@@ -258,7 +258,7 @@ The connector has these tools and no others:
 | `aether_session_changes`, `aether_pr_status` | A session's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
 | `aether_overlaps`, `aether_memory_search` | Pairs of active sessions touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes that replaced it or that it replaced | `read` |
 | `aether_changes` | What changed since a cursor: session status, reports, agent mail, pull requests and lifecycle, oldest first, paged with `next_cursor` | `read` |
-| `search`, `fetch` | Find runs by text, in the shape ChatGPT deep research uses | `read` |
+| `search`, `fetch` | Find sessions by text, in the shape ChatGPT deep research uses | `read` |
 | `aether_watches` | Your [watches](watches.md), each with its state, conditions and last notice; with `watch_id`, one watch with its 10 newest notices and where each was delivered | `read` |
 | `aether_launch_session` | Start a session, from a task or a saved [template](teams.md#task-templates-and-schedules), on any account you may use, with a fallback policy and extra repositories | `write` |
 | `aether_message_session`, `aether_answer` | Message a session; answer an agent's or a teammate's question | `write` |
@@ -276,7 +276,7 @@ Things to ask:
 
 - "What needs me in Aether?"
 - "What is the agent working on edge doing?"
-- "Launch a Claude run in api to fix the flaky login test."
+- "Launch a Claude session in api to fix the flaky login test."
 - "Which subscription has the most usage left? Launch the docs fix on it."
 - "What changed since I last asked?"
 - "What did my agents do today?"
