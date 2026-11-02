@@ -2,6 +2,7 @@ package acpkeeper
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,10 @@ const DefaultRetain = 32 << 20
 // agentQueueLimit bounds what attachers queued for an adapter that does not
 // read its stdin.
 const agentQueueLimit = 2 * maxLine
+
+// subagentBytes bounds the subagent announcements a keeper keeps for later
+// attachers.
+const subagentBytes = 4 << 20
 
 // deliveredTags bounds the tags a keeper reports. A tag this many tagged
 // requests old names one whose server long recorded where it went.
@@ -77,6 +82,12 @@ type Keeper struct {
 	// delivery after it handled the request's answer, and may die between
 	// the two.
 	tags []string
+	// subagents are the params of the first session/update announcing each
+	// subagent session, oldest first: the item log does not name a child's
+	// session, and the agent announces it only once.
+	subagents     []json.RawMessage
+	subagentIDs   map[string]bool
+	subagentsSize int
 }
 
 // retained is one agent-to-client frame: an ACP message, or the adapter's
@@ -128,10 +139,11 @@ func New(cfg Config) *Keeper {
 		cfg.Logger = slog.Default()
 	}
 	k := &Keeper{
-		cfg:        cfg,
-		unanswered: make(map[string]bool),
-		out:        make(map[int64]*outgoing),
-		ended:      make(chan struct{}),
+		cfg:         cfg,
+		unanswered:  make(map[string]bool),
+		out:         make(map[int64]*outgoing),
+		subagentIDs: make(map[string]bool),
+		ended:       make(chan struct{}),
 	}
 	k.cond = sync.NewCond(&k.mu)
 	go k.writeAgent()
@@ -275,8 +287,48 @@ func (k *Keeper) fromAgent(line []byte) {
 			delete(k.out, id)
 		}
 	default:
+		k.subagentLocked(line)
 		k.appendLocked(&retained{line: line})
 	}
+}
+
+// subagentLocked keeps the first announcement of each subagent session.
+func (k *Keeper) subagentLocked(line []byte) {
+	if !bytes.Contains(line, []byte(`"subagent_`)) {
+		return
+	}
+	var n struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	var p struct {
+		Update struct {
+			Kind              string `json:"sessionUpdate"`
+			SessionID         string `json:"sessionId"`
+			SubagentSessionID string `json:"subagentSessionId"`
+		} `json:"update"`
+	}
+	if json.Unmarshal(line, &n) != nil || n.Method != acp.ClientMethodSessionUpdate || json.Unmarshal(n.Params, &p) != nil {
+		return
+	}
+	id := p.Update.SubagentSessionID
+	switch p.Update.Kind {
+	case "subagent_spawned":
+	case "subagent_update":
+		id = p.Update.SessionID
+	default:
+		return
+	}
+	if id == "" || k.subagentIDs[id] {
+		return
+	}
+	if k.subagentsSize+len(n.Params) > subagentBytes {
+		k.cfg.Logger.Warn("acpkeeper: too many subagent announcements to keep; a later server drops this subagent's updates", "session", id, "limit", subagentBytes)
+		return
+	}
+	k.subagentIDs[id] = true
+	k.subagents = append(k.subagents, n.Params)
+	k.subagentsSize += len(n.Params)
 }
 
 // recordLocked keeps what a later attacher needs instead of initializing and
@@ -446,7 +498,7 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	}
 	k.gen = h.Gen
 	k.ackLocked(h.Ack)
-	state := State{Initialize: k.init, Session: k.session, SessionID: k.sessionID, Stderr: string(k.stderr), Delivered: slices.Clone(k.tags)}
+	state := State{Initialize: k.init, Session: k.session, SessionID: k.sessionID, Stderr: string(k.stderr), Delivered: slices.Clone(k.tags), Subagents: slices.Clone(k.subagents)}
 	// Answers belong to the attacher that asked; a prompt's answer stays
 	// for the attacher that adopts the prompt.
 	kept := k.frames[:0]

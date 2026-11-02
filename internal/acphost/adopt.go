@@ -18,6 +18,9 @@ type Adoption struct {
 	SessionID  string
 	PromptTurn int64
 	ReplayWait time.Duration
+	// Subagents are the params of the first session/update announcing each
+	// subagent session, oldest first, which the agent does not send again.
+	Subagents []json.RawMessage
 }
 
 // adopt takes over the session the keeper reported. A turn the log leaves
@@ -37,6 +40,19 @@ func (s *Session) adopt(openTurn bool) error {
 		return fmt.Errorf("acphost: adopt session %q: %w", a.SessionID, errors.Join(err, errors.New("the keeper reported no session")))
 	}
 	s.conn.sessionID.Store(a.SessionID)
+	for _, raw := range a.Subagents {
+		var n struct {
+			SessionID string          `json:"sessionId"`
+			Update    json.RawMessage `json:"update"`
+		}
+		if json.Unmarshal(raw, &n) != nil {
+			continue
+		}
+		parent, known := s.conn.parentOf(n.SessionID)
+		if child, ok := parseSubagent(n.Update); known && ok && s.conn.adopt(n.SessionID, parent, child) {
+			s.replayedSubagent(child)
+		}
+	}
 	s.conn.reuseRequests(PendingRequests(s.log), a.ReplayWait)
 	started := LastItem(s.log, KindTurnStart)
 	s.mu.Lock()

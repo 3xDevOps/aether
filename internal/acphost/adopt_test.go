@@ -188,3 +188,34 @@ func TestAdoptionKeepsTheLastRecordedSelections(t *testing.T) {
 		t.Fatalf("the adoption recorded the selections again: %+v", its)
 	}
 }
+
+func TestAdoptionKeepsTheSubagentsTheKeeperReported(t *testing.T) {
+	shortenAnnounceWait(t)
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	spawned, err := json.Marshal(map[string]any{"sessionId": m.sessionID(), "update": map[string]any{
+		"sessionUpdate": "subagent_spawned", "subagentSessionId": "child", "name": "Cleaner", "task": "Clean the build", "capabilities": map[string]any{},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, rec := startMock(t, m, Config{LogPath: adoptLog(t), Adopt: &Adoption{
+		Initialize: m.fix.Initialize, Session: m.fix.SessionNew, SessionID: m.sessionID(), PromptTurn: 2, Subagents: []json.RawMessage{spawned},
+	}})
+	got := make(chan error, 1)
+	go func() {
+		req := m.permissionRequest()
+		req["sessionId"] = "child"
+		_, err := m.request(context.Background(), acp.ClientMethodSessionRequestPermission, req)
+		got <- err
+	}()
+	pending := rec.waitInputs(t, 1)
+	if err := s.Answer(pending[0].ID, "allow", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-got; err != nil {
+		t.Fatalf("the adopted subagent's request: %v", err)
+	}
+	if tc := lastCalls(items(t, s))["t1"]; tc == nil || tc.ParentID != "subagent:child" {
+		t.Fatalf("the permission's tool call %+v", tc)
+	}
+}

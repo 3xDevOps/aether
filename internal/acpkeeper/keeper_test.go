@@ -803,3 +803,26 @@ func TestAnAdapterInputThatFailsEndsTheAttachment(t *testing.T) {
 		t.Fatalf("refusal %+v, want %q with the write error", re, RefusedInput)
 	}
 }
+
+func TestSubagentAnnouncementsOutliveAcks(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	spawned := `{"sessionId":"s1","update":{"sessionUpdate":"subagent_spawned","subagentSessionId":"c1","name":"Cleaner"}}`
+	drafted := `{"sessionId":"c2","update":{"sessionUpdate":"subagent_update","sessionId":"c2","title":"Explore"}}`
+	for _, params := range []string{spawned, drafted, `{"sessionId":"c2","update":{"sessionUpdate":"subagent_update","sessionId":"c2","title":"Again"}}`} {
+		a.send(`{"jsonrpc":"2.0","method":"session/update","params":` + params + `}`)
+	}
+	b := a.attach(1)
+	for range 3 {
+		b.next()
+	}
+	waitAcked(t, a.k, 3)
+	_ = b.Close()
+	var got []string
+	for _, raw := range a.attach(2).State().Subagents {
+		got = append(got, string(raw))
+	}
+	if !slices.Equal(got, []string{spawned, drafted}) {
+		t.Fatalf("subagents = %q", got)
+	}
+}

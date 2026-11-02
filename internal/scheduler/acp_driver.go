@@ -486,7 +486,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		exec, keeper, bridge, err = d.reattach(ctx, entry, managed, cid)
 		if err == nil {
 			state := keeper.State()
-			adopt = &acphost.Adoption{Initialize: state.Initialize, Session: state.Session, SessionID: state.SessionID, ReplayWait: acpRecoveryWait}
+			adopt = &acphost.Adoption{Initialize: state.Initialize, Session: state.Session, SessionID: state.SessionID, ReplayWait: acpRecoveryWait, Subagents: state.Subagents}
 			if state.Prompt != nil {
 				adopt.PromptTurn = state.Prompt.Turn
 			}

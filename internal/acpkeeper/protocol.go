@@ -126,7 +126,10 @@ type State struct {
 	// Delivered are the tags of the newest tagged requests that reached the
 	// agent, answered or not.
 	Delivered []string `json:"delivered,omitempty"`
-	Stderr    string   `json:"stderr,omitempty"`
+	// Subagents are the params of the first session/update announcing each
+	// subagent session, oldest first.
+	Subagents []json.RawMessage `json:"subagents,omitempty"`
+	Stderr    string            `json:"stderr,omitempty"`
 	// Term is a terminal keeper's state.
 	Term *TermState `json:"term,omitempty"`
 }
