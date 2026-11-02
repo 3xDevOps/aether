@@ -11,8 +11,8 @@ import (
 )
 
 // DefaultTermRetain bounds the terminal output a keeper retains for a server
-// that attaches later.
-const DefaultTermRetain = 2 << 20
+// that attaches later. It matches the output a server keeps readable.
+const DefaultTermRetain = 1 << 20
 
 // termChunk bounds the data of one output or input frame.
 const termChunk = 32 << 10

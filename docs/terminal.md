@@ -400,14 +400,14 @@ Session shells, and terminals the agent starts with `aether-internal terminal
 start`, survive a server restart or update too. Each runs under a keeper: an
 `aether-internal acp-keeper term` process in the session container, started as
 root from the staged server binary, that owns the shell's PTY, starts the
-shell as the session's user and keeps the newest 2 MiB of its output. The server
+shell as the session's user and keeps the newest 1 MiB of its output. The server
 attaches to it through a short-lived `aether-internal acp-keeper attach` exec
 and a token only the server holds. When the next server process recovers the
 session, or, for a session paused during the restart, when it resumes, it
 reattaches and replays the kept output: the same process keeps
 running, typing, resize and Ctrl-C work, `terminal output` continues from a
 cursor taken before the restart, and `terminal wait` reports the real exit.
-Output older than the kept 2 MiB is lost, and reading from a cursor before it
+Output older than the kept 1 MiB is lost, and reading from a cursor before it
 reports `truncated`. Input to a kept terminal returns once the shell's PTY
 took it. Input the shell does not read before the call times out fails, and
 the keeper drops what is left of it, so it never reaches the shell after
