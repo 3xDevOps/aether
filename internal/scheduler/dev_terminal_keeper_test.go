@@ -464,6 +464,52 @@ func TestDevelopmentTerminalLeaseSurvivesSchedulerRestart(t *testing.T) {
 	}
 }
 
+func TestDevelopmentTerminalLeaseSurvivesAFailedReattachAtRestart(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
+	current := e.sched
+	leases := func() *control.Service {
+		return control.New(control.Config{PersistSurface: func(run domain.RunID, surface control.Surface, lease control.SurfaceLease) error {
+			return current.PersistDevelopmentLease(run, surface, lease)
+		}})
+	}
+	e.sched.cfg.Control = leases()
+	run, _ := e.launchFake(t, "kept-lease-retry")
+	terminal := startTestTerminal(t, e, run.ID, "kept")
+	agent := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
+	fence := terminalTestFence(t, e, run.ID, terminal, agent, "agent", false)
+	if err := e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	cfg := e.sched.cfg
+	cfg.Control = leases()
+	host, err := ptyhost.New(ptyhost.Config{TranscriptDir: t.TempDir(), ReplayBytes: 1 << 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	cfg.PTY = host
+	recovered, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = recovered.Close() })
+	current = recovered
+	rt.mu.Lock()
+	rt.failAttach = 1
+	rt.mu.Unlock()
+	if err = recovered.RecoverDevelopmentTerminals(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The input's refresh reattaches; the lease from before the restart
+	// still admits it.
+	if _, err = terminalTestCall(t, recovered, run.ID, agent, protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{
+		DevTerminalTarget: terminalTestTarget(terminal), DevControlFence: fence, Kind: "text", Text: "ls\r"}); err != nil {
+		t.Fatalf("input with the pre-restart lease after a retried reattach: %v", err)
+	}
+}
+
 func TestDevelopmentTerminalLeaseThatFailedToSaveIsNotSavedLater(t *testing.T) {
 	e := newKeptTerminalEnv(t)
 	run, _ := e.launchFake(t, "kept-lease-save")

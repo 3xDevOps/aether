@@ -283,6 +283,7 @@ func (s *Scheduler) refreshRunTerminalLocked(ctx context.Context, run domain.Run
 			terminal.Unavailable = "reattach to the terminal's keeper: " + err.Error()
 		} else {
 			attached = true
+			s.restoreTerminalLease(run, set, terminal)
 		}
 	}
 	if terminal.Exec != nil && !terminal.ContainerEnded && !terminal.Gone {

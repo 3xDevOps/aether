@@ -196,14 +196,15 @@ func (s *Scheduler) PersistDevelopmentLease(run domain.RunID, surface control.Su
 
 // restoreTerminalLease reinstates the lease an earlier server process
 // recorded for terminal once this process has reattached to its running
-// keeper. A lease on a terminal that ended, or in a closed run, is not.
+// keeper. A lease on a terminal that ended, or in a closed run, is not, nor
+// one this process has already used.
 func (s *Scheduler) restoreTerminalLease(run domain.RunID, set *runTerminalSet, terminal *runTerminal) {
 	if terminal.Control == nil || terminal.Keeper == nil || terminal.Generation == 0 || !terminal.State.Running ||
 		set.Closed || s.cfg.Control == nil {
 		return
 	}
 	surface := control.Surface{Kind: control.SurfaceTerminal, ID: terminal.ID, Incarnation: terminal.Incarnation}
-	if err := s.cfg.Control.RestoreSurface(string(run), surface, *terminal.Control); err != nil {
+	if err := s.cfg.Control.RestoreSurface(string(run), surface, *terminal.Control); err != nil && !errors.Is(err, control.ErrOccupied) {
 		slog.Warn("scheduler: restore a terminal's control lease; its holder must acquire it again", "run", run, "terminal", terminal.ID, "error", err)
 	}
 }

@@ -414,7 +414,8 @@ the keeper drops what is left of it, so it never reaches the shell after
 another holder took control; if the keeper does not confirm the drop within
 2 seconds, the server ends its attachment and reattaches. A failed reattach
 reads `reattach to the terminal's keeper: <error>`, and the next terminal
-call on that terminal tries again. Control of a kept terminal survives too: the server
+call on that terminal tries again; once one succeeds, the lease recorded
+before the restart is restored as below. Control of a kept terminal survives too: the server
 records each lease's holder, `control_session_id` and `control_generation`
 in the session's terminal registry under the server's state directory when
 it is acquired, released or revoked, and the next server restores it. A lease the agent took
