@@ -217,7 +217,7 @@ func readStream(r io.Reader) <-chan string {
 // TestDockerManagedExecForgottenByDocker: dockerd restarted with
 // live-restore forgets every exec, while the processes keep running. A
 // forgotten exec is recovered, stopped and read from its helper; only a
-// stopped container or a helper with no supervisor proves it gone.
+// stopped container proves it gone.
 func TestDockerManagedExecForgottenByDocker(t *testing.T) {
 	d := newTestDocker(t)
 	binary := buildStagedHelper(t)
@@ -247,9 +247,12 @@ func TestDockerManagedExecForgottenByDocker(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cli.Close() })
 	forgetful := &Docker{cli: cli, waitClient: cli, namePrefix: d.namePrefix, labels: d.labels, networkMode: d.networkMode}
-	start := func(key string) ExecIdentity {
+	start := func(key string, argv ...string) ExecIdentity {
 		t.Helper()
-		execution, err := d.StartExecPipe(ctx, id, ExecSpec{CreationKey: key, Argv: []string{"sleep", "300"}})
+		if argv == nil {
+			argv = []string{"sleep", "300"}
+		}
+		execution, err := d.StartExecPipe(ctx, id, ExecSpec{CreationKey: key, Argv: argv})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -276,12 +279,16 @@ func TestDockerManagedExecForgottenByDocker(t *testing.T) {
 		t.Fatalf("forgotten exec after stop = %+v, %v", state, err)
 	}
 
-	orphan := start("orphan")
+	// The supervisor's death kills the shell, not the job it forked.
+	orphan := start("orphan", "/bin/sh", "-c", "sleep 299 & wait")
 	if code, _, stderr, err := d.Exec(ctx, id, []string{"pkill", "-KILL", "-f", "run-pipe orphan"}, ""); err != nil || code != 0 {
 		t.Fatalf("kill the supervisor: code=%d stderr=%q err=%v", code, stderr, err)
 	}
-	if _, err := forgetful.RecoverExec(ctx, orphan); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("recover a forgotten exec without a supervisor = %v; want ErrNotFound", err)
+	if _, err := forgetful.RecoverExec(ctx, orphan); !errors.Is(err, ErrExecUnavailable) || errors.Is(err, ErrNotFound) {
+		t.Fatalf("recover a forgotten exec without a supervisor = %v; want ErrExecUnavailable, not ErrNotFound", err)
+	}
+	if code, _, stderr, err := d.Exec(ctx, id, []string{"pgrep", "-f", "sleep 299"}, ""); err != nil || code != 0 {
+		t.Fatalf("the orphaned job: code=%d stderr=%q err=%v", code, stderr, err)
 	}
 
 	stopped := start("stopped")

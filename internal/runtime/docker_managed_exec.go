@@ -178,8 +178,8 @@ func (e *dockerManagedExec) inspect(ctx context.Context) (info client.ExecInspec
 }
 
 // forgotten asks the helper of an exec Docker has no record of for its
-// state. Only a stopped or removed container, or a helper with neither a
-// supervisor nor a final record, proves the exec gone.
+// state. Only a stopped or removed container proves the exec gone: jobs the
+// command forked outlive a supervisor that died without a final record.
 func (e *dockerManagedExec) forgotten(ctx context.Context, cause error) (devexec.State, error) {
 	gone := fmt.Errorf("%w: inspect execution: %w: %w", ErrExecUnavailable, ErrNotFound, cause)
 	container, err := e.docker.cli.ContainerInspect(ctx, string(e.identity.ContainerID), client.ContainerInspectOptions{})
@@ -192,9 +192,6 @@ func (e *dockerManagedExec) forgotten(ctx context.Context, cause error) (devexec
 		return devexec.State{}, gone
 	}
 	state, err := e.control(ctx, "status", 0)
-	if errors.Is(err, devexec.ErrNoSupervisor) {
-		return state, fmt.Errorf("%w: %w", gone, err)
-	}
 	if err != nil {
 		return state, fmt.Errorf("%w: inspect execution: %w; ask its helper: %w", ErrExecUnavailable, cause, err)
 	}
