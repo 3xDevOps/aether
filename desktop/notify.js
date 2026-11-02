@@ -61,7 +61,7 @@ function recentlyShown(slot) {
  * @param {(runId: string) => void} onOpen  open a run when its notification is clicked
  * @param {(link: string) => void} onLink  open a watch notice's link when it is clicked
  */
-function start(addr, url, onOpen, onLink = () => {}) {
+function start(addr, url, onOpen, onLink) {
   stop() // a sidecar respawn hands us a fresh addr and token
   stopped = false
   attempt = 0
