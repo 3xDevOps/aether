@@ -412,7 +412,9 @@ reports `truncated`. Input to a kept terminal returns once the shell's PTY
 took it. Input the shell does not read before the call times out fails, and
 the keeper drops what is left of it, so it never reaches the shell after
 another holder took control; if the keeper does not confirm the drop within
-2 seconds, the server ends its attachment and reattaches. Control of a kept terminal survives too: the server
+2 seconds, the server ends its attachment and reattaches. A failed reattach
+reads `reattach to the terminal's keeper: <error>`, and the next terminal
+call on that terminal tries again. Control of a kept terminal survives too: the server
 records each lease's holder, `control_session_id` and `control_generation`
 in the session's terminal registry under the server's state directory when
 it is acquired, released or revoked, and the next server restores it. A lease the agent took

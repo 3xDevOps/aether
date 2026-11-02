@@ -123,6 +123,10 @@ func (r *terminalTestRuntime) startKeeperExec(container runtime.ID, spec runtime
 			<-process.done
 			k.term.Exited(process.exit.Code)
 		}()
+	case spec.Argv[2] == "attach" && r.failAttach > 0:
+		r.failAttach--
+		delete(r.executions, spec.CreationKey)
+		return nil, errors.New("docker exec failed")
 	case spec.Argv[2] == "attach" && r.keeperTerms[socket] != nil:
 		client, server := net.Pipe()
 		go r.keeperTerms[socket].term.ServeConn(server)
@@ -248,6 +252,41 @@ func TestDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 	}
 	if keeper.exec.process.currentState() != "stopped" {
 		t.Fatal("stop left the keeper running")
+	}
+}
+
+func TestDevelopmentTerminalReattachesAfterAFailedReattach(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
+	run, _ := e.launchFake(t, "kept-lost")
+	terminal := startTestTerminal(t, e, run.ID, "server")
+	principal := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
+	list := func() protocol.DevTerminal {
+		t.Helper()
+		listed, err := terminalTestCall(t, e.sched, run.ID, principal, protocol.MethodDevTerminalList, protocol.DevTerminalListParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return listed.(protocol.DevTerminalListResult).Terminals[0]
+	}
+	rt.mu.Lock()
+	rt.failAttach = 1
+	for key, execution := range rt.executions {
+		if strings.HasPrefix(key, "terminal-attach-") {
+			execution.process.endProcess(0)
+		}
+	}
+	rt.mu.Unlock()
+	var got protocol.DevTerminal
+	deadline := time.Now().Add(5 * time.Second)
+	for got = list(); got.Process.State != "unavailable" && time.Now().Before(deadline); got = list() {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(got.Process.Reason, "docker exec failed") {
+		t.Fatalf("terminal after the bridge was lost = %+v", got)
+	}
+	if got = list(); got.Process.State != "running" || got.Incarnation != terminal.Incarnation {
+		t.Fatalf("terminal after a second refresh = %+v; want it reattached", got)
 	}
 }
 

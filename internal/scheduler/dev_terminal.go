@@ -271,13 +271,18 @@ func (s *Scheduler) refreshRunTerminalLocked(ctx context.Context, run domain.Run
 			// Only a lost bridge: a preempting server holds the keeper now.
 			if errors.Is(terminal.Client.Err(), acpkeeper.ErrLost) {
 				_ = releaseTerminal(terminal)
-				if err := s.attachTerminalLocked(ctx, run, set, terminal); err != nil {
-					slog.Warn("scheduler: reattach to a terminal's keeper", "run", run, "terminal", terminal.ID, "error", err)
-					terminal.Generation, attached = 0, false
-					terminal.Unavailable = "reattach to the terminal's keeper: " + err.Error()
-				}
 			}
 		default:
+		}
+	}
+	// Each refresh tries again until a running keeper takes the bridge.
+	if terminal.Keeper != nil && terminal.Client == nil && terminal.State.Running && !terminal.Gone && !terminal.ContainerEnded {
+		if err := s.attachTerminalLocked(ctx, run, set, terminal); err != nil {
+			slog.Warn("scheduler: reattach to a terminal's keeper", "run", run, "terminal", terminal.ID, "error", err)
+			terminal.Generation, attached = 0, false
+			terminal.Unavailable = "reattach to the terminal's keeper: " + err.Error()
+		} else {
+			attached = true
 		}
 	}
 	if terminal.Exec != nil && !terminal.ContainerEnded && !terminal.Gone {
