@@ -298,10 +298,10 @@ func (s *Service) Start(ctx context.Context) error {
 				return
 			}
 		}
-		undecided, settled := false, map[string]bool{}
+		undecided, settled, unsaved := false, map[string]bool{}, map[string]error{}
 		if s.cfg.Reattached != nil {
 			var err error
-			if undecided, err = s.settleAgentQueued(workerCtx, settled); err != nil {
+			if undecided, err = s.settleAgentQueued(workerCtx, settled, unsaved); err != nil {
 				s.recordOverdueError(err)
 			}
 		}
@@ -321,7 +321,7 @@ func (s *Service) Start(ctx context.Context) error {
 			case <-t.C:
 				if undecided {
 					var err error
-					if undecided, err = s.settleAgentQueued(workerCtx, settled); err != nil {
+					if undecided, err = s.settleAgentQueued(workerCtx, settled, unsaved); err != nil {
 						s.recordOverdueError(err)
 					}
 				}

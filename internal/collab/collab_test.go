@@ -36,6 +36,8 @@ type collabStore struct {
 	runs       map[domain.RunID]*domain.Run
 	messages   map[string]*store.RoomMessage
 	next       int
+	// settleFailures fails that many agent delivery settlements.
+	settleFailures int
 }
 
 func newCollabStore() *collabStore {
@@ -232,6 +234,10 @@ func (s *collabStore) MarkRoomMessageAgentQueued(_ context.Context, id string) (
 func (s *collabStore) SettleRoomMessageAgentDelivery(_ context.Context, id string, failure *store.RoomMessageFailure) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.settleFailures > 0 {
+		s.settleFailures--
+		return false, errors.New("collabStore: database is locked")
+	}
 	m := s.messages[id]
 	if m == nil || m.State != store.RoomMessageSent && m.State != store.RoomMessageUncertain || m.AgentDelivery == store.AgentDelivered {
 		return false, nil
@@ -1504,6 +1510,67 @@ func TestSteersQueuedBeforeTheRestartSettleByTheAgentsKeeper(t *testing.T) {
 	case body := <-sent:
 		t.Fatalf("sent %q again", body)
 	default:
+	}
+}
+
+func TestSteerSettlementsThatFailedToSaveAreSavedAgain(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	restored := &domain.Run{ID: "restored", WorkspaceID: ws.ID, MemberID: run.MemberID, Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	st.runs[restored.ID] = restored
+	for _, m := range []struct {
+		id  string
+		run domain.RunID
+	}{{"reached", run.ID}, {"unsent", run.ID}, {"dropped", restored.ID}} {
+		st.messages[m.id] = &store.RoomMessage{
+			ID: m.id, WorkspaceID: ws.ID, RunID: m.run, ActorID: other.ID,
+			Kind: store.RoomMessageSteerRequest, Body: m.id,
+			State: store.RoomMessageSent, AgentDelivery: store.AgentQueued, CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
+		}
+	}
+	st.settleFailures = 3
+	clock.Add(time.Second)
+	ready := make(chan struct{})
+	close(ready)
+	var sent atomic.Int32
+	service, err := New(Config{
+		Store: st, Runs: st, Workspaces: st, Now: clock.Now, Ready: ready, WorkerInterval: 10 * time.Millisecond,
+		Inject: func(context.Context, domain.RunID, domain.MemberID, domain.AgentPrompt, bool, func(error)) (string, error) {
+			sent.Add(1)
+			return acphost.OutcomeSent, nil
+		},
+		Reattached: func(id domain.RunID) ([]string, Reattach) {
+			if id == run.ID {
+				return []string{"reached"}, Adopted
+			}
+			return nil, Restored
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	want := map[string]func(*store.RoomMessage) bool{
+		"reached": func(m *store.RoomMessage) bool { return m.AgentDelivery == store.AgentDelivered },
+		"unsent":  func(m *store.RoomMessage) bool { return m.AgentDelivery == store.AgentDelivered },
+		"dropped": func(m *store.RoomMessage) bool { return m.State == store.RoomMessageNotSent },
+	}
+	for id, ok := range want {
+		var got *store.RoomMessage
+		deadline := time.Now().Add(2 * time.Second)
+		for got, _ = st.GetRoomMessage(ctx, id); !ok(got) && time.Now().Before(deadline); got, _ = st.GetRoomMessage(ctx, id) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !ok(got) {
+			t.Fatalf("%s after failed saves: %+v", id, got)
+		}
+	}
+	if n := sent.Load(); n != 1 {
+		t.Fatalf("sent %d times, want the unsent steer once", n)
 	}
 }
 
