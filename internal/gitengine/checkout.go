@@ -262,16 +262,6 @@ func (e *Engine) branchExists(ctx context.Context, repo, branch string) (bool, e
 	return false, err
 }
 
-// WorkspaceBranchExists reports whether the workspace bare repository
-// contains the exact branch ref.
-func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error) {
-	repo, err := e.existingRepoPath(ws)
-	if err != nil {
-		return false, err
-	}
-	return e.branchExists(ctx, repo, branch)
-}
-
 // commitAll stages and commits everything in the run's checkout, authored
 // as author and committed as Aether. Returns "", nil when the tree is
 // clean; a zero author leaves Aether as both. A non-empty signingKey is
