@@ -35,12 +35,10 @@ type workspaceMirrorAdoptOptions struct {
 	workspace  string
 	generation int64
 	commit     string
-	yes        bool
 }
 
 type workspaceMirrorWorkspaceOptions struct {
 	workspace string
-	yes       bool
 }
 
 func workspaceMirror(args []string) error {
@@ -150,7 +148,7 @@ func parseWorkspaceMirrorAdoptArgs(args []string) (workspaceMirrorAdoptOptions, 
 	if !*yes {
 		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --yes is required because adopt replaces the accepted base", workspaceMirrorAdoptUsage)
 	}
-	return workspaceMirrorAdoptOptions{workspace: *workspace, generation: *generation, commit: *commit, yes: *yes}, nil
+	return workspaceMirrorAdoptOptions{workspace: *workspace, generation: *generation, commit: *commit}, nil
 }
 
 func parseWorkspaceMirrorDisableArgs(args []string) (workspaceMirrorWorkspaceOptions, error) {
@@ -173,7 +171,7 @@ func parseWorkspaceMirrorWorkspaceArgs(args []string, name, usage string) (works
 	if !*yes {
 		return workspaceMirrorWorkspaceOptions{}, fmt.Errorf("%s: --yes is required because disabling removes the server mirror", usage)
 	}
-	return workspaceMirrorWorkspaceOptions{workspace: *workspace, yes: *yes}, nil
+	return workspaceMirrorWorkspaceOptions{workspace: *workspace}, nil
 }
 
 func workspaceMirrorStatus(args []string) error {
