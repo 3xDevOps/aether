@@ -1136,12 +1136,6 @@ export interface Schedule {
   next_fire_at?: string | null
 }
 
-/** Addresses a workspace by exactly one of id or name. */
-export interface WorkspaceSelector {
-  id?: string
-  name?: string
-}
-
 /** The wire names of Standard, Enhanced and Background. */
 export type LaunchMode = 'tui' | 'acp' | 'headless'
 

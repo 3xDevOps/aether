@@ -2,7 +2,6 @@ import { prefersReducedMotion } from '@/lib/hooks'
 
 export type DurationToken = `--duration-${string}`
 export type EasingToken = `--ease-${string}`
-export type ScaleToken = `--scale-${string}`
 export type TimeToken = DurationToken | '--stagger-row'
 
 /** Token names, never literal values, so a script animation follows motion.css. */
@@ -31,11 +30,6 @@ export function easing(token: EasingToken): string {
   return readToken(token) || 'linear'
 }
 
-export function numberToken(token: ScaleToken | `--opacity-${string}`): number {
-  const n = parseFloat(readToken(token))
-  return Number.isNaN(n) ? 1 : n
-}
-
 export function play(
   el: Element,
   keyframes: Keyframe[],
@@ -57,7 +51,6 @@ export type Entrance = {
   rise?: number
   /** Start from a blur of `--blur-fade`; for text, never rows. */
   blur?: boolean
-  scale?: ScaleToken
   /** Position in a burst: each step waits `--stagger-row`, up to the eighth. */
   index?: number
 }
@@ -73,9 +66,6 @@ export function playEntrance(el: Element, entrance: Entrance): Animation[] {
     animations.push(
       play(el, [{ translate: `0 ${entrance.rise}px` }, { translate: '0 0' }], entrance.motion, { ...timing, composite: 'add' }),
     )
-  }
-  if (entrance.scale) {
-    animations.push(play(el, [{ scale: String(numberToken(entrance.scale)) }, { scale: '1' }], entrance.motion, timing))
   }
   if (entrance.blur) {
     animations.push(play(el, [{ filter: `blur(${readToken('--blur-fade')})` }, { filter: 'blur(0px)' }], entrance.motion, timing))

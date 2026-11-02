@@ -131,9 +131,9 @@ Identity colour never replaces run-state colour.
 `Badge`, `CountBadge`, `RadioPills`, `FadeStrip`, `RequestCard`, `StatusDot`
 and `StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
 `Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `ProgressBar`, `DropZone`,
-`TextSwap` and `IconSwap`, `CopyButton`, `Separator`, `Toaster`, `LineGutter`
-(a code line's clickable number gutter, for the Changes view's comments) and
-the Chat view's timeline rows, step rail (`steps.tsx`) and blocks. Reach
+`TextSwap` and `IconSwap`, `CopyButton`, `Toaster`, `LineGutter` (a code
+line's clickable number gutter, for the Changes view's comments) and the Chat
+view's timeline rows, step rail (`steps.tsx`) and blocks. Reach
 for one before writing markup, and pass its `variant`, `size` or `tone` rather
 than restyling it.
 
