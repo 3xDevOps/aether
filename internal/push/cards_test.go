@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,16 +15,16 @@ import (
 
 type fakeCards struct {
 	mu      sync.Mutex
-	pending map[domain.MemberID][]protocol.AssistantConfirmation
+	pending map[domain.MemberID][]Card
 }
 
-func (f *fakeCards) PendingCards(_ context.Context, member domain.MemberID) ([]protocol.AssistantConfirmation, error) {
+func (f *fakeCards) PendingCards(_ context.Context, member domain.MemberID) ([]Card, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.pending[member], nil
 }
 
-func (f *fakeCards) set(member domain.MemberID, cards ...protocol.AssistantConfirmation) {
+func (f *fakeCards) set(member domain.MemberID, cards ...Card) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pending[member] = cards
@@ -38,7 +39,7 @@ func (h *harness) cardsChanged(member *domain.Member) {
 
 func newCardHarness(t *testing.T) (*harness, *fakeCards) {
 	t.Helper()
-	cards := &fakeCards{pending: map[domain.MemberID][]protocol.AssistantConfirmation{}}
+	cards := &fakeCards{pending: map[domain.MemberID][]Card{}}
 	h := newHarness(t)
 	_ = h.svc.Close()
 	h.cards = cards
@@ -50,7 +51,7 @@ func TestACardIsPushedWithItsIDAndWithdrawnWhenDecidedAnywhere(t *testing.T) {
 	t.Parallel()
 	h, cards := newCardHarness(t)
 	phone := h.subscribe(h.ada)
-	card := protocol.AssistantConfirmation{ID: "c1", Summary: "Launch claude in api", CreatedAt: h.clock.now()}
+	card := Card{ID: "c1", Summary: "Launch claude in api", CreatedAt: h.clock.now()}
 
 	cards.set(h.ada.ID, card)
 	h.cardsChanged(h.ada)
@@ -63,7 +64,70 @@ func TestACardIsPushedWithItsIDAndWithdrawnWhenDecidedAnywhere(t *testing.T) {
 
 	cards.set(h.ada.ID)
 	h.cardsChanged(h.ada)
-	phone.expect(t, notification{Title: cardTitle, Body: clearedBody, Clear: true})
+	phone.expect(t, notification{Title: cardTitle, Body: cardDecided, Clear: true})
+}
+
+func TestACardPushOffersActionsOnlyWhenItShowsTheWholeCard(t *testing.T) {
+	t.Parallel()
+	h, cards := newCardHarness(t)
+	phone := h.subscribe(h.ada)
+	long := strings.Repeat("x", maxBodyRunes+1)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Forget a saved preference", Private: true, CreatedAt: h.clock.now()})
+	h.cardsChanged(h.ada)
+	phone.expect(t, notification{Title: cardTitle, Body: "Forget a saved preference"})
+	h.clock.advance(burstWindow)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Forget a saved preference", Private: true, CreatedAt: h.clock.now()},
+		Card{ID: "c2", Summary: long, CreatedAt: h.clock.now()})
+	h.cardsChanged(h.ada)
+	phone.expect(t, notification{Title: cardTitle, Body: strings.Repeat("x", maxBodyRunes) + "…"})
+}
+
+func TestACardWaitsWhileItsMemberUsesADashboard(t *testing.T) {
+	t.Parallel()
+	h, cards := newCardHarness(t)
+	phone := h.subscribe(h.ada)
+	h.svc.Active(h.ada.ID)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: h.clock.now()})
+	h.cardsChanged(h.ada)
+	phone.expectNone(t, testQuiet/2)
+	phone.expect(t, notification{Title: cardTitle, Body: "Stop run-8x2", Card: "c1"})
+
+	// One decided while it waited is never pushed.
+	h.svc.Active(h.ada.ID)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: h.clock.now()}, Card{ID: "c2", Summary: "Stop run-9y3", CreatedAt: h.clock.now()})
+	h.cardsChanged(h.ada)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: h.clock.now()})
+	phone.expectNone(t, 2*testQuiet)
+}
+
+func TestARestartWithdrawsTheCardsDecidedWhileItWasDown(t *testing.T) {
+	t.Parallel()
+	h, cards := newCardHarness(t)
+	phone := h.subscribe(h.ada)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: h.clock.now()})
+	h.cardsChanged(h.ada)
+	phone.expect(t, notification{Title: cardTitle, Body: "Stop run-8x2", Card: "c1"})
+
+	deadline := time.Now().Add(10 * time.Second)
+	for pushed, _ := h.db.PushedCards(h.ctx); len(pushed[h.ada.ID]) != 1; pushed, _ = h.db.PushedCards(h.ctx) {
+		if time.Now().After(deadline) {
+			t.Fatal("the pushed card was never recorded")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := h.svc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cards.set(h.ada.ID)
+	h.start()
+	phone.expect(t, notification{Title: cardTitle, Body: cardDecided, Clear: true})
+	deadline = time.Now().Add(10 * time.Second)
+	for pushed, _ := h.db.PushedCards(h.ctx); len(pushed) != 0; pushed, _ = h.db.PushedCards(h.ctx) {
+		if time.Now().After(deadline) {
+			t.Fatalf("pushed cards = %v, want none left", pushed)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestACardInQuietHoursWaitsForTheDigestAndLeavesItOnceDecided(t *testing.T) {
@@ -77,13 +141,13 @@ func TestACardInQuietHoursWaitsForTheDigestAndLeavesItOnceDecided(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	cards.set(h.ada.ID, protocol.AssistantConfirmation{ID: "c1", Summary: "Stop run-8x2", CreatedAt: now},
-		protocol.AssistantConfirmation{ID: "c2", Summary: "Launch codex in web", CreatedAt: now})
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: now},
+		Card{ID: "c2", Summary: "Launch codex in web", CreatedAt: now})
 	h.cardsChanged(h.ada)
 	h.eventuallyQueued(h.ada, 2)
 	phone.expectNone(t, testQuiet)
 
-	cards.set(h.ada.ID, protocol.AssistantConfirmation{ID: "c2", Summary: "Launch codex in web", CreatedAt: now})
+	cards.set(h.ada.ID, Card{ID: "c2", Summary: "Launch codex in web", CreatedAt: now})
 	h.clock.advance(time.Hour + time.Minute)
 	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 // A notification's Approve calls assistant.confirm as the member on their
@@ -71,5 +72,24 @@ func TestRaisingAndDecidingACardAnnounceIt(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("the card's change was not announced")
 		}
+	}
+}
+
+func TestAPreferenceCardsPushSaysOnlyWhatItDoes(t *testing.T) {
+	w := newCardWorld(t)
+	c := protocol.AssistantConfirmation{
+		ID: "forget-1", Method: protocol.MethodAssistantForget, Summary: `Forget "Always deploy to eu-west-1"`,
+		Params: []byte(`{}`), CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(time.Hour).UTC(), State: protocol.AssistantCardPending,
+	}
+	row, err := cardRow(w.member, c, Door(protocol.AssistantDoorDashboard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.db.AddAssistantCard(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := w.svc.PendingCards(t.Context(), w.member)
+	if err != nil || len(pending) != 1 || !pending[0].Private || pending[0].Summary != "Forget a saved preference" {
+		t.Fatalf("pending cards = %+v, %v, want the preference card private and generic", pending, err)
 	}
 }

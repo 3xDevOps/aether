@@ -303,8 +303,8 @@ call, so it shows after a reload, on your phone or desktop, after a server
 restart and while the assistant itself needs sign-in, and any of them can
 decide it (`assistant.confirm`); the first decision wins, and a second gets
 `assistant: no such pending confirmation`. Its
-push notification carries **Approve** and **Decline** where the device shows
-them ([watches.md](watches.md#assistant-cards)).
+push notification carries **Approve**, which opens the card, and **Decline**
+where the device shows them ([watches.md](watches.md#assistant-cards)).
 
 - A card from a turn you started in Aether keeps the call waiting for 10
   minutes; approving it in that time hands the result to the assistant.

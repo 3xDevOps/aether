@@ -47,6 +47,12 @@ type PushStore interface {
 	DigestMembers(ctx context.Context) ([]domain.MemberID, error)
 	// DeleteDigestItems removes member's items with the given (source, key).
 	DeleteDigestItems(ctx context.Context, member domain.MemberID, items []*DigestItem) error
+
+	// PushedCards lists every member's assistant cards whose push is still
+	// on their devices; AddPushedCard and DeletePushedCard keep the list.
+	PushedCards(ctx context.Context) (map[domain.MemberID][]string, error)
+	AddPushedCard(ctx context.Context, member domain.MemberID, card string) error
+	DeletePushedCard(ctx context.Context, member domain.MemberID, card string) error
 }
 
 // DigestItem is a notification a member gets in their next digest rather
@@ -185,6 +191,43 @@ func (d *DB) DeleteDigestItems(ctx context.Context, member domain.MemberID, item
 		`DELETE FROM push_digest WHERE member_id = ? AND (source, key) IN (VALUES (?, ?)`+strings.Repeat(", (?, ?)", len(items)-1)+`)`, args...)
 	if err != nil {
 		return fmt.Errorf("store: delete digest items: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) PushedCards(ctx context.Context) (map[domain.MemberID][]string, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT member_id, card_id FROM push_cards ORDER BY member_id, card_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list pushed cards: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	out := map[domain.MemberID][]string{}
+	for rows.Next() {
+		var (
+			member domain.MemberID
+			card   string
+		)
+		if err := rows.Scan(&member, &card); err != nil {
+			return nil, fmt.Errorf("store: list pushed cards: %w", err)
+		}
+		out[member] = append(out[member], card)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list pushed cards: %w", err)
+	}
+	return out, nil
+}
+
+func (d *DB) AddPushedCard(ctx context.Context, member domain.MemberID, card string) error {
+	if _, err := d.db.ExecContext(ctx, `INSERT OR IGNORE INTO push_cards (member_id, card_id) VALUES (?, ?)`, member, card); err != nil {
+		return fmt.Errorf("store: record a pushed card: %w", mapConstraint(err, ErrNotFound))
+	}
+	return nil
+}
+
+func (d *DB) DeletePushedCard(ctx context.Context, member domain.MemberID, card string) error {
+	if _, err := d.db.ExecContext(ctx, `DELETE FROM push_cards WHERE member_id = ? AND card_id = ?`, member, card); err != nil {
+		return fmt.Errorf("store: forget a pushed card: %w", err)
 	}
 	return nil
 }

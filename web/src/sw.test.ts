@@ -77,7 +77,7 @@ describe('service worker', () => {
     expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ renotify: true }))
   })
 
-  it('offers Approve and Decline on an assistant card and decides it with this device’s sign-in', async () => {
+  it('offers Approve, which opens the card, and Decline, which decides it with this device’s sign-in', async () => {
     const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
     const { self, dispatch } = worker()
@@ -90,14 +90,26 @@ describe('service worker', () => {
       data: expect.objectContaining({ card: 'c1' }),
     }))
     const notification = { title: 'Assistant asks for approval', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1' }, close: vi.fn() }
+
+    // A locked phone runs actions, so Approve only opens the card.
     await dispatch('notificationclick', { notification, action: 'approve' })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(self.clients.openWindow).toHaveBeenCalledWith('/?assistant=1')
+
+    await dispatch('notificationclick', { notification, action: 'decline' })
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(fetch).toHaveBeenCalledWith('/api/v1/assistant.confirm', expect.objectContaining({
-      method: 'POST', credentials: 'same-origin', body: JSON.stringify({ confirmation_id: 'c1', approve: true }),
+      method: 'POST', credentials: 'same-origin', body: JSON.stringify({ confirmation_id: 'c1', approve: false }),
     }))
-    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant asks for approval', expect.objectContaining({ tag: 'card:c1', body: 'Approved', silent: true }))
-    expect(self.clients.openWindow).not.toHaveBeenCalled()
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant asks for approval', expect.objectContaining({ tag: 'card:c1', body: 'Declined', silent: true }))
     vi.unstubAllGlobals()
+  })
+
+  it('keeps the outcome this device decided when the server withdraws the card', async () => {
+    const shown = [{ tag: 'card:c1', title: 'Assistant asks for approval', body: 'Declined', data: { decided: true } }]
+    const { self, dispatch } = worker([], shown)
+    await dispatch('push', { data: { json: () => ({ title: 'Assistant asks for approval', body: 'Decided', tag: 'card:c1', clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant asks for approval', expect.objectContaining({ body: 'Declined', silent: true }))
   })
 
   it('shows the server’s refusal when a card was already decided elsewhere', async () => {

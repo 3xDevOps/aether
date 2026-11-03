@@ -44,8 +44,12 @@ let openRun = () => {}
 let openLink = () => {}
 let selfID = null
 
-// Assistant cards shown, by id, so one decided anywhere closes here.
+// Assistant cards shown, by id, so one decided anywhere closes here, and
+// the sync of them in flight.
 const cardsShown = new Map()
+let cardsSync = Promise.resolve()
+// What a card that saves or forgets a preference shows in its place.
+const preferenceCards = { 'assistant.remember': 'Save a preference', 'assistant.forget': 'Forget a saved preference' }
 
 // When each run last raised a needs-you notification, by any path, and
 // under `<run> done` a finished one. The same transition can reach us as
@@ -118,6 +122,8 @@ function connect(wsURL) {
     if (ev.ok === true) {
       // Subscribe ack: the gateway accepted us, so the backoff can reset.
       attempt = 0
+      // Cards raised while the app was away show now.
+      queueCards()
       return
     }
     if (ev.type === 'assistant.notice') {
@@ -129,7 +135,13 @@ function connect(wsURL) {
       return
     }
     if (ev.type === 'assistant.cards') {
-      void syncCards(ev.payload || {})
+      void (async () => {
+        try {
+          if ((ev.payload || {}).member_id === (await memberID())) queueCards()
+        } catch (err) {
+          console.log(`notify: cannot tell who this member is: ${err.message}`)
+        }
+      })()
       return
     }
     if (!ev.run_id) return
@@ -260,16 +272,22 @@ async function gatewayCall(method, params) {
   return body
 }
 
-// assistant.cards says the member's cards changed: each pending one shows
-// with Approve and Decline, and one no longer pending closes. Approve and
-// Decline call assistant.confirm through this app's own gateway, as the
-// card in the window would; macOS shows the buttons, elsewhere a click
-// opens the card.
-async function syncCards(p) {
+// queueCards syncs the member's cards after any sync already running, so
+// an older read never lands over a newer one.
+function queueCards() {
+  cardsSync = cardsSync.then(syncCards, syncCards)
+}
+
+// syncCards shows each pending card with Approve and Decline, and closes
+// one no longer pending. Approve and Decline call assistant.confirm through
+// this app's own gateway, as the card in the window would; macOS shows the
+// buttons, elsewhere a click opens the card. A card that saves or forgets a
+// preference, or one too long to show whole, shows no buttons and only
+// what it is.
+async function syncCards() {
   if (!Notification.isSupported()) return
   let status
   try {
-    if (p.member_id !== (await memberID())) return
     status = await gatewayCall('assistant.status', {})
   } catch (err) {
     console.log(`notify: assistant cards: ${err.message}`)
@@ -283,13 +301,16 @@ async function syncCards(p) {
   }
   for (const card of pending) {
     if (cardsShown.has(card.id)) continue
+    const preference = preferenceCards[card.method]
+    const summary = card.summary || ''
+    const whole = !preference && [...summary].length <= 240
     const notification = new Notification({
       title: cardTitle,
-      body: clip(card.summary || '', 240),
-      actions: [{ type: 'button', text: 'Approve' }, { type: 'button', text: 'Decline' }],
+      body: preference || clip(summary, 240),
+      ...(whole ? { actions: [{ type: 'button', text: 'Approve' }, { type: 'button', text: 'Decline' }] } : {}),
     })
     notification.on('click', () => openLink(cardLink))
-    notification.on('action', (_event, index) => void decideCard(card, index === 0))
+    if (whole) notification.on('action', (_event, index) => void decideCard(card, index === 0))
     cardsShown.set(card.id, notification)
     notification.show()
   }

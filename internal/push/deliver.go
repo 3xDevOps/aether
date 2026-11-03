@@ -48,7 +48,7 @@ type message struct {
 func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message) ([]DeviceResult, error) {
 	n := notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice, Card: m.Card}
 	if m.Clear {
-		n.Body, n.Clear = clearedBody, true
+		n.Body, n.Clear = cmp.Or(n.Body, clearedBody), true
 	}
 	payload, err := json.Marshal(message{notification: n, URL: m.URL, Tag: m.Topic})
 	if err != nil {

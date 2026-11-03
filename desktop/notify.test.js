@@ -600,6 +600,26 @@ test('an assistant card shows Approve and Decline, which decide it once through 
   assert.equal(shown[2].options.body, 'Not decided: assistant: no such pending confirmation: c1')
 })
 
+test('a preference card or one too long to show whole opens the card instead of deciding', async () => {
+  cards = [
+    { id: 'c4', state: 'pending', method: 'assistant.forget', summary: 'Forget "I prefer tabs"' },
+    { id: 'c5', state: 'pending', method: 'run.launch', summary: 'x'.repeat(241) },
+  ]
+  await cardsChanged()
+  assert.equal(shown.length, 2)
+  assert.equal(shown[0].options.body, 'Forget a saved preference')
+  assert.equal(shown[0].options.actions, undefined)
+  assert.equal(shown[1].options.actions, undefined)
+  assert.equal(shown[1].handlers.action, undefined)
+})
+
+test('cards pending when the app connects show once', async () => {
+  cards = [{ id: 'c6', state: 'pending', summary: 'Stop run-8x2' }]
+  socket.onmessage({ data: JSON.stringify({ ok: true }) })
+  await cardsChanged()
+  assert.equal(shown.length, 1)
+})
+
 test('a card decided on another device closes here, and another member’s cards never show', async () => {
   cards = [{ id: 'c3', state: 'pending', summary: 'Stop run-8x2' }]
   await cardsChanged('someone-else')

@@ -214,7 +214,7 @@ func New(cfg Config) (*Service, error) {
 		notices:   map[budgetKey]chan budgetDue{},
 		bursts:    map[domain.MemberID][]*burst{},
 
-		cardPushes: cardPushes{cards: map[domain.MemberID]map[string]bool{}},
+		cardPushes: cardPushes{cards: map[domain.MemberID]map[string]bool{}, held: map[domain.MemberID]bool{}},
 
 		digestRetry:    map[domain.MemberID]time.Time{},
 		digestAttempts: map[domain.MemberID]int{},
@@ -242,6 +242,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 	s.wg.Go(func() { s.consume(loopCtx, sub) })
 	s.wg.Go(func() { s.digests(loopCtx) })
+	s.wg.Go(func() { s.restoreCards(loopCtx) })
 	return nil
 }
 

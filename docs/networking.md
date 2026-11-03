@@ -318,7 +318,8 @@ and a finished or failed session waits for a digest every 30 minutes. Pushes
 within 2 minutes of another join it as one quiet summary, and
 [quiet hours](watches.md#notification-preferences) hold every push for a digest
 sent when they end. An [assistant card](watches.md#assistant-cards) is pushed with
-**Approve** and **Decline** where the device shows them. Runs the
+**Approve**, which opens the card, and **Decline**, where the device shows
+them. Runs the
 [assistant](assistant.md#notifications) launched for you also notify you when
 they finish, through the [watch](watches.md#assistant-watches) it keeps on
 them.

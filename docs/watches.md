@@ -336,16 +336,22 @@ queued without making the digest due.
 ### Assistant cards
 
 An [assistant approval card](assistant.md#approve-an-action) is pushed when it is
-raised, titled `Assistant asks for approval`, with the card's summary. On
-Android and desktop browsers, and in the desktop app on macOS, the notification
-carries **Approve** and **Decline**. They decide the card from that device as
-the card in the panel would; the notification then reads `Approved`,
-`Declined`, or `Not decided: <the server's error>`. A tap, and on iOS the only
-choice, opens the dashboard with the assistant panel, where **Always** options
-are. When the card is decided, expires or is withdrawn on any device, its
-notification is replaced quietly; one in a digest is dropped from it. See
-[security.md](security.md#the-assistant) for why a push cannot decide a card
-on its own.
+raised, titled `Assistant asks for approval`, with the card's summary. It
+waits while you use a dashboard, as other pushes do. A card that saves,
+forgets or sends a saved preference shows only what kind of action it is.
+
+In a browser on Android or a computer, the notification carries **Approve**
+and **Decline**. **Approve** opens the dashboard with the assistant panel,
+where you approve the card with one tap, because an action also runs from a
+locked phone. **Decline** declines it from the notification, which then reads
+`Declined` or `Not decided: <the server's error>`. The desktop app on macOS
+shows the same buttons and both decide at once. A card too long to show whole,
+or a private one, has no buttons. A tap, the only choice on iOS, opens the
+card, where **Always** options are. When the card is decided, expires or is
+withdrawn on any device, its notification is replaced quietly with `Decided`,
+also after a server restart; a device that decided it keeps its own outcome.
+One in a digest is dropped from it. See [security.md](security.md#the-assistant)
+for why a push cannot decide a card on its own.
 
 Seen anywhere, cleared everywhere: a session's push is replaced quietly once
 the session no longer needs you, including when you open its result on any
