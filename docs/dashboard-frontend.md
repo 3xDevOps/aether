@@ -1965,8 +1965,8 @@ callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
 finished. Mark it complete?", the summary of the session's latest success
 report when its agent messages are loaded, **Mark complete**, **Not yet** and
-**Review later**. **Mark complete** is a secondary button, and no button
-takes focus on its own. Each is a run command
+**Review later** (Not yet only on a live session). **Mark complete** is a
+secondary button, and no button takes focus on its own. Each is a run command
 (`src/lib/commands.ts`) that follows [Actions](#actions): **Mark complete**
 (`complete`) sends `run.review {action: "complete"}` and predicts `review`
 `accepted` and, for a live session, status `completed`; **Not yet**

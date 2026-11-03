@@ -74,6 +74,13 @@ describe('CompletionPrompt', () => {
     expect(banner()).toBeNull()
   })
 
+  it('asks about a completed run without offering Not yet', () => {
+    seed({ status: 'completed', state: '', finished_at: '2026-08-14T10:20:00Z' })
+    render(<Prompt />)
+    expect(screen.getByRole('button', { name: 'Mark complete' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Not yet' })).toBeNull()
+  })
+
   it('withdraws the review on Not yet and focuses the composer', async () => {
     seed()
     render(<Prompt />)

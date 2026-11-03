@@ -22,7 +22,7 @@ export function CompletionPrompt({ run, focusComposer, className }: { run: RunRe
   const commands = runCommands({ run: { ...run, finish_unopened: false }, paused, cap, members, self, steerOthers, predicting })
   const complete = commands.find((command) => command.id === 'complete')
   const notYet = commands.find((command) => command.id === 'not-yet')
-  if (!complete || !notYet) return null
+  if (!complete) return null
   const later = commands.find((command) => command.id === 'review-later')
   return <Ask run={run} complete={complete} notYet={notYet} later={later} focusComposer={focusComposer} className={className} />
 }
@@ -30,7 +30,7 @@ export function CompletionPrompt({ run, focusComposer, className }: { run: RunRe
 function Ask({ run, complete, notYet, later, focusComposer, className }: {
   run: RunRecord
   complete: Command
-  notYet: Command
+  notYet?: Command
   later?: Command
   focusComposer: () => void
   className?: string
@@ -59,16 +59,18 @@ function Ask({ run, complete, notYet, later, focusComposer, className }: {
         actions={
           <>
             <Button size="sm" variant="secondary" onClick={() => void perform(complete)}>Mark complete</Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                void perform(notYet)
-                focusComposer()
-              }}
-            >
-              Not yet
-            </Button>
+            {notYet && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  void perform(notYet)
+                  focusComposer()
+                }}
+              >
+                Not yet
+              </Button>
+            )}
             <Button size="sm" variant="ghost" onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
           </>
         }
