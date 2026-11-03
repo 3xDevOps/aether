@@ -409,7 +409,7 @@ func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.Ru
 }
 
 // hasLifecycleEvidence reports whether a finish or cleanup capture already
-// stored a packet for run.
+// stored a packet for run's latest launch.
 func (s *Scheduler) hasLifecycleEvidence(ctx context.Context, run domain.RunID) (bool, error) {
 	packets, ok := s.cfg.Store.(store.EvidencePacketStore)
 	if !ok {
@@ -429,6 +429,10 @@ func (s *Scheduler) hasLifecycleEvidence(ctx context.Context, run domain.RunID) 
 			return false, err
 		}
 		for _, p := range page.Items {
+			if r.StartedAt != nil && p.CapturedAt.Before(*r.StartedAt) {
+				// Newest first: the rest belong to an earlier launch.
+				return false, nil
+			}
 			if p.Origin.Kind == store.EvidenceOriginServer &&
 				(strings.HasPrefix(p.IdempotencyKey, "finish:"+string(run)+":") ||
 					strings.HasPrefix(p.IdempotencyKey, "cleanup:"+string(run)+":")) {

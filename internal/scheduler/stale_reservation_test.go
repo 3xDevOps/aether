@@ -180,6 +180,7 @@ func TestMissingCheckoutKeepsEarlierEvidence(t *testing.T) {
 		WorkspaceID: e.ws.ID, RunID: run.ID,
 		Origin:  store.EvidenceOrigin{Kind: store.EvidenceOriginServer},
 		Trigger: store.EvidenceFinish, IdempotencyKey: "finish:" + string(run.ID) + ":launch:1:abc:merged",
+		CapturedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("CreateEvidencePacket: %v", err)
 	}
