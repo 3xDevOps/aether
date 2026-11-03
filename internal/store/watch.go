@@ -87,27 +87,31 @@ type WatchDelivery struct {
 }
 
 // NotifyPrefs is a member's notification preferences. Quiet hours are off
-// while QuietTZ is empty.
+// while QuietTZ is empty. Level is blockers, batched or all; DigestAt is
+// the HH:MM of the blockers level's daily digest in DigestTZ, UTC when
+// empty.
 type NotifyPrefs struct {
 	Push       bool
 	QuietStart string
 	QuietEnd   string
 	QuietTZ    string
+	Level      string
+	DigestAt   string
+	DigestTZ   string
 }
 
 // Push states of a watch notification.
 const (
 	WatchPushNone    = "none"
 	WatchPushPending = "pending"
-	WatchPushHeld    = "held"
 	// WatchPushWithdraw is a delivered needs_you push to replace quietly:
 	// its need ended.
 	WatchPushWithdraw = "withdraw"
 )
 
 // WatchPushSummarized starts the detail of a push delivered inside one
-// push with other notices. It has no notification of its own on a device,
-// so it is never withdrawn.
+// push with other notices, a digest or a burst's summary. It has no
+// notification of its own on a device, so it is never withdrawn.
 const WatchPushSummarized = "Sent in one push with other notices"
 
 // WatchStore persists watches, their notifications and deliveries, each
@@ -148,13 +152,10 @@ type WatchStore interface {
 
 	ListWatchNotifications(ctx context.Context, watch string, limit int) ([]*WatchNotification, error)
 	GetWatchNotification(ctx context.Context, id string) (*WatchNotification, error)
-	// DueWatchPushes lists the notifications whose push is pending, held
-	// or to withdraw until now or earlier, oldest first, leaving out paused
-	// watches' pending and held ones.
+	// DueWatchPushes lists the notifications whose push is pending or to
+	// withdraw until now or earlier, oldest first, leaving out paused
+	// watches' pending ones.
 	DueWatchPushes(ctx context.Context, now time.Time) ([]*WatchNotification, error)
-	// ReleaseHeldWatchPushes makes member's held pushes due at now, for
-	// their quiet hours to be applied again.
-	ReleaseHeldWatchPushes(ctx context.Context, member domain.MemberID, now time.Time) error
 	// SetWatchPush records a notification's push state and, when d is not
 	// nil, replaces its delivery row on d's channel.
 	SetWatchPush(ctx context.Context, id, state string, attempts int, next *time.Time, d *WatchDelivery) error
@@ -531,7 +532,7 @@ func (d *DB) ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 	const heldByPause = `SELECT n.id FROM watch_notifications n JOIN watches w ON w.id = n.watch_id
-		WHERE n.push_state IN ('pending', 'held') AND w.state = 'paused' AND w.expires_at <= ?1`
+		WHERE n.push_state = 'pending' AND w.state = 'paused' AND w.expires_at <= ?1`
 	if _, err = tx.ExecContext(ctx,
 		`UPDATE watch_deliveries SET status = 'cleared', detail = 'The watch was paused until it expired', at = ?1
 		 WHERE channel = 'push' AND notification_id IN (`+heldByPause+`)`, at); err != nil {

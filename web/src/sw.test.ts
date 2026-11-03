@@ -68,6 +68,15 @@ describe('service worker', () => {
     })
   })
 
+  it('replaces a notification without alerting again with the summary of a burst', async () => {
+    const { self, dispatch } = worker()
+    await dispatch('push', {
+      data: { json: () => ({ title: '2 need you', body: 'Fix it: Blocked\nShip it: Blocked', tag: 'run-7k2m9q4xbd', url: '/', notice: true, quiet: true }) },
+    })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('2 need you', expect.objectContaining({ tag: 'run-7k2m9q4xbd', silent: true, data: expect.objectContaining({ notice: true, url: '/' }) }))
+    expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ renotify: true }))
+  })
+
   it('quietly replaces the notification of a need that ended, keeping its title', async () => {
     const { self, dispatch } = worker([], [{ tag: 'run-7k2m9q4xbd', title: 'Fix the login redirect' }])
     await dispatch('push', {

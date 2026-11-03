@@ -2536,6 +2536,31 @@ CREATE TABLE assistant_queue (
 CREATE UNIQUE INDEX idx_assistant_queue_key ON assistant_queue(member_id, generation, key) WHERE state <> 'failed' OR sent = 1;
 CREATE INDEX idx_assistant_queue_member ON assistant_queue(member_id, state, seq);
 `,
+	// v106: how often a member is notified, and the digest the server
+	// writes for what it does not push at once: one row per item waiting
+	// for the member's next digest, overnight when quiet hours held it.
+	// Quiet hours now hand watch pushes to the digest, so the watch's own
+	// held state goes.
+	`
+ALTER TABLE notify_prefs ADD COLUMN level TEXT NOT NULL DEFAULT 'batched' CHECK (level IN ('blockers', 'batched', 'all'));
+ALTER TABLE notify_prefs ADD COLUMN digest_at TEXT NOT NULL DEFAULT '09:00';
+ALTER TABLE notify_prefs ADD COLUMN digest_tz TEXT NOT NULL DEFAULT '';
+CREATE TABLE push_digest (
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	source     TEXT NOT NULL,
+	key        TEXT NOT NULL,
+	kind       TEXT NOT NULL,
+	workspace  TEXT NOT NULL DEFAULT '',
+	title      TEXT NOT NULL,
+	body       TEXT NOT NULL DEFAULT '',
+	url        TEXT NOT NULL DEFAULT '',
+	run_id     TEXT NOT NULL DEFAULT '',
+	overnight  INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (member_id, source, key)
+);
+UPDATE watch_notifications SET push_state = 'pending' WHERE push_state = 'held';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

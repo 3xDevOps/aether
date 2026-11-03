@@ -6,7 +6,8 @@ import { Code } from '@/components/ui/code'
 import { ApiError, codeUnavailable, type Api } from '@/lib/api'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { Input } from '@/components/ui/input'
-import type { NotifyPrefs, NotifyPrefsSetParams, SlackLinkResult, SlackStatusResult } from '@/lib/types'
+import { Radio, RadioGroup } from '@/components/ui/radio'
+import type { NotifyLevel, NotifyPrefs, NotifyPrefsSetParams, SlackLinkResult, SlackStatusResult } from '@/lib/types'
 import { errorSentence } from '@/lib/format'
 import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
@@ -198,6 +199,14 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
 const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const quietDefault = () => ({ start: '22:00', end: '07:00', tz: browserZone() })
 
+const levels: { level: NotifyLevel; label: string; help: string }[] = [
+  { level: 'blockers', label: 'Only what blocks me', help: 'Sessions that need you at once; finished, failed, merged and checks in one daily digest.' },
+  { level: 'batched', label: 'Blockers now, the rest batched', help: 'Sessions that need you at once; the rest in a digest every 30 minutes.' },
+  { level: 'all', label: 'Everything as it happens', help: 'Every notification at once.' },
+]
+
+type Row = 'watch-push' | 'level' | 'quiet-hours'
+
 /** unavailable is the server's own error from push.status, such as Web Push not being configured. */
 function destinations(prefs: NotifyPrefs, unavailable: string | null): string {
   const devices = prefs.destinations.push_devices
@@ -218,8 +227,9 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
   const cap = useStore((s) => s.capabilities)
   const [prefs, setPrefs] = useState<NotifyPrefs | null>(null)
   const [quiet, setQuiet] = useState(quietDefault)
+  const [digestAt, setDigestAt] = useState('09:00')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<{ row: 'watch-push' | 'quiet-hours'; text: string } | null>(null)
+  const [error, setError] = useState<{ row: Row; text: string } | null>(null)
   const [unavailable, setUnavailable] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const supported = cap === null || cap.methods.includes('*') || cap.methods.includes('notify.prefs.get')
@@ -232,6 +242,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
         if (!live) return
         setPrefs(next)
         if (next.quiet_hours) setQuiet(next.quiet_hours)
+        if (next.digest) setDigestAt(next.digest.at)
       },
       (err: unknown) => live && setError({ row: 'watch-push', text: errorSentence(err) }),
     )
@@ -246,21 +257,51 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
 
   if (!supported) return null
 
-  const save = (next: NotifyPrefsSetParams, row: 'watch-push' | 'quiet-hours') => {
+  const save = (next: NotifyPrefsSetParams, row: Row) => {
     setBusy(true)
     setError(null)
     client.notifyPrefsSet(next)
       .then((saved) => {
         setPrefs(saved)
         if (saved.quiet_hours) setQuiet(saved.quiet_hours)
+        if (saved.digest) setDigestAt(saved.digest.at)
       }, (err: unknown) => setError({ row, text: errorSentence(err) }))
       .finally(() => setBusy(false))
   }
 
   const held = prefs?.quiet_hours
   const edited = held && (held.start !== quiet.start || held.end !== quiet.end || held.tz !== quiet.tz)
+  const level = prefs?.level ?? 'batched'
+  // The daily digest follows this browser's zone, which is saved with it.
+  const digest = { at: digestAt, tz: browserZone() }
+  const digestEdited = prefs?.digest && (prefs.digest.at !== digest.at || prefs.digest.tz !== digest.tz)
   return (
-    <SettingsSection title="Watch notifications" scope="Your account">
+    <SettingsSection title="When to notify" scope="Your account">
+      <SettingRow
+        id="level"
+        label="How often"
+        help={levels.find((l) => l.level === level)?.help}
+      >
+        <RadioGroup aria-label="How often" value={level} disabled={busy || !prefs} onValueChange={(next) => save({ level: next as NotifyLevel }, 'level')}>
+          {levels.map((l) => (
+            <label key={l.level} className="flex min-h-8 min-w-0 cursor-pointer items-center gap-2 text-ui text-text coarse:min-h-11">
+              <Radio value={l.level} />
+              <span className="min-w-0 break-words">{l.label}</span>
+            </label>
+          ))}
+        </RadioGroup>
+        {level === 'blockers' && (
+          <div className="flex min-w-0 flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-ui-sm text-muted">
+              Daily digest at
+              <Input type="time" required value={digestAt} disabled={busy} className="w-28" onChange={(event) => setDigestAt(event.target.value)} />
+            </label>
+            <p className="text-ui-sm text-muted">{digest.tz}</p>
+            {digestEdited && <Button size="sm" variant="secondary" disabled={busy || !digestAt} onClick={() => save({ digest }, 'level')}>Save</Button>}
+          </div>
+        )}
+        {error?.row === 'level' && <Callout tone="failed" role="alert">{error.text}</Callout>}
+      </SettingRow>
       <SettingRow
         id="watch-push"
         label="Watch notifications on push devices"
@@ -275,7 +316,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
         id="quiet-hours"
         label="Quiet hours"
         labelFor="settings-quiet-hours"
-        help="Pushes wait until quiet hours end, then arrive as one. In-app notices and the desktop app are not held."
+        help="Pushes wait until quiet hours end, then arrive in one digest that leads with them. In-app notices and the desktop app are not held."
         control={(
           <Checkbox
             id="settings-quiet-hours"

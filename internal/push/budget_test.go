@@ -138,6 +138,13 @@ func (c *clock) freeze() {
 	c.mu.Unlock()
 }
 
+// advance moves the clock forward by d.
+func (c *clock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.skew += d
+	c.mu.Unlock()
+}
+
 // resume lets time run again from d past when it froze.
 func (c *clock) resume(d time.Duration) {
 	c.mu.Lock()

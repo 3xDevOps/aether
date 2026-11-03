@@ -212,7 +212,9 @@ push service receives:
   server's IP address.
 - **The notification, encrypted** on your server so that only that browser
   can read it (RFC 8291): the session's title or the first line of its task, one
-  line saying why it needs you, and the session's ID. The push service sees its
+  line saying why it needs you, and the session's ID. A
+  [digest or a burst's summary](watches.md#notification-levels) holds up to 5
+  such lines, each with its workspace's name. The push service sees its
   size, at most 4096 bytes, and when it was sent.
 - **A signed token** (RFC 8292): the public half of a key your server
   generated for this purpose, the push service's own address, an expiry, and
@@ -220,8 +222,8 @@ push service receives:
   your server nor you.
 - **Delivery settings**: a 24-hour time to live, high urgency (normal for a
   reported success and for the message that clears a need), and a topic,
-  which is a hash of the session's ID, so that a newer notification for a session
-  replaces an undelivered older one.
+  which is a hash of the session's ID (of your member ID for a digest), so
+  that a newer notification for a session replaces an undelivered older one.
 
 The push service relays the message to your browser under its own policy.
 **Send test notification** sends the same request with the text

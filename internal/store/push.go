@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -32,6 +34,35 @@ type PushStore interface {
 	// DeletePushSubscription removes member's subscription with endpoint,
 	// or returns ErrNotFound.
 	DeletePushSubscription(ctx context.Context, member domain.MemberID, endpoint string) error
+
+	GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error)
+	// AddDigestItem queues item for its member's next digest. One already
+	// queued under the same source and key keeps its place and becomes
+	// overnight if either is.
+	AddDigestItem(ctx context.Context, item *DigestItem) error
+	// ListDigestItems is member's queued items, oldest first.
+	ListDigestItems(ctx context.Context, member domain.MemberID) ([]*DigestItem, error)
+	// DigestMembers lists the members with a queued item.
+	DigestMembers(ctx context.Context) ([]domain.MemberID, error)
+	// DeleteDigestItems removes member's items with the given (source, key).
+	DeleteDigestItems(ctx context.Context, member domain.MemberID, items []*DigestItem) error
+}
+
+// DigestItem is a notification a member gets in their next digest rather
+// than at once. Source names what produced it, such as a session or a
+// watch notice, and Key identifies it there.
+type DigestItem struct {
+	MemberID  domain.MemberID
+	Source    string
+	Key       string
+	Kind      string
+	Workspace string
+	Title     string
+	Body      string
+	URL       string
+	RunID     domain.RunID
+	Overnight bool
+	CreatedAt time.Time
 }
 
 // The bound is part of the insert, so concurrent subscribes cannot each
@@ -76,4 +107,77 @@ func (d *DB) DeletePushSubscription(ctx context.Context, member domain.MemberID,
 		return fmt.Errorf("store: delete push subscription: %w", err)
 	}
 	return err
+}
+
+func (d *DB) AddDigestItem(ctx context.Context, item *DigestItem) error {
+	at, err := encodeTime(item.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("store: add digest item: %w", err)
+	}
+	_, err = d.db.ExecContext(ctx,
+		`INSERT INTO push_digest (member_id, source, key, kind, workspace, title, body, url, run_id, overnight, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (member_id, source, key) DO UPDATE SET overnight = max(overnight, excluded.overnight)`,
+		item.MemberID, item.Source, item.Key, item.Kind, item.Workspace, item.Title, item.Body, item.URL, item.RunID, item.Overnight, at)
+	if err != nil {
+		return fmt.Errorf("store: add digest item: %w", mapConstraint(err, ErrNotFound))
+	}
+	return nil
+}
+
+func (d *DB) ListDigestItems(ctx context.Context, member domain.MemberID) ([]*DigestItem, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT member_id, source, key, kind, workspace, title, body, url, run_id, overnight, created_at
+		 FROM push_digest WHERE member_id = ? ORDER BY created_at, rowid`, member)
+	if err != nil {
+		return nil, fmt.Errorf("store: list digest items: %w", err)
+	}
+	return collect(rows, func(row interface{ Scan(...any) error }) (*DigestItem, error) {
+		var (
+			item    DigestItem
+			created int64
+		)
+		if err := row.Scan(&item.MemberID, &item.Source, &item.Key, &item.Kind, &item.Workspace, &item.Title, &item.Body,
+			&item.URL, &item.RunID, &item.Overnight, &created); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = decodeTime(created)
+		return &item, nil
+	})
+}
+
+func (d *DB) DigestMembers(ctx context.Context) ([]domain.MemberID, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT member_id FROM push_digest ORDER BY member_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list digest members: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var out []domain.MemberID
+	for rows.Next() {
+		var id domain.MemberID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: list digest members: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list digest members: %w", err)
+	}
+	return out, nil
+}
+
+func (d *DB) DeleteDigestItems(ctx context.Context, member domain.MemberID, items []*DigestItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	args := []any{member}
+	for _, item := range items {
+		args = append(args, item.Source, item.Key)
+	}
+	_, err := d.db.ExecContext(ctx,
+		`DELETE FROM push_digest WHERE member_id = ? AND (source, key) IN (VALUES (?, ?)`+strings.Repeat(", (?, ?)", len(items)-1)+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("store: delete digest items: %w", err)
+	}
+	return nil
 }

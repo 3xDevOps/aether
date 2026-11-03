@@ -449,8 +449,8 @@ describe('watch notification preferences', () => {
   it('states the destinations and saves the push toggle with the quiet hours it keeps', async () => {
     const user = userEvent.setup()
     const client = fakeApi({
-      notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 2 } })),
-      notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 2 } })),
+      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 2 } })),
+      notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, level: prefs.level ?? 'batched', digest: prefs.digest ?? { at: '09:00', tz: '' }, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 2 } })),
     })
     render(<WatchNotifySection client={client} />)
     expect(await screen.findByText(/Push to 2 devices · the desktop app while it is open · in-app on every dashboard/)).toBeDefined()
@@ -462,8 +462,8 @@ describe('watch notification preferences', () => {
   it('says in-app only with no push device, and quiet hours default to this browser’s time zone', async () => {
     const user = userEvent.setup()
     const client = fakeApi({
-      notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
-      notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
+      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 0 } })),
+      notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, level: prefs.level ?? 'batched', digest: prefs.digest ?? { at: '09:00', tz: '' }, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
     })
     render(<WatchNotifySection client={client} />)
     expect(await screen.findByText(/No push device subscribed, so in-app only/)).toBeDefined()
@@ -476,7 +476,7 @@ describe('watch notification preferences', () => {
   it('tells a server without Web Push apart from no device, and shows a quiet-hours error on that row', async () => {
     const user = userEvent.setup()
     const client = fakeApi({
-      notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
+      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 0 } })),
       notifyPrefsSet: vi.fn(async () => { throw new Error('notify.prefs.set: unknown time zone "Mars/Olympus"') }),
       pushStatus: vi.fn(async () => { throw new ApiError(503, 'push service not configured', codeUnavailable) }),
     })
@@ -488,19 +488,36 @@ describe('watch notification preferences', () => {
     expect(alert.closest('#quiet-hours')).not.toBeNull()
   })
 
+  it('saves the level, and the daily digest time in this browser’s zone', async () => {
+    const user = userEvent.setup()
+    const client = fakeApi({
+      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 1 } })),
+    })
+    render(<WatchNotifySection client={client} />)
+    expect(await screen.findByText(/the rest in a digest every 30 minutes/)).toBeDefined()
+    await user.click(screen.getByRole('radio', { name: 'Only what blocks me' }))
+    expect(client.notifyPrefsSet).toHaveBeenCalledWith({ level: 'blockers' })
+    const time = await screen.findByLabelText('Daily digest at')
+    await user.clear(time)
+    await user.type(time, '08:30')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: zone } })
+  })
+
   it('re-reads the device count when this device subscribes', async () => {
-    const notifyPrefsGet = vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } }))
+    const notifyPrefsGet = vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 0 } }))
     const client = fakeApi({ notifyPrefsGet })
     const view = render(<WatchNotifySection client={client} subscriptions={0} />)
     expect(await screen.findByText(/No push device subscribed/)).toBeDefined()
-    notifyPrefsGet.mockResolvedValue({ push: true, destinations: { push_devices: 1 } })
+    notifyPrefsGet.mockResolvedValue({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 1 } })
     view.rerender(<WatchNotifySection client={client} subscriptions={1} />)
     expect(await screen.findByText(/Push to 1 device ·/)).toBeDefined()
   })
 
   it('does not claim the server lacks Web Push when push.status fails for another reason', async () => {
     const client = fakeApi({
-      notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 2 } })),
+      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 2 } })),
       pushStatus: vi.fn(async () => { throw new Error('network down') }),
     })
     render(<WatchNotifySection client={client} />)

@@ -68,6 +68,7 @@ func (h *harness) follow(member *domain.Member, run *domain.Run) protocol.Watch 
 func TestAssistantWatchWritesNewsToTheConversationAndPushesOnlyWhatTheRunDoesNot(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	h.level(h.ada, protocol.NotifyAll)
 	h.assistant = &conversation{}
 	_ = h.svc.Close()
 	h.start()

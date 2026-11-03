@@ -208,16 +208,11 @@ func TestAQueuedClearStopsAtItsAttemptLimit(t *testing.T) {
 	}
 }
 
-func TestANeedSentInASummaryIsNotWithdrawnOnItsOwn(t *testing.T) {
+func TestANeedSentInADigestIsNotWithdrawnOnItsOwn(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
-	now := h.clock.now().UTC()
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
-		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	h.quiet(h.ada)
 	a, b := h.run(h.bob, "First"), h.run(h.bob, "Second")
 	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
@@ -225,8 +220,10 @@ func TestANeedSentInASummaryIsNotWithdrawnOnItsOwn(t *testing.T) {
 	h.eventually("both held", func() bool {
 		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
 	})
-	h.clock.advance(time.Hour + time.Minute)
-	h.eventually("the summary", func() bool { return h.pushStatus(wa.ID) == protocol.WatchStatusDelivered })
+	h.digest(h.ada.ID)
+	if s := h.pushStatus(wa.ID); s != protocol.WatchStatusDelivered {
+		t.Fatalf("push of the digest's notice = %s, want delivered", s)
+	}
 
 	h.status(a, domain.RunRunning, domain.ActivityWorking, "")
 	h.eventually("the need read as ended", func() bool {
@@ -234,8 +231,8 @@ func TestANeedSentInASummaryIsNotWithdrawnOnItsOwn(t *testing.T) {
 		return json.Unmarshal(h.watchState(wa.ID).Observed, &o) == nil && o.Need == ""
 	})
 	h.settle()
-	if d := pushOf(h.notices(wa.ID)[0]); d.Status != protocol.WatchStatusDelivered || !strings.HasPrefix(d.Detail, store.WatchPushSummarized) || phone.received.Load() != 1 {
-		t.Fatalf("push row = %+v, %d sent; want the summary alone and no clear", d, phone.received.Load())
+	if d := pushOf(h.notices(wa.ID)[0]); d.Status != protocol.WatchStatusDelivered || !strings.HasPrefix(d.Detail, store.WatchPushSummarized) || phone.received.Load() != 0 {
+		t.Fatalf("push row = %+v, %d sent; want the digest's and no clear", d, phone.received.Load())
 	}
 }
 
@@ -296,6 +293,54 @@ type noBudgets struct{}
 
 func (noBudgets) Budget(context.Context, domain.WorkspaceID) (cost.Status, error) {
 	return cost.Status{}, nil
+}
+
+// quiet starts member's quiet hours an hour ago, until an hour from now.
+func (h *harness) quiet(member *domain.Member) {
+	h.t.Helper()
+	now := h.clock.now().UTC()
+	if _, err := h.svc.SetPrefs(h.ctx, member.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
+		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
+	}}); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func (h *harness) level(member *domain.Member, level string) {
+	h.t.Helper()
+	if _, err := h.svc.SetPrefs(h.ctx, member.ID, protocol.NotifyPrefs{Level: level}); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// digest settles member's queued notices the way the push service's digest
+// does, as one push a device took.
+func (h *harness) digest(member domain.MemberID) {
+	h.t.Helper()
+	items, err := h.db.ListDigestItems(h.ctx, member)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	source := h.svc.DigestSource()
+	for _, item := range items {
+		reason, err := source.Stale(h.ctx, item)
+		switch {
+		case errors.Is(err, push.ErrNotYet):
+			continue
+		case err != nil:
+			h.t.Fatal(err)
+		case reason != "":
+			err = source.Dropped(h.ctx, item, reason)
+		default:
+			err = source.Sent(h.ctx, item, []push.DeviceResult{{Status: push.DeviceDelivered}}, nil)
+		}
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		if err := h.db.DeleteDigestItems(h.ctx, member, []*store.DigestItem{item}); err != nil {
+			h.t.Fatal(err)
+		}
+	}
 }
 
 // clock is the time the service reads, moved forward by tests.
@@ -410,7 +455,7 @@ func newHarness(t *testing.T) *harness {
 	}}
 	svc, err := push.New(push.Config{
 		Store: db, Bus: h.bus, Runs: h.runs, Budgets: noBudgets{},
-		KeyPath: filepath.Join(t.TempDir(), "vapid.pem"), Client: insecure,
+		KeyPath: filepath.Join(t.TempDir(), "vapid.pem"), Client: insecure, Now: h.clock.now,
 	})
 	if err != nil {
 		t.Fatalf("push.New: %v", err)
@@ -1063,6 +1108,7 @@ func TestNeedAnsweredBeforeThePushIsDropped(t *testing.T) {
 func TestDeliveredNeedIsWithdrawnWhenItEnds(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	h.level(h.bob, protocol.NotifyAll)
 	phone := h.subscribe(h.bob)
 	run := h.run(h.ada, "Rotate the keys")
 	w := h.watch(h.bob, runTarget(run)).Watch
@@ -1190,17 +1236,11 @@ func TestWatchExpires(t *testing.T) {
 	})
 }
 
-func TestQuietHoursHoldPushesAndSendOneWhenTheyEnd(t *testing.T) {
+func TestQuietHoursQueueNoticesForTheDigest(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
-	now := h.clock.now().UTC()
-	start, end := now.Add(-time.Hour), now.Add(time.Hour)
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
-		Start: start.Format("15:04"), End: end.Format("15:04"), TZ: "UTC",
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	h.quiet(h.ada)
 	a, b := h.run(h.bob, "First"), h.run(h.bob, "Second")
 	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
@@ -1209,51 +1249,69 @@ func TestQuietHoursHoldPushesAndSendOneWhenTheyEnd(t *testing.T) {
 		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
 	})
 
-	// The hold survives a restart, and the end of quiet hours sends one.
+	// The hold survives a restart: the digest's queue is stored.
 	_ = h.svc.Close()
 	h.start()
-	h.clock.advance(time.Hour + time.Minute)
-	h.eventually("the coalesced push", func() bool { return phone.received.Load() == 1 })
-	h.settle()
-	if n := phone.received.Load(); n != 1 {
-		t.Fatalf("device received %d pushes, want one for both notices", n)
+	items, err := h.db.ListDigestItems(h.ctx, h.ada.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, id := range []string{wa.ID, wb.ID} {
-		if s := h.pushStatus(id); s != protocol.WatchStatusDelivered {
-			t.Fatalf("push of %s = %s, want delivered", id, s)
+	if len(items) != 2 {
+		t.Fatalf("digest has %d items, want both needs", len(items))
+	}
+	for _, item := range items {
+		if !item.Overnight || item.Kind != push.KindNeed || !strings.HasPrefix(item.Body, "Blocked: ") || item.Workspace != h.ws.Name {
+			t.Fatalf("digest item = %+v, want a need, overnight, with its workspace", *item)
 		}
+	}
+	// The answered need leaves the digest, as does a paused watch's.
+	c := h.run(h.bob, "Third")
+	wc := h.watch(h.ada, runTarget(c)).Watch
+	h.status(c, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: three")
+	h.eventually("the third held", func() bool { return h.pushStatus(wc.ID) == protocol.WatchStatusHeldQuiet })
+	paused := true
+	if _, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: wc.ID, Paused: &paused}); err != nil {
+		t.Fatal(err)
+	}
+	h.status(b, domain.RunRunning, domain.ActivityWorking, "")
+	h.eventually("the need read as ended", func() bool {
+		var o protocol.WatchObserved
+		return json.Unmarshal(h.watchState(wb.ID).Observed, &o) == nil && o.Need == ""
+	})
+	h.digest(h.ada.ID)
+	if s := h.pushStatus(wa.ID); s != protocol.WatchStatusDelivered {
+		t.Fatalf("push of the standing need = %s, want delivered in the digest", s)
+	}
+	if d := pushOf(h.notices(wb.ID)[0]); d.Status != protocol.WatchStatusCleared || d.Detail != "Resolved before the digest was sent" {
+		t.Fatalf("push of the answered need = %+v, want cleared", d)
+	}
+	if d := pushOf(h.notices(wc.ID)[0]); d.Status != protocol.WatchStatusCleared || d.Detail != "You paused the watch" {
+		t.Fatalf("push of a paused watch's need = %+v, want dropped from the digest", d)
+	}
+	if n := phone.received.Load(); n != 0 {
+		t.Fatalf("device received %d pushes during quiet hours, want none", n)
 	}
 }
 
-func TestADeletedWatchDoesNotCostAnotherItsPush(t *testing.T) {
+func TestADeletedWatchsPushIsNotSent(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
 	h.push.active(h.ada.ID)
-	a, b := h.run(h.ada, "Kept"), h.run(h.ada, "Deleted")
-	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
-	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
-	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
-	h.eventually("both notices", func() bool { return len(h.notices(wa.ID)) == 1 && len(h.notices(wb.ID)) == 1 })
-	batch := []*store.WatchNotification{h.notices(wb.ID)[0], h.notices(wa.ID)[0]}
-	watches := map[string]*store.Watch{wa.ID: h.watchState(wa.ID), wb.ID: h.watchState(wb.ID)}
-	if err := h.svc.Delete(h.ctx, h.ada.ID, wb.ID); err != nil {
+	run := h.run(h.ada, "Deleted")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
+	h.eventually("the notice", func() bool { return len(h.notices(w.ID)) == 1 })
+	n, state := h.notices(w.ID)[0], h.watchState(w.ID)
+	if err := h.svc.Delete(h.ctx, h.ada.ID, w.ID); err != nil {
 		t.Fatal(err)
 	}
-	// The delivery loop is stopped, so this send is the batch's only one.
 	_ = h.svc.Close()
-	var built []*store.WatchNotification
-	if err := h.svc.send(h.ctx, h.ada.ID, batch, watches, func(reserved []*store.WatchNotification) push.Message {
-		built = reserved
-		return push.Message{Title: "1 watch notice", URL: WatchesLink()}
-	}); err != nil {
+	if err := h.svc.send(h.ctx, h.ada.ID, n, state); err != nil {
 		t.Fatal(err)
 	}
-	if s := h.pushStatus(wa.ID); s != protocol.WatchStatusDelivered || phone.received.Load() != 1 {
-		t.Fatalf("kept watch push = %s, %d sent; want delivered once", s, phone.received.Load())
-	}
-	if len(built) != 1 || built[0].WatchID != wa.ID {
-		t.Fatalf("push built from %d notices, want the kept watch's alone", len(built))
+	if phone.received.Load() != 0 {
+		t.Fatal("a deleted watch's notice was pushed")
 	}
 }
 
@@ -1317,28 +1375,23 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 func TestPushOfAPausedRunWaitsForItsResumption(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	phone := h.subscribe(h.ada)
-	now := h.clock.now().UTC()
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
-		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	h.subscribe(h.ada)
+	h.quiet(h.ada)
 	run := h.run(h.bob, "Paused mid-question")
 	w := h.watch(h.ada, runTarget(run)).Watch
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: keep going?")
 	h.eventually("the held push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusHeldQuiet })
 
 	h.runs.pause(run.ID, true)
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{}); err != nil {
-		t.Fatal(err)
-	}
-	h.settle()
-	if s := h.pushStatus(w.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 0 {
-		t.Fatalf("push while the run is paused = %s, %d sent; want it still queued", s, phone.received.Load())
+	h.digest(h.ada.ID)
+	if s := h.pushStatus(w.ID); s != protocol.WatchStatusHeldQuiet {
+		t.Fatalf("push while the run is paused = %s, want it still queued", s)
 	}
 	h.runs.pause(run.ID, false)
-	h.eventually("the push after resumption", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+	h.digest(h.ada.ID)
+	if s := h.pushStatus(w.ID); s != protocol.WatchStatusDelivered {
+		t.Fatalf("push after resumption = %s, want delivered", s)
+	}
 }
 
 func TestWatchingAFinishedTargetAnnouncesOnlyWhatComesNext(t *testing.T) {
@@ -1459,51 +1512,28 @@ func TestPullRequestFailureKeepsTheRunsOwnNotices(t *testing.T) {
 	}
 }
 
-func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
+func TestTheLevelBatchesWhatDoesNotBlock(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
-	now := h.clock.now().UTC()
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
-		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	a, b := h.run(h.bob, "Kept"), h.run(h.bob, "Paused")
+	a, b := h.run(h.bob, "Asks"), h.run(h.bob, "Ends")
 	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
-	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
-	h.eventually("both held", func() bool {
-		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
-	})
-	paused := true
-	if _, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: wb.ID, Paused: &paused}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{}); err != nil {
-		t.Fatal(err)
-	}
-	h.eventually("the released push", func() bool { return phone.received.Load() == 1 })
-	h.settle()
-	if s := h.pushStatus(wa.ID); s != protocol.WatchStatusDelivered {
-		t.Fatalf("kept watch push = %s, want delivered", s)
-	}
-	if s := h.pushStatus(wb.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 1 {
-		t.Fatalf("paused watch push = %s, want it still held", s)
-	}
-	// A batch listed before the pause does not send it either.
-	if err := h.svc.deliverMember(h.ctx, h.ada.ID, h.notices(wb.ID)); err != nil {
-		t.Fatal(err)
-	}
-	if s := h.pushStatus(wb.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 1 {
-		t.Fatalf("paused watch push from a stale batch = %s, want it still held", s)
+	h.eventually("the need pushed at once", func() bool { return h.pushStatus(wa.ID) == protocol.WatchStatusDelivered })
+	h.status(b, domain.RunInterrupted, "", "")
+	h.eventually("the end batched", func() bool { return h.pushStatus(wb.ID) == protocol.WatchStatusBatched })
+	if n := phone.received.Load(); n != 1 {
+		t.Fatalf("device received %d pushes, want the need alone", n)
 	}
 
-	// Paused until it expires, its held push is dropped, never sent.
-	h.clock.advance(DefaultExpiry + time.Hour)
-	h.eventually("the paused push to be dropped", func() bool { return h.pushStatus(wb.ID) == protocol.WatchStatusCleared })
-	h.settle()
-	if n := phone.received.Load(); n != 1 {
-		t.Fatalf("device received %d pushes, want the paused watch's never sent", n)
+	h.digest(h.ada.ID)
+	if d := pushOf(h.notices(wb.ID)[0]); d.Status != protocol.WatchStatusDelivered || !strings.HasPrefix(d.Detail, store.WatchPushSummarized) {
+		t.Fatalf("push of the end = %+v, want delivered in the digest", d)
 	}
+
+	h.level(h.ada, protocol.NotifyAll)
+	c := h.run(h.bob, "Ends at once")
+	wc := h.watch(h.ada, runTarget(c)).Watch
+	h.status(c, domain.RunInterrupted, "", "")
+	h.eventually("the end pushed at once", func() bool { return h.pushStatus(wc.ID) == protocol.WatchStatusDelivered })
 }

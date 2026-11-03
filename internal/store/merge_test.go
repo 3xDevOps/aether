@@ -45,6 +45,7 @@ var memberRefs = map[string]bool{
 	"assistant_prompt_keys.member_id":          false,
 	"watches.member_id":                        true,
 	"notify_prefs.member_id":                   true,
+	"push_digest.member_id":                    true,
 	"watch_pr_snapshots.member_id":             false,
 	"watches.wait_ended_by":                    false,
 	"member_preferences.member_id":             true,
@@ -241,7 +242,7 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err := db.PutPushSubscription(ctx, &PushSubscription{Endpoint: "https://push.example/b", MemberID: b.ID, P256DH: "k", Auth: "a"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false}); err != nil {
+	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false, Level: "batched", DigestAt: "09:00"}); err != nil {
 		t.Fatal(err)
 	}
 	launchRevisions := map[domain.MemberID]int64{}

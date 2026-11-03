@@ -464,10 +464,7 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			}
 			rec.PushState, rec.PushNextAt = store.WatchPushPending, &now
 			d.Status, d.Detail = protocol.WatchStatusPending, "Sending"
-			if until, quiet := quietUntil(*prefs, now); quiet {
-				rec.PushState, rec.PushNextAt = store.WatchPushHeld, &until
-				d.Status, d.Detail = protocol.WatchStatusHeldQuiet, quietDetail(*prefs, until)
-			} else if s.push.HeldUntil(w.MemberID).After(now) {
+			if s.push.HeldUntil(w.MemberID).After(now) {
 				d.Detail = dashboardHold
 			}
 		}

@@ -624,7 +624,7 @@ func (s *Service) Prefs(ctx context.Context, member domain.MemberID) (protocol.N
 }
 
 func (s *Service) prefsProto(ctx context.Context, member domain.MemberID, p store.NotifyPrefs) (protocol.NotifyPrefs, error) {
-	out := protocol.NotifyPrefs{Push: &p.Push}
+	out := protocol.NotifyPrefs{Push: &p.Push, Level: p.Level, Digest: &protocol.NotifyDigest{At: p.DigestAt, TZ: p.DigestTZ}}
 	if p.QuietTZ != "" {
 		out.QuietHours = &protocol.QuietHours{Start: p.QuietStart, End: p.QuietEnd, TZ: p.QuietTZ}
 	}
@@ -638,20 +638,36 @@ func (s *Service) prefsProto(ctx context.Context, member domain.MemberID, p stor
 	return out, nil
 }
 
-// SetPrefs replaces member's notification preferences, keeping push as it
-// is when p leaves it out.
+// SetPrefs replaces member's notification preferences, keeping push, the
+// level and the digest time as they are when p leaves them out.
 func (s *Service) SetPrefs(ctx context.Context, member domain.MemberID, p protocol.NotifyPrefs) (protocol.NotifyPrefs, error) {
 	current, err := s.store.GetNotifyPrefs(ctx, member)
 	if err != nil {
 		return protocol.NotifyPrefs{}, err
 	}
-	rec := store.NotifyPrefs{Push: current.Push}
+	rec := store.NotifyPrefs{Push: current.Push, Level: current.Level, DigestAt: current.DigestAt, DigestTZ: current.DigestTZ}
 	if p.Push != nil {
 		rec.Push = *p.Push
 	}
+	switch p.Level {
+	case "":
+	case protocol.NotifyBlockers, protocol.NotifyBatched, protocol.NotifyAll:
+		rec.Level = p.Level
+	default:
+		return protocol.NotifyPrefs{}, invalid("level %q is not blockers, batched or all", p.Level)
+	}
+	if d := p.Digest; d != nil {
+		if _, ok := push.ParseClock(d.At); !ok {
+			return protocol.NotifyPrefs{}, invalid("digest.at is HH:MM, such as 09:00")
+		}
+		if _, err := time.LoadLocation(d.TZ); err != nil {
+			return protocol.NotifyPrefs{}, invalid("digest.tz %q is not an IANA time zone: %v", d.TZ, err)
+		}
+		rec.DigestAt, rec.DigestTZ = d.At, d.TZ
+	}
 	if q := p.QuietHours; q != nil {
-		start, okStart := minutes(q.Start)
-		end, okEnd := minutes(q.End)
+		start, okStart := push.ParseClock(q.Start)
+		end, okEnd := push.ParseClock(q.End)
 		if !okStart || !okEnd {
 			return protocol.NotifyPrefs{}, invalid("quiet_hours start and end are HH:MM, such as 22:00")
 		}
@@ -669,9 +685,5 @@ func (s *Service) SetPrefs(ctx context.Context, member domain.MemberID, p protoc
 	if err := s.store.PutNotifyPrefs(ctx, member, rec); err != nil {
 		return protocol.NotifyPrefs{}, err
 	}
-	if err := s.store.ReleaseHeldWatchPushes(ctx, member, s.now()); err != nil {
-		return protocol.NotifyPrefs{}, err
-	}
-	s.wake()
 	return s.prefsProto(ctx, member, rec)
 }

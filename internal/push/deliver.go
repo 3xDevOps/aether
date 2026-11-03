@@ -53,10 +53,6 @@ func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message
 	if err != nil {
 		return nil, fmt.Errorf("push: encode notification: %w", err)
 	}
-	subs, err := s.store.ListPushSubscriptions(ctx, member)
-	if err != nil {
-		return nil, fmt.Errorf("push: list subscriptions: %w", err)
-	}
 	urgency := urgencyNormal
 	if m.Urgent {
 		urgency = urgencyHigh
@@ -64,6 +60,30 @@ func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message
 	topic := ""
 	if m.Topic != "" {
 		topic = topicOf(m.Topic)
+	}
+	return s.deliverPayload(ctx, member, payload, topic, urgency)
+}
+
+// Push is Deliver for a new notification: within burstWindow of member's
+// last push it replaces that one quietly with a summary of both, and
+// reports joined. m.Topic must be set.
+func (s *Service) Push(ctx context.Context, member domain.MemberID, m Message, need bool) ([]DeviceResult, bool, error) {
+	summary, topic, err := s.join(member, m.Topic, topicOf(m.Topic), m.Title, m.Body, need)
+	if err != nil {
+		return nil, false, err
+	}
+	if summary == nil {
+		results, deliverErr := s.Deliver(ctx, member, m)
+		return results, false, deliverErr
+	}
+	results, err := s.deliverPayload(ctx, member, summary, topic, urgencyNormal)
+	return results, true, err
+}
+
+func (s *Service) deliverPayload(ctx context.Context, member domain.MemberID, payload []byte, topic, urgency string) ([]DeviceResult, error) {
+	subs, err := s.store.ListPushSubscriptions(ctx, member)
+	if err != nil {
+		return nil, fmt.Errorf("push: list subscriptions: %w", err)
 	}
 	results := make([]DeviceResult, 0, len(subs))
 	for _, sub := range subs {

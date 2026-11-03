@@ -28,6 +28,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -73,9 +74,10 @@ type Config struct {
 	Client *http.Client
 	// Quiet overrides DefaultQuiet.
 	Quiet time.Duration
-	// Now replaces time.Now when the quiet period is read, for tests. The
-	// waits stay on real timers, which re-read Now when they fire, so a
-	// clock that jumps does not wake a waiting notice early.
+	// Now replaces time.Now when the quiet period, levels, digests and
+	// bursts read it, for tests. The waits stay on real timers, which
+	// re-read Now when they fire, so a clock that jumps does not wake a
+	// waiting notice early.
 	Now func() time.Time
 }
 
@@ -116,6 +118,7 @@ type Service struct {
 	quiet   time.Duration
 	now     func() time.Time
 	sink    Sink
+	sources map[string]DigestSource
 	// started is when Start ran. A run standing in a need it entered before
 	// then was announced, if at all, by the server before this one.
 	started time.Time
@@ -133,6 +136,11 @@ type Service struct {
 	// notices holds, for every admin with a workspace's budget notice
 	// to send, what hands its watcher the state to announce.
 	notices map[budgetKey]chan budgetDue
+	bursts  map[domain.MemberID]*burst
+	// digestRetry and digestAttempts hold, for a member whose digest no
+	// device took, when to try again and how often it was tried.
+	digestRetry    map[domain.MemberID]time.Time
+	digestAttempts map[domain.MemberID]int
 }
 
 type notification struct {
@@ -142,8 +150,11 @@ type notification struct {
 	Workspace string `json:"workspace,omitempty"`
 	// Clear replaces the run's notification quietly: its need ended.
 	Clear bool `json:"clear,omitempty"`
-	// Notice marks an assistant's news, which a clear leaves shown.
+	// Notice marks news, which a clear leaves shown: an assistant's, a
+	// digest or a burst's summary.
 	Notice bool `json:"notice,omitempty"`
+	// Quiet replaces a notification without alerting again.
+	Quiet bool `json:"quiet,omitempty"`
 }
 
 // clearedBody is what a device shows in place of a need that ended, and
@@ -182,9 +193,14 @@ func New(cfg Config) (*Service, error) {
 		quiet:   cfg.Quiet,
 		now:     cfg.Now,
 		sink:    noSink{},
+		sources: map[string]DigestSource{},
 		active:  map[domain.MemberID]time.Time{},
 		watched: map[domain.RunID]chan struct{}{},
 		notices: map[budgetKey]chan budgetDue{},
+		bursts:  map[domain.MemberID]*burst{},
+
+		digestRetry:    map[domain.MemberID]time.Time{},
+		digestAttempts: map[domain.MemberID]int{},
 	}, nil
 }
 
@@ -208,6 +224,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.sub, s.stop, s.started = sub, cancel, time.Now()
 	s.mu.Unlock()
 	s.wg.Go(func() { s.consume(loopCtx, sub) })
+	s.wg.Go(func() { s.digests(loopCtx) })
 	return nil
 }
 
@@ -446,8 +463,17 @@ func (s *Service) unwatch(id domain.RunID, signal chan struct{}) bool {
 }
 
 // offer sends n to the next device of its member that has not had it, and
-// reports whether there was one.
+// reports whether there was one. Before the first device it routes n by
+// the member's level: queued for their digest, or joined to their last
+// push as its summary, n has no device to offer it to.
 func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered map[[2]string]domain.MemberID) bool {
+	started := false
+	for device := range offered {
+		started = started || device[0] == n.key
+	}
+	if !started && s.routed(ctx, run, n) {
+		return false
+	}
 	payload, err := json.Marshal(notification{Title: RunTitle(run), Body: n.body, Run: string(run.ID)})
 	if err != nil {
 		slog.Warn("push: encode notification", "run", run.ID, "error", err)
@@ -473,6 +499,32 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 		return true
 	}
 	return false
+}
+
+// routed queues n for its member's digest, or sends it as the summary of
+// their last push, and reports whether it did either. One it could not
+// queue is pushed at once.
+func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
+	kind := needKind(run, n)
+	prefs, err := s.store.GetNotifyPrefs(ctx, n.member)
+	if err != nil {
+		slog.Warn("push: read notification settings; pushing at once", "member", n.member, "error", err)
+		prefs.Level = protocol.NotifyAll
+	}
+	if route := RouteOf(prefs, kind, s.now()); route != RouteNow {
+		if err = s.queueNeed(ctx, run, n, kind, route == RouteOvernight); err == nil {
+			return true
+		}
+		slog.Warn("push: queue a notification for the digest; pushing at once", "run", run.ID, "error", err)
+	}
+	summary, topic, err := s.join(n.member, string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed)
+	if err != nil || summary == nil {
+		return false
+	}
+	if _, err := s.deliverPayload(ctx, n.member, summary, topic, urgencyNormal); err != nil {
+		slog.Warn("push: summary not delivered", "member", n.member, "error", err)
+	}
+	return true
 }
 
 // read is the run as it stands and what it needs, if anything, in the
