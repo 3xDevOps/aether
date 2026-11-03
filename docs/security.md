@@ -426,8 +426,9 @@ permissions, and it uses the account you signed it in to.
   approve a card. An unanswered card expires after 10 minutes, or 24 hours
   when a connector turn raised it. In a connector turn, auto-approval never
   passes a call the connector's scopes do not cover. Only your own Aether
-  devices decide a card
-  (`assistant.confirm`), never the assistant's tool socket. A card approved
+  devices decide a card (`assistant.confirm`), and a connector its own
+  turns' cards (see [ChatGPT and Claude connectors](#chatgpt-and-claude-connectors)),
+  never the assistant's tool socket. A card approved
   after its turn ended runs on the server as you, at most once, and only if it
   still reads as the card you approved.
 - **Let the assistant act without asking** (auto-approve, off by default)
@@ -706,13 +707,36 @@ there is no terminal, file, settings or git-writing tool.
 - Scopes: the member picks them on the consent page, not the client. `read` is
   always granted, and every member can read every session on the server, so a
   connector can read all of them. `write` (launch sessions, message,
-  pause and resume sessions, answer questions, mark sessions reviewed) is checked by
+  pause and resume sessions, answer questions, mark sessions reviewed, ask the assistant) is checked by
   default; `control` (decide permission requests, stop and close sessions) is not, because text an agent wrote could talk the assistant into
   approving or ending work. A connector serves only its scopes' tools, and the
   server checks every call's method against its scopes, a permission decision
   against `control`, and refuses every method outside its table
   ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
   then one every 2 seconds.
+- `aether_ask_assistant` runs a turn of your assistant, in your conversation
+  with your preferences. Its origin and the grant it belongs to come from the
+  connector's token, never from the call. The turn reads no dashboard view
+  context. It returns only that turn's final
+  reply, capped at 4 KiB, with saved preferences matched word for word
+  withheld; a paraphrase still gets out, a risk the owner accepted. Your
+  approval rules and auto-approval pass a connector turn's calls as they do a
+  dashboard turn's, so content the external host reads, which Aether cannot
+  see, can steer them; a method outside the connector's scopes, as they are
+  when the call is made, never passes without a card, and a revoked
+  connector's waiting prompts do not run. A connector decides only cards its own turns raised, and
+  only by echoing the card's text, the summary and every parameter whole,
+  byte for byte. The external host's confirmation of that tool call is the
+  human gate, as for `aether_decide_approval`; the echo binds it to the exact
+  card. Deciding is its own tool, `aether_decide_assistant_card`, so the
+  host asks for each decision; a member who sets that tool to **Always
+  allow** lets the external model, and content it read, approve cards
+  without them. Approving needs the scope of the method's own tool. A card
+  over 2,000 characters, one showing a saved preference, or one whose summary
+  holds a line break or a character not printed as itself is decided only
+  in Aether. The assistant's tool socket cannot call `assistant.ask` or
+  `assistant.confirm`, and no connector can create a rule or change
+  auto-approval.
 - Audit history: a connector's write calls, refused ones included, and its
   creation and revocation are recorded with the member, connector, method,
   target and outcome, never the parameters

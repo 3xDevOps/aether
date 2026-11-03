@@ -72,6 +72,10 @@ type Config struct {
 	// ConnectorScopes names the connector scopes, any one of which lets a
 	// connector call method; none for a method no connector may call.
 	ConnectorScopes func(method string) []string
+	// ConnectorGrant returns the scopes member's connector connectorID holds
+	// now, or why it no longer acts for them, such as a revocation. Nil keeps
+	// the scopes a connector turn's prompt was sent with.
+	ConnectorGrant func(ctx context.Context, member domain.MemberID, connectorID string) ([]string, error)
 }
 
 // Host is the scheduler's side of the assistant: its container and the
@@ -493,8 +497,8 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 // toolServer is the member's tool socket server, which also runs the calls
 // of cards approved after their call stopped waiting.
 func (s *Service) toolServer(m *member) *tools.Server {
-	srv := &tools.Server{Caller: s.preferenceCaller(m, actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}), Confirm: s.approver(m), Member: string(m.id),
-		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
+	srv := &tools.Server{Caller: grantGate{Caller: s.preferenceCaller(m, actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}), s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
+		View: func() protocol.AssistantViewContextResult { return s.turnView(m) }}
 	if s.watches != nil {
 		srv.Follow = func(ctx context.Context, run string) {
 			if _, followErr := s.watches.Follow(ctx, m.id, domain.RunID(run)); followErr != nil {

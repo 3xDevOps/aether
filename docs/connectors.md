@@ -210,7 +210,7 @@ than `offline_access`, the only one the OAuth metadata lists in
 | Scope | On the page | Grants |
 | --- | --- | --- |
 | `read` | Always granted | Every read-only tool |
-| `write` | **Launch and message**, checked by default | Launching sessions; messaging, pausing, resuming, relaunching, protecting and archiving sessions; answering agents' and teammates' questions; marking sessions reviewed; adding and pinning team memory |
+| `write` | **Launch and message**, checked by default | Launching sessions; messaging, pausing, resuming, relaunching, protecting and archiving sessions; answering agents' and teammates' questions; marking sessions reviewed; adding and pinning team memory; asking your assistant |
 | `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing sessions, switching a session's mode, handing sessions to teammates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
 
 Every member can read every session on the server, so a connector can read all of
@@ -223,7 +223,7 @@ member's role. Reads such as `run.get`, `run.close_check`, `workspace.timeline`,
 `launch.defaults.get` need `read`; `run.launch`, `template.launch`,
 `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
 `run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
-`memory.pin` and `memory.unpin` need `write`; `run.kill`, `run.close`,
+`memory.pin`, `memory.unpin` and `assistant.ask` need `write`; `run.kill`, `run.close`,
 `run.mode.switch` (it discards a turn in progress), `run.handoff`,
 `run.pr.create` and `run.pr.merge` need `control`.
 `run.input.respond` needs `control` to decide a permission request and `write`
@@ -265,6 +265,7 @@ The connector has these tools and no others:
 | `aether_pause_session`, `aether_resume_session`, `aether_mark_reviewed` | Pause or resume a session; accept a reported success, which closes the session, put it off, or say the work is not finished | `write` |
 | `aether_session_lifecycle` | Relaunch a stopped session, protect or unprotect it, archive or restore it | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
+| `aether_ask_assistant`, `aether_decide_assistant_card` | Send a prompt to your [assistant](assistant.md) and read its reply; approve or decline a card its turn raised ([Ask your assistant](#ask-your-assistant)) | `write` |
 | `aether_watch`, `aether_unwatch` | Watch a session (`run_id`) or pull request (`pr`: `owner/name#7` or its GitHub URL) for `conditions`, optionally relaying each notice into up to 4 sessions (`relay_to`), or with `watch_id` change its conditions, `relay_to` or `expires_at`, or pause or resume it; delete a watch and its notices | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
 | `aether_stop_session` | Stop a session, or with `outcome` close it as merged or abandoned | `control` |
@@ -594,6 +595,74 @@ while a member controls the session in the dashboard. Text a pull request, agent
 note carries never authorizes anything: these tools act only on what the
 arguments name.
 
+### Ask your assistant
+
+`aether_ask_assistant` sends a prompt to your [assistant](assistant.md) as a
+turn in your one conversation, with your preferences applied. Each call costs
+the external model's tokens and a turn on the assistant's sign-in, so read
+with the other tools. Pass `prompt`, with an optional `idempotency_key`, to
+queue a turn, or `turn_id` to read that turn again without starting one.
+Either waits up to 25 seconds for the turn to end.
+
+The result holds `turn_id`, `state` (`done`, `queued`, `running`,
+`waiting_for_approval` or `failed`) and, under `untrusted`, `reply`,
+`pending_cards` and a failed turn's `error`. Poll with `turn_id` until
+`state` is `done` or `failed`; polls do not count against the 30 write
+calls. A repeat with the same `idempotency_key` returns the first turn, so
+ask the same question again with a new key or none. Without a key, the same
+prompt from the same connector within 60 seconds of its first send returns
+that turn while it is queued or running, and starts a new one once it ended.
+A `turn_id` or `card_id` from another connector or another door fails as an
+unknown id would.
+
+`reply` and `error` are the turn's own: never the transcript, your
+preferences or earlier turns. A connector turn reads none of your dashboard
+view context, such as the page or file you have open. Each run of words matching a saved preference
+reads `[preference withheld]`, zero-width and control characters are
+dropped, and text over 4 KiB ends with
+`[reply cut here, at byte <n> of <total>]`. A paraphrase of a preference
+gets past the check ([security.md](security.md#chatgpt-and-claude-connectors)).
+
+Each pending card is `{card_id, card}`, where `card` is the card's summary
+followed by one `<field>: <value>` line for each parameter the call runs
+with, whole, and a template launch's rendered task. A value holding a line
+break or a character not printed as itself, such as a bidi override, is
+shown quoted with escapes.
+
+`aether_decide_assistant_card` decides one: `card_id`, `decision` (`approve`
+or `decline`) and `card`, byte for byte. Anything else fails with `card text
+does not match card <id>; show the person the card and pass its text
+exactly` and decides nothing. It is a separate tool so the host asks before
+each decision; an **Always allow** on it lets the external model approve
+cards without asking you, so allow it once at a time. Approving needs the
+scope of the method's own tool: `write` for launches, messages, answers,
+pauses, session lifecycle, memory notes and watches, `control` for stops,
+closes, merges, pull requests, mode switches and handoffs. A method no
+connector tool calls, such as saving the environment or your launch
+defaults, is decided only in Aether. Declining needs no scope. Only a card a turn of this
+connector raised can be decided. A card reads `Waiting for your approval in
+Aether` and is decided only there when its text is over 2,000 characters,
+its summary holds a line break or a character not printed as itself, it forgets a
+preference or shows a saved one, or approving it needs a scope the
+connector lacks now or lacked when the turn ran. The connector offers only
+**Approve** and **Decline**; rules and auto-approval change only in Aether.
+
+Your [approval rules and auto-approval](assistant.md#auto-approval) apply to
+connector turns as to dashboard turns, within the connector's scopes: a
+method the connector was not granted always shows a card, decided in Aether.
+A call that never shows a card, such as a pause, runs only under a scope
+the connector holds, so a connector turn cannot save a preference.
+The server reads the connector's scopes when each prompt is sent and each
+call is checked, not when the prompt was queued: once you revoke the
+connector, its waiting prompts fail with `assistant: ChatGPT connector <id>:
+it was revoked`, its turn's calls no longer pass without a card, and its
+calls that never show one, such as a pause, fail.
+
+The assistant not being signed in fails the call with `assistant: no agent is
+ready; ...`, and a full queue with the queue's own error. The MCP Tasks
+extension is not supported: the Go MCP SDK this server uses (v1.7.0) has no
+`tasks/get`, so clients poll with `turn_id`.
+
 ### Only in the dashboard
 
 These need a browser or a control lease, which a connector and the assistant
@@ -609,8 +678,8 @@ do not hold:
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow
 once** and **Always allow** per tool. Aether shows no confirmation card of its
-own, and the [assistant's auto-approval](assistant.md#auto-approval) does not
-apply. Your role still decides: a viewer's launch is refused, as it is in
+own for these tools, and the [assistant's auto-approval](assistant.md#auto-approval)
+applies only inside [`aether_ask_assistant`](#ask-your-assistant) turns. Your role still decides: a viewer's launch is refused, as it is in
 `aether`. A connector's calls are judged by the device its code was minted on:
 a method that needs an approved device refuses a connector minted on a
 registered one.

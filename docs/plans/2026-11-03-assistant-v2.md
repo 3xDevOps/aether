@@ -135,10 +135,8 @@ feature and needs the taint rule from phase 5 first.
   for the turn's final reply. It returns `{turn_id, state, reply,
   pending_cards}`, with `state` `done`, `queued`, `running` or
   `waiting_for_approval`. Calling it again with `turn_id` fetches the result
-  without a new turn. When the client declares MCP Tasks, the same call
-  returns a task whose id is the turn id. Polling remains the fallback,
-  because hosts and proxies time out within seconds and support for Tasks
-  varies.
+  without a new turn. MCP Tasks is not supported: the Go MCP SDK in use
+  (v1.7.0) has no `tasks/get`, so clients poll with `turn_id`.
 - A pending card is returned as one server-written line, `Waiting for your
   approval in Aether: Launch claude (acp) in api: "Fix the flaky login
   test"`. The card itself is pushed to your devices.
@@ -556,7 +554,7 @@ numbers race.
   after a server restart, and runs exactly once.
 
 **Phase 3: `aether_ask_assistant` (S, 1 PR).**
-- The tool, the 25-second wait, `turn_id` polling, optional MCP Tasks, the
+- The tool, the 25-second wait, `turn_id` polling (no MCP Tasks: go-sdk v1.7.0 lacks it), the
   4 KiB cap and preference redaction, and deciding the turn's cards by echo.
 - Keep `TestConnectorToolList` green. Docs: `connectors.md`.
 
@@ -756,30 +754,33 @@ Choices for phases 1–4 that the proposal left open.
 ### Deciding a card from a connector
 
 - `aether_ask_assistant` returns each card its turn raised as `{card_id,
-  card}`, where `card` is the card's full text: the server-written summary
-  with every field the call sends shown whole (no first-line cut, no
-  120-character cut of a task or message). A card whose full text is longer
-  than 2,000 characters, or that shows a saved preference (a `forget` card,
-  or any card `carriesPreference` matches), is returned as `Waiting for your
-  approval in Aether` with its id only, and is decided only in Aether.
-- The same tool decides one: `{card_id, decision: "approve" | "decline",
-  card}`. `card` must equal that full text byte for byte, as
-  `aether_decide_approval` requires the request text. A mismatch fails with
-  `card text does not match card <id>; show the person the card and pass its
-  text exactly`, and decides nothing.
-- Only a card raised in a turn that the same connector grant started can be
+  card}`, where `card` is the card's full text: the server-written summary,
+  then each field the call sends, whole, one per line, quoted when it holds
+  a line break or a character not printed as itself.
+- A separate tool, `aether_decide_assistant_card`, decides one: `{card_id,
+  decision: "approve" | "decline", card}`. Being its own tool, the host asks
+  for each decision, and an **Always allow** on asking never allows
+  approvals. `card` must equal the full text byte for byte. A mismatch fails
+  with `card text does not match card <id>; show the person the card and
+  pass its text exactly`, and decides nothing.
+- Only a card raised in a queue entry the same connector grant sent can be
   decided this way. A card from a dashboard turn, another connector or an
   event fails with the same error as a missing id.
-- A connector turn acts within its grant's scopes. A method needs the
-  scope its direct tool needs: `write` for launches, messages, answers,
-  memory notes, watches and session lifecycle, `control` for everything
-  else. In a connector turn, a method the grant's scopes don't cover never
-  passes by rule or auto-approval, and its card is decided only in Aether.
+- Approving needs the scope the direct tool for that method needs, both now
+  and when the turn ran: `write` for launches, messages, answers, memory
+  notes, watches and session lifecycle, `control` for everything else. In
+  a connector turn, a method the grant's scopes don't cover never passes by
+  rule or auto-approval, and its card is decided only in Aether.
+- A card whose full text is longer than 2,000 characters, whose summary
+  holds a character not printed as itself, or that shows a saved preference
+  (a `forget` card, or any word-for-word match) is returned as `Waiting for
+  your approval in Aether` and decided only in Aether.
 - The connector offers only **Approve** and **Decline**. Rules and
   auto-approval change only from an Aether device.
 - The external host's own confirmation of the tool call is the human gate,
   as for `aether_decide_approval`; the echo binds that confirmation to the
-  exact card. `security.md` says so.
+  exact card. `security.md` says so, and that **Always allow** on the
+  decide tool gives that gate up.
 
 ### Origin
 

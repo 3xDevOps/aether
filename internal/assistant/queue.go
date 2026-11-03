@@ -240,8 +240,12 @@ func (s *Service) dispatch(ctx context.Context, m *member, e store.AssistantQueu
 	if err := json.Unmarshal([]byte(e.Origin), &origin); err != nil {
 		return false, fmt.Errorf("assistant: decode the prompt's origin: %w", err)
 	}
+	origin, err := s.liveOrigin(ctx, m.id, origin)
+	if err != nil {
+		return false, err
+	}
 	conv := m.conversation()
-	if err := m.waitForNotes(ctx, conv); err != nil {
+	if err = m.waitForNotes(ctx, conv); err != nil {
 		return false, err
 	}
 	m.share.RLock()
