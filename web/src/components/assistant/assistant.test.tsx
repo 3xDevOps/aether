@@ -1054,6 +1054,16 @@ describe('approval rules', () => {
     await waitFor(() => expect(within(aside).queryByRole('group', { name: 'How should your assistant act?' })).toBeNull())
   })
 
+  it('asks once without the auto-approval suggestion beside it, and not from a failed status', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ approval_chosen: false, suggest_auto_approve: true }))
+    const aside = await openPanel()
+    acpOpen()
+    expect(await within(aside).findByRole('group', { name: 'How should your assistant act?' })).toBeDefined()
+    expect(within(aside).queryByRole('group', { name: 'Skip approval cards for the assistant?' })).toBeNull()
+    assistantSocket().send({ status: status({ state: 'failed', error: 'assistant: read settings: database is locked', approval_chosen: false }) })
+    await waitFor(() => expect(within(aside).queryByRole('group', { name: 'How should your assistant act?' })).toBeNull())
+  })
+
   it('does not ask a member who already chose', async () => {
     vi.mocked(api.assistantStatus).mockResolvedValue(status({ approval_chosen: true }))
     const aside = await openPanel()

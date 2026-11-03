@@ -649,12 +649,15 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   and closes the popover.
 - **Setup question** (`ApprovalChoice` in
   `components/assistant/approval-choice.tsx`): when the status has
-  `approval_chosen: false` (absent never asks), a notice above the composer
+  `approval_chosen: false` and the state is not `failed` (a failed status
+  carries no stored settings; absent never asks), a notice above the composer
   asks **How should your assistant act?** **Ask before acting** and **Act
   without asking** call `assistant.settings` with `auto_approve` false or
   true; the second shows the auto-approval warning under its button, so it
-  opens no dialog. The answer's settings replace the status, which drops the
-  notice; a refusal shows under the buttons.
+  opens no dialog. It scrolls past 40% of the viewport height, and the
+  auto-approval suggestion waits until it is answered. The answer's settings
+  replace the status, which drops the notice, unless another member signed in
+  meanwhile; a refusal shows under the buttons.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a
@@ -6087,7 +6090,8 @@ Categories:
   when it was created and last used and how many times, `Inactive: <reason>`
   when set, and **Revoke** (`assistant.rules.revoke`), which drops the row
   once the server answers; with none it says **No rules yet**, and a failed
-  read shows its error with **Try again**. **Change in Settings** in the assistant panel opens
+  read shows its error with **Try again**. It reads again when a card saves a
+  rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
 - **Launch**, where the server offers `launch.defaults.get`: **Saved

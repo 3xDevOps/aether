@@ -150,7 +150,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       )}
       <ApprovalChoice />
       <AutoApproveConfirm />
-      <AutoApproveSuggestion busy={running || confirmations.length > 0 || (session?.pending.length ?? 0) > 0} hasRows={hasRows} />
+      {status.approval_chosen !== false && <AutoApproveSuggestion busy={running || confirmations.length > 0 || (session?.pending.length ?? 0) > 0} hasRows={hasRows} />}
       {!failed && (
         <AssistantComposer
           textarea={textarea}

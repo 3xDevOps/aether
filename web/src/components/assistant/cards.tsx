@@ -73,8 +73,9 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
   const rule = confirmation.rule
   const approveEverything = () => void run('everything', async () => {
+    const identity = useStore.getState().identityKey
     await api.assistantConfirm(confirmation.id, true)
-    useStore.getState().setAssistantConfirmAutoApprove(true)
+    if (useStore.getState().identityKey === identity) useStore.getState().setAssistantConfirmAutoApprove(true)
   })
   const reason: [string, string][] = confirmation.reason ? [['Reason', confirmation.reason]] : []
   const rows = useLaunchRows(confirmation.method, confirmation.params, confirmation.defaults)
@@ -103,9 +104,9 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
               <Button
                 size="md"
                 variant={rule.suggested ? 'confirm' : 'secondary'}
-                className="h-auto min-h-8 justify-start py-1.5 text-left whitespace-normal"
+                className="h-auto min-h-8 justify-start py-1.5 text-left whitespace-normal coarse:h-auto coarse:min-h-11"
                 disabled={busy !== null}
-                onClick={() => void run('always', () => api.assistantApproveAlways(confirmation.id))}
+                onClick={() => void run('always', () => api.assistantApproveAlways(confirmation.id).then(() => useStore.getState().noteRuleSaved()))}
               >
                 {busy === 'always' ? 'Saving the rule…' : rule.wording}
               </Button>

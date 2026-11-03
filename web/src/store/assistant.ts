@@ -115,6 +115,9 @@ export interface AssistantSlice {
   /** A card's Approve everything from now on approved it: the panel asks to confirm turning auto-approval on. */
   assistantConfirmAutoApprove: boolean
   setAssistantConfirmAutoApprove: (open: boolean) => void
+  /** Bumped when a card saves an approval rule, so Settings › Assistant reads the rules again. */
+  ruleSaves: number
+  noteRuleSaved: () => void
   /** Bumped when a card's Undo changes a preference, so Settings › Memory reads the list again. */
   preferenceUndos: number
   notePreferenceUndo: () => void
@@ -163,6 +166,8 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   noteAssistantNotice: () => set((s) => (s.assistantOpen ? s : { assistantNotices: s.assistantNotices + 1 })),
   assistantConfirmAutoApprove: false,
   setAssistantConfirmAutoApprove: (assistantConfirmAutoApprove) => set({ assistantConfirmAutoApprove }),
+  ruleSaves: 0,
+  noteRuleSaved: () => set((s) => ({ ruleSaves: s.ruleSaves + 1 })),
   preferenceUndos: 0,
   notePreferenceUndo: () => set((s) => ({ preferenceUndos: s.preferenceUndos + 1 })),
   setAssistantOpen: (assistantOpen) => set(assistantOpen ? { assistantOpen, assistantNotices: 0 } : { assistantOpen }),

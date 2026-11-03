@@ -185,6 +185,17 @@ describe('approval rules', () => {
     await waitFor(() => expect(within(section).queryByText(rule.wording)).toBeNull())
   })
 
+  it('reads the rules again when a card saves one or another member signs in', async () => {
+    const client = show(['*'], { assistantRules: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([rule]).mockResolvedValue([]) })
+    const section = await screen.findByRole('region', { name: 'Approval rules' })
+    expect(await within(section).findByText('No rules yet')).toBeDefined()
+    act(() => useStore.getState().noteRuleSaved())
+    expect(await within(section).findByText(rule.wording)).toBeDefined()
+    act(() => useStore.setState({ identityKey: 'someone-else' }))
+    await waitFor(() => expect(within(section).queryByText(rule.wording)).toBeNull())
+    expect(client.assistantRules).toHaveBeenCalledTimes(3)
+  })
+
   it('is absent from a server without assistant.rules', async () => {
     const client = show(['assistant.status', 'assistant.settings', 'run.launch'])
     await waitFor(() => expect(toggle()).toHaveProperty('disabled', false))

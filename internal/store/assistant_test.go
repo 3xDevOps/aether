@@ -148,7 +148,7 @@ func TestAssistantRules(t *testing.T) {
 // are asked once.
 func TestApprovalChosenMigrationKeepsEarlierChoices(t *testing.T) {
 	t.Parallel()
-	previous := len(migrations) - 1
+	const previous = 102
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, previous)
 	if _, err := raw.Exec(`

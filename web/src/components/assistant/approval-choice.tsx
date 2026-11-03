@@ -8,21 +8,26 @@ import { errorSentence } from '@/lib/format'
 import { autoApproveWarning } from '@/routes/settings/assistant'
 import { useStore } from '@/store'
 
-function show(s: AssistantSettings) {
-  const status = useStore.getState().assistantStatus
-  if (status) useStore.getState().setAssistantStatus({ ...status, ...s })
+/** Merges settings read for the member signed in as `identity`, unless another member signed in since. */
+export function showSettings(identity: string | null, s: AssistantSettings) {
+  const store = useStore.getState()
+  if (store.identityKey === identity && store.assistantStatus) store.setAssistantStatus({ ...store.assistantStatus, ...s })
 }
 
 /** Asks once, after sign-in, whether the assistant asks before acting; either answer is stored as the member's choice. */
 export function ApprovalChoice() {
-  const chosen = useStore((s) => s.assistantStatus?.approval_chosen)
+  // A failed status carries zero settings, not the stored choice.
+  const unasked = useStore((s) => s.assistantStatus?.approval_chosen === false && s.assistantStatus.state !== 'failed')
   const [sending, setSending] = useState<'ask' | 'act' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  if (chosen !== false) return null
+  if (!unasked) return null
   const choose = (choice: 'ask' | 'act') => {
+    const identity = useStore.getState().identityKey
     setSending(choice)
     setError(null)
-    api.assistantSettings({ auto_approve: choice === 'act' }).then(show, (err: unknown) => setError(errorSentence(err))).finally(() => setSending(null))
+    api.assistantSettings({ auto_approve: choice === 'act' }).then((s) => showSettings(identity, s), (err: unknown) => {
+      if (useStore.getState().identityKey === identity) setError(errorSentence(err))
+    }).finally(() => setSending(null))
   }
   return (
     <Callout
@@ -30,7 +35,7 @@ export function ApprovalChoice() {
       role="group"
       aria-label="How should your assistant act?"
       title="How should your assistant act?"
-      className="mx-3 mt-3 shrink-0 border border-seam"
+      className="mx-3 mt-3 max-h-[40dvh] shrink-0 overflow-y-auto border border-seam"
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col items-start gap-1">
@@ -62,7 +67,10 @@ export function AutoApproveConfirm() {
       description={autoApproveWarning}
       action="Turn on"
       pending="Turning on…"
-      onConfirm={() => api.assistantSettings({ auto_approve: true }).then(show)}
+      onConfirm={() => {
+        const identity = useStore.getState().identityKey
+        return api.assistantSettings({ auto_approve: true }).then((s) => showSettings(identity, s))
+      }}
       onClose={() => close(false)}
     />
   )

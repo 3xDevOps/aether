@@ -6,6 +6,7 @@ import type { Api } from '@/lib/api'
 import type { AssistantRule } from '@/lib/assistant-types'
 import { errorSentence } from '@/lib/format'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
+import { useStore } from '@/store'
 
 /** The member's approval rules, each revoked with one click; the server reads them on every card. */
 export function ApprovalRulesSection({ client }: { client: Api }) {
@@ -14,8 +15,12 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
   const [revoking, setRevoking] = useState('')
   const [attempt, setAttempt] = useState(0)
 
+  const identity = useStore((s) => s.identityKey)
+  const saves = useStore((s) => s.ruleSaves)
+
   useEffect(() => {
     let live = true
+    setRules(null)
     client.assistantRules().then(
       (r) => live && setRules(r),
       (err: unknown) => live && setError(errorSentence(err)),
@@ -23,14 +28,14 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client, attempt])
+  }, [client, attempt, identity, saves])
 
   const revoke = (id: string) => {
     setRevoking(id)
     setError(null)
     client.assistantRuleRevoke(id).then(
-      () => setRules((held) => held?.filter((r) => r.id !== id) ?? null),
-      (err: unknown) => setError(errorSentence(err)),
+      () => useStore.getState().identityKey === identity && setRules((held) => held?.filter((r) => r.id !== id) ?? null),
+      (err: unknown) => useStore.getState().identityKey === identity && setError(errorSentence(err)),
     ).finally(() => setRevoking(''))
   }
 
