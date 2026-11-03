@@ -98,7 +98,10 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			// No retry can capture a checkout that is gone; what remains of
 			// the run is still removed. Extra repositories may still hold
 			// unpublished work, so their checkouts keep the retry.
-			if cleanupErr := cleanup(ctx); cleanupErr != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
+			cleanupErr := cleanup(cleanupCtx)
+			cancel()
+			if cleanupErr != nil {
 				return fmt.Errorf("scheduler: clean up session without checkout: %w", cleanupErr)
 			}
 			return s.recordEvidenceUnavailable(ctx, run, err)

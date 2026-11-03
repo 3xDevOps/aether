@@ -63,6 +63,14 @@ const maxPublicRunStatusReason = 256
 
 func publicRunStatusReason(reason string) string {
 	reason = strings.TrimSpace(reason)
+	if base, noted := withoutEvidenceUnavailable(reason); noted {
+		// Redaction and the length cap apply to the reason, never the note.
+		public := []rune(publicRunStatusReason(base))
+		if room := maxPublicRunStatusReason - len("; "+evidenceUnavailableReason); len(public) > room {
+			public = public[:room]
+		}
+		return withEvidenceUnavailable(string(public))
+	}
 	for _, w := range waitingPrefixes {
 		if rest, ok := strings.CutPrefix(reason, w.prefix); ok {
 			reason = rest
