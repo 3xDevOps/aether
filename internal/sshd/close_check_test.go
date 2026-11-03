@@ -46,6 +46,12 @@ func TestRunCloseCheckKinds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	reply := func(from, to *domain.Run) {
+		if err := db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: e.ws.ID, FromRun: from.ID, ToRun: to.ID, Body: "done",
+			Kind: store.RunMessageKindReply, CorrelationID: "q-1", CreatedAt: time.Now().Add(-2 * time.Hour)}, 100); err != nil {
+			t.Fatal(err)
+		}
+	}
 	read := func(to *domain.Run) {
 		_, token, _, err := db.DeliverRunMessages(ctx, to.ID, "", 100)
 		if err == nil {
@@ -120,6 +126,22 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	if _, _, err := db.SetRunReview(ctx, accepted.ID, domain.ReviewAccepted, ""); err != nil {
 		t.Fatal(err)
 	}
+	extra := newRun("extra-merge", pushed)
+	if err := db.RecordRunPullRequest(ctx, &store.RunPullRequest{RunID: extra.ID, RepoWorkspace: "ws-other", Repository: "acme/web", Number: 3,
+		URL: "https://github.com/acme/web/pull/3", State: "merged", MergedAt: &mergedAfter, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	family := newRun("family", nil)
+	member := child(family, "family-kid", domain.RunRunning)
+	mail(family, member, time.Now().Add(-5*time.Minute))
+	read(member)
+	reply(quiet, member)
+	lead := newRun("lead", nil)
+	worker := child(lead, "worker", domain.RunRunning)
+	pr(worker, 11, "open", nil)
+	watcher := newRun("watcher", nil)
+	await(watcher, worker)
+	await(lead, worker)
 	retained := newRun("retained", finished)
 	failedCleanup := newRun("failed-cleanup", finished)
 	e.runs.mu.Lock()
@@ -130,26 +152,37 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	e.runs.mu.Unlock()
 
 	for _, c := range []struct {
-		run  *domain.Run
-		want []protocol.CloseWarning
+		run     *domain.Run
+		outcome string
+		want    []protocol.CloseWarning
 	}{
-		{quiet, nil},
-		{protected, []protocol.CloseWarning{{Kind: "protected", Detail: "Protected: only its owner or an admin can steer, message or close it"}}},
-		{openPR, []protocol.CloseWarning{{Kind: "pull_request", Detail: "Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z", URL: "https://github.com/acme/api/pull/7"}}},
-		{unmerged, []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-unmerged are in no merged pull request"}}},
-		{stale, []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-stale-merge are in no merged pull request"}}},
-		{shipped, nil},
-		{mailed, []protocol.CloseWarning{{Kind: "messages", Count: 2, Detail: "2 messages from other sessions unread or sent in the last 30 minutes"}}},
-		{awaited, []protocol.CloseWarning{{Kind: "awaited", RunIDs: []string{string(coordinator.ID)},
+		{quiet, "", nil},
+		{protected, "", []protocol.CloseWarning{{Kind: "protected", Detail: "Protected: only its owner or an admin can steer, message or close it"}}},
+		{openPR, "", []protocol.CloseWarning{{Kind: "pull_request", Detail: "Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z", URL: "https://github.com/acme/api/pull/7"}}},
+		{unmerged, "", []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-unmerged may not be merged: no pull request recorded for it merged after its last commit"}}},
+		{unmerged, "merged", nil},
+		{stale, "", []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-stale-merge may not be merged: no pull request recorded for it merged after its last commit"}}},
+		{shipped, "", nil},
+		{extra, "", []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-extra-merge may not be merged: no pull request recorded for it merged after its last commit"}}},
+		{mailed, "", []protocol.CloseWarning{{Kind: "messages", Count: 2, Detail: "2 messages from other sessions awaiting it or sent in the last 30 minutes"}}},
+		{member, "", nil},
+		{awaited, "", []protocol.CloseWarning{{Kind: "awaited", RunIDs: []string{string(coordinator.ID)},
 			Detail: "Waiting for it to finish: " + string(coordinator.ID) + " (coordinator)"}}},
-		{parent, []protocol.CloseWarning{{Kind: "subsessions", Count: 1, RunIDs: []string{string(kid.ID)},
+		{parent, "", []protocol.CloseWarning{{Kind: "subsessions", Count: 1, RunIDs: []string{string(kid.ID)},
 			Detail: "1 subsession close with it: " + string(kid.ID) + " (kid)"}}},
-		{retained, []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup of its container and checkout is still pending"}}},
-		{failedCleanup, []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup failed: remove container: device busy"}}},
+		{lead, "", []protocol.CloseWarning{
+			{Kind: "subsessions", Count: 1, RunIDs: []string{string(worker.ID)}, Detail: "1 subsession close with it: " + string(worker.ID) + " (worker)"},
+			{Kind: "pull_request", Subsession: string(worker.ID), URL: "https://github.com/acme/api/pull/11",
+				Detail: "Subsession " + string(worker.ID) + " (worker): Pull request acme/api#11 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z"},
+			{Kind: "awaited", Subsession: string(worker.ID), RunIDs: []string{string(watcher.ID)},
+				Detail: "Subsession " + string(worker.ID) + " (worker): Waiting for it to finish: " + string(watcher.ID) + " (watcher)"},
+		}},
+		{retained, "", []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup of its container and checkout is still pending"}}},
+		{failedCleanup, "", []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup failed: remove container: device busy"}}},
 	} {
-		t.Run(c.run.Title, func(t *testing.T) {
+		t.Run(c.run.Title+"/"+c.outcome, func(t *testing.T) {
 			var res protocol.RunCloseCheckResult
-			if err := controlClient(t, e).Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(c.run.ID)}}, &res); err != nil {
+			if err := controlClient(t, e).Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(c.run.ID)}, Outcome: c.outcome}, &res); err != nil {
 				t.Fatal(err)
 			}
 			want := c.want
@@ -174,7 +207,7 @@ func TestRunCloseCheckAuthorization(t *testing.T) {
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	c := controlAs(t, e, bob)
 	var res protocol.RunCloseCheckResult
-	if err := c.Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(e.run.ID), "run-missing"}}, &res); err != nil {
+	if err := c.Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(e.run.ID), "run-missing", string(e.run.ID)}}, &res); err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Runs) != 2 || res.Runs[0].Error != nil || len(res.Runs[0].Warnings) != 1 || res.Runs[0].Warnings[0].Kind != protocol.CloseWarningProtected {

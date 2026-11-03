@@ -16,24 +16,29 @@ const (
 	CloseWarningCleanupPending = "cleanup_pending"
 )
 
+// RunCloseCheckParams.Outcome is the close the caller means: "merged",
+// "abandoned", "completed", or empty when not yet chosen. A merged close
+// asserts the work is merged, so it skips unmerged_work.
 type RunCloseCheckParams struct {
-	RunIDs []string `json:"run_ids"`
+	RunIDs  []string `json:"run_ids"`
+	Outcome string   `json:"outcome,omitempty"`
 }
 
-// RunCloseCheck is one run's warnings, or Error when the run cannot be
-// read.
 type RunCloseCheck struct {
 	RunID    string         `json:"run_id"`
 	Warnings []CloseWarning `json:"warnings"`
 	Error    *Error         `json:"error,omitempty"`
 }
 
+// CloseWarning.Subsession names the subsession a warning is about, when
+// it is one that closes with the checked run.
 type CloseWarning struct {
-	Kind   string   `json:"kind"`
-	Detail string   `json:"detail"`
-	URL    string   `json:"url,omitempty"`
-	Count  int      `json:"count,omitempty"`
-	RunIDs []string `json:"run_ids,omitempty"`
+	Kind       string   `json:"kind"`
+	Detail     string   `json:"detail"`
+	URL        string   `json:"url,omitempty"`
+	Count      int      `json:"count,omitempty"`
+	RunIDs     []string `json:"run_ids,omitempty"`
+	Subsession string   `json:"subsession,omitempty"`
 }
 
 type RunCloseCheckResult struct {

@@ -11,8 +11,9 @@ import (
 // CloseDependents is what closing one run would affect beyond the run
 // itself.
 type CloseDependents struct {
-	// Messages counts the mail other runs sent it that it has not
-	// acknowledged, or sent it since the recent cutoff.
+	// Messages counts the mail from other runs that asks it something and
+	// it has not acknowledged, and any mail since the recent cutoff from
+	// runs other than its parent and subsessions.
 	Messages int
 	// Awaiting lists the live runs with a pending wait on it finishing.
 	Awaiting []domain.RunID
@@ -23,8 +24,6 @@ type CloseDependents struct {
 
 // CloseCheckStore reads what a close would affect.
 type CloseCheckStore interface {
-	// CloseDependents reads run's dependents; mail created after recent
-	// counts even when acknowledged.
 	CloseDependents(ctx context.Context, run domain.RunID, recent time.Time) (CloseDependents, error)
 }
 
@@ -35,7 +34,9 @@ func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.
 		return out, fmt.Errorf("store: close dependents: %w", err)
 	}
 	if err = d.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_messages
-		WHERE to_run = ?1 AND from_run <> ?1 AND ((acked_at IS NULL AND retired_at IS NULL) OR created_at > ?2)`,
+		WHERE to_run = ?1 AND from_run <> ?1 AND ((acked_at IS NULL AND retired_at IS NULL AND kind <> 'reply')
+			OR (created_at > ?2 AND from_run NOT IN (SELECT parent_run_id FROM run_children WHERE run_id = ?1
+				UNION SELECT run_id FROM run_children WHERE parent_run_id = ?1)))`,
 		run, since).Scan(&out.Messages); err != nil {
 		return out, fmt.Errorf("store: close dependents: messages: %w", err)
 	}

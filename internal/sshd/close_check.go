@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,24 +29,34 @@ func (s *Server) runCloseCheck(ctx context.Context, member domain.MemberID, para
 	if len(p.RunIDs) == 0 || len(p.RunIDs) > protocol.MaxCloseCheckRuns {
 		return nil, invalidParams(fmt.Sprintf("run_ids must name 1 to %d sessions", protocol.MaxCloseCheckRuns))
 	}
+	outcome := domain.RunStatus(p.Outcome)
+	if outcome != "" && outcome != domain.RunMerged && outcome != domain.RunAbandoned && outcome != domain.RunCompleted {
+		return nil, invalidParams(`outcome must be "merged", "abandoned" or "completed"`)
+	}
 	actor, err := resolveActor(ctx, s.cfg.Store, member)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := protocol.RunCloseCheckResult{Runs: make([]protocol.RunCloseCheck, len(p.RunIDs))}
-	for i, id := range p.RunIDs {
-		out.Runs[i] = protocol.RunCloseCheck{RunID: id, Warnings: []protocol.CloseWarning{}}
-		warnings, perr := s.closeWarnings(ctx, actor, domain.RunID(id))
-		if perr != nil {
-			out.Runs[i].Error = perr
+	out := protocol.RunCloseCheckResult{Runs: []protocol.RunCloseCheck{}}
+	seen := map[string]bool{}
+	for _, id := range p.RunIDs {
+		if seen[id] {
 			continue
 		}
-		out.Runs[i].Warnings = append(out.Runs[i].Warnings, warnings...)
+		seen[id] = true
+		check := protocol.RunCloseCheck{RunID: id, Warnings: []protocol.CloseWarning{}}
+		warnings, perr := s.closeWarnings(ctx, actor, domain.RunID(id), outcome)
+		if perr != nil {
+			check.Error = perr
+		} else {
+			check.Warnings = append(check.Warnings, warnings...)
+		}
+		out.Runs = append(out.Runs, check)
 	}
 	return out, nil
 }
 
-func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id domain.RunID) ([]protocol.CloseWarning, *protocol.Error) {
+func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id domain.RunID, outcome domain.RunStatus) ([]protocol.CloseWarning, *protocol.Error) {
 	if id == "" {
 		return nil, invalidParams("run_id is required")
 	}
@@ -60,22 +71,74 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	prs, err := s.cfg.Store.RunPullRequests(ctx, id)
-	if err != nil {
-		return nil, rpcError(err)
-	}
 	deps, err := s.cfg.Store.CloseDependents(ctx, id, time.Now().Add(-recentMail))
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	snap := s.runSnapshot(run)
 	var out []protocol.CloseWarning
 	if run.Protected {
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningProtected,
 			Detail: "Protected: only its owner or an admin can steer, message or close it"})
 	}
-	// Recorded pull request states are as last observed; nothing here asks
-	// GitHub, so a 50-run check stays fast.
+	work, err := s.workWarnings(ctx, run, outcome)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	out = append(out, work...)
+	if deps.Messages > 0 {
+		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages,
+			Detail: fmt.Sprintf("%d %s from other sessions awaiting it or sent in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"))})
+	}
+	out = append(out, s.awaitedWarnings(ctx, deps.Awaiting, "")...)
+	if len(deps.Children) > 0 {
+		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningSubsessions, Count: len(deps.Children), RunIDs: runIDStrings(deps.Children),
+			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), s.runLabels(ctx, deps.Children))})
+	}
+	// A subsession closes as its parent does, so what closing it would
+	// affect is part of this close.
+	for _, childID := range deps.Children {
+		child, err := s.cfg.Store.GetRun(ctx, childID)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		childDeps, err := s.cfg.Store.CloseDependents(ctx, childID, time.Now().Add(-recentMail))
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		childWork, err := s.workWarnings(ctx, child, outcome)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		waiters := slices.DeleteFunc(childDeps.Awaiting, func(w domain.RunID) bool { return w == id })
+		prefix := "Subsession " + s.runLabels(ctx, []domain.RunID{childID}) + ": "
+		for _, w := range append(childWork, s.awaitedWarnings(ctx, waiters, prefix)...) {
+			if w.Kind != protocol.CloseWarningAwaited {
+				w.Detail = prefix + w.Detail
+			}
+			w.Subsession = string(childID)
+			out = append(out, w)
+		}
+	}
+	snap := s.runSnapshot(run)
+	if snap.CleanupPending || snap.CleanupError != "" {
+		detail := "Cleanup of its container and checkout is still pending"
+		if snap.CleanupError != "" {
+			detail = "Cleanup failed: " + snap.CleanupError
+		}
+		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningCleanupPending, Detail: detail})
+	}
+	return out, nil
+}
+
+// workWarnings reads recorded pull request states as last observed; it
+// never asks GitHub, so a 50-run check stays fast. Recorded pull requests
+// carry no commit, so whether one holds the branch tip is judged by time.
+func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome domain.RunStatus) ([]protocol.CloseWarning, error) {
+	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	var out []protocol.CloseWarning
 	open, merged := false, false
 	for _, pr := range prs {
 		primary := pr.RepoWorkspace == ""
@@ -90,33 +153,21 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 					pr.ObservedAt.UTC().Format(time.RFC3339))})
 		}
 	}
-	if run.LastCommit != "" && run.LastCommit != run.BaseCommit && run.Status != domain.RunMerged && !open && !merged {
+	if outcome != domain.RunMerged && run.Status != domain.RunMerged && run.LastCommit != "" && run.LastCommit != run.BaseCommit && !open && !merged {
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningUnmergedWork,
-			Detail: "Commits on " + run.Branch + " are in no merged pull request"})
-	}
-	if deps.Messages > 0 {
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages,
-			Detail: fmt.Sprintf("%d %s from other sessions unread or sent in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"))})
-	}
-	if len(deps.Awaiting) > 0 {
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningAwaited, RunIDs: runIDStrings(deps.Awaiting),
-			Detail: "Waiting for it to finish: " + s.runLabels(ctx, deps.Awaiting)})
-	}
-	if len(deps.Children) > 0 {
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningSubsessions, Count: len(deps.Children), RunIDs: runIDStrings(deps.Children),
-			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), s.runLabels(ctx, deps.Children))})
-	}
-	if snap.CleanupPending || snap.CleanupError != "" {
-		detail := "Cleanup of its container and checkout is still pending"
-		if snap.CleanupError != "" {
-			detail = "Cleanup failed: " + snap.CleanupError
-		}
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningCleanupPending, Detail: detail})
+			Detail: "Commits on " + run.Branch + " may not be merged: no pull request recorded for it merged after its last commit"})
 	}
 	return out, nil
 }
 
-// runLabels names each run by id and, when it has one, its title.
+func (s *Server) awaitedWarnings(ctx context.Context, waiters []domain.RunID, prefix string) []protocol.CloseWarning {
+	if len(waiters) == 0 {
+		return nil
+	}
+	return []protocol.CloseWarning{{Kind: protocol.CloseWarningAwaited, RunIDs: runIDStrings(waiters),
+		Detail: prefix + "Waiting for it to finish: " + s.runLabels(ctx, waiters)}}
+}
+
 func (s *Server) runLabels(ctx context.Context, ids []domain.RunID) string {
 	labels := make([]string, len(ids))
 	for i, id := range ids {
