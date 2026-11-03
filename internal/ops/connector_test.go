@@ -92,6 +92,7 @@ func newFake(t *testing.T) *fakeServer {
 		protocol.MethodWorkspaceTimeline: returns(protocol.WorkspaceTimelineResult{}),
 		protocol.MethodWorkspaceList:     returns(protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-1", Name: "api"}}}),
 		protocol.MethodRunChildren:       returns(protocol.RunChildrenResult{}),
+		protocol.MethodRunCloseCheck:     returns(protocol.RunCloseCheckResult{Runs: []protocol.RunCloseCheck{{RunID: "run-1"}}}),
 		protocol.MethodLaunchDefaultsGet: returns(protocol.LaunchDefaultsResult{}),
 		protocol.MethodAccountList: returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-me", DisplayName: "Me"},
 			{ID: "mem-ada", DisplayName: "Ada"}}}),
@@ -945,6 +946,44 @@ func TestConnectorRunActions(t *testing.T) {
 	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeNotFound, Message: "session run-x not found"}
 	if text, _, _ := try(t, cs, "aether_get_session", map[string]any{"run_id": "run-x"}); text != "session run-x not found; call aether_list_sessions for session ids" {
 		t.Fatalf("an unknown session = %q", text)
+	}
+}
+
+// A close whose run.close_check has warnings is refused, naming them,
+// until the caller acknowledges them.
+func TestConnectorCloseNeedsAcknowledgment(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodRunClose] = returns(struct{}{})
+	f.answers[protocol.MethodRunReview] = returns(struct{}{})
+	ready := testRun
+	ready.Review = "ready"
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: ready})
+	f.answers[protocol.MethodRunCloseCheck] = returns(protocol.RunCloseCheckResult{Runs: []protocol.RunCloseCheck{{RunID: "run-1", Warnings: []protocol.CloseWarning{
+		{Kind: protocol.CloseWarningPullRequest, Detail: "Pull request acme/api#7 is open, not merged", URL: "https://github.com/acme/api/pull/7"}}}}})
+	cs := connectorSession(t, f, ScopeWrite, ScopeControl)
+	for _, c := range []struct {
+		name   string
+		args   map[string]any
+		method string
+	}{
+		{"aether_stop_session", map[string]any{"run_id": "run-1", "outcome": "abandoned"}, protocol.MethodRunClose},
+		{"aether_mark_reviewed", map[string]any{"run_id": "run-1", "action": "complete"}, protocol.MethodRunReview},
+	} {
+		f.calls = nil
+		text, _, failed := try(t, cs, c.name, c.args)
+		if want := "closing session run-1 affects others: pull_request: Pull request acme/api#7 is open, not merged (https://github.com/acme/api/pull/7); show the user, then retry with acknowledge true to close anyway"; !failed || !strings.HasPrefix(text, want) {
+			t.Fatalf("%s without acknowledge = %q, want a refusal starting %q", c.name, text, want)
+		}
+		for _, call := range f.calls {
+			if call.scope != ScopeRead {
+				t.Fatalf("%s without acknowledge made %+v", c.name, call)
+			}
+		}
+		c.args["acknowledge"] = true
+		run(t, cs, c.name, c.args)
+		if got := f.acted(); got.method != c.method {
+			t.Errorf("%s with acknowledge called %+v, want %s", c.name, got, c.method)
+		}
 	}
 }
 

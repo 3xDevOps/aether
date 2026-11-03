@@ -47,6 +47,7 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodAccountUsage:      scopeRead,
 	protocol.MethodRunList:           scopeRead,
 	protocol.MethodRunGet:            scopeRead,
+	protocol.MethodRunCloseCheck:     scopeRead,
 	protocol.MethodRunACPHistory:     scopeRead,
 	protocol.MethodTerminalHistory:   scopeRead,
 	protocol.MethodRunGitLog:         scopeRead,

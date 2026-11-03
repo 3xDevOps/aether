@@ -43,6 +43,7 @@ var tiers = map[string]string{
 	protocol.MethodServerInfo:           tierRead,
 	protocol.MethodRunList:              tierRead,
 	protocol.MethodRunGet:               tierRead,
+	protocol.MethodRunCloseCheck:        tierRead,
 	protocol.MethodRunACPHistory:        tierRead,
 	protocol.MethodTerminalHistory:      tierRead,
 	protocol.MethodWorkspaceList:        tierRead,
