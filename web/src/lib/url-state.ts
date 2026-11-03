@@ -1,3 +1,4 @@
+import { mobileScreen } from '@/lib/breakpoints'
 import { isRunView, runRoute } from '@/routes/run/views'
 import type { Route } from '@/store/ui'
 
@@ -63,6 +64,8 @@ export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
   if (handedLink()) return { name: 'onboarding', params: {} }
   const route = routeFromQuery(new URLSearchParams(window.location.search))
+  // A phone lands on Needs you; the board stays one link away.
+  if (route === boardRoute && window.matchMedia?.(mobileScreen).matches) return { name: 'needs-you', params: {} }
   const hash = window.location.hash.slice(1)
   if (route.name !== 'settings' || route.params.section || !hash) return route
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)

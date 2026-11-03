@@ -103,11 +103,8 @@ export function Sidebar() {
       <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DialogContent
           id="sidebar-drawer"
-          variant="side"
-          side="left"
-          showCloseButton={false}
+          variant="bottom"
           aria-describedby={undefined}
-          className="w-[min(20rem,calc(100vw-3rem))]"
           onOpenAutoFocus={() => {
             opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
           }}
@@ -125,8 +122,8 @@ export function Sidebar() {
             setDrawerOpen(false)
           }}
         >
-          <DialogTitle className="sr-only">Aether</DialogTitle>
-          <SidebarContent onHide={() => setDrawerOpen(false)} />
+          <DialogTitle className="sr-only">More</DialogTitle>
+          <MoreContent />
         </DialogContent>
       </Dialog>
     )
@@ -200,13 +197,11 @@ function DesktopSidebar({ onHide }: { onHide: () => void }) {
 }
 
 function SidebarContent({ onHide }: { onHide: () => void }) {
-  const mobile = useIsMobile()
   const cap = useCapability()
   const admin = useIsAdmin()
   const role = useSelfRole()
   const blocked = useStore((s) => launchBlocked(s.linkStatus))
   const togglePalette = useStore((s) => s.togglePalette)
-  const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const lower = surfaces(cap, admin).filter((surface) => surface.place === 'admin')
 
@@ -219,10 +214,7 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           size="icon"
           label="Search"
           hint={`Search · ${shortcutLabel('palette')}`}
-          onClick={() => {
-            setDrawerOpen(false)
-            togglePalette(true)
-          }}
+          onClick={() => togglePalette(true)}
         >
           <Search />
         </Button>
@@ -230,8 +222,8 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           id="sidebar-hide"
           variant="ghost"
           size="icon"
-          label={mobile ? 'Close sidebar' : 'Hide sidebar'}
-          hint={`${mobile ? 'Close' : 'Hide'} sidebar · ${shortcutLabel('sidebar')}`}
+          label="Hide sidebar"
+          hint={`Hide sidebar · ${shortcutLabel('sidebar')}`}
           onClick={onHide}
         >
           <PanelLeft />
@@ -242,12 +234,9 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           <SplitNewRun
             blocked={blocked ?? null}
             shortcut={shortcutLabel('launch')}
-            onOpen={() => {
-              setDrawerOpen(false)
-              openDialog('launch')
-            }}
+            onOpen={() => openDialog('launch')}
           />
-          {!mobile && <AssistantButton variant="secondary" />}
+          <AssistantButton variant="secondary" />
         </div>
       )}
       <SidebarRuns />
@@ -256,6 +245,23 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           <NavRows surfaces={lower} />
         </div>
       )}
+      <UpdateNotice />
+      <SidebarFooter />
+    </nav>
+  )
+}
+
+/** On a phone the tab bar carries Needs you, sessions, launch and the assistant; More holds every other page. */
+function MoreContent() {
+  const cap = useCapability()
+  const admin = useIsAdmin()
+  const list = surfaces(cap, admin).filter((surface) => surface.place !== 'link')
+  return (
+    <nav aria-label="More" className="flex min-h-0 flex-col gap-1">
+      <div className="flex shrink-0 items-center pr-10">
+        <WorkspaceSwitcher />
+      </div>
+      <NavRows surfaces={list} />
       <UpdateNotice />
       <SidebarFooter />
     </nav>

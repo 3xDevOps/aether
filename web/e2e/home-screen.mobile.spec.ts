@@ -74,8 +74,11 @@ test('a phone is served everything it needs to install the dashboard', async ({
   // chrome goes: everything stays reachable and nothing overflows.
   const bar = page.getByRole('banner')
   await expect(bar).toBeInViewport({ ratio: 1 })
-  await expect(bar.getByRole('button', { name: /^Open sidebar/ })).toBeVisible()
-  await expect(bar.getByRole('button', { name: 'New session' })).toBeVisible()
+  await expect(bar.getByRole('button', { name: 'Search', exact: true })).toBeVisible()
+  const tabs = page.getByRole('navigation', { name: 'Main navigation' })
+  await expect(tabs).toBeInViewport({ ratio: 1 })
+  await expect(tabs.getByRole('button', { name: 'More' })).toBeVisible()
+  await expect(tabs.getByRole('button', { name: 'New session' })).toBeVisible()
   const overflow = await page.evaluate(() =>
     Math.max(
       document.documentElement.scrollWidth - document.documentElement.clientWidth,

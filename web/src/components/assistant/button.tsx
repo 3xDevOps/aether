@@ -22,7 +22,7 @@ export function useAssistantAvailable(): boolean {
   return role !== null && cap.hasMethod('assistant.status') && canLaunch({ cap, role })
 }
 
-/** Mounted in exactly one place at a time: the phone toolbar, the sidebar header, or the top bar when the sidebar is hidden. */
+/** Mounted in exactly one place at a time: the sidebar header, or the top bar when the sidebar is hidden. A phone has its Assistant tab instead. */
 export function AssistantButton({ variant = 'ghost' }: { variant?: 'ghost' | 'secondary' }) {
   const supported = useAssistantAvailable()
   const open = useStore((s) => s.assistantOpen)

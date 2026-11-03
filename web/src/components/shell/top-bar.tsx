@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Ellipsis, PanelLeft, Plus, Search } from '@/components/icons'
+import { Ellipsis, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
 import { ConnectionLine } from '@/components/shell/connection'
 import { desktopBridge, WindowControls } from '@/components/shell/window-bar'
@@ -9,15 +9,15 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { SlidingIndicator } from '@/components/ui/sliding-indicator'
 import { useIsMobile } from '@/lib/breakpoints'
 import { AssistantButton } from '@/components/assistant/button'
-import { canLaunch, launchBlocked } from '@/lib/commands'
-import { runLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useCapability, useNeedsYouCount, useSelfRole } from '@/store/hooks'
+import { useCapability } from '@/store/hooks'
 
 const titles: Record<string, string> = {
   overview: 'All workspaces',
+  'needs-you': 'Needs you',
+  sessions: 'Sessions',
 }
 
 export function TopBar({ navigation = true }: { navigation?: boolean }) {
@@ -41,27 +41,28 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
 
   return (
     <header ref={header} className="shrink-0 border-b border-seam bg-chrome pt-[var(--safe-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
-      <div
-        onContextMenu={desktop?.controls?.showMenu && ((event) => {
-          if ((event.target as HTMLElement).closest('button, a')) return
-          event.preventDefault()
-          desktop.controls?.showMenu?.(event.clientX, event.clientY)
-        })}
-        className={cn(
-          'flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12',
-          desktop && 'flex-nowrap select-none [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]',
-          desktop?.platform === 'darwin' && 'pl-20',
-        )}
-      >
-        <div className="flex shrink-0 -translate-y-px items-center gap-1.5">
-          <img src="/aether-mark.png" alt="" width={24} height={24} />
-          <span className="text-wordmark">aether</span>
+      {navigation && mobile ? <PhoneToolbar /> : (
+        <div
+          onContextMenu={desktop?.controls?.showMenu && ((event) => {
+            if ((event.target as HTMLElement).closest('button, a')) return
+            event.preventDefault()
+            desktop.controls?.showMenu?.(event.clientX, event.clientY)
+          })}
+          className={cn(
+            'flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12',
+            desktop && 'flex-nowrap select-none [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]',
+            desktop?.platform === 'darwin' && 'pl-20',
+          )}
+        >
+          <div className="flex shrink-0 -translate-y-px items-center gap-1.5">
+            <img src="/aether-mark.png" alt="" width={24} height={24} />
+            <span className="text-wordmark">aether</span>
+          </div>
+          {navigation && <HeaderNavigation />}
+          {navigation && collapsed && <AssistantButton />}
+          <WindowControls />
         </div>
-        {navigation && <HeaderNavigation />}
-        {navigation && !mobile && collapsed && <AssistantButton />}
-        <WindowControls />
-      </div>
-      {navigation && mobile && <PhoneToolbar />}
+      )}
     </header>
   )
 }
@@ -187,57 +188,20 @@ function HeaderNavigation() {
 
 function PhoneToolbar() {
   const cap = useCapability()
-  const role = useSelfRole()
-  const blocked = useStore((s) => launchBlocked(s.linkStatus))
   const route = useStore((s) => s.route)
-  const run = useStore((s) => (s.route.params.runId ? s.runs[s.route.params.runId] : undefined))
   const workspace = useStore((s) => (s.route.name === 'workspace' ? s.workspaces[s.route.params.workspaceId ?? ''] : undefined))
-  const drawerOpen = useStore((s) => s.sidebarDrawerOpen)
-  const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
   const togglePalette = useStore((s) => s.togglePalette)
-  const openDialog = useStore((s) => s.openPaletteDialog)
-  const needsYou = useNeedsYouCount()
-  const iconLaunch = useStore((s) => s.headerPrimaries > 0 || s.route.name === 'run')
   const title = route.name === 'run'
     ? 'Session'
-    : run
-    ? runLabel(run)
     : workspace?.name ?? titles[route.name] ?? surfaces(cap, true).find((surface) => surface.name === route.name)?.label ?? 'Aether'
 
   return (
     <>
-      <div className="flex h-[calc(var(--top-bar-height)-1px)] items-center gap-1 px-1">
-        <span className="relative shrink-0">
-          <Button
-            id="sidebar-drawer-trigger"
-            variant="ghost"
-            size="icon"
-            label={needsYou > 0 ? `Open sidebar, ${needsYou} ${needsYou === 1 ? 'session needs' : 'sessions need'} you` : 'Open sidebar'}
-            aria-expanded={drawerOpen}
-            aria-controls="sidebar-drawer"
-            onClick={() => setDrawerOpen(true)}
-          >
-            <PanelLeft />
-          </Button>
-          {needsYou > 0 && (
-            <span aria-hidden className="pointer-events-none absolute top-2 right-2 size-2 rounded-full bg-state-needs-you" />
-          )}
-        </span>
+      <div className="flex h-[calc(var(--top-bar-height)-1px)] items-center gap-1 pr-1 pl-3">
         <p className="min-w-0 flex-1 truncate text-ui font-medium text-text">{title}</p>
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
           <Search />
         </Button>
-        <AssistantButton />
-        {canLaunch({ cap, role }) && (iconLaunch ? (
-          <Button variant="ghost" size="icon" label="New session" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
-            <Plus />
-          </Button>
-        ) : (
-          <Button size="sm" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
-            <Plus />
-            New session
-          </Button>
-        ))}
       </div>
       <ConnectionLine className="px-3 pb-1.5" />
     </>

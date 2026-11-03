@@ -49,7 +49,7 @@ let sends = 0
 
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
 
-export function targetRoute(run: RunRecord, target: NeedsYouTarget | undefined): Route {
+export function targetRoute(run: Pick<RunRecord, 'id'>, target: NeedsYouTarget | undefined): Route {
   return runRoute(run.id, target && targetView[target])
 }
 

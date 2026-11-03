@@ -17,9 +17,9 @@ test('mobile Files opens a second file from the tree sheet', async ({
 
   await page.goto(alice.url)
 
-  await page.getByRole('button', { name: 'More navigation' }).tap()
-  await page.getByRole('menuitem', { name: 'Files', exact: true }).tap()
-  await expect(page.getByRole('menu')).toBeHidden()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'More' }).tap()
+  await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: 'Files', exact: true }).tap()
+  await expect(page.getByRole('dialog', { name: 'More' })).toBeHidden()
 
   await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeAttached()
   const tree = page.getByRole('complementary', { name: 'Files' })

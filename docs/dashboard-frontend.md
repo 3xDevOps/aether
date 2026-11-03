@@ -474,28 +474,81 @@ overflow measuring still counts only buttons, and it hides while the current
 page is in **More navigation**. Gateway capability gates still apply. Hidden buttons
 are inert and excluded from the accessibility tree.
 
-Under 768px a second, 48px toolbar holds **Open sidebar** with an amber dot
-while anything needs you, the view's title, **Search** and **New session**. On a
-session page the title is "Session", because the session header under it already shows
-the session's title. A connection problem is one line under the toolbar. On a
-phone the view's own header keeps only its actions, and its `h1` stays for
-screen readers. The header's measured bottom edge sets
+Under 768px the header is one 48px row: the view's title and **Search**. On
+a session page the title is "Session", because the session header under it
+already shows the session's title. A connection problem is one line under the
+row. On a phone the view's own header keeps only its actions, and its `h1`
+stays for screen readers. The header's measured bottom edge sets
 `--app-header-bottom` for the command palette's position and height limit.
+Navigation moves to the [phone tab bar](#phone-layout).
+
+### Phone layout
+
+Below 768px (`mobileScreen` in `src/lib/breakpoints.ts`) the shell adds a
+bottom tab bar, `phone-tab-bar.tsx`, a `nav` named "Main navigation". Desktop
+is unchanged. The tabs are at least 44px square, and the bar pads itself by
+the bottom and side safe-area insets, so `main` does not pad the bottom on a
+phone. Its measured height sets `--phone-tabs-height`, which keeps toasts
+8px above it. While a text field other than the terminal's has focus, the soft
+keyboard is likely up and the bar hides.
+
+| Tab | Opens |
+| --- | --- |
+| **Needs you** | the `needs-you` route, with the count of what asks you as a badge |
+| **Sessions** | the `sessions` route: the sidebar's session list, full width. Current on a session, the board and All workspaces too |
+| **New** | the launch dialog; named **New session**, and hidden for a member who cannot launch |
+| **Assistant** | the assistant sheet, with the dot the desktop button shows |
+| **More** | a bottom sheet, a `dialog` named "More" |
+
+A phone that opens the dashboard with no `run` or `page` in the address lands
+on Needs you (`initialRoute` in `src/lib/url-state.ts`). Every other link
+still opens its own page, the board included: it is in More.
 
 A phone screen has one filled button. A page whose own action is filled calls
 `useHeaderPrimary(shown)` (`src/store/hooks.ts`) while that action shows; the
 `ui` slice counts the holders in `headerPrimaries`, and while the count is
-above zero the top bar draws **New session** as an icon button with the same
-accessible name. A session page always gets the icon, with or without a primary
-action. The holders are a session header with a primary action, Environment's **Open** or **Save
+above zero the **New** tab drops its filled pill. The holders are a session
+header with a primary action, Environment's **Open** or **Save
 environment**, onboarding, Files with a file open and the Changes view's
-**Publish…**. The board, lists and settings keep the filled **New session**.
+**Publish…**.
 
-The sidebar opens as a left side sheet, a `dialog` named "Aether" with the
-same contents and **Close sidebar** in place of **Hide sidebar**; a tap
-outside, Escape or any navigation closes it, and navigation moves focus to the
-new view's heading. `Mod+B` closes it too, because it is the key that opened
-it; every other shell key stands down while it is open.
+**More** holds the workspace switcher, every page the desktop header and
+sidebar link to (Board, Activity, Insights, Memory, Files, Environment,
+Agents, Templates, Members, Settings, Members › Devices, Manage workspaces),
+the update notice and the profile footer. A tap outside, Escape or any
+navigation closes it, and navigation moves focus to the new view's heading.
+`Mod+B` opens and closes it; every other shell key stands down while it is
+open.
+
+**Needs you** (`src/routes/needs-you/`) reads the server's `attention.list`
+([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)),
+not the dashboard's copy of the rule, and reads it again 250ms after any
+session's status, state, review, requests, room questions or controller
+change. The badge counts the same list. Cards are ranked by kind in the order
+the server checks them (`needsYouConditions` in `src/lib/needs-you.ts`):
+permission, question, queued message, room question, disconnected, blocked,
+needs input, failed. Within a kind the server's order holds, oldest first.
+Each card is a `RequestCard` with the session's title, which opens the
+session's view the condition names, and its inline answer:
+
+- A permission with `allow_once` and `reject_once` options shows **Deny** and
+  **Approve**, the session's own `DecisionButtons`. Each sends
+  `run.input.respond` with the request's id and that option, so a tap that
+  lands after the request changed decides nothing else. **Always** is not
+  offered. A Standard session's permission has no options and opens the
+  terminal instead.
+- An Enhanced session's question shows its form and its options, answered
+  the same way. A link question opens the session.
+- A turn that ended asking (`needs input`, the condition's **Reply**) shows a
+  text field whose **Reply** sends `run.inject`. A room question replies with
+  `run.room.post`, correlated to the question.
+- Everything else has one button that opens the session.
+
+`already_answered` shows "Already answered: an earlier answer won". A refusal
+shows the server's error on the card, such as `-32003` while another member
+controls the session. Below the cards, **Finished: review the result** lists
+the `ready` items as plain rows. They never count toward the badge and have no
+Mark complete; opening one opens the session.
 
 ### Assistant panel
 
@@ -786,8 +839,8 @@ seconds. A phone gets the web push the server sends for the same notice.
 
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
 component mounted in one place at a time: the sidebar's **New session** row (a secondary
-icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
-the phone toolbar under 768px; keeping it out of the top bar's row leaves that
+icon button to its right, which keeps the workspace switcher's room), or the top bar's first row while the sidebar is hidden; under 768px the
+**Assistant** tab of the [phone tab bar](#phone-layout) replaces it; keeping it out of the top bar's row leaves that
 row to the header destinations), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
 **Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
 each onboarding step.
@@ -927,8 +980,8 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 - `viewport-fit=cover` - the shell paints under the notch and the home
   indicator, and the chrome that touches those edges pads itself back out with
   `env(safe-area-inset-*)`: the phone top bar sideways and downwards, the
-  sidebar sheet on all three edges it reaches, the sidebar on the left and the
-  content view on the right and bottom. The top inset is the one a surface
+  phone tab bar sideways and upwards, the sidebar on the left and the content
+  view on the right (and bottom, on desktop). The top inset is the one a surface
   away from that edge also has to read, because an installed iOS app asks for
   a `black-translucent` status bar and gets the whole screen: it is
   `--safe-top` in `src/index.css`, and the top bar's height, the palette's
@@ -956,8 +1009,8 @@ elements for a finger than for a mouse, or for a narrow window, ask
 room a view has rather than the window, such as Board's columns, measures
 itself with `useElementSize`. The `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
 `src/lib/breakpoints.ts`. The shell has one breakpoint: under 768px
-(`useIsMobile()`, Tailwind `max-md:`) the top bar and the sidebar sheet
-replace the sidebar.
+(`useIsMobile()`, Tailwind `max-md:`) the one-row top bar and the
+[phone tab bar](#phone-layout) replace the sidebar.
 
 A panel docked beside other content decides from room, not from the
 viewport. `minReadableWidth` (560px, `src/lib/breakpoints.ts`) is the width
@@ -987,7 +1040,7 @@ Desktop density is untouched.
 Use this variant rather than a new breakpoint or a per-component pixel value.
 
 **Header offsets follow the rendered layout.** `--top-bar-height` (48px,
-border included) in `src/index.css` sets the phone toolbar's height.
+border included) in `src/index.css` sets the phone header row's height.
 The app header reports its measured bottom edge through `--app-header-bottom`
 for the command palette. Desktop dragging uses the navigation row, not a
 separate height token.
@@ -5713,7 +5766,7 @@ viewer minted the code) shows in Sign-ins, in the code tab, as a Needs you
 card and as a row in the sidebar's Needs you; **Review** and the row open
 Profile at Sign-ins. Profile is mounted by the app shell (`profileOpen` in
 `store/ui.ts`), not the sidebar, so **Review** works with the sidebar
-collapsed or the phone drawer closed. It lists the proposer's sign-ins, the settings kept,
+collapsed or the phone's More sheet closed. It lists the proposer's sign-ins, the settings kept,
 what is discarded and the resulting role; **Accept and merge** (danger
 style) needs the same tick and sends `member.merge.accept` with the
 proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused
@@ -7281,14 +7334,16 @@ and Escape. `run-session` streams an Enhanced session, answers a permission,
 sends a message and stops it with Interrupt, then checks its Trace tab.
 
 The touch shell is driven by the `mobile` project, which
-[testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
-phone drawer, taps a session and finds the drawer gone with the session on screen and
-focus on its heading; `dialog-anchor.mobile.spec.ts` checks that a short
+[testing.md](testing.md) describes: `phone-shell.mobile.spec.ts` checks the
+tab bar at 360px and 430px with no sideways scroll, Needs you as the landing
+page and its badge, and approves a permission and replies to a question from
+their cards; `shell-drawer.mobile.spec.ts` taps a session in the Sessions tab
+and finds it on screen with focus on its heading; `dialog-anchor.mobile.spec.ts` checks that a short
 dialog sits at the top rather than the middle, and that the launch form keeps
 its footer on screen on a viewport as short as a keyboard leaves;
 `toast-clearance.mobile.spec.ts` checks that a toast comes to rest 8px clear
 of the bottom edge; `home-screen.mobile.spec.ts` checks the manifest, icons
-and that the top bar clears a phone status bar; `run-views.mobile.spec.ts`
+and that the top bar clears a phone status bar and the tab bar shows; `run-views.mobile.spec.ts`
 protects a session from More and reads its changes; and `files-browser.mobile.spec.ts` opens a second file
 from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
 because its keyboard contract - `Mod+B` closing the drawer and the palette

@@ -4,10 +4,13 @@ import { PaletteDialogs } from '@/components/palette/dialogs'
 import { CenterView, focusView } from '@/components/shell/center-view'
 import { ConnectionAnnouncer } from '@/components/shell/connection'
 import { useNavShortcuts } from '@/components/shell/nav-shortcuts'
+import { PhoneTabBar } from '@/components/shell/phone-tab-bar'
 import { Sidebar } from '@/components/shell/sidebar'
 import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
 import { UpdateCenter } from '@/components/update-banner'
+import { useIsMobile } from '@/lib/breakpoints'
+import { useAttentionFeed } from '@/routes/needs-you/attention'
 import { ProfileDialog } from '@/routes/members/personal'
 import { useTeamRefresh } from '@/routes/team'
 import { useStore } from '@/store'
@@ -17,6 +20,7 @@ export function AppShell() {
   useTeamRefresh()
   const profileOpen = useStore((s) => s.profileOpen)
   const setProfileOpen = useStore((s) => s.setProfileOpen)
+  const mobile = useIsMobile()
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas text-ui text-text">
       <a
@@ -35,12 +39,13 @@ export function AppShell() {
         <main
           id="main"
           tabIndex={-1}
-          className="min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] outline-none"
+          className="min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] outline-none md:pb-[env(safe-area-inset-bottom)]"
         >
           <CenterView />
         </main>
         <AssistantPanel />
       </div>
+      {mobile && <PhoneShell />}
       <CommandPalette />
       <PaletteDialogs />
       <ShortcutsDialog />
@@ -49,4 +54,9 @@ export function AppShell() {
       <ConnectionAnnouncer />
     </div>
   )
+}
+
+function PhoneShell() {
+  useAttentionFeed()
+  return <PhoneTabBar />
 }

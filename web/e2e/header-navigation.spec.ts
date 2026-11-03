@@ -16,7 +16,8 @@ test('header navigation preserves destinations and focus across resize and text-
   const menu = page.getByRole('menu', { name: 'More navigation' })
 
   await templates.focus()
-  await page.setViewportSize({ width: 390, height: 844 })
+  // Below 768px a phone has the tab bar instead of this row.
+  await page.setViewportSize({ width: 800, height: 844 })
   await expect(more).toBeFocused()
   await expect(board).toBeVisible()
   await expect(templates).toBeHidden()
@@ -27,7 +28,7 @@ test('header navigation preserves destinations and focus across resize and text-
   await expect(page.getByRole('heading', { level: 1, name: 'Templates', exact: true })).toBeFocused()
 
   await more.press('Enter')
-  await menu.getByRole('menuitem', { name: 'Agents', exact: true }).focus()
+  await menu.getByRole('menuitem', { name: 'Templates', exact: true }).focus()
   await page.setViewportSize({ width: 1280, height: 900 })
   await expect(menu).toBeHidden()
   await expect(templates).toBeFocused()

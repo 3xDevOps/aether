@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { onTestFinished } from 'vitest'
 import { AppShell } from '@/components/shell/app-shell'
+import { api } from '@/lib/api'
+import { useAttention } from '@/routes/needs-you/attention'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
@@ -562,22 +565,22 @@ describe('update notice and footer', () => {
 })
 
 describe('phone shell', () => {
-  it('opens the drawer from the top bar and closes it on navigation, focusing the view', async () => {
+  it('opens More from the tab bar and closes it on navigation, focusing the view', async () => {
     atViewport(390, { pointer: 'coarse' })
     render(<AppShell />)
 
     expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
-    const banner = within(topBanners()[0]!)
-    fireEvent.click(banner.getByRole('button', { name: 'Open sidebar, 2 sessions need you' }))
+    const tabs = within(screen.getByRole('navigation', { name: 'Main navigation' }))
+    fireEvent.click(tabs.getByRole('button', { name: 'More' }))
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Aether' }))
-    fireEvent.click(drawer.getByRole('button', { name: 'Settings' }))
+    const more = within(await screen.findByRole('dialog', { name: 'More' }))
+    fireEvent.click(more.getByRole('button', { name: 'Settings' }))
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Aether' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull())
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Settings' })))
   })
 
-  it('titles a run page "Run" and shrinks New run to an icon there', () => {
+  it('titles a run page "Session" and keeps New session in the tab bar', () => {
     atViewport(390, { pointer: 'coarse' })
     useStore.setState({ route: { name: 'run', params: { runId: 'run_2' } } })
     render(<AppShell />)
@@ -585,7 +588,33 @@ describe('phone shell', () => {
     const banner = within(topBanners()[0]!)
     expect(banner.getByText('Session')).toBeDefined()
     expect(banner.queryByText('answer the schema question')).toBeNull()
-    expect(banner.getByRole('button', { name: 'New session' }).textContent).toBe('')
+    expect(banner.queryByRole('button', { name: 'New session' })).toBeNull()
+    const tabs = within(screen.getByRole('navigation', { name: 'Main navigation' }))
+    expect(tabs.getByRole('button', { name: 'New session' })).toBeDefined()
+    expect(tabs.getByRole('button', { name: 'Sessions' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('counts what asks the viewer on the Needs you tab, never a finished session', async () => {
+    atViewport(390, { pointer: 'coarse' })
+    const item = { workspace_id: workspace.id, harness: 'claude', reason: '', since: '2026-08-14T10:02:00Z' }
+    const spy = vi.spyOn(api, 'attentionList').mockResolvedValue({ items: [
+      { ...item, kind: 'ready', run_id: 'run_1', title: 'finished one' },
+      { ...item, kind: 'failed', run_id: 'run_2', title: 'failed one' },
+      { ...item, kind: 'permission', run_id: 'run_3', title: 'asks one' },
+    ] })
+    onTestFinished(() => {
+      spy.mockRestore()
+      useAttention.setState({ items: null })
+    })
+    useStore.setState({ route: { name: 'needs-you', params: {} } })
+    render(<AppShell />)
+
+    const tabs = within(screen.getByRole('navigation', { name: 'Main navigation' }))
+    expect(await tabs.findByRole('button', { name: 'Needs you, 2' })).toBeDefined()
+    const cards = within(screen.getByRole('list', { name: 'Needs you' }))
+    expect(cards.getAllByRole('group').map((card) => card.getAttribute('aria-label'))).toEqual(['asks one', 'failed one'])
+    const finished = within(screen.getByRole('region', { name: /^Finished: review the result/ }))
+    expect(finished.getByRole('button', { name: /finished one/ })).toBeDefined()
   })
 })
 

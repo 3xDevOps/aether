@@ -1,6 +1,5 @@
-// The run list on a phone. Opening a run from it has to leave that run on
-// screen: before the drawer existed, the 280px pane stayed over the terminal
-// it had just opened and only a 26px Collapse button took it away.
+// The run list on a phone, under the Sessions tab. Opening a run from it has
+// to leave that run on screen with finger-sized controls.
 
 import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
@@ -8,7 +7,7 @@ import { expect, test } from './mobile'
 
 test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
-test('the phone drawer closes onto the run it opened', async ({ page, aether }) => {
+test('the Sessions tab opens a run full screen', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -23,11 +22,8 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
 
   await page.goto(alice.url)
 
-  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
-  const drawer = page.getByRole('dialog', { name: 'Aether' })
-  await expect(drawer).toBeVisible()
-
-  const row = drawer.getByRole('button', { name: /read the deployment log/ })
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).tap()
+  const row = page.getByRole('main').getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /read the deployment log/ })
   await expect(row).toBeVisible()
   // A finger needs about 44px where the desktop row is 28; the coarse-pointer
   // scale is what a phone is actually hitting here.
@@ -36,12 +32,11 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
 
   await row.tap()
 
-  await expect(drawer).toBeHidden()
   await expect(
     page.getByRole('heading', { name: 'read the deployment log', exact: true }),
   ).toBeVisible()
 
-  // Focus lands on the view the drawer closed onto. The top bar says Run, so
+  // Focus lands on the run. The top bar says Session, so
   // the title shows once, in the run header, and its controls are finger-sized.
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
   const bar = page.getByRole('banner')
@@ -50,8 +45,7 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
   const search = bar.getByRole('button', { name: 'Search', exact: true })
   expect((await search.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
 
-  // Nothing the drawer left behind is over the run: the shell still fits the
-  // phone in both directions.
+  // The shell still fits the phone in both directions.
   const overflow = await page.evaluate(() =>
     Math.max(
       document.documentElement.scrollWidth - document.documentElement.clientWidth,

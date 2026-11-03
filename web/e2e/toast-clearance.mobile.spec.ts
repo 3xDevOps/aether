@@ -1,11 +1,11 @@
-// A toast on a phone has to stay clear of the bottom edge and the home
+// A toast on a phone has to stay clear of the tab bar and the home
 // indicator. Sonner keeps two offsets and swaps to `mobileOffset` below
 // 600px, so the app's own offset has to be given to both.
 
 import { seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
 
-test('a toast clears the bottom edge on a phone', async ({ page, aether }) => {
+test('a toast clears the tab bar on a phone', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -21,8 +21,9 @@ test('a toast clears the bottom edge on a phone', async ({ page, aether }) => {
   })
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: 'More navigation' }).tap()
-  await page.getByRole('menuitem', { name: 'Templates', exact: true }).tap()
+  const tabs = page.getByRole('navigation', { name: 'Main navigation' })
+  await tabs.getByRole('button', { name: 'More' }).tap()
+  await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: 'Templates' }).tap()
   await page.getByRole('option', { name: 'Template nightly' }).tap()
   await page.getByRole('button', { name: 'More for nightly', exact: true }).tap()
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).tap()
@@ -36,13 +37,13 @@ test('a toast clears the bottom edge on a phone', async ({ page, aether }) => {
 
   // Polled: the toast slides up into place, so its first box is above where
   // it settles. What must hold is where it comes to rest: 8px clear of the
-  // bottom edge, which on a phone without a home indicator is the screen's.
-  const height = page.viewportSize()!.height
+  // tab bar, which sits on the bottom edge.
+  const top = (await tabs.boundingBox())!.y
   await expect
     .poll(async () => {
       const box = await toast.boundingBox()
       if (!box) return Number.POSITIVE_INFINITY
-      return Math.round(box.y + box.height - (height - 8))
+      return Math.round(box.y + box.height - (top - 8))
     })
     .toBeLessThanOrEqual(0)
 })

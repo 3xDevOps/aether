@@ -24,9 +24,9 @@ test('a phone protects a run from More and reads its changes', async ({
 
   await page.goto(alice.url)
 
-  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).tap()
   await page
-    .getByRole('dialog', { name: 'Aether' })
+    .getByRole('main').getByRole('region', { name: 'Sessions' })
     .getByRole('button', { name: /write the result file/ })
     .tap()
   await expect(

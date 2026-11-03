@@ -8,6 +8,7 @@ import type {
   AgentModelsResult,
   AgentRemoveResult,
   AgentInfo,
+  AttentionItem,
   BudgetReport,
   ChildLimits,
   ChildSettings,
@@ -75,6 +76,7 @@ import type {
   RunChildrenSetting,
   RoomMessageListResult,
   RoomPostResult,
+  RunInputRespondResult,
   RoomStatusResult,
   SlackLinkResult,
   SlackStatusResult,
@@ -649,8 +651,9 @@ export const api = {
       ...(values ? { values } : {}),
       ...lease,
     }),
-  runInputRespond: (runID: string, requestID: string, optionID: string) =>
-    call<unknown>('run.input.respond', { run_id: runID, request_id: requestID, option_id: optionID }),
+  runInputRespond: (runID: string, requestID: string, optionID: string, values?: Record<string, unknown>) =>
+    call<RunInputRespondResult>('run.input.respond', { run_id: runID, request_id: requestID, option_id: optionID, ...(values ? { values } : {}) }),
+  attentionList: () => call<{ items: AttentionItem[] }>('attention.list', {}),
   assistantStatus: () => call<AssistantStatus>('assistant.status', {}),
   assistantStart: (params: AssistantStartParams = {}) => call<AssistantStatus>('assistant.start', params),
   assistantPrompt: (text: string, idempotencyKey: string, viewContext?: ViewContext, signal?: AbortSignal) =>

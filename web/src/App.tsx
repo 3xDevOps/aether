@@ -14,8 +14,9 @@ import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from 
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
+// The phone tab bar's height includes the bottom inset.
 const toastOffset = {
-  bottom: 'calc(8px + env(safe-area-inset-bottom))',
+  bottom: 'calc(8px + var(--phone-tabs-height, env(safe-area-inset-bottom)))',
   right: 'calc(8px + env(safe-area-inset-right))',
 }
 

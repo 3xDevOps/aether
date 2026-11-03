@@ -74,7 +74,7 @@ server upgrade pins a newer version.
 ## Open it
 
 - Select **Assistant** in the sidebar next to **New session**, in the top bar when
-  the sidebar is hidden, or in the phone toolbar. A dot on it means an action
+  the sidebar is hidden, or the **Assistant** tab on a phone. A dot on it means an action
   waits for your approval.
 - Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
   a terminal has focus.

@@ -23,8 +23,8 @@ test('a waiting run says what Aether last read on a phone', async ({ page, aethe
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: test.info().outputPath('phone-run-list.png'), fullPage: true })
 
-  await page.getByRole('banner').getByRole('button', { name: /^Open sidebar/ }).click()
-  const sidebar = page.getByRole('dialog', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).click()
+  const sidebar = page.getByRole('main').getByRole('region', { name: 'Sessions' })
   await expect(sidebar.getByRole('button', { name: new RegExp(`^Needs you · .*${tasks.broken}`) })).toBeVisible()
   await expect(sidebar.getByRole('button', { name: new RegExp(`${tasks.unknown} · Waiting on .*status unknown since`) })).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('phone-sidebar.png') })
