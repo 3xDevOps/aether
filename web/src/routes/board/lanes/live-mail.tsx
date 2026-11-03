@@ -192,6 +192,31 @@ export function liveShapes(live: LiveArrow[], drawn: Map<string, string>, anchor
   })
 }
 
+/** A button that mounts after its arrow starts at the arrow's age, fixed at mount: a delay changed mid-run would move the fade. */
+function LiveChip({ at, className, style, onClick, children }: {
+  at: number
+  className: string
+  style: React.CSSProperties
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  const [delay] = useState(() => at - Date.now())
+  return (
+    <Button
+      {...mailControl}
+      data-mail-live-chip
+      variant="secondary"
+      size="sm"
+      tabIndex={-1}
+      className={cn('pointer-events-auto absolute z-10 h-6 max-w-[min(280px,60%)] gap-1 border-series-5 px-2 text-ui-xs', className)}
+      style={{ ...style, animationDelay: `${delay}ms` }}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  )
+}
+
 /**
  * Each arrow is its own HTML box, so its fade, the pulse that travels it and
  * the ring at its head run on the compositor: Chromium repaints an
@@ -235,21 +260,17 @@ export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf,
           // Too close to the window's start for the button to fit on the arrow's left.
           const right = x < chipRoom
           chip = (
-            <Button
-              {...mailControl}
+            <LiveChip
               key={`${key}:chip`}
-              data-mail-live-chip
-              variant="secondary"
-              size="sm"
-              tabIndex={-1}
-              className={cn(fade, 'pointer-events-auto absolute z-10 h-6 max-w-[min(280px,60%)] gap-1 border-series-5 px-2 text-ui-xs', !right && '-translate-x-full')}
-              style={{ animationDelay: `${arrow.at - Date.now()}ms`, left: g.labelWidth + x + (right ? 10 : -10), top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
+              at={arrow.at}
+              className={cn(fade, !right && '-translate-x-full')}
+              style={{ left: g.labelWidth + x + (right ? 10 : -10), top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
               onClick={() => onJump(end.lane)}
             >
               <Icon aria-hidden className="size-3 shrink-0 text-series-5" />
               <span className="min-w-0 truncate">{offscreen.end === 'to' ? `to ${nameOf(end)}` : `from ${nameOf(end)}`}</span>
               {arrow.count > 1 && <span className="shrink-0 text-muted tabular-nums">×{arrow.count}</span>}
-            </Button>
+            </LiveChip>
           )
         }
         const flash = anchors.get(arrow.to.lane)
