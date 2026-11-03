@@ -16,10 +16,10 @@ import (
 )
 
 // ruleServer is actionServer with a teammate's account shared with m1 and
-// workspaces that may be gone.
+// workspaces that may be gone or unreadable.
 type ruleServer struct {
 	actionServer
-	gone map[string]bool
+	gone, broken map[string]bool
 }
 
 func (f *ruleServer) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
@@ -31,6 +31,9 @@ func (f *ruleServer) Call(ctx context.Context, method string, params json.RawMes
 		_ = json.Unmarshal(params, &p)
 		if f.gone[p.WorkspaceID] {
 			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "workspace " + p.WorkspaceID + " not found"}
+		}
+		if f.broken[p.WorkspaceID] {
+			return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "store: database is locked"}
 		}
 	}
 	return f.actionServer.Call(ctx, method, params)
@@ -55,7 +58,7 @@ func card(t *testing.T, sock string, m *member, method string, params any) (prot
 func newRuleService(t *testing.T) (*Service, *member, *memStore, string, *ruleServer) {
 	t.Helper()
 	svc, m, db := newActionService(t)
-	fake := &ruleServer{gone: map[string]bool{}}
+	fake := &ruleServer{gone: map[string]bool{}, broken: map[string]bool{}}
 	return svc, m, db, serveCaller(t, svc, m, fake), fake
 }
 
@@ -126,7 +129,7 @@ func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 func TestRuleWordingNamesEveryKeyField(t *testing.T) {
 	svc, m, _, sock, _ := newRuleService(t)
 	for params, want := range map[*protocol.RunLaunchParams]string{
-		{WorkspaceID: "ws-1", Harness: "codex", Model: "gpt-5", Effort: "high", Permission: "isolated", AccountMemberID: "m2", NoFallback: true, Task: "x"}: "Always approve launches of Codex (default mode, model gpt-5, effort high) in api on Dana's account, permission isolated, no fallback",
+		{WorkspaceID: "ws-1", Harness: "codex", Model: "gpt-5", Effort: "high", Permission: "isolated", AccountMemberID: "m2", NoFallback: true, Task: "x"}: `Always approve launches of Codex (default mode, model "gpt-5", effort "high") in api on Dana's account, permission isolated, no fallback`,
 		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m1", NoFallback: true, Task: "x"}:                                                        "Always approve launches of Claude Code (default mode) in api on your account, permission default, no fallback",
 	} {
 		c, done := card(t, sock, m, protocol.MethodRunLaunch, params)
@@ -172,6 +175,9 @@ func TestNeverRuleableCardsOfferNoRule(t *testing.T) {
 		"extra repositories":         {protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, ExtraWorkspaceIDs: []string{"ws-2"}, Task: "x"}},
 		"subsessions":                {protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Children: "on", Task: "x"}},
 		"limits":                     {protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Limits: &protocol.RunLimits{Pids: 64}, Task: "x"}},
+		"a model with spaces":        {protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Model: "opus) in prod on Dana's account (x", Task: "x"}},
+		"an unknown permission":      {protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Permission: "everything", Task: "x"}},
+		"an unknown mode":            {protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Mode: "acp, permission root", Task: "x"}},
 		"close":                      {protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1", Outcome: "merged"}},
 		"handoff":                    {protocol.MethodRunHandoff, protocol.RunHandoffParams{RunID: "run-1", ToMemberID: "m2"}},
 		"memory pin":                 {protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "note-1"}},
@@ -252,11 +258,14 @@ func TestRuleWhoseWorkspaceIsGoneIsInactive(t *testing.T) {
 	if rules[0].Inactive != "" || rules[1].ID != shared.ID || rules[1].Inactive != "account m9 is no longer shared with you" {
 		t.Fatalf("rules = %+v, want the first active and the unshared account's inactive", rules)
 	}
-	fake.gone["ws-1"] = true
 	params, _ := json.Marshal(launch)
-	c = protocol.AssistantConfirmation{Method: protocol.MethodRunLaunch, Params: params}
-	if passed, err := svc.approveByRule(t.Context(), m.conversation(), m, &c); passed || err != nil {
-		t.Fatalf("card an inactive rule covers = passed %v, %v; want a card", passed, err)
+	for name, set := range map[string]map[string]bool{"removed": fake.gone, "unreadable": fake.broken} {
+		set["ws-1"] = true
+		c = protocol.AssistantConfirmation{Method: protocol.MethodRunLaunch, Params: params}
+		if passed, err := svc.approveByRule(t.Context(), m.conversation(), m, &c); passed || err != nil {
+			t.Fatalf("card a rule covers whose workspace is %s = passed %v, %v; want a card", name, passed, err)
+		}
+		delete(set, "ws-1")
 	}
 }
 
@@ -330,5 +339,24 @@ func TestRuleNeverPassesAPreference(t *testing.T) {
 	got := actions(t, f.svc, f.m)
 	if len(got) < 2 || got[len(got)-2][0].Approval != "card" || got[len(got)-1][0].Approval != "rule" {
 		t.Fatalf("launch records = %+v; want the one carrying a preference carded and the other passed by the rule", got)
+	}
+}
+
+// Saving a rule answers the nudge: one card of another kind afterwards does
+// not bring the suggestion to turn auto-approval on.
+func TestSavingARuleStartsTheCountsOver(t *testing.T) {
+	svc, m, _, sock, _ := newRuleService(t)
+	kill := protocol.RunIDParams{RunID: "run-1"}
+	for range suggestAfter {
+		_ = callTool(t, sock, m, protocol.MethodRunKill, kill, true, true)
+	}
+	c, done := card(t, sock, m, protocol.MethodRunKill, kill)
+	if _, err := svc.ApproveAlways(t.Context(), "m1", c.ID); err != nil {
+		t.Fatal(err)
+	}
+	_ = wait(t, done)
+	_ = callTool(t, sock, m, protocol.MethodEnvSave, struct{}{}, true, true)
+	if st, _ := svc.Settings(t.Context(), "m1"); st.SuggestAutoApprove {
+		t.Fatal("suggested auto-approval one card after saving a rule")
 	}
 }

@@ -328,7 +328,7 @@ card it came from, when it was created and last used, and how many cards it
 passed. A revoke applies to the next card. A rule whose workspace was
 removed, or whose teammate's account is no longer shared with you, stops
 passing cards and is listed as `Inactive: <reason>`. Merging two members
-keeps neither member's rules on the survivor.
+keeps the survivor's rules and does not move the absorbed member's.
 
 After you approve three cards of one kind in a row, the next card of that
 kind highlights **Always approve**.

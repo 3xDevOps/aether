@@ -42,9 +42,9 @@ func (s *Service) approveByRule(ctx, conv context.Context, m *member, c *protoco
 		r := rules[i]
 		inactive, ierr := s.inactive(ctx, m, r)
 		if ierr != nil {
-			return false, fmt.Errorf("check approval rule %s: %w", r.ID, ierr)
+			slog.Warn("assistant: check the approval rule; showing the card", "member", m.id, "rule", r.ID, "error", ierr)
 		}
-		if inactive == "" {
+		if ierr == nil && inactive == "" {
 			return true, s.passByRule(ctx, conv, m, *c, r)
 		}
 	}
@@ -109,6 +109,11 @@ func (s *Service) ruleKey(ctx context.Context, m *member, c protocol.AssistantCo
 		dec := json.NewDecoder(bytes.NewReader(c.Params))
 		dec.DisallowUnknownFields()
 		if dec.Decode(&p) != nil || p.WorkspaceID == "" || harness.ValidateName(p.Harness) != nil {
+			return key, false
+		}
+		// The wording quotes these, so only values run.launch accepts reach it.
+		if _, err := domain.ParsePermission(p.Permission); err != nil || (p.Mode != "" && !domain.LaunchMode(p.Mode).Valid()) ||
+			domain.ValidModel(p.Model) != nil || domain.ValidEffort(p.Effort) != nil {
 			return key, false
 		}
 		// The card shows everything a rule allows: these widen a launch
@@ -179,10 +184,10 @@ func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.Assis
 	}
 	how := []string{cmp.Or(key.Mode, "default mode")}
 	if key.Model != "" {
-		how = append(how, "model "+key.Model)
+		how = append(how, fmt.Sprintf("model %q", key.Model))
 	}
 	if key.Effort != "" {
-		how = append(how, "effort "+key.Effort)
+		how = append(how, fmt.Sprintf("effort %q", key.Effort))
 	}
 	account := "your account"
 	if key.AccountMemberID != "" {
@@ -265,6 +270,16 @@ func (s *Service) ApproveAlways(ctx context.Context, id domain.MemberID, confirm
 	if err != nil {
 		return protocol.AssistantRule{}, fmt.Errorf("assistant: approved the card, but saving the rule failed: %w", err)
 	}
+	// The member answered the nudge: both counts start over.
+	st, err := s.cfg.Store.AssistantSettings(ctx, id)
+	if err == nil {
+		st.Approvals, st.RuleStreakKey, st.RuleStreak = 0, "", 0
+		err = s.cfg.Store.PutAssistantSettings(ctx, id, st)
+	}
+	if err != nil {
+		return protocol.AssistantRule{}, fmt.Errorf("assistant: saved rule %s, but resetting the approval counts failed: %w", r.ID, err)
+	}
+	m.notify()
 	slog.Info("assistant approval rule saved", "member", id, "rule", r.ID, "method", r.Key.Method)
 	return ruleOf(r, ""), nil
 }
