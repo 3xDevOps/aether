@@ -223,10 +223,14 @@
       transform: translateY(var(--mail-travel));
     }
   }
+  /* Hidden through its delay, until the pulse reaches the head. */
   @keyframes mail-ping {
     from {
-      opacity: 0.9;
+      opacity: 0;
       transform: scale(0.6);
+    }
+    10% {
+      opacity: 0.9;
     }
     to {
       opacity: 0;

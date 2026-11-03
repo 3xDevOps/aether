@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { ArrowDown, ArrowUp } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -9,14 +9,18 @@ import type { EdgeAnchor } from '@/routes/board/lanes/connectors'
 import type { Mail } from '@/routes/board/lanes/edges'
 import type { LaneGeometry } from '@/routes/board/lanes/lane-row'
 import { mailControl } from '@/routes/board/lanes/mail-marks'
+import { useStore } from '@/store'
 
 /** How long a live arrow shows, its fade included; under 5s, so it needs no pause control (WCAG 2.2.2). */
 export const liveMailMs = 4500
 /** Arrows on screen at once; a newer pair replaces the oldest. */
 export const liveMailCap = 3
 const slotPx = 8
+const nowGap = 14
 const stubPx = 22
 const announceDelay = 1500
+/** Older mail is a reconnect replaying the log, not mail arriving now; the margin covers clock skew. */
+const replayMs = 60_000
 
 export interface LiveEnd {
   /** Empty when the session has no lane in this view. */
@@ -91,8 +95,8 @@ export function useLiveMail({ arrivals, mail, drawn, shown, nameOf }: {
 
   useEffect(() => {
     const fresh = arrivals.filter((id) => !seen.current!.has(id))
+    seen.current = new Set(arrivals)
     if (fresh.length === 0) return
-    for (const id of fresh) seen.current!.add(id)
     const { mail, drawn, shown, nameOf } = latest.current
     // A hidden tab throttles timers, so arrows would pile up and play together on return.
     if (!shown || document.hidden) return
@@ -100,7 +104,7 @@ export function useLiveMail({ arrivals, mail, drawn, shown, nameOf }: {
     const at = Date.now()
     const found: Arrival[] = []
     for (const { t, payload } of mail.sent) {
-      if (!wanted.has(payload.message_id)) continue
+      if (!wanted.has(payload.message_id) || t < at - replayMs) continue
       const from = laneOf(drawn, payload.from_run_id)
       const to = laneOf(drawn, payload.to_run_id)
       if ((!from.lane && !to.lane) || from.lane === to.lane) continue
@@ -110,6 +114,8 @@ export function useLiveMail({ arrivals, mail, drawn, shown, nameOf }: {
     setLive((current) => addLiveMail(current, found))
     queue.current.push(...found.map((a) => `${nameOf(a.from)} to ${nameOf(a.to)}`))
     if (announceTimer.current !== undefined) return
+    // Cleared first, so a burst worded like the last one is still read.
+    setAnnouncement('')
     announceTimer.current = window.setTimeout(() => {
       announceTimer.current = undefined
       const pairs = [...new Set(queue.current)]
@@ -129,7 +135,12 @@ export function useLiveMail({ arrivals, mail, drawn, shown, nameOf }: {
   }, [live])
 
   useEffect(() => {
-    if (!shown) setLive([])
+    if (shown) return
+    setLive([])
+    setAnnouncement('')
+    clearTimeout(announceTimer.current)
+    announceTimer.current = undefined
+    queue.current = []
   }, [shown])
 
   return { live, announcement }
@@ -146,13 +157,18 @@ export interface LiveShape {
   offscreen?: { end: 'from' | 'to'; edge: 'top' | 'bottom' }
 }
 
-export function liveShapes(live: LiveArrow[], anchors: Map<string, EdgeAnchor>, g: LaneGeometry, view: { top: number; bottom: number }): LiveShape[] {
-  return live.flatMap((arrow): LiveShape[] => {
+/** Ends resolve through the current `drawn`, so an arrow follows a family that folds or opens while it shows. */
+export function liveShapes(live: LiveArrow[], drawn: Map<string, string>, anchors: Map<string, EdgeAnchor>, g: LaneGeometry, view: { top: number; bottom: number }, now: number): LiveShape[] {
+  const following = g.window.end >= now
+  return live.flatMap((live): LiveShape[] => {
+    const arrow = { ...live, from: laneOf(drawn, live.from.run), to: laneOf(drawn, live.to.run) }
+    // Panned into the past, mail sent now is past the window's end, as its marks are.
+    if (arrow.t < g.window.start || (arrow.t > g.window.end && !following)) return []
     const a = anchors.get(arrow.from.lane)
     const b = anchors.get(arrow.to.lane)
-    if (!a && !b) return []
-    // Inside the bar's rounded ends, like the marks it leaves behind.
-    const x = Math.max(6, Math.min(g.width - 6, xOf(arrow.t, g.window, g.width)) - arrow.slot * slotPx)
+    if ((!a && !b) || arrow.from.lane === arrow.to.lane) return []
+    // Clear of live bars' end caps and the now line, which mail sent now would otherwise sit on.
+    const x = Math.max(6, Math.min(g.width - nowGap, xOf(arrow.t, g.window, g.width)) - arrow.slot * slotPx)
     const mid = (e: EdgeAnchor) => e.top + e.height / 2
     if (a && b) {
       const dir = Math.sign(mid(b) - mid(a)) || 1
@@ -169,12 +185,10 @@ export function liveShapes(live: LiveArrow[], anchors: Map<string, EdgeAnchor>, 
     const up = e.top >= stubPx
     const edge = up ? mid(e) - e.half - 2 : mid(e) + e.half + 2
     const far = edge + (up ? -stubPx : stubPx)
-    return [a ? { arrow, x, y1: edge, y2: far, stub: 'out' as const } : { arrow, x, y1: far, y2: edge, stub: 'in' as const }]
+    const away: 'top' | 'bottom' | undefined = edge < view.top ? 'top' : edge > view.bottom ? 'bottom' : undefined
+    const offscreen = away && { end: a ? 'from' as const : 'to' as const, edge: away }
+    return [a ? { arrow, x, y1: edge, y2: far, stub: 'out', offscreen } : { arrow, x, y1: far, y2: edge, stub: 'in', offscreen }]
   })
-}
-
-function head(x: number, y: number, dir: number): string {
-  return `${x},${y} ${x - 3.5},${y - dir * 6} ${x + 3.5},${y - dir * 6}`
 }
 
 /**
@@ -182,20 +196,28 @@ function head(x: number, y: number, dir: number): string {
  * the ring at its head run on the compositor: Chromium repaints an
  * animation on an SVG child on the main thread.
  */
-export function LiveMail({ shapes, g, view, reserved, nameOf, onJump }: {
-  shapes: LiveShape[]
+export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf, onJump }: {
+  mail: Mail
+  drawn: Map<string, string>
+  anchors: Map<string, EdgeAnchor>
   g: LaneGeometry
   view: { top: number; bottom: number }
+  now: number
   /** Rows the focused lane's pinned buttons already take at each edge. */
   reserved: { top: number; bottom: number }
   nameOf: (end: LiveEnd) => string
   onJump: (lane: string) => void
 }) {
+  // Live state lives here, not in the lanes view, so an arrow coming or going re-renders only this layer.
+  const arrivals = useStore((s) => s.laneArrivals)
+  const shown = useStore((s) => !s.laneHidden.includes('message'))
+  const { live, announcement } = useLiveMail({ arrivals, mail, drawn, shown, nameOf })
   const still = useReducedMotion()
   const pinned = { top: reserved.top, bottom: reserved.bottom }
   return (
     <>
-      {shapes.map(({ arrow, x, y1, y2, stub, offscreen }) => {
+      <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
+      {liveShapes(live, drawn, anchors, g, view, now).map(({ arrow, x, y1, y2, stub, offscreen }) => {
         const dir = Math.sign(y2 - y1) || 1
         const top = Math.min(y1, y2) - 6
         const height = Math.abs(y2 - y1) + 12
@@ -218,7 +240,7 @@ export function LiveMail({ shapes, g, view, reserved, nameOf, onJump }: {
               size="sm"
               tabIndex={-1}
               className={cn(fade, 'pointer-events-auto absolute z-10 h-6 max-w-[min(280px,60%)] -translate-x-full gap-1 border-series-5 px-2 text-ui-xs')}
-              style={{ left: g.labelWidth + x - 10, top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
+              style={{ animationDelay: `${arrow.at - Date.now()}ms`, left: g.labelWidth + x - 10, top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
               onClick={() => onJump(end.lane)}
             >
               <Icon aria-hidden className="size-3 shrink-0 text-series-5" />
@@ -227,7 +249,18 @@ export function LiveMail({ shapes, g, view, reserved, nameOf, onJump }: {
             </Button>
           )
         }
-        return [
+        const flash = anchors.get(arrow.to.lane)
+        return (
+          <Fragment key={arrow.pair}>
+          {flash && (
+            <div
+              key={`${key}:flash`}
+              aria-hidden
+              data-mail-live-flash
+              className={cn(fade, 'pointer-events-none absolute bg-series-5/10')}
+              style={{ left: g.labelWidth, width: g.width, top: flash.top, height: flash.height }}
+            />
+          )}
           <div
             key={key}
             aria-hidden
@@ -237,14 +270,14 @@ export function LiveMail({ shapes, g, view, reserved, nameOf, onJump }: {
           >
             <svg className="absolute inset-0 overflow-visible" width={16} height={height}>
               <path d={`M8 ${from}V${to - dir * 5}`} stroke="var(--canvas)" strokeWidth={4} strokeLinecap="round" />
-              <path d={`M8 ${from}V${to - dir * 5}`} stroke="currentColor" strokeWidth={1.5} strokeDasharray="4 3" strokeLinecap="round" />
+              <path d={`M8 ${from}V${to - dir * 5}`} stroke="currentColor" strokeWidth={2} strokeDasharray="4 3" strokeLinecap="round" />
               {stub !== 'in' && <circle cx={8} cy={from} r={2.5} fill="currentColor" stroke="var(--canvas)" strokeWidth={1} />}
-              <polygon points={head(8, to, dir)} fill="currentColor" stroke="var(--canvas)" strokeWidth={1} strokeLinejoin="round" />
+              <polygon points={`8,${to} 4.5,${to - dir * 6} 11.5,${to - dir * 6}`} fill="currentColor" stroke="var(--canvas)" strokeWidth={1} strokeLinejoin="round" />
             </svg>
             {!still && (
               <>
                 <span
-                  className="absolute left-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full motion-safe:animate-mail-travel bg-current"
+                  className="absolute left-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full motion-safe:animate-mail-travel bg-current"
                   style={{ top: from, '--mail-travel': `${to - from}px` } as React.CSSProperties}
                 />
                 <span
@@ -262,9 +295,10 @@ export function LiveMail({ shapes, g, view, reserved, nameOf, onJump }: {
                 {arrow.count > 1 && `×${arrow.count}`}
               </span>
             )}
-          </div>,
-          chip,
-        ]
+          </div>
+          {chip}
+          </Fragment>
+        )
       })}
     </>
   )

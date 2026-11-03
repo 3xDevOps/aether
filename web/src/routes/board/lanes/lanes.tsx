@@ -13,7 +13,7 @@ import { EdgeHits, EdgeStrokes, drawEdges, edgeShape, type EdgeAnchor } from '@/
 import { laneEdges, type EdgesInput, type LaneEdge } from '@/routes/board/lanes/edges'
 import { EdgePopover, FamilyPopover, LaneConversations, LaneLinks, LanePopoverContent, RunPopover } from '@/routes/board/lanes/lane-popover'
 import { LaneRow, trackGutter, type LaneGeometry } from '@/routes/board/lanes/lane-row'
-import { LiveMail, liveShapes, useLiveMail } from '@/routes/board/lanes/live-mail'
+import { LiveMail } from '@/routes/board/lanes/live-mail'
 import { bundleWords, conversationTag, conversationWords, conversationsByLane, mailMarks, type Conversation } from '@/routes/board/lanes/mail'
 import { MailMarks, OffscreenMail } from '@/routes/board/lanes/mail-marks'
 import { laneHeight, layoutLanes, type Lane, type LanesModel, type RunLane } from '@/routes/board/lanes/model'
@@ -141,9 +141,6 @@ export function LanesView(props: LanesViewProps) {
     const run = useStore.getState().runs[c.run]
     return run ? runLabel(run) : c.run
   }, [byKey])
-  const arrivals = useStore((s) => s.laneArrivals)
-  const mailShown = useStore((s) => !s.laneHidden.includes('message'))
-  const { live, announcement: mailAnnouncement } = useLiveMail({ arrivals, mail: props.edgeInput.mail, drawn: model.drawn, shown: mailShown, nameOf })
   const talkWords = useMemo(() => new Map([...talks].map(([lane, list]) => [lane, conversationWords(list, nameOf)])), [talks, nameOf])
 
   const windowed = model.lanes.length > windowAbove
@@ -446,7 +443,6 @@ export function LanesView(props: LanesViewProps) {
   }
   // Before the first measure nothing counts as scrolled away.
   const view = viewport.height > 0 ? { top: viewport.top, bottom: visibleBottom } : { top: -Infinity, bottom: Infinity }
-  const liveShown = liveShapes(live, anchors, g, view)
   const focusAbove = focusTalks.filter((c) => offscreen(c, true))
   const focusBelow = focusTalks.filter((c) => offscreen(c, false))
   const focusOutside = focusTalks.filter((c) => !c.lane)
@@ -566,9 +562,12 @@ export function LanesView(props: LanesViewProps) {
           />
         )}
         <LiveMail
-          shapes={liveShown}
+          mail={props.edgeInput.mail}
+          drawn={model.drawn}
+          anchors={anchors}
           g={g}
           view={view}
+          now={now}
           reserved={{ top: Number(focusAbove.length > 0) + Number(focusOutside.length > 0), bottom: Number(focusBelow.length > 0) }}
           nameOf={nameOf}
           onJump={jump}
@@ -619,7 +618,6 @@ export function LanesView(props: LanesViewProps) {
           ) : null}
         </Popover>
       </div>
-      <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{mailAnnouncement}</span>
       {treeFocused && activeLane?.kind === 'run' && (
         <LaneKeys
           onOpen={() => navigate('run', { runId: activeLane.card.run.id })}

@@ -336,11 +336,14 @@ describe('live mail', () => {
   it('points at the scrolled-away end and stubs mail with a session outside the view', () => {
     const g = { window: { start: now - 60 * min, end: now }, width: 600, labelWidth: 240, compact: false, metrics: fineMetrics }
     const anchors = new Map([['a', { top: 0, height: 36, half: 12 }], ['b', { top: 720, height: 36, half: 12 }]])
-    const [down, out] = liveShapes(addLiveMail([], [arrival('a', 'b', 0), { ...arrival('a', '', 1), to: { lane: '', run: 'elsewhere' } }]), anchors, g, { top: 0, bottom: 400 })
+    const drawn = new Map([['a', 'a'], ['b', 'b']])
+    const [down, out] = liveShapes(addLiveMail([], [arrival('a', 'b', 0), { ...arrival('a', '', 1), to: { lane: '', run: 'elsewhere' } }]), drawn, anchors, g, { top: 0, bottom: 400 }, now)
     expect(down.offscreen).toEqual({ end: 'to', edge: 'bottom' })
     expect(down.y2).toBeGreaterThan(down.y1)
     expect([out.stub, out.offscreen]).toEqual(['out', undefined])
-    const [up] = liveShapes(addLiveMail([], [arrival('b', 'a', 0)]), anchors, g, { top: 600, bottom: 1000 })
+    const [up, stub] = liveShapes(addLiveMail([], [arrival('b', 'a', 0), { ...arrival('', 'a', 1), from: { lane: '', run: 'elsewhere' } }]), drawn, anchors, g, { top: 600, bottom: 1000 }, now)
     expect(up.offscreen).toEqual({ end: 'to', edge: 'top' })
+    expect([stub.stub, stub.offscreen]).toEqual(['in', { end: 'to', edge: 'top' }])
+    expect(liveShapes(addLiveMail([], [arrival('a', 'b', 0)]), drawn, anchors, { ...g, window: { start: now - 120 * min, end: now - 60 * min } }, { top: 0, bottom: 400 }, now)).toEqual([])
   })
 })
