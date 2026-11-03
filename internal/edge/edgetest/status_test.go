@@ -13,6 +13,7 @@ import (
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // Environment of the server process TestKilledServerStatusIsStale starts.
@@ -78,15 +79,29 @@ func TestKilledServerStatusIsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &serverNode{h: h, id: edgeproto.ServerID(hostKey.PublicKey()), dir: dir}
+	// The child would otherwise migrate its own database, which under the
+	// race detector and a loaded runner can outlast the connect wait.
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
 
+	var out strings.Builder
 	child := exec.Command(os.Args[0], "-test.run=^TestServerProcess$")
 	child.Env = append(os.Environ(), childDirEnv+"="+dir, childEdgeEnv+"="+h.relayURL)
+	child.Stdout, child.Stderr = &out, &out
 	if err = child.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_ = child.Process.Kill()
 		_ = child.Wait()
+		if t.Failed() {
+			t.Logf("server process output:\n%s", out.String())
+		}
 	})
 	a.waitStatus("the server process connected", func(st edgeagent.Status) error {
 		if st.PID != child.Process.Pid {

@@ -42,19 +42,20 @@ var migrated = sync.OnceValues(func() ([]byte, error) {
 // Open is store.Open for tests. A database that does not exist yet starts
 // as a copy of a fully migrated one; an existing file is opened as is.
 func Open(path string) (*store.DB, error) {
-	image, err := migrated()
-	if err != nil {
-		return nil, err
-	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	switch {
-	case err == nil:
-		_, writeErr := f.Write(image)
-		if joined := errors.Join(writeErr, f.Close()); joined != nil {
-			return nil, fmt.Errorf("storetest: write %s: %w", path, joined)
-		}
-	case !errors.Is(err, fs.ErrExist):
+	case errors.Is(err, fs.ErrExist):
+		return store.Open(path)
+	case err != nil:
 		return nil, fmt.Errorf("storetest: create %s: %w", path, err)
+	}
+	image, err := migrated()
+	if err == nil {
+		_, err = f.Write(image)
+	}
+	if joined := errors.Join(err, f.Close()); joined != nil {
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("storetest: write %s: %w", path, joined)
 	}
 	return store.Open(path)
 }
