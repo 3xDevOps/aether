@@ -181,7 +181,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if err != nil {
 		return nil, invalidParams(protocol.MethodRunLaunch + ": " + err.Error())
 	}
-	// An omitted tier and "default" are one launch to its idempotency key.
+	// An omitted tier and "default" are one launch to its idempotency key;
+	// servers before this fingerprinted "default" as given.
+	explicitDefault := p.Permission == string(domain.PermissionDefault)
 	if permission == domain.PermissionDefault {
 		p.Permission = ""
 	}
@@ -192,6 +194,12 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
+	var earlier any
+	if explicitDefault {
+		given := p
+		given.Permission = string(domain.PermissionDefault)
+		earlier = given
+	}
 	// Cancelling a launch mid-provisioning fails the run it is creating, so
 	// it outlives the caller's channel; a server shutdown still stops it.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -199,7 +207,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	defer context.AfterFunc(s.authCtx(), cancel)()
 	var skipped []protocol.SkippedAccount
 	var childrenErr *protocol.Error
-	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, earlier, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
 		return s.launchRun(ctx, member, p, mode, policy, func(id domain.RunID) {
 			if created != nil {
 				created(id)

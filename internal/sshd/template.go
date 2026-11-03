@@ -156,7 +156,7 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if replayOnly && key == "" {
 		return nil, invalidParams("replay_only needs the idempotency_key of the launch to return")
 	}
-	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, nil, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
 		if replayOnly {
 			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: no session was launched under idempotency_key %q", protocol.MethodTemplateLaunch, key)}
 		}
