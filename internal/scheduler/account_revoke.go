@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -104,17 +103,17 @@ func (s *Scheduler) leaveRevokedAccounts(ctx context.Context, match func(*domain
 	}
 }
 
-// accountRevoked reports whether the run's owner or the member whose home its
-// container mounts may no longer launch on the run's account.
+// accountRevoked reports whether the member whose home the run's container
+// mounts may no longer launch on the run's account. A handoff changes the
+// run's owner but keeps the launcher's account, so the new owner's shares
+// do not count.
 func (s *Scheduler) accountRevoked(ctx context.Context, run *domain.Run) (bool, error) {
-	for _, member := range slices.Compact([]domain.MemberID{run.HomeMember(), run.MemberID}) {
-		_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(run.AccountMember()))
-		switch {
-		case errors.Is(err, permissions.ErrDenied) || errors.Is(err, store.ErrNotFound):
-			return true, nil
-		case err != nil:
-			return false, err
-		}
+	_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, run.HomeMember(), string(run.AccountMember()))
+	switch {
+	case errors.Is(err, permissions.ErrDenied) || errors.Is(err, store.ErrNotFound):
+		return true, nil
+	case err != nil:
+		return false, err
 	}
 	return false, nil
 }
@@ -143,16 +142,26 @@ func (s *Scheduler) leaveRevokedAccount(entry *supervised) {
 	}
 	ctx, cancel := context.WithTimeout(s.superCtx, usageMoveTimeout)
 	defer cancel()
+	// A move that finished between the check and the claim may have left
+	// the revoked account already.
+	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
+	revoked := err == nil
+	if err == nil {
+		revoked, err = s.accountRevoked(ctx, run)
+	}
+	if err != nil || !revoked {
+		if err != nil {
+			slog.Warn("scheduler: recheck the session's account share", "run", entry.runID, "error", err)
+		}
+		s.releaseMoveClaim(entry)
+		return
+	}
 	if !movable {
 		cause := "the session cannot move to another account now"
 		if paused {
 			cause = "the session is paused"
 		}
-		owner := "the account owner"
-		if run, err := s.cfg.Store.GetRun(ctx, entry.runID); err == nil {
-			owner = s.memberName(ctx, run.AccountMember())
-		}
-		s.stopRevoked(ctx, entry, revokeMove.cannotContinue(owner, cause))
+		s.stopRevoked(ctx, entry, revokeMove.cannotContinue(s.memberName(ctx, run.AccountMember()), cause))
 		return
 	}
 	outcome, reason := s.moveAccount(ctx, entry, revokeMove)

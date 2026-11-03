@@ -78,6 +78,23 @@ func TestRevokeMovesALiveRunToTheLaunchersOwnAccount(t *testing.T) {
 		sc, err := e.sched.readSidecar(run.ID)
 		return err == nil && sc.AccountSwap == nil
 	})
+
+	// A second revoke job queued before the move finished finds the run
+	// already off Grace's account and leaves it.
+	moved := e.rt.byName(string(run.ID))
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	e.sched.leaveRevokedAccount(entry)
+	if row, err := e.db.GetRun(t.Context(), run.ID); err != nil || row.Status.Terminal() || row.AccountMemberID != e.member.ID || e.rt.byName(string(run.ID)) != moved {
+		t.Fatalf("run after a stale revoke = %+v, %v; want it kept on Ada's account", row, err)
+	}
+	e.sched.mu.Lock()
+	claimed := entry.moving || entry.finalizing
+	e.sched.mu.Unlock()
+	if claimed {
+		t.Fatal("a stale revoke kept its claim on the run")
+	}
 }
 
 func TestRevokeStopsARunNoOtherAccountCanTake(t *testing.T) {
@@ -114,8 +131,9 @@ func TestRevokeStopsARunNoOtherAccountCanTake(t *testing.T) {
 }
 
 // A revoke touches only runs on the revoked account that the revoked member
-// may no longer use: Ada's run on her own account and Lin's on Grace's, still
-// shared with Lin, keep their containers, through the sweep too.
+// may no longer use: Ada's run on her own account, her own-account run handed
+// to Lin, who has no share of Ada's, and Lin's on Grace's, still shared with
+// Lin, keep their containers, through the sweep too.
 func TestRevokeLeavesOtherRunsAlone(t *testing.T) {
 	t.Parallel()
 	e, _, notes := newFallbackEnv(t, enhancedClaude)
@@ -132,13 +150,24 @@ func TestRevokeLeavesOtherRunsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	containers := map[domain.RunID]*fakeContainer{own.ID: e.rt.byName(string(own.ID)), other.ID: e.rt.byName(string(other.ID))}
+	handed, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "handed", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.TransferRunWithHandoff(t.Context(), &store.HandoffOutbox{
+		ID: "handoff-test", WorkspaceID: e.ws.ID, RunID: handed.ID, ActorID: e.member.ID,
+		FromMemberID: e.member.ID, ToMemberID: lin.ID,
+		EvidenceState: store.HandoffEvidencePending, PublicationState: store.HandoffPublicationPending,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	containers := map[domain.RunID]*fakeContainer{own.ID: e.rt.byName(string(own.ID)), other.ID: e.rt.byName(string(other.ID)), handed.ID: e.rt.byName(string(handed.ID))}
 
 	e.revoke(t)
 	e.sched.leaveRevokedAccounts(t.Context(), nil)
 	time.Sleep(100 * time.Millisecond)
 
-	for id, want := range map[domain.RunID]domain.MemberID{own.ID: e.member.ID, other.ID: e.owner.ID} {
+	for id, want := range map[domain.RunID]domain.MemberID{own.ID: e.member.ID, other.ID: e.owner.ID, handed.ID: e.member.ID} {
 		row, err := e.db.GetRun(t.Context(), id)
 		if err != nil || row.Status != domain.RunRunning || row.AccountMember() != want {
 			t.Fatalf("run %s = %+v, %v; want it running on %s", id, row, err, want)

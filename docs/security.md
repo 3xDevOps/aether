@@ -269,6 +269,8 @@ their own entries.
   again every 30 seconds (`aether-server --poll-interval`) and after a
   restart, so a session that was mid-move or provisioning then still leaves
   your account. A closed session's paused container cannot reopen on it.
+  Only the launcher's share counts: a session handed to another member
+  (`aether handoff`) stays on the launcher's account.
 - [Usage fallback](teams.md#usage-fallback) can move their session onto your
   account when theirs runs out, without them picking it: your share is the
   consent. It never picks an account not shared with the launcher.
