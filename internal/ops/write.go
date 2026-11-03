@@ -312,7 +312,9 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	if params.IdempotencyKey == "" {
 		var prior protocol.Run
 		var found bool
-		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodRunLaunch, params, func() (ok bool, err error) {
+		fingerprint := params
+		fingerprint.Permission = cmp.Or(params.Permission, string(domain.PermissionDefault))
+		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodRunLaunch, fingerprint, func() (ok bool, err error) {
 			prior, ok, err = recentLaunch(ctx, c.read, in, book.self(), time.Now())
 			return ok, err
 		})

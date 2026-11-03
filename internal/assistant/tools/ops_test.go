@@ -319,10 +319,10 @@ func TestLaunchCardRefusesInjectedSavedDefaults(t *testing.T) {
 		}
 	}
 
-	_, _, d, err := statedReason(protocol.MethodRunLaunch, json.RawMessage(`{"saved_defaults":{"applied":["harness","harness","harness","harness","harness","harness","harness"],
+	_, _, d, err := statedReason(protocol.MethodRunLaunch, json.RawMessage(`{"saved_defaults":{"applied":["harness","harness","harness","harness","harness","harness","harness","harness"],
 		"skipped":[{"field":"mode","reason":"1"},{"field":"mode","reason":"2"},{"field":"mode","reason":"3"},{"field":"mode","reason":"4"},
 		{"field":"mode","reason":"5"},{"field":"mode","reason":"6"},{"field":"mode","reason":"7"}]}}`))
-	if err != nil || len(d.Applied) != 6 || len(d.Skipped) != maxNamed {
+	if err != nil || len(d.Applied) != len(savedApplied) || len(d.Skipped) != maxNamed {
 		t.Fatalf("statedReason = %+v, %v, want applied and skipped capped", d, err)
 	}
 }
@@ -336,13 +336,13 @@ func TestLaunchCardNamesSavedDefaults(t *testing.T) {
 		got = c
 		return nil
 	}}
-	raw := json.RawMessage(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","no_fallback":true,
-		"saved_defaults":{"applied":["harness","mode"],"skipped":[{"field":"mode","reason":"enhanced mode is not installed"}],
+	raw := json.RawMessage(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","no_fallback":true,"permission":"root",
+		"saved_defaults":{"applied":["harness","mode","permission"],"skipped":[{"field":"mode","reason":"enhanced mode is not installed"}],
 		"unchecked":[{"field":"model","reason":"no current model list"}]}}`)
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
 		t.Fatal(perr)
 	}
-	if !strings.HasSuffix(got.Summary, `. From your saved defaults: harness, mode. Saved mode not used: enhanced mode is not installed. Saved model not checked: no current model list`) ||
+	if !strings.HasSuffix(got.Summary, `, permission root: "fix it". From your saved defaults: harness, mode, permission. Saved mode not used: enhanced mode is not installed. Saved model not checked: no current model list`) ||
 		got.Defaults == nil || len(got.Defaults.Skipped) != 1 || len(got.Defaults.Unchecked) != 1 {
 		t.Fatalf("confirmation = %+v", got)
 	}

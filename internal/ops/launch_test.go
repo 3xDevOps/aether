@@ -1,11 +1,13 @@
 package ops
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -261,6 +263,43 @@ func TestKeylessLaunchComparesAccountOptions(t *testing.T) {
 		if dup := out["duplicate"] == true; dup != c.duplicate || dup == (len(called(f, protocol.MethodRunLaunch)) == 1) {
 			t.Errorf("%s: duplicate %v after %d launches, want %v", name, out["duplicate"], len(called(f, protocol.MethodRunLaunch)), c.duplicate)
 		}
+	}
+}
+
+// A keyless launch that omits its tier and one that names Default are the
+// same launch while the first is still in flight.
+func TestKeylessLaunchInFlightTreatsOmittedTierAsDefault(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{Member: protocol.Member{ID: "mem-tier"}})
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	cs := callSession(t, func(ctx context.Context, method string, params, out any) error {
+		if CallScope(ctx) == ScopeRead {
+			return f.call(ctx, method, params, out)
+		}
+		p := params.(protocol.RunLaunchParams)
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			close(started)
+			<-release
+		}
+		*out.(*protocol.RunLaunchResult) = protocol.RunLaunchResult{Run: protocol.Run{ID: "run-" + p.IdempotencyKey, Status: "queued"}}
+		return nil
+	}, ScopeWrite)
+	args := map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t"}
+	firstDone := make(chan map[string]any, 1)
+	go func() {
+		_, out := run(t, cs, "aether_launch_session", maps.Clone(args))
+		firstDone <- out
+	}()
+	<-started
+	args["permission"] = "default"
+	_, second := run(t, cs, "aether_launch_session", args)
+	close(release)
+	first := <-firstDone
+	if second["duplicate"] != true || second["run_id"] != first["run_id"] {
+		t.Fatalf("a Default launch while the same launch without a tier is in flight = %v, first %v", second, first)
 	}
 }
 
