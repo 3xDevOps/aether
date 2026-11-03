@@ -175,6 +175,11 @@ func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Repo
 	if skip {
 		return
 	}
+	// A move that replaces the container meanwhile must not get this
+	// turn's end.
+	d.s.mu.Lock()
+	cid := entry.containerID
+	d.s.mu.Unlock()
 	go func() {
 		unlock := d.lockOp(entry.runID)
 		d.mu.Lock()
@@ -187,8 +192,7 @@ func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Repo
 		}
 		unlock()
 		d.s.mu.Lock()
-		cid := entry.containerID
-		if !ok {
+		if !ok && entry.containerID == cid {
 			entry.exitDetail = idle.Reason
 		}
 		d.s.mu.Unlock()
