@@ -169,9 +169,13 @@ describe('approval rules', () => {
 
   it('lists each rule with the card it came from and its use, and revokes one at once', async () => {
     const user = userEvent.setup()
+    let held = [rule, { ...rule, id: 'rule-2', wording: 'Always approve stopping your own sessions in web', summary: 'Stop session run-1', last_used_at: undefined, uses: 0, inactive: 'workspace ws-web no longer exists or you lost access to it' }]
     const client = show(['*'], {
-      assistantRules: vi.fn(async () => [rule, { ...rule, id: 'rule-2', wording: 'Always approve stopping your own sessions in web', summary: 'Stop session run-1', last_used_at: undefined, uses: 0, inactive: 'workspace ws-web no longer exists or you lost access to it' }]),
-      assistantRuleRevoke: vi.fn(async () => ({})),
+      assistantRules: vi.fn(async () => held),
+      assistantRuleRevoke: vi.fn(async (id: string) => {
+        held = held.filter((r) => r.id !== id)
+        return {}
+      }),
     })
     const section = await screen.findByRole('region', { name: 'Approval rules' })
     expect(await within(section).findByText(rule.wording)).toBeDefined()
@@ -183,6 +187,8 @@ describe('approval rules', () => {
     await user.click(within(section).getByRole('button', { name: `Revoke ${rule.wording}` }))
     expect(client.assistantRuleRevoke).toHaveBeenCalledWith('rule-1')
     await waitFor(() => expect(within(section).queryByText(rule.wording)).toBeNull())
+    await waitFor(() => expect(client.assistantRules).toHaveBeenCalledTimes(2))
+    expect(within(section).getByText('Always approve stopping your own sessions in web')).toBeDefined()
   })
 
   it('reads the rules again when a card saves one or another member signs in', async () => {
@@ -201,6 +207,15 @@ describe('approval rules', () => {
     await waitFor(() => expect(toggle()).toHaveProperty('disabled', false))
     expect(screen.queryByRole('region', { name: 'Approval rules' })).toBeNull()
     expect(client.assistantRules).not.toHaveBeenCalled()
+  })
+
+  it('clears a failed read once a later read succeeds', async () => {
+    show(['*'], { assistantRules: vi.fn().mockRejectedValueOnce(new ApiError(503, 'assistant.rules: ssh: connection lost')).mockResolvedValue([rule]) })
+    const section = await screen.findByRole('region', { name: 'Approval rules' })
+    expect(await within(section).findByText(/connection lost/)).toBeDefined()
+    act(() => useStore.getState().noteRuleSaved())
+    expect(await within(section).findByText(rule.wording)).toBeDefined()
+    expect(within(section).queryByText(/connection lost/)).toBeNull()
   })
 
   it('shows the real error of a failed read and tries again', async () => {

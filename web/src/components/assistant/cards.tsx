@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { isLaunch, launchTitle, useLaunchRows } from '@/components/assistant/launch-summary'
 import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -106,7 +107,11 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
                 variant={rule.suggested ? 'confirm' : 'secondary'}
                 className="h-auto min-h-8 justify-start py-1.5 text-left whitespace-normal coarse:h-auto coarse:min-h-11"
                 disabled={busy !== null}
-                onClick={() => void run('always', () => api.assistantApproveAlways(confirmation.id).then(() => useStore.getState().noteRuleSaved()))}
+                onClick={() => void run('always', () => api.assistantApproveAlways(confirmation.id).then(() => useStore.getState().noteRuleSaved(), (err: unknown) => {
+                  // The server may have approved the card before saving the rule failed, and the card is gone by then.
+                  toast.error(`Always approve: ${message(err)}`)
+                  throw err
+                }))}
               >
                 {busy === 'always' ? 'Saving the rule…' : rule.wording}
               </Button>

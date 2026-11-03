@@ -42,7 +42,7 @@ export function ApprovalChoice() {
           <Button size="sm" variant="primary" disabled={sending !== null} onClick={() => choose('ask')}>
             {sending === 'ask' ? 'Saving…' : 'Ask before acting'}
           </Button>
-          <p className="text-ui-sm text-muted">It shows a card before it launches, messages or stops a session, or saves your environment. Recommended.</p>
+          <p className="text-ui-sm text-muted">It shows a card before it launches, messages or stops a session, or saves your environment. Rules you save with Always approve still skip their card. Recommended.</p>
         </div>
         <div className="flex flex-col items-start gap-1">
           <Button size="sm" variant="secondary" disabled={sending !== null} onClick={() => choose('act')}>

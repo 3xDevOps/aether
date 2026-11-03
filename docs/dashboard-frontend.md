@@ -6089,7 +6089,7 @@ Categories:
   `assistant.rules`: each rule's wording, `From:` the card it came from,
   when it was created and last used and how many times, `Inactive: <reason>`
   when set, and **Revoke** (`assistant.rules.revoke`), which drops the row
-  once the server answers; with none it says **No rules yet**, and a failed
+  once the server answers and reads the list again; with none it says **No rules yet**, and a failed
   read shows its error with **Try again**. It reads again when a card saves a
   rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the

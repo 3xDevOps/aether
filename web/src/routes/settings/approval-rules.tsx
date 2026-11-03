@@ -21,6 +21,7 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
   useEffect(() => {
     let live = true
     setRules(null)
+    setError(null)
     client.assistantRules().then(
       (r) => live && setRules(r),
       (err: unknown) => live && setError(errorSentence(err)),
@@ -34,7 +35,12 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
     setRevoking(id)
     setError(null)
     client.assistantRuleRevoke(id).then(
-      () => useStore.getState().identityKey === identity && setRules((held) => held?.filter((r) => r.id !== id) ?? null),
+      () => {
+        if (useStore.getState().identityKey !== identity) return
+        setRules((held) => held?.filter((r) => r.id !== id) ?? null)
+        // A read started before the revoke may still list the rule.
+        setAttempt((n) => n + 1)
+      },
       (err: unknown) => useStore.getState().identityKey === identity && setError(errorSentence(err)),
     ).finally(() => setRevoking(''))
   }
