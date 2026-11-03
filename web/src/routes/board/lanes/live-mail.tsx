@@ -19,7 +19,7 @@ const slotPx = 16
 const nowGap = 28
 const stubPx = 22
 const bowMax = 56
-/** Shorter spans, such as adjacent lanes, stay straight: a bow there would tip the head toward the now line. */
+/** Shorter spans, such as adjacent lanes, stay straight: the 6px head is longer than their arc, so it would point sideways. */
 const bowFrom = 24
 const announceDelay = 1500
 /** Older mail is a reconnect replaying the log, not mail arriving now; the margin covers clock skew. */
