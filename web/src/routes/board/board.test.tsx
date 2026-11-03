@@ -7,6 +7,7 @@ import type { Event, GatewayCapabilities, Run, TimelinePage } from '@/lib/types'
 import { Board } from '@/routes/board'
 import { virtualizeAbove } from '@/routes/board/card-list'
 import { EdgePopover } from '@/routes/board/lanes/lane-popover'
+import { liveMailMs } from '@/routes/board/lanes/live-mail'
 import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
 import { useStore } from '@/store'
@@ -786,6 +787,53 @@ describe('lanes view', () => {
     expect(within(messages).getByRole('button', { name: /^→ Agent message · .* · not acknowledged$/ })).toBeDefined()
     await userEvent.click(within(messages).getByRole('button', { name: 'waiting on you' }))
     await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^waiting on you.*received 1 from still going/))
+  })
+
+  it('draws an arrow only for mail that arrives while the view is open, not a replay, then leaves its marks', async () => {
+    seed([stopped, working])
+    const mail = (seq: number, id: string, minutesAgo: number): Event => ({
+      id: `evt_${id}`, seq, time: new Date(Date.now() - minutesAgo * 60_000).toISOString(), workspace_id: workspace.id, run_id: working.id, actor_id: '',
+      type: 'coord.message', payload: { message_id: id, workspace_id: workspace.id, from_run_id: working.id, to_run_id: stopped.id, kind: 'question' },
+    })
+    vi.mocked(api.workspaceTimeline).mockResolvedValueOnce({ events: [mail(1, 'm1', 50)], next_seq: 0, more: false })
+    await openLanes()
+    await waitFor(() => expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(2))
+    expect(document.querySelector('[data-mail-live]')).toBeNull()
+    act(() => useStore.getState().appendLaneEvent(mail(2, 'replayed', 20)))
+    expect(document.querySelector('[data-mail-live]')).toBeNull()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      act(() => useStore.getState().appendLaneEvent(mail(3, 'm2', 0.5)))
+      const arrow = document.querySelector<HTMLElement>('[data-mail-live]')!
+      expect(arrow.className).toContain('animate-mail-live')
+      expect(arrow.querySelector('.motion-safe\\:animate-mail-travel')).not.toBeNull()
+      act(() => vi.advanceTimersByTime(1500))
+      expect(screen.getByText('New message from still going to waiting on you')).toBeDefined()
+      act(() => vi.advanceTimersByTime(liveMailMs))
+      expect(document.querySelector('[data-mail-live]')).toBeNull()
+      expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(6)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a live arrow without travel or fade under reduced motion', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) => ({ matches: query.includes('prefers-reduced-motion'), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList,
+    )
+    try {
+      seed([stopped, working])
+      await openLanes()
+      act(() => useStore.getState().appendLaneEvent({
+        id: 'evt_live', seq: 5, time: new Date().toISOString(), workspace_id: workspace.id, run_id: working.id, actor_id: '',
+        type: 'coord.message', payload: { message_id: 'live', workspace_id: workspace.id, from_run_id: working.id, to_run_id: stopped.id, kind: 'message' },
+      }))
+      const arrow = document.querySelector<HTMLElement>('[data-mail-live]')!
+      expect(arrow.className).not.toContain('animate-mail-live')
+      expect(arrow.querySelectorAll('span.rounded-full')).toHaveLength(0)
+    } finally {
+      media.mockRestore()
+    }
   })
 
   it('keeps the reply composer open after Reply in a lane popover', async () => {

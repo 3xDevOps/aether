@@ -14,6 +14,8 @@ export const laneEventTypes = ['run.status', 'coord.message', 'coord.message.ack
 /** Events held per workspace. A busy workspace's 7d window can hold far more; past this the bars say history is not loaded. */
 export const historyBudget = 5000
 
+const arrivalsKept = 64
+
 /** One workspace's history, read backward from the log head. */
 export interface LaneHistory {
   /** Oldest first, unique by seq. */
@@ -30,6 +32,8 @@ export interface LaneHistory {
 
 export interface LanesSlice {
   laneHistory: Record<string, LaneHistory>
+  /** Agent mail that arrived live while a Lanes view was mounted, newest last; history pages never add to it. */
+  laneArrivals: string[]
   /** Live events are kept only while a Lanes view is mounted. */
   laneViews: number
   /** Null follows the default: 1h while anything works, else 6h. */
@@ -62,6 +66,7 @@ function merged(events: Event[], more: Event[]): Event[] {
 
 export const createLanesSlice: SliceCreator<LanesSlice> = (set, get) => ({
   laneHistory: {},
+  laneArrivals: [],
   laneViews: 0,
   laneWindow: null,
   laneGroup: 'status',
@@ -69,7 +74,7 @@ export const createLanesSlice: SliceCreator<LanesSlice> = (set, get) => ({
   // The last view to leave drops the history: nothing appends to it unheld.
   holdLanes: () => {
     set((s) => ({ laneViews: s.laneViews + 1 }))
-    return () => set((s) => (s.laneViews === 1 ? { laneViews: 0, laneHistory: {} } : { laneViews: s.laneViews - 1 }))
+    return () => set((s) => (s.laneViews === 1 ? { laneViews: 0, laneHistory: {}, laneArrivals: [] } : { laneViews: s.laneViews - 1 }))
   },
   appendLaneEvent: (event) => {
     const s = get()
@@ -81,8 +86,10 @@ export const createLanesSlice: SliceCreator<LanesSlice> = (set, get) => ({
     const drop = events.length - historyBudget
     // Dropping the oldest moves the boundary up to the oldest kept, so bars before it read History not loaded.
     const next = drop > 0 ? { events: events.slice(drop), floor: Date.parse(events[drop].time), olderSeq: events[drop].seq } : { events }
+    const id = event.type === 'coord.message' ? (event.payload as { message_id?: string }).message_id : undefined
     set((state) => ({
       laneHistory: { ...state.laneHistory, [event.workspace_id]: { ...history, ...next } },
+      ...(id && { laneArrivals: [...state.laneArrivals.slice(1 - arrivalsKept), id] }),
     }))
   },
   setLaneHistory: (workspaceID, patch, older = []) =>

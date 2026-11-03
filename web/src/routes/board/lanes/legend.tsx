@@ -40,6 +40,7 @@ function Mark({ sent }: { sent: boolean }) {
 const lines = [
   { label: 'Agent message sent, on the edge facing the recipient', line: <Mark sent /> },
   { label: 'Agent message received, on the edge facing the sender', line: <Mark sent={false} /> },
+  { label: 'Message that just arrived; fades in a few seconds', line: <Line className={edgeTone.message} dash="4 3" tail="dot" head="filled" /> },
   { label: 'Focused session\'s message, acknowledged', line: <Line className={edgeTone.message} tail="dot" head="filled" /> },
   { label: 'Focused session\'s message, not acknowledged', line: <Line className={edgeTone.message} tail="dot" head="hollow" /> },
   { label: 'Edits the same files (selected session)', line: <Line className={edgeTone.overlap} dash="4 2" /> },
