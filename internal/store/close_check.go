@@ -33,7 +33,7 @@ func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.
 	if err != nil {
 		return out, fmt.Errorf("store: close dependents: %w", err)
 	}
-	if err := d.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_messages
+	if err = d.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_messages
 		WHERE to_run = ?1 AND from_run <> ?1 AND ((acked_at IS NULL AND retired_at IS NULL) OR created_at > ?2)`,
 		run, since).Scan(&out.Messages); err != nil {
 		return out, fmt.Errorf("store: close dependents: messages: %w", err)
