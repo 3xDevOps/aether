@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // revocableEnv is gatedEnv with a fast re-validation clock.
@@ -954,4 +955,41 @@ func TestAttachReadOnlySurvivesSteerLossUntilMembershipGoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.expectExit(t, protocol.AttachExitMembershipRevoked)
+}
+
+// removedDuringShareCheck removes grantee as its account share is read,
+// the way a removal committed between authorize's reads lands.
+type removedDuringShareCheck struct {
+	store.Store
+	grantee domain.MemberID
+}
+
+func (s removedDuringShareCheck) AccountSharedWith(ctx context.Context, owner, grantee domain.MemberID) (bool, error) {
+	if grantee == s.grantee {
+		if err := s.DeleteMember(ctx, grantee); err != nil {
+			return false, err
+		}
+	}
+	return s.Store.AccountSharedWith(ctx, owner, grantee)
+}
+
+// A member removed while a shell checks its authority is told its
+// membership ended, not that it lost steer, even though the removal also
+// dropped the account share the check reads last.
+func TestDevelopmentAuthorityReportsARemovalMidCheck(t *testing.T) {
+	e := revocableEnv(t)
+	installDevelopmentTestService(e)
+	_, cm := addMember(t, e, "Shell viewer", domain.RoleCollaborator, false)
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, cm.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, _, authorize, err := e.srv.developmentAuthority(t.Context(), cm.ID, string(e.run.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.srv.cfg.Store = removedDuringShareCheck{Store: e.store, grantee: cm.ID}
+	err = authorize(t.Context())
+	if got := attachExitForError(err); got != protocol.AttachExitMembershipRevoked {
+		t.Fatalf("exit for %v = %d, want membership revoked (%d)", err, got, protocol.AttachExitMembershipRevoked)
+	}
 }
