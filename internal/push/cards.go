@@ -61,6 +61,7 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		if slices.ContainsFunc(pending, func(c protocol.AssistantConfirmation) bool { return c.ID == id }) {
 			continue
 		}
+		s.unjoin(ctx, cardTopic(id))
 		if pushed {
 			results, err := s.Deliver(ctx, member, Message{Title: cardTitle, URL: CardLink, Topic: cardTopic(id), Clear: true})
 			if failed(results, err) {
