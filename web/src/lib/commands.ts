@@ -39,7 +39,7 @@ import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
 import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
-import { closeWarned, readCloseCheck } from '@/lib/close-check'
+import { closeChangedText, closeState, closeWarned, readCloseCheck } from '@/lib/close-check'
 import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
@@ -1017,11 +1017,16 @@ export function useCommandRunner(
         const { runID, outcome } = command.closes
         if (useStore.getState().closeChecking[runID]) return
         const same = sameIdentity()
+        const asked = closeState(useStore.getState().runs[runID])
         setCloseChecking(runID, true)
         const check = await readCloseCheck(runID, outcome).finally(() => setCloseChecking(runID, false))
         if (!same()) return
+        if (closeState(useStore.getState().runs[runID]) !== asked) {
+          toast.info(closeChangedText)
+          return
+        }
         if (closeWarned(check, outcome)) {
-          openCloseConfirmation({ check, command: { ...command, closes: undefined } })
+          openCloseConfirmation({ check, asked, command: { ...command, closes: undefined } })
           return
         }
       }

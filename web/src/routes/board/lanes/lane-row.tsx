@@ -180,6 +180,7 @@ function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agen
       <span className="flex items-center gap-1">
         <StatusDot tone={stateTone[state]} pulse={state === 'working'} />
         <AgentGlyph agent={card.run.harness} />
+        {card.run.protected && <ProtectedMark />}
       </span>
     )
   }

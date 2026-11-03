@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
 import { RunRetention } from '@/components/run-retention'
 import {
   AlertDialog,
@@ -11,7 +12,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { readCloseCheck } from '@/lib/close-check'
+import { closeChangedText, closeState, readCloseCheck } from '@/lib/close-check'
 import { useCommandRunner } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 import type { CloseOutcome, CloseWarning, Run, RunCloseCheck } from '@/lib/types'
@@ -125,6 +126,10 @@ export function CloseConfirmation() {
           <AlertDialogAction
             onClick={() => {
               dismiss()
+              if (closeState(useStore.getState().runs[run.id]) !== pending.asked) {
+                toast.info(closeChangedText)
+                return
+              }
               void perform(pending.command)
             }}
           >

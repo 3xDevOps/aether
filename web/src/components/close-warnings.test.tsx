@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { CloseConfirmation, CloseWarnings } from '@/components/close-warnings'
 import { Check } from '@/components/icons'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { runCommands, useCommandRunner } from '@/lib/commands'
 import { useStore } from '@/store'
@@ -12,7 +13,7 @@ vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
   return { ...actual, api: fakeApi() }
 })
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }))
 
 function MarkComplete() {
   const perform = useCommandRunner()
@@ -30,6 +31,7 @@ function MarkComplete() {
 beforeEach(() => {
   vi.mocked(api.runReview).mockClear()
   vi.mocked(api.runCloseCheck).mockClear()
+  vi.mocked(toast.info).mockClear()
   useStore.setState({
     info: { ...serverInfo, member: alice },
     runs: { run_1: toRecord(run({ id: 'run_1', status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' })) },
@@ -76,9 +78,32 @@ describe('Mark complete with close warnings', () => {
     expect(api.runCloseCheck).toHaveBeenCalledWith(['run_1'], 'completed')
   })
 
+  it('drops the close when the session changed during a slow check, such as after Not yet', async () => {
+    vi.mocked(api.runCloseCheck).mockReset()
+    const answer = Promise.withResolvers<{ run_id: string; warnings: [] }[]>()
+    vi.mocked(api.runCloseCheck).mockReturnValueOnce(answer.promise)
+    render(<><MarkComplete /><CloseConfirmation /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
+    act(() => useStore.setState((s) => ({ runs: { run_1: { ...s.runs.run_1!, review: '' } } })))
+    await act(async () => answer.resolve([{ run_id: 'run_1', warnings: [] }]))
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith('The session changed while its close was being checked, so it was not closed'))
+    expect(api.runReview).not.toHaveBeenCalled()
+  })
+
+  it('drops Close anyway when the session changed since the warnings were shown', async () => {
+    render(<><MarkComplete /><CloseConfirmation /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
+    await screen.findByRole('alertdialog')
+    act(() => useStore.setState((s) => ({ runs: { run_1: { ...s.runs.run_1!, status: 'running', state: 'working' } } })))
+    fireEvent.click(screen.getByRole('button', { name: 'Close anyway' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(api.runReview).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalled()
+  })
+
   it('drops the confirmation when its run is gone', async () => {
     render(<CloseConfirmation />)
-    act(() => useStore.setState({ runs: {}, closeConfirmation: { check: { run_id: 'run_1', warnings: [{ kind: 'protected', detail: 'Protected' }] }, command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } } }))
+    act(() => useStore.setState({ runs: {}, closeConfirmation: { check: { run_id: 'run_1', warnings: [{ kind: 'protected', detail: 'Protected' }] }, asked: '', command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } } }))
     await waitFor(() => expect(useStore.getState().closeConfirmation).toBeNull())
   })
 })

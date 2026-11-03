@@ -1,6 +1,6 @@
 import { api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
-import type { CloseOutcome, RunCloseCheck } from '@/lib/types'
+import type { CloseOutcome, Run, RunCloseCheck } from '@/lib/types'
 
 /** A failed read is the check's error, so a close never proceeds on a guess. */
 export function readCloseCheck(runID: string, outcome?: CloseOutcome): Promise<RunCloseCheck> {
@@ -15,3 +15,10 @@ export function closeWarned(check: RunCloseCheck | undefined, outcome?: CloseOut
   if (!check) return false
   return Boolean(check.error) || check.warnings.some((warning) => !(outcome === 'merged' && warning.kind === 'unmerged_work'))
 }
+
+/** What a close was asked against; a close is dropped when this changed before it runs, such as after Not yet. */
+export function closeState(run: Pick<Run, 'status' | 'review' | 'state'> | undefined): string {
+  return run ? `${run.status}|${run.review ?? ''}|${run.state ?? ''}` : ''
+}
+
+export const closeChangedText = 'The session changed while its close was being checked, so it was not closed'
