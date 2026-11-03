@@ -542,7 +542,11 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
   double click cancels once and an agent that ignores it can be stopped
   again; the call aborts after 10 seconds with `assistant.cancel got no
-  answer within 10 seconds`). An empty conversation offers four example prompts that fill the
+  answer within 10 seconds`). An empty conversation leads with
+  `AssistantAccountCheck` (`assistant.account`, shown when the server lists
+  it), the [same-account line](assistant.md#same-account-as-your-sessions),
+  which **Settings > Assistant > Sign-in** also shows under each ready agent,
+  and offers four example prompts that fill the
   composer, led by the page's own: a failed session offers **Fix this**, one that
   needs you or waits **Why is this stuck?**, one with an open pull request
   (`useOpenPullRequest`) **Review and merge when checks pass**; the board

@@ -417,6 +417,9 @@ permissions, and it uses the account you signed it in to.
   **New conversation**.
 - The assistant does not start when the server cannot reach the vendor's
   sign-in service.
+- The [same-account check](assistant.md#same-account-as-your-sessions) reads
+  your environment's login read-only and sends only its Claude access token
+  to the profile endpoint. It is information only and gates nothing.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a session and saving your environment wait for you to
   approve a card. An unanswered card fails after 10 minutes.

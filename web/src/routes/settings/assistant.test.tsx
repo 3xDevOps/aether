@@ -1,6 +1,7 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
+import type { AssistantAccount } from '@/lib/assistant-types'
 import { AssistantSection, autoApproveLabel, autoApproveWarning } from '@/routes/settings/assistant'
 import { useStore } from '@/store'
 import { alice, fakeApi, serverInfo } from '@/test/fixtures'
@@ -92,6 +93,31 @@ describe('assistant settings', () => {
     await waitFor(() => expect(client.assistantLoginSocket).toHaveBeenCalledWith('claude'))
     await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('region', { name: 'Sign in to Claude Code' })).toBeNull()
+  })
+
+  it('says whether each signed-in agent uses the same account as your sessions', async () => {
+    const accounts: Record<string, AssistantAccount[]> = {
+      claude: [{ agent: 'claude', state: 'same', email: 'alice@example.test' }, { agent: 'claude', state: 'expired' }],
+      codex: [{ agent: 'codex', state: 'other', environment: 'ChatGPT account acct-other' }, { agent: 'codex', state: 'error', error: 'your environment has no ~/.codex/auth.json' }],
+    }
+    const signedIn = { state: 'idle' as const, agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }, { name: 'codex', display_name: 'Codex', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }
+    const client = show(['*'], { assistantAccount: vi.fn(async (agent: string) => accounts[agent].shift()!) })
+    act(() => useStore.getState().setAssistantStatus(signedIn))
+    expect(await screen.findByText('Same Claude account as your sessions (alice@example.test)')).toBeDefined()
+    expect(await screen.findByText('Your sessions use another Codex account (ChatGPT account acct-other)')).toBeDefined()
+
+    cleanup()
+    show(['*'], { assistantAccount: client.assistantAccount })
+    act(() => useStore.getState().setAssistantStatus(signedIn))
+    expect(await screen.findByText("Can't compare: your environment's Claude token is expired. Start a session to refresh it")).toBeDefined()
+    expect(await screen.findByText("Can't compare with your sessions' Codex account: your environment has no ~/.codex/auth.json")).toBeDefined()
+  })
+
+  it('does not ask a server without the account check', async () => {
+    const client = show(['assistant.status', 'assistant.settings', 'run.launch'])
+    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }))
+    expect(await screen.findByText('Signed in for the assistant.')).toBeDefined()
+    expect(client.assistantAccount).not.toHaveBeenCalled()
   })
 
   it('lists what auto-approval covers', () => {

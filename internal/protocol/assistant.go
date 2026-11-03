@@ -31,6 +31,9 @@ const (
 	// connector may call them; assistant.confirm with always creates one.
 	MethodAssistantRules      = "assistant.rules"
 	MethodAssistantRuleRevoke = "assistant.rules.revoke"
+	// MethodAssistantAccount compares an agent's assistant sign-in with the
+	// login in the caller's environment.
+	MethodAssistantAccount = "assistant.account"
 )
 
 const (
@@ -51,6 +54,35 @@ type AssistantAgent struct {
 	// Reason says why the agent is not ready, for example that its Enhanced
 	// adapter is not installed or no login was found.
 	Reason string `json:"reason,omitempty"`
+}
+
+type AssistantAccountParams struct {
+	Agent string `json:"agent"`
+}
+
+// How an agent's assistant sign-in compares with the environment's login.
+const (
+	// AssistantAccountUnrecorded means the server recorded no account for
+	// the assistant's sign-in yet; it does at the next start.
+	AssistantAccountUnrecorded = "unrecorded"
+	AssistantAccountSame       = "same"
+	AssistantAccountOther      = "other"
+	// AssistantAccountExpired means the environment's access token is past
+	// its expiry, so the vendor cannot be asked whose it is.
+	AssistantAccountExpired = "expired"
+	AssistantAccountError   = "error"
+)
+
+// AssistantAccount is information only: the environment's login is
+// writable by every session, so it gates nothing.
+type AssistantAccount struct {
+	Agent string `json:"agent"`
+	State string `json:"state"`
+	// Environment names the environment's account when State is other.
+	Environment string `json:"environment,omitempty"`
+	// Email is the environment account's email, when the vendor names one.
+	Email string `json:"email,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type AssistantConfirmation struct {

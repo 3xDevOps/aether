@@ -1,6 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type * as React from 'react'
 import { MessageSquarePlus, X } from '@/components/icons'
+import { AssistantAccountCheck } from '@/components/assistant/account-check'
 import { ActionHistory } from '@/components/assistant/action-history'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
@@ -135,10 +136,13 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       ) : hasRows ? (
         <Transcript session={session} />
       ) : (
+        <>
+        {status.agent && <AssistantAccountCheck agent={status.agent} client={api} className="shrink-0 px-4 pt-3" />}
         <EmptyConversation autoApprove={status.auto_approve} onPick={(text) => {
           setDraft(text)
           textarea.current?.focus()
         }} />
+        </>
       )}
       {connection && session?.stream !== 'refused' && hasRows && (
         <p role="status" className="shrink-0 px-3 pb-1 text-ui-sm text-muted">{connection}</p>

@@ -41,6 +41,7 @@ type AssistantService interface {
 	SetSettings(ctx context.Context, member domain.MemberID, p protocol.AssistantSettingsParams) (protocol.AssistantSettings, error)
 	SetShareView(ctx context.Context, member domain.MemberID, on bool) error
 	SignIn(ctx context.Context, member domain.MemberID, start func(context.Context) error) error
+	Account(ctx context.Context, member domain.MemberID, agent string) (protocol.AssistantAccount, error)
 }
 
 func init() {
@@ -57,6 +58,7 @@ func init() {
 	registerMethod(protocol.MethodAssistantView, (*Server).assistantView)
 	registerMethod(protocol.MethodAssistantRules, (*Server).assistantRules)
 	registerMethod(protocol.MethodAssistantRuleRevoke, (*Server).assistantRuleRevoke)
+	registerMethod(protocol.MethodAssistantAccount, (*Server).assistantAccount)
 }
 
 var errAssistantUnavailable = &protocol.Error{Code: protocol.CodeUnavailable, Message: "the assistant is not configured on this server"}
@@ -71,6 +73,22 @@ func (s *Server) assistantStatus(ctx context.Context, member domain.MemberID, _ 
 		return nil, assistantError(err)
 	}
 	return status, nil
+}
+
+func (s *Server) assistantAccount(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil, errAssistantUnavailable
+	}
+	p, perr := decodeParams[protocol.AssistantAccountParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	account, err := svc.Account(ctx, member, p.Agent)
+	if err != nil {
+		return nil, assistantError(err)
+	}
+	return account, nil
 }
 
 func (s *Server) assistantStart(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
