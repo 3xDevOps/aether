@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import type { Api } from '@/lib/api'
 import type { AssistantSettings } from '@/lib/assistant-types'
 import { errorSentence } from '@/lib/format'
+import { ApprovalRulesSection } from '@/routes/settings/approval-rules'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { refreshAssistant } from '@/store/assistant-stream'
@@ -116,6 +117,7 @@ export function AssistantSection({ client }: { client: Api }) {
         />
       )}
     </SettingsSection>
+    <ApprovalRulesSection client={client} />
     </>
   )
 }

@@ -991,3 +991,74 @@ describe('width', () => {
     expect(restored.assistantWidth).toBe(640)
   })
 })
+
+describe('approval rules', () => {
+  const launch: AssistantConfirmation = {
+    ...stop,
+    id: 'c3',
+    method: 'run.launch',
+    summary: 'Launch claude (acp) in api, no fallback: "Fix the flaky login test"',
+    params: { workspace_id: workspace.id, harness: 'claude', mode: 'acp', no_fallback: true, task: 'Fix the flaky login test' },
+    rule: { wording: 'Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback' },
+  }
+  const card = (aside: HTMLElement) => within(aside).findByRole('group', { name: `Approve this action? ${launch.summary}` })
+
+  it('saves the rule a card offers, in the server’s wording, with assistant.confirm always', async () => {
+    vi.mocked(api.assistantApproveAlways).mockResolvedValue({ rule: { id: 'rule-1', method: 'run.launch', wording: launch.rule!.wording, summary: launch.summary, created_at: '2026-11-03T10:00:00Z', uses: 0 } })
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [launch, stop] }) })
+    const offered = await card(aside)
+    await userEvent.click(within(offered).getByRole('button', { name: launch.rule!.wording }))
+    expect(api.assistantApproveAlways).toHaveBeenCalledWith('c3')
+    expect(api.assistantConfirm).not.toHaveBeenCalled()
+
+    const plain = within(aside).getByRole('group', { name: `Approve this action? ${stop.summary}` })
+    expect(within(plain).queryByRole('button', { name: /^Always approve/ })).toBeNull()
+    expect(within(plain).queryByRole('button', { name: 'Approve everything from now on' })).toBeNull()
+  })
+
+  it('highlights the rule after three cards of its kind', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [{ ...launch, rule: { ...launch.rule!, suggested: true } }] }) })
+    const offered = await card(aside)
+    expect(within(offered).getByText('You approved this kind three times in a row.')).toBeDefined()
+  })
+
+  it('approves the card with Approve everything, then confirms before turning auto-approval on', async () => {
+    vi.mocked(api.assistantConfirm).mockResolvedValue({})
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true })
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [launch] }) })
+    await userEvent.click(within(await card(aside)).getByRole('button', { name: 'Approve everything from now on' }))
+    expect(api.assistantConfirm).toHaveBeenCalledWith('c3', true)
+    assistantSocket().send({ status: status() })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Let the assistant act without asking?' })
+    expect(api.assistantSettings).not.toHaveBeenCalledWith({ auto_approve: true })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Turn on' }))
+    expect(api.assistantSettings).toHaveBeenCalledWith({ auto_approve: true })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
+  it('asks once after sign-in how the assistant should act, and stores either answer', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ approval_chosen: false }))
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, approval_chosen: true })
+    const aside = await openPanel()
+    acpOpen()
+    const question = await within(aside).findByRole('group', { name: 'How should your assistant act?' })
+    expect(within(question).getByText(/launch sessions, message and stop your sessions and save your environment on its own/)).toBeDefined()
+    await userEvent.click(within(question).getByRole('button', { name: 'Ask before acting' }))
+    expect(api.assistantSettings).toHaveBeenCalledWith({ auto_approve: false })
+    await waitFor(() => expect(within(aside).queryByRole('group', { name: 'How should your assistant act?' })).toBeNull())
+  })
+
+  it('does not ask a member who already chose', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ approval_chosen: true }))
+    const aside = await openPanel()
+    acpOpen()
+    await within(aside).findByRole('region', { name: 'Suggestions' })
+    expect(within(aside).queryByRole('group', { name: 'How should your assistant act?' })).toBeNull()
+  })
+})

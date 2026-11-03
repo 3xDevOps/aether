@@ -163,3 +163,35 @@ describe('assistant settings', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })
+
+describe('approval rules', () => {
+  const rule = { id: 'rule-1', method: 'run.launch', wording: 'Always approve launches of Claude Code (acp) in api on your account, permission default', summary: 'Launch claude (acp) in api: "Fix it"', created_at: '2026-11-01T10:00:00Z', last_used_at: '2026-11-03T10:00:00Z', uses: 3 }
+
+  it('lists each rule with the card it came from and its use, and revokes one at once', async () => {
+    const user = userEvent.setup()
+    const client = show(['*'], {
+      assistantRules: vi.fn(async () => [rule, { ...rule, id: 'rule-2', wording: 'Always approve stopping your own sessions in web', summary: 'Stop session run-1', last_used_at: undefined, uses: 0, inactive: 'workspace ws-web no longer exists or you lost access to it' }]),
+      assistantRuleRevoke: vi.fn(async () => ({})),
+    })
+    const section = await screen.findByRole('region', { name: 'Approval rules' })
+    expect(await within(section).findByText(rule.wording)).toBeDefined()
+    expect(within(section).getByText(`From: ${rule.summary}`)).toBeDefined()
+    expect(within(section).getByText(/3 times/)).toBeDefined()
+    expect(within(section).getByText('never used', { exact: false })).toBeDefined()
+    expect(within(section).getByText('Inactive: workspace ws-web no longer exists or you lost access to it')).toBeDefined()
+
+    await user.click(within(section).getByRole('button', { name: `Revoke ${rule.wording}` }))
+    expect(client.assistantRuleRevoke).toHaveBeenCalledWith('rule-1')
+    await waitFor(() => expect(within(section).queryByText(rule.wording)).toBeNull())
+  })
+
+  it('shows the real error of a failed read and tries again', async () => {
+    const user = userEvent.setup()
+    const client = show(['*'], { assistantRules: vi.fn().mockRejectedValueOnce(new ApiError(200, 'assistant.rules: the assistant is not configured on this server', -32004)).mockResolvedValue([]) })
+    const section = await screen.findByRole('region', { name: 'Approval rules' })
+    expect(await within(section).findByText(/the assistant is not configured on this server/)).toBeDefined()
+    await user.click(within(section).getByRole('button', { name: 'Try again' }))
+    expect(await within(section).findByText('No rules yet')).toBeDefined()
+    expect(client.assistantRules).toHaveBeenCalledTimes(2)
+  })
+})

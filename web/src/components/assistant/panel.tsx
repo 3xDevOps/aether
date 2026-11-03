@@ -8,6 +8,7 @@ import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/c
 import { AssistantComposer } from '@/components/assistant/composer'
 import { TemporaryChatToggle } from '@/components/assistant/temporary'
 import { AssistantFailed, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
+import { ApprovalChoice, AutoApproveConfirm } from '@/components/assistant/approval-choice'
 import { AssistantSheet, AutoApproveSuggestion } from '@/components/assistant/suggestion'
 import { assistantRows, Transcript } from '@/components/assistant/transcript'
 import { Confirm } from '@/components/confirm'
@@ -147,6 +148,8 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       {connection && session?.stream !== 'refused' && hasRows && (
         <p role="status" className="shrink-0 px-3 pb-1 text-ui-sm text-muted">{connection}</p>
       )}
+      <ApprovalChoice />
+      <AutoApproveConfirm />
       <AutoApproveSuggestion busy={running || confirmations.length > 0 || (session?.pending.length ?? 0) > 0} hasRows={hasRows} />
       {!failed && (
         <AssistantComposer

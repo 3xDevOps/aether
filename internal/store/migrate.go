@@ -2478,6 +2478,13 @@ CREATE UNIQUE INDEX idx_assistant_rules_key ON assistant_rules(member_id, method
 ALTER TABLE assistant_settings ADD COLUMN rule_streak_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE assistant_settings ADD COLUMN rule_streak INTEGER NOT NULL DEFAULT 0;
 `,
+	// v102: approval_chosen records that the member chose how the assistant
+	// acts, so the dashboard asks once. Turning auto-approval on or answering
+	// the suggestion to was a choice.
+	`
+ALTER TABLE assistant_settings ADD COLUMN approval_chosen INTEGER NOT NULL DEFAULT 0;
+UPDATE assistant_settings SET approval_chosen = 1 WHERE auto_approve = 1 OR suggest_off = 1 OR suggest_snoozes > 0;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

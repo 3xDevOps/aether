@@ -299,7 +299,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	status := protocol.AssistantStatus{
 		Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(),
 		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
-		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary,
+		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary, ApprovalChosen: settings.ApprovalChosen,
 	}
 	switch {
 	case live != nil:

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { isLaunch, launchTitle, useLaunchRows } from '@/components/assistant/launch-summary'
 import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
+import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { IconTile } from '@/components/ui/icon-tile'
@@ -70,6 +71,11 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const { busy, error, run } = useAction()
   const { harness } = useAssistantAgent()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
+  const rule = confirmation.rule
+  const approveEverything = () => void run('everything', async () => {
+    await api.assistantConfirm(confirmation.id, true)
+    useStore.getState().setAssistantConfirmAutoApprove(true)
+  })
   const reason: [string, string][] = confirmation.reason ? [['Reason', confirmation.reason]] : []
   const rows = useLaunchRows(confirmation.method, confirmation.params, confirmation.defaults)
   const launch = rows && [...reason, ...rows]
@@ -91,6 +97,25 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             <RequestAction label={busy === 'decline' ? 'Declining…' : 'Decline'} disabled={busy !== null} onClick={() => decide(false)} />
             <RequestAction label={busy === 'approve' ? 'Approving…' : 'Approve'} variant="primary" disabled={busy !== null} onClick={() => decide(true)} />
           </RequestActions>
+          {rule && (
+            <div className="flex min-w-0 flex-col items-stretch gap-1.5">
+              {rule.suggested && <p className="text-ui-xs text-muted">You approved this kind three times in a row.</p>}
+              <Button
+                size="md"
+                variant={rule.suggested ? 'confirm' : 'secondary'}
+                className="h-auto min-h-8 justify-start py-1.5 text-left whitespace-normal"
+                disabled={busy !== null}
+                onClick={() => void run('always', () => api.assistantApproveAlways(confirmation.id))}
+              >
+                {busy === 'always' ? 'Saving the rule…' : rule.wording}
+              </Button>
+              {!autoApprove && (
+                <Button size="md" variant="quiet" className="justify-start" disabled={busy !== null} onClick={approveEverything}>
+                  {busy === 'everything' ? 'Approving…' : 'Approve everything from now on'}
+                </Button>
+              )}
+            </div>
+          )}
           {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
           {confirmation.other_member ? (
             <p className="text-ui-xs text-muted">
@@ -98,7 +123,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
                 ? `${confirmation.other_owner}'s account pays for this launch, so this asks even with auto-approval on.`
                 : `${confirmation.other_owner} owns this session, so this asks even with auto-approval on.`}
             </p>
-          ) : !autoApprove && (
+          ) : !autoApprove && !rule && (
             <p className="text-ui-xs"><AssistantSettingsLink>Skip these cards…</AssistantSettingsLink></p>
           )}
         </RequestFooter>

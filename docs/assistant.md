@@ -106,6 +106,13 @@ Aether checks only that the sign-in file exists, not that it still works. When
 the sign-in expires or you want another account, use **Settings > Assistant >
 Sign-in > Sign in again**.
 
+After sign-in the panel asks once **How should your assistant act?**:
+**Ask before acting** (recommended) keeps [approval cards](#approve-an-action),
+and **Act without asking** turns on [auto-approval](#auto-approval), with its
+warning shown under the button. Either answer is stored with your settings;
+a member who already set auto-approval, from Settings or the CLI, or answered
+the suggestion to turn it on, is not asked.
+
 ### Same account as your sessions
 
 Once the first start has recorded the assistant's account, the panel's empty
@@ -312,15 +319,19 @@ flight instead of writing them into the new one.
 
 ## Approval rules
 
-A card that could become a rule also offers **Always approve** with the
+A card that could become a rule shows four buttons. The third is the
 server's wording of exactly what the rule covers:
 
 ```text
 Launch claude (acp) in api, no fallback: "Fix the flaky login test"
-  Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback
+  [Decline]  [Approve]
+  [Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback]
+  [Approve everything from now on]
 ```
 
-Clicking it approves the card and saves the rule. A later card with the same
+**Always approve …** approves the card and saves the rule. **Approve
+everything from now on** approves the card, then asks to confirm turning on
+[auto-approval](#auto-approval); it is not shown while auto-approval is on. A later card with the same
 key passes without asking and is recorded as `Auto-approved by rule <id>:
 <summary>`. A card of any other kind still asks. Rules are checked before
 [auto-approval](#auto-approval), are read on every call, and never expire.
@@ -351,16 +362,28 @@ Only you create rules, by clicking **Always approve** on a card in the
 Aether app. The assistant, its tool socket and connectors cannot create,
 list or revoke them.
 
-List and revoke them with `assistant.rules` and `assistant.rules.revoke`
-([protocol reference](local-gateway.md)). Each rule shows its wording, the
-card it came from, when it was created and last used, and how many cards it
-passed. A revoke applies to the next card. A rule whose workspace was
+**Settings → Assistant → Approval rules** lists each rule with its wording,
+the card it came from, when it was created and last used, and how many cards
+it passed. **Revoke** deletes it in one click and applies to the next card.
+The CLI does the same:
+
+```sh
+aether member assistant rules                    # list
+aether member assistant rules --revoke <rule-id>
+```
+
+```
+rule-7k2m9q4xbd  created 2026-11-03 14:02, 3 uses, last 2026-11-03 16:40
+  Always approve launches of Claude Code (acp) in api on your account, permission default
+  from: Launch claude (acp) in api: "Fix the flaky login test"
+``` A rule whose workspace was
 removed, or whose teammate's account is no longer shared with you, stops
 passing cards and is listed as `Inactive: <reason>`. Merging two members
 keeps the survivor's rules and does not move the absorbed member's.
 
 After you approve three cards of one kind in a row, the next card of that
-kind highlights **Always approve**.
+kind highlights **Always approve** and says `You approved this kind three
+times in a row.`
 
 ## See what it did
 

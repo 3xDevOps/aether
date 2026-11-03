@@ -112,6 +112,9 @@ export interface AssistantSlice {
   /** Run notices from the assistant that arrived while the panel was closed. */
   assistantNotices: number
   noteAssistantNotice: () => void
+  /** A card's Approve everything from now on approved it: the panel asks to confirm turning auto-approval on. */
+  assistantConfirmAutoApprove: boolean
+  setAssistantConfirmAutoApprove: (open: boolean) => void
   /** Bumped when a card's Undo changes a preference, so Settings › Memory reads the list again. */
   preferenceUndos: number
   notePreferenceUndo: () => void
@@ -158,6 +161,8 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   assistantGeneration: 0,
   assistantNotices: 0,
   noteAssistantNotice: () => set((s) => (s.assistantOpen ? s : { assistantNotices: s.assistantNotices + 1 })),
+  assistantConfirmAutoApprove: false,
+  setAssistantConfirmAutoApprove: (assistantConfirmAutoApprove) => set({ assistantConfirmAutoApprove }),
   preferenceUndos: 0,
   notePreferenceUndo: () => set((s) => ({ preferenceUndos: s.preferenceUndos + 1 })),
   setAssistantOpen: (assistantOpen) => set(assistantOpen ? { assistantOpen, assistantNotices: 0 } : { assistantOpen }),
@@ -226,6 +231,6 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   resetAssistant: () => {
     get().restartAssistantConversation()
     get().clearAssistantDraft()
-    set({ assistantStatus: null, assistantStatusError: null, assistantStopping: false, assistantNotices: 0, assistantShareChoice: null })
+    set({ assistantStatus: null, assistantStatusError: null, assistantStopping: false, assistantNotices: 0, assistantShareChoice: null, assistantConfirmAutoApprove: false })
   },
 })

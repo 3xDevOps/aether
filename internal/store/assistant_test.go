@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 func TestAssistantSessionLifecycle(t *testing.T) {
@@ -71,7 +74,7 @@ func TestAssistantSettings(t *testing.T) {
 	if got, err := db.AssistantSettings(ctx, ada); err != nil || got != (AssistantSettings{ShareView: true, PreferencesEnabled: true}) {
 		t.Fatalf("settings before any were set = %+v, %v, want only view sharing on", got, err)
 	}
-	want := AssistantSettings{AutoApprove: true, Approvals: 2, Snoozes: 1, SnoozedUntil: time.Unix(1_800_000_000, 0).UTC(), ShareView: true, RuleStreakKey: `{"method":"env.save"}`, RuleStreak: 2}
+	want := AssistantSettings{AutoApprove: true, Approvals: 2, Snoozes: 1, SnoozedUntil: time.Unix(1_800_000_000, 0).UTC(), ShareView: true, RuleStreakKey: `{"method":"env.save"}`, RuleStreak: 2, ApprovalChosen: true}
 	if err := db.PutAssistantSettings(ctx, ada, want); err != nil {
 		t.Fatal(err)
 	}
@@ -137,5 +140,38 @@ func TestAssistantRules(t *testing.T) {
 	}
 	if _, err = db.AddAssistantRule(ctx, "mem-missing", key, "w", "s"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a rule for an unknown member = %v, want ErrNotFound", err)
+	}
+}
+
+// A member who turned auto-approval on or answered the suggestion to chose
+// how the assistant acts, so the migration records the choice; the others
+// are asked once.
+func TestApprovalChosenMigrationKeepsEarlierChoices(t *testing.T) {
+	t.Parallel()
+	previous := len(migrations) - 1
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, previous)
+	if _, err := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, color, role, created_at)
+			VALUES ('on', 'A', ?, '#e6194b', 'admin', 1), ('snoozed', 'B', ?, '#e6194b', 'admin', 1),
+			       ('never', 'C', ?, '#e6194b', 'admin', 1), ('untouched', 'D', ?, '#e6194b', 'admin', 1);
+		INSERT INTO assistant_settings (member_id, auto_approve, suggest_snoozes, suggest_off, updated_at)
+			VALUES ('on', 1, 0, 0, 1), ('snoozed', 0, 1, 0, 1), ('never', 0, 0, 1, 1), ('untouched', 0, 0, 0, 1);
+	`, testKey(t, "a"), testKey(t, "b"), testKey(t, "c"), testKey(t, "d")); err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (migration from v%d): %v", previous, err)
+	}
+	defer func() { _ = db.Close() }()
+	for member, want := range map[string]bool{"on": true, "snoozed": true, "never": true, "untouched": false} {
+		st, err := db.AssistantSettings(context.Background(), domain.MemberID(member))
+		if err != nil || st.ApprovalChosen != want {
+			t.Errorf("%s: approval chosen = %v, %v; want %v", member, st.ApprovalChosen, err, want)
+		}
 	}
 }
