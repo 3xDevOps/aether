@@ -69,6 +69,14 @@ export const minTerminalFontSize = 8
 export const maxTerminalFontSize = 32
 export const defaultTerminalFontSize = 12
 
+/**
+ * How small fitting a grid to a phone's width may draw it. A phone packs two
+ * to three device pixels into each CSS pixel, so text below the zoom range
+ * stays legible there, and 80 columns fit a 360px screen only near 7px.
+ * Narrower than this, the grid pans instead.
+ */
+export const minFitTerminalFontSize = 6
+
 /** Snaps any candidate zoom level into the supported range. */
 export function clampTerminalFontSize(px: number): number {
   if (!Number.isFinite(px)) return defaultTerminalFontSize

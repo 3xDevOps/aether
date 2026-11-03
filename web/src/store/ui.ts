@@ -129,6 +129,9 @@ export interface UiSlice {
   terminalDockHeight: number
   /** Zoom level shared by every terminal, in pixels. */
   terminalFontSize: number
+  /** On a phone, size terminal text so the whole grid fits the pane's width.
+   * Choosing a size turns it off. */
+  terminalFitWidth: boolean
   /** Off makes character shortcuts (`n`, `?`, `g b`) inert, for speech
    * input that types words the dashboard would read as commands. */
   singleKeyShortcuts: boolean
@@ -194,6 +197,7 @@ export interface UiSlice {
   holdHeaderPrimary: () => () => void
   setTerminalDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
+  fitTerminalWidth: () => void
   setSingleKeyShortcuts: (on: boolean) => void
   setDiffWrap: (wrap: boolean) => void
   toggleSidebar: () => void
@@ -245,6 +249,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   headerPrimaries: 0,
   terminalDockHeight: 280,
   terminalFontSize: defaultTerminalFontSize,
+  terminalFitWidth: true,
   singleKeyShortcuts: true,
   diffWrap: null,
   onboarded: false,
@@ -285,7 +290,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
       sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width)),
     }),
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
-  setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
+  setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size), terminalFitWidth: false }),
+  fitTerminalWidth: () => set({ terminalFitWidth: true }),
   setSingleKeyShortcuts: (singleKeyShortcuts) => set({ singleKeyShortcuts }),
   setDiffWrap: (diffWrap) => set({ diffWrap }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

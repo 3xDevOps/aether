@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SearchAddon } from '@xterm/addon-search'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
+import { noModifiers } from '@/components/terminal-modifiers'
 import { TerminalPane } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
 import type { XtermController } from '@/components/xterm-host'
@@ -457,8 +458,8 @@ describe('xterm viewport ownership', () => {
   })
 })
 
-/** The key bar's half of the Ctrl modifier lives in the host. */
-function CtrlProbe({
+/** The key bar's half of the sticky modifiers lives in the host. */
+function ModifierProbe({
   onData,
   onController,
 }: {
@@ -472,12 +473,12 @@ function CtrlProbe({
   return <div ref={controller.hostRef} />
 }
 
-describe('the key bar Ctrl modifier', () => {
-  it('turns the next character into its control code, once', async () => {
+describe('the key bar modifiers', () => {
+  it('apply to the next key once, or to every key while locked', async () => {
     const sent: string[] = []
     let controller: ReturnType<typeof useXterm> | null = null
     const view = render(
-      <CtrlProbe
+      <ModifierProbe
         onData={(data) => sent.push(data)}
         onController={(next) => (controller = next)}
       />,
@@ -485,31 +486,29 @@ describe('the key bar Ctrl modifier', () => {
     await waitFor(() => expect(controller).not.toBeNull())
     const host = () => controller as unknown as ReturnType<typeof useXterm>
 
-    act(() => host().armCtrl(true))
-    await waitFor(() => expect(host().ctrlArmed).toBe(true))
+    act(() => host().tapModifier('ctrl'))
+    await waitFor(() => expect(host().modifiers.ctrl).toBe('once'))
     act(() => host().terminal?.input('c'))
-    expect(sent).toEqual(['\x03'])
-
-    // One character, then the modifier is spent: the next keystroke is plain.
-    await waitFor(() => expect(host().ctrlArmed).toBe(false))
+    await waitFor(() => expect(host().modifiers.ctrl).toBe('off'))
     act(() => host().terminal?.input('c'))
     expect(sent).toEqual(['\x03', 'c'])
 
-    // A key the modifier does not cover goes through as it is and leaves
-    // Ctrl armed, so the next one can still use it rather than the wrong
-    // control code arriving at the agent.
-    act(() => host().armCtrl(true))
-    act(() => host().terminal?.input('\x1b[A'))
-    expect(sent).toEqual(['\x03', 'c', '\x1b[A'])
-    expect(host().ctrlArmed).toBe(true)
-
-    // Case folding is ASCII, not locale text: the German sharp s upper
-    // cases to two letters and must not become Ctrl+S.
+    // A key the modifier does not cover goes through as it is and keeps
+    // Ctrl for the next one. Case folding is ASCII, not locale text: the
+    // German sharp s upper cases to two letters and must not become Ctrl+S.
+    act(() => host().tapModifier('ctrl'))
     act(() => host().terminal?.input('\u00df'))
-    expect(sent).toEqual(['\x03', 'c', '\x1b[A', '\u00df'])
-    act(() => host().terminal?.input('d'))
-    expect(sent).toEqual(['\x03', 'c', '\x1b[A', '\u00df', '\x04'])
-    await waitFor(() => expect(host().ctrlArmed).toBe(false))
+    expect(host().modifiers.ctrl).toBe('once')
+    act(() => host().terminal?.input('\x1b[A'))
+    expect(sent).toEqual(['\x03', 'c', '\u00df', '\x1b[1;5A'])
+
+    act(() => host().tapModifier('alt'))
+    act(() => host().tapModifier('alt'))
+    await waitFor(() => expect(host().modifiers.alt).toBe('locked'))
+    act(() => host().terminal?.input('b'))
+    act(() => host().terminal?.input('f'))
+    expect(sent.slice(4)).toEqual(['\x1bb', '\x1bf'])
+    expect(host().modifiers.alt).toBe('locked')
     view.unmount()
   })
 })
@@ -696,8 +695,9 @@ describe('terminal shortcuts', () => {
           findOpen: true,
           setFindOpen: () => {},
           focusTerminal: () => {},
-          ctrlArmed: false,
-          armCtrl: () => {},
+          modifiers: noModifiers,
+          tapModifier: () => {},
+          clearModifiers: () => {},
         }}
       />,
     )
@@ -724,8 +724,9 @@ describe('the terminal toolbar', () => {
           findOpen: false,
           setFindOpen: () => {},
           focusTerminal: () => {},
-          ctrlArmed: false,
-          armCtrl: () => {},
+          modifiers: noModifiers,
+          tapModifier: () => {},
+          clearModifiers: () => {},
         }}
       />,
     )

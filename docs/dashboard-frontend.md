@@ -3254,7 +3254,10 @@ while a live session's attach is not live. A finished session reads "Container
 removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
 session with no agent terminal, such as an Enhanced session, shows "No agent
-terminal" and the shell controls. The frame renders one `TakeoverDialog`
+terminal" and the shell controls. Under 768px (`useIsMobile`), the first time
+the Terminal view shows for such a session `useShellOnPhone` refreshes the
+shell list and shows a running shell, or opens one with `shells.open`; a shell
+closed after that leaves the empty state. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
@@ -3307,7 +3310,8 @@ open a shell in it" in place of the terminal.
 `TerminalTools` in `src/components/terminal-pane.tsx` is the **Tools** menu
 (named "Terminal tools"): **Find** (**Find in recorded output** while
 reading history), the text size with **Smaller text**, **Larger text** and
-**Reset text size**, **Copy selection**, **Copy screen**, **Paste**,
+**Reset text size** (on `phoneScreen`, only **Fit to width**, because the
+toolbar carries **A−** and **A+** and the trigger is icon-only), **Copy selection**, **Copy screen**, **Paste**,
 **Upload image…** and, on a session, **Captures…**. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
@@ -3480,14 +3484,58 @@ A following terminal therefore:
   what makes xterm's textarea read-only, so a tap on a mirror raises no
   keyboard.
 
+**Sizing the PTY to a phone is not done.** A phone could size the PTY
+while no wider client is attached, but the server keeps one grid and one
+transcript per session, so: every keyboard open and close would resize the
+agent's screen and make its TUI redraw; a desktop attaching or leaving would
+flip the width, and output drawn at the phone's 45 columns stays in the
+recorded transcript that later desktop viewers replay; and an older server
+reads an unknown "size only when alone" flag as an ordinary writer imposing
+its size, shrinking every desktop viewer. A phone therefore follows, and fits
+on the client.
+
+**Fit to width.** `useTerminalFit` (`src/components/terminal-fit.ts`), on
+`phoneScreen`, sets xterm's `fontSize` so the followed grid's columns fit the
+host's content box: proportional from the drawn `.xterm-screen` width,
+floored to 0.25px steps, no larger than the chosen size and no smaller than
+`minFitTerminalFontSize` (6px, `src/lib/term-font.ts`), below which the grid
+pans. It grows only when the pane, the grid or the preference changes; a
+render only shrinks an overflow, so device-pixel rounding cannot make it
+oscillate. 80 columns fit a 360px screen at about 7px. The fitted size is
+not stored: the store keeps `terminalFitWidth` (persisted, default on) beside
+`terminalFontSize`, and `setTerminalFontSize` turns fitting off. **A−** and
+**A+** (`TextSizeButtons` in the toolbar, 44px) step one whole pixel from
+the drawn size, within the 8-32px zoom range. A two-finger pinch on the host
+scales the drawn size live in 0.5px steps and on release stores it, or
+returns to fitting when it ends at or below the fitted size or below 8px.
+
+**Read first.** On `phoneScreen` `focusTerminal()` does nothing, so no
+effect - a new shell, a tab change, a closed find bar - raises the soft
+keyboard. Only a tap on the terminal's own textarea, or **Show keyboard** in
+the more-keys sheet, focuses it.
+
 `TerminalKeys` is shown under the host on any coarse pointer while the
-terminal is writable, a tablet included: Ctrl, Esc, Tab, the arrows, Enter
-and Ctrl+C, each through `terminal.input` so the replay gate and
-`disableStdin` treat a tap exactly like a keystroke. Ctrl is a one-shot
-modifier held in the host (`armCtrl`), because a soft keyboard sends
-characters and never a modifier: it rewrites the next character into its
-control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte.
+terminal is writable, a tablet included. Its row does not scroll: **Ctrl**,
+**Alt**, Esc, Tab, the arrows, Enter and **More keys** share the width at
+44px tall. **More keys** is a non-modal `Popover` above the row that keeps
+focus where it was: symbols a phone keyboard buries, ^C, Home/End,
+PgUp/PgDn, Del, F1-F12 and Show/Hide keyboard. Every key goes through
+`terminal.input`, so the replay gate and `disableStdin` treat a tap exactly
+like a keystroke, refuses focus on `pointerdown` so the keyboard stays as it
+was, and then calls `focusTerminal()`, which a tablet honours and a phone
+ignores. The row pads its bottom by `--keyboard-inset` (`keyboard-inset.ts`)
+so it stays above an iOS keyboard.
+
+Ctrl and Alt are sticky modifiers held in the host (`modifiers`,
+`tapModifier`, `clearModifiers` on `XtermController`), because a soft
+keyboard sends characters and never a modifier. `terminal-modifiers.ts` has
+the rules: a tap arms a modifier for one key, a second tap within 400ms locks
+it, the next tap releases it. `applyModifiers` rewrites a single character
+into its control code and/or an ESC prefix for Alt, and the cursor,
+Home/End, paging and function-key sequences into xterm's `1;<n>` modifier
+parameter form. A key it does not cover, such as a paste, passes unmodified
+and keeps the modifiers armed rather than spending them on the wrong byte.
+Losing write access clears them.
 
 In a session's normal buffer, a downward finger drag pans the live grid to its
 top before handing off continuously to integrated history. Horizontal drags

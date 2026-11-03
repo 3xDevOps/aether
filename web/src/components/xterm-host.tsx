@@ -6,6 +6,14 @@ import '@xterm/xterm/css/xterm.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import {
+  applyModifiers,
+  type ModifierKey,
+  type Modifiers,
+  noModifiers,
+  tapModifier as nextModifier,
+} from '@/components/terminal-modifiers'
+import { phoneScreen } from '@/lib/hooks'
+import {
   defaultTerminalFontSize,
   terminalFontFamily,
   terminalZoomKey,
@@ -133,13 +141,10 @@ export interface XtermController {
   noteViewportInteraction?: () => void
   /** Focuses xterm now, or records the focused action owner until it mounts. */
   focusTerminal: () => void
-  /**
-   * The key bar's Ctrl modifier. A soft keyboard sends characters rather than
-   * key codes, so Ctrl cannot be a held key: armed, it turns the next
-   * character - typed or tapped - into its control code, then disarms.
-   */
-  ctrlArmed: boolean
-  armCtrl: (armed: boolean) => void
+  /** The key bar's sticky Ctrl and Alt (see terminal-modifiers.ts). */
+  modifiers: Modifiers
+  tapModifier: (key: ModifierKey) => void
+  clearModifiers: () => void
   /** Capture this pane's viewport before a structural reset/replay. */
   beginStructuralReplay?: () => number
   /** Abandon a structural replay without restoring its captured viewport. */
@@ -195,24 +200,6 @@ function restoreViewport(
   terminal.refresh(0, Math.max(0, terminal.rows - 1))
 }
 
-
-/**
- * The control code one character carries under Ctrl, or null when it has
- * none. A terminal maps `@` through `_`, the ASCII letters, and space; a
- * key with no control code of its own - and any longer chunk, a paste
- * among them - has none. Case folding is done by hand rather than with
- * `toUpperCase`, which is locale text rather than ASCII: it turns the
- * German sharp s into two letters and the dotless i into an I, and either
- * would send a control code nobody pressed.
- */
-function controlCode(data: string): string | null {
-  if (data.length !== 1) return null
-  const code = data.charCodeAt(0)
-  if (code === 0x20) return '\x00'
-  const upper = code >= 0x61 && code <= 0x7a ? code - 0x20 : code
-  if (upper < 0x40 || upper > 0x5f) return null
-  return String.fromCharCode(upper & 0x1f)
-}
 
 function rgba(color: string, alpha: number): string | undefined {
   const rgb = color.match(/^rgba?\((.*)\)$/i)
@@ -357,8 +344,9 @@ export function useXterm({
   // rather than from each caller.
   const fontSize = useStore((s) => s.terminalFontSize)
   const appliedFontSize = useRef(fontSize)
-  const [ctrlArmed, setCtrlArmed] = useState(false)
-  const ctrlArmedRef = useRef(false)
+  const [modifiers, setModifiers] = useState(noModifiers)
+  const modifiersRef = useRef(noModifiers)
+  const lastModifierTap = useRef<Record<ModifierKey, number>>({ ctrl: -Infinity, alt: -Infinity })
   const followRef = useRef(follow)
   const responderOption = useRef(serverOwnedResponder)
   responderOption.current = serverOwnedResponder
@@ -382,11 +370,24 @@ export function useXterm({
   const noteViewportInteraction = useCallback(() => {
     viewportInteractionRevision.current++
   }, [])
-  const armCtrl = useCallback((armed: boolean) => {
-    ctrlArmedRef.current = armed
-    setCtrlArmed(armed)
+  const updateModifiers = useCallback((next: Modifiers) => {
+    modifiersRef.current = next
+    setModifiers(next)
   }, [])
+  const tapModifier = useCallback((key: ModifierKey) => {
+    const now = performance.now()
+    const since = now - lastModifierTap.current[key]
+    lastModifierTap.current[key] = now
+    const current = modifiersRef.current
+    updateModifiers({ ...current, [key]: nextModifier(current[key], since) })
+  }, [updateModifiers])
+  const clearModifiers = useCallback(() => {
+    if (modifiersRef.current.ctrl !== 'off' || modifiersRef.current.alt !== 'off') updateModifiers(noModifiers)
+  }, [updateModifiers])
   const focusTerminal = useCallback(() => {
+    // Focus raises a phone's soft keyboard over what the person came to
+    // read, so there only a tap on the terminal or the key bar gives it.
+    if (window.matchMedia?.(phoneScreen).matches) return
     const activeElement = document.activeElement
     if (terminal) {
       focusIntent.current = null
@@ -645,20 +646,20 @@ export function useXterm({
       host.addEventListener('touchmove', noteViewportInteraction, { passive: true })
       host.addEventListener('pointerdown', noteScrollbarInteraction)
       const input = created.onData((data) => {
-        if (!ctrlArmedRef.current) {
+        const { ctrl, alt } = modifiersRef.current
+        const modified = ctrl === 'off' && alt === 'off'
+          ? null
+          : applyModifiers(data, ctrl !== 'off', alt !== 'off')
+        // A key the modifiers do not cover keeps them for the next key rather
+        // than spending them on one that would arrive unmodified.
+        if (modified === null) {
           onDataRef.current?.(data)
           return
         }
-        const held = controlCode(data)
-        // A key the modifier does not cover keeps it armed rather than
-        // spending it on a keystroke that would arrive uncontrolled: the
-        // bar still shows Ctrl pressed, and the next key can use it.
-        if (held === null) {
-          onDataRef.current?.(data)
-          return
+        if (ctrl === 'once' || alt === 'once') {
+          updateModifiers({ ctrl: ctrl === 'once' ? 'off' : ctrl, alt: alt === 'once' ? 'off' : alt })
         }
-        armCtrl(false)
-        onDataRef.current?.(held)
+        onDataRef.current?.(modified)
       })
       const binary = created.onBinary((data) => onBinaryRef.current?.(data))
       const observer = new ResizeObserver(resize)
@@ -682,7 +683,7 @@ export function useXterm({
         active = false
         liveTerminal.current = null
         if (structuralReplay.current?.terminal === created) structuralReplay.current = null
-        armCtrl(false)
+        clearModifiers()
         cancelFontWait()
         teardown?.()
         disposeResponder()
@@ -692,7 +693,7 @@ export function useXterm({
         setFindOpen(false)
       }
     }
-  }, [armCtrl, enabled, host, scrollback])
+  }, [clearModifiers, enabled, host, scrollback, updateModifiers])
 
   useEffect(() => {
     resizeRef.current?.()
@@ -723,9 +724,10 @@ export function useXterm({
     findOpen,
     setFindOpen,
     focusTerminal,
-    ctrlArmed,
+    modifiers,
+    tapModifier,
+    clearModifiers,
     noteViewportInteraction,
-    armCtrl,
     beginStructuralReplay,
     cancelStructuralReplay,
     finishStructuralReplay,

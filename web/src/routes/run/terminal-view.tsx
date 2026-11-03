@@ -1,7 +1,9 @@
+import { useEffect, useRef } from 'react'
 import { connectionLabel } from '@/components/shell/connection'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { useIsMobile } from '@/lib/breakpoints'
 import { isRetainedRun } from '@/lib/commands'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { usePresenceSummary } from '@/routes/run/multiplayer-controls'
@@ -12,6 +14,7 @@ import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
+import { shellEnded } from '@/store/terminal'
 
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const summary = usePresenceSummary(run, agent)
@@ -59,6 +62,28 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   )
 }
 
+/**
+ * On a phone an Enhanced session has no agent terminal to land on, so the
+ * Terminal tab shows a running shell, or opens one, the first time it is
+ * viewed. Closing that shell leaves the empty state; nothing reopens it.
+ */
+function useShellOnPhone(shells: RunShells, wanted: boolean) {
+  const mobile = useIsMobile()
+  const asked = useRef(false)
+  const { runID, visible, canOpen, atLimit, refresh, open, show } = shells
+  useEffect(() => {
+    if (!mobile || !wanted || !visible || !canOpen || asked.current) return
+    asked.current = true
+    void (async () => {
+      // The poll may not have listed the session's shells yet.
+      await refresh().catch(() => {})
+      const running = useStore.getState().shellDocks[runID]?.terminals.find((terminal) => !shellEnded(terminal))
+      if (running) show(running.terminal_id)
+      else if (!atLimit) await open()
+    })()
+  }, [atLimit, canOpen, mobile, open, refresh, runID, show, visible, wanted])
+}
+
 export function TerminalView({ run, agent, shells, onCaptures }: {
   run: RunRecord
   agent: AgentTerminal
@@ -70,6 +95,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
   const tabbed = shells.canOpen && shells.dock.tabs.length > 0
   const { controller, session, takeover } = agent
   const { state, replaying, controlMetadata } = session
+  useShellOnPhone(shells, !agent.hasAgentTerminal && !shellShown)
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">

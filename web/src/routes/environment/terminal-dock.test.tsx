@@ -33,8 +33,9 @@ const xterm = vi.hoisted(() => ({
   search: null,
   findOpen: false,
   setFindOpen: vi.fn(),
-  ctrlArmed: false,
-  armCtrl: vi.fn(),
+  modifiers: { ctrl: 'off', alt: 'off' },
+  tapModifier: vi.fn(),
+  clearModifiers: vi.fn(),
   focusTerminal: vi.fn(),
 }))
 
@@ -112,8 +113,7 @@ describe('environment terminal dock', () => {
     attach.handlers = null
     vi.clearAllMocks()
     xterm.structuralGeneration = 0
-    xterm.ctrlArmed = false
-    xterm.armCtrl.mockReset()
+    xterm.clearModifiers.mockReset()
     xterm.beginStructuralReplay.mockReset()
     xterm.beginStructuralReplay.mockImplementation(() => ++xterm.structuralGeneration)
     xterm.cancelStructuralReplay.mockReset()
