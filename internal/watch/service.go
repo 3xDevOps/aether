@@ -51,6 +51,7 @@ type Store interface {
 	GetCoordStateReport(ctx context.Context, run domain.RunID, key string) (*store.CoordStateReport, error)
 	GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, key string) (*store.RunMessage, error)
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
+	ListChildren(ctx context.Context, run domain.RunID) ([]*domain.ChildReservation, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	RunResumedSince(ctx context.Context, id domain.RunID, at time.Time) (bool, error)
@@ -426,11 +427,49 @@ func (s *Service) advance(ctx context.Context, seq uint64) error {
 	return nil
 }
 
+// affected is the watches e may change: those on its run and, when the
+// run's standing changed, those on the attached subsessions below it, whose
+// held outcomes (domain.OutcomeHeldIn) follow it.
 func (s *Service) affected(ctx context.Context, e events.Event) ([]string, error) {
 	if e.RunID == "" {
 		return nil, nil
 	}
-	return s.store.EvaluableWatchIDs(ctx, e.RunID)
+	ids, err := s.store.EvaluableWatchIDs(ctx, e.RunID)
+	if err != nil {
+		return nil, err
+	}
+	switch p := e.Payload.(type) {
+	case events.RunStatusPayload:
+	case events.TimelinePayload:
+		if p.Kind != events.TimelinePause && p.Kind != events.TimelineResume {
+			return ids, nil
+		}
+	default:
+		return ids, nil
+	}
+	level := []domain.RunID{e.RunID}
+	for depth := 0; depth < domain.MaxHeldDepth && len(level) > 0; depth++ {
+		var next []domain.RunID
+		for _, id := range level {
+			children, err := s.store.ListChildren(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("list the subsessions of %s: %w", id, err)
+			}
+			for _, c := range children {
+				if c.Detached {
+					continue
+				}
+				below, err := s.store.EvaluableWatchIDs(ctx, c.RunID)
+				if err != nil {
+					return nil, err
+				}
+				ids = append(ids, below...)
+				next = append(next, c.RunID)
+			}
+		}
+		level = next
+	}
+	return ids, nil
 }
 
 // background expires watches, retries failing ones and polls pull

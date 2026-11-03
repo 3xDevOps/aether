@@ -361,7 +361,7 @@ export function buildLanes(input: LanesInput): LanesModel {
       })
       drawn.set(parent.card.run.id, familyKey)
       for (const lane of children) drawn.set(lane.card.run.id, familyKey)
-      const folded = unit.members.filter((lane) => needs.includes(lane) || (lane === parent && lane.card.group === 'review'))
+      const folded = unit.members.filter((lane) => needs.includes(lane) || lane.card.group === 'review')
       for (const lane of familyOpen ? [parent, ...children] : folded) lanes.push(...withAgents({ ...lane, level: 3, parentKey: familyKey }))
     }
   }

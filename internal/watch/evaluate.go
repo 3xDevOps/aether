@@ -235,11 +235,14 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	r := reading{ok: true, title: push.RunTitle(run), final: run.Status.Final()}
 	link := RunLink(run.ID)
 	r.observed = protocol.WatchObserved{RunStatus: string(run.Status), Activity: string(run.Activity)}
-	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
-		held, err := s.outcomeHeld(ctx, run)
-		if err != nil {
+	held := false
+	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) || followed(w) {
+		var err error
+		if held, err = s.outcomeHeld(ctx, run); err != nil {
 			return reading{}, err
 		}
+	}
+	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
 		for i, n := range s.runNeeds(run, held) {
 			if i == 0 {
 				r.observed.Need = n.body
@@ -262,7 +265,11 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 		}
 	}
 	var finished string
-	if key, body, ok := runFinish(run, fired); ok {
+	key, body, ok := runFinish(run, fired)
+	if ok && held && followed(w) && reportedOutcome(key) {
+		ok = false
+	}
+	if ok {
 		finished = body
 		if slices.Contains(w.Conditions, protocol.WatchFinished) {
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: key, Title: r.title, Body: body, Link: link})
@@ -325,6 +332,19 @@ func (s *Service) runNeeds(run *domain.Run, held bool) []need {
 		return out
 	}
 	return []need{{key: "status:" + run.NeedKey(), body: push.AttentionBody(run, held)}}
+}
+
+// followed is whether Follow made w for the assistant, rather than a person
+// or an assistant asking for that session. Its finished notice waits while
+// the session's parent agent holds the outcome; an asked-for one does not.
+func followed(w *store.Watch) bool {
+	return w.Source == protocol.WatchSourceAssistant && strings.HasPrefix(w.IdempotencyKey, followKeyPrefix)
+}
+
+// reportedOutcome is whether a runFinish key is an outcome a parent can
+// hold: a reported success or a failure.
+func reportedOutcome(key string) bool {
+	return strings.HasPrefix(key, "reported|") || key == "failed"
 }
 
 // outcomeHeld reports whether run's outcome is its parent's to read

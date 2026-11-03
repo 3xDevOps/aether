@@ -438,3 +438,43 @@ func TestAssistantNoticeWithoutItsToastIsDeliveredWithTheReason(t *testing.T) {
 		t.Fatalf("written = %d notices, want the one, not retried", len(got))
 	}
 }
+
+// A subsession's success under a working parent is its parent agent's: the
+// assistant's own follow of the subsession waits until the parent stops,
+// while a watch someone asked for on that subsession hears of it at once.
+func TestAFollowWaitsForAHeldSubsessionOutcome(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.assistant = &conversation{}
+	_ = h.svc.Close()
+	h.start()
+	parent := h.run(h.ada, "Lead the migration")
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 subsession")
+	reserved, _, err := h.db.ReserveChild(h.ctx, &domain.ChildReservation{
+		ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: h.ws.ID,
+		OwnerID: h.ada.ID, AccountID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP, Task: "Port the schema",
+		IdempotencyKey: "child", RequestHash: "child",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := &domain.Run{ID: reserved.RunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "Port the schema", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	if err = h.db.CreateRunWithID(h.ctx, child); err != nil {
+		t.Fatal(err)
+	}
+	asked := h.watch(h.ada, runTarget(child))
+	followed := h.follow(h.ada, child)
+	if followed.ID == asked.Watch.ID {
+		t.Fatalf("the follow took over the asked-for watch %s", asked.Watch.ID)
+	}
+	h.status(child, domain.RunNeedsAttention, domain.ActivityFinished, "agent reported success")
+	h.eventually("the asked-for watch's finish", func() bool { return len(h.notices(asked.Watch.ID)) == 1 })
+	h.settle()
+	if got := h.notices(followed.ID); len(got) != 0 {
+		t.Fatalf("follow notices under a working parent = %q, want none", bodies(got))
+	}
+
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
+	h.eventually("the follow's finish once the parent stops", func() bool { return len(h.notices(followed.ID)) == 1 })
+}

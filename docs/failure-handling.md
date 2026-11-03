@@ -166,7 +166,9 @@ Needs you. A subsession's own requests of a person (a permission, question,
 `needs-input`, `blocked`, a disconnect) still do. Once the parent stops,
 ends or is paused, the outcome surfaces as for any session, notifications
 included, and a notice already shown is taken back when the parent works
-again. The dashboard reads a held success as Completed, "Finished: reported to
+again. A watch someone asked for on the subsession still hears of its finish
+at once; the assistant's own follow of a session it launched or messaged
+waits like the session's notifications. The dashboard reads a held success as Completed, "Finished: reported to
 its parent", and `aether sessions` as `Finished: reported to its parent`.
 
 | Session | Needs you | Notifies |
