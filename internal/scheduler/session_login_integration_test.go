@@ -45,7 +45,7 @@ func TestIntegrationSessionLoginDocker(t *testing.T) {
 	adaOwn := filepath.Join(adaHome, filepath.FromSlash(claudeLogin))
 
 	shared := launchShareRun(t, e, docker, cli, e.member.ID, owner.ID, "session login", "grace-access-1")
-	copyFile := e.sched.sessionLoginPath(shared.run.ID, "claude")
+	copyFile := e.sched.sessionLoginPath(shared.run.ID, owner.ID, "claude")
 	const target = "/root/.claude/.credentials.json"
 	shared.want(t, "stat -c %i "+target, fmt.Sprintf("%d\n", inodeOf(t, copyFile)))
 	if code, out := shared.sh(t, "grep -e refreshToken -e mcp-secret "+target); code != 1 {

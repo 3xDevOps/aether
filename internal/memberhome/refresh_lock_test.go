@@ -140,3 +140,38 @@ func TestReadLoginRefusesASymlink(t *testing.T) {
 		t.Fatalf("ReadLogin through a symlink = %s", data)
 	}
 }
+
+// A login the member replaces with a FIFO or a link during the refresh is
+// refused, not written through, and the write never blocks.
+func TestRefreshLoginRefusesAReplacedLogin(t *testing.T) {
+	for _, replace := range []struct {
+		name string
+		make func(string) error
+	}{
+		{"fifo", func(p string) error { return unix.Mkfifo(p, 0o600) }},
+		{"symlink", func(p string) error { return os.Symlink("/etc/hostname", p) }},
+	} {
+		manager, owner, _ := newLoginHomes(t)
+		login := filepath.Join(owner, ".claude", ".credentials.json")
+		if err := os.WriteFile(login, []byte(`{"old":1}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- manager.RefreshLogin("owner", ".claude/.credentials.json", claudeLock, func([]byte) ([]byte, error) {
+				if err := os.Remove(login); err != nil {
+					return nil, err
+				}
+				return []byte(`{"new":2}`), replace.make(login)
+			})
+		}()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatalf("%s: RefreshLogin wrote through a replaced login", replace.name)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: RefreshLogin blocked on the replaced login", replace.name)
+		}
+	}
+}

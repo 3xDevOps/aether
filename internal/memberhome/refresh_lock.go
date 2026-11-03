@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -88,11 +89,37 @@ func (m *Manager) RefreshLogin(member domain.MemberID, rel string, lock LoginLoc
 	}
 	rotated, err := refresh(old)
 	if rotated != nil {
-		if writeErr := writeInPlace(parent, leaf, rotated); writeErr != nil {
+		if writeErr := writeLoginInPlace(parent, leaf, rotated); writeErr != nil {
 			return errors.Join(err, fmt.Errorf("memberhome: write back login %s in %q: %w", rel, member, writeErr))
 		}
 	}
 	return err
+}
+
+// writeLoginInPlace rewrites the regular file leaf on its own inode. The
+// member can replace the file during the refresh, so the open neither
+// follows a link nor blocks on a FIFO, and anything but a regular file with
+// one link is refused before the truncate.
+func writeLoginInPlace(parent *os.Root, leaf string, data []byte) error {
+	f, err := parent.OpenFile(leaf, os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || hasMultipleLinks(info) {
+		return fmt.Errorf("%s is no longer a regular file with one link", leaf)
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func readLoginFile(parent *os.Root, leaf string) ([]byte, error) {

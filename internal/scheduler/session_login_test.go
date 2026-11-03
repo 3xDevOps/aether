@@ -618,3 +618,41 @@ func TestSessionLoginPumpFollowsSignOutAndRevokeDuringRefresh(t *testing.T) {
 		}
 	}
 }
+
+// Two server refreshes of one login past a stale CLI lock spend its refresh
+// token once.
+func TestSessionLoginRefreshesPastAStaleLockOnce(t *testing.T) {
+	t.Parallel()
+	e := newSessionLoginEnv(t)
+	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-old", "grace~1", time.Now().Add(5*time.Minute)))
+	lockDir := e.ownerFile(".claude/.oauth_refresh.lock")
+	if err := os.Mkdir(lockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(lockDir, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { e.sched.refreshOwnerLogin(t.Context(), e.owner.ID, "claude") })
+	}
+	wg.Wait()
+	if e.posts.Load() != 1 {
+		t.Fatalf("%d refreshes, want 1", e.posts.Load())
+	}
+}
+
+// An engine older than Docker 26.0 pins no logins, so the launcher's own CLI
+// could rename over a copy's mountpoint; a session login launch is refused
+// there, as a shared login's is.
+func TestSessionLoginRefusedWithoutLoginPins(t *testing.T) {
+	t.Parallel()
+	e := newSessionLoginEnv(t)
+	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-1", "grace~1", time.Now().Add(8*time.Hour)))
+	e.sched.cfg.Runtime = preSubpathEngine{e.rt}
+	run, err := e.launch(t, "claude")
+	if err == nil || !strings.Contains(err.Error(), "cannot mount a path beneath a member home") || run != nil || e.containerCount() != 0 {
+		t.Fatalf("Launch on an engine without subpath mounts = %+v, %v; want refused with no container", run, err)
+	}
+}

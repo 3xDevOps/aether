@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -62,12 +63,8 @@ func (s *Scheduler) sessionLoginPath(run domain.RunID, account domain.MemberID, 
 // sessionLoginAccount reports whether a launch of profile on account mounts a
 // session login copy rather than the owner's login.
 func (s *Scheduler) sessionLoginAccount(account domain.MemberID, profile harness.Profile) bool {
-	rel, known := assistantSignInRel[profile.Name]
-	if !known || !s.cfg.SessionLoginAccounts[account] {
-		return false
-	}
-	paths, err := profile.LoginPaths()
-	return err == nil && slices.Equal(paths, []string{rel})
+	_, known := assistantSignInRel[profile.Name]
+	return known && s.cfg.SessionLoginAccounts[account]
 }
 
 // ownerLogin reads account's login for agent, rereading an empty or
@@ -107,6 +104,17 @@ func sessionLogin(agent string, owner []byte) ([]byte, error) {
 // the launch as loginMounts would.
 func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, launcher domain.MemberID, profile harness.Profile, home, user string) ([]runtime.Mount, error) {
 	account := run.AccountMemberID
+	rel := assistantSignInRel[profile.Name]
+	if paths, err := profile.LoginPaths(); err != nil || !slices.Equal(paths, []string{rel}) {
+		return nil, fmt.Errorf("scheduler: %s's %s logins are listed for session login copies, but this %s definition signs in at %v, not ~/%s alone", account, profile.Name, profile.Name, paths, rel)
+	}
+	// Only pinned logins keep the launcher's own CLI from renaming over the
+	// copy's mountpoint, and an engine without subpath mounts pins none.
+	if checker, ok := s.cfg.Runtime.(subpathAPIChecker); ok {
+		if err := checker.CheckSubpathAPI(ctx); err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+	}
 	owner, err := s.ownerLogin(account, profile.Name)
 	if errors.Is(err, fs.ErrNotExist) {
 		_, err = s.accountLogins(ctx, account, profile)
@@ -132,7 +140,6 @@ func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, lau
 	if err != nil {
 		return nil, err
 	}
-	rel := assistantSignInRel[profile.Name]
 	if err := s.cfg.Homes.PrepareLoginMountpoint(launcher, rel, false); err != nil {
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
@@ -150,6 +157,8 @@ func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, lau
 // after the truncate, on the file's own inode: a rename would detach the
 // container's bind of it.
 func (s *Scheduler) writeSessionLogin(run domain.RunID, account domain.MemberID, agent string, login []byte, user string) (string, error) {
+	s.sessionLoginWrite.Lock()
+	defer s.sessionLoginWrite.Unlock()
 	file := s.sessionLoginPath(run, account, agent)
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return "", fmt.Errorf("scheduler: create the session login directory: %w", err)
@@ -178,6 +187,8 @@ func (s *Scheduler) writeSessionLogin(run domain.RunID, account domain.MemberID,
 // anything else. It never creates the copy: a new file is not the inode the
 // container mounts.
 func (s *Scheduler) rewriteSessionLogin(run domain.RunID, account domain.MemberID, agent string, login []byte) error {
+	s.sessionLoginWrite.Lock()
+	defer s.sessionLoginWrite.Unlock()
 	file := s.sessionLoginPath(run, account, agent)
 	current, err := os.ReadFile(file)
 	if err != nil {
@@ -240,6 +251,9 @@ func (s *Scheduler) sweepSessionLogins(ctx context.Context) {
 // the login as it is: the sessions show the agent's own sign-in error once the
 // access token expires.
 func (s *Scheduler) refreshOwnerLogin(ctx context.Context, account domain.MemberID, agent string) {
+	mu, _ := s.sessionLoginRefresh.LoadOrStore(sessionLoginKey{account: account, agent: agent}, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
 	issuer := s.cfg.AssistantIssuer.withDefaults()
 	refreshed := false
 	err := s.cfg.Homes.RefreshLogin(account, assistantSignInRel[agent], sessionLoginLocks[agent], func(old []byte) ([]byte, error) {
@@ -291,7 +305,8 @@ type sessionLoginRun struct {
 // login, refreshed first when due, or a signed-out login once the account is
 // no longer shared with the run's launcher. Retained runs are kept current
 // too, since a reopen thaws them with the copy they hold. Signed-out copies
-// are written before any refresh, so a slow issuer cannot delay them.
+// are written before any refresh, and each account refreshes on its own, so
+// a slow issuer delays only its own account's copies.
 func (s *Scheduler) syncSessionLogins(ctx context.Context) {
 	groups := map[sessionLoginKey][]sessionLoginRun{}
 	s.mu.Lock()
@@ -317,15 +332,19 @@ func (s *Scheduler) syncSessionLogins(ctx context.Context) {
 			}
 		}
 	}
+	var wg sync.WaitGroup
 	for key, runs := range live {
-		login := s.ownerSessionLogin(ctx, key)
-		if login == nil {
-			continue
-		}
-		for _, r := range runs {
-			s.writeSessionLoginCopy(ctx, key, r, login)
-		}
+		wg.Go(func() {
+			login := s.ownerSessionLogin(ctx, key)
+			if login == nil {
+				return
+			}
+			for _, r := range runs {
+				s.writeSessionLoginCopy(ctx, key, r, login)
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // writeSessionLoginCopy writes login over r's copy. A login that is not

@@ -201,6 +201,13 @@ type Scheduler struct {
 	recoveryReadyOnce sync.Once
 	// recovering is set while Start recovers runs.
 	recovering atomic.Bool
+	// sessionLoginRefresh holds a *sync.Mutex per sessionLoginKey: two
+	// refreshes of one login that both found its CLI lock stale would remove
+	// each other's lock and spend the refresh token twice.
+	sessionLoginRefresh sync.Map
+	// sessionLoginWrite serializes the truncate-then-write of session login
+	// copies, which a launch and the pump can both make to one file.
+	sessionLoginWrite sync.Mutex
 	// superCtx bounds every supervision goroutine; cancelling it never stops a
 	// container.
 	superCtx    context.Context
