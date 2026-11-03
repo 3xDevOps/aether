@@ -348,6 +348,14 @@ again. If the agent loses the conversation again within 5 minutes, Aether stops 
 adapter and the session parks with
 `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`.
 
+If the agent refuses a turn with `Authentication required`, Aether shows
+**Agent signed out**, restarts the adapter in the same container so it reads the
+account's login again, restores the conversation, and sends the turn once more. If
+the restarted agent refuses again within 5 minutes, the session parks with
+`enhanced turn failed: ... Authentication required ...; restarting the agent did not restore its sign-in, ...: start a new session`.
+That container's copy of the login is stale or unreadable; a new session's
+container mounts the current one.
+
 If the adapter fails to start or exits, the container and login shell stay
 available. The log shows the real error and the end of the adapter's stderr, and
 the session parks:

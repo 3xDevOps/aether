@@ -88,7 +88,7 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun) {
 		return
 	}
 	prompt := sess.FailedPrompt()
-	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again, then sends the turn once more."); err != nil {
+	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again, then will send the turn once more."); err != nil {
 		slog.Warn("scheduler: record the sign-in notice", "run", entry.runID, "error", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)

@@ -50,7 +50,8 @@ func TestEnhancedAuthRefusalAfterARestartShowsTheFailure(t *testing.T) {
 	waitFor(t, "the failure shown", func() bool {
 		row, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && row.Status == domain.RunNeedsAttention &&
-			strings.HasPrefix(row.Reason, acpTurnFailedReason) && strings.Contains(row.Reason, "Authentication required")
+			strings.HasPrefix(row.Reason, acpTurnFailedReason) && strings.Contains(row.Reason, "Authentication required") &&
+			strings.Contains(row.Reason, "start a new session")
 	})
 	time.Sleep(200 * time.Millisecond)
 	if n := len(rt.all()); n != before+1 {
