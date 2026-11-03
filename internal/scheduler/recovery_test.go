@@ -664,7 +664,7 @@ func TestRecoveryUnstartedLookupFailureKeepsSyntheticOwner(t *testing.T) {
 		t.Fatal("lookup outage must retain the live container")
 	}
 
-	retry.setFindErr(nil)
+	retry.clearFindErr()
 	s2.sweepRetained(ctx)
 	waitFor(t, "unstarted lookup retry destroy", func() bool { return e.rt.byName(string(r.ID)) == nil })
 	row := e.waitStoreStatus(t, r.ID, domain.RunInterrupted)
@@ -714,7 +714,7 @@ func TestTerminalCreationKeyFailureInstallsSyntheticRetryOwner(t *testing.T) {
 	if err := s2.Close(); err != nil {
 		t.Fatalf("Close synthetic owner scheduler: %v", err)
 	}
-	retry.setFindErr(nil)
+	retry.clearFindErr()
 	s3 := e.newScheduler(t, e.rt, newFakePTY())
 	s3.cfg.Runtime = retry
 	if err := s3.recoverRuns(ctx); err != nil {
@@ -1519,9 +1519,9 @@ func (r *creationKeyFailureRuntime) emptyDestroyCount() int {
 	return r.emptyDestroyCalls
 }
 
-func (r *creationKeyFailureRuntime) setFindErr(err error) {
+func (r *creationKeyFailureRuntime) clearFindErr() {
 	r.mu.Lock()
-	r.findErr = err
+	r.findErr = nil
 	r.mu.Unlock()
 }
 func TestBootRetainedDestroyFailureRetriesOnSweep(t *testing.T) {

@@ -133,7 +133,12 @@ func TestUnknownReservationResolvesAtLaunch(t *testing.T) {
 		}
 	}
 
-	flaky.setFindErr(nil)
+	if c := e.rt.byName(string(run.ID)); c != nil {
+		if err := e.rt.Destroy(ctx, c.id); err != nil {
+			t.Fatalf("remove container: %v", err)
+		}
+	}
+	flaky.clearFindErr()
 	if err := recovered.reserveRunUser(ctx, next, "1000:1000", true); err != nil {
 		t.Fatalf("launch after the runtime confirmed the container gone: %v", err)
 	}
@@ -219,7 +224,7 @@ func TestCheckoutGCSettlesMissingCheckout(t *testing.T) {
 	}
 	old := time.Now().UTC().Add(-2 * time.Hour)
 	row.FinishedAt = &old
-	if err := e.db.UpdateRun(ctx, row); err != nil {
+	if err = e.db.UpdateRun(ctx, row); err != nil {
 		t.Fatal(err)
 	}
 	capture.mu.Lock()

@@ -844,7 +844,7 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheOwnersLogin(t *testing.T) {
 	}
 
 	_, err = s2.Launch(ctx, e.ws.ID, lin.ID, e.owner.ID, "second", "claude", domain.LaunchTUI)
-	if err == nil || !strings.Contains(err.Error(), "shares is held by live session") {
+	if err == nil || !strings.Contains(err.Error(), "(cleanup pending)") {
 		t.Fatalf("second recipient beside the recovered runs = %v, want reservation refusal", err)
 	}
 	// The probe uses the owner's mapping, so once the owner's containers run
@@ -852,13 +852,13 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheOwnersLogin(t *testing.T) {
 	probe := func() error {
 		return s2.reserveRunUser(context.Background(), &supervised{runID: "run-probe", memberID: lin.ID, loginMember: e.owner.ID}, "2000:2000", true)
 	}
-	if err = probe(); err == nil || !strings.Contains(err.Error(), "shares is held by live session") {
+	if err = probe(); err == nil || !strings.Contains(err.Error(), "(cleanup pending)") {
 		t.Fatalf("login beside the recovered runs = %v, want reservation refusal", err)
 	}
 
 	// The owner's terminal and run look up their own creation keys. Nothing
 	// retries the recovered owners until the sweep below.
-	retry.setFindErr(nil)
+	retry.clearFindErr()
 	if _, err = s2.EnsureTerminal(ctx, e.owner.ID); err != nil {
 		t.Fatalf("owner terminal beside the recovered runs: %v", err)
 	}

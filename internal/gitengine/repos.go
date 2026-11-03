@@ -112,8 +112,8 @@ func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string
 		return "", err
 	}
 	if extraErr := e.eachExtra(run, false, func(key domain.RunID) error {
-		_, err := e.commitAll(ctx, key, message, author, signingKey)
-		return err
+		_, keyErr := e.commitAll(ctx, key, message, author, signingKey)
+		return keyErr
 	}); extraErr != nil {
 		return commit, extraErr
 	}
@@ -127,8 +127,8 @@ func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (string
 		return "", err
 	}
 	if extraErr := e.eachExtra(run, false, func(key domain.RunID) error {
-		_, err := e.publishRunBranch(ctx, key)
-		return err
+		_, keyErr := e.publishRunBranch(ctx, key)
+		return keyErr
 	}); extraErr != nil {
 		return commit, extraErr
 	}
