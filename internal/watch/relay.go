@@ -133,6 +133,9 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	if s.notifier == nil {
 		return settle(protocol.WatchStatusFailed, "This server has no session inboxes", nil)
 	}
+	if !slices.Contains(w.RelayTo, r.RunID) {
+		return settle(protocol.WatchStatusCleared, "Not delivered: the session was removed from relay_to", nil)
+	}
 	member, err := s.store.GetMember(ctx, w.MemberID)
 	if err != nil {
 		return err
@@ -153,7 +156,7 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 		return settle(protocol.WatchStatusFailed, "Not relayed: "+err.Error(), nil)
 	}
 	if run.Status.Terminal() {
-		return settle(protocol.WatchStatusCleared, "Not delivered: the session ended", nil)
+		return s.ended(ctx, w, r, settle)
 	}
 	// Claimed before the write, so a second server pass waits out the
 	// lease; the inbox key keeps a retry after a crash from writing twice.
@@ -168,6 +171,11 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
+	// The key was written by an attempt that stopped before it settled;
+	// the body differs only if the member renamed themselves since.
+	if errors.Is(err, store.ErrIdempotencyConflict) {
+		written, err = true, nil
+	}
 	switch {
 	case written:
 		detail := "Written to the session's inbox"
@@ -176,12 +184,20 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 		}
 		return settle(protocol.WatchStatusDelivered, detail, nil)
 	case err == nil:
-		return settle(protocol.WatchStatusCleared, "Not delivered: the session ended", nil)
+		return s.ended(ctx, w, r, settle)
 	case r.Attempts >= maxPushAttempts:
 		return settle(protocol.WatchStatusFailed, err.Error(), nil)
 	}
 	next := s.now().Add(backoff(r.Attempts))
 	return settle(protocol.WatchStatusPending, fmt.Sprintf("Retry %d of %d at %s: %s", r.Attempts+1, maxPushAttempts, next.Format("15:04"), err), &next)
+}
+
+// ended clears r, whose session ended, and stops relaying to it.
+func (s *Service) ended(ctx context.Context, w *store.Watch, r *store.WatchRelay, settle func(status, detail string, next *time.Time) error) error {
+	if err := s.dropRelay(ctx, w.ID, r.RunID); err != nil {
+		return err
+	}
+	return settle(protocol.WatchStatusCleared, "Not delivered: the session ended", nil)
 }
 
 // dropRelay stops watch id relaying to run.

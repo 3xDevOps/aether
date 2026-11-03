@@ -248,7 +248,8 @@ finishes" needs no one polling:
   longer message, or one that was deleted, gets a `failed` row with the
   real error, such as `Not relayed: you may not write to session run-b:
   ...`, and is removed from `relay_to`. A session that ended gets
-  `cleared`. An inbox write that fails is retried with backoff, 5 times at
+  `cleared` and is removed too, as is a row for a session you removed from
+  `relay_to` before it was written. An inbox write that fails is retried with backoff, 5 times at
   most, and then marked `failed`.
 - A watch relays at most 50 deliveries over its life; later ones are recorded
   `failed` with that reason. Create a new watch to relay more.

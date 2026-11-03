@@ -232,6 +232,9 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: fmt.Sprintf(
 			"method not found: %s; allowed methods: %s", req.Method, strings.Join(allowedMethods(), ", "))}
 	}
+	if relays(req) {
+		tier = tierConfirmed
+	}
 	result, rpcErr := s.run(ctx, req, tier)
 	outcome := "ok"
 	if rpcErr != nil {
@@ -239,6 +242,20 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 	}
 	slog.Info("assistant tool", "method", req.Method, "tier", tier, "outcome", outcome)
 	return result, rpcErr
+}
+
+// relays reports whether req makes a watch write into sessions, which
+// wakes them as a message does, so it is confirmed like run.inject.
+func relays(req protocol.Request) bool {
+	switch req.Method {
+	case protocol.MethodWatchCreate:
+		p, err := protocol.DecodeParams[protocol.WatchCreateParams](req.Params)
+		return err == nil && len(p.RelayTo) > 0
+	case protocol.MethodWatchUpdate:
+		p, err := protocol.DecodeParams[protocol.WatchUpdateParams](req.Params)
+		return err == nil && p.RelayTo != nil && len(*p.RelayTo) > 0
+	}
+	return false
 }
 
 func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (json.RawMessage, *protocol.Error) {
@@ -345,6 +362,8 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		return s.summarizeTemplate(ctx, req, c)
 	case protocol.MethodRunInject:
 		return s.summarizeInject(ctx, req, c)
+	case protocol.MethodWatchCreate, protocol.MethodWatchUpdate:
+		return s.summarizeRelay(ctx, req, c)
 	case protocol.MethodRunKill:
 		p, err := protocol.DecodeParams[protocol.RunIDParams](req.Params)
 		if err != nil || p.RunID == "" {
@@ -763,6 +782,41 @@ func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *p
 		return rpcErr
 	}
 	c.Summary = fmt.Sprintf("Send to session %s (%q)%s: %q%s", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message), attached(p.Attachments, nil))
+	return nil
+}
+
+func (s *Server) summarizeRelay(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	var watched string
+	var relay []string
+	if req.Method == protocol.MethodWatchCreate {
+		p, err := protocol.DecodeParams[protocol.WatchCreateParams](req.Params)
+		if err != nil {
+			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
+		}
+		watched, relay = "session "+p.Target.RunID, p.RelayTo
+		if p.Target.Kind == protocol.WatchTargetPR {
+			watched = fmt.Sprintf("pull request %s#%d", p.Target.Repo, p.Target.Number)
+		}
+	} else {
+		p, err := protocol.DecodeParams[protocol.WatchUpdateParams](req.Params)
+		if err != nil || p.RelayTo == nil {
+			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": relay_to is required"}
+		}
+		watched, relay = "watch "+p.WatchID, *p.RelayTo
+	}
+	parts := make([]string, 0, len(relay))
+	for _, id := range relay {
+		var probe protocol.AssistantConfirmation
+		run, rpcErr := s.ownedRun(ctx, id, &probe)
+		if rpcErr != nil {
+			return rpcErr
+		}
+		if probe.OtherMember {
+			c.OtherMember, c.OtherOwner = true, probe.OtherOwner
+		}
+		parts = append(parts, fmt.Sprintf("%s (%q)%s", id, runLabel(run), ownedBy(&probe)))
+	}
+	c.Summary = fmt.Sprintf("Write each notice of %s into session %s, waking it", watched, strings.Join(parts, ", "))
 	return nil
 }
 

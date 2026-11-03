@@ -125,6 +125,7 @@ run.
 | Pause and resume | Pause or resume a session | No |
 | Launch a session | Start a session with a workspace, agent and task | Yes |
 | Message a session | Send a message to a session's agent | Yes |
+| Watch | Watch a session or pull request, change or pause a watch | No; Yes, always, when the watch relays notices into sessions (`relay_to`) |
 | Stop or close a session | Stop a session, or close it as merged or abandoned | Yes |
 | Save your environment | Save it as the image new sessions and terminals start from | Yes |
 | Session lifecycle | Relaunch a stopped session, switch its mode, protect or archive it, hand it to a teammate | Yes |

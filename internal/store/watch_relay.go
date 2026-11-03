@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -59,6 +60,9 @@ func (d *DB) DueWatchRelays(ctx context.Context, now time.Time) ([]*WatchRelay, 
 	out := make([]*WatchRelay, 0, len(found))
 	for _, f := range found {
 		n, err := d.GetWatchNotification(ctx, f.notification)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

@@ -286,6 +286,20 @@ func TestReversibleCallIsRecordedWithoutApproval(t *testing.T) {
 	}
 }
 
+func TestAWatchThatRelaysIntoSessionsAsksFirst(t *testing.T) {
+	svc, m, _ := newActionService(t)
+	sock, _ := serveTools(t, svc, m)
+	create := protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"}, RelayTo: []string{"run-1"}}
+	if err := callTool(t, sock, m, protocol.MethodWatchCreate, create, true, false); err == nil {
+		t.Fatal("a refused relay watch was created")
+	}
+	got := actions(t, svc, m)
+	if len(got) != 1 || got[0][0].Outcome != protocol.AssistantActionDeclined ||
+		!strings.HasPrefix(got[0][0].Summary, `Write each notice of session run-1 into session run-1 (`) {
+		t.Fatalf("records = %+v, want the relay shown on a card and refused", got)
+	}
+}
+
 func TestReversibleWatchSummaryNamesWhatItCanRead(t *testing.T) {
 	for _, tc := range []struct{ method, params, want string }{
 		{protocol.MethodWatchCreate, `{"target":{"kind":"pr","repo":"acme/shop","number":7},"conditions":["ci"]}`, "Watch pull request acme/shop#7 for ci"},
