@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { Api } from '@/lib/api'
+import { useEffect, useRef, useState } from 'react'
+import { ApiError, type Api, codeMethodNotFound } from '@/lib/api'
 import type { AssistantAccount } from '@/lib/assistant-types'
 import { errorSentence } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -28,21 +28,29 @@ export function accountSentence(account: AssistantAccount): string | null {
 /** Whether the assistant's sign-in names the account your sessions use. Information only: it reads the environment's login and changes nothing. */
 export function AssistantAccountCheck({ agent, client, className }: { agent: string; client: Api; className?: string }) {
   const supported = useCapability().hasMethod('assistant.account')
-  // A start records the account, so a check made before it reads again.
   const assistantState = useStore((s) => s.assistantStatus?.state)
+  // A start records the account, so only a check made before it reads
+  // again; one that found it keeps the state it was made in.
+  const found = useRef<{ state: typeof assistantState } | null>(null)
+  const retry = found.current ? found.current.state : assistantState
   const [text, setText] = useState<string | null>(null)
   useEffect(() => {
     if (!supported) return
     let live = true
     setText(null)
     client.assistantAccount(agent).then(
-      (account) => live && setText(accountSentence(account)),
-      (err: unknown) => live && setText(`Can't compare with your sessions' account: ${errorSentence(err)}`),
+      (account) => {
+        if (!live) return
+        if (account.state !== 'unrecorded') found.current = { state: retry }
+        setText(accountSentence(account))
+      },
+      // A server behind a gateway that lists every method may not have it.
+      (err: unknown) => live && setText(err instanceof ApiError && err.code === codeMethodNotFound ? null : `Can't compare with your sessions' account: ${errorSentence(err)}`),
     )
     return () => {
       live = false
     }
-  }, [agent, client, supported, assistantState])
+  }, [agent, client, supported, retry])
   if (!text) return null
   return <p role="status" className={cn('text-ui-sm break-words text-muted', className)}>{text}</p>
 }

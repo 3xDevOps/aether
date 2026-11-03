@@ -121,6 +121,9 @@ describe('assistant settings', () => {
     await waitFor(() => expect(client.assistantAccount).toHaveBeenCalledTimes(1))
     act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'running' }))
     expect(await screen.findByText('Same Claude account as your sessions')).toBeDefined()
+    act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'idle' }))
+    act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'running' }))
+    expect(client.assistantAccount).toHaveBeenCalledTimes(2)
   })
 
   it('does not ask a server without the account check', async () => {
@@ -128,6 +131,13 @@ describe('assistant settings', () => {
     act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }))
     expect(await screen.findByText('Signed in for the assistant.')).toBeDefined()
     expect(client.assistantAccount).not.toHaveBeenCalled()
+  })
+
+  it('shows nothing when a gateway that lists every method reaches a server without the check', async () => {
+    const client = show(['*'], { assistantAccount: vi.fn(async () => { throw new ApiError(404, 'assistant.account: method not found: assistant.account', -32601) }) })
+    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }))
+    await waitFor(() => expect(client.assistantAccount).toHaveBeenCalled())
+    expect(screen.queryByText(/Can't compare/)).toBeNull()
   })
 
   it('lists what auto-approval covers', () => {
