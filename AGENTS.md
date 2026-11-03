@@ -166,6 +166,11 @@ Many sessions share the same CI runners.
   reason; `CI gate` green on the current head. Then
   `gh pr merge <n> --squash` puts it in the merge queue, which runs the
   full suite once per batch before `main` moves. Never pass `--admin`.
+- A UI change also gets a design review loop: a separate Opus session
+  reviews dark-mode screenshots at the affected widths as a senior product
+  designer would. Apply or rebut each point and re-shoot until none blocks.
+  Aether is dark-first, so every screenshot is dark mode; force
+  `colorScheme: 'dark'` in headless browsers.
 
 ## Repository shape
 
