@@ -54,6 +54,8 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 		p.refusal = fmt.Sprintf("session %s is itself a subsession of %s, and subsessions go one level deep; do the work yourself or message %s", parent.ID, p.parentOf, p.parentOf)
 	case s.cfg.Runs.WakeRefusal(parent.Harness, parent.Mode) != nil:
 		p.refusal = s.cfg.Runs.WakeRefusal(parent.Harness, parent.Mode).Error()
+	case parent.Children == domain.ChildrenOff:
+		p.refusal = "subsessions are off for this session; its owner can allow them from the session's More menu (Allow subsessions)"
 	case !memberAllows(parent, p.settings):
 		p.refusal = "subsessions are off for this session's owner; they can turn them on in Settings → Subsessions (aether subsessions on) or allow them for this session only from the session's More menu (Allow subsessions)"
 	}

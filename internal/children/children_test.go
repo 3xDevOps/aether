@@ -504,8 +504,8 @@ func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 	if _, err := h.svc.Allow(h.ctx, h.ada, parent.ID, domain.ChildrenOff); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("start after an admin turned subsessions off = %v, want denied", err)
+	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "off for this session;") {
+		t.Fatalf("start after an admin turned subsessions off = %v, want denied naming the session's setting", err)
 	}
 	if _, err := h.svc.Allow(h.ctx, h.bob, parent.ID, ""); err != nil {
 		t.Fatal(err)
