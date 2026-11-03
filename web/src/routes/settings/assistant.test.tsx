@@ -185,6 +185,13 @@ describe('approval rules', () => {
     await waitFor(() => expect(within(section).queryByText(rule.wording)).toBeNull())
   })
 
+  it('is absent from a server without assistant.rules', async () => {
+    const client = show(['assistant.status', 'assistant.settings', 'run.launch'])
+    await waitFor(() => expect(toggle()).toHaveProperty('disabled', false))
+    expect(screen.queryByRole('region', { name: 'Approval rules' })).toBeNull()
+    expect(client.assistantRules).not.toHaveBeenCalled()
+  })
+
   it('shows the real error of a failed read and tries again', async () => {
     const user = userEvent.setup()
     const client = show(['*'], { assistantRules: vi.fn().mockRejectedValueOnce(new ApiError(200, 'assistant.rules: the assistant is not configured on this server', -32004)).mockResolvedValue([]) })

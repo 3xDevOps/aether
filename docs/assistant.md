@@ -376,9 +376,10 @@ aether member assistant rules --revoke <rule-id>
 rule-7k2m9q4xbd  created 2026-11-03 14:02, 3 uses, last 2026-11-03 16:40
   Always approve launches of Claude Code (acp) in api on your account, permission default
   from: Launch claude (acp) in api: "Fix the flaky login test"
-``` A rule whose workspace was
-removed, or whose teammate's account is no longer shared with you, stops
-passing cards and is listed as `Inactive: <reason>`. Merging two members
+```
+
+A rule whose workspace was removed, or whose teammate's account is no
+longer shared with you, stops passing cards and is listed as `Inactive: <reason>`. Merging two members
 keeps the survivor's rules and does not move the absorbed member's.
 
 After you approve three cards of one kind in a row, the next card of that

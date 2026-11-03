@@ -38,3 +38,20 @@ func TestAssistantRulesListsAndRevokes(t *testing.T) {
 		t.Fatalf("revoke = %q, %v", out.String(), err)
 	}
 }
+
+// A card's summary quotes the task the assistant wrote, so the list prints
+// no control character that could drive the terminal.
+func TestAssistantRulesNeutralizesControlCharacters(t *testing.T) {
+	c := fakeControlMethods(t, map[string]*fakeReply{
+		protocol.MethodAssistantRules: {result: protocol.AssistantRulesResult{Rules: []protocol.AssistantRule{{
+			ID: "rule-1", Wording: "Always approve\x07", Summary: "Launch \x1b[2J\x1b]8;;https://example.invalid\x07x\x1b]8;;\x07\rdone", CreatedAt: time.Now(),
+		}}}},
+	})
+	var out strings.Builder
+	if err := assistantRules(c, &out, ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(out.String(), "\x1b\x07\r") {
+		t.Fatalf("list = %q, want no control characters", out.String())
+	}
+}

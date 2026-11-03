@@ -1,9 +1,11 @@
-// Approval rules and the setup question against a real gateway and server.
-// The assistant agent is not installed here, so assistant.status, its
-// stream, assistant.confirm and the rules list are scripted the way the
-// server answers them; TestIntegrationAssistantApprovalRule drives the same
-// journey through the real server's tool socket. The setup question's answer
-// goes to the real server's assistant.settings.
+// The dashboard's wiring of approval rules and the setup question, against a
+// real gateway and server. The assistant agent is not installed here, so
+// assistant.status, its stream, assistant.confirm and the rules list are
+// scripted the way the server answers them: this covers the buttons, the
+// params they send and the Settings list, not the server's matching, which
+// TestIntegrationAssistantApprovalRule (internal/server) drives through the
+// real tool socket. The setup question's answer and Approve everything's
+// confirm go to the real server's assistant.settings.
 
 import type { Page, WebSocketRoute } from '@playwright/test'
 import { expect, test } from './fixtures'
@@ -116,5 +118,13 @@ test('Always approve saves a rule, a matching launch passes, another kind asks, 
 
   if (!(await assistant.isVisible())) await page.getByRole('button', { name: 'Assistant' }).first().click()
   await cards(launchCard('conf-3', 'after the revoke', { wording }))
-  await expect(assistant.getByRole('group', { name: /^Approve this action\? .*"after the revoke"/ }).getByRole('button', { name: wording })).toBeVisible()
+  const restored = assistant.getByRole('group', { name: /^Approve this action\? .*"after the revoke"/ })
+  await expect(restored.getByRole('button', { name: wording })).toBeVisible()
+
+  await restored.getByRole('button', { name: 'Approve everything from now on' }).click()
+  await expect.poll(() => confirmed.at(-1)).toEqual({ confirmation_id: 'conf-3', approve: true })
+  const dialog = page.getByRole('alertdialog', { name: 'Let the assistant act without asking?' })
+  await dialog.getByRole('button', { name: 'Turn on' }).click()
+  await expect(dialog).toBeHidden()
+  await expect.poll(async () => (await settings()).auto_approve).toBe(true)
 })

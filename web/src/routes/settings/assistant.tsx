@@ -13,6 +13,7 @@ import { ApprovalRulesSection } from '@/routes/settings/approval-rules'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { refreshAssistant } from '@/store/assistant-stream'
+import { useCapability } from '@/store/hooks'
 
 export const autoApproveLabel = 'Let the assistant act without asking'
 
@@ -27,6 +28,7 @@ const scope: [string, string][] = [
 
 export function AssistantSection({ client }: { client: Api }) {
   const available = useAssistantAvailable()
+  const cap = useCapability()
   const [loaded, setLoaded] = useState<boolean | null>(null)
   const stored = useStore((s) => s.assistantStatus?.auto_approve)
   const on = loaded === null ? null : (stored ?? loaded)
@@ -117,7 +119,7 @@ export function AssistantSection({ client }: { client: Api }) {
         />
       )}
     </SettingsSection>
-    <ApprovalRulesSection client={client} />
+    {cap.hasMethod('assistant.rules') && <ApprovalRulesSection client={client} />}
     </>
   )
 }

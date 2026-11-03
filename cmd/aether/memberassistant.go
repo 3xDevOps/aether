@@ -94,9 +94,9 @@ func assistantRules(c *protocol.Client, w io.Writer, revoke string) error {
 		if !r.LastUsedAt.IsZero() {
 			used = fmt.Sprintf("%d uses, last %s", r.Uses, day(r.LastUsedAt))
 		}
-		line := fmt.Sprintf("%s  created %s, %s\n  %s\n  from: %s\n", r.ID, day(r.CreatedAt), used, r.Wording, r.Summary)
+		line := fmt.Sprintf("%s  created %s, %s\n  %s\n  from: %s\n", printable(r.ID), day(r.CreatedAt), used, printable(r.Wording), printable(r.Summary))
 		if r.Inactive != "" {
-			line += "  Inactive: " + r.Inactive + "\n"
+			line += "  Inactive: " + printable(r.Inactive) + "\n"
 		}
 		if _, err := io.WriteString(w, line); err != nil {
 			return err
