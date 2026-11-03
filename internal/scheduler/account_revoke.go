@@ -103,12 +103,16 @@ func (s *Scheduler) leaveRevokedAccounts(ctx context.Context, match func(*domain
 	}
 }
 
-// accountRevoked reports whether the member whose home the run's container
-// mounts may no longer launch on the run's account. A handoff changes the
-// run's owner but keeps the launcher's account, so the new owner's shares
-// do not count.
+// accountRevoked reports whether the run's launcher may no longer launch on
+// the run's account. A handoff changes the run's owner but keeps the
+// launcher's account, so the new owner's shares do not count. A row from
+// before shares were narrowed records no launcher; its owner stands in.
 func (s *Scheduler) accountRevoked(ctx context.Context, run *domain.Run) (bool, error) {
-	_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, run.HomeMember(), string(run.AccountMember()))
+	launcher := run.HomeMemberID
+	if launcher == "" {
+		launcher = run.MemberID
+	}
+	_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, launcher, string(run.AccountMember()))
 	switch {
 	case errors.Is(err, permissions.ErrDenied) || errors.Is(err, store.ErrNotFound):
 		return true, nil

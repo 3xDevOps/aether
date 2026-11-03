@@ -106,6 +106,9 @@ func TestRevokeStopsARunNoOtherAccountCanTake(t *testing.T) {
 		{"no account", "account share revoked: Grace revoked access to their account; no other account can run claude", func(e *shareEnv, _ domain.RunID) {
 			e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.member.ID: 100}, AuthorizationMu: &sync.Mutex{}, Note: (&roomNotes{}).post})
 		}},
+		{"from before narrowed shares", "account share revoked: Grace revoked access to their account; cannot continue on another account: the session predates narrowed account shares, and its container mounts the account owner's whole home", func(e *shareEnv, run domain.RunID) {
+			e.clearHomeMember(t, run)
+		}},
 		{"paused", "account share revoked: Grace revoked access to their account; cannot continue on another account: the session is paused", func(e *shareEnv, run domain.RunID) {
 			if err := e.sched.Pause(t.Context(), run, e.member.ID); err != nil {
 				t.Fatal(err)
