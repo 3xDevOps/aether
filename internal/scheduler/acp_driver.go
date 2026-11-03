@@ -576,6 +576,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				d.s.goMove(func() { d.usageLimit(entry, oneShot, st, message) })
 				return
 			}
+			if !oneShot && acphost.AuthRequired(st.Failed) && d.reauthDue(entry) {
+				d.s.goMove(func() { d.reauth(entry, r) })
+				return
+			}
 			if !oneShot && acphost.SessionLost(st.Failed) {
 				d.s.goMove(func() { d.reopenLost(entry, r, st.Failed) })
 				return

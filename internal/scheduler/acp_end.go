@@ -63,6 +63,53 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 	}
 }
 
+// reauthDue reports whether an auth refusal should restart the agent: not
+// when the restart the previous refusal caused did not help.
+func (d *acpDriver) reauthDue(entry *supervised) bool {
+	d.s.mu.Lock()
+	defer d.s.mu.Unlock()
+	if time.Since(entry.authLostAt) < acpLostAgain {
+		return false
+	}
+	entry.authLostAt = time.Now()
+	return true
+}
+
+// reauth restarts an agent that refused a turn for want of a sign-in, so it
+// reads the account's login again, restores its session and sends the turn
+// once more.
+func (d *acpDriver) reauth(entry *supervised, lost *acpRun) {
+	defer d.lockOp(entry.runID)()
+	d.mu.Lock()
+	sess := lost.session
+	current := d.runs[entry.runID] == lost && !lost.stopping && sess != nil
+	d.mu.Unlock()
+	if !current {
+		return
+	}
+	prompt := sess.FailedPrompt()
+	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again, then sends the turn once more."); err != nil {
+		slog.Warn("scheduler: record the sign-in notice", "run", entry.runID, "error", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)
+	defer cancel()
+	d.record(entry, func() { entry.agentKeeper = nil })
+	if err := d.open(ctx, entry, openRestore); err != nil {
+		d.fail(entry, err)
+		return
+	}
+	if len(prompt) == 0 {
+		return
+	}
+	restarted, err := d.live(ctx, entry.runID)
+	if err == nil {
+		_, err = restarted.Prompt(ctx, prompt, false, nil)
+	}
+	if err != nil {
+		d.notice(entry.runID, "error", "Turn not sent again", err.Error())
+	}
+}
+
 func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	<-r.session.Done()
 	d.mu.Lock()

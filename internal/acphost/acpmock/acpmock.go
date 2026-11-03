@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -57,6 +58,8 @@ const (
 	PromptAskForm = "ask form"
 	// PromptRefuse makes the agent refuse the prompt with authRequired.
 	PromptRefuse = "refuse"
+	// PromptFail makes the agent fail the prompt with an internal error.
+	PromptFail = "fail the prompt"
 	// PromptUsageLimit makes the agent fail the prompt as Claude's adapter
 	// does when the account's usage limit is reached
 	// (acphost/testdata/claude_usage_limit.jsonl).
@@ -137,6 +140,9 @@ type Fixture struct {
 	List []json.RawMessage `json:"list"`
 	// RefusePrompts makes the agent refuse every prompt with authRequired.
 	RefusePrompts bool `json:"-"`
+	// RefuseNext, shared by every agent given the fixture, makes them
+	// refuse that many prompts with authRequired, then accept.
+	RefuseNext *atomic.Int32 `json:"-"`
 }
 
 func Load(name string) (Fixture, error) {
@@ -380,7 +386,7 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	cancelTurn := a.cancelTurn
 	a.mu.Unlock()
 	defer cancelTurn()
-	if a.fix.RefusePrompts {
+	if a.fix.RefusePrompts || (a.fix.RefuseNext != nil && a.fix.RefuseNext.Add(-1) >= 0) {
 		return nil, acp.NewAuthRequired(nil)
 	}
 	switch text {
@@ -413,6 +419,8 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptRefuse:
 		return nil, acp.NewAuthRequired(nil)
+	case PromptFail:
+		return nil, acp.NewInternalError(nil)
 	case PromptUsageLimit:
 		return nil, &acp.RequestError{Code: -32603, Message: "Internal error: You've hit your weekly limit · resets Oct 14, 9am (UTC)",
 			Data: map[string]any{"errorKind": "rate_limit"}}

@@ -230,6 +230,8 @@ type Session struct {
 	openedAt   time.Time
 	turnAt     time.Time
 	compacting bool
+	// failedPrompt is the prompt of the turn that last failed.
+	failedPrompt []acp.ContentBlock
 	// quietAt is when the armed check of the autonomous turn's quiet fires.
 	quietAt time.Time
 	// owedUntil bounds the wait for the turn reporting back on a task the
