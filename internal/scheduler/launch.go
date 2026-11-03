@@ -139,25 +139,26 @@ func (s *Scheduler) reservationConflictLocked(home, login domain.MemberID, user,
 		}
 		if other.home == home {
 			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
-				home, other.owner, other.user, owner, user)
+				home, other.holder(), other.user, owner, user)
 		}
 		return fmt.Errorf("the login %s shares is held by %s as user %s, but %s resolved user %s; a session on a shared account must use the uid:gid of the owner's live containers and of other sessions on that login",
-			login, other.owner, other.user, owner, user)
+			login, other.holder(), other.user, owner, user)
 	}
 	return nil
 }
 
-func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string) error {
+func (s *Scheduler) reserveTerminalUser(ctx context.Context, entry *terminalSupervision, user string) error {
 	if user == "" {
 		return nil
 	}
+	lookupErr := s.resolveStaleRunUsers(ctx, entry.member, "", user)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
 	for other := range s.credentialUsers {
 		if other.blocks(entry.member, "", user) {
-			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
-				entry.member, other.owner, other.user, user)
+			return withLookupError(fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+				entry.member, other.holder(), other.user, user), lookupErr)
 		}
 	}
 	reservation := &credentialUserReservation{
@@ -175,9 +176,81 @@ func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string)
 
 // reserveRunUser records the resolved run user and reserves its writable
 // member home and shared login for the full live-run registry lifetime.
-func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bool) error {
+func (s *Scheduler) reserveRunUser(ctx context.Context, entry *supervised, user string, sharedHome bool) error {
+	var lookupErr error
+	if sharedHome && user != "" {
+		lookupErr = s.resolveStaleRunUsers(ctx, entry.memberID, entry.loginMember, user)
+	}
 	_, err := s.reserveCredentialUser(entry.memberID, entry.loginMember, user, sharedHome, "live session "+string(entry.runID), entry)
-	return err
+	return withLookupError(err, lookupErr)
+}
+
+// releaseGoneRunUser drops the reservation of a run whose container the
+// runtime confirmed gone, while its cleanup may still retry.
+func (s *Scheduler) releaseGoneRunUser(entry *supervised) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs[entry.runID] != entry || entry.runUser == "" {
+		return nil
+	}
+	entry.runUser = ""
+	s.syncRunUserReservationsLocked()
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		return fmt.Errorf("persist the released user of session %s: %w", entry.runID, err)
+	}
+	return nil
+}
+
+func withLookupError(conflict, lookup error) error {
+	if conflict == nil || lookup == nil {
+		return conflict
+	}
+	return fmt.Errorf("%w; %w", conflict, lookup)
+}
+
+// resolveStaleRunUsers asks the runtime for the container of every closed,
+// retained or unidentified run whose reservation would keep user from home
+// or login. A gone container mounts nothing and releases its reservation; an
+// existing one reserves its real user, so a genuine conflict still refuses.
+// A failed lookup leaves the reservation standing and is returned.
+func (s *Scheduler) resolveStaleRunUsers(ctx context.Context, home, login domain.MemberID, user string) error {
+	type candidate struct {
+		entry *supervised
+		cid   runtime.ID
+		user  string
+	}
+	var candidates []candidate
+	s.mu.Lock()
+	s.syncRunUserReservationsLocked()
+	for other := range s.credentialUsers {
+		e := other.run
+		if e == nil || !other.blocks(home, login, user) {
+			continue
+		}
+		if e.runUser == unknownRecoveryRunUser || e.destroyPending || e.retained {
+			candidates = append(candidates, candidate{e, e.containerID, e.runUser})
+		}
+	}
+	s.mu.Unlock()
+	var errs []error
+	for _, c := range candidates {
+		info, err := s.runContainerInfo(ctx, c.entry.runID, c.cid)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("look up the container of session %s: %w", c.entry.runID, err))
+			continue
+		}
+		resolved := normalizeRecoveryRunUser(info.User)
+		s.mu.Lock()
+		if s.runs[c.entry.runID] == c.entry && c.entry.containerID == c.cid && c.entry.runUser == c.user && resolved != c.user {
+			c.entry.runUser = resolved
+			s.syncRunUserReservationsLocked()
+			if err := s.writeSidecar(c.entry.sidecar()); err != nil {
+				errs = append(errs, fmt.Errorf("persist the resolved user of session %s: %w", c.entry.runID, err))
+			}
+		}
+		s.mu.Unlock()
+	}
+	return errors.Join(errs...)
 }
 
 // errKillRequested aborts provisioning when a Kill was accepted for the
@@ -465,7 +538,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 	entry.home = plan.Home
 	entry.loginMember = plan.LoginMember
 	s.mu.Unlock()
-	if reserveErr := s.reserveRunUser(entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
+	if reserveErr := s.reserveRunUser(ctx, entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return nil, reserveErr
 	}
 	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {

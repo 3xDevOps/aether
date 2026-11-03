@@ -443,6 +443,17 @@ retention ends, a closed session's reason reads `retained container expired` or
 `retained container unavailable`; when low disk space removes the container
 early it reads `retained container reclaimed for disk space`.
 
+Aether captures evidence before it removes a container or checkout, and
+retries a failed capture every `--poll-interval`. If the checkout is already
+gone, no retry can capture it: cleanup finishes without an evidence packet and
+the reason gains `evidence unavailable: session checkout missing`.
+
+A member's containers share one uid:gid mapping, so a launch under another
+mapping is refused while one of them is live. A closed session whose cleanup
+is still retrying counts only while its container exists: Aether asks Docker
+before refusing, and the refusal names it as `session <id> (cleanup pending)`
+and includes any Docker error.
+
 ## Tuning
 
 `aether-server serve` reads these from `/etc/aether/server.conf`. Set one by

@@ -279,7 +279,7 @@ func TestRecoveredTerminalAttachFailurePreservesAndRetries(t *testing.T) {
 		t.Fatalf("EnsureTerminal retry: %v", err)
 	}
 	conflicting := &supervised{runID: "conflicting-run", memberID: e.member.ID}
-	if err := s2.reserveRunUser(conflicting, "2000:2000", true); err == nil {
+	if err := s2.reserveRunUser(context.Background(), conflicting, "2000:2000", true); err == nil {
 		t.Fatal("incompatible session ownership was accepted while survivor remained reserved")
 	}
 	if retried.ContainerID != first.ContainerID {
