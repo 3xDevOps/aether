@@ -29,7 +29,8 @@ session's owner allows, and manage them. A subsession cannot start subsessions.
         [--model <id>] [--mode standard|enhanced|background]
         [--account <member-id>] [--idempotency-key <key>]
                                 start a subsession from your last published commit;
-                                commit first, uncommitted changes are not included
+                                commit first, uncommitted changes are not included;
+                                --account takes only your session owner's account
   list [--run-id <subsession>]  your subsessions with state, latest report, branch,
                                 and account
   cancel --run-id <subsession>  stop a subsession, or drop it from the queue
@@ -155,12 +156,67 @@ func readTask(task, file string, in io.Reader) (string, error) {
 func childSkill(status *protocol.CoordStatusResult) string {
 	switch {
 	case slices.Contains(status.Capabilities, protocol.MethodChildStart):
-		return "Subsessions: `aether-internal subsession start` dispatches a session on any installed agent and model with a completely fresh context, which can orchestrate its own subagents (aether-internal subsession --help). " +
-			"Use one instead of your own subagents for a complex task that splits into parallel parts and benefits from fresh-context sessions: it is a dispatch-and-forget shortcut for firing off part of a very complex task, or for when the user asks for session orchestration. Your own subagents suit small lookups and edits. " +
-			"Run `aether-internal subsession options` once, then `subsession start`; honor the number of subsessions and agents the user asks for. " +
-			"A subsession sees only its task text and your last commit, and cannot start subsessions. Its report reaches your inbox and wakes you; account for unfinished subsessions before reporting success. A subsession idle or waiting for over an hour is reported to your inbox: check it, then wake it with `send --to <subsession>` or stop it with `subsession cancel`.\n"
+		return "Subsessions: `aether-internal subsession start` runs part of your task as a separate Aether session with a fresh context and its own container and branch, on any installed agent and model, on your session owner's own account; its report reaches your inbox and wakes you. " +
+			"Use one for what your own subagents cannot give: another agent or model, a separate branch or build, long work that would crowd out your context, or an independent review; honor the number of subsessions and agents the user asks for. " +
+			"When to start one, the steps, the task format and the account rules: `aether-internal skill subsessions`. " +
+			"Account for unfinished subsessions before reporting success. A subsession idle or waiting for over an hour is reported to your inbox: check it, then wake it with `send --to <subsession>` or stop it with `subsession cancel`.\n"
 	case slices.Contains(status.Capabilities, protocol.MethodChildOptions):
 		return "Subsessions: not available to this session now; `aether-internal subsession options` gives the reason. If the user asks for one, tell them that reason.\n"
 	}
 	return ""
+}
+
+const subsessionTopic = `Subsessions: separate Aether sessions you start, then collect. Each has a fresh
+context and its own container and branch, and appears under this session in the
+dashboard, where people can watch and steer it.
+Start one when a part:
+- needs another agent or model, such as an independent review;
+- needs its own branch, container or build, or would conflict with your changes;
+- is long enough that doing it here would crowd out your context;
+- or when the user asks for subsessions, a number of them or particular agents:
+  do exactly that.
+Do the work yourself, or with your own subagents, when it is quick or one change,
+when its result must land in your working tree right away or the parts share
+files, or when what it needs lives in this conversation rather than in the
+repository. Each subsession costs a full new context and its own setup time;
+more sessions are not faster by default.
+Steps:
+1. Commit what it needs: it starts from your last commit and sees only its task.
+2. aether-internal subsession options --harness <agent>: whether you may start
+   one, the limits, and each agent's state and models.
+3. aether-internal subsession start --harness <agent> [--model <id>]
+     --purpose "<3-8 words>" --task-file <file>
+   The task states the goal, the files it owns, the files it must not touch, how
+   to verify, and what its final report must contain. Use repository-relative
+   paths: it runs in another container.
+4. Keep working on your part. Its report arrives in your inbox. When only
+   subsessions remain, wait for them the way aether-internal skill says for this
+   session: report waiting --for agents where mail wakes you, otherwise
+   aether-internal inbox --wait 30 inside your turn. A success report is refused
+   while one is unfinished.
+5. aether-internal subsession fetch --run-id <id>, then merge or cherry-pick
+   refs/remotes/children/<id> and verify before you report success.
+Accounts: a subsession starts on your session owner's own sign-in for that
+agent; only this session's launch fallback can move it to another account, as
+for any launch. --account accepts only the owner's account; another member's
+account is refused. To delegate on another member's account, that member
+starts this session or is handed it.
+A subsession cannot start subsessions.
+`
+
+func writeSubsessionSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
+	text := "No mounted session socket: whether this session may start subsessions cannot be discovered.\n"
+	switch {
+	case status != nil && slices.Contains(status.Capabilities, protocol.MethodChildStart):
+		text = subsessionTopic
+	case status != nil:
+		text = childSkill(status)
+	}
+	if text == "" {
+		text = "Subsessions: this server offers none.\n"
+	}
+	if _, err := io.WriteString(out, text); err != nil {
+		return ExitFailure, fmt.Errorf("write subsessions skill: %w", err)
+	}
+	return ExitOK, nil
 }

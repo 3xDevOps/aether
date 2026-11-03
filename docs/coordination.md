@@ -689,6 +689,9 @@ optional. Unknown flags and positional arguments are rejected. `skill` prints
 the CLI build version, live role and identity, current phase and immediate
 actions. `skill terminal`, `skill browser`, and `skill git` load focused
 development guidance when the relevant live capabilities are advertised.
+`skill subsessions` prints when to start a subsession, the steps, the task
+format and the account rules while `child.start` is advertised, and otherwise
+says why subsessions are not available.
 Its build version comes from the mounted binary, which may predate newly
 published documentation; help describes that binary's command syntax.
 
@@ -1189,11 +1192,13 @@ session ID and question ID returned by the session's own status and inbox result
 ### Subsessions
 
 A **subsession** is a session another session started with a completely fresh context
-to take a piece of a complex task, such as parallel implementation slices or an
-adversarial review by another agent. It can orchestrate its own subagents. It
-is a dispatch-and-forget shortcut for firing off part of a very complex task,
-or for when the user asks for session orchestration; a session's own
-subagents suit small lookups and edits. The caller is its **parent**. A subsession
+to take a piece of a task that the session's own subagents cannot: work on
+another agent or model, such as an adversarial review; work that needs its own
+branch, container or build; or long work that would crowd out the session's
+context. It can orchestrate its own subagents. Quick or tightly coupled work
+stays with the session, and more sessions are not faster by default.
+`aether-internal skill subsessions` gives agents these criteria, the steps, the
+task format and the account rules. The caller is its **parent**. A subsession
 is an ordinary session with its own container, checkout and branch, owned by the
 parent's owner, and it appears under its parent in the dashboard. Subsessions
 are on by default and go one level deep: a subsession cannot start subsessions, and
@@ -1222,7 +1227,9 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
 - `subsession start` takes `--harness`, `--purpose` (3-8 words, shown in the
   dashboard) and `--task` or `--task-file` (at most 24 KiB, so the escaped request fits the socket's 64 KiB; `-` reads
   standard input), plus optional `--model`, `--mode
-  standard|enhanced|background` and `--account <member-id>`. The server
+  standard|enhanced|background` and `--account <member-id>`. `--account` takes
+  only the parent owner's own account: another member's is refused with
+  `-32001 subsessions use the owner's own <agent> account`. The server
   publishes the parent's branch and checks the subsession out from that commit;
   uncommitted changes are not included. The subsession inherits the parent's
   extra repositories (`--repo`) and permission tier. The receipt carries the subsession's

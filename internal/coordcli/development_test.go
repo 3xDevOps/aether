@@ -121,3 +121,22 @@ func TestDevelopmentSkillGitMarksPullRequestsWithRunID(t *testing.T) {
 		t.Fatalf("git skill lost the pull request run marker: %d %s", code, raw)
 	}
 }
+
+func TestSubsessionSkillFollowsChildStart(t *testing.T) {
+	for _, tc := range []struct {
+		capabilities []string
+		want, absent string
+	}{
+		{[]string{protocol.MethodChildOptions, protocol.MethodChildStart}, "--account accepts only the owner's account", "not available"},
+		{[]string{protocol.MethodChildOptions}, "not available to this session now", "--task-file"},
+	} {
+		s := newCLISocket(t, func(protocol.Request) protocol.Response {
+			data, _ := json.Marshal(protocol.CoordStatusResult{RunID: "run", Capabilities: tc.capabilities})
+			return protocol.Response{Result: data}
+		})
+		code, raw := runCLI(t, s.path, []string{"skill", "subsessions"}, "")
+		if code != ExitOK || !strings.Contains(raw, tc.want) || strings.Contains(raw, tc.absent) {
+			t.Fatalf("skill subsessions with %v = %d %s", tc.capabilities, code, raw)
+		}
+	}
+}

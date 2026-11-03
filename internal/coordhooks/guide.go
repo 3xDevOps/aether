@@ -210,7 +210,8 @@ func RoleCard(g Guide) string {
 			"Ask it with `aether-internal ask --to %s` before asking the user; your final report reaches it. If you sit idle or waiting for over an hour, it is told and may wake you or stop you.\n", g.Parent, g.Parent)
 	}
 	if g.Parent == "" && !g.Background {
-		b.WriteString("For a very complex task that splits into parallel parts, `aether-internal subsession start` dispatches a fresh-context session on any installed agent; `aether-internal skill` says when to use one instead of your own subagents.\n")
+		b.WriteString("`aether-internal subsession start` runs part of your task as its own Aether session, with a fresh context and its own branch, on any installed agent or model; its report wakes you. " +
+			"Use one for what your own subagents cannot give: another agent or model, a separate branch or build, long work that would crowd out your context, or an independent review. `aether-internal skill subsessions` says when and how.\n")
 	}
 	if g.Role != "" {
 		b.WriteString(ReportGuide(g))

@@ -179,7 +179,7 @@ a peer's run_id with send --to or ask --to. A viewer-owned session has no peers;
 it can only reply to questions it was asked. status lists the most relevant
 peers; any other live session's run_id works with send --to and ask --to too.
 `,
-	"skill": `usage: aether-internal skill [terminal|browser|git]
+	"skill": `usage: aether-internal skill [terminal|browser|git|subsessions]
        aether-internal skill --hooks
 
 Print this session's identity, conditional development topics, and this session's
@@ -322,16 +322,19 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 		return ExitOK, nil
 	}
 	if fs.NArg() > 1 {
-		return fail(out, protocol.CodeInvalidParams, "skill accepts at most one topic: terminal, browser, git")
+		return fail(out, protocol.CodeInvalidParams, "skill accepts at most one topic: terminal, browser, git, subsessions")
 	}
 	topic := ""
 	if fs.NArg() == 1 {
 		topic = fs.Arg(0)
-		if topic != "terminal" && topic != "browser" && topic != "git" {
+		if topic != "terminal" && topic != "browser" && topic != "git" && topic != "subsessions" {
 			return fail(out, protocol.CodeInvalidParams, "unknown skill topic: "+topic)
 		}
 	}
 	write := func(status *protocol.CoordStatusResult) (int, error) {
+		if topic == "subsessions" {
+			return writeSubsessionSkill(out, status)
+		}
 		if topic != "" {
 			return writeDevelopmentSkill(out, status, topic)
 		}
