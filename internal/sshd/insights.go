@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -99,6 +100,10 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	needsYou, err := s.needsYou(ctx, got.NeedsYou)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	out := protocol.InsightsResult{
 		GeneratedAt: q.Now.Format(time.RFC3339),
 		From:        q.From.In(loc).Format(time.RFC3339),
@@ -135,7 +140,7 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 			Members: make([]protocol.InsightsMemberOutcome, 0, len(got.Members)),
 		},
 		Recent:   make([]protocol.InsightsRecentRun, 0, len(got.Recent)),
-		NeedsYou: s.unpaused(got.NeedsYou),
+		NeedsYou: needsYou,
 		Coverage: protocol.InsightsCoverage{
 			StateTimesSince:   optionalRFC3339(got.StateTimesSince),
 			PullRequestsSince: optionalRFC3339(got.PullRequestsSince),
@@ -249,12 +254,24 @@ func optionalRFC3339(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-func (s *Server) unpaused(runs []domain.RunID) int {
+// needsYou counts the runs that are not paused and whose need is not an
+// outcome held for their parent (domain.Run.OutcomeHeld).
+func (s *Server) needsYou(ctx context.Context, runs []*domain.Run) (int, error) {
 	n := 0
-	for _, id := range runs {
-		if !s.cfg.Runs.Paused(id) {
-			n++
+	for _, run := range runs {
+		if s.cfg.Runs.Paused(run.ID) {
+			continue
 		}
+		if run.ParentRunID != "" && !run.Detached {
+			parent, err := s.cfg.Store.GetRun(ctx, run.ParentRunID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return 0, fmt.Errorf("read the parent of session %s: %w", run.ID, err)
+			}
+			if parent != nil && !run.NeedsAttention(false, run.OutcomeHeld(parent, s.cfg.Runs.Paused(parent.ID))) {
+				continue
+			}
+		}
+		n++
 	}
-	return n
+	return n, nil
 }

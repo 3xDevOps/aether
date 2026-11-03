@@ -1574,7 +1574,7 @@ func TestAnsweredIsRefusedWhileAQuestionIsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kept != "needs input: which region?" || !after.Equal(before) || r.Reason != kept || r.Activity != domain.ActivityNeedsYou || !r.NeedsAttention(false) {
+	if kept != "needs input: which region?" || !after.Equal(before) || r.Reason != kept || r.Activity != domain.ActivityNeedsYou || !r.NeedsAttention(false, false) {
 		t.Fatalf("after a refused answer: idle reason %q at %v (was %v), row %s %q; want the question kept", kept, after, before, r.Activity, r.Reason)
 	}
 }

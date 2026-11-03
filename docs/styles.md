@@ -304,7 +304,7 @@ it). Subagent sub-lanes use the same fills.
 | Working | `text-state-working`; a live bar adds a 2px `border-state-working` end cap and `live-shimmer` on its activity text |
 | Needs you, or Needed attention in history | `text-state-needs-you`; a live bar ends in a `bg-raised` **Needs you** tag with a pulsing dot |
 | Paused | `text-state-paused` |
-| Finished: review | `text-accent`, matching its dot; a live bar ends in a review-tone **Finished: review** tag, never the Needs you tag |
+| Finished: review | `text-accent`, matching its dot; never the Needs you tag. The lane's label carries a review-tone **Finished: review** chip |
 | Done, Failed | `text-state-done`, `text-state-failed`; a finished session's working spans take its outcome's colour |
 | Waiting, answered, closed | `text-muted` |
 | Starting | hollow, dashed `border-seam` |

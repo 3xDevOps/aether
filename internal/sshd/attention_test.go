@@ -77,6 +77,32 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 	if _, err := e.store.FinishRunReported(ctx, failed.ID, domain.RunNeedsAttention, "agent reported failure", domain.ActivityFailed, nil, nil); err != nil {
 		t.Fatal(err)
 	}
+	lead := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "waiting for 2 subsessions", domain.ActivityWaitingAgents)
+	child := func(reason string, activity domain.RunActivity) *domain.Run {
+		t.Helper()
+		reserved, _, err := e.store.(*store.DB).ReserveChild(ctx, &domain.ChildReservation{
+			ParentRunID: lead.ID, RootRunID: lead.ID, TreeKey: string(lead.ID), WorkspaceID: e.ws.ID,
+			OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "codex", Mode: domain.LaunchACP, Task: "subtask",
+			IdempotencyKey: reason, RequestHash: reason,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := &domain.Run{ID: reserved.RunID, WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "subtask", Harness: "codex", Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+		if err := e.store.(*store.DB).CreateRunWithID(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.store.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, activity, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	heldSuccess := child("agent reported success", domain.ActivityFinished)
+	if _, _, err := e.store.SetRunReview(ctx, heldSuccess.ID, domain.ReviewReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	heldFailure := child("agent reported failure", domain.ActivityFailed)
+	childBlocked := child("blocked: no credentials", domain.ActivityNeedsYou)
 	bobs := newRun(bob.ID, domain.LaunchTUI, domain.RunRunning, "", domain.ActivityWorking)
 	question := &store.RoomMessage{WorkspaceID: e.ws.ID, RunID: bobs.ID, ActorID: e.member.ID, ActorDisplayName: "Ada", Kind: store.RoomMessageQuestion, Body: "Is the migration safe?", IdempotencyKey: "q1"}
 	if err := e.store.CreateRoomMessage(ctx, question); err != nil {
@@ -93,6 +119,7 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		blocked.ID:      {protocol.AttentionKindBlocked, "Blocked: no credentials"},
 		failed.ID:       {protocol.AttentionKindFailed, "Agent reported failure; review the result. Session remains open for follow-up."},
 		finished.ID:     {protocol.AttentionKindReady, "Finished: review the result"},
+		childBlocked.ID: {protocol.AttentionKindBlocked, "Blocked: no credentials"},
 	}
 	for id, w := range want {
 		item, ok := got[id]
@@ -100,7 +127,7 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 			t.Errorf("session %s = %+v, want kind %q reason %q", id, item, w[0], w[1])
 		}
 	}
-	for _, id := range []domain.RunID{paused.ID, working.ID, subsessions.ID, ci.ID, process.ID, bobs.ID, e.run.ID} {
+	for _, id := range []domain.RunID{paused.ID, working.ID, subsessions.ID, ci.ID, process.ID, lead.ID, heldSuccess.ID, heldFailure.ID, bobs.ID, e.run.ID} {
 		if item, ok := got[id]; ok {
 			t.Errorf("session %s listed for Ada: %+v", id, item)
 		}

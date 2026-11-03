@@ -50,8 +50,8 @@ type need struct {
 
 // needOf is the owner's rows of the dashboard's Needs you table
 // (web/src/lib/needs-you.ts), in its order, from what the server knows about
-// the run alone.
-func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need {
+// the run and, through held (domain.Run.OutcomeHeld), its parent.
+func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused, held bool) *need {
 	if paused {
 		return nil
 	}
@@ -75,9 +75,9 @@ func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need
 		}
 		return &need{key: inputKey(request), body: body, urgency: urgencyHigh, answer: request.ID}
 	}
-	body := statusBody(run)
+	body := statusBody(run, held)
 	if body == "" {
-		return finishedOf(run)
+		return finishedOf(run, held)
 	}
 	n := &need{key: "status:" + run.NeedKey(), body: clip(body, maxBodyRunes), urgency: urgencyHigh}
 	if run.StatusChangedAt != nil {
@@ -89,8 +89,8 @@ func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need
 // finishedOf announces a success ready for review once and quietly: it asks
 // nothing of the member, so it is not a need. One put off for later is not
 // announced again.
-func finishedOf(run *domain.Run) *need {
-	if run.Review != domain.ReviewReady || !run.AwaitsReview(false) {
+func finishedOf(run *domain.Run, held bool) *need {
+	if run.Review != domain.ReviewReady || !run.AwaitsReview(false, held) {
 		return nil
 	}
 	n := &need{key: "finished:" + run.NeedKey(), body: finishedBody, urgency: urgencyNormal}
@@ -100,16 +100,16 @@ func finishedOf(run *domain.Run) *need {
 	return n
 }
 
-func AttentionBody(run *domain.Run) string {
-	return clip(statusBody(run), maxBodyRunes)
+func AttentionBody(run *domain.Run, held bool) string {
+	return clip(statusBody(run, held), maxBodyRunes)
 }
 
 // statusBody announces a run only when it needs a member
 // (domain.Run.NeedsAttention) or failed with a result nobody has seen.
 // Waiting and working never do; a reported success is finishedOf's.
-func statusBody(run *domain.Run) string {
-	if !run.NeedsAttention(false) {
-		if !run.OutcomeUnseen || run.Status != domain.RunFailed {
+func statusBody(run *domain.Run, held bool) string {
+	if !run.NeedsAttention(false, held) {
+		if held || !run.OutcomeUnseen || run.Status != domain.RunFailed {
 			return ""
 		}
 		return "Failed, review the result"

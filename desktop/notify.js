@@ -252,7 +252,8 @@ function onStatus(runId, p) {
   }
   const token = {}
   reading.set(runId, token)
-  void Promise.all([readRun(runId), memberID().catch(() => null)]).then(([run, self]) => {
+  void Promise.all([readRun(runId), memberID().catch(() => null)]).then(async ([run, self]) => {
+    const parent = run && run.parent_run_id && !run.detached ? await readRun(run.parent_run_id) : null
     if (reading.get(runId) !== token) return
     reading.delete(runId)
     // /ws/events carries every run in the workspace; like push, only the
@@ -263,7 +264,7 @@ function onStatus(runId, p) {
       resolve(runId)
       return
     }
-    announce(runId, run)
+    announce(runId, run, outcomeHeld(run, parent))
   })
 }
 
@@ -299,14 +300,14 @@ async function readRun(runId) {
   return null
 }
 
-function announce(runId, run) {
-  const body = run.paused ? '' : bodyOf(run)
+function announce(runId, run, held) {
+  const body = run.paused ? '' : bodyOf(run, held)
   if (!body) {
     resolve(runId)
     return
   }
   const key = needKey(run)
-  const attention = needsAttention(run)
+  const attention = needsAttention(run, held)
   let entry = standing.get(runId)
   if (entry && (!attention || entry.key !== key)) {
     // A watch notice for the new need can arrive before this event does.
@@ -321,7 +322,7 @@ function announce(runId, run) {
   if (announced.get(runId) === key) return
   announced.set(runId, key)
   // A success ready for review is the watch's finished notice too; a live failure is its needs_you notice.
-  const finished = !attention && awaitsReview(run)
+  const finished = !attention && awaitsReview(run, held)
   if ((attention || finished) && recentlyShown(finished ? `${runId} done` : runId)) return
   if (!Notification.isSupported()) return
   const notification = new Notification({
@@ -352,22 +353,29 @@ function resolve(runId, before = Infinity) {
   updateBadge()
 }
 
-// needsAttention, awaitsReview and needKey are domain.Run.NeedsAttention,
-// AwaitsReview with review ready and NeedKey in internal/domain/domain.go; titleOf and statusBody are RunTitle and
+// needsAttention, awaitsReview, outcomeHeld and needKey are
+// domain.Run.NeedsAttention, AwaitsReview with review ready, OutcomeHeld and
+// NeedKey in internal/domain/domain.go; titleOf and statusBody are RunTitle and
 // statusBody of internal/push/need.go. A desktop notification fires and
 // reads like the one a phone gets for the same run.
 
 const isLive = (run) => run.status === 'running' || run.status === 'needs-attention'
 
-function needsAttention(run) {
+function needsAttention(run, held = false) {
   if (run.paused || !isLive(run)) return false
   if (run.state === 'needs-you' || run.state === 'disconnected') return true
-  return run.state === 'failed' && run.outcome_unseen === true
+  return !held && run.state === 'failed' && run.outcome_unseen === true
 }
 
-function awaitsReview(run) {
-  if (run.paused || run.review !== 'ready') return false
+function awaitsReview(run, held) {
+  if (run.paused || held || run.review !== 'ready') return false
   return run.status === 'completed' || (isLive(run) && run.state === 'finished')
+}
+
+const activeStates = new Set(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'])
+
+function outcomeHeld(run, parent) {
+  return Boolean(parent) && !run.detached && isLive(parent) && !parent.paused && activeStates.has(parent.state)
 }
 
 function needKey(run) {
@@ -389,8 +397,8 @@ function clip(text, limit) {
 }
 
 // An empty body means the run gets no notification.
-function bodyOf(run) {
-  return clip(statusBody(run), 240)
+function bodyOf(run, held = false) {
+  return clip(statusBody(run, held), 240)
 }
 
 const disconnects = [
@@ -398,11 +406,11 @@ const disconnects = [
   ['enhanced session ended: ', 'Agent disconnected: '],
 ]
 
-function statusBody(run) {
+function statusBody(run, held) {
   const reason = run.reason || ''
-  if (!needsAttention(run)) {
-    if (awaitsReview(run)) return 'Finished: review the result'
-    if (!run.outcome_unseen || run.status !== 'failed') return ''
+  if (!needsAttention(run, held)) {
+    if (awaitsReview(run, held)) return 'Finished: review the result'
+    if (held || !run.outcome_unseen || run.status !== 'failed') return ''
     return 'Failed, review the result'
   }
   if (run.state === 'needs-you') {

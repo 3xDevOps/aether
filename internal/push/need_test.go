@@ -30,6 +30,7 @@ func TestNeedOf(t *testing.T) {
 		run    *domain.Run
 		inputs []domain.RunInputRequest
 		paused bool
+		held   bool
 		want   string
 	}{
 		{name: "working", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunRunning, Activity: domain.ActivityWorking}},
@@ -65,6 +66,11 @@ func TestNeedOf(t *testing.T) {
 		{name: "reported success", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewReady)), want: "Finished: review the result"},
 		{name: "reported success seen, still to review", run: parked(domain.ActivityFinished, "agent reported success", review(domain.ReviewReady)), want: "Finished: review the result"},
 		{name: "reported success for later", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewLater))},
+		{name: "subsession success held for its parent", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewReady)), held: true},
+		{name: "subsession failure held for its parent", run: parked(domain.ActivityFailed, "agent reported failure", enhanced, unseen), held: true},
+		{name: "subsession ended failed, held for its parent", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunFailed, OutcomeUnseen: true}, held: true},
+		{name: "subsession question under a working parent", run: parked(needsYou, "turn ended without a report", enhanced), inputs: question, held: true, want: "Question from the agent"},
+		{name: "subsession blocked under a working parent", run: parked(needsYou, "blocked: need the staging API key"), held: true, want: "Blocked: need the staging API key"},
 		{name: "reported success paused", run: parked(domain.ActivityFinished, "agent reported success", review(domain.ReviewReady)), paused: true},
 		{name: "reported success disconnected", run: parked(domain.ActivityDisconnected, "enhanced session ended: exit code 1", review(domain.ReviewReady)), want: "Agent disconnected: exit code 1"},
 		{name: "reported failure", run: parked(domain.ActivityFailed, "agent reported failure", enhanced, unseen), want: "Agent reported failure, review the result"},
@@ -76,7 +82,7 @@ func TestNeedOf(t *testing.T) {
 		{name: "finished and seen", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunCompleted}},
 		{name: "closed by a member", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunAbandoned}},
 	} {
-		got := needOf(tc.run, tc.inputs, tc.paused)
+		got := needOf(tc.run, tc.inputs, tc.paused, tc.held)
 		switch {
 		case got == nil && tc.want != "":
 			t.Errorf("%s: no need, want %q", tc.name, tc.want)
@@ -104,20 +110,20 @@ func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 	first := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}}
 	second := []domain.RunInputRequest{{ID: "q2", SessionID: "s1", Kind: "question"}}
 
-	same := needOf(blocked, nil, false).key
+	same := needOf(blocked, nil, false, false).key
 	for name, other := range map[string]*need{
-		"blocked again after working": needOf(&again, nil, false),
-		"a question":                  needOf(&asked, nil, false),
-		"a native question":           needOf(blocked, first, false),
+		"blocked again after working": needOf(&again, nil, false, false),
+		"a question":                  needOf(&asked, nil, false, false),
+		"a native question":           needOf(blocked, first, false, false),
 	} {
 		if other.key == same {
 			t.Errorf("%s has the key of the first block, %q", name, same)
 		}
 	}
-	if repeat := needOf(&opened, nil, false).key; repeat != same {
+	if repeat := needOf(&opened, nil, false, false).key; repeat != same {
 		t.Errorf("opening the block changed its key from %q to %q", same, repeat)
 	}
-	if needOf(blocked, first, false).key == needOf(blocked, second, false).key {
+	if needOf(blocked, first, false, false).key == needOf(blocked, second, false, false).key {
 		t.Error("two different questions share a key")
 	}
 
@@ -129,11 +135,11 @@ func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 		run  *domain.Run
 		want string
 	}{{blocked, urgencyHigh}, {&failed, urgencyHigh}, {&finished, urgencyNormal}} {
-		if got := needOf(tc.run, nil, false).urgency; got != tc.want {
+		if got := needOf(tc.run, nil, false, false).urgency; got != tc.want {
 			t.Errorf("%s: urgency = %q, want %q", tc.run.Activity, got, tc.want)
 		}
 	}
-	if key := needOf(&finished, nil, false).key; !strings.HasPrefix(key, "finished:") {
+	if key := needOf(&finished, nil, false, false).key; !strings.HasPrefix(key, "finished:") {
 		t.Errorf("a success ready for review has key %q, want a finished: key, never a need's", key)
 	}
 }

@@ -34,6 +34,8 @@ func TestRenderRuns(t *testing.T) {
 		{ID: "r15", Status: "needs-attention", Activity: "answered", Reason: "explained the retry policy", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Q&A", Task: "task fifteen"},
 		{ID: "r16", Status: "needs-attention", Activity: "waiting-tools", ACP: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Build", Task: "task sixteen"},
 		{ID: "r17", Status: "needs-attention", Activity: "waiting-ci", ACP: true, ParentRunID: "r4", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Sub", Task: "task seventeen"},
+		{ID: "r18", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true, ParentRunID: "r4", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Held", Task: "task eighteen"},
+		{ID: "r19", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true, ParentRunID: "r4", Detached: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Detached", Task: "task nineteen"},
 		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
 	}
@@ -64,12 +66,14 @@ func TestRenderRuns(t *testing.T) {
 				"r14  Needs you                        claude  m1      m1                            Paused     task fourteen\n" +
 				"r15  Answered                         claude  m1      m1                            Q&A        task fifteen\n" +
 				"r16  Waiting for process              claude  m1      m1                            Build      task sixteen\n" +
-				"r17  Waiting for CI                   claude  m1      m1                            Sub        task seventeen\n",
+				"r17  Waiting for CI                   claude  m1      m1                            Sub        task seventeen\n" +
+				"r18  Failed                           claude  m1      m1                            Held       task eighteen\n" +
+				"r19  Failed                           claude  m1      m1                            Detached   task nineteen\n",
 		},
 		{
-			name:     "--needs-you hides archived, waiting, worker, ended and finished runs",
+			name:     "--needs-you hides archived, waiting, worker, ended, finished and held subsession runs",
 			needsYou: true,
-			wantIDs:  []string{"r2", "r6", "r13"},
+			wantIDs:  []string{"r2", "r6", "r13", "r19"},
 		},
 		{
 			name:     "--archived shows only archived sessions",

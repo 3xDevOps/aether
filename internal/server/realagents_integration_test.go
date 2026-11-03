@@ -405,7 +405,7 @@ func needsYou(r protocol.Run) bool {
 		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
 		OutcomeUnseen: r.OutcomeUnseen, Review: domain.RunReview(r.Review),
 	}
-	return run.NeedsAttention(r.Paused)
+	return run.NeedsAttention(r.Paused, false)
 }
 
 // instructed fails unless the launch recorded where the run instructions

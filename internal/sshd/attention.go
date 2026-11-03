@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ type attentionRun struct {
 	controller domain.MemberID
 	inputs     []domain.RunInputRequest
 	pending    []acphost.Request
+	// held is whether the run's outcome is its parent's to read
+	// (domain.Run.OutcomeHeld).
+	held bool
 	// open are the run's open room questions and queued steer requests,
 	// oldest first, read only when a room row can hold.
 	open []*store.RoomMessage
@@ -72,11 +76,15 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 		if err != nil {
 			return nil, rpcError(err)
 		}
+		byID := make(map[domain.RunID]*domain.Run, len(runs))
+		for _, run := range runs {
+			byID[run.ID] = run
+		}
 		for _, run := range runs {
 			if run.ArchivedAt != nil {
 				continue
 			}
-			r, err := s.attentionRun(ctx, run)
+			r, err := s.attentionRun(ctx, run, byID[run.ParentRunID])
 			if err != nil {
 				return nil, rpcError(err)
 			}
@@ -113,8 +121,17 @@ func compareSince(a, b string) int {
 	return at.Compare(bt)
 }
 
-func (s *Server) attentionRun(ctx context.Context, run *domain.Run) (*attentionRun, error) {
+// attentionRun reads run's standing; parent is its parent when the parent is
+// in the same workspace, and nil otherwise.
+func (s *Server) attentionRun(ctx context.Context, run, parent *domain.Run) (*attentionRun, error) {
 	r := &attentionRun{run: run}
+	if run.ParentRunID != "" && !run.Detached && parent == nil {
+		var err error
+		if parent, err = s.cfg.Store.GetRun(ctx, run.ParentRunID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	r.held = parent != nil && run.OutcomeHeld(parent, s.cfg.Runs.Paused(parent.ID))
 	if !run.Status.Terminal() {
 		r.paused = s.cfg.Runs.Paused(run.ID)
 		r.inputs = s.cfg.Runs.PendingInputs(run.ID)
@@ -388,7 +405,7 @@ var attentionRows = []attentionRow{
 		background: true,
 		completed:  true,
 		holds: func(r *attentionRun) bool {
-			return r.run.Review == domain.ReviewReady &&
+			return !r.held && r.run.Review == domain.ReviewReady &&
 				(r.run.Status == domain.RunCompleted || r.live() && r.run.Activity == domain.ActivityFinished)
 		},
 		resolvers: owner,
@@ -402,8 +419,10 @@ var attentionRows = []attentionRow{
 	{
 		kind:       protocol.AttentionKindFailed,
 		background: true,
-		holds:      func(r *attentionRun) bool { return r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen },
-		resolvers:  owner,
+		holds: func(r *attentionRun) bool {
+			return !r.held && r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen
+		},
+		resolvers: owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
 			item.Reason = "Agent reported failure; review the result. Session remains open for follow-up."
 			if r.run.Reason != "" && r.run.Reason != "agent reported failure" {

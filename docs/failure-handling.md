@@ -156,6 +156,17 @@ count below Needs you, and the label `Finished: review` in the dashboard and
 `aether sessions`. `attention.list` still returns it, as kind `ready` with the
 reason `Finished: review the result`, after every item that asks something.
 
+A [subsession](teams.md#subsessions)'s outcome is its parent agent's to read
+while the parent is live, not paused and active (working, or waiting on
+agents, CI or a process), unless the subsession is detached. Its reported
+success and its unseen failure then never count as Needs you or Finished:
+review the result, never notify, and never move the parent or the family into
+Needs you. A subsession's own requests of a person (a permission, question,
+`needs-input`, `blocked`, a disconnect) still do. Once the parent stops,
+ends or is paused, the outcome surfaces as for any session. Push does not
+announce a held outcome again when the parent later stops; the dashboard and
+`aether sessions --needs-you` show it then.
+
 | Session | Needs you | Notifies |
 | --- | --- | --- |
 | `needs-you` | Yes | Once, when it enters the state. |

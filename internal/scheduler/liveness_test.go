@@ -58,7 +58,7 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 			if r.Status != domain.RunNeedsAttention || r.StatusSeq != ev.Payload.(events.RunStatusPayload).StatusSeq {
 				t.Fatalf("the possible stall did not hold: %+v", r)
 			}
-			if r.NeedsAttention(false) {
+			if r.NeedsAttention(false, false) {
 				t.Fatalf("a possible stall needs you: %+v", r)
 			}
 			l, ok := e.sched.Liveness(run.ID)

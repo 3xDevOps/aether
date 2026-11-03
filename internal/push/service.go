@@ -469,7 +469,11 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 	if err != nil {
 		return nil, nil, err
 	}
-	n := needOf(run, s.runs.PendingInputs(id), s.runs.Paused(id))
+	held, err := s.held(ctx, run)
+	if err != nil {
+		return nil, nil, err
+	}
+	n := needOf(run, s.runs.PendingInputs(id), s.runs.Paused(id), held)
 	if n != nil {
 		n.member = run.MemberID
 	}
@@ -477,6 +481,23 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 		n.key = string(n.member) + "|" + n.key
 	}
 	return run, n, nil
+}
+
+// held reports whether the run's outcome is its parent's to read
+// (domain.Run.OutcomeHeld). A held outcome is not announced again when the
+// parent later stops: the dashboard shows it then.
+func (s *Service) held(ctx context.Context, run *domain.Run) (bool, error) {
+	if run.ParentRunID == "" || run.Detached {
+		return false, nil
+	}
+	parent, err := s.store.GetRun(ctx, run.ParentRunID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return run.OutcomeHeld(parent, s.runs.Paused(parent.ID)), nil
 }
 
 func topicOf(id string) string {

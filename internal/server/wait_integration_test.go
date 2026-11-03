@@ -133,7 +133,7 @@ func TestIntegrationAConditionDecidesWhetherAWaitNeedsYou(t *testing.T) {
 		if getErr != nil {
 			t.Fatal(getErr)
 		}
-		return push.AttentionBody(row)
+		return push.AttentionBody(row, false)
 	}
 
 	now := time.Now().UTC()

@@ -269,7 +269,11 @@ func (s *Service) currentNeeds(ctx context.Context, w *store.Watch) ([]need, err
 		if err != nil {
 			return nil, err
 		}
-		return s.runNeeds(run), nil
+		held, err := s.outcomeHeld(ctx, run)
+		if err != nil {
+			return nil, err
+		}
+		return s.runNeeds(run, held), nil
 	}
 	return nil, nil
 }

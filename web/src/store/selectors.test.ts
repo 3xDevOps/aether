@@ -1,3 +1,4 @@
+import type { Run } from '@/lib/types'
 import { toRecord, type RunRecord } from '@/store/runs'
 import {
   descendantRuns,
@@ -206,5 +207,33 @@ describe('listedRuns', () => {
     const rows = listedRuns(workspace.id, input([done, working, stopped, elsewhere, failed]).ctx)
     expect(ids(rows)).toEqual(['stopped', 'working', 'failed', 'done'])
     expect(rows[0].owner).toEqual(alice)
+  })
+})
+
+describe('a subsession outcome held for its parent', () => {
+  const parent = (state: Run['state'], over: Partial<Run> = {}) =>
+    record({ id: 'lead', mode: 'acp', acp: true, status: state === 'working' ? 'running' : 'needs-attention', state, ...over })
+  const done = record({ id: 'done', parent_run_id: 'lead', status: 'needs-attention', state: 'finished', review: 'ready' })
+  const broke = record({ id: 'broke', parent_run_id: 'lead', status: 'needs-attention', state: 'failed', outcome_unseen: true })
+  const asks = record({ id: 'asks', parent_run_id: 'lead', status: 'needs-attention', state: 'needs-you', reason: 'blocked: no key' })
+
+  it.each(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'] as const)('never moves the family to Needs you while the parent is %s', (state) => {
+    const groups = sidebarGroups(input([parent(state), done, broke]))
+    expect(groups.map((group) => group.key)).toEqual(['working'])
+    expect(needsYouByWorkspace(input([parent(state), done, broke]).ctx)).toEqual({})
+    const [tree] = groups[0].runs
+    expect(tree.childRuns?.counts).toEqual({ working: 0, needsYou: 0, done: 1, failed: 1 })
+  })
+
+  it('still surfaces a request the subsession makes of a person', () => {
+    const groups = sidebarGroups(input([parent('working'), asks]))
+    expect(groups.find((group) => group.key === 'needs-you')?.count).toBe(1)
+  })
+
+  it('surfaces the outcome once the parent is idle, gone, paused or the subsession detached', () => {
+    for (const lead of [parent('waiting'), parent('answered'), record({ id: 'lead', status: 'completed' }), parent('working', { paused: true })]) {
+      expect(needsYouByWorkspace(input([lead, broke]).ctx)).toEqual({ [workspace.id]: 1 })
+    }
+    expect(needsYouByWorkspace(input([parent('working'), { ...broke, detached: true }]).ctx)).toEqual({ [workspace.id]: 1 })
   })
 })

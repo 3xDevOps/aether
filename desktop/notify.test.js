@@ -489,3 +489,22 @@ test('a watch notice read when the connection drops never shows', async () => {
     globalThis.fetch = fetched
   }
 })
+
+test("a subsession's outcome stays with its working parent, and surfaces once the parent stops", async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+  const parent = { ...lead('r22'), acp: true }
+  await status(parent, { status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 1 subsession' })
+  const child = { ...lead('r23'), acp: true, parent_run_id: 'r22' }
+  await status(child, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
+  await settle()
+  await status(child, { state: 'finished', reason: 'agent reported success', review: 'ready' })
+  await settle()
+  assert.equal(shown.length, 0)
+  assert.equal(badge, 0)
+
+  await status(parent, { state: 'waiting', reason: 'turn ended without a report' })
+  await status(child, { state: 'failed', reason: 'agent reported failure', outcome_unseen: true, review: '', status_changed_at: '2026-10-16T00:03:00Z' })
+  await settle()
+  assert.equal(shown.length, 1)
+  assert.equal(badge, 1)
+})

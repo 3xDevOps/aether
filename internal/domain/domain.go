@@ -166,27 +166,44 @@ const ReportedSuccessReason = "agent reported success"
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether sessions --needs-you and
 // the dashboard's Needs you list share: a live run with an open human
-// request, a disconnected agent, or a failure nobody has seen. A reported
-// success is AwaitsReview, never this. A paused run never does.
-func (r *Run) NeedsAttention(paused bool) bool {
+// request, a disconnected agent, or a failure nobody has seen unless that
+// failure is held for its parent (OutcomeHeld). A reported success is
+// AwaitsReview, never this. A paused run never does.
+func (r *Run) NeedsAttention(paused, held bool) bool {
 	switch {
 	case paused, !r.Status.Live():
 		return false
 	case r.Activity == ActivityNeedsYou, r.Activity == ActivityDisconnected:
 		return true
 	}
-	return r.Activity == ActivityFailed && r.OutcomeUnseen
+	return !held && r.Activity == ActivityFailed && r.OutcomeUnseen
 }
 
 // AwaitsReview is the one rule for Finished: review the result: a success
 // its agent reported that the owner has not marked complete, on a live
 // finished run or a completed one. It asks nothing of anyone, so it is never
-// NeedsAttention. A paused run never does.
-func (r *Run) AwaitsReview(paused bool) bool {
-	if paused || r.Review != ReviewReady && r.Review != ReviewLater {
+// NeedsAttention. A paused run, or one whose outcome is held for its parent,
+// never does.
+func (r *Run) AwaitsReview(paused, held bool) bool {
+	if paused || held || r.Review != ReviewReady && r.Review != ReviewLater {
 		return false
 	}
 	return r.Status == RunCompleted || r.Status.Live() && r.Activity == ActivityFinished
+}
+
+// OutcomeHeld reports whether an attached subsession's reported outcome is
+// its parent agent's to read rather than a person's: its parent, nil when
+// unknown, is live, not paused and still active. Requests the subsession
+// makes of a person are never held.
+func (r *Run) OutcomeHeld(parent *Run, parentPaused bool) bool {
+	if r.ParentRunID == "" || r.Detached || parent == nil || parentPaused || !parent.Status.Live() {
+		return false
+	}
+	switch parent.Activity {
+	case ActivityWorking, ActivityWaitingAgents, ActivityWaitingCI, ActivityWaitingTools:
+		return true
+	}
+	return false
 }
 
 // NeedKey identifies the standing the run is in: its status, state and

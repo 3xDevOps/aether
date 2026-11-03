@@ -211,8 +211,8 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 			t.Fatalf("%s: published %s by %s %q wait %q, want %s by %s %q wait %q", what, p.Activity, p.Cause, p.Reason, got, activity, cause, reason, kind)
 		}
 		stored := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-		if stored.NeedsAttention(false) != (activity == domain.ActivityNeedsYou) {
-			t.Fatalf("%s: stored %s %q needs attention = %v", what, stored.Activity, stored.Reason, stored.NeedsAttention(false))
+		if stored.NeedsAttention(false, false) != (activity == domain.ActivityNeedsYou) {
+			t.Fatalf("%s: stored %s %q needs attention = %v", what, stored.Activity, stored.Reason, stored.NeedsAttention(false, false))
 		}
 		return p
 	}
@@ -376,7 +376,7 @@ func TestALiveSwarmKeepsAStrandedWaitQuiet(t *testing.T) {
 		return got != nil && got.Kind == domain.WaitFault
 	})
 	e.sched.refreshActivities(ctx)
-	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.NeedsAttention(false) {
+	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.NeedsAttention(false, false) {
 		t.Fatalf("a stranded wait with a live swarm shows %s %q", row.Activity, row.Reason)
 	}
 
@@ -482,7 +482,7 @@ func TestHeldTasksKeepAStrandedWaitQuiet(t *testing.T) {
 	if got := e.sched.Wait(run.ID, domain.ActivityWaitingAgents); got == nil || got.Kind != domain.WaitFault {
 		t.Fatalf("Wait = %+v while tasks are held, want a quiet fault", got)
 	}
-	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.NeedsAttention(false) {
+	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.NeedsAttention(false, false) {
 		t.Fatalf("a stranded wait with held tasks shows %s %q", row.Activity, row.Reason)
 	}
 
@@ -644,7 +644,7 @@ func TestAPausedOrEndedRunHasNoWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.sched.refreshActivities(ctx)
-	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.Activity != domain.ActivityWaitingCI || row.NeedsAttention(true) {
+	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.Activity != domain.ActivityWaitingCI || row.NeedsAttention(true, false) {
 		t.Fatalf("paused session shows %s %q", row.Activity, row.Reason)
 	}
 	if got := e.sched.Wait(run.ID, domain.ActivityWaitingCI); got != nil {

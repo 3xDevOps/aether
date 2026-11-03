@@ -248,13 +248,30 @@ func runShow(runID string, asJSON bool) error {
 }
 
 // needsYou selects the runs that need a member, by the rule push
-// notifications and the dashboard share (domain.Run.NeedsAttention).
-func needsYou(r protocol.Run) bool {
-	run := domain.Run{
+// notifications and the dashboard share (domain.Run.NeedsAttention). parent
+// is the run's parent when listed: while its agent is active it holds the
+// run's outcome (domain.Run.OutcomeHeld).
+func needsYou(r protocol.Run, parent *protocol.Run) bool {
+	run := domainRun(r)
+	held := parent != nil && run.OutcomeHeld(domainRun(*parent), parent.Paused)
+	return run.NeedsAttention(r.Paused, held)
+}
+
+func domainRun(r protocol.Run) *domain.Run {
+	return &domain.Run{
 		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
 		OutcomeUnseen: r.OutcomeUnseen, Review: domain.RunReview(r.Review),
+		ParentRunID: domain.RunID(r.ParentRunID), Detached: r.Detached,
 	}
-	return run.NeedsAttention(r.Paused)
+}
+
+// parents finds a listed run's parent among runs.
+func parents(runs []protocol.Run) func(protocol.Run) *protocol.Run {
+	byID := make(map[string]*protocol.Run, len(runs))
+	for _, r := range runs {
+		byID[r.ID] = &r
+	}
+	return func(r protocol.Run) *protocol.Run { return byID[r.ParentRunID] }
 }
 
 // plural renders a count with its noun, so the notice reads as a sentence
@@ -268,6 +285,7 @@ func plural(n int, noun string) string {
 
 // renderRuns writes the table, filtering archived runs independently of status.
 func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string, overlapOf map[string]string, onlyNeedsYou, archived bool) error {
+	parentOf := parents(runs)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tAGENT\tMEMBER\tACCOUNT\tOVERLAP\tTITLE\tTASK"); err != nil {
 		return err
@@ -276,7 +294,7 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 		if (r.ArchivedAt != nil) != archived {
 			continue
 		}
-		if onlyNeedsYou && !needsYou(r) {
+		if onlyNeedsYou && !needsYou(r, parentOf(r)) {
 			continue
 		}
 		title := r.Title
@@ -301,8 +319,7 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 // its status. A reported success awaiting review (domain.Run.AwaitsReview)
 // is Finished: review, live or completed.
 func displayStatus(r protocol.Run) string {
-	run := domain.Run{Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Review: domain.RunReview(r.Review)}
-	if run.AwaitsReview(false) {
+	if domainRun(r).AwaitsReview(false, false) {
 		return "Finished: review"
 	}
 	if label, ok := activityLabels[domain.RunActivity(r.Activity)]; ok {
@@ -380,9 +397,10 @@ func runRuns(args []string) error {
 		if err := c.Call(protocol.MethodRunList, protocol.RunListParams{}, &rl); err != nil {
 			return err
 		}
+		parentOf := parents(rl.Runs)
 		if *asJSON {
 			listed := slices.DeleteFunc(rl.Runs, func(r protocol.Run) bool {
-				return (r.ArchivedAt != nil) != *archived || *onlyNeedsYou && !needsYou(r)
+				return (r.ArchivedAt != nil) != *archived || *onlyNeedsYou && !needsYou(r, parentOf(r))
 			})
 			views, err := listRunViews(c, listed)
 			if err != nil {
@@ -425,7 +443,7 @@ func runRuns(args []string) error {
 		}
 		waiting := 0
 		for _, r := range rl.Runs {
-			if needsYou(r) {
+			if needsYou(r, parentOf(r)) {
 				waiting++
 			}
 		}

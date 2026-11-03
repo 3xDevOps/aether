@@ -114,7 +114,7 @@ export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen' | 'sta
     (run.status === 'completed' || run.status === 'failed' || run.state === 'finished' || run.state === 'failed')
 }
 
-/** A reported success the owner has not answered, or answered Not yet. */
+/** A reported success the owner has not answered, or put off for later. */
 export function awaitsCompletion(run: Pick<Run, 'status' | 'state' | 'review'>): boolean {
   return (run.review === 'ready' || run.review === 'later') &&
     (run.status === 'completed' || (isLive(run) && run.state === 'finished'))
@@ -122,6 +122,15 @@ export function awaitsCompletion(run: Pick<Run, 'status' | 'state' | 'review'>):
 
 export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>): boolean {
   return !isTerminal(run.status) && (ctx.pausedRuns[run.id] ?? run.paused) === true
+}
+
+const activeStates = new Set<string | undefined>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'])
+
+/** An attached subsession's outcome is its parent agent's to read while that parent is live, unpaused and active. Mirrors domain.Run.OutcomeHeld. */
+export function outcomeHeld(run: RunRecord, ctx: Pick<StateContext, 'runs' | 'pausedRuns'>): boolean {
+  if (!run.parent_run_id || run.detached) return false
+  const parent = ctx.runs[run.parent_run_id]
+  return parent !== undefined && isLive(parent) && !isPaused(parent, ctx) && activeStates.has(parent.state)
 }
 
 // Room status loads only while the run is open; an older gateway's snapshot has no controller.
@@ -268,7 +277,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     state: 'failed',
     target: 'changes',
     background: true,
-    holds: (run) => run.state === 'failed' && run.outcome_unseen === true,
+    holds: (run, ctx) => run.state === 'failed' && run.outcome_unseen === true && !outcomeHeld(run, ctx),
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
     reason: (run) =>

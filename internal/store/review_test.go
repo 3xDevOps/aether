@@ -156,8 +156,8 @@ func TestRunReviewMigrationFromV71(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Review != "" || got.ReviewChangedAt != nil || got.NeedsAttention(false) {
-			t.Fatalf("migrated %s = review %q at %v, needs attention %v; want no review and no need", id, got.Review, got.ReviewChangedAt, got.NeedsAttention(false))
+		if got.Review != "" || got.ReviewChangedAt != nil || got.NeedsAttention(false, false) {
+			t.Fatalf("migrated %s = review %q at %v, needs attention %v; want no review and no need", id, got.Review, got.ReviewChangedAt, got.NeedsAttention(false, false))
 		}
 		if id == "legacy" && got.Activity != domain.ActivityIdle {
 			t.Fatalf("legacy run activity = %q, want idle read as stored", got.Activity)

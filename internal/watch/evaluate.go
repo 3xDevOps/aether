@@ -236,7 +236,11 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	link := RunLink(run.ID)
 	r.observed = protocol.WatchObserved{RunStatus: string(run.Status), Activity: string(run.Activity)}
 	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
-		for i, n := range s.runNeeds(run) {
+		held, err := s.outcomeHeld(ctx, run)
+		if err != nil {
+			return reading{}, err
+		}
+		for i, n := range s.runNeeds(run, held) {
 			if i == 0 {
 				r.observed.Need = n.body
 			}
@@ -297,8 +301,9 @@ var questionKinds = []string{"question", "form", "extension_ui"}
 // runNeeds is what the run waits on a member for, in the Needs you
 // table's order: each of its own open permission requests and questions,
 // else its status when domain.Run.NeedsAttention holds. Each is a need
-// of its own. A reported success is the finished condition's, not a need.
-func (s *Service) runNeeds(run *domain.Run) []need {
+// of its own. A reported success is the finished condition's, not a need,
+// and an outcome held for the run's parent (domain.Run.OutcomeHeld) is none.
+func (s *Service) runNeeds(run *domain.Run, held bool) []need {
 	if !run.Status.Live() || s.runs.Paused(run.ID) {
 		return nil
 	}
@@ -316,10 +321,26 @@ func (s *Service) runNeeds(run *domain.Run) []need {
 			}
 		}
 	}
-	if len(out) > 0 || !run.NeedsAttention(false) || run.Review == domain.ReviewReady {
+	if len(out) > 0 || !run.NeedsAttention(false, held) || run.Review == domain.ReviewReady {
 		return out
 	}
-	return []need{{key: "status:" + run.NeedKey(), body: push.AttentionBody(run)}}
+	return []need{{key: "status:" + run.NeedKey(), body: push.AttentionBody(run, held)}}
+}
+
+// outcomeHeld reports whether run's outcome is its parent's to read
+// (domain.Run.OutcomeHeld).
+func (s *Service) outcomeHeld(ctx context.Context, run *domain.Run) (bool, error) {
+	if run.ParentRunID == "" || run.Detached {
+		return false, nil
+	}
+	parent, err := s.store.GetRun(ctx, run.ParentRunID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the parent of session %s: %w", run.ID, err)
+	}
+	return run.OutcomeHeld(parent, s.runs.Paused(parent.ID)), nil
 }
 
 func (s *Service) requestLine(run *domain.Run, input *domain.RunInputRequest, label string) string {

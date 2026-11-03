@@ -42,7 +42,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	parked := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if parked.Activity != domain.ActivityWaiting || parked.Reason != turnEndedReason || parked.Review != "" || parked.NeedsAttention(false) {
+	if parked.Activity != domain.ActivityWaiting || parked.Reason != turnEndedReason || parked.Review != "" || parked.NeedsAttention(false, false) {
 		t.Fatalf("turn end without a report = %s %q review %q, want waiting, no review and no need", parked.Activity, parked.Reason, parked.Review)
 	}
 	if _, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater, false); !errors.Is(err, ErrInvalidTransition) {
@@ -69,7 +69,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 		}
 		row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 		if p.Review != domain.ReviewReady || p.ReviewChangedAt == nil || row.Review != domain.ReviewReady ||
-			row.Activity != domain.ActivityFinished || row.NeedsAttention(false) || !row.AwaitsReview(false) {
+			row.Activity != domain.ActivityFinished || row.NeedsAttention(false, false) || !row.AwaitsReview(false, false) {
 			t.Fatalf("success park = event %+v, row %s review %q, want finished, awaiting review and not needing anyone", p, row.Activity, row.Review)
 		}
 		return row
@@ -83,7 +83,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	if p := nextReview(t, sub, run.ID); p.Review != domain.ReviewLater || p.StatusSeq <= first.StatusSeq {
 		t.Fatalf("later event = %+v, want later above status_seq %d", p, first.StatusSeq)
 	}
-	if later.Review != domain.ReviewLater || later.Status != domain.RunNeedsAttention || later.NeedsAttention(false) || !later.AwaitsReview(false) {
+	if later.Review != domain.ReviewLater || later.Status != domain.RunNeedsAttention || later.NeedsAttention(false, false) || !later.AwaitsReview(false, false) {
 		t.Fatalf("after later = %s review %q, want still parked and not needing anyone", later.Status, later.Review)
 	}
 	// A reportedOnly complete closes a live run only while its success
@@ -112,7 +112,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Activity != domain.ActivityFinished || recovered.Review != domain.ReviewLater || recovered.NeedsAttention(false) {
+	if recovered.Activity != domain.ActivityFinished || recovered.Review != domain.ReviewLater || recovered.NeedsAttention(false, false) {
 		t.Fatalf("recovered run = %s review %q, want finished and still later", recovered.Activity, recovered.Review)
 	}
 
@@ -131,7 +131,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	if p := nextReview(t, sub, run.ID); p.Review != domain.ReviewAccepted {
 		t.Fatalf("complete review event = %+v, want accepted", p)
 	}
-	if completed.Status != domain.RunCompleted || completed.Review != domain.ReviewAccepted || completed.NeedsAttention(false) {
+	if completed.Status != domain.RunCompleted || completed.Review != domain.ReviewAccepted || completed.NeedsAttention(false, false) {
 		t.Fatalf("completed session = %s review %q, want completed and accepted", completed.Status, completed.Review)
 	}
 	if sc, err := s2.readSidecar(run.ID); err != nil || !sc.Retained || !retainedReason(completed.Status, completed.Reason) {
@@ -161,7 +161,7 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	}
 	e.rt.byName(string(run.ID)).exitNow(0)
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	if row.Review != domain.ReviewReady || row.NeedsAttention(false) || !row.AwaitsReview(false) {
+	if row.Review != domain.ReviewReady || row.NeedsAttention(false, false) || !row.AwaitsReview(false, false) {
 		t.Fatalf("background success = review %q, want ready, awaiting review and not needing its owner", row.Review)
 	}
 	// A reportedOnly complete that reaches the close after a concurrent one
@@ -175,7 +175,7 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Status != domain.RunCompleted || accepted.Review != domain.ReviewAccepted || accepted.NeedsAttention(false) {
+	if accepted.Status != domain.RunCompleted || accepted.Review != domain.ReviewAccepted || accepted.NeedsAttention(false, false) {
 		t.Fatalf("accepted background session = %s review %q", accepted.Status, accepted.Review)
 	}
 

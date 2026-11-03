@@ -1621,8 +1621,9 @@ before the history read is a dotted outline that says "History not loaded";
 if the read fails, bars fall back to the current state and a **Session history**
 callout shows the server's error with **Retry**. A working bar has a 2px end
 cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
-tag; a session awaiting review gets a **Finished: review** tag instead.
-Finished bars add "took 18m" after their end when there is room.
+tag. A session awaiting review never gets that tag; its label carries a
+review-tone **Finished: review** chip instead of the Needs you chip. Finished
+bars add "took 18m" after their end when there is room.
 
 **Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
 pair within 24px) draws as marks, not links: a dot on the sender's bar and a
@@ -1849,7 +1850,11 @@ share ([failure-handling.md](failure-handling.md)): a live session (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`. Waiting, every Waiting
 for state, Working, a reported success awaiting review (`review` `ready` or
-`later`) and a finished session never count. The sidebar's Needs you count, the workspace badges and the
+`later`) and a finished session never count. A subsession's failure held for
+its active parent (`outcomeHeld` in `src/lib/needs-you.ts`,
+[failure-handling.md](failure-handling.md#needs-you)) does not count either,
+so the family stays in its parent's group and counts the subsession as done
+or failed. The sidebar's Needs you count, the workspace badges and the
 list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused session
 too.
 Needs you means the viewer can resolve it.
