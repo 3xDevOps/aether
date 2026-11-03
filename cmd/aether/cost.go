@@ -36,7 +36,7 @@ func runCost(args []string) error {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "MEMBER\tRUNS\tINPUT\tOUTPUT\tCOST\tUNMETERED")
+		_, _ = fmt.Fprintln(tw, "MEMBER\tSESSIONS\tINPUT\tOUTPUT\tCOST\tUNMETERED")
 		for _, m := range res.Members {
 			_, _ = fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%s\t%d\n", m.MemberID, m.Rollup.Runs,
 				m.Rollup.InputTokens, m.Rollup.OutputTokens, usd(m.Rollup.CostUSD), m.Rollup.Unmetered)
@@ -44,7 +44,7 @@ func runCost(args []string) error {
 		_, _ = fmt.Fprintf(tw, "TOTAL\t%d\t%d\t%d\t%s\t%d\n", res.Total.Runs,
 			res.Total.InputTokens, res.Total.OutputTokens, usd(res.Total.CostUSD), res.Total.Unmetered)
 		if *runs {
-			_, _ = fmt.Fprintln(tw, "\nRUN\tMEMBER\tINPUT\tOUTPUT\tCOST\tMETERED")
+			_, _ = fmt.Fprintln(tw, "\nSESSION\tMEMBER\tINPUT\tOUTPUT\tCOST\tMETERED")
 			for _, r := range res.Runs {
 				_, _ = fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n", r.RunID, r.MemberID,
 					r.InputTokens, r.OutputTokens, usd(r.CostUSD), meteredLabel(r.Metered))

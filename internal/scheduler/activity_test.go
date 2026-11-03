@@ -111,7 +111,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"turn end with a live subsession", func() {
 			children.workers.Store(1)
 			report(idle)
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 child run"},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 subsession"},
 		{"the last worker finished", func() {
 			children.workers.Store(0)
 			quietFor(t, e)
@@ -358,8 +358,8 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 
 	// A hook's reason that reads like the workers reason is the hook's.
-	report(agentstatus.Report{State: agentstatus.Idle, Reason: "waiting for 2 child runs"})
-	expect("a hook's reason", domain.ActivityWaiting, events.CauseTurnEnd, "waiting for 2 child runs", "")
+	report(agentstatus.Report{State: agentstatus.Idle, Reason: "waiting for 2 subsessions"})
+	expect("a hook's reason", domain.ActivityWaiting, events.CauseTurnEnd, "waiting for 2 subsessions", "")
 	e.sched.refreshActivities(ctx)
 	expectNoStatusEvent(t, sub, run.ID, "refreshing a hook's reason")
 	report(agentstatus.Report{State: agentstatus.Working})
@@ -446,16 +446,16 @@ func TestTheChildRunsReasonFollowsTheChildren(t *testing.T) {
 
 	children.workers.Store(1)
 	report(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
-	expect("turn end with a live worker", domain.ActivityWaitingAgents, "waiting for 1 child run")
+	expect("turn end with a live worker", domain.ActivityWaitingAgents, "waiting for 1 subsession")
 	report(permissionInput("open"))
-	expect("a permission request", domain.ActivityNeedsYou, "waiting for 1 child run")
+	expect("a permission request", domain.ActivityNeedsYou, "waiting for 1 subsession")
 	report(permissionInput("close"))
-	expect("the request answered", domain.ActivityWaitingAgents, "waiting for 1 child run")
+	expect("the request answered", domain.ActivityWaitingAgents, "waiting for 1 subsession")
 	children.workers.Store(2)
 	e.sched.refreshActivities(ctx)
-	expect("a second worker", domain.ActivityWaitingAgents, "waiting for 2 child runs")
+	expect("a second worker", domain.ActivityWaitingAgents, "waiting for 2 subsessions")
 	sc, err := e.sched.readSidecar(run.ID)
-	if err != nil || sc.WorkersReason != "waiting for 2 child runs" {
+	if err != nil || sc.WorkersReason != "waiting for 2 subsessions" {
 		t.Fatalf("sidecar workers reason = %q, %v", sc.WorkersReason, err)
 	}
 	children.workers.Store(0)

@@ -262,6 +262,8 @@ describe('plainReason', () => {
     ['waiting for 1 child run', 'Waiting for 1 subsession'],
     ['waiting for 3 workers', 'Waiting for 3 subsessions'],
     ['2 unread worker messages', '2 unread subsession messages'],
+    ['waiting for 2 subsessions', 'Waiting for 2 subsessions'],
+    ['1 unread subsession message', '1 unread subsession message'],
     ['review retained evidence', "Review the subsession's saved results"],
     ['killed', 'Stopped'],
     ['disk quota exceeded', 'disk quota exceeded'],

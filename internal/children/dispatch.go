@@ -240,7 +240,7 @@ func (s *Service) settle(ctx context.Context) error {
 			return err
 		} else if err != nil {
 			// The notice's key makes a resend after a failed mark a no-op.
-			msg := fmt.Sprintf("Subsession session %s (%s) ended %s without a final report", c.RunID, c.Purpose, child.Status)
+			msg := fmt.Sprintf("Subsession %s (%s) ended %s without a final report", c.RunID, c.Purpose, child.Status)
 			if child.Reason != "" {
 				msg += ": " + child.Reason
 			}
@@ -250,7 +250,8 @@ func (s *Service) settle(ctx context.Context) error {
 			if child.Branch != "" {
 				msg += "\nIts branch: " + child.Branch
 			}
-			if err := s.notify(ctx, c.RunID, c.ParentRunID, msg, "child-ended:"+string(c.RunID)); err != nil {
+			// A notice saved under this key with an older body still told the parent.
+			if err := s.notify(ctx, c.RunID, c.ParentRunID, msg, "child-ended:"+string(c.RunID)); err != nil && !errors.Is(err, store.ErrIdempotencyConflict) {
 				continue
 			}
 		}

@@ -173,7 +173,7 @@ export function ChildRunsSwitch({ value, onChange, enabled, readError, unavailab
         />
       </div>
       <p id="launch-child-runs-help" className="text-ui-sm text-muted">
-        {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your subsessions setting…') : ['Lets the agent start other agents as subsessions.', value ? 'Set for this run only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
+        {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your subsessions setting…') : ['Lets the agent start other agents as subsessions.', value ? 'Set for this session only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
       </p>
     </div>
   )
