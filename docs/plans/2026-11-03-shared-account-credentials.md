@@ -4,8 +4,8 @@
 while the recipient can no longer take, log out or overwrite the sharer's
 login, and a revoke stops a running session's use.
 
-**Status:** proposal. Nothing here changes how shares work until the owner
-approves it.
+**Status:** approved by the owner on 2026-11-03: Phase 0 and Phase 1, and
+a canary before any existing share switches.
 
 ## Today
 
@@ -68,9 +68,11 @@ a real refresh token.
 
 ### Session login copies
 
-A recipient's run gets its own login file, written by the server under the
-server's state directory and outside every member home. The file is
-bind-mounted at the agent's login path:
+A recipient's run gets its own login file per account,
+`<data-dir>/scheduler/logins/<run>/<account>/`, written by the server outside
+every member home, so a write for an account a run has moved off never reaches
+its new container. The file is bind-mounted read-only at the agent's login
+path:
 
 - Claude Code: `claudeAiOauth` with `accessToken`, `expiresAt`, `scopes` and
   `subscriptionType`. No `refreshToken`.
@@ -79,8 +81,10 @@ bind-mounted at the agent's login path:
 
 The server rewrites the file in place with one `write` after the truncate.
 Both CLIs treat a torn read as a missing file and recover on the next read.
-The owner's own sessions and environment keep their real login file as
-today.
+The server rereads a torn owner login too, and a listed account never falls
+back to mounting the owner's file: a login that is not an OAuth sign-in gives
+a signed-out copy. The owner's own sessions and environment keep their real
+login file as today.
 
 ### Token pump
 
@@ -126,13 +130,33 @@ container.
 - Use the access token for its remaining lifetime, from anywhere.
 - Read the subscription type and plan, as today.
 
-## Open decisions for the owner
+### The owner's own sessions
 
-1. Approve central refresh, in which the server POSTs refreshes with the
-   CLIs' client ids. The alternative is to keep sharing the login files
-   (Phase 0 only).
-2. Before rollout: a canary on the owner's own account, shared with a test
-   member, through at least two real refreshes of each CLI.
+On 2026-11-03 about six Enhanced sessions on one account failed together with
+`Authentication required` while new containers on the account worked. Claude
+Code 2.1.287 (the ACP adapter's) and 2.1.317 rewrite the login in place when
+the rename fails, and on `invalid_grant` blank the file they see. A blanked
+shared file breaks new containers too, so the failed sessions most likely
+held an older inode of the login whose refresh token another process had
+spent. Session login copies remove this for recipients, whose sessions hold
+no refresh token and whose copies the server rewrites. The owner's own
+sessions keep the real login and stay exposed; giving them copies too is a
+follow-up. A failed session recovers only in a new container: writing the
+current login into its old inode forks the refresh-token chain.
+
+## Decisions
+
+1. Central refresh is approved: the server refreshes with the CLIs' client
+   ids, and recipient sessions of `claude` and `codex` get short-lived access
+   tokens.
+2. Phase 1 ships behind `aether-server --session-login-accounts
+   <member-id>,...`, which lists the accounts whose shares use session login
+   copies. Every other share keeps today's mounts.
+3. The canary lists only the owner's own account, shared with a test member
+   the owner picks, through at least two real refreshes of each CLI. The flag
+   selects whole accounts, so every existing share of that account joins the
+   canary too; `aether account list` shows them before it starts. Phase 2
+   waits for it to pass and for the owner's go.
 
 ## Phases
 
@@ -142,4 +166,5 @@ container.
    nothing else can run them.
 1. Session login copies, pump and central refresh for `claude` and `codex`.
    Other agents keep today's mounts.
-2. Retire `loginMounts` for `claude` and `codex` once the canary passes.
+2. Retire `loginMounts` and the flag for `claude` and `codex` once the canary
+   passes and the owner approves.
