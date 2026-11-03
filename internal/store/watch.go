@@ -41,6 +41,8 @@ type Watch struct {
 	NextCheckAt    *time.Time
 	EndedAt        *time.Time
 	Version        int64
+	// RelayTo are the sessions each notice is written into.
+	RelayTo []domain.RunID
 	// OwnerRunID is set on a run's wait condition, which RunWait describes
 	// and only the run-wait methods change.
 	OwnerRunID domain.RunID
@@ -80,6 +82,8 @@ type WatchDelivery struct {
 	Status  string
 	Detail  string
 	At      time.Time
+	// RunID is the session a relay row writes to.
+	RunID domain.RunID
 }
 
 // NotifyPrefs is a member's notification preferences. Quiet hours are off
@@ -174,18 +178,19 @@ type WatchStore interface {
 const watchColumns = `id, member_id, COALESCE(workspace_id, ''), target_kind, COALESCE(run_id, ''), repo,
 	pr_number, target_title, conditions, label, source, state, error, failures, observed, fired,
 	COALESCE(idempotency_key, ''), created_at, updated_at, expires_at, last_check_at, next_check_at, ended_at, version,
-	COALESCE(owner_run_id, '')`
+	COALESCE(owner_run_id, ''), relay_to`
 
 func scanWatch(row interface{ Scan(...any) error }) (*Watch, error) {
 	var (
 		w                          Watch
 		conditions, observed, fire string
+		relay                      string
 		created, updated, expires  int64
 		last, next, ended          *int64
 	)
 	if err := row.Scan(&w.ID, &w.MemberID, &w.WorkspaceID, &w.TargetKind, &w.RunID, &w.Repo,
 		&w.Number, &w.TargetTitle, &conditions, &w.Label, &w.Source, &w.State, &w.Error, &w.Failures,
-		&observed, &fire, &w.IdempotencyKey, &created, &updated, &expires, &last, &next, &ended, &w.Version, &w.OwnerRunID); err != nil {
+		&observed, &fire, &w.IdempotencyKey, &created, &updated, &expires, &last, &next, &ended, &w.Version, &w.OwnerRunID, &relay); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(conditions), &w.Conditions); err != nil {
@@ -193,6 +198,9 @@ func scanWatch(row interface{ Scan(...any) error }) (*Watch, error) {
 	}
 	if err := json.Unmarshal([]byte(fire), &w.Fired); err != nil {
 		return nil, fmt.Errorf("watch %s fired: %w", w.ID, err)
+	}
+	if err := json.Unmarshal([]byte(relay), &w.RelayTo); err != nil {
+		return nil, fmt.Errorf("watch %s relay_to: %w", w.ID, err)
 	}
 	w.Observed = json.RawMessage(observed)
 	w.CreatedAt, w.UpdatedAt, w.ExpiresAt = decodeTime(created), decodeTime(updated), decodeTime(expires)
@@ -210,6 +218,13 @@ func watchArgs(w *Watch) ([]any, error) {
 		w.Fired = map[string]string{}
 	}
 	fired, err := json.Marshal(w.Fired)
+	if err != nil {
+		return nil, err
+	}
+	if w.RelayTo == nil {
+		w.RelayTo = []domain.RunID{}
+	}
+	relay, err := json.Marshal(w.RelayTo)
 	if err != nil {
 		return nil, err
 	}
@@ -238,11 +253,11 @@ func watchArgs(w *Watch) ([]any, error) {
 		return nil, err
 	}
 	return []any{w.TargetTitle, string(conditions), w.Label, w.State, w.Error, w.Failures, observed, string(fired),
-		updated, expires, last, next, ended, w.Source}, nil
+		updated, expires, last, next, ended, w.Source, string(relay)}, nil
 }
 
 const watchSet = `target_title = ?, conditions = ?, label = ?, state = ?, error = ?, failures = ?, observed = ?, fired = ?,
-	updated_at = ?, expires_at = ?, last_check_at = ?, next_check_at = ?, ended_at = ?, source = ?`
+	updated_at = ?, expires_at = ?, last_check_at = ?, next_check_at = ?, ended_at = ?, source = ?, relay_to = ?`
 
 func nullable[T comparable](v T) any {
 	var zero T
@@ -268,8 +283,8 @@ func (d *DB) CreateWatch(ctx context.Context, w *Watch) error {
 	_, err = d.db.ExecContext(ctx,
 		`INSERT INTO watches (id, member_id, workspace_id, target_kind, run_id, repo, pr_number,
 		   idempotency_key, created_at, target_title, conditions, label, state, error, failures, observed, fired,
-		   updated_at, expires_at, last_check_at, next_check_at, ended_at, source)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   updated_at, expires_at, last_check_at, next_check_at, ended_at, source, relay_to)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		append([]any{id, w.MemberID, nullable(w.WorkspaceID), w.TargetKind, nullable(w.RunID), w.Repo,
 			w.Number, nullable(w.IdempotencyKey), created}, args...)...)
 	if err != nil {
@@ -405,7 +420,21 @@ func insertWatchNotification(ctx context.Context, tx *sql.Tx, watch string, n *W
 		return false, err
 	}
 	n.ID = id
-	for _, del := range n.Deliveries {
+	relayed := -1
+	for i, del := range n.Deliveries {
+		if del.Channel == watchChannelRelay {
+			if relayed < 0 {
+				if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_deliveries d JOIN watch_notifications n ON n.id = d.notification_id
+					WHERE n.watch_id = ? AND d.channel = 'relay'`, watch).Scan(&relayed); err != nil {
+					return false, fmt.Errorf("store: count watch relays: %w", err)
+				}
+			}
+			if relayed >= WatchRelayCap {
+				del.Status, del.Detail = "failed", watchRelayCapped
+				n.Deliveries[i] = del
+			}
+			relayed++
+		}
 		if err := insertWatchDelivery(ctx, tx, id, del); err != nil {
 			return false, err
 		}
@@ -413,14 +442,27 @@ func insertWatchNotification(ctx context.Context, tx *sql.Tx, watch string, n *W
 	return true, nil
 }
 
+// WatchRelayCap bounds the relay deliveries of one watch over its life, so
+// relays between sessions that watch each other cannot run on.
+const WatchRelayCap = 50
+
+const watchChannelRelay = "relay"
+
+var watchRelayCapped = fmt.Sprintf("Not relayed: this watch already relayed %d notices, its limit; create a new watch to relay more", WatchRelayCap)
+
+// insertWatchDelivery adds del; a pending relay row is due at once.
 func insertWatchDelivery(ctx context.Context, db execer, notification string, del WatchDelivery) error {
 	at, err := encodeTime(del.At)
 	if err != nil {
 		return fmt.Errorf("store: record watch delivery: %w", err)
 	}
+	var next any
+	if del.Channel == watchChannelRelay && del.Status == "pending" {
+		next = at
+	}
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO watch_deliveries (notification_id, channel, status, detail, at) VALUES (?, ?, ?, ?, ?)`,
-		notification, del.Channel, del.Status, del.Detail, at); err != nil {
+		`INSERT INTO watch_deliveries (notification_id, channel, status, detail, at, run_id, next_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		notification, del.Channel, del.Status, del.Detail, at, del.RunID, next); err != nil {
 		return fmt.Errorf("store: record watch delivery: %w", mapConstraint(err, ErrNotFound))
 	}
 	return nil
@@ -494,6 +536,12 @@ func (d *DB) ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 		`UPDATE watch_deliveries SET status = 'cleared', detail = 'The watch was paused until it expired', at = ?1
 		 WHERE channel = 'push' AND notification_id IN (`+heldByPause+`)`, at); err != nil {
 		return nil, fmt.Errorf("store: expire watches: drop paused pushes: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE watch_deliveries SET status = 'cleared', detail = 'The watch was paused until it expired', at = ?1, next_at = NULL
+		 WHERE channel = 'relay' AND next_at IS NOT NULL AND notification_id IN (
+		   SELECT n.id FROM watch_notifications n JOIN watches w ON w.id = n.watch_id WHERE w.state = 'paused' AND w.expires_at <= ?1)`, at); err != nil {
+		return nil, fmt.Errorf("store: expire watches: drop paused relays: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx,
 		`UPDATE watch_notifications SET push_state = 'none', push_next_at = NULL WHERE id IN (`+heldByPause+`)`, at); err != nil {

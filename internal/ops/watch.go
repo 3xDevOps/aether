@@ -16,12 +16,13 @@ type watchesInput struct {
 }
 
 type watchInput struct {
-	WatchID    string   `json:"watch_id,omitempty"`
-	RunID      string   `json:"run_id,omitempty"`
-	PR         string   `json:"pr,omitempty"`
-	Conditions []string `json:"conditions,omitempty"`
-	ExpiresAt  string   `json:"expires_at,omitempty" jsonschema:"RFC 3339"`
-	Paused     *bool    `json:"paused,omitempty"`
+	WatchID    string    `json:"watch_id,omitempty"`
+	RunID      string    `json:"run_id,omitempty"`
+	PR         string    `json:"pr,omitempty"`
+	Conditions []string  `json:"conditions,omitempty"`
+	ExpiresAt  string    `json:"expires_at,omitempty" jsonschema:"RFC 3339"`
+	Paused     *bool     `json:"paused,omitempty"`
+	RelayTo    *[]string `json:"relay_to,omitempty" jsonschema:"up to 4 run_ids each notice is written into; [] stops"`
 }
 
 type unwatchInput struct {
@@ -64,6 +65,7 @@ type watchRow struct {
 	Conditions       []string    `json:"conditions"`
 	Label            string      `json:"label,omitempty"`
 	Source           string      `json:"source"`
+	RelayTo          []string    `json:"relay_to,omitempty"`
 	ExpiresAt        string      `json:"expires_at"`
 	LastCheckAt      string      `json:"last_check_at,omitempty"`
 	LastNotification *noticeRow  `json:"last_notification,omitempty"`
@@ -103,7 +105,7 @@ func (l links) at(path string) string {
 
 func watchRowOf(w protocol.Watch, l links) watchRow {
 	t := watchTarget{Kind: w.Target.Kind, RunID: w.Target.RunID, Repo: w.Target.Repo, Number: w.Target.Number}
-	row := watchRow{ID: w.ID, State: w.State, Error: w.Error, Target: t, Conditions: w.Conditions, Label: w.Label, Source: w.Source,
+	row := watchRow{ID: w.ID, State: w.State, Error: w.Error, Target: t, Conditions: w.Conditions, Label: w.Label, Source: w.Source, RelayTo: w.RelayTo,
 		ExpiresAt: w.ExpiresAt, LastCheckAt: w.LastCheckAt, URL: l.at(w.Link),
 		Untrusted: watchText{TargetTitle: clip(w.TargetTitle, maxReport), Observed: clip(w.Observed.Summary, maxReport)}}
 	if n := w.LastNotification; n != nil {
@@ -169,7 +171,7 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 			return "", nil, invalid("a watch's target cannot change; leave out watch_id to create a new watch")
 		}
 		err = c.act(ctx, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: in.WatchID, Paused: in.Paused, Conditions: in.Conditions,
-			ExpiresAt: in.ExpiresAt}, &res)
+			ExpiresAt: in.ExpiresAt, RelayTo: in.RelayTo}, &res)
 	} else {
 		var t protocol.WatchTarget
 		switch {
@@ -205,8 +207,12 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 		}
 		// Without an idempotency key the server returns the member's live
 		// watch on the same target and conditions, so a retry creates none.
+		var relay []string
+		if in.RelayTo != nil {
+			relay = *in.RelayTo
+		}
 		err = c.act(ctx, protocol.MethodWatchCreate, protocol.WatchCreateParams{Target: t, Conditions: in.Conditions, ExpiresAt: in.ExpiresAt,
-			Source: source}, &res)
+			Source: source, RelayTo: relay}, &res)
 	}
 	if err != nil {
 		return "", nil, err
@@ -218,7 +224,7 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 	if link == "" && c.surface == Assistant {
 		link = w.Link
 	}
-	out := map[string]any{"watch_id": w.ID, "state": w.State, "conditions": w.Conditions, "expires_at": w.ExpiresAt, "url": link,
+	out := map[string]any{"watch_id": w.ID, "state": w.State, "conditions": w.Conditions, "relay_to": w.RelayTo, "expires_at": w.ExpiresAt, "url": link,
 		"untrusted": map[string]any{"receipt": res.Receipt, "target_title": clip(w.TargetTitle, maxReport)}}
 	summary := fmt.Sprintf("Watch %s is %s.", w.ID, w.State)
 	if w.Error != "" {

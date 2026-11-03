@@ -2440,6 +2440,16 @@ CREATE INDEX idx_watches_wait_target ON watches(wait_target_run) WHERE wait_targ
 CREATE INDEX idx_watches_wait_delivery ON watches(wait_delivery_next_at) WHERE wait_delivery_next_at IS NOT NULL;
 ALTER TABLE coord_state_reports ADD COLUMN until_conditions TEXT NOT NULL DEFAULT '';
 `,
+	// v101: the sessions a watch relays its notices to, and one delivery
+	// row per notice and session, with its attempts and when it is due.
+	`
+ALTER TABLE watches ADD COLUMN relay_to TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE watch_deliveries ADD COLUMN run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE watch_deliveries ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE watch_deliveries ADD COLUMN next_at INTEGER;
+CREATE UNIQUE INDEX idx_watch_deliveries_relay ON watch_deliveries(notification_id, run_id) WHERE channel = 'relay';
+CREATE INDEX idx_watch_deliveries_relay_due ON watch_deliveries(next_at) WHERE channel = 'relay' AND next_at IS NOT NULL;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

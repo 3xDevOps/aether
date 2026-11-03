@@ -137,7 +137,7 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 		}
 		for _, n := range recorded {
 			s.changed(ctx, w, n.ID)
-			if n.PushState != store.WatchPushNone || w.Source == protocol.WatchSourceAssistant && s.assistant != nil {
+			if n.PushState != store.WatchPushNone || w.Source == protocol.WatchSourceAssistant && s.assistant != nil || len(w.RelayTo) > 0 {
 				s.wake()
 			}
 		}
@@ -463,6 +463,7 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 		if w.Source == protocol.WatchSourceAssistant && s.assistant != nil {
 			rec.Deliveries = append(rec.Deliveries, store.WatchDelivery{Channel: protocol.WatchChannelAssistant, Status: protocol.WatchStatusPending, At: now})
 		}
+		rec.Deliveries = append(rec.Deliveries, relayDeliveries(w, now)...)
 		out = append(out, rec)
 	}
 	return out, nil

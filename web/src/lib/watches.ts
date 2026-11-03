@@ -93,6 +93,18 @@ export function deliveryText(delivery: WatchDelivery): string {
     case 'assistant':
       if (delivery.status === 'delivered') return 'In the assistant chat'
       if (delivery.status === 'failed') return `Assistant chat failed: ${detail || 'no reason given'}`
+      break
+    case 'relay':
+      switch (delivery.status) {
+        case 'delivered':
+          return `Relayed to ${delivery.run_id}`
+        case 'failed':
+          return `Relay to ${delivery.run_id} failed: ${detail || 'no reason given'}`
+        case 'pending':
+          return `Relay to ${delivery.run_id} pending${detail ? `: ${detail}` : ''}`
+        case 'cleared':
+          return `Not relayed to ${delivery.run_id}${detail ? `: ${detail}` : ''}`
+      }
   }
   return `${delivery.channel}: ${delivery.status}${detail ? ` (${detail})` : ''}`
 }

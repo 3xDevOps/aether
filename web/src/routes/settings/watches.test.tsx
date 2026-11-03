@@ -119,7 +119,7 @@ describe('watches in settings', () => {
     const user = userEvent.setup()
     const { rerender } = showSettings([watch()], {
       watchGet: vi.fn(async () => ({
-        watch: watch({ source: 'assistant' }),
+        watch: watch({ source: 'assistant', relay_to: ['run-b'] }),
         notifications: [
           notice,
           {
@@ -134,6 +134,15 @@ describe('watches in settings', () => {
           { ...notice, id: 'not-c', title: 'Broken', deliveries: [at('push', 'failed', '410 Gone from fcm.googleapis.com')] },
           { ...notice, id: 'not-e', title: 'Skipped', deliveries: [at('push', 'skipped', 'The session notification already sent it'), at('assistant', 'delivered')] },
           { ...notice, id: 'not-f', title: 'Withdrawn', deliveries: [at('push', 'withdrawn')] },
+          {
+            ...notice,
+            id: 'not-g',
+            title: 'Relayed',
+            deliveries: [
+              { ...at('relay', 'delivered'), run_id: 'run-b' },
+              { ...at('relay', 'failed', 'Not relayed: you may not write to session run-c'), run_id: 'run-c' },
+            ],
+          },
         ],
       })),
     })
@@ -153,6 +162,9 @@ describe('watches in settings', () => {
     expect(within(dialog).getByText('Push skipped: The session notification already sent it')).toBeDefined()
     expect(within(dialog).getByText('In the assistant chat')).toBeDefined()
     expect(within(dialog).getByText('Push withdrawn from your devices: the need ended')).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'run-b' })).toBeDefined()
+    expect(within(dialog).getByText('Relayed to run-b')).toBeDefined()
+    expect(within(dialog).getByText('Relay to run-c failed: Not relayed: you may not write to session run-c')).toBeDefined()
     await user.click(within(dialog).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: fixRun.id } })
   })
