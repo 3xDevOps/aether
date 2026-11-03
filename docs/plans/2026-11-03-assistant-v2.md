@@ -3,7 +3,7 @@
 Status: approved with the [owner decisions](#owner-decisions) below, which
 override the text they name. Phases 1–4 are being built. Builds on
 [2026-11-03-assistant-signin-and-standing-jobs.md](2026-11-03-assistant-signin-and-standing-jobs.md)
-(assistant sign-in and `relay_to` on watches, being built now) and on
+(assistant sign-in and `relay_to` on watches, added with PR #708) and on
 [assistant.md](../assistant.md), [watches.md](../watches.md),
 [connectors.md](../connectors.md), [security.md](../security.md) and
 [teams.md](../teams.md).
@@ -129,7 +129,8 @@ feature and needs the taint rule from phase 5 first.
 
 ### `aether_ask_assistant`
 
-- One connector tool, scope `write`: `{prompt, turn_id?}`.
+- One connector tool, scope `write`: `{prompt, idempotency_key?, turn_id?}`.
+  A retried prompt with the same key returns the existing turn.
 - It enqueues the prompt with origin `connector`, then waits up to 25 seconds
   for the turn's final reply. It returns `{turn_id, state, reply,
   pending_cards}`, with `state` `done`, `queued`, `running` or
@@ -192,7 +193,7 @@ Launch claude (acp) in api: "Fix the flaky login test"
 
 | Method | Rule key | Never covered by a rule |
 | --- | --- | --- |
-| `run.launch` | workspace, agent, account (yours or one named), mode, permission tier | automatic fallback while any account is shared with you |
+| `run.launch` | workspace, agent, account (yours or one named), mode, model, effort, permission tier, no fallback | automatic fallback while any account is shared with you; an explicit fallback order, extra repositories |
 | `run.inject` | workspace, own sessions | another member's session |
 | `run.kill` | workspace, own sessions | another member's session |
 | `env.save` | your environment | none |
@@ -440,6 +441,9 @@ boundaries.
 
 Every turn carries the origin of its queue entry. A turn that receives a
 teammate's request body is raised to `request`, even if a member started it.
+Since later turns share the conversation that holds the body, the taint
+stays on the conversation: every later turn is a `request` turn until the
+conversation is reset.
 
 | Origin | Rules | Approve everything | Notes |
 | --- | --- | --- | --- |
@@ -752,20 +756,25 @@ Choices for phases 1–4 that the proposal left open.
 ### Deciding a card from a connector
 
 - `aether_ask_assistant` returns each card its turn raised as `{card_id,
-  card}`, where `card` is the server-written summary.
+  card}`, where `card` is the card's full text: the server-written summary
+  with every field the call sends shown whole (no first-line cut, no
+  120-character cut of a task or message). A card whose full text is longer
+  than 2,000 characters, or that shows a saved preference (a `forget` card,
+  or any card `carriesPreference` matches), is returned as `Waiting for your
+  approval in Aether` with its id only, and is decided only in Aether.
 - The same tool decides one: `{card_id, decision: "approve" | "decline",
-  card}`. `card` must equal the card's summary byte for byte, as
+  card}`. `card` must equal that full text byte for byte, as
   `aether_decide_approval` requires the request text. A mismatch fails with
   `card text does not match card <id>; show the person the card and pass its
   text exactly`, and decides nothing.
 - Only a card raised in a turn that the same connector grant started can be
   decided this way. A card from a dashboard turn, another connector or an
   event fails with the same error as a missing id.
-- Approving needs the scope the direct tool for that method needs:
-  `write` for launches, messages, answers, memory notes, watches and session
-  lifecycle, `control` for everything else.
-- A card whose summary is longer than 600 characters is decided only in
-  Aether, as for permission requests.
+- A connector turn acts within its grant's scopes. A method needs the
+  scope its direct tool needs: `write` for launches, messages, answers,
+  memory notes, watches and session lifecycle, `control` for everything
+  else. In a connector turn, a method the grant's scopes don't cover never
+  passes by rule or auto-approval, and its card is decided only in Aether.
 - The connector offers only **Approve** and **Decline**. Rules and
   auto-approval change only from an Aether device.
 - The external host's own confirmation of the tool call is the human gate,
