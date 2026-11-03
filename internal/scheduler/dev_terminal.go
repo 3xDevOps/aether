@@ -149,7 +149,7 @@ func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID
 		if set.deferred && !paused {
 			set.deferred = false
 			for _, terminal := range set.Terminals {
-				if terminal.Exec == nil && !terminal.ContainerEnded && !terminal.Gone {
+				if terminal.Exec == nil && !terminal.ContainerEnded && !terminal.Gone && !terminal.Lost {
 					s.recoverRunTerminalLocked(ctx, run, set, terminal)
 				}
 			}
@@ -259,6 +259,9 @@ func (s *Scheduler) prepareRunTerminalsLocked(set *runTerminalSet, container run
 }
 
 func (s *Scheduler) refreshRunTerminalLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, terminal *runTerminal) error {
+	if terminal.Lost {
+		return nil
+	}
 	changed, attached := false, false
 	if terminal.Generation != 0 {
 		if host, ok := s.cfg.PTY.(DevelopmentPTYHost); ok {
@@ -610,7 +613,8 @@ func (s *Scheduler) settleLostDevelopmentTerminals(ctx context.Context, run doma
 	if err != nil {
 		return false, err
 	}
-	settled, changed := true, false
+	settled := true
+	var lost []*runTerminal
 	for _, terminal := range set.Terminals {
 		if terminalEnded(terminal) || terminal.Lost {
 			continue
@@ -625,20 +629,29 @@ func (s *Scheduler) settleLostDevelopmentTerminals(ctx context.Context, run doma
 			settled = false
 			continue
 		}
+		terminal.Lost = true
+		terminal.Unavailable = "the terminal's exec helper cannot be reached and left no exit record, so its exit status is unknown; " +
+			"processes it left are frozen or stopped with the session's container and run again if the session is reopened: " + probeErr.Error()
+		lost = append(lost, terminal)
+	}
+	// The stop error is dropped only once every lost record is durable;
+	// otherwise they are probed again on the next attempt.
+	var saveErr error
+	if settled {
+		saveErr = s.persistRunTerminalsLocked(run, set)
+	}
+	for _, terminal := range lost {
+		if !settled || saveErr != nil {
+			terminal.Lost = false
+			continue
+		}
 		if terminal.Exec != nil {
 			_ = terminal.Exec.Detach()
 			terminal.Exec = nil
 		}
-		terminal.Lost, terminal.Generation, changed = true, 0, true
-		terminal.Unavailable = "the terminal's exec helper cannot be reached and left no exit record, so its exit status is unknown; " +
-			"processes it left are frozen or stopped with the session's container and run again if the session is reopened: " + probeErr.Error()
+		terminal.Generation, terminal.State = 0, runtime.ExecState{}
 	}
-	if changed {
-		if err := s.persistRunTerminalsLocked(run, set); err != nil {
-			return false, err
-		}
-	}
-	return settled, nil
+	return settled && saveErr == nil, saveErr
 }
 
 func (s *Scheduler) StopDevelopmentTerminals(ctx context.Context, run domain.RunID) error {

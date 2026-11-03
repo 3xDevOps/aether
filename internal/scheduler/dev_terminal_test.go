@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +38,12 @@ type terminalTestRuntime struct {
 	// failAttach is how many more keeper bridges fail to start.
 	failAttach int
 	loseReady  bool
+	resumes    atomic.Int32
+}
+
+func (r *terminalTestRuntime) Resume(ctx context.Context, id runtime.ID) error {
+	r.resumes.Add(1)
+	return r.fakeRuntime.Resume(ctx, id)
 }
 
 type terminalTestExec struct {
@@ -692,6 +700,20 @@ func TestCloseRecordsTerminalWithLostHelper(t *testing.T) {
 				t.Fatalf("stop terminals = %v, want %v", err, tc.stopErr)
 			}
 
+			if tc.closes && os.Geteuid() != 0 {
+				dir := filepath.Dir(e.sched.runTerminalsPath(run.ID))
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				settled, err := e.sched.settleLostDevelopmentTerminals(t.Context(), run.ID)
+				if chmodErr := os.Chmod(dir, 0o700); chmodErr != nil {
+					t.Fatal(chmodErr)
+				}
+				if err == nil || settled {
+					t.Fatalf("settle with an unwritable registry = %v, %v; want the save error", settled, err)
+				}
+			}
+
 			err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged)
 			if !tc.closes {
 				if !errors.Is(err, tc.stopErr) {
@@ -708,12 +730,44 @@ func TestCloseRecordsTerminalWithLostHelper(t *testing.T) {
 			if execution.process.currentState() != "running" {
 				t.Fatal("close pretended to stop a lost terminal's process")
 			}
-			got, err := e.sched.LookupDevelopmentTerminal(t.Context(), run.ID, terminal.TerminalID)
+			rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
+			if cleanupErr := e.sched.StopDevelopmentRun(t.Context(), run.ID); cleanupErr != nil {
+				t.Fatalf("cleanup after close: %v", cleanupErr)
+			}
+			if resumes := rt.resumes.Load(); resumes != 0 {
+				t.Fatalf("cleanup resumed the closed container %d times for a lost terminal", resumes)
+			}
+
+			cfg := e.sched.cfg
+			host, err := ptyhost.New(ptyhost.Config{TranscriptDir: t.TempDir()})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Process.State != "unavailable" || got.Process.ExitCode != nil || !strings.Contains(got.Process.Reason, "exit status is unknown") {
-				t.Fatalf("lost terminal = %+v, want unavailable with an unknown exit status", got.Process)
+			t.Cleanup(func() { _ = host.Close() })
+			cfg.PTY = host
+			recovered, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = recovered.Close() })
+			registry, err := os.Stat(recovered.runTerminalsPath(run.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				got, err := recovered.LookupDevelopmentTerminal(t.Context(), run.ID, terminal.TerminalID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Process.State != "unavailable" || got.Process.ExitCode != nil || !strings.Contains(got.Process.Reason, "exit status is unknown") {
+					t.Fatalf("lost terminal after a restart = %+v, want unavailable with an unknown exit status", got.Process)
+				}
+			}
+			if after, err := os.Stat(recovered.runTerminalsPath(run.ID)); err != nil || !after.ModTime().Equal(registry.ModTime()) {
+				t.Fatalf("reading a lost terminal rewrote the registry: %v", err)
+			}
+			if err := recovered.ReopenDevelopmentTerminals(t.Context(), run.ID); err != nil {
+				t.Fatalf("reopen with a lost terminal: %v", err)
 			}
 		})
 	}

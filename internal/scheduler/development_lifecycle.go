@@ -280,7 +280,7 @@ func (s *Scheduler) stopDevelopmentProcesses(ctx context.Context, id domain.RunI
 	needStop := false
 	if err == nil {
 		for _, terminal := range set.Terminals {
-			if !terminal.State.Exited {
+			if !terminal.State.Exited && !terminal.Lost {
 				needStop = true
 				break
 			}
