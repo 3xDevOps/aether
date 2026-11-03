@@ -321,16 +321,18 @@ function announce(runId, run) {
   if (announced.get(runId) === key) return
   announced.set(runId, key)
   // A success ready for review is the watch's finished notice too; a live failure is its needs_you notice.
-  if (attention && recentlyShown(run.review === 'ready' ? `${runId} done` : runId)) return
+  const finished = !attention && awaitsReview(run)
+  if ((attention || finished) && recentlyShown(finished ? `${runId} done` : runId)) return
   if (!Notification.isSupported()) return
   const notification = new Notification({
     title: titleOf(run),
     body,
-    ...(attention && run.review !== 'ready' ? {} : { silent: true, urgency: 'low' }),
+    ...(attention ? {} : { silent: true, urgency: 'low' }),
   })
   notification.on('click', () => openRun(runId))
   notification.show()
   if (entry) entry.notification = notification
+  if (finished) finishedShown.set(runId, [...(finishedShown.get(runId) || []), notification])
 }
 
 // resolve ends runId's need and closes its watch notices shown before `before`.
@@ -350,18 +352,22 @@ function resolve(runId, before = Infinity) {
   updateBadge()
 }
 
-// needsAttention and needKey are domain.Run.NeedsAttention and NeedKey in
-// internal/domain/domain.go; titleOf and statusBody are RunTitle and
+// needsAttention, awaitsReview and needKey are domain.Run.NeedsAttention,
+// AwaitsReview with review ready and NeedKey in internal/domain/domain.go; titleOf and statusBody are RunTitle and
 // statusBody of internal/push/need.go. A desktop notification fires and
 // reads like the one a phone gets for the same run.
 
+const isLive = (run) => run.status === 'running' || run.status === 'needs-attention'
+
 function needsAttention(run) {
-  const live = run.status === 'running' || run.status === 'needs-attention'
-  if (run.paused) return false
-  if (run.review === 'ready' && (live || run.status === 'completed')) return true
-  if (!live) return false
+  if (run.paused || !isLive(run)) return false
   if (run.state === 'needs-you' || run.state === 'disconnected') return true
   return run.state === 'failed' && run.outcome_unseen === true
+}
+
+function awaitsReview(run) {
+  if (run.paused || run.review !== 'ready') return false
+  return run.status === 'completed' || (isLive(run) && run.state === 'finished')
 }
 
 function needKey(run) {
@@ -395,6 +401,7 @@ const disconnects = [
 function statusBody(run) {
   const reason = run.reason || ''
   if (!needsAttention(run)) {
+    if (awaitsReview(run)) return 'Finished: review the result'
     if (!run.outcome_unseen || run.status !== 'failed') return ''
     return 'Failed, review the result'
   }
@@ -411,7 +418,6 @@ function statusBody(run) {
     const match = disconnects.find(([prefix]) => reason.startsWith(prefix))
     return match ? match[1] + reason.slice(match[0].length) : 'Agent disconnected'
   }
-  if (run.review === 'ready') return 'Agent reported success, review the result'
   if (reason.startsWith('enhanced turn failed: ')) return 'Turn failed: ' + reason.slice('enhanced turn failed: '.length)
   return reason === 'agent reported failure' ? 'Agent reported failure, review the result' : 'Agent failed'
 }

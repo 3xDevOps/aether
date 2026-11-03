@@ -50,7 +50,7 @@ function archivedRows(s: RunsInput): RunRow[] {
 
 export function board(s: RunsInput): BoardData {
   const groups = runGroups(s)
-  // Ready for review heads Finished: the work is done, and only the owner's answer is left.
+  // Finished: review heads Finished: the work is done, and only the owner's answer is left.
   const cards = { ...groups, finished: [...groups.review, ...groups.finished] }
   return {
     columns: (['needs-you', 'working', 'finished'] as const).map((key) => ({

@@ -966,14 +966,16 @@ These serve a client with no dashboard and no stream, such as the
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first: each session that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it |
+| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first, `ready` items last: each session that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it, then each reported success awaiting the caller's review |
 | `run.input.respond` | `{"run_id":"...","request_id":"...","option_id":"...","values":{...}}`; Steer | `{"status":"answered"}`, or `{"status":"already_answered"}` when an earlier answer won |
 
 An `AttentionItem` is `{kind, run_id, workspace_id, title,
 harness, reason, since}` plus what answering it needs. `kind` is one of
 `permission`, `question`, `queued-message`, `room-question`,
 `disconnected`,
-`blocked`, `needs-input`, `ready` or `failed`. `permission` and
+`blocked`, `needs-input`, `ready` or `failed`. `ready` is a finished session
+whose success awaits review (reason `Finished: review the result`); it blocks
+nothing and is not Needs you. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 session's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a

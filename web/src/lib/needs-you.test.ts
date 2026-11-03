@@ -1,5 +1,5 @@
 import { deviceNeeds, needsYou, needsYouConditions, waitingOn, type AttentionState, type NeedsYouID } from '@/lib/needs-you'
-import { presentRun } from '@/lib/status'
+import { groupOf, presentRun } from '@/lib/status'
 import type { Run } from '@/lib/types'
 import { toRecord, type RunRecord } from '@/store/runs'
 import {
@@ -29,7 +29,13 @@ it.each(['tui', 'acp'] as const)('keeps actual requests ahead of a reported %s o
   expect(needsYou(success, stateContext())).toBeUndefined()
   expect(presentRun(success, stateContext())).toMatchObject({ state: 'ready', reason: 'Agent reported success' })
   const ready = { ...success, review: 'ready' as const }
-  expect(needsYou(ready, stateContext())?.id).toBe('ready')
+  expect(needsYou(ready, stateContext())).toBeUndefined()
+  for (const finished of [ready, { ...ready, status: 'completed' as const, state: undefined }, { ...ready, parent_run_id: 'run_0' }, { ...ready, review: 'later' as const }]) {
+    const shown = presentRun(finished, stateContext())
+    expect(shown).toMatchObject({ state: 'ready' })
+    expect(shown.needsYou).toBeUndefined()
+    expect(groupOf(shown)).toBe('review')
+  }
   expect(needsYou({ ...ready, pending_inputs: [{ id: 'question_1', session_id: 'session_1', kind: 'question' }] }, stateContext())?.id).toBe('question')
 })
 
@@ -102,13 +108,6 @@ const rows: {
     run: record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which database?' }),
     ctx: {},
     reason: 'Agent asks: Which database?',
-  },
-  {
-    id: 'ready',
-    run: record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' }),
-    ctx: {},
-    reason: 'Your agent reports this task is finished',
-    state: 'ready',
   },
   {
     id: 'failed',

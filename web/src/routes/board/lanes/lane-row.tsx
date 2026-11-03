@@ -189,6 +189,7 @@ function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agen
         {owner}
         <span className={cn('min-w-0 truncate text-ui leading-4 font-medium', lane.outcome && 'text-muted')}>{lane.title}</span>
         {card.group === 'needs-you' && <Badge tone="needs-you" className="h-4 text-ui-xs">Needs you</Badge>}
+        {card.group === 'review' && <Badge tone="review" className="h-4 text-ui-xs">{stateLabel.ready}</Badge>}
       </span>
       <span className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
         <AgentGlyph agent={card.run.harness} />

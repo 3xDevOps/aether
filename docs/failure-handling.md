@@ -54,7 +54,7 @@ A live session carries a state that says what it is doing. The dashboard and
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
 | `waiting` | Turn ended, or Stale wait for a stale wait (`aether sessions`: Waiting) | The turn ended with no report (`turn ended without a report`), the session stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
-| `finished` | Ready for review | An interactive session reported `success`. |
+| `finished` | Finished: review | An interactive session reported `success`. Asks nothing of you. |
 | `failed` | Failed | The session reported `failure`, or its turn failed. |
 | `disconnected` | Disconnected | The Enhanced session failed or ended while the session is open. |
 
@@ -142,13 +142,19 @@ Any new turn clears the review, and a later success report asks again.
 ### Needs you
 
 One rule decides whether a session needs a person. The **Needs you** list,
-`aether sessions --needs-you`, `aether wait` (exit 3, except that a success ready
-for review exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of sessions that need
+`aether sessions --needs-you`, `aether wait` (exit 3, except that a finished
+success exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of sessions that need
 you, `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
 notifications and the assistant's notices all use it. The session status
 `needs-attention` alone does not: it means the agent is parked, which includes
 waiting on agents, CI or a process and a reported success.
+
+A reported success is never a need. While its `review` is `ready` or `later`
+the session shows **Finished: review the result**, its own group with its own
+count below Needs you, and the label `Finished: review` in the dashboard and
+`aether sessions`. `attention.list` still returns it, as kind `ready` with the
+reason `Finished: review the result`, after every item that asks something.
 
 | Session | Needs you | Notifies |
 | --- | --- | --- |
@@ -156,8 +162,8 @@ waiting on agents, CI or a process and a reported success.
 | `disconnected` | Yes | Once. |
 | `failed`, result not yet seen by the owner | Yes, while the session is live | Once: `Failed, review the result`. |
 | `failed`, result seen | No | No. |
-| Review ready, live or `completed` | Yes | Once per success: `Agent reported success, review the result`, at normal urgency. |
-| Review marked **Not yet** or complete | No | No. |
+| Review ready, live or `completed` | No: Finished: review the result | Once per success, quietly: `Finished: review the result`, at normal urgency, never in the desktop badge. |
+| Review put off for later or complete | No | No. |
 | A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |
 | Any state while the session is paused | No | Checked again on resume. |

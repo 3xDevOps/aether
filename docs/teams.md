@@ -323,10 +323,12 @@ more than one workspace exists`. `aether sessions` lists sessions from every wor
 | `aether changes` | Session changes since a cursor: status, reports, mail, pull requests and lifecycle. `--follow` keeps polling ([coordination.md](coordination.md#follow-changes-from-a-cursor)) |
 | `aether cost --runs` | Token spend per member and run |
 
-The dashboard shows each session as **Needs you**, **Working**, **Paused**, **Done**
-or **Failed**. **Needs you** means something blocks the session that you can
-resolve, such as a permission or question, a stalled session of yours, or an unreviewed
-finish. Everyone else sees that session as **Working** with
+The dashboard shows each session as **Needs you**, **Finished: review the
+result**, **Working**, **Paused**, **Done** or **Failed**. **Needs you** means
+something blocks the session that you can resolve, such as a permission or
+question or a stalled session of yours. A session whose agent reported success
+is **Finished: review the result**: it blocks nothing, so check its work before
+you close it. Everyone else sees that session as **Working** with
 "Waiting for Alice" ([failure-handling.md](failure-handling.md#needs-you)).
 
 Answer an agent's plan or permission prompt in the session's Chat view
@@ -346,7 +348,7 @@ checkout exceeds 64 MiB gets no finish packet. If saving fails, Aether keeps the
 checkout and transcript instead of deleting them.
 
 ```sh
-aether close <session> --outcome merged|abandoned   # clear a finished session off Needs you
+aether close <session> --outcome merged|abandoned   # close a finished session after reviewing it
 aether archive <session>                            # hide a finished session; unarchive restores it
 aether delete <session>                             # stop it and remove its checkout and records
 ```

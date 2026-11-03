@@ -178,34 +178,48 @@ test('an unseen failure needs you until the owner sees it', async () => {
   assert.equal(badge, 0)
 })
 
-test('a success ready for review notifies once, quietly, until it is put off', async () => {
+test('a success ready for review notifies once, quietly, outside the badge, until it is put off', async () => {
   const run = lead('r6')
   await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
   assert.equal(shown.length, 1)
-  assert.equal(shown[0].options.body, 'Agent reported success, review the result')
+  assert.equal(shown[0].options.body, 'Finished: review the result')
   assert.equal(shown[0].options.silent, true)
-  assert.equal(badge, 1)
+  assert.equal(badge, 0, 'a finished run asks nothing, so the badge does not count it')
   await status(run, {})
   assert.equal(shown.length, 1)
 
   await review(run, 'later')
   assert.ok(shown[0].closed)
-  assert.equal(badge, 0)
   await status(run, {})
   assert.equal(shown.length, 1, 'a success put off for later stays quiet')
 
   await status(run, { status: 'running', state: 'working', reason: '', review: '' })
+  const now = Date.now()
+  mock.method(Date, 'now', () => now + 6000)
   await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready', status_changed_at: '2026-10-16T00:02:00Z' })
-  assert.equal(badge, 1, 'a new success report asks again')
+  assert.equal(shown.length, 2, 'a new success report is announced again')
+  assert.equal(badge, 0)
+  mock.restoreAll()
+})
+
+test('a run waiting on subsessions, CI or a process never notifies or counts', async () => {
+  const run = { ...lead('r20'), acp: true }
+  await status(run, { status: 'needs-attention', state: 'waiting-agents', reason: 'waiting on 2 subsessions' })
+  await status(run, { state: 'waiting-ci', reason: 'CI on PR 12' })
+  await status(run, { state: 'waiting-tools', reason: 'release build' })
+  const child = { ...lead('r21'), acp: true, parent_run_id: 'r20' }
+  await status(child, { status: 'needs-attention', state: 'waiting-ci', reason: 'CI on PR 13' })
+  assert.equal(shown.length, 0)
+  assert.equal(badge, 0)
 })
 
 test('a completed success notifies until accepted; an old finished run never does', async () => {
   const run = lead('r9')
   await status(run, { status: 'completed', state: '', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
   assert.equal(shown.length, 1)
+  assert.equal(badge, 0)
   await review(run, 'accepted')
   assert.ok(shown[0].closed)
-  assert.equal(badge, 0)
 
   const old = lead('r10')
   await status(old, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true })

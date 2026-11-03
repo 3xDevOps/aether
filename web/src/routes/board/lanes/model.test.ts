@@ -164,7 +164,7 @@ describe('buildLanes', () => {
       run({ id: 'c1', parent_run_id: 'parent', status: 'completed', state: undefined, created_at: at(10), finished_at: at(20) }),
     ])
     const { lanes } = buildLanes(input(ctx))
-    expect(lanes.find((l): l is FamilyLane => l.kind === 'family')).toMatchObject({ open: false })
+    expect(lanes.find((l): l is FamilyLane => l.kind === 'family')).toMatchObject({ open: false, detail: '1 subsession · 1 done' })
     expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['parent'])
   })
 
@@ -177,10 +177,11 @@ describe('buildLanes', () => {
     expect(summary?.kind === 'summary' && summary.strip.map((s) => s.tone)).toEqual(['done', 'failed', 'done'])
   })
 
-  it('colours a completed run awaiting review by its completion, while it reads Ready for review', () => {
+  it('colours a completed run awaiting review by its completion, while it reads Finished: review, never Needs you', () => {
     const ctx = ctxOf([run({ id: 'done', status: 'completed', state: undefined, review: 'ready', created_at: at(10), started_at: at(10), finished_at: at(40) })])
     const lane = buildLanes(input(ctx)).lanes.find((l): l is RunLane => l.kind === 'run')!
     expect(lane.card.state).toBe('ready')
+    expect(lane.card.group).toBe('review')
     expect(lane.outcome).toBe('completed')
     expect(segmentTone(lane.segments[0].state, lane.outcome)).toBe('done')
   })

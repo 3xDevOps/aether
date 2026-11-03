@@ -55,7 +55,7 @@ export function possiblyStalled(run: Pick<RunRecord, 'status' | 'reason'>): bool
 const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'answered', 'needs-you', 'failed', 'disconnected'])
 
 /**
- * A live run's state from its wire status and activity. A reported success reads Ready for review.
+ * A live run's state from its wire status and activity. A reported success reads Finished: review.
  * A parked run with no known state, or the `idle` older servers wrote, ended its turn without a
  * report; a running one this dashboard cannot read is shown as Running.
  */
@@ -300,7 +300,7 @@ export const stateLabel: Record<PresentationState, string> = {
   waiting: 'Waiting',
   answered: 'Answered',
   'needs-you': 'Needs you',
-  ready: 'Ready for review',
+  ready: 'Finished: review',
   failed: 'Failed',
   disconnected: 'Disconnected',
   completed: 'Completed',
@@ -337,6 +337,6 @@ export const stateTone: Record<PresentationState, Tone> = {
 export const groupLabel: Record<RunGroup, string> = {
   'needs-you': 'Needs you',
   working: 'Working',
-  review: 'Ready for review',
+  review: 'Finished: review the result',
   finished: 'Finished',
 }

@@ -50,7 +50,7 @@ export interface RunLane extends LaneBase {
   card: BoardCard
   title: string
   segments: Segment[]
-  /** Set once the run ended, from its status: the viewer's state can read Ready for review instead. */
+  /** Set once the run ended, from its status: the viewer's state can read Finished: review instead. */
   outcome?: PresentationState
   start: number
   end: number
@@ -361,7 +361,8 @@ export function buildLanes(input: LanesInput): LanesModel {
       })
       drawn.set(parent.card.run.id, familyKey)
       for (const lane of children) drawn.set(lane.card.run.id, familyKey)
-      for (const lane of familyOpen ? [parent, ...children] : needs) lanes.push(...withAgents({ ...lane, level: 3, parentKey: familyKey }))
+      const folded = unit.members.filter((lane) => needs.includes(lane) || (lane === parent && lane.card.group === 'review'))
+      for (const lane of familyOpen ? [parent, ...children] : folded) lanes.push(...withAgents({ ...lane, level: 3, parentKey: familyKey }))
     }
   }
   return { lanes, drawn, inWindow }

@@ -37,7 +37,6 @@ export type NeedsYouID =
   | 'disconnected'
   | 'blocked'
   | 'needs-input'
-  | 'ready'
   | 'failed'
 
 export interface PrimaryAction {
@@ -48,7 +47,7 @@ export interface PrimaryAction {
 export const openAction: PrimaryAction = { kind: 'open', label: 'Open' }
 
 /** How a row in Needs you is labelled: a request, or a run that needs intervention. */
-export type AttentionState = 'needs-you' | 'ready' | 'failed' | 'disconnected'
+export type AttentionState = 'needs-you' | 'failed' | 'disconnected'
 
 export interface NeedsYouCondition {
   id: NeedsYouID
@@ -263,19 +262,6 @@ export const needsYouConditions: NeedsYouCondition[] = [
     // A Background run takes no input.
     action: (run) =>
       (asks(run) || turnCutShort(run) || waitBroken(run)) && run.mode !== 'headless' ? { kind: 'reply', label: 'Reply' } : openAction,
-  }),
-  condition({
-    id: 'ready',
-    state: 'ready',
-    target: 'run',
-    background: true,
-    completed: true,
-    // Leaves Needs you only on Mark complete or Not yet; opening the run does not answer it.
-    holds: (run) => run.review === 'ready' && awaitsCompletion(run),
-    resolvers: (run) => [run.member_id],
-    reason: () => 'Your agent reports this task is finished',
-    action: () => ({ kind: 'open', label: 'Review' }),
-    since: (run) => run.review_changed_at,
   }),
   condition({
     id: 'failed',

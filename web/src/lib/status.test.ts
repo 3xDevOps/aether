@@ -1,6 +1,6 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateName, stateTitle, stateTone, stateWords, toneOf } from '@/lib/status'
+import { backgroundReason, clipLabel, groupLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateName, stateTitle, stateTone, stateWords, toneOf } from '@/lib/status'
 import { clockTime } from '@/lib/format'
 import type { RunActivity, RunWait } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
@@ -82,7 +82,7 @@ describe('run presentation', () => {
       ['waiting', 'Turn ended'],
       ['answered', 'Answered'],
       ['idle', 'Turn ended'],
-      ['finished', 'Ready for review'],
+      ['finished', 'Finished: review'],
       ['failed', 'Failed'],
       ['disconnected', 'Disconnected'],
       ['needs-you', 'Needs you'],
@@ -144,23 +144,23 @@ describe('run presentation', () => {
     expect(stateTitle({ state: 'working', reason: 'Working' }, '2026-08-14T10:15:00Z', now)).toBe('Working since 5 minutes ago.')
   })
 
-  it('reads a reported success as Ready for review until the owner answers it', () => {
+  it('reads a reported success as Finished: review, never Needs you, until the owner answers it', () => {
     const ready = shown({ status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' })
-    expect(ready).toMatchObject({ state: 'ready', reason: 'Your agent reports this task is finished' })
-    expect(ready.needsYou?.id).toBe('ready')
-    expect(groupOf(ready)).toBe('needs-you')
+    expect(ready).toEqual({ state: 'ready', reason: 'Agent reported success', next: 'Mark it complete, or send a message to keep going.' })
+    expect(groupOf(ready)).toBe('review')
     const later = shown({ status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'later' })
-    expect(later).toEqual({ state: 'ready', reason: 'Agent reported success', next: 'Mark it complete, or send a message to keep going.' })
-    expect(groupOf(later)).toBe('review')
+    expect(later).toEqual(ready)
     const headless = shown({ mode: 'headless', status: 'completed', reason: 'agent reported success', review: 'ready' })
     expect(headless.state).toBe('ready')
-    expect(groupOf(headless)).toBe('needs-you')
+    expect(headless.needsYou).toBeUndefined()
+    expect(groupOf(headless)).toBe('review')
     expect(shown({ status: 'completed', review: 'later' }).state).toBe('ready')
     expect(groupOf(shown({ status: 'completed', review: 'accepted' }))).toBe('finished')
-    // Only the owner is asked; a teammate sees the same state in the quiet group.
     const teammate = shown({ status: 'needs-attention', state: 'finished', review: 'ready', member_id: bob.id })
     expect(teammate.state).toBe('ready')
     expect(groupOf(teammate)).toBe('review')
+    expect(stateLabel.ready).toBe('Finished: review')
+    expect(groupLabel.review).toBe('Finished: review the result')
   })
 
   it('labels a live run without a known state honestly, never Working', () => {
@@ -229,7 +229,7 @@ describe('run presentation', () => {
 
   it('labels every state in words and gives each its own dot, so no state is told by colour alone', () => {
     expect(Object.values(stateLabel)).toEqual([
-      'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Turn ended', 'Waiting', 'Answered', 'Needs you', 'Ready for review',
+      'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Turn ended', 'Waiting', 'Answered', 'Needs you', 'Finished: review',
       'Failed', 'Disconnected', 'Completed', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running', 'Possibly stalled',
     ])
     expect(stateTone).toMatchObject({

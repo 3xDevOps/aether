@@ -179,7 +179,7 @@ const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
   review: byChange,
   finished: failedFirst,
 }
-const groupOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
+const groupOrder: RunGroup[] = ['needs-you', 'review', 'working', 'finished']
 
 function located(row: RunRow, s: RunsInput): RunRow {
   const elsewhere = s.workspace && row.run.workspace_id !== s.workspace

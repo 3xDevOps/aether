@@ -1340,8 +1340,8 @@ What a report does depends on the session:
 - **Interactive session** (`tui` or `acp`). At turn end,
   with no permission or question request open, success or failure records
   `needs-attention` with the reason `agent reported success` or
-  `agent reported failure`. A success shows **Ready for review** and counts
-  as **Needs you** until the owner marks it complete or later
+  `agent reported failure`. A success shows **Finished: review** until the
+  owner marks it complete, and never counts as **Needs you**
   ([review](failure-handling.md#review)); a failure shows **Failed**. The
   composer, native terminal, container and Enhanced agent remain
   live. The next working turn clears the shown outcome and the review. A report received after turn end is shown immediately. Without a
@@ -1358,7 +1358,7 @@ What a report does depends on the session:
   the work (`aether:` for success, `wip:` for failure), publishes the session
   branch, records `completed` or `failed`, and cleans up its container.
   A Close or Kill that lands first wins. A session completed by its success
-  report shows **Ready for review** until the owner marks it complete or
+  report shows **Finished: review** until the owner marks it complete or
   later.
 - **Blocked report.** The summary becomes `blocked: <summary>` at turn end,
   or when an agent without a status reporter stalls. It does not interrupt
