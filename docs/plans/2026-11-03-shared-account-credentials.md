@@ -4,8 +4,8 @@
 while the recipient can no longer take, log out or overwrite the sharer's
 login, and a revoke stops a running session's use.
 
-**Status:** proposal. Nothing here changes how shares work until the owner
-approves it.
+**Status:** approved by the owner on 2026-11-03: Phase 0 and Phase 1, and
+a canary before any existing share switches.
 
 ## Today
 
@@ -126,13 +126,17 @@ container.
 - Use the access token for its remaining lifetime, from anywhere.
 - Read the subscription type and plan, as today.
 
-## Open decisions for the owner
+## Decisions
 
-1. Approve central refresh, in which the server POSTs refreshes with the
-   CLIs' client ids. The alternative is to keep sharing the login files
-   (Phase 0 only).
-2. Before rollout: a canary on the owner's own account, shared with a test
-   member, through at least two real refreshes of each CLI.
+1. Central refresh is approved: the server refreshes with the CLIs' client
+   ids, and recipient sessions of `claude` and `codex` get short-lived access
+   tokens.
+2. Phase 1 ships behind `aether-server --session-login-accounts
+   <member-id>,...`, which lists the accounts whose shares use session login
+   copies. Every other share keeps today's mounts.
+3. The canary lists only the owner's own account, shared with a test member
+   the owner picks, through at least two real refreshes of each CLI. Phase 2
+   waits for it to pass and for the owner's go.
 
 ## Phases
 
@@ -142,4 +146,5 @@ container.
    nothing else can run them.
 1. Session login copies, pump and central refresh for `claude` and `codex`.
    Other agents keep today's mounts.
-2. Retire `loginMounts` for `claude` and `codex` once the canary passes.
+2. Retire `loginMounts` and the flag for `claude` and `codex` once the canary
+   passes and the owner approves.
