@@ -912,14 +912,10 @@ func normalizeRecoveryRunUser(user string) string {
 }
 
 func (s *Scheduler) recoverDestroyMetadata(ctx context.Context, cid runtime.ID, sc *sidecar) {
-	if sc == nil || sc.RunUser != "" {
+	if sc == nil || (sc.RunUser != "" && sc.RunUser != unknownRecoveryRunUser) {
 		return
 	}
-	if cid == "" {
-		sc.RunUser = unknownRecoveryRunUser
-		return
-	}
-	info, err := s.cfg.Runtime.Inspect(ctx, cid)
+	info, err := s.runContainerInfo(ctx, domain.RunID(sc.RunID), cid)
 	if err != nil {
 		// A container with unknown identity may still mount a member home.
 		// Reserve a conservative sentinel until destruction is confirmed.
@@ -930,6 +926,27 @@ func (s *Scheduler) recoverDestroyMetadata(ctx context.Context, cid runtime.ID, 
 	if sc.Home == "" {
 		sc.Home = containerHome(info.Env)
 	}
+}
+
+// runContainerInfo inspects the run's container, found by its creation key
+// when cid is empty. A container that is gone returns an empty info and no
+// error: it mounts no home.
+func (s *Scheduler) runContainerInfo(ctx context.Context, run domain.RunID, cid runtime.ID) (runtime.ContainerInfo, error) {
+	if cid == "" {
+		found, err := s.cfg.Runtime.FindByCreationKey(ctx, string(run))
+		if errors.Is(err, runtime.ErrNotFound) {
+			return runtime.ContainerInfo{}, nil
+		}
+		if err != nil {
+			return runtime.ContainerInfo{}, err
+		}
+		cid = found
+	}
+	info, err := s.cfg.Runtime.Inspect(ctx, cid)
+	if errors.Is(err, runtime.ErrNotFound) {
+		return runtime.ContainerInfo{}, nil
+	}
+	return info, err
 }
 
 // admitDestroyPendingOwner reports false when an existing owner or a changed
@@ -965,7 +982,7 @@ func (s *Scheduler) admitDestroyPendingOwner(ctx context.Context, r *domain.Run,
 			current.LoginMember = string(fresh.AccountMember())
 		}
 	}
-	if current.RunUser == "" {
+	if current.RunUser == "" || current.RunUser == unknownRecoveryRunUser {
 		current.RunUser = sc.RunUser
 	}
 	if current.Home == "" {
@@ -1051,6 +1068,9 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		reason := "server restarted"
 		if entry.exitObserved {
 			reason = fmt.Sprintf("server restarted: container exited %d", entry.exitCode)
+		}
+		if entry.evidenceUnavailable {
+			reason = withEvidenceUnavailable(reason)
 		}
 		if err := s.transitionLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status,
 			domain.RunInterrupted, reason, ""); err != nil {
@@ -1627,13 +1647,17 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 	metadataRecovered := false
 	if sc.Home == "" || sc.RunUser == "" || sc.RunUser == unknownRecoveryRunUser {
 		info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
-		if inspectErr != nil {
+		switch {
+		case errors.Is(inspectErr, runtime.ErrNotFound):
+			metadataRecovered = sc.RunUser != ""
+			sc.RunUser = ""
+		case inspectErr != nil:
 			slog.Warn("scheduler: inspect container metadata during recovery", "run", r.ID, "container", cid, "error", inspectErr)
 			if sc.RunUser == "" {
 				sc.RunUser = unknownRecoveryRunUser
 				metadataRecovered = true
 			}
-		} else {
+		default:
 			if sc.Home == "" {
 				sc.Home = containerHome(info.Env)
 				if sc.Home == "" {

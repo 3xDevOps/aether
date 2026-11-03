@@ -78,6 +78,9 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			slog.Warn("scheduler: release run without evidence", "run", run, "error", err)
 			return nil
 		}
+		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
+			return s.recordEvidenceUnavailable(ctx, run, err)
+		}
 	} else {
 		// cleanup removes the checkout: its work must be on the run branch.
 		req.Uncaptured = func(ctx context.Context, refusal error) error {
@@ -91,6 +94,14 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			return nil
 		}
 		packet, err = service.CaptureBeforeCleanup(ctx, req, cleanup)
+		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
+			// No retry can capture a checkout that is gone; what remains of
+			// the run is still removed.
+			if cleanupErr := cleanup(ctx); cleanupErr != nil {
+				return fmt.Errorf("scheduler: clean up session without checkout: %w", cleanupErr)
+			}
+			return s.recordEvidenceUnavailable(ctx, run, err)
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: capture evidence: %w", err)
@@ -347,6 +358,35 @@ func finishCaptureIdentity(generation, published, committed string, code int) st
 		return generation
 	}
 	return evidenceCommitIdentity(published, committed, code)
+}
+
+// recordEvidenceUnavailable settles a capture whose checkout is gone: the
+// run's reason says so instead of cleanup retrying forever. A run not yet
+// terminal carries the note into the reason its cleanup finishes with.
+func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.RunID, cause error) error {
+	slog.Warn("scheduler: release session without evidence", "run", run, "error", cause)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+	}
+	if !r.Status.Terminal() {
+		if entry := s.runs[run]; entry != nil {
+			entry.evidenceUnavailable = true
+		}
+		return nil
+	}
+	if _, noted := withoutEvidenceUnavailable(r.Reason); noted {
+		return nil
+	}
+	if err := s.relabelLocked(ctx, run, r.WorkspaceID, r.Status, withEvidenceUnavailable(r.Reason), ""); err != nil {
+		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+	}
+	return nil
 }
 
 func logEvidenceFailure(run domain.RunID, err error) {

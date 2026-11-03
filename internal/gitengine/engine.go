@@ -388,6 +388,9 @@ func (e *Engine) existingCheckoutPath(run domain.RunID) (string, error) {
 		return "", err
 	}
 	fi, err := os.Lstat(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("gitengine: session checkout %s: %w", run, err)
+	}
 	if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: %s", ErrCheckoutNotFound, run)
 	}

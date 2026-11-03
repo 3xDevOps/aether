@@ -213,7 +213,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		ensureCoordinationCLIPath(plan.Env)
 	}
 	terminalReservation := &terminalSupervision{member: member}
-	if reserveErr := s.reserveTerminalUser(terminalReservation, plan.User); reserveErr != nil {
+	if reserveErr := s.reserveTerminalUser(ctx, terminalReservation, plan.User); reserveErr != nil {
 		s.releaseTerminalCoordination(member)
 		return nil, fmt.Errorf("scheduler: reserve terminal user: %w", reserveErr)
 	}
@@ -515,8 +515,9 @@ func (s *Scheduler) ensureTerminalReady(ctx context.Context, sup *terminalSuperv
 		if err != nil {
 			return err
 		}
+		lookupErr := s.resolveStaleRunUsers(ctx, sup.member, "", user)
 		if err := s.resolveTerminalMetadata(sup, user, home); err != nil {
-			return err
+			return withLookupError(err, lookupErr)
 		}
 		if info.Image != "" {
 			s.mu.Lock()
@@ -526,8 +527,12 @@ func (s *Scheduler) ensureTerminalReady(ctx context.Context, sup *terminalSuperv
 		}
 	}
 	if sup.ownershipBlocked {
+		s.mu.Lock()
+		user := sup.runUser
+		s.mu.Unlock()
+		lookupErr := s.resolveStaleRunUsers(ctx, sup.member, "", user)
 		if err := s.checkTerminalOwnership(sup); err != nil {
-			return err
+			return withLookupError(err, lookupErr)
 		}
 		s.mu.Lock()
 		sup.ownershipBlocked = false

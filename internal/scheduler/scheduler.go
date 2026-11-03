@@ -365,6 +365,9 @@ type supervised struct {
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
+	// evidenceUnavailable notes a capture that found the checkout gone, for
+	// the reason the run's cleanup finishes with.
+	evidenceUnavailable bool
 	// evidencePending persists a completed terminalization whose required
 	// evidence capture did not finish, so a same-status retry resolves it first.
 	evidencePending bool

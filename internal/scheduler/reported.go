@@ -31,7 +31,24 @@ const (
 	needsInputReasonPrefix        = domain.NeedsInputReasonPrefix
 	exitedCompletedReason         = "agent exited; results committed"
 	exitedFailedReasonPrefix      = "agent exited "
+	evidenceUnavailableReason     = "evidence unavailable: session checkout missing"
 )
+
+// withoutEvidenceUnavailable strips the evidence-unavailable note so the
+// retention reasons below still match exactly.
+func withoutEvidenceUnavailable(reason string) (string, bool) {
+	if reason == evidenceUnavailableReason {
+		return "", true
+	}
+	return strings.CutSuffix(reason, "; "+evidenceUnavailableReason)
+}
+
+func withEvidenceUnavailable(reason string) string {
+	if reason == "" {
+		return evidenceUnavailableReason
+	}
+	return reason + "; " + evidenceUnavailableReason
+}
 
 // closeSpec is what ending a run through closeRun records.
 type closeSpec struct {
@@ -69,6 +86,7 @@ func reportedClose(outcome domain.RunStatus) closeSpec {
 // retainedReason reports whether a terminal row promises a retained,
 // relaunchable container.
 func retainedReason(status domain.RunStatus, reason string) bool {
+	reason, _ = withoutEvidenceUnavailable(reason)
 	switch status {
 	case domain.RunMerged, domain.RunAbandoned:
 		return reason == retainedCloseReason
@@ -89,6 +107,15 @@ func retentionValid(mode domain.LaunchMode, status domain.RunStatus, reason stri
 // releasedReason is the reason a retained run keeps once its container is
 // gone, and whether the row needs it.
 func releasedReason(status domain.RunStatus, reason, closed string) (string, bool) {
+	base, unavailable := withoutEvidenceUnavailable(reason)
+	released, ok := releasedBaseReason(status, base, closed)
+	if ok && unavailable {
+		released = withEvidenceUnavailable(released)
+	}
+	return released, ok
+}
+
+func releasedBaseReason(status domain.RunStatus, reason, closed string) (string, bool) {
 	switch {
 	case status == domain.RunCompleted && reason == reportedSuccessRetainedReason:
 		return reportedSuccessReason, true

@@ -735,7 +735,7 @@ func TestRecoveredSharedRunReservations(t *testing.T) {
 		"other recipient":  {&supervised{runID: "run-login", memberID: "lin", loginMember: e.owner.ID}, held},
 		"owner's own home": {&supervised{runID: "run-owner", memberID: e.owner.ID}, ""},
 	} {
-		err := s2.reserveRunUser(tc.entry, "2000:2000", true)
+		err := s2.reserveRunUser(context.Background(), tc.entry, "2000:2000", true)
 		if tc.want == "" && err != nil {
 			t.Fatalf("%s after restart: %v", name, err)
 		}
@@ -788,10 +788,10 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheLaunchersHome(t *testing.T) {
 			t.Fatalf("synthetic owner of %s = %+v, want it on the launcher's home %s and the login of %s", run.ID, entry, e.member.ID, e.owner.ID)
 		}
 	}
-	if err = s2.reserveRunUser(&supervised{runID: "run-owner", memberID: e.owner.ID}, "2000:2000", true); err != nil {
+	if err = s2.reserveRunUser(context.Background(), &supervised{runID: "run-owner", memberID: e.owner.ID}, "2000:2000", true); err != nil {
 		t.Fatalf("owner's own container beside the synthetic owners: %v", err)
 	}
-	err = s2.reserveRunUser(&supervised{runID: "run-home", memberID: e.member.ID}, "2000:2000", true)
+	err = s2.reserveRunUser(context.Background(), &supervised{runID: "run-home", memberID: e.member.ID}, "2000:2000", true)
 	if err == nil || !strings.Contains(err.Error(), "home "+string(e.member.ID)+" is reserved") {
 		t.Fatalf("launcher's home beside the synthetic owners = %v, want reservation refusal", err)
 	}
@@ -850,7 +850,7 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheOwnersLogin(t *testing.T) {
 	// The probe uses the owner's mapping, so once the owner's containers run
 	// only the recovered owners block it.
 	probe := func() error {
-		return s2.reserveRunUser(&supervised{runID: "run-probe", memberID: lin.ID, loginMember: e.owner.ID}, "2000:2000", true)
+		return s2.reserveRunUser(context.Background(), &supervised{runID: "run-probe", memberID: lin.ID, loginMember: e.owner.ID}, "2000:2000", true)
 	}
 	if err = probe(); err == nil || !strings.Contains(err.Error(), "shares is held by live session") {
 		t.Fatalf("login beside the recovered runs = %v, want reservation refusal", err)
