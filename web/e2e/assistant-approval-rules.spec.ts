@@ -83,7 +83,8 @@ test('Always approve saves a rule, a matching launch passes, another kind asks, 
   await expect(question).toBeHidden()
   await expect.poll(async () => settings()).toMatchObject({ auto_approve: false, approval_chosen: true })
   await page.reload()
-  await page.getByRole('button', { name: 'Assistant' }).first().click()
+  // The panel's open state survives a reload.
+  await expect(assistant).toBeVisible()
   await expect(assistant.getByRole('region', { name: 'Suggestions' })).toBeVisible()
   await expect(question).toBeHidden()
 
