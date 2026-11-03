@@ -197,7 +197,7 @@ export function LaneConversations({ conversations, lane, nameOf, now, onPick, on
       <Header>Messages with {conversations.length} {conversations.length === 1 ? 'session' : 'sessions'}</Header>
       <ul className="mt-1 flex flex-col gap-2">
         {conversations.map((c) => (
-          <li key={c.lane || c.run} className="min-w-0">
+          <li key={c.run} className="min-w-0">
             {c.lane
               ? <Button variant="link" size="sm" className="max-w-full truncate" onClick={() => onJump(c.lane)}>{nameOf(c)}</Button>
               : <p className="truncate text-ui-sm">{nameOf(c)} <span className="text-muted">(outside this view)</span></p>}
