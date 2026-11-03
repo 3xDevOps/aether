@@ -32,6 +32,8 @@ async function shoot(page: Page, testInfo: TestInfo, name: string) {
 }
 
 test('an Enhanced session opens a shell that fits a phone and takes a sticky Ctrl', async ({ page, aether }, testInfo) => {
+  // Aether is dark first, and the dashboard's default theme follows the system.
+  await page.emulateMedia({ colorScheme: 'dark' })
   await page.setViewportSize({ width: 360, height: 780 })
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
