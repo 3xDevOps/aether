@@ -17,8 +17,8 @@ export function closeWarned(check: RunCloseCheck | undefined, outcome?: CloseOut
 }
 
 /** What a close was asked against; a close is dropped when this changed before it runs, such as after Not yet. */
-export function closeState(run: Pick<Run, 'status' | 'review' | 'state'> | undefined): string {
-  return run ? `${run.status}|${run.review ?? ''}|${run.state ?? ''}` : ''
+export function closeState(run: Pick<Run, 'status_seq' | 'status' | 'review' | 'state'> | undefined): string {
+  return run ? `${run.status_seq}|${run.status}|${run.review ?? ''}|${run.state ?? ''}` : ''
 }
 
 export const closeChangedText = 'The session changed while its close was being checked, so it was not closed'

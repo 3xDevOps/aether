@@ -101,6 +101,17 @@ describe('Mark complete with close warnings', () => {
     expect(toast.info).toHaveBeenCalled()
   })
 
+  it('drops Close anyway after a later success report with the same status, review and state', async () => {
+    render(<><MarkComplete /><CloseConfirmation /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
+    await screen.findByRole('alertdialog')
+    act(() => useStore.setState((s) => ({ runs: { run_1: { ...s.runs.run_1!, status_seq: s.runs.run_1!.status_seq + 2 } } })))
+    fireEvent.click(screen.getByRole('button', { name: 'Close anyway' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(api.runReview).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('The session changed while its close was being checked, so it was not closed')
+  })
+
   it('drops the confirmation when its run is gone', async () => {
     render(<CloseConfirmation />)
     act(() => useStore.setState({ runs: {}, closeConfirmation: { check: { run_id: 'run_1', warnings: [{ kind: 'protected', detail: 'Protected' }] }, asked: '', command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } } }))
