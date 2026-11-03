@@ -334,10 +334,10 @@ glyph, left of the age. A mark added after the view opens fades in once with
 `motion-safe:animate-fade-in`; nothing loops. A live arrow draws above the
 bars for `--duration-mail-live` (4.5s, under WCAG 2.2.2's five seconds):
 `animate-mail-live` fades it and the recipient's tint in over 150ms, holds
-them to 2s and fades them out on `--ease-in-out`; `animate-mail-travel` (down, linear) and `animate-mail-bow` (sideways,
-quadratic) run an 8px dot along the arc from sender to recipient once over
-500ms, and `animate-mail-ping` grows a ring at the head
-once. Each arrow is its own HTML box and animates only `opacity` and
+them to 2s and fades them out on `--ease-in-out`; `animate-mail-travel`
+(down, linear) and `animate-mail-bow` (sideways, quadratic) run an 8px dot
+along the arc from sender to recipient once over 500ms, and
+`animate-mail-ping` grows a ring at the head once. Each arrow is its own HTML box and animates only `opacity` and
 `transform`, which an SVG child could not keep on the compositor. Under
 reduced motion the arrow and tint show still, without the dot or ring, and
 go when their time ends. Tree focus without hover or a

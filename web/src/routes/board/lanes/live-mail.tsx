@@ -17,7 +17,6 @@ export const liveMailMs = 4500
 export const liveMailCap = 3
 const slotPx = 8
 const nowGap = 28
-const chipRoom = 160
 const stubPx = 22
 const bowMax = 56
 const announceDelay = 1500
@@ -275,8 +274,8 @@ export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf,
           const row = pinned[offscreen.edge]++
           const end = offscreen.end === 'to' ? arrow.to : arrow.from
           const Icon = offscreen.edge === 'top' ? ArrowUp : ArrowDown
-          // Too close to the window's start for the button to fit on the arrow's left.
-          const right = x - bow < chipRoom
+          // On whichever side of the arc has more room, so a narrow track keeps the name readable.
+          const right = g.width - x > x - bow
           chip = (
             <LiveChip
               key={`${key}:chip`}

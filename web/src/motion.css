@@ -227,6 +227,7 @@
   /* The pulse's sideways leg: quadratic out to the arc's apex and back, which with mail-travel's linear leg traces the arc. */
   @keyframes mail-bow {
     from {
+      transform: none;
       animation-timing-function: cubic-bezier(0.33, 0.67, 0.67, 1);
     }
     50% {
