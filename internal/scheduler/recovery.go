@@ -1079,9 +1079,7 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		if entry.exitObserved {
 			reason = fmt.Sprintf("server restarted: container exited %d", entry.exitCode)
 		}
-		if entry.evidenceUnavailable {
-			reason = withEvidenceUnavailable(reason)
-		}
+		reason = s.interruptedReasonLocked(entry.runID, reason)
 		if err := s.transitionLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status,
 			domain.RunInterrupted, reason, ""); err != nil {
 			s.recordCleanupErrorLocked(entry, cleanupStateError)
@@ -1098,6 +1096,7 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		delete(s.credentialUsers, entry.userReservation)
 		entry.userReservation = nil
 	}
+	delete(s.evidenceUnavailable, entry.runID)
 	s.closeDone(entry)
 	delete(s.runs, entry.runID)
 	s.mu.Unlock()
@@ -1228,6 +1227,16 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 
 // interrupt re-reads the status under s.mu so a kill that raced recovery is
 // never overwritten.
+// interruptedReasonLocked adds a recorded missing-checkout note to the
+// reason an active run is interrupted with. The caller holds s.mu and
+// clears the note once that reason is written.
+func (s *Scheduler) interruptedReasonLocked(run domain.RunID, reason string) string {
+	if _, ok := s.evidenceUnavailable[run]; !ok {
+		return reason
+	}
+	return withEvidenceUnavailable(reason)
+}
+
 func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 	s.mu.Lock()
 	fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
@@ -1236,7 +1245,10 @@ func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 			s.mu.Unlock()
 			return
 		}
-		err = s.transitionLocked(ctx, r.ID, r.WorkspaceID, fresh.Status, domain.RunInterrupted, "server restarted", "")
+		err = s.transitionLocked(ctx, r.ID, r.WorkspaceID, fresh.Status, domain.RunInterrupted, s.interruptedReasonLocked(r.ID, "server restarted"), "")
+		if err == nil {
+			delete(s.evidenceUnavailable, r.ID)
+		}
 	}
 	s.mu.Unlock()
 	if err != nil {

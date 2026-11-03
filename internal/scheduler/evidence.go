@@ -94,9 +94,10 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			return nil
 		}
 		packet, err = service.CaptureBeforeCleanup(ctx, req, cleanup)
-		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
+		if errors.Is(err, gitengine.ErrCheckoutNotFound) && len(r.Extras) == 0 {
 			// No retry can capture a checkout that is gone; what remains of
-			// the run is still removed.
+			// the run is still removed. Extra repositories may still hold
+			// unpublished work, so their checkouts keep the retry.
 			if cleanupErr := cleanup(ctx); cleanupErr != nil {
 				return fmt.Errorf("scheduler: clean up session without checkout: %w", cleanupErr)
 			}
@@ -383,9 +384,10 @@ func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.Ru
 		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
 	}
 	if !r.Status.Terminal() {
-		if entry := s.runs[run]; entry != nil {
-			entry.evidenceUnavailable = true
+		if s.evidenceUnavailable == nil {
+			s.evidenceUnavailable = make(map[domain.RunID]struct{})
 		}
+		s.evidenceUnavailable[run] = struct{}{}
 		return nil
 	}
 	if _, noted := withoutEvidenceUnavailable(r.Reason); noted {

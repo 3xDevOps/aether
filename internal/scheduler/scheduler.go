@@ -237,8 +237,11 @@ type Scheduler struct {
 	assistantLoginLocks   map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
-	titleMu               sync.Mutex
-	titleUpdates          map[domain.RunID]*pendingRunTitle
+	// evidenceUnavailable holds active runs whose capture found the checkout
+	// gone, for the reason they are interrupted with. Guarded by mu.
+	evidenceUnavailable map[domain.RunID]struct{}
+	titleMu             sync.Mutex
+	titleUpdates        map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
 	// waits is nil when runs register no wait conditions.
@@ -373,9 +376,6 @@ type supervised struct {
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
-	// evidenceUnavailable notes a capture that found the checkout gone, for
-	// the reason the run's cleanup finishes with.
-	evidenceUnavailable bool
 	// evidencePending persists a completed terminalization whose required
 	// evidence capture did not finish, so a same-status retry resolves it first.
 	evidencePending bool

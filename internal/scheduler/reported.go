@@ -378,8 +378,9 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	if !r.Status.Terminal() {
 		return fmt.Errorf("scheduler: finish reported session %s: the session is %s and has no live container yet", run, r.Status)
 	}
-	exited := (r.Status == domain.RunCompleted && r.Reason == exitedCompletedReason) ||
-		(r.Status == domain.RunFailed && strings.HasPrefix(r.Reason, exitedFailedReasonPrefix))
+	base, unavailable := withoutEvidenceUnavailable(r.Reason)
+	exited := (r.Status == domain.RunCompleted && base == exitedCompletedReason) ||
+		(r.Status == domain.RunFailed && strings.HasPrefix(base, exitedFailedReasonPrefix))
 	if !exited {
 		return nil
 	}
@@ -395,7 +396,11 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 			return nil
 		}
 	}
-	reason := publicRunStatusReason(reportedClose(outcome).reason)
+	reason := reportedClose(outcome).reason
+	if unavailable {
+		reason = withEvidenceUnavailable(reason)
+	}
+	reason = publicRunStatusReason(reason)
 	stamp, writeErr := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, "", nil, nil)
 	if writeErr != nil {
 		return fmt.Errorf("scheduler: finish reported session %s over its exit: %w", run, writeErr)
