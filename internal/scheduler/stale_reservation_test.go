@@ -10,6 +10,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func checkoutMissing(run domain.RunID) error {
@@ -166,4 +167,34 @@ func TestCloseWithoutCheckoutThenLaunch(t *testing.T) {
 		t.Fatalf("reservation after close: %v", err)
 	}
 	e.launchFake(t, "launch after close")
+}
+
+// A retry whose key misses a packet an earlier close already stored still
+// finishes cleanup, without claiming the evidence is unavailable.
+func TestMissingCheckoutKeepsEarlierEvidence(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run := syntheticDestroyPendingRun(t, e, "evidence captured before the checkout went")
+	if err := e.db.CreateEvidencePacket(ctx, &store.EvidencePacket{
+		WorkspaceID: e.ws.ID, RunID: run.ID,
+		Origin:  store.EvidenceOrigin{Kind: store.EvidenceOriginServer},
+		Trigger: store.EvidenceFinish, IdempotencyKey: "finish:" + string(run.ID) + ":launch:1:abc:merged",
+	}); err != nil {
+		t.Fatalf("CreateEvidencePacket: %v", err)
+	}
+
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.refusal = checkoutMissing(run.ID)
+	recovered.UseEvidence(capture)
+	if err := recovered.recoverRuns(ctx); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+	if _, err := os.Stat(recovered.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("sidecar after cleanup: %v", err)
+	}
+	if row := e.waitStoreStatus(t, run.ID, domain.RunMerged); strings.Contains(row.Reason, evidenceUnavailableReason) {
+		t.Fatalf("reason = %q, want no unavailable note beside a stored packet", row.Reason)
+	}
 }

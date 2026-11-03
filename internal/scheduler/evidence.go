@@ -364,6 +364,14 @@ func finishCaptureIdentity(generation, published, committed string, code int) st
 // run's reason says so instead of cleanup retrying forever. A run not yet
 // terminal carries the note into the reason its cleanup finishes with.
 func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.RunID, cause error) error {
+	captured, err := s.hasLifecycleEvidence(ctx, run)
+	if err != nil {
+		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+	}
+	if captured {
+		// The retry's key missed a packet an earlier capture already stored.
+		return nil
+	}
 	slog.Warn("scheduler: release session without evidence", "run", run, "error", cause)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -387,6 +395,40 @@ func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.Ru
 		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
 	}
 	return nil
+}
+
+// hasLifecycleEvidence reports whether a finish or cleanup capture already
+// stored a packet for run.
+func (s *Scheduler) hasLifecycleEvidence(ctx context.Context, run domain.RunID) (bool, error) {
+	packets, ok := s.cfg.Store.(store.EvidencePacketStore)
+	if !ok {
+		return false, nil
+	}
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	before := ""
+	for {
+		page, err := packets.ListEvidencePackets(ctx, r.WorkspaceID, run, before, 100)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range page.Items {
+			if p.Origin.Kind == store.EvidenceOriginServer &&
+				(strings.HasPrefix(p.IdempotencyKey, "finish:"+string(run)+":") ||
+					strings.HasPrefix(p.IdempotencyKey, "cleanup:"+string(run)+":")) {
+				return true, nil
+			}
+		}
+		if page.NextBefore == "" {
+			return false, nil
+		}
+		before = page.NextBefore
+	}
 }
 
 func logEvidenceFailure(run domain.RunID, err error) {
