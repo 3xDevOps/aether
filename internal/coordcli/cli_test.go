@@ -217,7 +217,7 @@ func TestCLIGeneralSkillWithoutSocket(t *testing.T) {
 }
 
 func TestCLIHelpIsSocketIndependent(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"send", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"send", "--help"}, {"subsession", "start", "--help"}, {"subsession", "start", "--harness", "codex", "-h"}, {"subsession", "fetch", "--help"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			var out bytes.Buffer
 			code, err := Run(context.Background(), args, Config{Socket: filepath.Join(t.TempDir(), "missing.sock"), Out: &out})
