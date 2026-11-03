@@ -68,9 +68,11 @@ a real refresh token.
 
 ### Session login copies
 
-A recipient's run gets its own login file, written by the server under the
-server's state directory and outside every member home. The file is
-bind-mounted at the agent's login path:
+A recipient's run gets its own login file per account,
+`<data-dir>/scheduler/logins/<run>/<account>/`, written by the server outside
+every member home, so a write for an account a run has moved off never reaches
+its new container. The file is bind-mounted read-only at the agent's login
+path:
 
 - Claude Code: `claudeAiOauth` with `accessToken`, `expiresAt`, `scopes` and
   `subscriptionType`. No `refreshToken`.
@@ -79,8 +81,10 @@ bind-mounted at the agent's login path:
 
 The server rewrites the file in place with one `write` after the truncate.
 Both CLIs treat a torn read as a missing file and recover on the next read.
-The owner's own sessions and environment keep their real login file as
-today.
+The server rereads a torn owner login too, and a listed account never falls
+back to mounting the owner's file: a login that is not an OAuth sign-in gives
+a signed-out copy. The owner's own sessions and environment keep their real
+login file as today.
 
 ### Token pump
 
@@ -125,6 +129,20 @@ container.
 
 - Use the access token for its remaining lifetime, from anywhere.
 - Read the subscription type and plan, as today.
+
+### The owner's own sessions
+
+On 2026-11-03 about six Enhanced sessions on one account failed together with
+`Authentication required` while new containers on the account worked. Claude
+Code 2.1.287 (the ACP adapter's) and 2.1.317 rewrite the login in place when
+the rename fails, and on `invalid_grant` blank the file they see. A blanked
+shared file breaks new containers too, so the failed sessions most likely
+held an older inode of the login whose refresh token another process had
+spent. Session login copies remove this for recipients, whose sessions hold
+no refresh token and whose copies the server rewrites. The owner's own
+sessions keep the real login and stay exposed; giving them copies too is a
+follow-up. A failed session recovers only in a new container: writing the
+current login into its old inode forks the refresh-token chain.
 
 ## Decisions
 
