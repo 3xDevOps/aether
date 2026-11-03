@@ -327,7 +327,7 @@ func (s *Service) Report(ctx context.Context, workspace domain.WorkspaceID) (Rep
 	if err != nil {
 		return Report{}, fmt.Errorf("cost: report %s: %w", workspace, err)
 	}
-	rep := Roll(workspace, records)
+	rep := Roll(records)
 	rep.foldDeleted(deleted)
 	return rep, nil
 }

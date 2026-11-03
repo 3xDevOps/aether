@@ -44,12 +44,6 @@ const (
 	ChildRefused   = "refused"
 )
 
-// Run child-run settings: "" follows the owner's member setting.
-const (
-	RunChildrenOn  = "on"
-	RunChildrenOff = "off"
-)
-
 // ChildLimits bound a parent's child runs: MaxLive are busy at once, more
 // queue.
 type ChildLimits struct {

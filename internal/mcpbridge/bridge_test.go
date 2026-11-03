@@ -206,7 +206,7 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 		t.Fatalf("send to a non-peer: code = %d, want %d", code, protocol.CodeDenied)
 	}
 
-	var inbox inboxOutput
+	var inbox protocol.CoordInboxResult
 	callTool(t, cs, toolInbox, nil, &inbox)
 	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" || inbox.AckToken != ack {
 		t.Fatalf("inbox = %+v", inbox)
@@ -225,7 +225,7 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 	mu.Lock()
 	queued = true
 	mu.Unlock()
-	var after inboxOutput
+	var after protocol.CoordInboxResult
 	callTool(t, cs, toolInbox, nil, &after)
 	if len(after.Messages) != 1 || after.Messages[0].ID != "msg_04" {
 		t.Fatalf("inbox after acknowledging the first batch = %+v, want the later queued question", after)
@@ -309,7 +309,7 @@ func TestBatchRedeliversWhenTheResponseNeverLands(t *testing.T) {
 	mu.Unlock()
 
 	revived := session(t, coord.path, nil)
-	var inbox inboxOutput
+	var inbox protocol.CoordInboxResult
 	callTool(t, revived, toolInbox, nil, &inbox)
 	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" {
 		t.Fatalf("redelivered inbox = %+v, want the same batch", inbox)

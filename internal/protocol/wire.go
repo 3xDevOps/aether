@@ -828,12 +828,6 @@ func (e *RemoteExitError) Error() string {
 	return fmt.Sprintf("remote exited with status %d", e.Status)
 }
 
-// WorkspaceSelector addresses a workspace by exactly one of ID or Name.
-type WorkspaceSelector struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-}
-
 // SyncRequest.Force overrides the refusal while the run is `running`.
 type SyncRequest struct {
 	RunID string `json:"run_id"`

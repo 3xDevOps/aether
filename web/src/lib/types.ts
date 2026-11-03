@@ -610,7 +610,6 @@ export interface DiskEntry {
   owner_id?: string
   pool?: string
   bytes: number
-  reclaimable_bytes?: number
   retained_until?: string
   reason: string
   error?: string

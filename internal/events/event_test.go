@@ -36,7 +36,6 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		TimelinePayload{Kind: TimelineSteer, Message: "focus on the failing test"},
 		GitBranchPayload{WorkspaceID: "ws_1", Branch: "aether/run-r1-fix", Commit: "abc123"},
 		AgentEventPayload{Kind: AgentToolCall, Tool: "Bash", ToolUseID: "toolu_1", Detail: "go test ./..."},
-		ProfilePayload{Member: "mem_1", Harness: "claude", SnapshotID: "snap_1", Action: ProfileActionPut},
 		SyncConflictPayload{RunID: "r1", SyncSessionID: "sync_1", Files: []string{"main.go"}, Members: []domain.MemberID{"m1", "m2"}},
 		RoomMessagePayload{MessageID: "msg_1", WorkspaceID: "ws_1", RunID: "r1", ActorID: "mem_1", Kind: "note", State: "visible",
 			CorrelationID: "corr_1", AttachmentCount: 2, HasAnchor: true},

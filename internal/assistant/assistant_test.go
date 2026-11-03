@@ -272,7 +272,7 @@ func TestLateEndExecLeavesNewerRowAlone(t *testing.T) {
 	db := newMemStore()
 	s := New(Config{Store: db})
 	old := func() *session {
-		return &session{agent: "claude", harnessID: "old", generation: 0, identity: "OLD", exec: fakeExec{}}
+		return &session{agent: "claude", generation: 0, identity: "OLD", exec: fakeExec{}}
 	}
 
 	db.rows["m1"] = &store.AssistantSession{MemberID: "m1", Generation: 1}

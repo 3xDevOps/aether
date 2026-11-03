@@ -180,7 +180,7 @@ func TestBridgeAgainstRealCoordination(t *testing.T) {
 	if statusA.Unread != 1 {
 		t.Fatalf("unread = %d, want 1", statusA.Unread)
 	}
-	var inbox inboxOutput
+	var inbox protocol.CoordInboxResult
 	callTool(t, agentA, toolInbox, nil, &inbox)
 	if len(inbox.Messages) != 1 || inbox.Messages[0].Body != body ||
 		inbox.Messages[0].FromRunID != string(stack.runB) {
@@ -229,7 +229,7 @@ func TestRealBatchRedeliversWhenTheResponseIsLost(t *testing.T) {
 	}
 
 	revived := session(t, stack.sockA, nil)
-	var inbox inboxOutput
+	var inbox protocol.CoordInboxResult
 	callTool(t, revived, toolInbox, nil, &inbox)
 	if len(inbox.Messages) != 1 || inbox.Messages[0].Body != body {
 		t.Fatalf("redelivered inbox = %+v, want the same batch", inbox)
@@ -269,7 +269,7 @@ func TestRealCancelledInboxNeverLosesAMessage(t *testing.T) {
 		delivered += messageCount(t, res)
 	}
 
-	var inbox inboxOutput
+	var inbox protocol.CoordInboxResult
 	callTool(t, agentA, toolInbox, nil, &inbox)
 	delivered += len(inbox.Messages)
 
@@ -283,7 +283,7 @@ func messageCount(t *testing.T, res *mcp.CallToolResult) int {
 	if res.IsError {
 		return 0
 	}
-	var out inboxOutput
+	var out protocol.CoordInboxResult
 	decodeStructured(t, res, &out)
 	return len(out.Messages)
 }

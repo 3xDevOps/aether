@@ -187,7 +187,6 @@ type Store interface {
 	SaveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot, files []ProfileFile) error
 	SaveProfileSnapshotStaged(ctx context.Context, s *domain.ProfileSnapshot, files []ProfileFile) error
 	GetProfileSnapshot(ctx context.Context, id domain.ProfileSnapshotID) (*domain.ProfileSnapshot, error)
-	GetProfileSnapshotByDigest(ctx context.Context, member domain.MemberID, harness, digest string) (*domain.ProfileSnapshot, error)
 	ListProfileSnapshots(ctx context.Context, member domain.MemberID, harness string) ([]*domain.ProfileSnapshot, error)
 	GetProfileFiles(ctx context.Context, id domain.ProfileSnapshotID) ([]ProfileFile, error)
 	SetProfileHead(ctx context.Context, member domain.MemberID, harness string, id domain.ProfileSnapshotID) error

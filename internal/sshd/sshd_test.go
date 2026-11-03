@@ -772,48 +772,6 @@ func (f *fakeRuns) Relaunch(ctx context.Context, run domain.RunID, actor domain.
 	}, nil
 }
 
-type fakeShellReservation struct {
-	f    *fakeRuns
-	run  domain.RunID
-	tab  string
-	mu   sync.Mutex
-	done bool
-}
-
-func (r *fakeShellReservation) Generation() uint64 {
-	return 1
-}
-
-func (r *fakeShellReservation) Adopt() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.done {
-		return
-	}
-	r.done = true
-}
-
-func (r *fakeShellReservation) Rollback(_ context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.done {
-		return nil
-	}
-	r.done = true
-	return r.f.record(fmt.Sprintf("run-shell-stop:%s:%s", r.run, r.tab))
-}
-
-func (f *fakeRuns) EnsureRunShellTabReserved(_ context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error) {
-	if err := f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows)); err != nil {
-		return nil, err
-	}
-	return &fakeShellReservation{f: f, run: run, tab: tab}, nil
-}
-
-func (f *fakeRuns) EnsureRunShellTab(_ context.Context, run domain.RunID, tab string, cols, rows uint) error {
-	return f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows))
-}
-
 func (f *fakeRuns) StopRunShellTab(_ context.Context, run domain.RunID, tab string) error {
 	return f.record(fmt.Sprintf("run-shell-stop:%s:%s", run, tab))
 }

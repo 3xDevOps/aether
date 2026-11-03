@@ -65,7 +65,7 @@ func rpcError(err error) *protocol.Error {
 	switch mirrorKind(err) {
 	case gitengine.MirrorErrorAuthFailed:
 		code = protocol.CodeDenied
-	case gitengine.MirrorErrorOffline, gitengine.MirrorErrorUnsupported:
+	case gitengine.MirrorErrorOffline:
 		code = protocol.CodeUnavailable
 	case gitengine.MirrorErrorSourceMissing:
 		code = protocol.CodeNotFound

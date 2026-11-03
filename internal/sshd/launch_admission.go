@@ -15,7 +15,6 @@ import (
 // human run.launch and child run dispatch. Account sharing is deliberately
 // resolved at admission time; a run owner never becomes an account owner.
 type LaunchAdmission struct {
-	Actor   *domain.Member
 	Account *domain.Member
 }
 
@@ -48,7 +47,7 @@ func AuthorizeLaunch(ctx context.Context, st store.Store, actorID domain.MemberI
 	if account.Pending {
 		return LaunchAdmission{}, fmt.Errorf("%w: account owner is pending admin approval", permissions.ErrDenied)
 	}
-	return LaunchAdmission{Actor: actor, Account: account}, nil
+	return LaunchAdmission{Account: account}, nil
 }
 
 // lockAuthorization runs the admission callback under the process-wide

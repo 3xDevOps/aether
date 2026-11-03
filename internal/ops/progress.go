@@ -15,7 +15,6 @@ const (
 	notTracked   = "Aether does not track releases or deployments of this repository"
 	sourceRecord = "aether record"
 	sourceGitHub = "github"
-	sourceAether = "aether git"
 )
 
 // untracked is what an evidence read says of releases and deployments,

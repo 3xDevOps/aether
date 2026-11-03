@@ -99,15 +99,14 @@ type ServerDockerDisk struct {
 
 // ServerDiskEntry is admin-only attribution, overlapping component totals.
 type ServerDiskEntry struct {
-	Kind             string  `json:"kind"`
-	OwnerKind        string  `json:"owner_kind"`
-	OwnerID          string  `json:"owner_id,omitempty"`
-	Pool             string  `json:"pool,omitempty"`
-	Bytes            uint64  `json:"bytes"`
-	ReclaimableBytes *uint64 `json:"reclaimable_bytes,omitempty"`
-	RetainedUntil    string  `json:"retained_until,omitempty"`
-	Reason           string  `json:"reason"`
-	Error            string  `json:"error,omitempty"`
+	Kind          string `json:"kind"`
+	OwnerKind     string `json:"owner_kind"`
+	OwnerID       string `json:"owner_id,omitempty"`
+	Pool          string `json:"pool,omitempty"`
+	Bytes         uint64 `json:"bytes"`
+	RetainedUntil string `json:"retained_until,omitempty"`
+	Reason        string `json:"reason"`
+	Error         string `json:"error,omitempty"`
 }
 
 // SystemStatsParams asks for host samples taken after SinceMS (Unix

@@ -56,7 +56,6 @@ type ChildReservation struct {
 	Detached    bool
 	Error       string
 	CreatedAt   time.Time
-	StartedAt   *time.Time
 	// EndNotified is set once the parent was told the child ended without a
 	// report.
 	EndNotified bool

@@ -49,16 +49,15 @@ type Container struct {
 
 // Entry.Key is an internal lookup key, never a wire-visible filename.
 type Entry struct {
-	Kind             string
-	Key              string
-	OwnerKind        string
-	OwnerID          string
-	Pool             string
-	Bytes            uint64
-	ReclaimableBytes *uint64
-	RetainedUntil    *time.Time
-	Reason           string
-	Error            string
+	Kind          string
+	Key           string
+	OwnerKind     string
+	OwnerID       string
+	Pool          string
+	Bytes         uint64
+	RetainedUntil *time.Time
+	Reason        string
+	Error         string
 }
 
 // DockerUsage is daemon-wide, not restricted to Aether-owned resources.

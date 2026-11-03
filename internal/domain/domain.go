@@ -906,16 +906,6 @@ func (r *Run) HomeMember() MemberID {
 	return r.AccountMember()
 }
 
-// AccountShare grants Grantee permission to launch agents with Owner's
-// vendor login: the harness's declared login paths from Owner's home, inside
-// Grantee's own environment. The authenticated grantee remains the run owner
-// and the actor recorded in the timeline.
-type AccountShare struct {
-	Owner     MemberID
-	Grantee   MemberID
-	CreatedAt time.Time
-}
-
 // ServerBusy is what a scheduled self-update waits for. Paused runs do not
 // hold an update back - a frozen container survives a restart - but are still
 // reported so an admin sees why a "running" run is ignored.

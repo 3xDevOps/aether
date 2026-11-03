@@ -71,7 +71,7 @@ type Checks struct {
 	SaveTool string `json:"save_tool,omitempty"`
 	// Params are the fields the launch call must carry.
 	Params map[string]string `json:"params,omitempty"`
-	// BriefAll and BriefNone apply to the task or objective of every launch.
+	// BriefAll and BriefNone apply to the task of every launch.
 	BriefAll [][]string `json:"brief_all,omitempty"`
 	// MustKeep are the member's prohibitions and limits; a launch that drops
 	// one is counted as a dropped must-not.
@@ -147,12 +147,8 @@ type launch struct {
 }
 
 func (l launch) brief() string {
-	for _, k := range []string{"task", "objective"} {
-		if v, ok := l.args[k].(string); ok {
-			return v
-		}
-	}
-	return ""
+	task, _ := l.args["task"].(string)
+	return task
 }
 
 // launches are the launch calls in calls; a rejected call counts only when

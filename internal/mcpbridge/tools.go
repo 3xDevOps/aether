@@ -47,11 +47,6 @@ func callID(req *mcp.CallToolRequest) jsonrpc.ID {
 	return id
 }
 
-type inboxOutput struct {
-	Messages []protocol.CoordMessage `json:"messages"`
-	AckToken string                  `json:"ack_token,omitempty"`
-}
-
 // reportSchema is aether_report's input schema with its outcome enumerated.
 func reportSchema() (*jsonschema.Schema, error) {
 	schema, err := jsonschema.For[protocol.CoordReportParams](nil)

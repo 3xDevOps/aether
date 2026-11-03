@@ -167,7 +167,6 @@ const (
 )
 
 const (
-	CollaborationDefaultPageSize        = 50
 	CollaborationMaxPageSize            = 100
 	CollaborationMaxBodyBytes           = 64 << 10
 	CollaborationMaxIdempotencyKeyBytes = 256

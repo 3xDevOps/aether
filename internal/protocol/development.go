@@ -55,7 +55,6 @@ const (
 	MaxDevLogEntries        = 100
 	MaxDevArtifactPage      = 100
 	MaxDevTerminalDimension = 500
-	MaxDevViewportDimension = 4096
 )
 
 // DecodeDevAgentParams refuses a caller-supplied run identity, including an

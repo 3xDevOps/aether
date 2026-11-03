@@ -106,7 +106,7 @@ func TestServerDiskDurableOwnershipAndPrivacy(t *testing.T) {
 			continue
 		}
 		cachePools[entry.Pool] = true
-		if entry.OwnerKind != "member" || entry.OwnerID != string(admin.ID) || entry.Bytes != 5 || entry.ReclaimableBytes != nil || entry.Reason == "" {
+		if entry.OwnerKind != "member" || entry.OwnerID != string(admin.ID) || entry.Bytes != 5 || entry.Reason == "" {
 			t.Fatalf("cache pool attribution: %+v", entry)
 		}
 		if entry.Error == "" || entry.RetainedUntil != "" {
@@ -130,9 +130,6 @@ func TestServerDiskDurableOwnershipAndPrivacy(t *testing.T) {
 			for _, entry := range result.Entries {
 				if entry.OwnerID == string(runs[i].ID) && entry.Kind == kind {
 					found = true
-					if entry.ReclaimableBytes != nil {
-						t.Errorf("%s/%s: %+v", tc.name, kind, entry)
-					}
 					if kind != "checkout" {
 						if entry.RetainedUntil != "" || entry.Error != "" {
 							t.Errorf("history inherited compute expiry or uncertainty: %+v", entry)
@@ -209,7 +206,7 @@ func TestServerDiskBoundsLargestUnknownOwners(t *testing.T) {
 			t.Fatal("inventory is not largest first")
 		}
 		previous = entry.Bytes
-		if entry.Kind == "checkout" && (entry.OwnerID != "" || entry.ReclaimableBytes != nil || !strings.Contains(entry.Reason, "No durable owner")) {
+		if entry.Kind == "checkout" && (entry.OwnerID != "" || !strings.Contains(entry.Reason, "No durable owner")) {
 			t.Fatalf("unknown storage given deletion authority: %+v", entry)
 		}
 	}
@@ -238,7 +235,7 @@ func TestHistoryRetentionIsIndependentOfCheckout(t *testing.T) {
 		}}
 		attributeStorage(t.Context(), deps, &u, now)
 		for _, entry := range u.Entries {
-			if entry.OwnerKind != "run" || entry.OwnerID != string(run.ID) || entry.RetainedUntil != nil || entry.ReclaimableBytes != nil || entry.Error != "" {
+			if entry.OwnerKind != "run" || entry.OwnerID != string(run.ID) || entry.RetainedUntil != nil || entry.Error != "" {
 				t.Fatalf("history inherited checkout cleanup policy: %+v", entry)
 			}
 		}

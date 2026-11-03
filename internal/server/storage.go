@@ -116,7 +116,7 @@ func storageEnricher(d Deps) func(*disk.Usage) {
 }
 
 // attributeContainers keeps run and environment containers, largest first.
-// Short-lived updater and verification containers have no durable owner.
+// Short-lived updater containers have no durable owner.
 func attributeContainers(ctx context.Context, db store.Store, sizes map[string]uint64) ([]disk.Container, string) {
 	var containers []disk.Container
 	var failure string
