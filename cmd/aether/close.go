@@ -28,7 +28,7 @@ func init() {
 func runClose(args []string) error {
 	fs := newFlagSet("close")
 	outcome := fs.String("outcome", "", "merged or abandoned")
-	force := fs.Bool("force", false, "close without asking, even when the close affects others")
+	force := fs.Bool("force", false, "close without asking, even with close warnings")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, closeUsage)
@@ -53,7 +53,7 @@ func closeSession(c *protocol.Client, runID, outcome string, force, interactive 
 		_, _ = fmt.Fprintf(out, "Could not check what closing %s affects: %v\n", runID, err)
 	}
 	if len(warnings) > 0 {
-		_, _ = fmt.Fprintf(out, "Closing %s affects others:\n", runID)
+		_, _ = fmt.Fprintf(out, "Before closing %s:\n", runID)
 		for _, w := range warnings {
 			_, _ = fmt.Fprintf(out, "  %s: %s\n", w.Kind, w.Detail)
 			if w.URL != "" {

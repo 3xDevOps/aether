@@ -20,6 +20,7 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	ctx := context.Background()
 	db := e.store.(*store.DB)
 	committed := time.Now().Add(-2 * time.Hour)
+	observed := time.Date(2026, 11, 3, 18, 20, 0, 0, time.UTC)
 	newRun := func(title string, mod func(*domain.Run)) *domain.Run {
 		r := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: title, Title: title, Harness: "claude",
 			Mode: domain.LaunchTUI, Status: domain.RunRunning, Branch: "aether/run-" + title}
@@ -35,7 +36,7 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	pushed := func(r *domain.Run) { r.BaseCommit, r.LastCommit, r.LastCommitAt = "aaaa", "bbbb", committed }
 	pr := func(r *domain.Run, number int, state string, merged *time.Time) {
 		if err := db.RecordRunPullRequest(ctx, &store.RunPullRequest{RunID: r.ID, Repository: "acme/api", Number: number,
-			URL: fmt.Sprintf("https://github.com/acme/api/pull/%d", number), State: state, MergedAt: merged, ObservedAt: time.Now()}); err != nil {
+			URL: fmt.Sprintf("https://github.com/acme/api/pull/%d", number), State: state, MergedAt: merged, ObservedAt: observed}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -115,6 +116,10 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	parent := newRun("parent", nil)
 	kid := child(parent, "kid", domain.RunRunning)
 	child(parent, "done-kid", domain.RunMerged)
+	accepted := child(parent, "accepted-kid", domain.RunCompleted)
+	if _, _, err := db.SetRunReview(ctx, accepted.ID, domain.ReviewAccepted, ""); err != nil {
+		t.Fatal(err)
+	}
 	retained := newRun("retained", finished)
 	failedCleanup := newRun("failed-cleanup", finished)
 	e.runs.mu.Lock()
@@ -130,7 +135,7 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	}{
 		{quiet, nil},
 		{protected, []protocol.CloseWarning{{Kind: "protected", Detail: "Protected: only its owner or an admin can steer, message or close it"}}},
-		{openPR, []protocol.CloseWarning{{Kind: "pull_request", Detail: "Pull request acme/api#7 is open, not merged", URL: "https://github.com/acme/api/pull/7"}}},
+		{openPR, []protocol.CloseWarning{{Kind: "pull_request", Detail: "Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z", URL: "https://github.com/acme/api/pull/7"}}},
 		{unmerged, []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-unmerged are in no merged pull request"}}},
 		{stale, []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-stale-merge are in no merged pull request"}}},
 		{shipped, nil},

@@ -74,16 +74,20 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningProtected,
 			Detail: "Protected: only its owner or an admin can steer, message or close it"})
 	}
+	// Recorded pull request states are as last observed; nothing here asks
+	// GitHub, so a 50-run check stays fast.
 	open, merged := false, false
 	for _, pr := range prs {
+		primary := pr.RepoWorkspace == ""
 		switch pr.State {
 		case "merged":
-			merged = merged || pr.MergedAt == nil || !pr.MergedAt.Before(run.LastCommitAt)
+			merged = merged || primary && (pr.MergedAt == nil || !pr.MergedAt.Before(run.LastCommitAt))
 		case "closed":
 		default:
-			open = true
-			out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningPullRequest,
-				Detail: fmt.Sprintf("Pull request %s#%d is %s, not merged", pr.Repository, pr.Number, pr.State), URL: pr.URL})
+			open = open || primary
+			out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningPullRequest, URL: pr.URL,
+				Detail: fmt.Sprintf("Pull request %s#%d was %s, not merged, when Aether last checked %s", pr.Repository, pr.Number, pr.State,
+					pr.ObservedAt.UTC().Format(time.RFC3339))})
 		}
 	}
 	if run.LastCommit != "" && run.LastCommit != run.BaseCommit && run.Status != domain.RunMerged && !open && !merged {

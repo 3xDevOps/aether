@@ -90,7 +90,7 @@ type stopInput struct {
 
 const idempotencyRule = " Reuse idempotency_key on a retry; "
 
-const closeRule = " A close that affects others is refused with its warnings; show them to the user, then retry with acknowledge true."
+const closeRule = " A close with warnings is refused with them; show them to the user, then retry with acknowledge true."
 
 var writeOps = []Op{
 	opOf("aether_launch_session", "Launch session", ScopeWrite, false, nextWorkspaces,
@@ -686,7 +686,7 @@ func closeWarned(ctx context.Context, read Call, id string, acknowledged bool) e
 		}
 	}
 	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-		"closing session %s affects others: %s; show the user, then retry with acknowledge true to close anyway", id, strings.Join(lines, "; "))}
+		"closing session %s has warnings: %s; show the user, then retry with acknowledge true to close anyway", id, strings.Join(lines, "; "))}
 }
 
 // decidable refuses a request the connector showed cut, since deciding it
