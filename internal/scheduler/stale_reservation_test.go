@@ -90,6 +90,19 @@ func TestGoneContainerReleasesHomeWhileCleanupRetries(t *testing.T) {
 	if err := recovered.reserveRunUser(ctx, next, "1000:1000", true); err != nil {
 		t.Fatalf("launch while cleanup retries: %v", err)
 	}
+
+	capture.mu.Lock()
+	capture.refusal = nil
+	capture.mu.Unlock()
+	if err := recovered.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("closing the pending session again: %v", err)
+	}
+	recovered.mu.Lock()
+	owner = recovered.runs[run.ID]
+	recovered.mu.Unlock()
+	if owner != nil {
+		t.Fatalf("second close left the owner: %+v", owner)
+	}
 }
 
 // A container the runtime cannot answer for keeps blocking, and the launch
