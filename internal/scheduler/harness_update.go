@@ -86,6 +86,13 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 	member := domain.MemberID(filepath.Base(home.HostPath))
 	name := "harness-update-" + string(member) + "-" + profile.Name
 	mounts := []runtime.Mount{home}
+	// The updater runs the CLI too, which replaces an unpinned login by
+	// rename and so detaches it from every running container's pin.
+	for _, m := range plan.Mounts {
+		if m.HostPath == home.HostPath && m.Subpath != "" {
+			mounts = append(mounts, m)
+		}
+	}
 	env := maps.Clone(plan.Env)
 	if s.cfg.Homes != nil {
 		// Provisioning holds this member's cache lock. Publish the key

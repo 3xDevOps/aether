@@ -470,3 +470,21 @@ func TestHarnessUpdateHeadless(t *testing.T) {
 		t.Fatalf("headless launch: notes = %q, update containers = %d, want one update", noteMessages(notes), len(rt.updates()))
 	}
 }
+
+// The updater runs the vendor CLI over the member's home like a session,
+// so it pins the same login files: a rename there would detach them from
+// every running session's container.
+func TestHarnessUpdatePinsTheLogins(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newUpdateEnv(t, nil)
+	installInHome(t, e, "claude")
+
+	launchNotes(t, e, "claude", domain.LaunchTUI)
+	updates := rt.updates()
+	if len(updates) != 1 {
+		t.Fatalf("updates = %d, want one", len(updates))
+	}
+	if !slices.ContainsFunc(updates[0].Mounts, func(m runtime.Mount) bool { return m.Subpath == ".claude/.credentials.json" }) {
+		t.Fatalf("updater mounts %+v pin no Claude login", updates[0].Mounts)
+	}
+}
