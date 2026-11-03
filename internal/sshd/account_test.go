@@ -124,6 +124,34 @@ func TestSharedAccountLaunchRequiresOwnerGrant(t *testing.T) {
 	}
 }
 
+// The scheduler is told to move the grantee's runs off the account only
+// once the share is gone, and again on every revoke after a new share.
+func TestAccountRevokeMovesTheGranteesRuns(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.Control = control.New(control.Config{}) })
+	ctx := context.Background()
+	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	want := string(e.member.ID) + ":" + string(grantee.ID)
+	for range 2 {
+		if _, perr := e.srv.accountShare(ctx, e.member.ID, accountParams(t, grantee.ID)); perr != nil {
+			t.Fatalf("account.share: %+v", perr)
+		}
+		if _, perr := e.srv.runLaunch(ctx, grantee.ID, launchParams(t, e.ws.ID, e.member.ID)); perr != nil {
+			t.Fatalf("shared launch: %+v", perr)
+		}
+		before := len(e.runs.Revokes())
+		if _, perr := e.srv.accountRevoke(ctx, e.member.ID, accountParams(t, grantee.ID)); perr != nil {
+			t.Fatalf("account.revoke: %+v", perr)
+		}
+		if shared, err := e.store.AccountSharedWith(ctx, e.member.ID, grantee.ID); err != nil || shared {
+			t.Fatalf("share after revoke = %v, %v; want it gone", shared, err)
+		}
+		if revokes := e.runs.Revokes()[before:]; !slices.Equal(revokes, []string{want}) {
+			t.Fatalf("scheduler revokes = %v, want %q", revokes, want)
+		}
+	}
+}
+
 func TestLaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)

@@ -370,10 +370,12 @@ type fakeRuns struct {
 	terminalAddrErr error
 	terminalStopErr error
 	calls           []string
-	launchOptions   []domain.LaunchOptions
-	paused          map[domain.RunID]bool
-	retentions      map[domain.RunID]scheduler.RetentionInfo
-	retentionErr    error
+	// revokes lists each RevokeAccount as owner:grantee.
+	revokes       []string
+	launchOptions []domain.LaunchOptions
+	paused        map[domain.RunID]bool
+	retentions    map[domain.RunID]scheduler.RetentionInfo
+	retentionErr  error
 	// sharedLaunches is what CheckSharedLaunch reports, keyed by
 	// "member:account:harness"; absent means launchable. sharedRefusals is
 	// the refusal it reports with the same key.
@@ -601,6 +603,18 @@ func (f *fakeRuns) blockContainerAddr() (<-chan struct{}, chan struct{}, <-chan 
 
 func (f *fakeRuns) Kill(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("kill:%s:%s", run, actor))
+}
+
+func (f *fakeRuns) RevokeAccount(owner, grantee domain.MemberID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.revokes = append(f.revokes, string(owner)+":"+string(grantee))
+}
+
+func (f *fakeRuns) Revokes() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.revokes)
 }
 
 func (f *fakeRuns) Release(_ context.Context, run domain.RunID, actor domain.MemberID) error {

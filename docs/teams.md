@@ -464,8 +464,11 @@ lists exactly what is shared.
 > your home to.
 
 - Sharing is one-way. Admins get no implicit access to anyone's account.
-- Revoking blocks new launches, but runs already going continue. Stop them with
-  **Kill run** in the session header's **More** menu, or `aether kill <session-id>`.
+- Revoking blocks new launches and moves the recipient's running sessions on the
+  account to another account they may use, as [usage fallback](#usage-fallback)
+  picks one. A session that cannot move fails with `account share revoked:
+  <owner> revoked access to their account; no other account can run <agent>`, or
+  another reason [security.md](security.md#account-sharing) lists.
 - An agent you defined with `aether agent add` runs only on your own account. A
   shared account shows it disabled as **Your account only**.
 - An owner with no login shows **Not logged in**. A CLI launch fails with `Grace

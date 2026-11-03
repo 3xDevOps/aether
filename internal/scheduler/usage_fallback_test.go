@@ -257,7 +257,7 @@ func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 			}
 			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 			if tc.moves {
-				continued := continuationPrompt("Grace", "Ada")
+				continued := usageMove.continuation("Grace", "Ada")
 				waitFor(t, "the continuation prompt on Ada's account", func() bool {
 					execs := rt.all()
 					prompts := execs[len(execs)-1].wire.prompts(t)

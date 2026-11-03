@@ -750,6 +750,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.drainEvidencePublications(ctx)
 			s.tickUpdates(ctx)
 			s.checkOOMKills(ctx)
+			s.leaveRevokedAccounts(ctx, nil)
 			if s.reclaimMu.TryLock() {
 				s.reclaimDiskLocked(ctx, "")
 				s.reclaimMu.Unlock()

@@ -85,6 +85,9 @@ type RunController interface {
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
+	// RevokeAccount starts moving grantee's live runs on owner's account,
+	// whose share was just removed, to another account, or stopping them.
+	RevokeAccount(owner, grantee domain.MemberID)
 	Release(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	DeleteRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Pause(ctx context.Context, run domain.RunID, actor domain.MemberID) error

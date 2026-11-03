@@ -141,5 +141,6 @@ func (s *Server) accountRevoke(ctx context.Context, member domain.MemberID, raw 
 			}
 		}
 	}
+	s.cfg.Runs.RevokeAccount(member, grantee)
 	return struct{}{}, nil
 }

@@ -26,7 +26,7 @@ credentials out of the report.
 | [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's sessions reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Sessions still reach the server host. |
 | [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own sessions. | Every session you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
 | [Who can act on a session](#who-can-see-and-act-on-a-session) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your sessions, which hold your home. |
-| [Account sharing](#account-sharing) | A recipient's session gets your agent login, not your home. | The recipient's session can copy, overwrite or log out your login. Revoking does not stop running sessions. An `omp` share is as broad as sharing your home. |
+| [Account sharing](#account-sharing) | A recipient's session gets your agent login, not your home. | The recipient's session can copy, overwrite or log out your login. A copied refresh token outlives a revoke. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Sessions sign through an agent and cannot copy the key. | Any of your sessions can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every session of the workspace reads them, and anyone who can launch or message a session can make it print one. |
 | [Assistant](#the-assistant) | Its own container, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
@@ -243,16 +243,32 @@ they have no installation of the agent in their own `~/.local/bin`, they also
 get yours, read-only, with your whole `~/.local/bin` on their `PATH` after
 their own entries.
 
-- Root in their session can copy your login, refresh token included, and revoking
-  does not recall a copy. Log out and in again to rotate it.
-- Their session can end or replace your login: `/logout` in Claude Code and
-  `codex logout` revoke it at the vendor, and `/login` writes their login into
+- Root in their session can copy your login file. The refresh token in it
+  outlives a revoke and keeps working until you log out and in again.
+- Their session can end or replace your login. Measured with Claude Code
+  2.1.317 and Codex 0.166.0: `/logout` or `claude auth logout`, and `codex
+  logout`, in their session POST your refresh token to the vendor's revoke
+  endpoint, which ends your login everywhere. `/login` writes their login into
   your file. For every agent except `omp`, that costs the login and nothing
   else in your home.
-- Revoking blocks later launches and reopens and removes their control of sessions
-  on your account, but does not stop a running container. Kill those sessions
-  first: **Kill run** in the session header's **More** menu, or `aether kill
-  <session-id>`.
+- Revoking blocks later launches and reopens, removes their control of sessions
+  on your account, and takes your login out of their running sessions. Each of
+  their live sessions on your account moves to another account they may use,
+  picked by the [usage fallback](teams.md#usage-fallback) rules whether or not
+  your usage ran out, and continues there with a room note; an Enhanced session
+  gets a prompt to continue. A session that cannot move fails, its container
+  removed, with one of:
+  - `account share revoked: <owner> revoked access to their account; no other account can run <agent>`
+  - `account share revoked: <owner> revoked access to their account; fallback is off for this session`
+    (launched with `--no-fallback`)
+  - `account share revoked: <owner> revoked access to their account; cannot continue on another account: <reason>`,
+    for example `the session is paused`
+  - `account share revoked: <owner> revoked access to their account; continuing on <account>'s account failed: <error>`
+
+  `aether account revoke` returns once the moves start. The server checks
+  again every 30 seconds (`aether-server --poll-interval`) and after a
+  restart, so a session that was mid-move or provisioning then still leaves
+  your account. A closed session's paused container cannot reopen on it.
 - [Usage fallback](teams.md#usage-fallback) can move their session onto your
   account when theirs runs out, without them picking it: your share is the
   consent. It never picks an account not shared with the launcher.
