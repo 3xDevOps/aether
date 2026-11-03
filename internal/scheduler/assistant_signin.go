@@ -61,7 +61,7 @@ func (i AssistantIssuer) withDefaults() AssistantIssuer {
 
 const issuerTimeout = 30 * time.Second
 
-const assistantSignIn = "the assistant's sign-in"
+const assistantSignInWords = "the assistant's sign-in"
 
 // assistantSignInDir holds what the server recorded of each agent's sign-in:
 // <agent>.json, the account of the sign-in the member made, and
@@ -292,7 +292,7 @@ func (i AssistantIssuer) refreshClaude(ctx context.Context, data []byte) (string
 	}
 	// The exchange already spent the old refresh token, so the rotated one
 	// is returned even when the profile check fails.
-	profile, err := i.claudeProfile(ctx, assistantSignIn, tokens.AccessToken)
+	profile, err := i.claudeProfile(ctx, assistantSignInWords, tokens.AccessToken)
 	if err != nil {
 		return "", rotated, err
 	}
@@ -453,14 +453,14 @@ func rewriteSignIn(file map[string]json.RawMessage, key string, inner map[string
 func (i AssistantIssuer) post(ctx context.Context, vendor, url string, body map[string]string, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("couldn't verify %s with %s: %w", assistantSignIn, vendor, err)
+		return fmt.Errorf("couldn't verify %s with %s: %w", assistantSignInWords, vendor, err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("couldn't verify %s with %s: %w", assistantSignIn, vendor, err)
+		return fmt.Errorf("couldn't verify %s with %s: %w", assistantSignInWords, vendor, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return i.do(req, assistantSignIn, vendor, out)
+	return i.do(req, assistantSignInWords, vendor, out)
 }
 
 // do sends req to verify what, a sign-in, and decodes a 2xx answer into
