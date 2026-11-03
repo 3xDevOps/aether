@@ -49,6 +49,7 @@ var (
 // Store is the persistence the service reads and writes.
 type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
+	ListChildren(ctx context.Context, run domain.RunID) ([]*domain.ChildReservation, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	store.PushStore
@@ -141,8 +142,12 @@ type notification struct {
 	Notice bool `json:"notice,omitempty"`
 }
 
-// clearedBody is what a device shows in place of a need that ended.
-const clearedBody = "No longer needs you"
+// clearedBody is what a device shows in place of a need that ended, and
+// clearedFinishedBody in place of a finished session's notice.
+const (
+	clearedBody         = "No longer needs you"
+	clearedFinishedBody = "No longer awaiting review"
+)
 
 // New loads the server's VAPID key, creating it on first use; call Start to
 // begin consuming events.
@@ -233,10 +238,42 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 			switch p := e.Payload.(type) {
 			case events.BudgetPayload:
 				s.budget(ctx, e, p)
+			case events.RunStatusPayload:
+				s.changed(ctx, e.RunID)
+				s.subsessionsChanged(ctx, e.RunID)
+			case events.TimelinePayload:
+				s.changed(ctx, e.RunID)
+				if p.Kind == events.TimelinePause || p.Kind == events.TimelineResume {
+					s.subsessionsChanged(ctx, e.RunID)
+				}
 			default:
 				s.changed(ctx, e.RunID)
 			}
 		}
+	}
+}
+
+// subsessionsChanged has the attached subsessions below parent read again,
+// a level at a time to the depth domain.OutcomeHeldIn walks: whether their
+// outcomes are held follows the parent's standing.
+func (s *Service) subsessionsChanged(ctx context.Context, parent domain.RunID) {
+	level := []domain.RunID{parent}
+	for depth := 0; depth < domain.MaxHeldDepth && len(level) > 0; depth++ {
+		var next []domain.RunID
+		for _, id := range level {
+			children, err := s.store.ListChildren(ctx, id)
+			if err != nil {
+				slog.Warn("push: list subsessions to read again", "run", id, "error", err)
+				continue
+			}
+			for _, c := range children {
+				if !c.Detached {
+					s.changed(ctx, c.RunID)
+					next = append(next, c.RunID)
+				}
+			}
+		}
+		level = next
 	}
 }
 
@@ -357,9 +394,13 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 // deleted.
 func (s *Service) withdraw(ctx context.Context, run *domain.Run, id domain.RunID, offered map[[2]string]domain.MemberID, keep domain.MemberID) error {
 	devices := map[domain.MemberID]map[string]bool{}
+	body := clearedFinishedBody
 	for device, member := range offered {
 		if member == "" || member == keep {
 			continue
+		}
+		if !strings.HasPrefix(device[0], string(member)+"|finished:") {
+			body = clearedBody
 		}
 		if devices[member] == nil {
 			devices[member] = map[string]bool{}
@@ -369,7 +410,7 @@ func (s *Service) withdraw(ctx context.Context, run *domain.Run, id domain.RunID
 	if len(devices) == 0 {
 		return nil
 	}
-	message := notification{Body: clearedBody, Run: string(id), Clear: true}
+	message := notification{Body: body, Run: string(id), Clear: true}
 	if run != nil {
 		message.Title = RunTitle(run)
 	}
@@ -484,20 +525,18 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 }
 
 // held reports whether the run's outcome is its parent's to read
-// (domain.Run.OutcomeHeld). A held outcome is not announced again when the
-// parent later stops: the dashboard shows it then.
+// (domain.OutcomeHeldIn).
 func (s *Service) held(ctx context.Context, run *domain.Run) (bool, error) {
-	if run.ParentRunID == "" || run.Detached {
-		return false, nil
-	}
-	parent, err := s.store.GetRun(ctx, run.ParentRunID)
-	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return run.OutcomeHeld(parent, s.runs.Paused(parent.ID)), nil
+	return domain.OutcomeHeldIn(run, func(id domain.RunID) (*domain.Run, bool, error) {
+		parent, err := s.store.GetRun(ctx, id)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return parent, s.runs.Paused(id), nil
+	})
 }
 
 func topicOf(id string) string {

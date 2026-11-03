@@ -70,27 +70,30 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 		return nil, rpcError(err)
 	}
 	viewer := attentionViewer{id: member, admin: caller.Role == domain.RoleAdmin, name: names}
-	items := []protocol.AttentionItem{}
+	var runs []*domain.Run
 	for _, ws := range workspaces {
-		runs, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
+		listed, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		byID := make(map[domain.RunID]*domain.Run, len(runs))
-		for _, run := range runs {
-			byID[run.ID] = run
+		runs = append(runs, listed...)
+	}
+	byID := make(map[domain.RunID]*domain.Run, len(runs))
+	for _, run := range runs {
+		byID[run.ID] = run
+	}
+	parents := s.parentLookup(ctx, byID)
+	items := []protocol.AttentionItem{}
+	for _, run := range runs {
+		if run.ArchivedAt != nil {
+			continue
 		}
-		for _, run := range runs {
-			if run.ArchivedAt != nil {
-				continue
-			}
-			r, err := s.attentionRun(ctx, run, byID[run.ParentRunID])
-			if err != nil {
-				return nil, rpcError(err)
-			}
-			if item, ok := attentionItem(r, viewer); ok {
-				items = append(items, item)
-			}
+		r, err := s.attentionRun(ctx, run, parents)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		if item, ok := attentionItem(r, viewer); ok {
+			items = append(items, item)
 		}
 	}
 	// A finished run asks nothing of anyone, so it follows every row that does.
@@ -121,17 +124,40 @@ func compareSince(a, b string) int {
 	return at.Compare(bt)
 }
 
-// attentionRun reads run's standing; parent is its parent when the parent is
-// in the same workspace, and nil otherwise.
-func (s *Server) attentionRun(ctx context.Context, run, parent *domain.Run) (*attentionRun, error) {
+// parentLookup reads the parents domain.OutcomeHeldIn walks: from known,
+// else the store.
+func (s *Server) parentLookup(ctx context.Context, known map[domain.RunID]*domain.Run) func(domain.RunID) (*domain.Run, bool, error) {
+	return func(id domain.RunID) (*domain.Run, bool, error) {
+		run := known[id]
+		if run == nil {
+			got, err := s.cfg.Store.GetRun(ctx, id)
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, false, nil
+			}
+			if err != nil {
+				return nil, false, err
+			}
+			run = got
+		}
+		return run, s.cfg.Runs.Paused(id), nil
+	}
+}
+
+// holdable is whether run has an outcome a parent could hold, the only
+// case worth reading its parents for.
+func holdable(run *domain.Run) bool {
+	return run.ParentRunID != "" && (run.OutcomeUnseen || run.Review == domain.ReviewReady || run.Review == domain.ReviewLater)
+}
+
+func (s *Server) attentionRun(ctx context.Context, run *domain.Run, parents func(domain.RunID) (*domain.Run, bool, error)) (*attentionRun, error) {
 	r := &attentionRun{run: run}
-	if run.ParentRunID != "" && !run.Detached && parent == nil {
-		var err error
-		if parent, err = s.cfg.Store.GetRun(ctx, run.ParentRunID); err != nil && !errors.Is(err, store.ErrNotFound) {
+	if holdable(run) {
+		held, err := domain.OutcomeHeldIn(run, parents)
+		if err != nil {
 			return nil, err
 		}
+		r.held = held
 	}
-	r.held = parent != nil && run.OutcomeHeld(parent, s.cfg.Runs.Paused(parent.ID))
 	if !run.Status.Terminal() {
 		r.paused = s.cfg.Runs.Paused(run.ID)
 		r.inputs = s.cfg.Runs.PendingInputs(run.ID)

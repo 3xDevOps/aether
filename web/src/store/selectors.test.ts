@@ -225,6 +225,19 @@ describe('a subsession outcome held for its parent', () => {
     expect(tree.childRuns?.counts).toEqual({ working: 0, needsYou: 0, done: 1, failed: 1 })
   })
 
+  it('shows a held success as reported to its parent, never Finished: review, and holds a grandchild under it', () => {
+    const grandchild = record({ id: 'leaf', parent_run_id: 'done', status: 'needs-attention', state: 'failed', outcome_unseen: true })
+    const rows = listedRuns(workspace.id, input([parent('working'), done, grandchild]).ctx)
+    const row = (id: string) => rows.find((r) => r.run.id === id)!
+    expect(row('done')).toMatchObject({ state: 'completed', reason: 'Finished: reported to its parent', group: 'finished' })
+    expect(row('done').needsYou).toBeUndefined()
+    expect(row('leaf').needsYou).toBeUndefined()
+    expect(rows.some((r) => r.group === 'review' || r.group === 'needs-you')).toBe(false)
+    const idle = listedRuns(workspace.id, input([parent('waiting'), done, grandchild]).ctx)
+    expect(idle.find((r) => r.run.id === 'done')?.group).toBe('review')
+    expect(idle.find((r) => r.run.id === 'leaf')?.needsYou).toBe('failed')
+  })
+
   it('still surfaces a request the subsession makes of a person', () => {
     const groups = sidebarGroups(input([parent('working'), asks]))
     expect(groups.find((group) => group.key === 'needs-you')?.count).toBe(1)

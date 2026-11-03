@@ -3,7 +3,6 @@ package sshd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -255,19 +254,24 @@ func optionalRFC3339(t *time.Time) string {
 }
 
 // needsYou counts the runs that are not paused and whose need is not an
-// outcome held for their parent (domain.Run.OutcomeHeld).
+// outcome held for their parent (domain.OutcomeHeldIn).
 func (s *Server) needsYou(ctx context.Context, runs []*domain.Run) (int, error) {
+	known := make(map[domain.RunID]*domain.Run, len(runs))
+	for _, run := range runs {
+		known[run.ID] = run
+	}
+	parents := s.parentLookup(ctx, known)
 	n := 0
 	for _, run := range runs {
 		if s.cfg.Runs.Paused(run.ID) {
 			continue
 		}
-		if run.ParentRunID != "" && !run.Detached {
-			parent, err := s.cfg.Store.GetRun(ctx, run.ParentRunID)
-			if err != nil && !errors.Is(err, store.ErrNotFound) {
-				return 0, fmt.Errorf("read the parent of session %s: %w", run.ID, err)
+		if holdable(run) {
+			held, err := domain.OutcomeHeldIn(run, parents)
+			if err != nil {
+				return 0, fmt.Errorf("read the parents of session %s: %w", run.ID, err)
 			}
-			if parent != nil && !run.NeedsAttention(false, run.OutcomeHeld(parent, s.cfg.Runs.Paused(parent.ID))) {
+			if !run.NeedsAttention(false, held) {
 				continue
 			}
 		}

@@ -232,3 +232,22 @@ func TestLatestReportCostsOneCallForARunThatNeverReported(t *testing.T) {
 		t.Fatalf("timeline calls = %v, want one per session", calls)
 	}
 }
+
+func TestAHeldSubsessionOutcomeReadsAsItsParents(t *testing.T) {
+	runs := []protocol.Run{
+		{ID: "root", Status: "running", Activity: "working"},
+		{ID: "lead", ParentRunID: "root", Status: "needs-attention", Activity: "finished", Review: "ready"},
+		{ID: "leaf", ParentRunID: "lead", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true},
+		{ID: "top", Status: "needs-attention", Activity: "finished", Review: "ready"},
+	}
+	held := heldIn(runs)
+	if got := displayStatus(runs[1], held(runs[1])); got != "Finished: reported to its parent" {
+		t.Errorf("held success = %q", got)
+	}
+	if got := displayStatus(runs[3], held(runs[3])); got != "Finished: review" {
+		t.Errorf("top-level success = %q", got)
+	}
+	if !held(runs[2]) || needsYou(runs[2], held(runs[2])) {
+		t.Error("a grandchild's failure under a held parent outcome needs someone")
+	}
+}

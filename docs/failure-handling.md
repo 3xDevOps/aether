@@ -158,14 +158,16 @@ reason `Finished: review the result`, after every item that asks something.
 
 A [subsession](teams.md#subsessions)'s outcome is its parent agent's to read
 while the parent is live, not paused and active (working, or waiting on
-agents, CI or a process), unless the subsession is detached. Its reported
+agents, CI or a process), or while the parent's own outcome is held the same
+way further up the tree, unless the subsession is detached. Its reported
 success and its unseen failure then never count as Needs you or Finished:
 review the result, never notify, and never move the parent or the family into
 Needs you. A subsession's own requests of a person (a permission, question,
 `needs-input`, `blocked`, a disconnect) still do. Once the parent stops,
-ends or is paused, the outcome surfaces as for any session. Push does not
-announce a held outcome again when the parent later stops; the dashboard and
-`aether sessions --needs-you` show it then.
+ends or is paused, the outcome surfaces as for any session, notifications
+included, and a notice already shown is taken back when the parent works
+again. The dashboard reads a held success as Completed, "Finished: reported to
+its parent", and `aether sessions` as `Finished: reported to its parent`.
 
 | Session | Needs you | Notifies |
 | --- | --- | --- |
@@ -181,8 +183,8 @@ announce a held outcome again when the parent later stops; the dashboard and
 
 A need is announced once: opening the session or restarting the server does not
 repeat it. When it ends, or the session is handed to another member, each
-browser that showed it gets a silent `No longer needs you` in place of the
-notification, and the desktop app closes its own. A server restart forgets
+browser that showed it gets a silent `No longer needs you` (`No longer
+awaiting review` for a finished session) in place of the notification, and the desktop app closes its own. A server restart forgets
 which browsers showed a need, so one announced before it is not replaced.
 
 ## Recover from disk pressure

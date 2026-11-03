@@ -125,12 +125,22 @@ export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>):
 }
 
 const activeStates = new Set<string | undefined>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'])
+// Mirrors domain.MaxHeldDepth.
+const maxHeldDepth = 8
 
-/** An attached subsession's outcome is its parent agent's to read while that parent is live, unpaused and active. Mirrors domain.Run.OutcomeHeld. */
-export function outcomeHeld(run: RunRecord, ctx: Pick<StateContext, 'runs' | 'pausedRuns'>): boolean {
-  if (!run.parent_run_id || run.detached) return false
+const hasOutcome = (run: Pick<Run, 'status' | 'state'>) =>
+  run.state === 'finished' || run.state === 'failed' || run.status === 'completed' || run.status === 'failed'
+
+/**
+ * An attached subsession's outcome is its parent agent's to read while that parent is live, unpaused and
+ * active, or has an outcome of its own held further up. Mirrors domain.OutcomeHeldIn.
+ */
+export function outcomeHeld(run: RunRecord, ctx: Pick<StateContext, 'runs' | 'pausedRuns'>, depth = 0): boolean {
+  if (!run.parent_run_id || run.detached || depth >= maxHeldDepth) return false
   const parent = ctx.runs[run.parent_run_id]
-  return parent !== undefined && isLive(parent) && !isPaused(parent, ctx) && activeStates.has(parent.state)
+  if (!parent) return false
+  if (hasOutcome(parent) && outcomeHeld(parent, ctx, depth + 1)) return true
+  return isLive(parent) && !isPaused(parent, ctx) && activeStates.has(parent.state)
 }
 
 // Room status loads only while the run is open; an older gateway's snapshot has no controller.

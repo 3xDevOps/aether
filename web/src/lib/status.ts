@@ -4,6 +4,7 @@ import {
   isPaused,
   memberName,
   needsYou,
+  outcomeHeld,
   waitingOn,
   type NeedsYouCondition,
   type StateContext,
@@ -156,6 +157,7 @@ function presentation(run: RunRecord, ctx: StateContext): RunPresentation {
     return { state: condition.state, reason: condition.reason(run, ctx), next: stateNext[condition.state], needsYou: condition }
   }
   if (awaitsCompletion(run) && !isPaused(run, ctx)) {
+    if (outcomeHeld(run, ctx)) return { state: 'completed', reason: 'Finished: reported to its parent' }
     const reason = run.reason && !isTerminal(run.status) ? plainReason(run.reason) : stateReasons.ready
     return { state: 'ready', reason, next: stateNext.ready }
   }

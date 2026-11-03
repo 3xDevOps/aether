@@ -413,7 +413,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Fatalf("SetRunReview: %v", err)
 	}
 	h.publish(run, events.RunReviewPayload{Review: stamp.Review, StatusSeq: stamp.StatusSeq})
-	phone.expect(t, cleared)
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: clearedFinishedBody, Run: id, Clear: true})
 	if got := phone.urgency.Load(); got != urgencyNormal {
 		t.Errorf("cleared urgency = %v, want %s", got, urgencyNormal)
 	}
@@ -951,4 +951,39 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 		t.Fatalf("after a failed read the sink heard %q, want nothing", got)
 	case <-time.After(testQuiet):
 	}
+}
+
+// A subsession's failure is its parent agent's while the parent works: it
+// is announced when the parent stops and withdrawn when the parent works
+// again, though only the parent's state changed.
+func TestASubsessionOutcomeFollowsItsParent(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	parent := h.run(h.ada, "Lead the migration", domain.LaunchACP)
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 subsession")
+	reserved, _, err := h.db.ReserveChild(h.ctx, &domain.ChildReservation{
+		ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: h.ws.ID,
+		OwnerID: h.ada.ID, AccountID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP, Task: "Port the schema",
+		IdempotencyKey: "child", RequestHash: "child",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := &domain.Run{ID: reserved.RunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "Port the schema", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	if err = h.db.CreateRunWithID(h.ctx, child); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.db.FinishRunReported(h.ctx, child.ID, domain.RunNeedsAttention, "agent reported failure", domain.ActivityFailed, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(child, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFailed, OutcomeUnseen: true})
+	phone.expectNone(t, testQuiet)
+
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
+	phone.expect(t, notification{Title: "Port the schema", Body: "Agent reported failure, review the result", Run: string(child.ID)})
+
+	h.status(parent, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	phone.expect(t, notification{Title: "Port the schema", Body: clearedBody, Run: string(child.ID), Clear: true})
 }

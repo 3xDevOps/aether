@@ -193,10 +193,17 @@ func (r *Run) AwaitsReview(paused, held bool) bool {
 
 // OutcomeHeld reports whether an attached subsession's reported outcome is
 // its parent agent's to read rather than a person's: its parent, nil when
-// unknown, is live, not paused and still active. Requests the subsession
-// makes of a person are never held.
-func (r *Run) OutcomeHeld(parent *Run, parentPaused bool) bool {
-	if r.ParentRunID == "" || r.Detached || parent == nil || parentPaused || !parent.Status.Live() {
+// unknown, is live, not paused and still active, or has an outcome of its
+// own that is held (parentHeld) further up the tree. Requests the
+// subsession makes of a person are never held.
+func (r *Run) OutcomeHeld(parent *Run, parentPaused, parentHeld bool) bool {
+	if r.ParentRunID == "" || r.Detached || parent == nil {
+		return false
+	}
+	if parentHeld && parent.hasOutcome() {
+		return true
+	}
+	if parentPaused || !parent.Status.Live() {
 		return false
 	}
 	switch parent.Activity {
@@ -204,6 +211,35 @@ func (r *Run) OutcomeHeld(parent *Run, parentPaused bool) bool {
 		return true
 	}
 	return false
+}
+
+func (r *Run) hasOutcome() bool {
+	return r.Activity == ActivityFinished || r.Activity == ActivityFailed || r.Status == RunCompleted || r.Status == RunFailed
+}
+
+// MaxHeldDepth bounds the walk up a tree of subsessions.
+const MaxHeldDepth = 8
+
+// OutcomeHeldIn is OutcomeHeld with the parents read through lookup, which
+// returns a run (nil when unknown) and whether it is paused, walking up the
+// attached chain at most MaxHeldDepth levels.
+func OutcomeHeldIn(run *Run, lookup func(RunID) (*Run, bool, error)) (bool, error) {
+	return outcomeHeldIn(run, lookup, 0)
+}
+
+func outcomeHeldIn(run *Run, lookup func(RunID) (*Run, bool, error), depth int) (bool, error) {
+	if run.ParentRunID == "" || run.Detached || depth >= MaxHeldDepth {
+		return false, nil
+	}
+	parent, paused, err := lookup(run.ParentRunID)
+	if err != nil || parent == nil {
+		return false, err
+	}
+	parentHeld, err := outcomeHeldIn(parent, lookup, depth+1)
+	if err != nil {
+		return false, err
+	}
+	return run.OutcomeHeld(parent, paused, parentHeld), nil
 }
 
 // NeedKey identifies the standing the run is in: its status, state and

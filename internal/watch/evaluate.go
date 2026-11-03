@@ -328,19 +328,22 @@ func (s *Service) runNeeds(run *domain.Run, held bool) []need {
 }
 
 // outcomeHeld reports whether run's outcome is its parent's to read
-// (domain.Run.OutcomeHeld).
+// (domain.OutcomeHeldIn).
 func (s *Service) outcomeHeld(ctx context.Context, run *domain.Run) (bool, error) {
-	if run.ParentRunID == "" || run.Detached {
-		return false, nil
-	}
-	parent, err := s.store.GetRun(ctx, run.ParentRunID)
-	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
-	}
+	held, err := domain.OutcomeHeldIn(run, func(id domain.RunID) (*domain.Run, bool, error) {
+		parent, err := s.store.GetRun(ctx, id)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return parent, s.runs.Paused(id), nil
+	})
 	if err != nil {
-		return false, fmt.Errorf("read the parent of session %s: %w", run.ID, err)
+		return false, fmt.Errorf("read the parents of session %s: %w", run.ID, err)
 	}
-	return run.OutcomeHeld(parent, s.runs.Paused(parent.ID)), nil
+	return held, nil
 }
 
 func (s *Service) requestLine(run *domain.Run, input *domain.RunInputRequest, label string) string {
@@ -427,6 +430,7 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 	var out []*store.WatchNotification
 	var prefs *store.NotifyPrefs
 	var run *domain.Run
+	held := false
 	devices := -1
 	for _, n := range notices {
 		if slices.Contains(strings.Split(w.Fired[n.Condition], firedSep), n.Key) {
@@ -440,6 +444,9 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			prefs = &p
 			if w.TargetKind == protocol.WatchTargetRun {
 				if run, err = s.store.GetRun(ctx, w.RunID); err != nil {
+					return nil, err
+				}
+				if held, err = s.outcomeHeld(ctx, run); err != nil {
 					return nil, err
 				}
 			}
@@ -467,7 +474,7 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 				d.Status, d.Detail = protocol.WatchStatusNoDestination, "No device has notifications turned on"
 				break
 			}
-			if ownerPushed(w, run, n, s.startedAt()) {
+			if ownerPushed(w, run, held, n, s.startedAt()) {
 				d.Status, d.Detail = protocol.WatchStatusSkipped, "The session notification already sent it"
 				break
 			}

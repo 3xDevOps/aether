@@ -151,7 +151,7 @@ func (s *Service) baseline(ctx context.Context, w *store.Watch) error {
 // off or accepted is not pushed by the run. Push, started before the watch
 // service, does not announce a standing entered before it started, which
 // a watch evaluated on recovery then pushes itself.
-func ownerPushed(w *store.Watch, run *domain.Run, n Notice, started time.Time) bool {
+func ownerPushed(w *store.Watch, run *domain.Run, held bool, n Notice, started time.Time) bool {
 	if run == nil || run.MemberID != w.MemberID {
 		return false
 	}
@@ -165,7 +165,7 @@ func ownerPushed(w *store.Watch, run *domain.Run, n Notice, started time.Time) b
 	case protocol.WatchNeedsYou:
 		return true
 	case protocol.WatchFinished:
-		return strings.HasPrefix(n.Key, "reported|") && run.Review == domain.ReviewReady || n.Key == "failed" && run.OutcomeUnseen
+		return !held && (strings.HasPrefix(n.Key, "reported|") && run.Review == domain.ReviewReady || n.Key == "failed" && run.OutcomeUnseen)
 	}
 	return false
 }

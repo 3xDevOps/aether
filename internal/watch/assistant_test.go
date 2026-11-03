@@ -269,27 +269,30 @@ func TestOwnersRunNotificationCoversOnlyWhatItPushes(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		run  *domain.Run
+		held bool
 		n    Notice
 		want bool
 	}{
-		{"a need of the owner's run", own(nil), need, true},
-		{"a need of someone else's run", own(func(r *domain.Run) { r.MemberID = "bob" }), need, false},
-		{"a success parked for review", own(nil), reported, true},
-		{"a success never put up for review", own(func(r *domain.Run) { r.Review = "" }), reported, false},
-		{"a success put off for later", own(func(r *domain.Run) { r.Review = domain.ReviewLater }), reported, false},
-		{"a failure nobody has seen", own(func(r *domain.Run) { r.OutcomeUnseen = true }), failed, true},
-		{"a failure already seen", own(nil), failed, false},
-		{"closed as merged", own(nil), Notice{Condition: protocol.WatchFinished, Key: "merged"}, false},
-		{"closed as abandoned", own(nil), Notice{Condition: protocol.WatchFinished, Key: "abandoned"}, false},
-		{"stopped", own(nil), Notice{Condition: protocol.WatchFinished, Key: "interrupted"}, false},
-		{"completed", own(nil), Notice{Condition: protocol.WatchFinished, Key: "completed"}, false},
-		{"its pull request merged", own(nil), Notice{Condition: protocol.WatchPRMerged, Key: "merged"}, false},
-		{"a need entered before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), need, false},
-		{"a success parked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), reported, false},
-		{"a question asked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }),
+		{"a need of the owner's run", own(nil), false, need, true},
+		{"a need of someone else's run", own(func(r *domain.Run) { r.MemberID = "bob" }), false, need, false},
+		{"a success parked for review", own(nil), false, reported, true},
+		{"a success never put up for review", own(func(r *domain.Run) { r.Review = "" }), false, reported, false},
+		{"a success put off for later", own(func(r *domain.Run) { r.Review = domain.ReviewLater }), false, reported, false},
+		{"a failure nobody has seen", own(func(r *domain.Run) { r.OutcomeUnseen = true }), false, failed, true},
+		{"a failure already seen", own(nil), false, failed, false},
+		{"a subsession success held for its parent", own(nil), true, reported, false},
+		{"a subsession failure held for its parent", own(func(r *domain.Run) { r.OutcomeUnseen = true }), true, failed, false},
+		{"closed as merged", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "merged"}, false},
+		{"closed as abandoned", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "abandoned"}, false},
+		{"stopped", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "interrupted"}, false},
+		{"completed", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "completed"}, false},
+		{"its pull request merged", own(nil), false, Notice{Condition: protocol.WatchPRMerged, Key: "merged"}, false},
+		{"a need entered before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), false, need, false},
+		{"a success parked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), false, reported, false},
+		{"a question asked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), false,
 			Notice{Condition: protocol.WatchNeedsYou, Key: "input:s|question|q1"}, true},
 	} {
-		if got := ownerPushed(w, c.run, c.n, started); got != c.want {
+		if got := ownerPushed(w, c.run, c.held, c.n, started); got != c.want {
 			t.Errorf("%s: skipped = %v, want %v", c.name, got, c.want)
 		}
 	}

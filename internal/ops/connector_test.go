@@ -502,6 +502,11 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("the sudo request = %v, want it answered with aether_decide_approval", sudoRow)
 	}
 
+	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many[:2]})
+	if text, _ = run(t, cs, "aether_needs_attention", nil); text != "Nothing needs you. 2 finished sessions await review last; they are not blocking." {
+		t.Fatalf("aether_needs_attention with only finished sessions = %q", text)
+	}
+
 	f.answers[protocol.MethodInsightsGet] = func(raw json.RawMessage) (any, error) {
 		var p protocol.InsightsParams
 		if err := json.Unmarshal(raw, &p); err != nil {

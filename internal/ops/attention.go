@@ -145,6 +145,9 @@ func needsAttention(ctx context.Context, c calls, in workspaceFilterInput) (stri
 		}
 	}
 	text := fmt.Sprintf("%d items need you, pending requests first, then oldest first.", len(items)-finished)
+	if finished == len(items) {
+		text = "Nothing needs you."
+	}
 	if finished > 0 {
 		text += fmt.Sprintf(" %d finished sessions await review last; they are not blocking.", finished)
 	}

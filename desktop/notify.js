@@ -25,6 +25,8 @@ const announced = new Map()
 const seqs = new Map()
 // The run.get read in flight per run; a newer event supersedes it.
 const reading = new Map()
+// The subsessions read per parent run, read again when the parent changes.
+const children = new Map()
 // When each run's need, or under `<run> done` its finish, last ended, on
 // the `ends` count; a watch notice read from before then is stale.
 const ended = new Map()
@@ -71,6 +73,7 @@ function start(addr, url, onOpen, onLink) {
   lastShown.clear()
   announced.clear()
   seqs.clear()
+  children.clear()
 
   if (typeof globalThis.WebSocket !== 'function') {
     // Older Electron main processes have no WHATWG WebSocket, and adding an
@@ -244,16 +247,32 @@ async function readWatch(watchId) {
 function onStatus(runId, p) {
   if (p.status_seq > 0 && p.status_seq <= (seqs.get(runId) || 0)) return
   if (p.status_seq > 0) seqs.set(runId, p.status_seq)
+  rereadSubsessions(runId)
   const seen = { status: p.to, reason: p.reason || '', state: p.state || '', outcome_unseen: p.outcome_unseen === true, review: p.review || '' }
   // The event does not carry paused, so a need it shows is checked on run.get.
   if (!bodyOf(seen)) {
-    resolve(runId)
+    leave(runId, seen)
     return
   }
+  read(runId)
+}
+
+// A subsession's outcome is held by its parent's standing, so a parent's
+// change reads again the subsessions this socket has read, down the tree.
+function rereadSubsessions(parentId, depth = 0) {
+  if (depth >= maxHeldDepth) return
+  for (const child of children.get(parentId) || []) {
+    read(child)
+    rereadSubsessions(child, depth + 1)
+  }
+}
+
+function read(runId) {
   const token = {}
   reading.set(runId, token)
   void Promise.all([readRun(runId), memberID().catch(() => null)]).then(async ([run, self]) => {
-    const parent = run && run.parent_run_id && !run.detached ? await readRun(run.parent_run_id) : null
+    if (run && run.parent_run_id) children.set(run.parent_run_id, new Set([...(children.get(run.parent_run_id) || []), runId]))
+    const held = run ? await outcomeHeld(run) : false
     if (reading.get(runId) !== token) return
     reading.delete(runId)
     // /ws/events carries every run in the workspace; like push, only the
@@ -264,8 +283,16 @@ function onStatus(runId, p) {
       resolve(runId)
       return
     }
-    announce(runId, run, outcomeHeld(run, parent))
+    announce(runId, run, held)
   })
+}
+
+// leave ends what runId was announced for. A live run that announces
+// nothing has also left its finished standing, as when a follow-up restarts
+// it or its parent holds the outcome; an ended run's finish stays until seen.
+function leave(runId, run) {
+  resolve(runId)
+  if (isLive(run)) closeFinished(runId)
 }
 
 function onOutcomeSeen(runId) {
@@ -303,7 +330,7 @@ async function readRun(runId) {
 function announce(runId, run, held) {
   const body = run.paused ? '' : bodyOf(run, held)
   if (!body) {
-    resolve(runId)
+    leave(runId, run)
     return
   }
   const key = needKey(run)
@@ -373,9 +400,16 @@ function awaitsReview(run, held) {
 }
 
 const activeStates = new Set(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'])
+const maxHeldDepth = 8
 
-function outcomeHeld(run, parent) {
-  return Boolean(parent) && !run.detached && isLive(parent) && !parent.paused && activeStates.has(parent.state)
+const hasOutcome = (run) => run.state === 'finished' || run.state === 'failed' || run.status === 'completed' || run.status === 'failed'
+
+async function outcomeHeld(run, depth = 0) {
+  if (!run.parent_run_id || run.detached || depth >= maxHeldDepth) return false
+  const parent = await readRun(run.parent_run_id)
+  if (!parent) return false
+  if (hasOutcome(parent) && (await outcomeHeld(parent, depth + 1))) return true
+  return isLive(parent) && !parent.paused && activeStates.has(parent.state)
 }
 
 function needKey(run) {

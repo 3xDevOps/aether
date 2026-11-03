@@ -279,9 +279,22 @@ func TestASubsessionOutcomeIsHeldWhileItsParentIsActive(t *testing.T) {
 		{"detached", &Run{ParentRunID: "run-parent", Detached: true}, parent(RunRunning, ActivityWorking), false, false},
 		{"top level", &Run{}, parent(RunRunning, ActivityWorking), false, false},
 	} {
-		if got := tc.child.OutcomeHeld(tc.parent, tc.paused); got != tc.held {
+		if got := tc.child.OutcomeHeld(tc.parent, tc.paused, false); got != tc.held {
 			t.Errorf("%s: OutcomeHeld = %v, want %v", tc.name, got, tc.held)
 		}
+	}
+	tree := map[RunID]*Run{
+		"run-root":   {ID: "run-root", Status: RunRunning, Activity: ActivityWorking},
+		"run-parent": {ID: "run-parent", ParentRunID: "run-root", Status: RunNeedsAttention, Activity: ActivityFinished, Review: ReviewReady},
+	}
+	lookup := func(id RunID) (*Run, bool, error) { return tree[id], false, nil }
+	grandchild := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityFailed, OutcomeUnseen: true}
+	if held, err := OutcomeHeldIn(grandchild, lookup); err != nil || !held {
+		t.Errorf("a grandchild under a finished parent held for its working root: held = %v, %v; want held", held, err)
+	}
+	tree["run-root"].Activity = ActivityAnswered
+	if held, _ := OutcomeHeldIn(grandchild, lookup); held {
+		t.Error("a grandchild is held although its root stopped and its parent finished")
 	}
 	if child.AwaitsReview(false, true) || !child.AwaitsReview(false, false) || child.NeedsAttention(false, false) {
 		t.Error("a held success awaits no review, a surfaced one does, and neither needs anyone")

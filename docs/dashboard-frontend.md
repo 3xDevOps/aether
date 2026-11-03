@@ -6252,7 +6252,7 @@ cannot read, because Safari drops a subscription whose push shows nothing.
 A message with `clear` set means the session's need, or the watch's, ended: for
 the same reason it is not simply closed but replaced, under the same tag and keeping the shown
 title, by a `silent` notification with the server's body,
-`No longer needs you`. The server sends it only to the devices whose push
+`No longer needs you`, or `No longer awaiting review` for a finished session's. The server sends it only to the devices whose push
 service took the need, when the need ends or the session changes hands,
 under the session's Web Push topic, so a need still queued at the push service
 is never shown, and tries again a minute later for a device it could not
