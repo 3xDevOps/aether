@@ -510,7 +510,7 @@ says to call again without `cursor`.
 `aether_mark_reviewed` completes only a session whose agent reported success and
 awaits your review; to end any other session, use `aether_stop_session` under
 `control`. Both read `run.close_check` before they close: a close with
-warnings fails with `closing session <id> affects others: <kind>: <detail>; ...`
+warnings fails with `closing session <id> has warnings: <kind>: <detail>; ...`
 until the call repeats with `acknowledge: true`, so the assistant shows you
 what each close affects first
 ([failure-handling.md](failure-handling.md#before-a-close)). A message to your own session that no one

@@ -155,8 +155,8 @@ the warnings and refuses. `--force` closes anyway, and also when the check
 itself fails, such as on a server older than the CLI:
 
 ```
-Closing run-d6ay38tj8j affects others:
-  pull_request: Pull request acme/api#7 is open, not merged
+Before closing run-d6ay38tj8j:
+  pull_request: Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z
     https://github.com/acme/api/pull/7
 Error: no terminal to ask on; to close anyway: aether close run-d6ay38tj8j --outcome merged --force
 ```

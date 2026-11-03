@@ -44,7 +44,7 @@ describe('Mark complete with close warnings', () => {
   it('asks first, listing each warning, and runs only on Close anyway', async () => {
     render(<><MarkComplete /><CloseConfirmation /></>)
     fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
-    const dialog = await screen.findByRole('alertdialog', { name: 'Closing this session affects others' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Close this session anyway?' })
     expect(dialog.textContent).toContain('Commits on aether/run-1 are in no merged pull request. The branch stays, but nothing merges it.')
     expect(dialog.textContent).toContain('Protected: only its owner or an admin can steer, message or close it.')
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))

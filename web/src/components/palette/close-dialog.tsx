@@ -71,10 +71,11 @@ export function CloseDialog() {
       <DialogContent
         {...returnFocus}
         onOpenAutoFocus={(event) => {
+          returnFocus.onOpenAutoFocus()
           event.preventDefault()
           cancel.current?.focus()
         }}
-        className="max-h-[calc(100dvh-2rem)] max-w-[min(480px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+        className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Close this session?</DialogTitle>
           <DialogDescription>
@@ -91,7 +92,7 @@ export function CloseDialog() {
             </p>
           )}
         </div>
-        <DialogFooter className="border-t px-3 py-3 sm:px-4">
+        <DialogFooter className="border-t px-3 py-3 sm:flex-wrap sm:px-4">
           <Button ref={cancel} variant="secondary" onClick={close}>
             Cancel
           </Button>

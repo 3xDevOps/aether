@@ -103,7 +103,7 @@ export function CloseConfirmation() {
     <AlertDialog open onOpenChange={(open) => { if (!open) dismiss() }}>
       <AlertDialogContent className="max-w-[min(480px,calc(100%-2rem))]">
         <AlertDialogHeader>
-          <AlertDialogTitle>Closing this session affects others</AlertDialogTitle>
+          <AlertDialogTitle>Close this session anyway?</AlertDialogTitle>
           <AlertDialogDescription>
             &quot;{runLabel(run)}&quot; - {pending.command.label} closes the session.
           </AlertDialogDescription>

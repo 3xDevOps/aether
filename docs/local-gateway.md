@@ -819,11 +819,11 @@ sentence and, where it applies, `url`, `count` and `run_ids`:
 | `kind` | When |
 | --- | --- |
 | `protected` | The session is protected (`aether protect`). |
-| `pull_request` | A pull request recorded for it is neither merged nor closed; `url` links it. |
-| `unmerged_work` | Its branch has commits past its base and no open or merged recorded pull request holds them. A pull request merged before the last commit does not. |
+| `pull_request` | A pull request recorded for it was neither merged nor closed when Aether last checked it; `url` links it. The check does not ask GitHub. |
+| `unmerged_work` | Its branch has commits past its base and no open or merged pull request recorded for its own repository holds them. One merged before Aether last recorded a commit does not. |
 | `messages` | Mail from other sessions it has not acknowledged, or any it got in the last 30 minutes; `count`. |
 | `awaited` | Live sessions wait on `run:<session-id>:finished`; `run_ids`. Closing wakes them with its outcome. |
-| `subsessions` | Attached subsessions not yet merged, abandoned, failed or interrupted, which close with it; `count`, `run_ids`. |
+| `subsessions` | Attached subsessions not yet merged, abandoned, failed, interrupted or accepted, which close with it; `count`, `run_ids`. |
 | `cleanup_pending` | Its container cleanup is pending or failed; `detail` carries the error. |
 
 Closing stays allowed: `run.close` and `run.review` do not read the check.

@@ -1013,7 +1013,9 @@ export function useCommandRunner(
     async (command: Command) => {
       onDone?.()
       if (command.closes) {
+        const same = sameIdentity()
         const check = await readCloseCheck(command.closes)
+        if (!same()) return
         if (closeWarned(check)) {
           openCloseConfirmation({ check, command: { ...command, closes: undefined } })
           return
