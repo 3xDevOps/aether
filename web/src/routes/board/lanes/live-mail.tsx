@@ -17,6 +17,7 @@ export const liveMailMs = 4500
 export const liveMailCap = 3
 const slotPx = 8
 const nowGap = 14
+const chipRoom = 160
 const stubPx = 22
 const announceDelay = 1500
 /** Older mail is a reconnect replaying the log, not mail arriving now; the margin covers clock skew. */
@@ -231,6 +232,8 @@ export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf,
           const row = pinned[offscreen.edge]++
           const end = offscreen.end === 'to' ? arrow.to : arrow.from
           const Icon = offscreen.edge === 'top' ? ArrowUp : ArrowDown
+          // Too close to the window's start for the button to fit on the arrow's left.
+          const right = x < chipRoom
           chip = (
             <Button
               {...mailControl}
@@ -239,8 +242,8 @@ export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf,
               variant="secondary"
               size="sm"
               tabIndex={-1}
-              className={cn(fade, 'pointer-events-auto absolute z-10 h-6 max-w-[min(280px,60%)] -translate-x-full gap-1 border-series-5 px-2 text-ui-xs')}
-              style={{ animationDelay: `${arrow.at - Date.now()}ms`, left: g.labelWidth + x - 10, top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
+              className={cn(fade, 'pointer-events-auto absolute z-10 h-6 max-w-[min(280px,60%)] gap-1 border-series-5 px-2 text-ui-xs', !right && '-translate-x-full')}
+              style={{ animationDelay: `${arrow.at - Date.now()}ms`, left: g.labelWidth + x + (right ? 10 : -10), top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
               onClick={() => onJump(end.lane)}
             >
               <Icon aria-hidden className="size-3 shrink-0 text-series-5" />
