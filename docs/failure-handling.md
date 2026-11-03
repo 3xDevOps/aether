@@ -136,7 +136,7 @@ reports this task is finished. Mark it complete?**
 - **Mark complete** closes a live session as `completed`: it commits, publishes
   the branch and keeps the container like **Close**.
 - **Not yet** says the work is not finished: the session leaves review and
-  reads **Answered**, "Not finished yet: you chose Not yet". Once the server
+  reads **Answered**, "Not finished yet: marked Not yet". Once the server
   accepts it, the session's Chat view opens with the composer focused so you
   can say what is left.
 - **Review later** keeps the session open and in review without a new

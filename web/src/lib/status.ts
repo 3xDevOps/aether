@@ -67,7 +67,7 @@ export function liveStateOf(status: 'running' | 'needs-attention', state: string
 }
 
 /**
- * A reported success its owner answered Not yet: the session reads idle until the agent reports success again.
+ * A reported success a member answered Not yet: the session reads idle until the agent reports success again.
  * The wire omits an empty review; its change time tells Not yet from an older server that sends neither.
  */
 export function notFinishedYet(run: Pick<RunRecord, 'status' | 'state' | 'review' | 'review_changed_at'>): boolean {
@@ -111,7 +111,7 @@ function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'ne
   if (state === 'working' && run.toolActivity) {
     return { state, reason: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() }
   }
-  if (notFinishedYet(run)) return { state: 'answered', reason: 'Not finished yet: you chose Not yet' }
+  if (notFinishedYet(run)) return { state: 'answered', reason: 'Not finished yet: marked Not yet' }
   const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
   if (possiblyStalled(run)) return { state: 'stalled', reason, next: stateNext.stalled }
   if (state === 'failed') return { state, reason: `${reason}. Session remains open for follow-up.` }

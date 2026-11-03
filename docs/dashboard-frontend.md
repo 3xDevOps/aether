@@ -1788,7 +1788,7 @@ running".
 | Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked session with no `state`: the turn ended without a verified reason. Asks nothing | Working |
 | Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
 | Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
-| Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action. Also a live `finished` session its owner answered **Not yet** (no `review`, with a `review_changed_at`), read "Not finished yet: you chose Not yet" | Working |
+| Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action. Also a live `finished` session a member answered **Not yet** (no `review`, with a `review_changed_at`), read "Not finished yet: marked Not yet" | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Ready for review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
 | Completed / Merged | check | `completed`, `merged` | Finished |
@@ -1977,8 +1977,8 @@ placeholder reads "Say what is left to do". **Review later**
 (`review-later`) sends `action: "later"` and predicts `later`. A refusal puts
 the callout back and toasts the server's error. While `review` is `later` the
 callout folds to one line, "Finished:" and a **Review later** chip, whose
-**Review now** unfolds it. After Not yet the session reads Answered, "Not finished yet: you
-chose Not yet" (`notFinishedYet` in `src/lib/status.ts`), and the callout
+**Review now** unfolds it. After Not yet the session reads Answered, "Not finished yet:
+marked Not yet" (`notFinishedYet` in `src/lib/status.ts`), and the callout
 stays hidden until a new success report sets `ready` again. The session's
 actions menu and the palette offer the same commands, except that until
 someone opens the result (`finish_unopened`, which any member opening the
