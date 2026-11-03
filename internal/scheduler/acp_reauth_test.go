@@ -26,6 +26,10 @@ func TestEnhancedAuthRefusalRestartsTheAgentAndResendsTheTurn(t *testing.T) {
 	}
 	waitItems(t, e.sched, run.ID, "the sign-in notice", noticeTitled("Agent signed out"))
 	waitFor(t, "the restarted agent", func() bool { return len(rt.all()) == before+1 && e.sched.acp.session(run.ID) != nil })
+	waitFor(t, "the refusal shown after the restart", func() bool {
+		row, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && row.Status == domain.RunNeedsAttention && strings.Contains(row.Reason, "send the message again")
+	})
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
 		t.Fatalf("message after the restart: %v", err)
 	}

@@ -91,6 +91,9 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 	current := d.runs[entry.runID] == lost && !lost.stopping && sess != nil
 	d.mu.Unlock()
 	if !current {
+		d.s.mu.Lock()
+		entry.authLostAt = time.Time{}
+		d.s.mu.Unlock()
 		return
 	}
 	if sess.State().TurnInFlight {
@@ -101,20 +104,26 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 		d.s.mu.Unlock()
 		return
 	}
-	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again; send the refused message again."); err != nil {
+	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again."); err != nil {
 		slog.Warn("scheduler: record the sign-in notice", "run", entry.runID, "error", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)
 	defer cancel()
-	d.record(entry, func() { entry.agentKeeper = nil })
-	if err := d.open(ctx, entry, openRestore); err != nil {
-		d.fail(entry, err)
-		return
-	}
 	// The restored session's idle state must not hide the refusal: nothing
 	// sends a refused task again.
-	st.Failed = fmt.Errorf("%w; Aether restarted the agent so it reads the account's login again: send the message again", st.Failed)
-	d.turnState(entry, false, st)
+	d.record(entry, func() {
+		entry.agentKeeper = nil
+		entry.authRefused = fmt.Errorf("%w; Aether restarted the agent so it reads the account's login again: send the message again", st.Failed)
+	})
+	if err := d.open(ctx, entry, openRestore); err != nil {
+		d.s.mu.Lock()
+		entry.authRefused = nil
+		d.s.mu.Unlock()
+		if acphost.AuthRequired(err) {
+			err = fmt.Errorf("%w; the restarted agent still finds no sign-in, so this container's copy of the login is stale or unreadable: start a new session", err)
+		}
+		d.fail(entry, err)
+	}
 }
 
 func (d *acpDriver) watch(entry *supervised, r *acpRun) {
