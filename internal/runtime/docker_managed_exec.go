@@ -293,11 +293,19 @@ func (e *dockerManagedExec) Stop(ctx context.Context, grace time.Duration) (Exit
 	stopCtx, cancel := context.WithTimeout(ctx, devexec.StartupTimeout+grace+devexec.ReapTimeout)
 	defer cancel()
 	ctx = stopCtx
-	if _, _, err := e.inspect(ctx); err != nil {
+	info, forgotten, err := e.inspect(ctx)
+	if err != nil {
 		return ExitStatus{}, err
 	}
-	if _, err := e.control(ctx, "stop", grace); err != nil {
-		return ExitStatus{}, err
+	if forgotten != nil {
+		info.Running = forgotten.Running && !forgotten.Exited
+	}
+	// An exec Docker saw end has no supervisor left to stop; its record, or
+	// the lack of one, is the answer.
+	if info.Running {
+		if _, err := e.control(ctx, "stop", grace); err != nil {
+			return ExitStatus{}, err
+		}
 	}
 	return e.Wait(ctx)
 }

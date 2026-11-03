@@ -22,6 +22,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/control"
+	"github.com/3xDevOps/Aether/internal/devexec"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -75,6 +76,11 @@ type runTerminal struct {
 	// Gone records that the runtime no longer knows the exec: nothing is
 	// left to stop, and its exit status is lost.
 	Gone bool `json:"gone,omitempty"`
+	// Lost records a terminal whose exec helper could not be reached and
+	// left no exit record when its session was closed. Whatever it left
+	// running is frozen or stopped with the container, so it still counts
+	// against the shell limit.
+	Lost bool `json:"lost,omitempty"`
 	// Control is the terminal's control lease, recorded for a kept terminal
 	// so a lease survives a server restart.
 	Control    *control.SurfaceLease `json:"control,omitempty"`
@@ -143,7 +149,7 @@ func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID
 		if set.deferred && !paused {
 			set.deferred = false
 			for _, terminal := range set.Terminals {
-				if terminal.Exec == nil && !terminal.ContainerEnded && !terminal.Gone {
+				if terminal.Exec == nil && !terminal.ContainerEnded && !terminal.Gone && !terminal.Lost {
 					s.recoverRunTerminalLocked(ctx, run, set, terminal)
 				}
 			}
@@ -173,7 +179,7 @@ func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID
 				return nil, fmt.Errorf("invalid persisted terminal identity")
 			}
 			switch {
-			case terminal.ContainerEnded || terminal.Gone:
+			case terminal.ContainerEnded || terminal.Gone || terminal.Lost:
 			case paused:
 				set.deferred = true
 				terminal.Unavailable = "the session is paused; the terminal reconnects when it resumes"
@@ -253,6 +259,9 @@ func (s *Scheduler) prepareRunTerminalsLocked(set *runTerminalSet, container run
 }
 
 func (s *Scheduler) refreshRunTerminalLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, terminal *runTerminal) error {
+	if terminal.Lost {
+		return nil
+	}
 	changed, attached := false, false
 	if terminal.Generation != 0 {
 		if host, ok := s.cfg.PTY.(DevelopmentPTYHost); ok {
@@ -527,7 +536,7 @@ func (s *Scheduler) stopRunTerminalsLocked(ctx context.Context, run domain.RunID
 	stopping := false
 	var wg sync.WaitGroup
 	for i, terminal := range terminals {
-		if terminal.Exec == nil && !terminalEnded(terminal) {
+		if terminal.Exec == nil && !terminalEnded(terminal) && !terminal.Lost {
 			s.recoverTerminalExecLocked(ctx, terminal)
 			stopping = stopping || terminal.Gone
 		}
@@ -591,6 +600,60 @@ func (s *Scheduler) RecoverDevelopmentTerminals(ctx context.Context, run domain.
 	return err
 }
 
+// settleLostDevelopmentTerminals runs only when a close failed to stop
+// terminals and the container is frozen or stopped next. A terminal whose
+// exec helper cannot be reached and left no exit record is recorded as lost
+// instead of blocking the close; any other failure still blocks it. It
+// reports whether every terminal is now ended or lost.
+func (s *Scheduler) settleLostDevelopmentTerminals(ctx context.Context, run domain.RunID) (bool, error) {
+	lock := s.lockForShell(run)
+	lock.Lock()
+	defer lock.Unlock()
+	set, err := s.loadRunTerminalsLocked(ctx, run)
+	if err != nil {
+		return false, err
+	}
+	settled := true
+	var lost []*runTerminal
+	for _, terminal := range set.Terminals {
+		if terminalEnded(terminal) || terminal.Lost {
+			continue
+		}
+		var probeErr error
+		if terminal.Exec != nil {
+			_, probeErr = terminal.Exec.Status(ctx)
+		} else if managed, ok := s.cfg.Runtime.(runtime.ManagedExecRuntime); ok {
+			_, probeErr = managed.RecoverExec(ctx, terminal.Identity)
+		}
+		if !errors.Is(probeErr, devexec.ErrNoSupervisor) {
+			settled = false
+			continue
+		}
+		terminal.Lost = true
+		terminal.Unavailable = "the terminal's exec helper cannot be reached and left no exit record, so its exit status is unknown; " +
+			"processes it left are frozen or stopped with the session's container and run again if the session is reopened: " + probeErr.Error()
+		lost = append(lost, terminal)
+	}
+	// The stop error is dropped only once every lost record is durable;
+	// otherwise they are probed again on the next attempt.
+	var saveErr error
+	if settled {
+		saveErr = s.persistRunTerminalsLocked(run, set)
+	}
+	for _, terminal := range lost {
+		if !settled || saveErr != nil {
+			terminal.Lost = false
+			continue
+		}
+		if terminal.Exec != nil {
+			_ = terminal.Exec.Detach()
+			terminal.Exec = nil
+		}
+		terminal.Generation, terminal.State = 0, runtime.ExecState{}
+	}
+	return settled && saveErr == nil, saveErr
+}
+
 func (s *Scheduler) StopDevelopmentTerminals(ctx context.Context, run domain.RunID) error {
 	lock := s.lockForShell(run)
 	lock.Lock()
@@ -639,7 +702,7 @@ func (s *Scheduler) ReopenDevelopmentTerminals(ctx context.Context, run domain.R
 		if err := s.refreshRunTerminalLocked(ctx, run, set, terminal); err != nil {
 			return err
 		}
-		if !terminalEnded(terminal) {
+		if !terminalEnded(terminal) && !terminal.Lost {
 			return fmt.Errorf("%w: prior terminal has not proved exit", runtime.ErrExecUnavailable)
 		}
 	}

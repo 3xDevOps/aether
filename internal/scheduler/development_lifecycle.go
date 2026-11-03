@@ -266,6 +266,9 @@ func (s *Scheduler) RunCoAuthors(ctx context.Context, run domain.Run, authorEmai
 	return s.containerCoAuthors(ctx, &run, authorEmail)
 }
 
+// stopDevelopmentProcesses stops the run's terminals on the way to freezing,
+// stopping or destroying its container, so a terminal whose helper is lost
+// does not block it.
 func (s *Scheduler) stopDevelopmentProcesses(ctx context.Context, id domain.RunID, cid containerruntime.ID) error {
 	s.mu.Lock()
 	entry := s.runs[id]
@@ -277,7 +280,7 @@ func (s *Scheduler) stopDevelopmentProcesses(ctx context.Context, id domain.RunI
 	needStop := false
 	if err == nil {
 		for _, terminal := range set.Terminals {
-			if !terminal.State.Exited {
+			if !terminal.State.Exited && !terminal.Lost {
 				needStop = true
 				break
 			}
@@ -292,14 +295,29 @@ func (s *Scheduler) stopDevelopmentProcesses(ctx context.Context, id domain.RunI
 			return err
 		}
 		s.setPaused(entry, false)
-		stopErr := s.StopDevelopmentTerminals(ctx, id)
+		stopErr := s.stopDevelopmentTerminals(ctx, id)
 		pauseErr := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid)
 		if pauseErr == nil {
 			s.setPaused(entry, true)
 		}
 		return errors.Join(stopErr, pauseErr)
 	}
-	return s.StopDevelopmentTerminals(ctx, id)
+	return s.stopDevelopmentTerminals(ctx, id)
+}
+
+func (s *Scheduler) stopDevelopmentTerminals(ctx context.Context, id domain.RunID) error {
+	stopErr := s.StopDevelopmentTerminals(ctx, id)
+	if stopErr == nil {
+		return stopErr
+	}
+	settled, err := s.settleLostDevelopmentTerminals(ctx, id)
+	if err != nil {
+		return errors.Join(stopErr, err)
+	}
+	if !settled {
+		return stopErr
+	}
+	return nil
 }
 
 func (s *Scheduler) destroyDevelopmentContainer(ctx context.Context, id domain.RunID, cid containerruntime.ID) error {

@@ -446,8 +446,11 @@ container stopped, reads **exited** with the reason; stopping it removes it
 without taking control first, and closing the session is not blocked by it.
 If the exec helper died without recording an exit, jobs the command forked can
 still run, so the terminal stays unavailable with `execution control
-unavailable`, and stopping it or closing the session fails with that error
-until the container stops.
+unavailable` and `terminal stop` fails with that error. Closing or completing
+the session is not blocked: the terminal is recorded as lost with no exit
+status, and its leftover jobs are frozen or stopped with the session's
+container. Reopening a retained session resumes them. A lost terminal counts
+against the shell limit until its container stops.
 
 ## Limits
 
