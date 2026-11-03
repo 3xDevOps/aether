@@ -78,6 +78,9 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			slog.Warn("scheduler: release run without evidence", "run", run, "error", err)
 			return nil
 		}
+		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
+			return s.recordEvidenceUnavailable(ctx, run, err)
+		}
 	} else {
 		// cleanup removes the checkout: its work must be on the run branch.
 		req.Uncaptured = func(ctx context.Context, refusal error) error {
@@ -91,6 +94,24 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			return nil
 		}
 		packet, err = service.CaptureBeforeCleanup(ctx, req, cleanup)
+		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
+			// No retry can capture a checkout that is gone. Extra
+			// repositories may still hold work, so it is published before
+			// what remains of the run is removed.
+			if _, commitErr := s.commitAll(ctx, run, "wip: "+taskLine(r.Task)); commitErr != nil && !errors.Is(commitErr, gitengine.ErrCheckoutNotFound) {
+				return fmt.Errorf("scheduler: commit extra repositories: %w", commitErr)
+			}
+			if _, publishErr := s.cfg.Git.PublishRunBranch(ctx, run); publishErr != nil && !errors.Is(publishErr, gitengine.ErrCheckoutNotFound) {
+				return fmt.Errorf("scheduler: publish extra repositories: %w", publishErr)
+			}
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
+			cleanupErr := cleanup(cleanupCtx)
+			cancel()
+			if cleanupErr != nil {
+				return fmt.Errorf("scheduler: clean up session without checkout: %w", cleanupErr)
+			}
+			return s.recordEvidenceUnavailable(ctx, run, err)
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: capture evidence: %w", err)
@@ -347,6 +368,70 @@ func finishCaptureIdentity(generation, published, committed string, code int) st
 		return generation
 	}
 	return evidenceCommitIdentity(published, committed, code)
+}
+
+// recordEvidenceUnavailable settles a capture whose checkout is gone: the
+// run's reason says so instead of cleanup retrying forever. A run not yet
+// terminal carries the note into the reason its cleanup finishes with.
+func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.RunID, cause error) error {
+	if packets, ok := s.cfg.Store.(store.EvidencePacketStore); ok {
+		r, err := s.cfg.Store.GetRun(ctx, run)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+		}
+		// A retry's key can miss the packet this launch's capture already
+		// stored; that packet is the evidence.
+		before := ""
+	scan:
+		for {
+			page, err := packets.ListEvidencePackets(ctx, r.WorkspaceID, run, before, 100)
+			if err != nil {
+				return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+			}
+			for _, p := range page.Items {
+				if r.StartedAt != nil && p.CapturedAt.Before(*r.StartedAt) {
+					// Newest first: the rest belong to an earlier launch.
+					break scan
+				}
+				if p.Origin.Kind == store.EvidenceOriginServer &&
+					(strings.HasPrefix(p.IdempotencyKey, "finish:"+string(run)+":") ||
+						strings.HasPrefix(p.IdempotencyKey, "cleanup:"+string(run)+":")) {
+					return nil
+				}
+			}
+			if page.NextBefore == "" {
+				break
+			}
+			before = page.NextBefore
+		}
+	}
+	slog.Warn("scheduler: release session without evidence", "run", run, "error", cause)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+	}
+	if !r.Status.Terminal() {
+		if s.evidenceUnavailable == nil {
+			s.evidenceUnavailable = make(map[domain.RunID]struct{})
+		}
+		s.evidenceUnavailable[run] = struct{}{}
+		return nil
+	}
+	if _, noted := withoutEvidenceUnavailable(r.Reason); noted {
+		return nil
+	}
+	if err := s.relabelLocked(ctx, run, r.WorkspaceID, r.Status, withEvidenceUnavailable(r.Reason), ""); err != nil {
+		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+	}
+	return nil
 }
 
 func logEvidenceFailure(run domain.RunID, err error) {
