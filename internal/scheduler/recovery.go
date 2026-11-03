@@ -839,6 +839,16 @@ func (s *Scheduler) cleanupTerminalCreationKeyContainers(ctx context.Context) {
 			}
 			cid, ferr := s.cfg.Runtime.FindByCreationKey(ctx, string(r.ID))
 			if ferr != nil && !errors.Is(ferr, runtime.ErrNotFound) {
+				if r.Worktree == "" {
+					// A container never exists before the checkout is
+					// recorded, and the sweep clears that record only after
+					// capturing evidence and removing the checkout. Deferring
+					// cleanup here would demand evidence from a checkout that
+					// is already gone, on every sweep, and reserve the
+					// member's environment home while it retried.
+					slog.Warn("scheduler: skip creation-key lookup for a reclaimed checkout", "run", r.ID, "error", ferr)
+					continue
+				}
 				sc := sidecar{
 					RunID: string(r.ID), WorkspaceID: string(r.WorkspaceID),
 					DestroyPending: true, RunUser: unknownRecoveryRunUser,

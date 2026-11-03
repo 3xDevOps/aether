@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -2667,5 +2669,69 @@ func TestRecoveryAttachesRunningContainerWithoutWaiting(t *testing.T) {
 	}
 	if probe.inspectCount() != 1 {
 		t.Fatalf("recovery inspected %d times, want one", probe.inspectCount())
+	}
+}
+
+// A session whose checkout the sweep already reclaimed has nothing left to
+// clean up, and nothing left to capture evidence from. A runtime lookup
+// failure at boot must not hand it a deferred cleanup owner: that owner
+// demands evidence from the removed checkout on every sweep and reserves the
+// member's environment home as <unknown> while it retries.
+func TestCleanedTerminalRunGainsNoDeferredCleanupOwner(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = -time.Second
+		cfg.CheckoutTTL = time.Hour
+	})
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	e.sched.UseEvidence(capture)
+	run, _ := e.launchFake(t, "merged work")
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	finished := time.Now().UTC().Add(-2 * time.Hour)
+	row.FinishedAt = &finished
+	if err = e.db.UpdateRun(t.Context(), row); err != nil {
+		t.Fatalf("UpdateRun: %v", err)
+	}
+	e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
+	cleaned, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun after sweep: %v", err)
+	}
+	if cleaned.Worktree != "" {
+		t.Fatalf("worktree after cleanup = %q, want cleared", cleaned.Worktree)
+	}
+	if _, statErr := os.Stat(e.git.checkoutPath(run.ID)); !os.IsNotExist(statErr) {
+		t.Fatalf("checkout after cleanup: %v", statErr)
+	}
+	if _, serr := e.sched.readSidecar(run.ID); !os.IsNotExist(serr) {
+		t.Fatalf("cleanup ownership after cleanup: %v", serr)
+	}
+	captured := capture.requestCount()
+
+	// The checkout is gone, so every later capture fails as production did.
+	capture.refusal = fmt.Errorf("evidence: retain git state: %w", gitengine.ErrCheckoutNotFound)
+	e.rt.mu.Lock()
+	e.rt.findErr = errors.New("fake runtime: daemon unavailable")
+	e.rt.mu.Unlock()
+	e.sched.cleanupTerminalCreationKeyContainers(t.Context())
+
+	if sc, serr := e.sched.readSidecar(run.ID); serr == nil {
+		t.Fatalf("cleaned session regained cleanup ownership: %+v", sc)
+	}
+	e.sched.mu.Lock()
+	owner := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	if owner != nil {
+		t.Fatalf("cleaned session regained a lifecycle owner: destroy_pending=%v run_user=%q",
+			owner.destroyPending, owner.runUser)
+	}
+	e.sched.sweepRetained(t.Context())
+	if got := capture.requestCount(); got != captured {
+		t.Fatalf("evidence capture attempts %d -> %d, want none for a reclaimed checkout", captured, got)
 	}
 }
