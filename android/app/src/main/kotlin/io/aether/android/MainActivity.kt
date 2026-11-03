@@ -137,15 +137,26 @@ class MainActivity : ComponentActivity() {
     private var clearHistoryOnLoad = false
 
     /**
-     * Back walks the dashboard's own history and then leaves the app running:
-     * finishing would drop the terminal's scrollback on the way to the home
-     * screen. Where the platform does that itself the callback stands down at
-     * the root, so the predictive back-to-home animation runs.
+     * Back walks the dashboard's own history, then goes to the dashboard's
+     * home from a page opened with nothing behind it - a notification, a
+     * share, a link - and only from home leaves the app running: finishing
+     * would drop the terminal's scrollback on the way to the home screen.
+     * Where the platform does that itself the callback stands down at home,
+     * so the predictive back-to-home animation runs.
      */
     private val back =
         object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (gate?.isShown != true && web.canGoBack()) web.goBack() else moveTaskToBack(true)
+                val home = if (mode == ConnectionMode.EDGE) gatewayUrl else loaded
+                when {
+                    gate?.isShown == true -> moveTaskToBack(true)
+                    web.canGoBack() -> web.goBack()
+                    home != null && !atDashboardHome(web.url) -> {
+                        clearHistoryOnLoad = true
+                        web.loadUrl(home)
+                    }
+                    else -> moveTaskToBack(true)
+                }
             }
         }
 
@@ -815,8 +826,34 @@ class MainActivity : ComponentActivity() {
      * WebView actually has, wherever that history changes.
      */
     private fun syncBackCallback() {
-        if (platformBackgroundsUs) back.isEnabled = gate?.isShown != true && web.canGoBack()
+        if (platformBackgroundsUs) {
+            back.isEnabled = gate?.isShown != true && (web.canGoBack() || !atDashboardHome(web.url))
+        }
     }
+
+    /**
+     * The dashboard path a share opens, or null for any
+     * other intent. Another app can send one, so the path is held to
+     * [isDashboardPath], a share only ever prefills a prompt, and extras
+     * filled with a class this app lacks are no path at all.
+     */
+    private fun intentPath(intent: Intent?): String? =
+        try {
+            when (intent?.action) {
+                Intent.ACTION_SEND -> {
+                    val text =
+                        (intent.getCharSequenceExtra(Intent.EXTRA_TEXT) ?: intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT))
+                            ?.toString()
+                    if ((text?.trim()?.length ?: 0) > MAX_SHARED_CHARS) {
+                        Toast.makeText(this, getString(R.string.share_cut, MAX_SHARED_CHARS), Toast.LENGTH_LONG).show()
+                    }
+                    sharePath(text)
+                }
+                else -> null
+            }
+        } catch (_: RuntimeException) {
+            null
+        }
 
     private fun openSetup() {
         startActivity(Intent(this, SetupActivity::class.java))

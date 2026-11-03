@@ -95,3 +95,22 @@ fun popupNavigation(url: String, scheme: String?): Navigation =
         navigationFor(null, url, scheme, mainFrame = true) == Navigation.EXTERNAL -> Navigation.EXTERNAL
         else -> Navigation.DROP
     }
+
+/**
+ * Whether [url] is the dashboard's home: the root with no route in its
+ * query. The Edge gateway's `token` is not a route. Back leaves the app
+ * only from here; from any other page with no history behind it, back goes
+ * home first.
+ */
+fun atDashboardHome(url: String?): Boolean {
+    val uri =
+        try {
+            URI(url ?: return true)
+        } catch (_: URISyntaxException) {
+            return true
+        }
+    if (uri.scheme != "http" && uri.scheme != "https") return true
+    if (uri.rawPath != "/" && !uri.rawPath.isNullOrEmpty()) return false
+    val query = uri.rawQuery ?: return true
+    return query.split('&').all { it.isEmpty() || it.startsWith("token=") }
+}
