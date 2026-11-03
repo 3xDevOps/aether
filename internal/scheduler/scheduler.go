@@ -292,6 +292,14 @@ type credentialUserReservation struct {
 // always wins: a reservation that only mounts a login from home never blocks
 // a container whose home it is, while the owner's live containers and other
 // runs on the same login block a run on that login with another mapping.
+// holder names the reservation's owner in a conflict; the caller holds s.mu.
+func (r *credentialUserReservation) holder() string {
+	if r.run != nil && r.run.destroyPending {
+		return "session " + string(r.run.runID) + " (cleanup pending)"
+	}
+	return r.owner
+}
+
 func (r *credentialUserReservation) blocks(home, login domain.MemberID, user string) bool {
 	if r.user == user {
 		return false

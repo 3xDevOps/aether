@@ -139,10 +139,10 @@ func (s *Scheduler) reservationConflictLocked(home, login domain.MemberID, user,
 		}
 		if other.home == home {
 			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
-				home, other.owner, other.user, owner, user)
+				home, other.holder(), other.user, owner, user)
 		}
 		return fmt.Errorf("the login %s shares is held by %s as user %s, but %s resolved user %s; a session on a shared account must use the uid:gid of the owner's live containers and of other sessions on that login",
-			login, other.owner, other.user, owner, user)
+			login, other.holder(), other.user, owner, user)
 	}
 	return nil
 }
@@ -158,7 +158,7 @@ func (s *Scheduler) reserveTerminalUser(ctx context.Context, entry *terminalSupe
 	for other := range s.credentialUsers {
 		if other.blocks(entry.member, "", user) {
 			return withLookupError(fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
-				entry.member, other.owner, other.user, user), lookupErr)
+				entry.member, other.holder(), other.user, user), lookupErr)
 		}
 	}
 	reservation := &credentialUserReservation{

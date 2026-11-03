@@ -126,7 +126,7 @@ func TestUnknownReservationResolvesAtLaunch(t *testing.T) {
 	if err == nil {
 		t.Fatal("launch accepted while the pending container's identity is unknown")
 	}
-	for _, want := range []string{string(run.ID), unknownRecoveryRunUser, lookupErr.Error()} {
+	for _, want := range []string{"session " + string(run.ID) + " (cleanup pending)", unknownRecoveryRunUser, lookupErr.Error()} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("conflict %q does not name %q", err, want)
 		}
