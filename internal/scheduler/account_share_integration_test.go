@@ -175,9 +175,16 @@ var printLogin = []string{"sh", "-c", `sleep 1; printf 'harness-login:%s\n' "$(c
 // member, Grace, beside the test member Ada.
 func newShareDockerEnv(t *testing.T, claude []string) (*testEnv, *runtime.Docker, *client.Client, *domain.Member) {
 	t.Helper()
+	return newShareDockerEnvOn(t, claude, "none", "")
+}
+
+// newShareDockerEnvOn is newShareDockerEnv with the runs on network and, when
+// image is set, from image.
+func newShareDockerEnvOn(t *testing.T, claude []string, network, image string) (*testEnv, *runtime.Docker, *client.Client, *domain.Member) {
+	t.Helper()
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
-		runtime.WithNetworkMode("none"),
+		runtime.WithNetworkMode(network),
 	)
 	if err != nil {
 		t.Fatalf("NewDocker: %v", err)
@@ -195,6 +202,9 @@ func newShareDockerEnv(t *testing.T, claude []string) (*testEnv, *runtime.Docker
 		// An argv override keeps the shipped claude profile, whose login
 		// path is .claude/.credentials.json.
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: claude}}
+		if image != "" {
+			cfg.StandardImage = image
+		}
 	})
 	owner := &domain.Member{DisplayName: "Grace", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
 	if err = e.db.CreateMember(t.Context(), owner); err != nil {
