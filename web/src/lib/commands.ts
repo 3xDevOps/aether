@@ -618,7 +618,7 @@ export function closeCommand(runID: string, outcome: 'merged' | 'abandoned'): Co
 
 /** A run whose agent reported success and that its owner has not marked complete. */
 function completable(run: RunRecord): boolean {
-  return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review === undefined)
+  return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review === undefined && !run.review_changed_at)
 }
 
 /** Older agent-report finishes can still have a retained interactive runtime. */

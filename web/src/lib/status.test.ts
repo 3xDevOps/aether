@@ -64,6 +64,17 @@ describe('run presentation', () => {
   const ctx = stateContext()
   const shown = (over: Parameters<typeof run>[0]) => presentRun(toRecord(run(over)), ctx)
 
+  it('reads a success answered Not yet as an ordinary idle session, even when the snapshot omits the empty review', () => {
+    const notYet = { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review_changed_at: '2026-08-14T10:10:00Z' } as const
+    for (const review of ['', undefined] as const) {
+      const presented = shown({ ...notYet, review })
+      expect(presented).toMatchObject({ state: 'answered', reason: 'Not finished yet: you chose Not yet' })
+      expect(groupOf(presented)).toBe('working')
+    }
+    expect(shown({ ...notYet, review: 'ready' }).state).not.toBe('answered')
+    expect(shown({ ...notYet, review_changed_at: undefined }).state).not.toBe('answered')
+  })
+
   it('maps every wire status and activity to its state', () => {
     expect(shown({ status: 'queued' })).toEqual({ state: 'working', reason: 'Queued' })
     expect(shown({ status: 'provisioning' })).toEqual({ state: 'working', reason: 'Starting' })

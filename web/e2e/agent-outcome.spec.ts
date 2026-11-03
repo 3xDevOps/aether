@@ -80,7 +80,7 @@ test('a reported success waits in Needs you until answered, Not yet withdraws it
   await prompt.getByRole('button', { name: 'Review now' }).click()
   await prompt.getByRole('button', { name: 'Not yet' }).click()
   await expect(prompt).toHaveCount(0)
-  await expect.poll(async () => (await read()).review).toBe('')
+  await expect.poll(async () => (await read()).review ?? '').toBe('')
   const composer = page.getByRole('textbox', { name: 'Message the agent' })
   await expect(composer).toBeFocused()
   await expect(composer).toHaveAttribute('placeholder', 'Say what is left to do')

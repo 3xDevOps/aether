@@ -66,9 +66,12 @@ export function liveStateOf(status: 'running' | 'needs-attention', state: string
   return status === 'needs-attention' ? 'ended' : 'running'
 }
 
-/** A reported success its owner answered Not yet: the session reads idle until the agent reports success again. */
-export function notFinishedYet(run: Pick<RunRecord, 'status' | 'state' | 'review'>): boolean {
-  return !isTerminal(run.status) && run.state === 'finished' && run.review === ''
+/**
+ * A reported success its owner answered Not yet: the session reads idle until the agent reports success again.
+ * The wire omits an empty review; its change time tells Not yet from an older server that sends neither.
+ */
+export function notFinishedYet(run: Pick<RunRecord, 'status' | 'state' | 'review' | 'review_changed_at'>): boolean {
+  return !isTerminal(run.status) && run.state === 'finished' && !run.review && Boolean(run.review_changed_at)
 }
 
 const stateReasons: Record<LiveState, string> = {
