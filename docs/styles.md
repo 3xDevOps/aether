@@ -315,18 +315,23 @@ the window fades in over its first 32px (a mask, not a colour). Strips (folded F
 in the state's text colour, neighbours of one colour drawn as one; each
 stretch is at least 1/300 of the window, so a brief failure still shows.
 
-Links use the categorical series by meaning:
+Mail marks and links use the categorical series by meaning:
 
-| Link | Colour | Style | Ends |
+| Mark or link | Colour | Style | Ends |
 | --- | --- | --- | --- |
-| Agent message | `text-series-5` | dotted, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a chip with the kind glyph and count |
+| Agent message, at rest | `text-series-5` | sent: 5.5px filled dot with a 1px `--canvas` halo; received: 6px `--canvas` ring, 1.5px stroke; 2px outside the bar edge facing the other lane | a `text-ui-xs` tabular count on a `--canvas` halo when marks merge |
+| Agent message, focused lane | `text-series-5` | solid 1.5px, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a count chip on bundles |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
-Links and their chips draw under the bars and labels, over the hover and
-selection fills; only their 10px hit paths sit above. Hovering or selecting a
-lane keeps its links in colour and turns every other link `text-icon-faint`;
-nothing uses opacity. The axis is 28px with `text-ui-xs` muted tabular labels
+Marks sit above the bars with 16px hit targets. Links and their chips draw
+under the bars and labels, over the hover and selection fills; only their
+10px hit paths sit above. A focused lane's marks give way to its links and
+every other mark turns `text-icon-faint`. Label chips are 16px
+`rounded-chip`, `border-series-5` on `bg-raised` with the `MessageSquare`
+glyph, left of the age. A mark added after the view opens fades in once with
+`motion-safe:animate-fade-in`; nothing loops. Tree focus without hover or a
+popover takes the `bg-hover` row fill, like hover. nothing uses opacity. The axis is 28px with `text-ui-xs` muted tabular labels
 over dashed `border-seam` gridlines, dropping any label within 48px of the
 now chip; the now line is 1px `bg-icon-faint` under a neutral `bg-raised`
 **now** chip, never accent. The label column is 240px, 48px under 768px. Lanes that change

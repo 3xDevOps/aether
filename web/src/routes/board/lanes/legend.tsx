@@ -17,19 +17,31 @@ const bars: { label: string; className: string }[] = [
   { label: 'History not loaded', className: barFill('unloaded') },
 ]
 
-function Line({ className, dash, cap, head, tail }: { className: string; dash?: string; cap?: 'round'; head?: 'filled' | 'hollow'; tail?: 'dot' }) {
+function Line({ className, dash, head, tail }: { className: string; dash?: string; head?: 'filled' | 'hollow'; tail?: 'dot' }) {
   return (
     <svg aria-hidden viewBox="0 0 40 10" className={cn('h-2.5 w-10 shrink-0', className)}>
-      <path d="M4 5H32" fill="none" stroke="currentColor" strokeWidth={1.5} strokeDasharray={dash} strokeLinecap={cap} />
+      <path d="M4 5H32" fill="none" stroke="currentColor" strokeWidth={1.5} strokeDasharray={dash} />
       {tail && <circle cx={4} cy={5} r={2} fill="currentColor" stroke="currentColor" strokeWidth={1.25} />}
       {head && <polygon points="38,5 32,1.5 32,8.5" fill={head === 'hollow' ? 'var(--raised)' : 'currentColor'} stroke="currentColor" strokeWidth={1} strokeLinejoin="round" />}
     </svg>
   )
 }
 
+function Mark({ sent }: { sent: boolean }) {
+  return (
+    <svg aria-hidden viewBox="0 0 40 10" className={cn('h-2.5 w-10 shrink-0', edgeTone.message)}>
+      {sent
+        ? <circle cx={20} cy={5} r={2.75} fill="currentColor" />
+        : <circle cx={20} cy={5} r={3} fill="var(--raised)" stroke="currentColor" strokeWidth={1.5} />}
+    </svg>
+  )
+}
+
 const lines = [
-  { label: 'Agent message, acknowledged', line: <Line className={edgeTone.message} dash="0.5 3" cap="round" tail="dot" head="filled" /> },
-  { label: 'Agent message, not acknowledged', line: <Line className={edgeTone.message} dash="0.5 3" cap="round" tail="dot" head="hollow" /> },
+  { label: 'Agent message sent, on the edge facing the recipient', line: <Mark sent /> },
+  { label: 'Agent message received, on the edge facing the sender', line: <Mark sent={false} /> },
+  { label: 'Focused session\'s message, acknowledged', line: <Line className={edgeTone.message} tail="dot" head="filled" /> },
+  { label: 'Focused session\'s message, not acknowledged', line: <Line className={edgeTone.message} tail="dot" head="hollow" /> },
   { label: 'Edits the same files (selected session)', line: <Line className={edgeTone.overlap} dash="4 2" /> },
 ]
 
@@ -69,7 +81,8 @@ export function Legend() {
             </li>
           ))}
         </ul>
-        <h3 className="mt-3 text-ui-sm font-medium">Links</h3>
+        <h3 className="mt-3 text-ui-sm font-medium">Messages and overlaps</h3>
+        <p className="mt-1.5 text-ui-sm text-muted">Hover, focus or select a session to draw its messages as links; its popover lists them by session.</p>
         <ul className="mt-1.5 grid gap-1 text-ui-sm">
           {lines.map((item) => (
             <li key={item.label} className="flex items-center gap-2">

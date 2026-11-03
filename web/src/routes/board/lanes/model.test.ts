@@ -1,7 +1,8 @@
 import type { StateContext } from '@/lib/needs-you'
 import type { Event, Run } from '@/lib/types'
 import { agoLabel, tickStep, ticks, widerWindow, windowSpan } from '@/routes/board/lanes/axis'
-import { laneEdges, mailOf } from '@/routes/board/lanes/edges'
+import { laneEdges, mailOf, type LaneEdge } from '@/routes/board/lanes/edges'
+import { conversationWords, conversationsByLane, mailMarks } from '@/routes/board/lanes/mail'
 import { buildLanes, layoutLanes, fineMetrics, type LanesInput, type FamilyLane, type RunLane } from '@/routes/board/lanes/model'
 import { runSegments, segmentTone, statusChanges, strongest } from '@/routes/board/lanes/segments'
 import { mapRuns } from '@/routes/board/selectors'
@@ -261,5 +262,46 @@ describe('laneEdges', () => {
       window: { start: now - 60 * min, end: now }, now, bucket: 5 * min, overlaps: {}, hidden: new Set(),
     })
     expect(edge.messages).toMatchObject({ ids: ['m1', 'm2'], senders: ['a', 'b'] })
+  })
+
+  it('keeps mail with a session outside the view, at its drawn end', () => {
+    const ctx = ctxOf([run({ id: 'a', created_at: at(0) })])
+    const model = buildLanes(input(ctx))
+    const sent: Event = {
+      id: 'm', seq: 1, time: at(30), workspace_id: workspace.id, run_id: 'a', actor_id: '', type: 'coord.message',
+      payload: { message_id: 'm', workspace_id: workspace.id, from_run_id: 'a', to_run_id: 'away', kind: 'message' },
+    }
+    const [edge] = laneEdges({ drawn: model.drawn, mail: mailOf([sent]), window: { start: now - 60 * min, end: now }, now, bucket: 5 * min, overlaps: {}, hidden: new Set() })
+    expect(edge).toMatchObject({ outside: 'away', from: { lane: model.drawn.get('a') }, to: { lane: '', run: 'away' } })
+  })
+})
+
+describe('mail', () => {
+  const edge = (key: string, from: string, to: string, t: number, ids: string[], acked = false, outside?: string): LaneEdge => ({
+    key, kind: 'message', from: { lane: from, run: `run-${from || outside}`, t }, to: { lane: to, run: `run-${to || outside}`, t }, outside,
+    messages: { ids, senders: [`run-${from}`], acked },
+  })
+  const order = new Map([['a', 0], ['b', 1], ['c', 2]])
+
+  it('marks both ends on the edges that face each other, and merges marks that crowd one edge', () => {
+    const marks = mailMarks([edge('1', 'a', 'c', 10, ['m1']), edge('2', 'b', 'c', 14, ['m2', 'm3']), edge('3', 'c', 'a', 40, ['m4'])], order, (t) => t)
+    expect(marks.map((m) => [m.lane, m.side, m.sent, m.x, m.count])).toEqual([
+      ['a', 'bottom', true, 10, 1],
+      ['a', 'bottom', false, 40, 1],
+      ['b', 'bottom', true, 14, 2],
+      ['c', 'top', false, 10, 3],
+      ['c', 'top', true, 40, 1],
+    ])
+  })
+
+  it('marks only the drawn end of mail with a session outside the view, on its top edge', () => {
+    expect(mailMarks([edge('1', '', 'b', 5, ['m1'], false, 'away')], order, (t) => t).map((m) => [m.lane, m.side, m.sent])).toEqual([['b', 'top', false]])
+  })
+
+  it('groups each lane\'s mail by the other session and words it for screen readers', () => {
+    const talks = conversationsByLane([edge('1', 'a', 'b', 1, ['m1', 'm2']), edge('2', 'b', 'a', 2, ['m3'], true), edge('3', 'a', '', 3, ['m4'], false, 'away')])
+    expect(talks.get('a')!.map((c) => [c.lane || c.run, c.sent, c.received, c.unacked])).toEqual([['b', 2, 1, 2], ['run-away', 1, 0, 1]])
+    expect(conversationWords(talks.get('a')!, (c) => c.lane || 'Outside')).toBe('messages: sent 2 to b and received 1 from b, sent 1 to Outside, 3 not acknowledged')
+    expect(talks.has('')).toBe(false)
   })
 })

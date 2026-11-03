@@ -1585,9 +1585,9 @@ Map's scope picker (labelled **Lanes workspace scope**), **Mine** and
 - **Time window**: 1h, 6h, 24h or 7d. Without a choice it opens on 1h while
   any session is working, else 6h. Ctrl/Cmd-scroll zooms around the pointer and
   the control then reads **Custom**.
-- **Show**: which links to draw (Agent messages, Overlaps).
+- **Show**: which relationships to draw (Agent messages, Overlaps).
 - **Group lanes by**: status or owner.
-- **Legend**: every bar fill and link style with its meaning.
+- **Legend**: every bar fill, mail mark and link style with its meaning.
 - **Now**, shown only after panning into the past. While the window ends at
   now it follows now.
 
@@ -1623,23 +1623,40 @@ callout shows the server's error with **Retry**. A working bar has a 2px end
 cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
 tag. Finished bars add "took 18m" after their end when there is room.
 
-**Links.** Mail between sessions
-(`coord.message`, bundled per lane pair within 24px, its glyph naming a
-question, reply or report, the arrowhead hollow until every message is
-acknowledged) and, for the hovered or selected session only, file overlaps at the
-now line. A link into a folded family or Finished attaches to its header.
-Hovering or selecting a lane keeps its links in colour and greys the rest.
-Clicking a link opens its facts; a mail link reads the bodies through
-`coord.messages.list` (the thread, else each sender's newest page, since a
-link into a folded lane can bundle several senders) and shows them with
-`MessageRow`. [Styles: Lanes](styles.md#lanes) has the colour coding.
+**Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
+pair within 24px) draws as marks, not links: a dot on the sender's bar and a
+ring on the recipient's, at the send time, on the bar edge facing the other
+lane. Marks within 8px on one edge merge and show their message count. Mail
+into a folded family or Finished marks its header. Mail with a session that
+has no lane in this view (another workspace, hidden by **Mine**) keeps its
+drawn end, marked on the top edge. A mark's tooltip names the direction, the
+other session, the time and whether the recipient has acknowledged it.
+Each lane's accessible name ends with its mail, such as "messages: sent 2 to
+Reviewer and received 1 from Reviewer, 2 not acknowledged".
+Mail is not parentage: subsessions show as a family, and nothing draws
+dependencies.
+
+Hovering, focusing or selecting a lane draws its mail as solid links (a dot
+at the sender, an arrowhead at the recipient, hollow until every bundled
+message is acknowledged) and greys every other mark. Chips on the lanes'
+labels count that mail from the focused lane's side: `↔ 3` on the focused
+lane (sessions it talks with), `→2 ←1` on each of them. Sessions past the
+scrolled rows get a pinned **↑**/**↓** button that moves to them, and mail with
+sessions outside the view gets a dashed note. File overlaps draw for the
+focused lane only, at the now line. Clicking a mark or link opens its facts;
+a mail link reads the bodies through `coord.messages.list` (the thread, else
+each sender's newest page, since a mark on a folded lane can bundle several
+senders) and shows them with `MessageRow`. [Styles: Lanes](styles.md#lanes)
+has the colour coding.
 
 **Popovers.** Clicking a bar or pressing Enter on a lane opens its popover:
 "agent · state · elapsed", the title, the reason, next step, branch and diff,
 unread mail, pending inputs, overlaps and the state span under the pointer,
 then the card's primary action (Reply opens the same composer as a card),
 **Open session** and, for Enhanced sessions, **Show agents**, then the
-lane's **Links**, each opening the same facts as clicking that link. A popover whose lane leaves the view, as when its session folds
+lane's **Messages** by session (`→ sent 2 · ← received 1`, then each bundle with
+its direction, time and "not acknowledged"; a session's name moves to its
+lane) and any overlaps, each opening the same facts as clicking its link. A popover whose lane leaves the view, as when its session folds
 into Finished, closes and puts focus on the lane that now draws the session. Show
 agents inserts the session's subagents as sub-lanes: from the live session when
 the session is open elsewhere in this tab, else from one `run.acp.history` page of
@@ -1650,7 +1667,8 @@ subagent. Escape closes and returns focus to the lane.
 and Down move, Home and End jump, Right opens a section, a family or a session's
 agents (or moves into it), Left closes it or moves to its parent, Enter or
 Space opens the popover or toggles a header, and `o` and `r` open and reply as
-on a card; links open from a lane's popover. The axis is a separate tab stop,
+on a card. Focusing a lane draws its mail as links and
+chips, and its popover lists every message, so nothing depends on hover. The axis is a separate tab stop,
 **Timeline window**: Left and Right pan by a tenth, `+` and `-` zoom, `0` or
 Home return to now. A polite status line announces sessions that turn Needs you,
 Failed, Ready for review or Completed, gathered for 1.5s and at most three at

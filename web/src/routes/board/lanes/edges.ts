@@ -16,6 +16,8 @@ export interface LaneEdge {
   /** Bundled mail: every message id, its sending runs, whether all were acknowledged, and the kind when they share one. */
   messages?: { ids: string[]; senders: string[]; acked: boolean; kind?: RunMessageKind; correlation?: string }
   files?: string[]
+  /** Mail with a session that has no lane in this view: that run's ID; its end's lane is empty. */
+  outside?: string
 }
 
 export interface EdgesInput {
@@ -47,7 +49,7 @@ export function mailOf(events: Event[]): Mail {
   return { sent, acked }
 }
 
-/** Every relationship between drawn lanes; an edge whose ends share one lane is dropped. */
+/** Every relationship between drawn lanes; an edge whose ends share one lane is dropped, and mail with an undrawn session keeps its drawn end. */
 export function laneEdges(input: EdgesInput): LaneEdge[] {
   const { drawn, hidden } = input
   const out: LaneEdge[] = []
@@ -65,13 +67,16 @@ export function laneEdges(input: EdgesInput): LaneEdge[] {
     const { acked } = input.mail
     const bundles = new Map<string, LaneEdge>()
     for (const { t, payload: p } of input.mail.sent) {
-      const from = end(p.from_run_id, t)
-      const to = end(p.to_run_id, t)
-      if (!from || !to || from.lane === to.lane || t < input.window.start || t > input.window.end) continue
-      const key = `message:${from.lane}>${to.lane}@${Math.floor(t / input.bucket)}`
+      const drawnFrom = end(p.from_run_id, t)
+      const drawnTo = end(p.to_run_id, t)
+      if ((!drawnFrom && !drawnTo) || drawnFrom?.lane === drawnTo?.lane || t < input.window.start || t > input.window.end) continue
+      const outside = !drawnFrom ? p.from_run_id : !drawnTo ? p.to_run_id : undefined
+      const from = drawnFrom ?? { lane: '', run: p.from_run_id, t }
+      const to = drawnTo ?? { lane: '', run: p.to_run_id, t }
+      const key = `message:${from.lane || from.run}>${to.lane || to.run}@${Math.floor(t / input.bucket)}`
       const bundle = bundles.get(key)
       if (!bundle) {
-        bundles.set(key, { key, kind: 'message', from, to, messages: { ids: [p.message_id], senders: [p.from_run_id], acked: acked.has(p.message_id), kind: p.kind, correlation: p.correlation_id } })
+        bundles.set(key, { key, kind: 'message', from, to, outside, messages: { ids: [p.message_id], senders: [p.from_run_id], acked: acked.has(p.message_id), kind: p.kind, correlation: p.correlation_id } })
         continue
       }
       const m = bundle.messages!

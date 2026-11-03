@@ -1,6 +1,5 @@
 import { memo } from 'react'
 import { TriangleAlert } from '@/components/icons'
-import { MessageKindGlyph } from '@/components/messages/message-row'
 import { cn } from '@/lib/utils'
 import { xOf } from '@/routes/board/lanes/axis'
 import type { LaneEdge } from '@/routes/board/lanes/edges'
@@ -54,7 +53,7 @@ export function edgeShape(edge: LaneEdge, a: EdgeAnchor, b: EdgeAnchor, g: LaneG
   }
 }
 
-const dash: Partial<Record<LaneEdge['kind'], string>> = { message: '0.5 3', overlap: '4 2' }
+const dash: Partial<Record<LaneEdge['kind'], string>> = { overlap: '4 2' }
 
 export interface DrawnEdge {
   edge: LaneEdge
@@ -75,7 +74,7 @@ export function drawEdges(edges: LaneEdge[], anchors: Map<string, EdgeAnchor>, g
   return out.sort((x, y) => Number(x.near) - Number(y.near))
 }
 
-/** Strokes, ends and marks; drawn under the lanes so bars and labels stay readable. */
+/** Links for the focused lane's mail, a picked link and overlaps, with their ends and counts; drawn under the lanes so bars and labels stay readable. */
 export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { shapes: DrawnEdge[]; g: LaneGeometry; height: number }) {
   return (
     <>
@@ -98,9 +97,8 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
       </svg>
       {shapes.map(({ edge, shape, tone }) => {
         const count = edge.messages && edge.messages.ids.length > 1 ? edge.messages.ids.length : undefined
-        const kind = edge.messages?.kind && edge.messages.kind !== 'message' ? edge.messages.kind : undefined
         const files = edge.kind === 'overlap' ? edge.files?.length : undefined
-        if (!count && !kind && !files) return null
+        if (!count && !files) return null
         return (
           <span
             key={`${edge.key}:mark`}
@@ -108,7 +106,6 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
             className={cn('pointer-events-none absolute flex h-4 -translate-x-1/2 -translate-y-1/2 items-center gap-0.5 rounded-chip border border-seam bg-raised px-1 text-ui-xs tabular-nums', tone)}
             style={{ left: g.labelWidth + shape.mid.x, top: shape.mid.y }}
           >
-            {kind && <MessageKindGlyph kind={kind} />}
             {files !== undefined && <TriangleAlert className="size-3" />}
             {count ?? files}
           </span>
