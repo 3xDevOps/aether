@@ -250,7 +250,8 @@ func (s *Service) settle(ctx context.Context) error {
 			if child.Branch != "" {
 				msg += "\nIts branch: " + child.Branch
 			}
-			if err := s.notify(ctx, c.RunID, c.ParentRunID, msg, "child-ended:"+string(c.RunID)); err != nil {
+			// A notice saved under this key with an older body still told the parent.
+			if err := s.notify(ctx, c.RunID, c.ParentRunID, msg, "child-ended:"+string(c.RunID)); err != nil && !errors.Is(err, store.ErrIdempotencyConflict) {
 				continue
 			}
 		}

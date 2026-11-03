@@ -777,3 +777,28 @@ func TestParentIsToldOncePerIdleSpell(t *testing.T) {
 		t.Fatalf("notices after a second spell = %+v, errors %v; want 2", h.mail.sent, h.mail.errs)
 	}
 }
+
+func TestEndNoticeSavedWithAnOlderBodyCounts(t *testing.T) {
+	h := newHarness(t)
+	h.mail.db = h.db
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	child := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	h.settle()
+	if _, err := h.db.AppendRunMessageCreated(h.ctx, &store.RunMessage{WorkspaceID: parent.WorkspaceID, FromRun: domain.RunID(child.RunID), ToRun: parent.ID,
+		Kind: store.RunMessageKindMessage, Body: "an earlier server's wording", IdempotencyKey: "child-ended:" + child.RunID}, protocol.CoordMaxUnread); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(child.RunID), domain.RunFailed, "agent exited 1", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	c, err := h.db.GetChild(h.ctx, domain.RunID(child.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.EndNotified {
+		t.Fatal("an end notice saved under the same key with an older body is retried forever")
+	}
+}
