@@ -240,3 +240,13 @@ func TestCheckoutGCSettlesMissingCheckout(t *testing.T) {
 		t.Fatalf("after gc: worktree %q, reason %q; want cleared with %q", fresh.Worktree, fresh.Reason, evidenceUnavailableReason)
 	}
 }
+
+func TestEvidenceNoteKeepsTheReasonsCause(t *testing.T) {
+	t.Parallel()
+	cause := "exec: \"claude\": executable file not found"
+	got := publicRunStatusReason(withEvidenceUnavailable("provisioning: " + strings.Repeat("step ", 60) + cause))
+	if !strings.HasSuffix(got, "; "+evidenceUnavailableReason) || !strings.Contains(got, cause) ||
+		len([]rune(got)) > maxPublicRunStatusReason {
+		t.Fatalf("public reason = %q, want the cause and the note within %d runes", got, maxPublicRunStatusReason)
+	}
+}

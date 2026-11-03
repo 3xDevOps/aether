@@ -67,7 +67,9 @@ func publicRunStatusReason(reason string) string {
 		// Redaction and the length cap apply to the reason, never the note.
 		public := []rune(publicRunStatusReason(base))
 		if room := maxPublicRunStatusReason - len("; "+evidenceUnavailableReason); len(public) > room {
-			public = public[:room]
+			head := room * 2 / 5
+			tail := room - head - 5
+			public = append(append(public[:head:head], []rune(" ... ")...), public[len(public)-tail:]...)
 		}
 		return withEvidenceUnavailable(string(public))
 	}
