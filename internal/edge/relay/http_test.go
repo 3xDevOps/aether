@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/textproto"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,4 +256,73 @@ func TestUniversalRefusesAnOlderServer(t *testing.T) {
 	if w.Code != http.StatusNotImplemented || strings.TrimSpace(w.Body.String()) != want {
 		t.Fatalf("universal request to a protocol-2 server: %d %q, want 501 %q", w.Code, w.Body.String(), want)
 	}
+}
+
+// holdData answers every request on each data socket a attaches with an
+// empty JSON body once release is closed, after sending to the returned
+// channel.
+func holdData(t *testing.T, a *agent, release <-chan struct{}) <-chan struct{} {
+	held := make(chan struct{}, 64)
+	go func() {
+		for {
+			select {
+			case nc := <-a.data:
+				go func() {
+					br := bufio.NewReader(nc)
+					for {
+						req, err := http.ReadRequest(br)
+						if err != nil {
+							return
+						}
+						_, _ = io.Copy(io.Discard, req.Body)
+						held <- struct{}{}
+						<-release
+						if _, err := io.WriteString(nc, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"); err != nil {
+							return
+						}
+					}
+				}()
+			case <-t.Context().Done():
+				return
+			}
+		}
+	}()
+	return held
+}
+
+// A request that waits past HTTPConnWait for one of its server's busy
+// connections is refused with 503, naming the limit.
+func TestHTTPConnWait(t *testing.T) {
+	e := newEnv(t)
+	e.r.httpConnWait = 200 * time.Millisecond
+	a := claimedAgent(t, e)
+	release := make(chan struct{})
+	held := holdData(t, a, release)
+	var wg sync.WaitGroup
+	for range edgeproto.MaxHTTPConnsPerServer {
+		wg.Go(func() {
+			if resp, err := http.Post(e.base+edgeproto.MCPPath(a.id), "application/json", strings.NewReader("{}")); err == nil {
+				_ = resp.Body.Close()
+			}
+		})
+	}
+	for range edgeproto.MaxHTTPConnsPerServer {
+		<-held
+	}
+	start := time.Now()
+	resp, err := http.Post(e.base+edgeproto.MCPPath(a.id), "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	want := "this server already has 8 MCP connector requests in progress through the edge; retry shortly"
+	if resp.StatusCode != http.StatusServiceUnavailable || strings.TrimSpace(string(body)) != want {
+		t.Errorf("a request past the busy connections: %s %q, want 503 %q", resp.Status, body, want)
+	}
+	if waited := time.Since(start); waited < e.r.httpConnWait {
+		t.Errorf("refused after %s, before the %s wait", waited, e.r.httpConnWait)
+	}
+	close(release)
+	wg.Wait()
 }

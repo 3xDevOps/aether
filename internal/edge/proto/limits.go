@@ -11,7 +11,8 @@ const (
 	// MaxSSHConnsPerServer stays below sshd's relayed handshake budget.
 	MaxSSHConnsPerServer = 48
 	// MaxHTTPConnsPerServer bounds a server's KindHTTP connections, apart
-	// from its SSH connections. Each carries one request at a time.
+	// from its SSH connections. Each carries one request at a time; a
+	// request past them waits up to HTTPConnWait for one to come free.
 	MaxHTTPConnsPerServer  = 8
 	MaxConnsPerDevice      = 16
 	MaxUnclaimedPerAddress = 3
@@ -20,6 +21,11 @@ const (
 	// AttachDeadline is how long the edge waits for a data socket after
 	// sending open.
 	AttachDeadline = 10 * time.Second
+	// HTTPConnWait is how long a request waits for one of its server's
+	// KindHTTP connections before the edge refuses it with 503. It is
+	// longer than AttachDeadline, so a connection being opened for it
+	// attaches or fails first.
+	HTTPConnWait = 15 * time.Second
 	// HTTPIdleTimeout is how long the edge keeps an idle KindHTTP
 	// connection for the next request. A server keeps one open longer,
 	// so it is the edge that closes an idle one, never a request in

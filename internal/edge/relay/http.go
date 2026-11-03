@@ -8,9 +8,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/http/httputil"
 	"net/netip"
 	"strings"
+	"time"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
@@ -159,6 +161,13 @@ func (r *Relay) Version(serverID string) int {
 }
 
 func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID string, body []byte, browser string) {
+	client := req
+	ctx, cancel := context.WithCancelCause(req.Context())
+	defer cancel(nil)
+	queued := time.AfterFunc(r.httpConnWait, func() { cancel(errHTTPLimit) })
+	defer queued.Stop()
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { queued.Stop() }})
+	req = req.WithContext(ctx)
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
@@ -177,8 +186,8 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID strin
 		},
 		Transport:     r.http,
 		FlushInterval: -1,
-		ErrorHandler: func(_ http.ResponseWriter, out *http.Request, err error) {
-			r.refuseHTTP(w, out, serverID, err)
+		ErrorHandler: func(_ http.ResponseWriter, _ *http.Request, err error) {
+			r.refuseHTTP(w, client, serverID, err)
 		},
 	}
 	proxy.ServeHTTP(&responseFilter{ResponseWriter: w}, req)

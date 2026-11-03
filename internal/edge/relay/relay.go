@@ -143,6 +143,7 @@ type Relay struct {
 
 	// Durations, rates and limits that tests shorten.
 	attachDeadline     time.Duration
+	httpConnWait       time.Duration
 	unclaimedTTL       time.Duration
 	pingInterval       time.Duration
 	idleTimeout        time.Duration
@@ -210,6 +211,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		budget:             cfg.EgressBudget,
 		flushed:            make(chan struct{}),
 		attachDeadline:     edgeproto.AttachDeadline,
+		httpConnWait:       edgeproto.HTTPConnWait,
 		unclaimedTTL:       edgeproto.UnclaimedTTL,
 		pingInterval:       edgeproto.PingInterval,
 		idleTimeout:        edgeproto.ControlIdleTimeout,
@@ -229,6 +231,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 	}
 	r.http = &http.Transport{
 		DialContext:         r.dialHTTP,
+		MaxConnsPerHost:     edgeproto.MaxHTTPConnsPerServer,
 		MaxIdleConnsPerHost: edgeproto.MaxHTTPConnsPerServer,
 		IdleConnTimeout:     edgeproto.HTTPIdleTimeout,
 		DisableCompression:  true,
