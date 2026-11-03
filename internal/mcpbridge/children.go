@@ -31,8 +31,9 @@ func registerChildTools(ctx context.Context, srv *mcp.Server, socket string) {
 	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "aether_subsession_start",
-		Description: "Dispatch a fresh-context subsession on any installed agent and model, from your last published commit (commit first). Use it instead of your own subagents for a complex task that splits into parallel parts and benefits from completely fresh-context sessions, which can orchestrate their own subagents: a dispatch-and-forget shortcut for firing off part of a very complex task, or for when the user asks for session orchestration. A child cannot start children. " +
-			"The subsession sees only task, so include everything it needs. Its report arrives in aether_inbox and wakes you; follow the receipt's next. " +
+		Description: "Start a subsession: a separate Aether session with a fresh context and its own container and branch from your last published commit (commit first), on any installed agent and model, on your session owner's own account. " +
+			"Use one for what your own subagents cannot give: another agent or model, a separate branch or build, long work that would crowd out your context, or an independent review; do quick or tightly coupled work yourself. " +
+			"The subsession sees only task: state the goal, the files it owns and must not touch, how to verify and what to report, with repository-relative paths. Its report arrives in aether_inbox and wakes you; follow the receipt's next. A subsession cannot start subsessions. " +
 			"Honor the number of subsessions and the agents the user asks for. A retry with the same idempotency_key returns the first receipt.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.ChildStartParams) (*mcp.CallToolResult, protocol.ChildReceipt, error) {
 		var out protocol.ChildReceipt
