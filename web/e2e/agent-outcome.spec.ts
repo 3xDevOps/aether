@@ -96,8 +96,8 @@ test('Mark complete closes a reported success as completed', async ({ page, aeth
   await page.goto(alice.url)
   const card = (column: string) =>
     page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
-  await expect(card('Needs you')).toBeVisible({ timeout: 180_000 })
-  await card('Needs you').click({ position: { x: 16, y: 12 } })
+  await expect(card('Finished').getByRole('img', { name: 'Finished: review' })).toBeVisible({ timeout: 180_000 })
+  await card('Finished').click({ position: { x: 16, y: 12 } })
   const prompt = page.getByRole('region', { name: 'Completion' })
   await prompt.getByRole('button', { name: 'Mark complete' }).click()
   await expect(prompt).toHaveCount(0)
@@ -120,8 +120,8 @@ test('a completed run inside its grace relaunches from the composer and its grac
   await page.goto(alice.url)
   const card = (column: string) =>
     page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
-  await expect(card('Needs you')).toBeVisible({ timeout: 180_000 })
-  await card('Needs you').click({ position: { x: 16, y: 12 } })
+  await expect(card('Finished').getByRole('img', { name: 'Finished: review' })).toBeVisible({ timeout: 180_000 })
+  await card('Finished').click({ position: { x: 16, y: 12 } })
   await page.getByRole('region', { name: 'Completion' }).getByRole('button', { name: 'Mark complete' }).click()
   await expect.poll(async () => (await read()).status, { timeout: 60_000 }).toBe('completed')
   const closed = await read()

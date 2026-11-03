@@ -346,9 +346,12 @@ func TestIntegrationRealAgents(t *testing.T) {
 						if tc.outcome == "" && !model.saw(tagged(turn), coord.ErrCannotAsk.Error()) {
 							t.Errorf("the agent was not told it cannot ask:%s", model.tails(tagged(turn)))
 						}
-						// Only a success awaiting review needs a member.
-						if got, want := needsYou(r), tc.outcome == protocol.CoordOutcomeSuccess; got != want {
-							t.Errorf("needs you = %v (review %q), want %v", got, r.Review, want)
+						// A Background run never needs a member; its success awaits review.
+						if needsYou(r) {
+							t.Errorf("needs you (review %q), want not", r.Review)
+						}
+						if got, want := domainRun(r).AwaitsReview(r.Paused, false), tc.outcome == protocol.CoordOutcomeSuccess; got != want {
+							t.Errorf("awaits review = %v (review %q), want %v", got, r.Review, want)
 						}
 					})
 				}
@@ -401,11 +404,14 @@ func (a *realAgentRun) get(t *testing.T) protocol.Run {
 
 // needsYou is the rule the dashboard's Needs you list applies.
 func needsYou(r protocol.Run) bool {
-	run := domain.Run{
+	return domainRun(r).NeedsAttention(r.Paused, false)
+}
+
+func domainRun(r protocol.Run) *domain.Run {
+	return &domain.Run{
 		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
 		OutcomeUnseen: r.OutcomeUnseen, Review: domain.RunReview(r.Review),
 	}
-	return run.NeedsAttention(r.Paused, false)
 }
 
 // instructed fails unless the launch recorded where the run instructions
