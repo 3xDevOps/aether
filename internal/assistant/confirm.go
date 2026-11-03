@@ -34,6 +34,9 @@ var (
 type pendingConfirmation struct {
 	protocol.AssistantConfirmation
 	answer chan error
+	// answered is set, under the registry's lock, by the first answer: the
+	// waiting call may already have taken it, emptying the channel.
+	answered bool
 }
 
 // confirmations holds one member's pending confirmations. changed runs after
@@ -92,7 +95,7 @@ func (r *confirmations) decide(id string, approve bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, p := range r.pending {
-		if p.ID != id {
+		if p.ID != id || p.answered {
 			continue
 		}
 		var answer error
@@ -101,6 +104,7 @@ func (r *confirmations) decide(id string, approve bool) error {
 		}
 		select {
 		case p.answer <- answer:
+			p.answered = true
 			return nil
 		default:
 		}
@@ -112,8 +116,12 @@ func (r *confirmations) cancelAll() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, p := range r.pending {
+		if p.answered {
+			continue
+		}
 		select {
 		case p.answer <- errSessionEnded:
+			p.answered = true
 		default:
 		}
 	}
@@ -228,7 +236,20 @@ func (s *Service) countApproval(ctx context.Context, m *member, c protocol.Assis
 	if err != nil {
 		return err
 	}
-	switch key := ruleStreakKey(c.Rule); {
+	key := ruleStreakKey(c.Rule)
+	// ApproveAlways saves the card's rule and starts the counts over; this
+	// count may run after it, and must not count the card again.
+	var saved bool
+	if approved && key != "" {
+		rules, rerr := s.cfg.Store.AssistantRules(ctx, m.id)
+		if rerr != nil {
+			return rerr
+		}
+		saved = slices.ContainsFunc(rules, func(r store.AssistantRule) bool { return r.Key == store.AssistantRuleKey(c.Rule.Key) })
+	}
+	switch {
+	case saved:
+		st.Approvals, st.RuleStreakKey, st.RuleStreak = 0, "", 0
 	case approved:
 		st.Approvals++
 		switch key {

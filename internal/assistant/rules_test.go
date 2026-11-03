@@ -355,8 +355,48 @@ func TestSavingARuleStartsTheCountsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = wait(t, done)
-	_ = callTool(t, sock, m, protocol.MethodEnvSave, struct{}{}, true, true)
-	if st, _ := svc.Settings(t.Context(), "m1"); st.SuggestAutoApprove {
-		t.Fatal("suggested auto-approval one card after saving a rule")
+	inject := protocol.RunInjectParams{RunID: "run-1", Message: "hi"}
+	for i, call := range []struct {
+		method string
+		params any
+	}{{protocol.MethodEnvSave, struct{}{}}, {protocol.MethodRunInject, inject}} {
+		_ = callTool(t, sock, m, call.method, call.params, true, true)
+		if st, _ := svc.Settings(t.Context(), "m1"); st.SuggestAutoApprove {
+			t.Fatalf("suggested auto-approval %d cards after saving a rule", i+1)
+		}
+	}
+}
+
+// A card answered once cannot be answered again, even after the waiting
+// call took the first answer and before it drops the card: Always cannot
+// save a rule for a declined card.
+func TestAnsweredCardTakesNoSecondAnswer(t *testing.T) {
+	svc, m, db := newActionService(t)
+	p := &pendingConfirmation{AssistantConfirmation: protocol.AssistantConfirmation{ID: "c1", Method: protocol.MethodEnvSave,
+		Rule: &protocol.AssistantRuleOffer{Key: protocol.AssistantRuleKey{Method: protocol.MethodEnvSave}, Wording: "w"}}, answer: make(chan error, 1)}
+	m.confirms.pending = append(m.confirms.pending, p)
+	if err := m.confirms.decide("c1", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-p.answer; !errors.Is(err, errDeclined) {
+		t.Fatalf("answer = %v, want the decline", err)
+	}
+	if _, err := svc.ApproveAlways(t.Context(), "m1", "c1"); !errors.Is(err, ErrNoConfirmation) {
+		t.Fatalf("always after a decline = %v, want ErrNoConfirmation", err)
+	}
+	if len(db.rules) != 0 {
+		t.Fatalf("rules = %+v, want none", db.rules)
+	}
+}
+
+// A pass by rule that cannot be recorded does not run.
+func TestRulePassThatCannotBeRecordedDoesNotRun(t *testing.T) {
+	svc, m, db, _, _ := newRuleService(t)
+	if _, err := db.AddAssistantRule(t.Context(), "m1", store.AssistantRuleKey{Method: protocol.MethodEnvSave}, "w", "s"); err != nil {
+		t.Fatal(err)
+	}
+	m.removing = true
+	if err := svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodEnvSave, Summary: "Save"}); err == nil {
+		t.Fatal("a rule pass that could not be recorded ran")
 	}
 }

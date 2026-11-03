@@ -45,7 +45,10 @@ func (s *Service) approveByRule(ctx, conv context.Context, m *member, c *protoco
 			slog.Warn("assistant: check the approval rule; showing the card", "member", m.id, "rule", r.ID, "error", ierr)
 		}
 		if ierr == nil && inactive == "" {
-			return true, s.passByRule(ctx, conv, m, *c, r)
+			if perr := s.passByRule(ctx, conv, m, *c, r); perr != nil {
+				return false, perr
+			}
+			return true, nil
 		}
 	}
 	st, err := s.cfg.Store.AssistantSettings(ctx, m.id)
