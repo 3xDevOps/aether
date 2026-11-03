@@ -158,14 +158,6 @@ func report(delivered func(queued bool, err error), queued bool) func(error) {
 	return func(err error) { delivered(queued, err) }
 }
 
-// FailedPrompt is the prompt of the turn that last failed, until the next
-// turn starts; nil for a turn adopted from an earlier server process.
-func (s *Session) FailedPrompt() []acp.ContentBlock {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.failedPrompt
-}
-
 // awaitAccept reports a turn's prompt sent once the agent accepted it, or
 // once promptAcceptGrace passed without a refusal.
 func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
@@ -230,7 +222,6 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 	s.starting = ack
 	s.turn++
 	s.turnActive, s.holdIdle, s.owedUntil = true, false, time.Time{}
-	s.failedPrompt = nil
 	s.turnAt = time.Now()
 	s.emitLocked(Item{Kind: KindTurnStart})
 	s.relogTasksLocked()
@@ -422,7 +413,6 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		// Tasks still report back; the failure shows until the agent works
 		// again.
 		s.holdIdle, s.idleStop = true, ""
-		s.failedPrompt = blocks
 		s.stateLocked(TurnState{Reason: reason, Failed: failed})
 	case reason == "interrupted":
 		s.stateLocked(TurnState{Reason: reason})

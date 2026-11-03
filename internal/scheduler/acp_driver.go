@@ -577,11 +577,14 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				return
 			}
 			if !oneShot && acphost.AuthRequired(st.Failed) {
-				if d.reauthDue(entry) {
-					d.s.goMove(func() { d.reauth(entry, r) })
+				due, tried := d.reauthDue(entry)
+				if due {
+					d.s.goMove(func() { d.reauth(entry, r, st) })
 					return
 				}
-				st.Failed = fmt.Errorf("%w; restarting the agent did not restore its sign-in, so this container's copy of the login is stale or unreadable: start a new session", st.Failed)
+				if tried {
+					st.Failed = fmt.Errorf("%w; restarting the agent did not restore its sign-in, so this container's copy of the login is stale or unreadable: start a new session", st.Failed)
+				}
 			}
 			if !oneShot && acphost.SessionLost(st.Failed) {
 				d.s.goMove(func() { d.reopenLost(entry, r, st.Failed) })

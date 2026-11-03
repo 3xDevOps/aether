@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -100,9 +101,11 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 		slog.Warn("scheduler: hide the login from the updater", "member", filepath.Base(home.HostPath), "error", err)
 		return
 	}
-	for _, m := range plan.Mounts {
-		if m.HostPath == home.HostPath && m.Subpath != "" {
-			mounts = append(mounts, runtime.Mount{HostPath: noLogin, ContainerPath: m.ContainerPath, ReadOnly: true})
+	for _, p := range harness.Profiles() {
+		for _, rel := range p.PinnedLogins {
+			if info, statErr := os.Lstat(filepath.Join(home.HostPath, rel)); statErr == nil && info.Mode().IsRegular() {
+				mounts = append(mounts, runtime.Mount{HostPath: noLogin, ContainerPath: path.Join(plan.Home, rel), ReadOnly: true})
+			}
 		}
 	}
 	env := maps.Clone(plan.Env)

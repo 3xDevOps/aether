@@ -10,7 +10,7 @@ import (
 )
 
 // An agent that lost its sign-in recovers by itself: the restarted agent
-// reads the login again and answers the turn it refused.
+// reads the login again and answers the message sent after the refusal.
 func TestEnhancedAuthRefusalRestartsTheAgentAndResendsTheTurn(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
@@ -24,11 +24,12 @@ func TestEnhancedAuthRefusalRestartsTheAgentAndResendsTheTurn(t *testing.T) {
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err == nil {
 		t.Fatal("Inject of a refused prompt succeeded")
 	}
-	waitItems(t, e.sched, run.ID, "the resent turn", assistantSaid("pong"))
 	waitItems(t, e.sched, run.ID, "the sign-in notice", noticeTitled("Agent signed out"))
-	if got := len(rt.all()); got != before+1 {
-		t.Fatalf("agent processes = %d, want one restart after %d", got, before)
+	waitFor(t, "the restarted agent", func() bool { return len(rt.all()) == before+1 && e.sched.acp.session(run.ID) != nil })
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
+		t.Fatalf("message after the restart: %v", err)
 	}
+	waitItems(t, e.sched, run.ID, "the answered turn", assistantSaid("pong"))
 	if row := e.waitStoreStatus(t, run.ID, domain.RunRunning); strings.HasPrefix(row.Reason, acpTurnFailedReason) {
 		t.Fatalf("reason %q after recovery", row.Reason)
 	}
@@ -46,6 +47,10 @@ func TestEnhancedAuthRefusalAfterARestartShowsTheFailure(t *testing.T) {
 
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "first"}, false, nil); err == nil {
 		t.Fatal("Inject of a refused prompt succeeded")
+	}
+	waitFor(t, "the restarted agent", func() bool { return len(rt.all()) == before+1 && e.sched.acp.session(run.ID) != nil })
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "second"}, false, nil); err == nil {
+		t.Fatal("Inject of a prompt refused again succeeded")
 	}
 	waitFor(t, "the failure shown", func() bool {
 		row, err := e.db.GetRun(t.Context(), run.ID)

@@ -350,8 +350,10 @@ adapter and the session parks with
 
 If the agent refuses a turn with `Authentication required`, Aether shows
 **Agent signed out**, restarts the adapter in the same container so it reads the
-account's login again, restores the conversation, and sends the turn once more. If
-the restarted agent refuses again within 5 minutes, the session parks with
+account's login again, and restores the conversation. Send the refused message
+again; agent mail is offered again by itself. A session whose agent reported an
+outcome that is still waiting for its turn to end is not restarted. If the
+restarted agent refuses again within 5 minutes, the session parks with
 `enhanced turn failed: ... Authentication required ...; restarting the agent did not restore its sign-in, ...: start a new session`.
 That container's copy of the login is stale or unreadable; a new session's
 container mounts the current one.

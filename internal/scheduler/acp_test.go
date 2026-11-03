@@ -626,11 +626,11 @@ func TestEnhancedRunFailedTurnDoesNotSettleReportedOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptFail}, false, nil); err == nil {
-		t.Fatal("Inject of a failed prompt succeeded")
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptRefuse}, false, nil); err == nil {
+		t.Fatal("Inject of a refused prompt succeeded")
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if !strings.HasPrefix(got.Reason, acpTurnFailedReason) || !strings.Contains(got.Reason, "Internal error") {
+	if !strings.HasPrefix(got.Reason, acpTurnFailedReason) || !strings.Contains(got.Reason, "Authentication required") {
 		t.Fatalf("reason %q", got.Reason)
 	}
 
