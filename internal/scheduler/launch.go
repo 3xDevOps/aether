@@ -187,17 +187,18 @@ func (s *Scheduler) reserveRunUser(ctx context.Context, entry *supervised, user 
 
 // releaseGoneRunUser drops the reservation of a run whose container the
 // runtime confirmed gone, while its cleanup may still retry.
-func (s *Scheduler) releaseGoneRunUser(entry *supervised) {
+func (s *Scheduler) releaseGoneRunUser(entry *supervised) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.runs[entry.runID] != entry || entry.runUser == "" {
-		return
+		return nil
 	}
 	entry.runUser = ""
 	s.syncRunUserReservationsLocked()
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		slog.Warn("scheduler: persist released session user", "run", entry.runID, "error", err)
+		return fmt.Errorf("persist the released user of session %s: %w", entry.runID, err)
 	}
+	return nil
 }
 
 func withLookupError(conflict, lookup error) error {
@@ -244,7 +245,7 @@ func (s *Scheduler) resolveStaleRunUsers(ctx context.Context, home, login domain
 			c.entry.runUser = resolved
 			s.syncRunUserReservationsLocked()
 			if err := s.writeSidecar(c.entry.sidecar()); err != nil {
-				slog.Warn("scheduler: persist resolved session user", "run", c.entry.runID, "error", err)
+				errs = append(errs, fmt.Errorf("persist the resolved user of session %s: %w", c.entry.runID, err))
 			}
 		}
 		s.mu.Unlock()
