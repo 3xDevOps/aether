@@ -309,7 +309,6 @@ type claudeProfile struct {
 	} `json:"organization"`
 }
 
-// account is the profile's account as the sign-in record holds it.
 func (p claudeProfile) account() string {
 	return "account=" + p.Account.UUID + ";organization=" + p.Organization.UUID
 }

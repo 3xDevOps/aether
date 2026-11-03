@@ -113,6 +113,16 @@ describe('assistant settings', () => {
     expect(await screen.findByText("Can't compare with your sessions' Codex account: your environment has no ~/.codex/auth.json")).toBeDefined()
   })
 
+  it('reads the account again once the first start records it', async () => {
+    const accounts: AssistantAccount[] = [{ agent: 'claude', state: 'unrecorded' }, { agent: 'claude', state: 'same' }]
+    const signedIn = { state: 'idle' as const, agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }
+    const client = show(['*'], { assistantAccount: vi.fn(async () => accounts.shift()!) })
+    act(() => useStore.getState().setAssistantStatus(signedIn))
+    await waitFor(() => expect(client.assistantAccount).toHaveBeenCalledTimes(1))
+    act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'running' }))
+    expect(await screen.findByText('Same Claude account as your sessions')).toBeDefined()
+  })
+
   it('does not ask a server without the account check', async () => {
     const client = show(['assistant.status', 'assistant.settings', 'run.launch'])
     act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }))

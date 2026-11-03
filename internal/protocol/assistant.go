@@ -60,7 +60,6 @@ type AssistantAccountParams struct {
 	Agent string `json:"agent"`
 }
 
-// How an agent's assistant sign-in compares with the environment's login.
 const (
 	// AssistantAccountUnrecorded means the server recorded no account for
 	// the assistant's sign-in yet; it does at the next start.
