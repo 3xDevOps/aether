@@ -92,4 +92,8 @@ func TestAPreferenceCardsPushSaysOnlyWhatItDoes(t *testing.T) {
 	if err != nil || len(pending) != 1 || !pending[0].Private || pending[0].Summary != "Forget a saved preference" {
 		t.Fatalf("pending cards = %+v, %v, want the preference card private and generic", pending, err)
 	}
+	open, err := w.svc.openCards(t.Context(), w.member)
+	if err != nil || len(open) != 1 || !open[0].Private || open[0].Summary != c.Summary {
+		t.Fatalf("status cards = %+v, %v, want the card whole and marked private for the desktop app", open, err)
+	}
 }

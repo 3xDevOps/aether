@@ -28,17 +28,28 @@ func (s *Service) PendingCards(ctx context.Context, member domain.MemberID) ([]p
 			return nil, err
 		}
 		card := push.Card{ID: c.ID, Summary: c.Summary, CreatedAt: c.CreatedAt}
-		switch {
-		case c.Method == protocol.MethodAssistantRemember:
-			card.Summary, card.Private = "Save a preference", true
-		case c.Method == protocol.MethodAssistantForget:
-			card.Summary, card.Private = "Forget a saved preference", true
-		case s.carriesPreference(ctx, member, c.AssistantConfirmation):
-			card.Summary, card.Private = "An action that uses a saved preference", true
+		if s.privateCard(ctx, member, c.AssistantConfirmation) {
+			card.Summary, card.Private = privateSummaries[c.Method], true
+			if card.Summary == "" {
+				card.Summary = "An action that uses a saved preference"
+			}
 		}
 		out = append(out, card)
 	}
 	return out, nil
+}
+
+// privateSummaries is what a notification shows for a card that saves or
+// forgets a preference; the desktop app keeps the same words.
+var privateSummaries = map[string]string{
+	protocol.MethodAssistantRemember: "Save a preference",
+	protocol.MethodAssistantForget:   "Forget a saved preference",
+}
+
+// privateCard reports whether c saves, forgets or sends a saved preference.
+func (s *Service) privateCard(ctx context.Context, member domain.MemberID, c protocol.AssistantConfirmation) bool {
+	_, ok := privateSummaries[c.Method]
+	return ok || s.carriesPreference(ctx, member, c)
 }
 
 // cardsChanged tells the bus member's cards changed, for their devices'

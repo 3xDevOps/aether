@@ -602,15 +602,18 @@ test('an assistant card shows Approve and Decline, which decide it once through 
 
 test('a preference card or one too long to show whole opens the card instead of deciding', async () => {
   cards = [
-    { id: 'c4', state: 'pending', method: 'assistant.forget', summary: 'Forget "I prefer tabs"' },
+    { id: 'c4', state: 'pending', method: 'assistant.forget', private: true, summary: 'Forget "I prefer tabs"' },
     { id: 'c5', state: 'pending', method: 'run.launch', summary: 'x'.repeat(241) },
+    { id: 'c7', state: 'pending', method: 'run.launch', private: true, summary: 'Launch claude in api: "always use tabs"' },
   ]
   await cardsChanged()
-  assert.equal(shown.length, 2)
+  assert.equal(shown.length, 3)
   assert.equal(shown[0].options.body, 'Forget a saved preference')
   assert.equal(shown[0].options.actions, undefined)
   assert.equal(shown[1].options.actions, undefined)
   assert.equal(shown[1].handlers.action, undefined)
+  assert.equal(shown[2].options.body, 'An action that uses a saved preference')
+  assert.equal(shown[2].options.actions, undefined)
 })
 
 test('cards pending when the app connects show once', async () => {

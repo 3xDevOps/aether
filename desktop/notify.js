@@ -48,7 +48,8 @@ let selfID = null
 // the sync of them in flight.
 const cardsShown = new Map()
 let cardsSync = Promise.resolve()
-// What a card that saves or forgets a preference shows in its place.
+// What a private card that saves or forgets a preference shows in its
+// place; internal/assistant uses the same words.
 const preferenceCards = { 'assistant.remember': 'Save a preference', 'assistant.forget': 'Forget a saved preference' }
 
 // When each run last raised a needs-you notification, by any path, and
@@ -281,9 +282,9 @@ function queueCards() {
 // syncCards shows each pending card with Approve and Decline, and closes
 // one no longer pending. Approve and Decline call assistant.confirm through
 // this app's own gateway, as the card in the window would; macOS shows the
-// buttons, elsewhere a click opens the card. A card that saves or forgets a
-// preference, or one too long to show whole, shows no buttons and only
-// what it is.
+// buttons, elsewhere a click opens the card. A card the server marks
+// private (it saves, forgets or sends a saved preference), or one too long
+// to show whole, shows no buttons; a private one shows only what it is.
 async function syncCards() {
   if (!Notification.isSupported()) return
   let status
@@ -301,7 +302,7 @@ async function syncCards() {
   }
   for (const card of pending) {
     if (cardsShown.has(card.id)) continue
-    const preference = preferenceCards[card.method]
+    const preference = card.private ? preferenceCards[card.method] || 'An action that uses a saved preference' : ''
     const summary = card.summary || ''
     const whole = !preference && [...summary].length <= 240
     const notification = new Notification({

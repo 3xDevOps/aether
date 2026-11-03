@@ -339,6 +339,7 @@ func (s *Service) openCards(ctx context.Context, id domain.MemberID) ([]protocol
 		if err != nil {
 			return nil, err
 		}
+		c.Private = s.privateCard(ctx, id, c.AssistantConfirmation)
 		out = append(out, c.AssistantConfirmation)
 	}
 	return out, nil
