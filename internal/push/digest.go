@@ -44,11 +44,12 @@ var ErrNotYet = errors.New("push: not yet")
 
 // DigestSource is what queues items of one source. Stale says why an item
 // is no longer worth telling, empty while it is, or returns ErrNotYet.
-// Sent records the digest push an item went out in, and Dropped one
-// dropped unsent with reason.
+// Sent records the digest push an item went out in, retrying when no
+// device took it and it will be tried again, and Dropped one dropped
+// unsent with reason.
 type DigestSource interface {
 	Stale(ctx context.Context, item *store.DigestItem) (string, error)
-	Sent(ctx context.Context, item *store.DigestItem, results []DeviceResult, err error) error
+	Sent(ctx context.Context, item *store.DigestItem, results []DeviceResult, err error, retrying bool) error
 	Dropped(ctx context.Context, item *store.DigestItem, reason string) error
 }
 
@@ -227,7 +228,12 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 		s.digestRetry[member] = now.Add(retry)
 		s.mu.Unlock()
 		if attempts < digestAttempts {
-			return fmt.Errorf("push: no device took the digest (attempt %d of %d): %w", attempts, digestAttempts, errors.Join(err, deviceErrors(results)))
+			for _, item := range current {
+				if sentErr := s.source(item).Sent(ctx, item, results, err, true); sentErr != nil {
+					errs = append(errs, sentErr)
+				}
+			}
+			return errors.Join(append(errs, fmt.Errorf("push: no device took the digest (attempt %d of %d): %w", attempts, digestAttempts, errors.Join(err, deviceErrors(results))))...)
 		}
 	}
 	s.mu.Lock()
@@ -235,7 +241,7 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 	delete(s.digestRetry, member)
 	s.mu.Unlock()
 	for _, item := range current {
-		if sentErr := s.source(item).Sent(ctx, item, results, err); sentErr != nil {
+		if sentErr := s.source(item).Sent(ctx, item, results, err, false); sentErr != nil {
 			errs = append(errs, sentErr)
 		}
 	}
@@ -306,15 +312,17 @@ func (r runItems) Stale(ctx context.Context, item *store.DigestItem) (string, er
 	return "", nil
 }
 
-func (runItems) Sent(context.Context, *store.DigestItem, []DeviceResult, error) error { return nil }
-func (runItems) Dropped(context.Context, *store.DigestItem, string) error             { return nil }
+func (runItems) Sent(context.Context, *store.DigestItem, []DeviceResult, error, bool) error {
+	return nil
+}
+func (runItems) Dropped(context.Context, *store.DigestItem, string) error { return nil }
 
 // orphanItems are items whose source this server does not run, such as
 // watch notices on a server without watches: they are sent as they are.
 type orphanItems struct{}
 
 func (orphanItems) Stale(context.Context, *store.DigestItem) (string, error) { return "", nil }
-func (orphanItems) Sent(context.Context, *store.DigestItem, []DeviceResult, error) error {
+func (orphanItems) Sent(context.Context, *store.DigestItem, []DeviceResult, error, bool) error {
 	return nil
 }
 func (orphanItems) Dropped(context.Context, *store.DigestItem, string) error { return nil }

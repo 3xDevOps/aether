@@ -332,7 +332,7 @@ func (h *harness) digest(member domain.MemberID) {
 		case reason != "":
 			err = source.Dropped(h.ctx, item, reason)
 		default:
-			err = source.Sent(h.ctx, item, []push.DeviceResult{{Status: push.DeviceDelivered}}, nil)
+			err = source.Sent(h.ctx, item, []push.DeviceResult{{Status: push.DeviceDelivered}}, nil, false)
 		}
 		if err != nil {
 			h.t.Fatal(err)

@@ -327,7 +327,8 @@ a result you opened or put off on any device, and a notice whose watch you
 paused or deleted are dropped; a digest left empty is not sent. A need of a paused
 session waits until it resumes. While you use a dashboard the digest waits, as
 other pushes do. When no device takes it, it is tried again every minute, 5
-times in all, and each watch notice in it records the result. A server that
+times in all; each watch notice in it reads `pending` with the push service's
+error while it is tried again, then the result. A server that
 stops while it sends a digest can send that digest again after it starts. An
 item a source cannot read now, such as the need of a paused session, stays
 queued without making the digest due.

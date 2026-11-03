@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -76,7 +77,7 @@ func TestPushesWithinTwoMinutesJoinTheFirstAsOneNotification(t *testing.T) {
 type waiting struct{}
 
 func (waiting) Stale(context.Context, *store.DigestItem) (string, error) { return "", ErrNotYet }
-func (waiting) Sent(context.Context, *store.DigestItem, []DeviceResult, error) error {
+func (waiting) Sent(context.Context, *store.DigestItem, []DeviceResult, error, bool) error {
 	return nil
 }
 func (waiting) Dropped(context.Context, *store.DigestItem, string) error { return nil }
@@ -201,4 +202,41 @@ func TestQuietHoursHoldNeedsForADigestThatLeadsWithThem(t *testing.T) {
 		Body:   "Overnight: proj  Fix login test: run the migration?  [Answer]",
 		Notice: true,
 	})
+}
+
+// recorded is a digest source that keeps what each Sent was told.
+type recorded struct{ retrying chan bool }
+
+func (recorded) Stale(context.Context, *store.DigestItem) (string, error) { return "", nil }
+func (r recorded) Sent(_ context.Context, _ *store.DigestItem, _ []DeviceResult, _ error, retrying bool) error {
+	r.retrying <- retrying
+	return nil
+}
+func (recorded) Dropped(context.Context, *store.DigestItem, string) error { return nil }
+
+func TestADigestNoDeviceTookIsTriedAgainAndSaysSo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	phone.answer.Store(http.StatusInternalServerError)
+	source := recorded{retrying: make(chan bool, digestAttempts)}
+	h.svc.UseDigestSource("recorded", source)
+	if err := h.svc.Queue(h.ctx, &store.DigestItem{
+		MemberID: h.ada.ID, Source: "recorded", Key: "k", Kind: KindDone, Title: "Done", Overnight: true, CreatedAt: h.clock.now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= digestAttempts; attempt++ {
+		err := h.svc.sendDigest(h.ctx, h.ada.ID)
+		if final := attempt == digestAttempts; (err == nil) == !final {
+			t.Fatalf("attempt %d: err = %v", attempt, err)
+		}
+		if retrying := <-source.retrying; retrying != (attempt < digestAttempts) {
+			t.Fatalf("attempt %d: retrying = %v", attempt, retrying)
+		}
+		h.clock.advance(retry)
+	}
+	if got := h.digestItems(h.ada); len(got) != 0 {
+		t.Fatalf("digest still holds %d items after its last attempt", len(got))
+	}
 }

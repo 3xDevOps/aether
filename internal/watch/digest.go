@@ -51,10 +51,13 @@ func (d digestItems) Stale(ctx context.Context, item *store.DigestItem) (string,
 	return detail, nil
 }
 
-func (d digestItems) Sent(ctx context.Context, item *store.DigestItem, results []push.DeviceResult, err error) error {
+func (d digestItems) Sent(ctx context.Context, item *store.DigestItem, results []push.DeviceResult, err error, retrying bool) error {
 	status, detail := pushOutcome(results, err)
-	if status == protocol.WatchStatusDelivered {
+	switch {
+	case status == protocol.WatchStatusDelivered:
 		detail = store.WatchPushSummarized + ": " + detail
+	case retrying:
+		status, detail = protocol.WatchStatusPending, "The digest is tried again in a minute: "+detail
 	}
 	return d.record(ctx, item, status, detail)
 }
