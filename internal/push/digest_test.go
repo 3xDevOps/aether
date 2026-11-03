@@ -93,15 +93,33 @@ func TestAnItemSeenBeforeTheDigestIsDroppedAndAnEmptyDigestIsNotSent(t *testing.
 	t.Parallel()
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
-	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	run, kept := h.run(h.ada, "Upgrade the linter", domain.LaunchACP), h.run(h.ada, "Rotate the keys", domain.LaunchACP)
 	h.finish(run)
 	h.eventuallyQueued(h.ada, 1)
+	h.finish(kept)
+	h.eventuallyQueued(h.ada, 2)
 
 	if _, _, err := h.db.SetRunReview(h.ctx, run.ID, domain.ReviewAccepted, domain.ReviewReady); err != nil {
 		t.Fatalf("SetRunReview: %v", err)
 	}
 	h.clock.advance(batchWindow)
-	h.svc.sendDigests(h.ctx)
+	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	phone.expect(t, notification{
+		Title: "Aether · 1 done", Body: "proj  Rotate the keys: Finished: review the result  [Review]", Notice: true,
+	})
+
+	late := h.run(h.ada, "Write the docs", domain.LaunchACP)
+	h.finish(late)
+	h.eventuallyQueued(h.ada, 1)
+	if _, _, err := h.db.SetRunReview(h.ctx, late.ID, domain.ReviewAccepted, domain.ReviewReady); err != nil {
+		t.Fatalf("SetRunReview: %v", err)
+	}
+	h.clock.advance(batchWindow)
+	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
 	phone.expectNone(t, testQuiet)
 	if got := h.digestItems(h.ada); len(got) != 0 {
 		t.Fatalf("digest still holds %d items", len(got))

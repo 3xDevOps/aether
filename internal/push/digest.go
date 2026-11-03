@@ -200,8 +200,8 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 	if err = s.store.DeleteDigestItems(ctx, member, stale); err != nil {
 		return errors.Join(append(errs, err)...)
 	}
-	if len(errs) > 0 || len(current) == 0 {
-		return errors.Join(errs...)
+	if err = errors.Join(errs...); err != nil || len(current) == 0 {
+		return err
 	}
 	title, body := digestText(current)
 	payload, err := json.Marshal(message{
