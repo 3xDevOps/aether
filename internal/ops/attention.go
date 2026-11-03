@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -107,6 +108,14 @@ func answerWith(it protocol.AttentionItem) string {
 	return dashboard
 }
 
+func rank(it protocol.AttentionItem) int {
+	switch it.Kind {
+	case protocol.AttentionKindPermission, protocol.AttentionKindQuestion, protocol.AttentionKindQueuedMessage, protocol.AttentionKindRoomQuestion:
+		return 0
+	}
+	return 1
+}
+
 func needsAttention(ctx context.Context, c calls, in workspaceFilterInput) (string, any, error) {
 	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
@@ -116,6 +125,11 @@ func needsAttention(ctx context.Context, c calls, in workspaceFilterInput) (stri
 	if err != nil {
 		return "", nil, err
 	}
+	// A request blocks its agent and a sudo request expires in minutes, so
+	// past the cap it must not fall behind sessions only awaiting review.
+	slices.SortStableFunc(items, func(a, b protocol.AttentionItem) int {
+		return cmp.Compare(rank(a), rank(b))
+	})
 	rows := make([]attentionRow, 0, min(len(items), maxAttention))
 	for _, it := range items[:min(len(items), maxAttention)] {
 		rows = append(rows, attentionRowOf(it, l))
@@ -126,7 +140,7 @@ func needsAttention(ctx context.Context, c calls, in workspaceFilterInput) (stri
 		return "Nothing needs you.", out, nil
 	case len(items) > len(rows):
 		out["total"], out["truncated"] = len(items), true
-		return fmt.Sprintf("%d of %d items that need you, oldest first.", len(rows), len(items)), out, nil
+		return fmt.Sprintf("%d of %d items that need you, pending requests first, then oldest first.", len(rows), len(items)), out, nil
 	}
-	return fmt.Sprintf("%d items need you, oldest first.", len(rows)), out, nil
+	return fmt.Sprintf("%d items need you, pending requests first, then oldest first.", len(rows)), out, nil
 }

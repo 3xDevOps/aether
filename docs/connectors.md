@@ -312,7 +312,8 @@ it returns a session's title, task and reason whole. A permission
 request longer than 600 characters is decided only in the dashboard, never by
 `aether_decide_approval`. Lists return 20 rows by default, at most 100, and say
 how many matched when they cut rows; `aether_needs_attention` returns at most 30
-items. `aether_session_changes` lists 20 commits and up to 10 diff
+items, pending permission requests and questions first, since a sudo request
+expires after 10 minutes, then the rest oldest first. `aether_session_changes` lists 20 commits and up to 10 diff
 files of 6000 bytes, 12000 in all, per page, and returns `next_commits_offset`
 and `next_diff_file` for the next page, `diff_clipped_files` with the numbers of
 files cut at 6000 bytes, and `diff_truncated: true` when the server cut the diff

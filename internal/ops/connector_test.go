@@ -462,18 +462,29 @@ func TestConnectorReadTools(t *testing.T) {
 
 	text, out = run(t, cs, "aether_needs_attention", nil)
 	item := out["items"].([]any)[0].(map[string]any)
-	if text != "1 items need you, oldest first." || item["answer_id"] != "req-1" || item["reason"] != "The agent asks a question" ||
+	if text != "1 items need you, pending requests first, then oldest first." || item["answer_id"] != "req-1" || item["reason"] != "The agent asks a question" ||
 		item["untrusted"].(map[string]any)["text"] != "Which database?" || len(item["untrusted"].(map[string]any)["options"].([]any)) != 1 ||
 		strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_needs_attention = %q %v", text, out)
 	}
 	many := make([]protocol.AttentionItem, 45)
 	for i := range many {
-		many[i] = protocol.AttentionItem{Kind: protocol.AttentionKindFailed, RunID: fmt.Sprintf("run-%d", i)}
+		many[i] = protocol.AttentionItem{Kind: protocol.AttentionKindReady, RunID: fmt.Sprintf("run-%d", i)}
 	}
+	many[44] = protocol.AttentionItem{Kind: protocol.AttentionKindPermission, RunID: "run-sudo",
+		Request: &protocol.AttentionRequest{ID: "sudo-1", Kind: "permission", Title: "Run as root in /tmp: kill 1", Options: []protocol.AttentionOption{
+			{ID: "allow-once", Label: "Allow once", Kind: "allow_once"}, {ID: "deny-once", Label: "Deny", Kind: "reject_once"}}}}
 	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many})
-	if text, out = run(t, cs, "aether_needs_attention", nil); text != "30 of 45 items that need you, oldest first." || len(out["items"].([]any)) != 30 || out["total"] != float64(45) {
+	text, out = run(t, cs, "aether_needs_attention", nil)
+	items := out["items"].([]any)
+	if text != "30 of 45 items that need you, pending requests first, then oldest first." || len(items) != 30 || out["total"] != float64(45) {
 		t.Fatalf("aether_needs_attention past the cap = %q", text)
+	}
+	if first := items[0].(map[string]any); first["run_id"] != "run-sudo" || first["answer_id"] != "sudo-1" || first["answer_with"] != "aether_decide_approval" {
+		t.Fatalf("past the cap, the newest pending request is not first: %v", first)
+	}
+	if second := items[1].(map[string]any); second["run_id"] != "run-0" {
+		t.Fatalf("the items after the requests are not oldest first: %v", second)
 	}
 
 	f.answers[protocol.MethodInsightsGet] = func(raw json.RawMessage) (any, error) {
