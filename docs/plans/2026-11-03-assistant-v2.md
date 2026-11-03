@@ -75,7 +75,12 @@ feature and needs the taint rule from phase 5 first.
   member's settings. This proposal uses "private" to mean those.
 - **Watches** record notices, push them, and for `source: assistant` write
   them into the conversation without starting a turn. `relay_to` (phase 0)
-  adds server-written inbox messages to up to 4 sessions, with no model.
+  adds server-written inbox messages to up to 4 sessions, with no model
+  (draft PR #708). Targets are sessions only, the message is a fixed
+  template with the session's text on an `Untrusted` line, each notice
+  relays once per target, and a watch relays at most 50 times. There is no
+  relay into the assistant, and no event starts an assistant turn; phases 5
+  and 6 add both.
 - **Connector budget:** 32 tools and 11,599 of 15,000 bytes before
   `relay_to` (`TestConnectorToolList`).
 
