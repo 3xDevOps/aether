@@ -68,7 +68,7 @@ func (s *Service) Queue(ctx context.Context, item *store.DigestItem) error {
 // most digestLines items, those quiet hours held first and marked
 // Overnight:, each group what needs the member first, and a count of the
 // rest.
-func digestText(items []*store.DigestItem) (string, string) {
+func digestText(items []*store.DigestItem, lines int) (string, string) {
 	rank := map[string]int{}
 	counts := map[string]int{}
 	for i, k := range kinds {
@@ -93,10 +93,10 @@ func digestText(items []*store.DigestItem) (string, string) {
 		}
 		return rank[a.Kind] - rank[b.Kind]
 	})
-	shown := ordered[:min(len(ordered), digestLines)]
-	var lines []string
+	shown := ordered[:min(len(ordered), lines)]
+	var out []string
 	for _, item := range shown {
-		lines = append(lines, digestLine(item, kinds[rank[item.Kind]].action))
+		out = append(out, digestLine(item, kinds[rank[item.Kind]].action))
 	}
 	rest := map[string]int{}
 	for _, item := range ordered[len(shown):] {
@@ -109,9 +109,9 @@ func digestText(items []*store.DigestItem) (string, string) {
 		}
 	}
 	if len(more) > 0 {
-		lines = append(lines, strings.Join(more, " · "))
+		out = append(out, strings.Join(more, " · "))
 	}
-	return title, strings.Join(lines, "\n")
+	return title, strings.Join(out, "\n")
 }
 
 func digestLine(item *store.DigestItem, action string) string {
@@ -120,7 +120,7 @@ func digestLine(item *store.DigestItem, action string) string {
 		line += ": " + clip(body, digestBodyRunes)
 	}
 	if item.Workspace != "" {
-		line = plain(item.Workspace) + "  " + line
+		line = clip(plain(item.Workspace), digestTitleRunes) + "  " + line
 	}
 	if item.Overnight {
 		line = "Overnight: " + line
@@ -212,13 +212,9 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 	if len(current) == 0 || digestDue(prefs, current, now).After(now) {
 		return errors.Join(errs...)
 	}
-	title, body := digestText(current)
-	payload, err := json.Marshal(message{
-		notification: notification{Title: title, Body: body, Notice: true},
-		URL:          "/", Tag: "digest",
-	})
+	payload, err := digestPayload(current)
 	if err != nil {
-		return fmt.Errorf("push: encode a digest: %w", err)
+		return err
 	}
 	results, err := s.deliverPayload(ctx, member, payload, topicOf("digest:"+string(member)), urgencyNormal)
 	if failed(results, err) {
@@ -249,6 +245,21 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// digestPayload is the digest of items as one push message: lines that
+// would not fit it go into the count of the rest.
+func digestPayload(items []*store.DigestItem) ([]byte, error) {
+	for lines := digestLines; ; lines-- {
+		title, body := digestText(items, lines)
+		payload, err := json.Marshal(message{notification: notification{Title: title, Body: body, Notice: true}, URL: "/", Tag: "digest"})
+		if err != nil {
+			return nil, fmt.Errorf("push: encode a digest: %w", err)
+		}
+		if len(payload) <= maxPayload || lines == 0 {
+			return payload, nil
+		}
+	}
 }
 
 // failed reports whether a member with a device had none take a push.
@@ -298,16 +309,23 @@ func (s *Service) queueNeed(ctx context.Context, run *domain.Run, n *need, kind 
 }
 
 // runItems settles a session's own notifications: one is worth telling
-// while the session still stands in the need it announced.
+// while the session still stands in the need it announced, and a result
+// while nobody has opened it. A paused session's waits for it to resume.
 type runItems struct{ s *Service }
 
 func (r runItems) Stale(ctx context.Context, item *store.DigestItem) (string, error) {
-	_, n, err := r.s.read(ctx, item.RunID)
+	if r.s.runs.Paused(item.RunID) {
+		return "", ErrNotYet
+	}
+	run, n, err := r.s.read(ctx, item.RunID)
 	if err != nil {
 		return "", err
 	}
 	if n == nil || n.key != item.Key {
 		return "Resolved before the digest was sent", nil
+	}
+	if item.Kind == KindDone && !run.OutcomeUnseen {
+		return "Opened before the digest was sent", nil
 	}
 	return "", nil
 }

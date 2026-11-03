@@ -2559,7 +2559,7 @@ CREATE TABLE push_digest (
 	created_at INTEGER NOT NULL,
 	PRIMARY KEY (member_id, source, key)
 );
-UPDATE watch_notifications SET push_state = 'pending' WHERE push_state = 'held';
+UPDATE watch_notifications SET push_state = 'pending', push_next_at = 0 WHERE push_state = 'held';
 `,
 }
 

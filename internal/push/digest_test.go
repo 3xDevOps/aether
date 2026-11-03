@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -238,5 +239,54 @@ func TestADigestNoDeviceTookIsTriedAgainAndSaysSo(t *testing.T) {
 	}
 	if got := h.digestItems(h.ada); len(got) != 0 {
 		t.Fatalf("digest still holds %d items after its last attempt", len(got))
+	}
+}
+
+func TestAPausedSessionsItemWaitsAndAnOpenedResultLeavesTheDigest(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	paused, opened := h.run(h.ada, "Paused", domain.LaunchACP), h.run(h.ada, "Opened", domain.LaunchACP)
+	h.finish(paused)
+	h.eventuallyQueued(h.ada, 1)
+	h.finish(opened)
+	h.eventuallyQueued(h.ada, 2)
+
+	h.runs.paused.Store(true)
+	if _, err := h.db.ClearRunOutcomeUnseen(h.ctx, opened.ID, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.advance(30 * time.Minute)
+	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	phone.expectNone(t, testQuiet)
+	if got := h.digestItems(h.ada); len(got) != 2 {
+		t.Fatalf("digest holds %d items while their sessions are paused, want both kept", len(got))
+	}
+
+	h.runs.paused.Store(false)
+	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	phone.expect(t, notification{Title: "Aether · 1 done", Body: "proj  Paused: Finished: review the result  [Review]", Notice: true})
+	if got := h.digestItems(h.ada); len(got) != 0 {
+		t.Fatalf("digest still holds %d items", len(got))
+	}
+}
+
+func TestExpiredBurstsWithoutANeedAreForgotten(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	for i := range 3 {
+		if _, err := h.svc.join(h.ada.ID, fmt.Sprintf("pr-%d", i), "tag", "topic", "acme/web#7", "Checks passed", false); err != nil {
+			t.Fatal(err)
+		}
+		h.clock.advance(burstWindow)
+	}
+	h.svc.mu.Lock()
+	defer h.svc.mu.Unlock()
+	if n := len(h.svc.bursts[h.ada.ID]); n != 1 {
+		t.Fatalf("member keeps %d bursts, want only the one inside its window", n)
 	}
 }

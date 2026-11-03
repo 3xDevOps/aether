@@ -488,21 +488,23 @@ describe('watch notification preferences', () => {
     expect(alert.closest('#quiet-hours')).not.toBeNull()
   })
 
-  it('saves the level, and the daily digest time in this browser’s zone', async () => {
+  it('saves the level, and the daily digest time in this browser’s zone, keeping quiet hours', async () => {
     const user = userEvent.setup()
+    const quiet = { start: '22:00', end: '07:00', tz: 'Europe/Berlin' }
     const client = fakeApi({
-      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 1 } })),
+      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, quiet_hours: quiet, destinations: { push_devices: 1 } })),
     })
     render(<WatchNotifySection client={client} />)
     expect(await screen.findByText(/the rest in a digest every 30 minutes/)).toBeDefined()
     await user.click(screen.getByRole('radio', { name: 'Only what blocks me' }))
-    expect(client.notifyPrefsSet).toHaveBeenCalledWith({ level: 'blockers' })
+    // notify.prefs.set turns quiet hours off when they are left out.
+    expect(client.notifyPrefsSet).toHaveBeenCalledWith({ level: 'blockers', quiet_hours: quiet })
     const time = await screen.findByLabelText('Daily digest at')
     await user.clear(time)
     await user.type(time, '08:30')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: zone } })
+    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: zone }, quiet_hours: quiet })
   })
 
   it('re-reads the device count when this device subscribes', async () => {

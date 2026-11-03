@@ -1,6 +1,7 @@
 package push
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +84,7 @@ func TestTheDigestHasAFixedShape(t *testing.T) {
 		{Kind: KindDone, Workspace: "web", Title: "Add a test", Body: "Agent reported done"},
 		{Kind: KindMerged, Title: "acme/web#42: Add a test", Body: "PR #42 merged on GitHub"},
 	}
-	title, body := digestText(items)
+	title, body := digestText(items, digestLines)
 	if want := "Aether · 2 need you · 1 failed · 3 done · 1 merged"; title != want {
 		t.Errorf("title = %q, want %q", title, want)
 	}
@@ -98,8 +99,23 @@ api  Write docs: Completed  [Review]
 	}
 
 	items[3].Overnight = true
-	_, body = digestText(items)
+	_, body = digestText(items, digestLines)
 	if want := "Overnight: api  Write docs: Completed  [Review]"; body[:len(want)] != want {
 		t.Errorf("body =\n%s\nwant it to lead with %q", body, want)
+	}
+}
+
+func TestADigestOfLongNamesStillFitsOnePush(t *testing.T) {
+	t.Parallel()
+	var items []*store.DigestItem
+	for range 7 {
+		items = append(items, &store.DigestItem{Kind: KindDone, Workspace: strings.Repeat("w", 800), Title: strings.Repeat("ü", 400), Body: strings.Repeat("\u202e€", 400)})
+	}
+	payload, err := digestPayload(items)
+	if err != nil || len(payload) > maxPayload {
+		t.Fatalf("digest is %d octets, %v; want at most %d", len(payload), err, maxPayload)
+	}
+	if !strings.Contains(string(payload), "Aether · 7 done") {
+		t.Fatalf("digest %s lost its counts", payload)
 	}
 }

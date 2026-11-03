@@ -282,7 +282,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
         label="How often"
         help={levels.find((l) => l.level === level)?.help}
       >
-        <RadioGroup aria-label="How often" value={level} disabled={busy || !prefs} onValueChange={(next) => save({ level: next as NotifyLevel }, 'level')}>
+        <RadioGroup aria-label="How often" value={level} disabled={busy || !prefs} onValueChange={(next) => prefs && save({ level: next as NotifyLevel, quiet_hours: prefs.quiet_hours }, 'level')}>
           {levels.map((l) => (
             <label key={l.level} className="flex min-h-8 min-w-0 cursor-pointer items-center gap-2 text-ui text-text coarse:min-h-11">
               <Radio value={l.level} />
@@ -297,7 +297,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
               <Input type="time" required value={digestAt} disabled={busy} className="w-28" onChange={(event) => setDigestAt(event.target.value)} />
             </label>
             <p className="text-ui-sm text-muted">{digest.tz}</p>
-            {digestEdited && <Button size="sm" variant="secondary" disabled={busy || !digestAt} onClick={() => save({ digest }, 'level')}>Save</Button>}
+            {digestEdited && <Button size="sm" variant="secondary" disabled={busy || !digestAt} onClick={() => prefs && save({ digest, quiet_hours: prefs.quiet_hours }, 'level')}>Save</Button>}
           </div>
         )}
         {error?.row === 'level' && <Callout tone="failed" role="alert">{error.text}</Callout>}

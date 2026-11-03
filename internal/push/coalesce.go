@@ -3,6 +3,7 @@ package push
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -50,7 +51,12 @@ func (s *Service) join(member domain.MemberID, key, tag, topic, title, body stri
 	now := s.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	bursts := s.bursts[member]
+	// A burst is kept past its window only while its summary shows a
+	// need, which unjoin updates when that need ends.
+	bursts := slices.DeleteFunc(s.bursts[member], func(b *burst) bool {
+		return !now.Before(b.start.Add(burstWindow)) && !(b.summarized && slices.ContainsFunc(b.keys, func(k string) bool { return b.needs[k] }))
+	})
+	s.bursts[member] = bursts
 	var b *burst
 	if n := len(bursts); n > 0 && now.Before(bursts[n-1].start.Add(burstWindow)) {
 		b = bursts[n-1]
@@ -107,8 +113,8 @@ func (s *Service) unjoin(ctx context.Context, key string) {
 	}
 	s.mu.Unlock()
 	for _, u := range updates {
-		if _, err := s.deliverPayload(ctx, u.member, u.s.payload, u.s.topic, u.s.urgency); err != nil {
-			slog.Warn("push: update a summary", "member", u.member, "error", err)
+		if results, err := s.deliverPayload(ctx, u.member, u.s.payload, u.s.topic, u.s.urgency); failed(results, err) {
+			slog.Warn("push: update a summary", "member", u.member, "error", errors.Join(err, deviceErrors(results)))
 		}
 	}
 }

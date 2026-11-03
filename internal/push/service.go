@@ -316,7 +316,11 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			if devicesErr != nil {
 				slog.Warn("push: a device was not told a need ended; trying again later", "run", id, "in", retry, "error", devicesErr)
 			}
-			s.unjoin(ctx, string(id))
+			// A summary is updated only once this need's own clear went
+			// out, so a clear retried later never lands over it.
+			if devicesErr == nil {
+				s.unjoin(ctx, string(id))
+			}
 			if err = s.sink.Clear(ctx, id); err != nil {
 				slog.Warn("push: the sink did not clear a need; trying again later", "run", id, "in", retry, "error", err)
 			}
@@ -522,8 +526,8 @@ func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
 	if err != nil || sum == nil {
 		return false
 	}
-	if _, err := s.deliverPayload(ctx, n.member, sum.payload, sum.topic, sum.urgency); err != nil {
-		slog.Warn("push: summary not delivered", "member", n.member, "error", err)
+	if results, err := s.deliverPayload(ctx, n.member, sum.payload, sum.topic, sum.urgency); failed(results, err) {
+		slog.Warn("push: summary not delivered", "member", n.member, "error", errors.Join(err, deviceErrors(results)))
 	}
 	return true
 }
