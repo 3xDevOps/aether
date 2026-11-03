@@ -232,7 +232,11 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: fmt.Sprintf(
 			"method not found: %s; allowed methods: %s", req.Method, strings.Join(allowedMethods(), ", "))}
 	}
-	if relays(req) {
+	relay, rpcErr := s.relayed(ctx, req)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if len(relay) > 0 {
 		tier = tierConfirmed
 	}
 	result, rpcErr := s.run(ctx, req, tier)
@@ -244,18 +248,35 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 	return result, rpcErr
 }
 
-// relays reports whether req makes a watch write into sessions, which
-// wakes them as a message does, so it is confirmed like run.inject.
-func relays(req protocol.Request) bool {
+// relayed is the sessions a watch.create or watch.update leaves the watch
+// writing into. Writing wakes them as a message does, so such a call is
+// confirmed like run.inject; an update that keeps a relay, such as a
+// resume or new conditions, is too. Only pausing never relays.
+func (s *Server) relayed(ctx context.Context, req protocol.Request) ([]string, *protocol.Error) {
 	switch req.Method {
 	case protocol.MethodWatchCreate:
 		p, err := protocol.DecodeParams[protocol.WatchCreateParams](req.Params)
-		return err == nil && len(p.RelayTo) > 0
+		if err != nil {
+			return nil, nil
+		}
+		return p.RelayTo, nil
 	case protocol.MethodWatchUpdate:
 		p, err := protocol.DecodeParams[protocol.WatchUpdateParams](req.Params)
-		return err == nil && p.RelayTo != nil && len(*p.RelayTo) > 0
+		switch {
+		case err != nil || p.WatchID == "":
+			return nil, nil
+		case p.RelayTo != nil:
+			return *p.RelayTo, nil
+		case p.Paused != nil && *p.Paused:
+			return nil, nil
+		}
+		var got protocol.WatchGetResult
+		if rpcErr := s.call(ctx, protocol.MethodWatchGet, protocol.WatchIDParams{WatchID: p.WatchID}, &got); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return got.Watch.RelayTo, nil
 	}
-	return false
+	return nil, nil
 }
 
 func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (json.RawMessage, *protocol.Error) {
@@ -786,23 +807,20 @@ func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *p
 }
 
 func (s *Server) summarizeRelay(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	relay, rpcErr := s.relayed(ctx, req)
+	if rpcErr != nil {
+		return rpcErr
+	}
 	var watched string
-	var relay []string
 	if req.Method == protocol.MethodWatchCreate {
-		p, err := protocol.DecodeParams[protocol.WatchCreateParams](req.Params)
-		if err != nil {
-			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
-		}
-		watched, relay = "session "+p.Target.RunID, p.RelayTo
+		p, _ := protocol.DecodeParams[protocol.WatchCreateParams](req.Params)
+		watched = "session " + p.Target.RunID
 		if p.Target.Kind == protocol.WatchTargetPR {
 			watched = fmt.Sprintf("pull request %s#%d", p.Target.Repo, p.Target.Number)
 		}
 	} else {
-		p, err := protocol.DecodeParams[protocol.WatchUpdateParams](req.Params)
-		if err != nil || p.RelayTo == nil {
-			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": relay_to is required"}
-		}
-		watched, relay = "watch "+p.WatchID, *p.RelayTo
+		p, _ := protocol.DecodeParams[protocol.WatchUpdateParams](req.Params)
+		watched = "watch " + p.WatchID
 	}
 	parts := make([]string, 0, len(relay))
 	for _, id := range relay {

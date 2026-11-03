@@ -46,6 +46,10 @@ func (f *actionServer) Call(_ context.Context, method string, params json.RawMes
 		return json.RawMessage(`{"workspace":{"id":"ws-1","name":"api"}}`), nil
 	case protocol.MethodRunLaunch:
 		return json.RawMessage(`{"run":{"id":"run-new","workspace_id":"ws-1"}}`), nil
+	case protocol.MethodWatchGet:
+		if strings.Contains(string(params), "w-relay") {
+			return json.RawMessage(`{"watch":{"id":"w-relay","relay_to":["run-2"]}}`), nil
+		}
 	case protocol.MethodRunKill:
 		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "session run-1 is not live: it finished at 12:04"}
 	}
@@ -297,6 +301,15 @@ func TestAWatchThatRelaysIntoSessionsAsksFirst(t *testing.T) {
 	if len(got) != 1 || got[0][0].Outcome != protocol.AssistantActionDeclined ||
 		!strings.HasPrefix(got[0][0].Summary, `Write each notice of session run-1 into session run-1 (`) {
 		t.Fatalf("records = %+v, want the relay shown on a card and refused", got)
+	}
+
+	// Resuming a watch that relays starts writing into its sessions again.
+	if err := callTool(t, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-relay", Paused: new(false)}, true, false); err == nil {
+		t.Fatal("a refused resume of a relaying watch ran")
+	}
+	got = actions(t, svc, m)
+	if len(got) != 2 || got[1][0].Summary != `Write each notice of watch w-relay into session run-2 ("Docs"), owned by Dana, waking it` {
+		t.Fatalf("records = %+v, want the resume shown on a card naming the session and its owner", got)
 	}
 }
 

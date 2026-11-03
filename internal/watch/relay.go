@@ -38,6 +38,8 @@ func (s *Service) relayTargets(ctx context.Context, member *domain.Member, ws do
 	if len(out) > protocol.WatchRelayMax {
 		return nil, invalid("relay_to names %d sessions; at most %d", len(out), protocol.WatchRelayMax)
 	}
+	// Sorted, so the same sessions in another order find the same watch.
+	slices.Sort(out)
 	for _, id := range out {
 		run, err := s.store.GetRun(ctx, id)
 		if err != nil {
