@@ -75,7 +75,8 @@
   --animate-shake: shake var(--duration-360) var(--ease-in-out);
   --animate-bob: bob var(--duration-450) var(--ease-in-out) infinite alternate;
   --animate-mail-live: mail-live var(--duration-mail-live) linear forwards;
-  --animate-mail-travel: mail-travel var(--duration-500) var(--ease-in-out) forwards;
+  --animate-mail-travel: mail-travel var(--duration-500) linear forwards;
+  --animate-mail-bow: mail-bow var(--duration-500) forwards;
   --animate-mail-ping: mail-ping var(--duration-500) var(--ease-enter) var(--duration-450) both;
 
   /* Overlays grow from the Radix transform origin their content sets. */
@@ -221,6 +222,19 @@
     to {
       opacity: 0;
       transform: translateY(var(--mail-travel));
+    }
+  }
+  /* The pulse's sideways leg: quadratic out to the arc's apex and back, which with mail-travel's linear leg traces the arc. */
+  @keyframes mail-bow {
+    from {
+      animation-timing-function: cubic-bezier(0.33, 0.67, 0.67, 1);
+    }
+    50% {
+      transform: translateX(var(--mail-bow));
+      animation-timing-function: cubic-bezier(0.33, 0, 0.67, 0.33);
+    }
+    to {
+      transform: none;
     }
   }
   /* Hidden through its delay, until the pulse reaches the head. */
