@@ -268,6 +268,16 @@ describe('states', () => {
     expect(signIns()).toHaveLength(1)
   })
 
+  it('starts no sign-in on its own when the status read on load is stale', async () => {
+    const agents = [{ name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' }]
+    useStore.getState().setAssistantStatus(status({ state: 'setup', agent: undefined, sign_in_recorded: false, agents }))
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'setup', agent: undefined, sign_in_recorded: true, agents }))
+    const aside = await openPanel()
+    await waitFor(() => expect(useStore.getState().assistantStatus?.sign_in_recorded).toBe(true))
+    expect(await within(aside).findByRole('list', { name: 'Agents' })).toBeDefined()
+    expect(StubSocket.opened.filter((socket) => socket.url.includes('assistant_login='))).toHaveLength(0)
+  })
+
   it('signs an agent in for the assistant alone and leaves setup once it is ready', async () => {
     const setup = status({
       state: 'setup',

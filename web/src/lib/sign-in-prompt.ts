@@ -12,8 +12,9 @@ export interface SignInPrompt {
 
 export function readSignInPrompt(output: string): SignInPrompt {
   const text = output.replace(escapes, '')
-  // A URL is whole only once something follows it; output arrives in chunks.
-  const url = /https:\/\/\S+(?=\s)/.exec(text)?.[0]
+  // A link's target survives the CLI wrapping its text. A URL is whole only
+  // once something follows it; output arrives in chunks.
+  const url = /\x1b\]8;[^;\x07\x1b]*;(https:\/\/[^\x07\x1b]+)(?:\x07|\x1b\\)/.exec(output)?.[1] ?? /https:\/\/\S+(?=\s)/.exec(text)?.[0]
   const code = /one-time code[^\n]*\n\s*(\S+)\s/.exec(text)?.[1]
   return { url, code }
 }

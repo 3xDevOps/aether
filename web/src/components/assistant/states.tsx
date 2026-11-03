@@ -50,14 +50,24 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
   const [signing, setSigning] = useState('')
   const signingIn = status.agents.find((agent) => agent.name === signing)
   // A sign-in deletes the agent's earlier one and stops a running assistant,
-  // so only the first, with nothing to lose, starts on its own.
-  const first = status.sign_in_recorded === false ? status.agents[0]?.name : undefined
+  // so only the first, with nothing to lose, starts on its own. The status
+  // in the store can predate a sign-in made elsewhere, so a fresh read
+  // decides; a failed read starts nothing and the panel's own read reports it.
+  const unrecorded = status.sign_in_recorded === false
   useEffect(() => {
-    const store = useStore.getState()
-    if (!first || store.assistantSignInStarted) return
-    store.noteAssistantSignInStarted()
-    setSigning(first)
-  }, [first])
+    if (!unrecorded || useStore.getState().assistantSignInStarted) return
+    let live = true
+    api.assistantStatus().then((fresh) => {
+      const store = useStore.getState()
+      const first = fresh.sign_in_recorded === false ? fresh.agents[0]?.name : undefined
+      if (!live || !first || store.assistantSignInStarted) return
+      store.noteAssistantSignInStarted()
+      setSigning(first)
+    }, () => {})
+    return () => {
+      live = false
+    }
+  }, [unrecorded])
   if (signingIn) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">

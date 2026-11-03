@@ -14,6 +14,11 @@ describe('readSignInPrompt', () => {
     expect(readSignInPrompt(claude)).toEqual({ url: claudeURL, code: undefined })
   })
 
+  it('reads the link target of a URL wrapped across lines', () => {
+    const wrapped = claude.replace(`\x1b[94m${claudeURL}`, `\x1b[94m${claudeURL.slice(0, 40)}\r\n${claudeURL.slice(40)}`)
+    expect(readSignInPrompt(wrapped).url).toBe(claudeURL)
+  })
+
   it('reads the Codex device URL and code', () => {
     expect(readSignInPrompt(codex)).toEqual({ url: 'https://auth.openai.com/codex/device', code: 'WXYZ-12345' })
   })
