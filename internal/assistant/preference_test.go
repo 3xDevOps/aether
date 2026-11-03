@@ -245,7 +245,7 @@ func TestMemoryOffRefusesReadingAndSavingButNotForgetting(t *testing.T) {
 		if _, err = f.mine(); errCode(err) != protocol.CodeDenied {
 			t.Errorf("my preferences = %v, want denied", err)
 		}
-		if err = callTool(t, f.sock, f.m, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: id}, true, true); err != nil {
+		if err = callTool(t, f.svc, f.sock, f.m, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: id}, true, true); err != nil {
 			t.Errorf("forget = %v, want it forgotten after the card", err)
 		}
 		if _, err = f.prefs.Get(t.Context(), f.m.id, id); errCode(err) != protocol.CodeNotFound && !strings.Contains(fmt.Sprint(err), "not found") {
@@ -384,7 +384,7 @@ func TestForgetShowsTheTextAndTellsTheNextPrompt(t *testing.T) {
 	var logMu sync.Mutex
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(lockedWriter{&logMu, &logs}, nil)))
-	err = callTool(t, f.sock, f.m, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: saved.Preference.ID}, true, true)
+	err = callTool(t, f.svc, f.sock, f.m, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: saved.Preference.ID}, true, true)
 	slog.SetDefault(prev)
 	if err != nil {
 		t.Fatal(err)
@@ -428,18 +428,12 @@ func TestForgetKeepsAPreferenceChangedWhileItsCardWaits(t *testing.T) {
 	go func() {
 		done <- coordtransport.Call(t.Context(), f.sock, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: saved.Preference.ID}, nil)
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(f.m.confirms.snapshot()) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("no card was shown")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	card := pendingCards(t, f.svc, f.m)[0]
 	text := "Prefer short answers"
 	if _, err = f.prefs.Update(t.Context(), f.m.id, protocol.PreferenceUpdateParams{ID: saved.Preference.ID, Text: &text}, protocol.PreferenceSourceSettings, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.m.confirms.decide(f.m.confirms.snapshot()[0].ID, true); err != nil {
+	if err = f.svc.Confirm(t.Context(), f.m.id, card.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err = wait(t, done); errCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), "changed since you saw it") {
@@ -486,11 +480,11 @@ func TestAutoApprovalNeverPassesAPreference(t *testing.T) {
 		t.Fatal(err)
 	}
 	carrying := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "Fix the report. I PREFER TABLE\n  OUTPUT."}
-	if err := callTool(t, f.sock, f.m, protocol.MethodRunLaunch, carrying, true, true); err != nil {
+	if err := callTool(t, f.svc, f.sock, f.m, protocol.MethodRunLaunch, carrying, true, true); err != nil {
 		t.Fatal(err)
 	}
 	plain := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "Fix the report."}
-	if err := callTool(t, f.sock, f.m, protocol.MethodRunLaunch, plain, false, false); err != nil {
+	if err := callTool(t, f.svc, f.sock, f.m, protocol.MethodRunLaunch, plain, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got := actions(t, f.svc, f.m)
@@ -776,7 +770,7 @@ func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
 	left, cancel := context.WithCancel(t.Context())
 	cancel()
 	// The caller's leaving races the agent's refusal; either ends the prompt, and the notes must come back both ways.
-	if err := s.Prompt(left, m.id, "show my sessions", "k1", nil); !errors.Is(err, context.Canceled) && !errors.Is(err, domain.ErrPromptRefused) {
+	if err := s.Prompt(left, m.id, "show my sessions", "k1", nil, Door("")); !errors.Is(err, context.Canceled) && !errors.Is(err, domain.ErrPromptRefused) {
 		t.Fatalf("Prompt of a caller that left = %v; want it cancelled or refused", err)
 	}
 	forgotten := "preference " + saved.Preference.ID + " was forgotten"
@@ -803,7 +797,7 @@ func TestNextPromptWaitsForTheLastPromptsNotes(t *testing.T) {
 	m.notesSettled = settled
 	m.mu.Unlock()
 	done := make(chan error, 1)
-	go func() { done <- s.Prompt(t.Context(), m.id, "show my sessions", "k2", nil) }()
+	go func() { done <- s.Prompt(t.Context(), m.id, "show my sessions", "k2", nil, Door("")) }()
 	select {
 	case err := <-done:
 		t.Fatalf("Prompt returned %v while the last prompt's answer was outstanding", err)
@@ -856,7 +850,7 @@ func TestPromptThatWaitedThroughAResetIsRefused(t *testing.T) {
 	m.notesSettled = make(chan struct{})
 	m.mu.Unlock()
 	waiting := make(chan error, 1)
-	go func() { waiting <- s.Prompt(t.Context(), m.id, "show my sessions", "k4", nil) }()
+	go func() { waiting <- s.Prompt(t.Context(), m.id, "show my sessions", "k4", nil, Door("")) }()
 	time.Sleep(50 * time.Millisecond)
 	m.op.Lock()
 	err := s.resetLocked(t.Context(), m)

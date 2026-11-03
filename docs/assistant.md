@@ -256,10 +256,36 @@ assistant saves it with `aether_save_launch_defaults`, behind a card that
 spells out every saved choice; a choice for one launch is never saved. The
 launch dialog and **Settings → Launch** show the same choices.
 
-**Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
-turn or session fails the action with the reason, for example `run.kill was
-not approved: the member declined this action`. The assistant is told to report
-the failure and not retry. The assistant cannot approve for you.
+**Approve** runs it. **Decline** or no answer before the card expires fails
+the action with the reason, for example `run.kill was not approved: the member
+declined this action`. The assistant is told to report the failure and not
+retry. The assistant cannot approve for you.
+
+A card outlives the turn that raised it. The server stores it with the exact
+call, so it shows after a reload, on your phone or desktop, and after a server
+restart, and any of them can decide it (`assistant.confirm`); the first
+decision wins, and a second gets `assistant: no such pending confirmation`.
+
+- A card from a turn you started in Aether keeps the call waiting for 10
+  minutes; approving it in that time hands the result to the assistant.
+  **Stop**, the turn ending or the tool call hanging up stops the wait but
+  leaves the card open until it expires.
+- A card from a connector turn (ChatGPT, Claude) does not wait: the call
+  returns `Waiting for approval as card <id>; ...` at once and the card stays
+  open for 24 hours.
+- Approving a card whose call no longer waits makes the server run it with
+  the stored parameters, as you. It first builds the card again; when it
+  would read differently, for example the session changed owner or the
+  template changed, the card fails with what it reads now and nothing runs.
+  The outcome is written into the conversation; the assistant is not woken.
+- Each card runs at most once. A run cut off by a server restart is recorded
+  as `Failed: the server restarted while it ran; check before retrying`, and
+  is not run again.
+- **New conversation** withdraws every open card.
+
+The card's chip names a turn that did not come from the dashboard, such as
+**via ChatGPT**. An approved card reads **Approved, running…** until its
+outcome is in the conversation.
 
 Every action is recorded in the transcript. The approval is written before the
 action runs; if it cannot be written, the action does not run. The outcome
@@ -269,9 +295,9 @@ follows when the call returns:
 | --- | --- |
 | `Approved: <summary>` | You approved the card |
 | `Auto-approved: <summary>` | [Auto-approval](#auto-approval) passed it |
-| `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer in 10 minutes, or the turn ended first. Nothing ran |
+| `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer before the card expired, or a new conversation withdrew it. Nothing ran |
 | `Done: <summary>` | It succeeded, with the session it launched |
-| `Failed: <summary>` | The server refused it, or the approval could not be read or counted, with the exact error. In the second case nothing ran |
+| `Failed: <summary>` | The server refused it, the card changed before it ran, the server restarted while it ran, or the approval could not be read or counted, with the exact error. In the last three cases nothing ran, or you check whether it did |
 
 Pausing and resuming are recorded as `Done` or `Failed` without an approval.
 Each record carries the target's session and workspace id, and the owner when the
@@ -283,8 +309,8 @@ flight instead of writing them into the new one.
 
 Each action appears in the conversation as a card. The card names the action
 and its target ("Launched session on api with Claude Code", "Merged PR #42") and
-shows its state: running, done, failed, declined by you, expired after 10
-minutes unanswered, withdrawn when the turn ended first, or did not finish. A
+shows its state: running, done, failed, declined by you, expired unanswered,
+withdrawn by a new conversation, or did not finish. A
 call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the session,
 pull request or environment. A failure shows the server's error as is.
@@ -489,7 +515,9 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
-| `the member did not answer within 10m0s` | The card timed out. Ask again |
+| `the member did not answer before the card expired` | The card timed out. Ask again |
+| `the card changed after you approved it and now reads "..."; nothing was run` | The target changed while the card waited. Read the new text and ask again |
+| `the server restarted while it ran; check before retrying` | The call may or may not have taken effect. Check the session before you ask again |
 | `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
 | `the assistant is not configured on this server` | The server runs without the assistant |
 | `assistant: the server is shutting down` | Try again after the restart |

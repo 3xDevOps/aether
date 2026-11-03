@@ -2440,6 +2440,29 @@ CREATE INDEX idx_watches_wait_target ON watches(wait_target_run) WHERE wait_targ
 CREATE INDEX idx_watches_wait_delivery ON watches(wait_delivery_next_at) WHERE wait_delivery_next_at IS NOT NULL;
 ALTER TABLE coord_state_reports ADD COLUMN until_conditions TEXT NOT NULL DEFAULT '';
 `,
+	// v101: assistant approval cards outlive the turn that raised them. A
+	// card holds the exact call it approves; state 'running' is the claim
+	// taken before that call runs, so it runs at most once.
+	`
+CREATE TABLE assistant_cards (
+	id          TEXT PRIMARY KEY,
+	member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	method      TEXT NOT NULL,
+	params      TEXT NOT NULL,
+	card        TEXT NOT NULL,
+	origin      TEXT NOT NULL,
+	state       TEXT NOT NULL,
+	action_id   TEXT NOT NULL DEFAULT '',
+	result      TEXT NOT NULL DEFAULT '',
+	error       TEXT NOT NULL DEFAULT '',
+	shown_at    INTEGER NOT NULL DEFAULT 0,
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	updated_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_assistant_cards_member ON assistant_cards(member_id, created_at);
+CREATE INDEX idx_assistant_cards_open ON assistant_cards(state) WHERE state IN ('pending', 'approved', 'running');
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

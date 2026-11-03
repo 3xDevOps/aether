@@ -206,8 +206,8 @@ func (s *Server) serve(ctx context.Context, conn net.Conn) {
 }
 
 // dispatchWatched runs req with a context that ends when the caller hangs up,
-// so a confirmation nobody can answer any more is withdrawn. The wait for a
-// confirmation outlasts the idle deadline, which is lifted meanwhile.
+// so a call nobody can read the result of stops waiting for its card. The
+// wait for a card outlasts the idle deadline, which is lifted meanwhile.
 func (s *Server) dispatchWatched(ctx context.Context, conn net.Conn, r *bufio.Reader, req protocol.Request) (json.RawMessage, *protocol.Error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -259,16 +259,11 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 		if result, ok := s.replayTemplateLaunch(ctx, req); ok {
 			return result, nil
 		}
-		c := protocol.AssistantConfirmation{Method: req.Method, Params: req.Params, CreatedAt: time.Now().UTC(), Defaults: defaults}
-		if rpcErr := s.summarize(ctx, req, &c); rpcErr != nil {
+		c := protocol.AssistantConfirmation{Method: req.Method, Params: req.Params, CreatedAt: time.Now().UTC(), Defaults: defaults, Reason: reason}
+		if rpcErr := s.Summarize(ctx, &c); rpcErr != nil {
 			return nil, rpcErr
 		}
 		req.Params = c.Params
-		c.Summary += defaultsNote(defaults)
-		if reason != "" {
-			c.Reason = reason
-			c.Summary += fmt.Sprintf(". The assistant's reason: %q", reason)
-		}
 		if err := s.Confirm(ctx, c); err != nil {
 			var pe *protocol.Error
 			if errors.As(err, &pe) {
@@ -277,9 +272,28 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: req.Method + " was not approved: " + err.Error()}
 		}
 	}
-	result, rpcErr := s.Caller.Call(ctx, req.Method, req.Params)
+	return s.Call(ctx, req.Method, req.Params)
+}
+
+// Summarize writes the card of c's call from its method, params, saved
+// defaults and stated reason, as the member is shown it. It may pin the
+// params, such as a template launch to the version it shows.
+func (s *Server) Summarize(ctx context.Context, c *protocol.AssistantConfirmation) *protocol.Error {
+	if rpcErr := s.summarize(ctx, protocol.Request{Method: c.Method, Params: c.Params}, c); rpcErr != nil {
+		return rpcErr
+	}
+	c.Summary += defaultsNote(c.Defaults)
+	if c.Reason != "" {
+		c.Summary += fmt.Sprintf(". The assistant's reason: %q", c.Reason)
+	}
+	return nil
+}
+
+// Call makes an allowed call and follows the run it launched or messaged.
+func (s *Server) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	result, rpcErr := s.Caller.Call(ctx, method, params)
 	if rpcErr == nil && s.Follow != nil {
-		if id := s.followed(req, result); id != "" {
+		if id := s.followed(protocol.Request{Method: method, Params: params}, result); id != "" {
 			s.Follow(context.WithoutCancel(ctx), id)
 		}
 	}

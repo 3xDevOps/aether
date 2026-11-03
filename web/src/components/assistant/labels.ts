@@ -1,10 +1,22 @@
-import type { ViewAttachment, ViewEntry } from '@/lib/assistant-types'
+import type { AssistantOrigin, ViewAttachment, ViewEntry } from '@/lib/assistant-types'
 import { runLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import type { RootState } from '@/store'
 import type { AttachedTarget } from '@/store/view-context'
 
 const everything = { hasMethod: () => true, hasLocal: () => true, hasWS: () => true }
+
+/** The chip naming where a turn came from; none for the dashboard. */
+export function originLabel(origin: AssistantOrigin | undefined): string {
+  switch (origin?.door) {
+    case 'connector':
+      return `via ${origin.client || 'a connector'}`
+    case 'phone':
+    case 'desktop':
+      return `from ${origin.door}`
+  }
+  return ''
+}
 
 export const kindWord: Record<ViewAttachment['kind'] | 'page', string> = {
   page: 'Page',

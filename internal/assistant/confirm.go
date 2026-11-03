@@ -19,116 +19,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-const confirmTTL = 10 * time.Minute
-
-var (
-	// ErrNoConfirmation means no pending confirmation has the id: it was
-	// answered, expired or discarded with its session.
-	ErrNoConfirmation = errors.New("assistant: no such pending confirmation")
-
-	errDeclined     = errors.New("the member declined this action")
-	errExpired      = fmt.Errorf("the member did not answer within %s", confirmTTL)
-	errSessionEnded = errors.New("the turn or session ended before the member answered")
-)
-
-type pendingConfirmation struct {
-	protocol.AssistantConfirmation
-	answer chan error
-}
-
-// confirmations holds one member's pending confirmations. changed runs after
-// the set changes and must not block.
-type confirmations struct {
-	now     func() time.Time
-	ttl     time.Duration
-	changed func()
-
-	mu      sync.Mutex
-	pending []*pendingConfirmation
-}
-
-func newConfirmations(changed func()) *confirmations {
-	return &confirmations{now: time.Now, ttl: confirmTTL, changed: changed}
-}
-
-// confirm shows c as a card, filling its id and times, and waits for the
-// member's answer.
-func (r *confirmations) confirm(ctx context.Context, c *protocol.AssistantConfirmation) error {
-	c.ID = rand.Text()
-	c.CreatedAt = r.now().UTC()
-	c.ExpiresAt = c.CreatedAt.Add(r.ttl)
-	p := &pendingConfirmation{AssistantConfirmation: *c, answer: make(chan error, 1)}
-	r.mu.Lock()
-	r.pending = append(r.pending, p)
-	r.mu.Unlock()
-	r.changed()
-	defer r.remove(p)
-
-	timer := time.NewTimer(r.ttl)
-	defer timer.Stop()
-	select {
-	case err := <-p.answer:
-		return err
-	case <-timer.C:
-		return errExpired
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (r *confirmations) remove(p *pendingConfirmation) {
-	r.mu.Lock()
-	i := slices.Index(r.pending, p)
-	if i >= 0 {
-		r.pending = slices.Delete(r.pending, i, i+1)
-	}
-	r.mu.Unlock()
-	if i >= 0 {
-		r.changed()
-	}
-}
-
-func (r *confirmations) decide(id string, approve bool) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, p := range r.pending {
-		if p.ID != id {
-			continue
-		}
-		var answer error
-		if !approve {
-			answer = errDeclined
-		}
-		select {
-		case p.answer <- answer:
-			return nil
-		default:
-		}
-	}
-	return fmt.Errorf("%w: %s", ErrNoConfirmation, id)
-}
-
-func (r *confirmations) cancelAll() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, p := range r.pending {
-		select {
-		case p.answer <- errSessionEnded:
-		default:
-		}
-	}
-}
-
-func (r *confirmations) snapshot() []protocol.AssistantConfirmation {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]protocol.AssistantConfirmation, len(r.pending))
-	for i, p := range r.pending {
-		out[i] = p.AssistantConfirmation
-	}
-	return out
-}
-
 // autoApproved are the methods auto-approval may pass. A confirmed method
 // not listed here shows a card whatever the setting.
 var autoApproved = []string{protocol.MethodRunLaunch, protocol.MethodRunInject, protocol.MethodRunKill, protocol.MethodEnvSave}
@@ -153,11 +43,14 @@ func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
 }
 
 // approver passes a confirmed call at once when the member turned
-// auto-approval on and the call is one it covers, or else when they approve
-// its card. The setting is read from the store on every call, so a change
-// applies to the live session. A passed call is in the transcript before it
-// runs; one that cannot be recorded does not run. A call that does not pass
-// is recorded with its outcome, in the conversation it was asked in.
+// auto-approval on and the call is one it covers, or else raises a card. The
+// setting is read from the store on every call, so a change applies to the
+// live session. A card from a turn the member may be watching keeps the call
+// waiting until it is decided or expires; one from a connector turn parks,
+// and the call returns at once. A call that stops waiting leaves its card
+// open, and approving it later runs the call on the server (runParked). A
+// passed call is in the transcript before it runs; one that cannot be
+// recorded does not run.
 func (s *Service) approver(m *member) func(context.Context, protocol.AssistantConfirmation) error {
 	return func(ctx context.Context, c protocol.AssistantConfirmation) error {
 		conv := m.conversation()
@@ -165,30 +58,50 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 		if passed {
 			return nil
 		}
+		var answer chan error
 		if err == nil {
-			err = m.confirms.confirm(ctx, &c)
-			// A withdrawn card ends with the caller's context done; its
-			// reset must still be stored.
-			if cerr := s.countApproval(context.WithoutCancel(ctx), m, c, err == nil); cerr != nil {
-				err = errors.Join(err, fmt.Errorf("count the approval: %w", cerr))
+			origin := m.turnOrigin()
+			if answer, err = s.raise(ctx, m, &c, origin); err == nil && answer == nil {
+				return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(parkedText, c.ID)}
 			}
 		}
-		a := newAction(c)
-		a.ConfirmationID, a.DecidedAt = c.ID, time.Now().UTC()
 		if err != nil {
-			a.Outcome, a.FinishedAt = refusal(err), a.DecidedAt
-			if a.Outcome == protocol.AssistantActionFailed {
-				a.Error = err.Error()
-			}
+			a := newAction(c)
+			a.DecidedAt = time.Now().UTC()
+			a.Outcome, a.FinishedAt, a.Error = protocol.AssistantActionFailed, a.DecidedAt, err.Error()
 			if nerr := s.noteOutcome(conv, m, a, err.Error()); nerr != nil {
-				err = errors.Join(err, fmt.Errorf("record the %s action: %w", a.Outcome, nerr))
+				err = errors.Join(err, fmt.Errorf("record the failed action: %w", nerr))
 			}
 			return err
 		}
-		slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", false)
-		a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
-		if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
-			return fmt.Errorf("record the approval: %w", err)
+		select {
+		case err = <-answer:
+		case <-ctx.Done():
+			if answered, decision := m.confirms.leave(c.ID, answer); answered && decision == nil {
+				s.spawn(func() { s.runParked(m, c.ID, nil) })
+			}
+			return ctx.Err()
+		}
+		if err != nil {
+			return err
+		}
+		a := newAction(c)
+		a.ConfirmationID, a.DecidedAt = c.ID, time.Now().UTC()
+		claimed, err := s.claim(context.WithoutCancel(ctx), m, c, a)
+		if err == nil && !claimed {
+			err = fmt.Errorf("card %s is no longer approved", c.ID)
+		}
+		if err == nil {
+			slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", false)
+			a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
+			if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
+				err = fmt.Errorf("record the approval: %w", err)
+				a.Outcome, a.Approval, a.Error, a.FinishedAt = protocol.AssistantActionFailed, "", err.Error(), time.Now().UTC()
+				s.finishCard(m, a)
+			}
+		}
+		if err != nil {
+			return err
 		}
 		m.actions.hold(conv, a, c.Params, c.Shown)
 		return nil
@@ -203,14 +116,14 @@ func refusal(err error) string {
 		return protocol.AssistantActionDeclined
 	case errors.Is(err, errExpired):
 		return protocol.AssistantActionExpired
-	case errors.Is(err, errSessionEnded), errors.Is(err, context.Canceled):
+	case errors.Is(err, errSessionEnded):
 		return protocol.AssistantActionWithdrawn
 	}
 	return protocol.AssistantActionFailed
 }
 
 // countApproval counts a card auto-approval would have passed toward the
-// suggestion to turn it on; a decline, timeout or withdrawal of any card
+// suggestion to turn it on; a decline, expiry or withdrawal of any card
 // starts the count over.
 func (s *Service) countApproval(ctx context.Context, m *member, c protocol.AssistantConfirmation, approved bool) error {
 	if approved && !autoApprovable(c) {
@@ -405,8 +318,10 @@ func (s *Service) noteIn(ctx, conv context.Context, m *member, n acphost.Notice)
 	return s.recordLocked(ctx, m, n)
 }
 
-// noteOutcome records a in conv, unless a reset discarded it.
+// noteOutcome records a in conv, unless a reset discarded it, and the
+// outcome of a card's call on the card.
 func (s *Service) noteOutcome(conv context.Context, m *member, a protocol.AssistantAction, body string) error {
+	s.finishCard(m, a)
 	if err := s.noteAction(conv, conv, m, a, body); !errors.Is(err, errConversationEnded) {
 		return err
 	}

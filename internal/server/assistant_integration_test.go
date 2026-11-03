@@ -671,14 +671,15 @@ func TestIntegrationAssistantCrash(t *testing.T) {
 	}
 }
 
-// TestIntegrationAssistantCancelCards cancels a turn while a
-// tool call waits for approval: the card goes and the call fails unapproved.
-func TestIntegrationAssistantCancelCards(t *testing.T) {
+// TestIntegrationAssistantKeptCards stops a turn while a tool
+// call waits for approval and hangs the call up: the card stays open, and
+// survives a server restart. Approving it then runs the call once, on the
+// server.
+func TestIntegrationAssistantKeptCards(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	env := startAssistantServer(t, ctx, nil)
-	defer env.stop()
 	if perr := env.call(protocol.MethodAssistantStart, protocol.AssistantStartParams{}, nil); perr != nil {
 		t.Fatal(perr)
 	}
@@ -690,28 +691,66 @@ func TestIntegrationAssistantCancelCards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = conn.Close() }()
-	result := make(chan *protocol.Error, 1)
-	go func() {
-		perr, _ := env.toolCall(conn, bufio.NewReader(conn), protocol.MethodEnvSave)
-		result <- perr
-	}()
-	frames.until(t, "a pending confirmation", func(f protocol.AssistantFrame) bool {
+	req, _ := json.Marshal(protocol.Request{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: protocol.MethodEnvSave, Params: json.RawMessage("{}")})
+	if _, err = conn.Write(append(req, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	pending := frames.until(t, "a pending confirmation", func(f protocol.AssistantFrame) bool {
 		return f.Status != nil && len(f.Status.Confirmations) == 1
 	})
+	card := pending.Status.Confirmations[0]
+	if card.State != protocol.AssistantCardPending || card.Origin.Door != protocol.AssistantDoorDashboard {
+		t.Fatalf("card = %+v, want pending from the dashboard", card)
+	}
 	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
 		t.Fatal(perr)
 	}
-	frames.until(t, "the card to go", func(f protocol.AssistantFrame) bool {
-		return f.Status != nil && len(f.Status.Confirmations) == 0
+	frames.until(t, "the idle status", func(f protocol.AssistantFrame) bool {
+		return f.Status != nil && f.Status.State == protocol.AssistantStateIdle
 	})
-	select {
-	case perr := <-result:
-		if perr == nil || !strings.Contains(perr.Message, "was not approved") {
-			t.Fatalf("env.save after a cancel = %v, want it refused", perr)
+	_ = conn.Close()
+	if st := env.status(); len(st.Confirmations) != 1 || st.Confirmations[0].ID != card.ID {
+		t.Fatalf("cards after Stop and a hang-up = %+v, want %s kept", st.Confirmations, card.ID)
+	}
+
+	env.stop()
+	env = startAssistantServer(t, ctx, env)
+	defer env.stop()
+	if st := env.status(); len(st.Confirmations) != 1 || st.Confirmations[0].ID != card.ID || st.Confirmations[0].Summary != card.Summary {
+		t.Fatalf("cards after a restart = %+v, want %s kept", st.Confirmations, card.ID)
+	}
+	if perr := env.call(protocol.MethodAssistantConfirm, protocol.AssistantConfirmParams{ConfirmationID: card.ID, Approve: true}, nil); perr != nil {
+		t.Fatalf("assistant.confirm after a restart: %v", perr)
+	}
+	var row *store.AssistantCard
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if row, err = env.srv.Store().AssistantCard(ctx, env.member.ID, card.ID); err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the tool call stayed blocked after the cancel")
+		if row.State == protocol.AssistantCardSucceeded || row.State == protocol.AssistantCardFailed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("card is still %s", row.State)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if perr := env.call(protocol.MethodAssistantConfirm, protocol.AssistantConfirmParams{ConfirmationID: card.ID, Approve: true}, nil); perr == nil || perr.Code != protocol.CodeNotFound {
+		t.Fatalf("second assistant.confirm = %v, want not found", perr)
+	}
+	var history protocol.RunACPHistoryResult
+	if perr := env.call(protocol.MethodAssistantHistory, protocol.AssistantHistoryParams{}, &history); perr != nil {
+		t.Fatal(perr)
+	}
+	outcomes := 0
+	for _, f := range history.Frames {
+		if strings.Contains(string(f.Item), `"confirmation_id":"`+card.ID+`"`) && (strings.Contains(string(f.Item), `"outcome":"succeeded"`) || strings.Contains(string(f.Item), `"outcome":"failed"`)) {
+			outcomes++
+		}
+	}
+	if outcomes != 1 {
+		t.Fatalf("%d outcome records for card %s (%s), want 1", outcomes, card.ID, row.State)
 	}
 }
 
@@ -725,11 +764,11 @@ func TestIntegrationAssistantKeyKept(t *testing.T) {
 	defer env.stop()
 	callerCtx, leave := context.WithCancel(ctx)
 	time.AfterFunc(300*time.Millisecond, leave)
-	err := env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone", nil)
+	err := env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door(""))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("prompt of a caller that left = %v, want the cancellation", err)
 	}
-	if err := env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone", nil); err != nil {
+	if err := env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door("")); err != nil {
 		t.Fatalf("retry of a dispatched prompt = %v, want it ignored", err)
 	}
 	var history protocol.RunACPHistoryResult

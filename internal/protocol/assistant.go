@@ -72,6 +72,43 @@ type AssistantConfirmation struct {
 	// launch, as the assistant's launch tool reported it. It is shown on the
 	// card and decides nothing.
 	Defaults *AssistantDefaultsUse `json:"defaults,omitempty"`
+	// State is one of the AssistantCard states; a card is listed while it
+	// is pending, approved or running.
+	State string `json:"state,omitempty"`
+	// Origin is where the prompt of the turn that raised the card came from.
+	Origin AssistantOrigin `json:"origin,omitzero"`
+}
+
+// States of an assistant approval card. Approved is the decision; running
+// is the claim taken before the call runs, so it runs at most once.
+const (
+	AssistantCardPending   = "pending"
+	AssistantCardApproved  = "approved"
+	AssistantCardDeclined  = "declined"
+	AssistantCardExpired   = "expired"
+	AssistantCardWithdrawn = "withdrawn"
+	AssistantCardRunning   = "running"
+	AssistantCardSucceeded = "succeeded"
+	AssistantCardFailed    = "failed"
+)
+
+// Doors of an assistant turn's origin. An Aether client names its own door
+// for display; it decides nothing.
+const (
+	AssistantDoorDashboard = "dashboard"
+	AssistantDoorPhone     = "phone"
+	AssistantDoorDesktop   = "desktop"
+	AssistantDoorConnector = "connector"
+)
+
+// AssistantOrigin is where a turn's prompt came from, stamped by the server
+// from the transport that carried it. Only the connector route sets the
+// connector door.
+type AssistantOrigin struct {
+	Door string `json:"door"`
+	// Client and ConnectorID name the connector of a connector turn.
+	Client      string `json:"client,omitempty"`
+	ConnectorID string `json:"connector_id,omitempty"`
 }
 
 // AssistantDefaultsUse names the launch fields saved defaults filled, each

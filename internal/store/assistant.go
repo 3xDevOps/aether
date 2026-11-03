@@ -53,6 +53,7 @@ type AssistantSettings struct {
 // AssistantStore persists each member's assistant session. Removing a member
 // removes theirs.
 type AssistantStore interface {
+	AssistantCardStore
 	// GetAssistantSession returns ErrNotFound when the member has none.
 	GetAssistantSession(ctx context.Context, member domain.MemberID) (*AssistantSession, error)
 	// PutAssistantSession stores everything but the generation.

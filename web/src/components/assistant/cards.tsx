@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { originLabel } from '@/components/assistant/labels'
 import { isLaunch, launchTitle, useLaunchRows } from '@/components/assistant/launch-summary'
 import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -15,7 +16,7 @@ import { useSecondsUntil } from '@/lib/hooks'
 import type { SessionRequest } from '@/lib/session-types'
 import { AcpRequestCard } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
-import { assistantSessionID } from '@/store/assistant'
+import { assistantSessionID, cardPending } from '@/store/assistant'
 
 function useAction() {
   const [busy, setBusy] = useState<string | null>(null)
@@ -77,15 +78,17 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)
   const remaining = useSecondsUntil(confirmation.expires_at)
   const total = Date.parse(confirmation.expires_at) - Date.parse(confirmation.created_at)
+  const pending = cardPending(confirmation)
+  const origin = originLabel(confirmation.origin)
   return (
     <RequestCard
-      aria-label={`Approve this action? ${confirmation.summary}`}
+      aria-label={pending ? `Approve this action? ${confirmation.summary}` : `Approved, running: ${confirmation.summary}`}
       avatar={<IconTile aria-hidden><AgentGlyph agent={harness} className="size-4" /></IconTile>}
       title={launch || confirmation.task ? launchTitle(confirmation.summary) : confirmation.summary}
-      source={<Code>{confirmation.method}</Code>}
-      meta={<>expires <RelativeTime at={confirmation.expires_at} /></>}
-      timeBar={remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
-      footer={(
+      source={<><Code>{confirmation.method}</Code>{origin && <span className="text-ui-xs text-muted">{origin}</span>}</>}
+      meta={pending ? <>expires <RelativeTime at={confirmation.expires_at} /></> : 'Approved, running…'}
+      timeBar={pending && remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
+      footer={pending && (
         <RequestFooter>
           <RequestActions>
             <RequestAction label={busy === 'decline' ? 'Declining…' : 'Decline'} disabled={busy !== null} onClick={() => decide(false)} />

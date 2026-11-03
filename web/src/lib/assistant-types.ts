@@ -29,6 +29,17 @@ export interface AssistantConfirmation {
   task?: string
   /** What the member's saved launch defaults filled into a launch, each saved choice it skipped and each it could not check, with the reason. */
   defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[]; unchecked?: { field: string; reason: string }[] }
+  /** Pending until decided; approved and running cards stay listed until their call's outcome is in the transcript. Absent from a server without durable cards. */
+  state?: 'pending' | 'approved' | 'running'
+  /** Where the prompt of the turn that raised the card came from. */
+  origin?: AssistantOrigin
+}
+
+/** Where a turn's prompt came from, stamped by the server. */
+export interface AssistantOrigin {
+  door: 'dashboard' | 'phone' | 'desktop' | 'connector'
+  client?: string
+  connector_id?: string
 }
 
 export interface AssistantActionTarget {
