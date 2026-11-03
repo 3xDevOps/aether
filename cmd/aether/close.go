@@ -28,7 +28,7 @@ func init() {
 func runClose(args []string) error {
 	fs := newFlagSet("close")
 	outcome := fs.String("outcome", "", "merged or abandoned")
-	force := fs.Bool("force", false, "close without asking, even with close warnings")
+	force := fs.Bool("force", false, "on a terminal, close without asking even with close warnings")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, closeUsage)
@@ -38,33 +38,25 @@ func runClose(args []string) error {
 	}
 	interactive := term.IsTerminal(int(os.Stdin.Fd()))
 	return withControl(func(c *protocol.Client) error {
-		return closeSession(c, runID, *outcome, *force, interactive, os.Stdin, os.Stdout)
+		return closeSession(c, runID, *outcome, *force, interactive, os.Stdin, os.Stdout, os.Stderr)
 	})
 }
 
-// closeSession prints what closing runID would affect and, unless force,
-// asks before it closes.
-func closeSession(c *protocol.Client, runID, outcome string, force, interactive bool, in io.Reader, out io.Writer) error {
-	warnings, err := closeWarnings(c, runID)
+func closeSession(c *protocol.Client, runID, outcome string, force, interactive bool, in io.Reader, out, errOut io.Writer) error {
+	warnings, err := closeWarnings(c, runID, outcome)
 	if err != nil {
-		if !force {
-			return err
-		}
-		_, _ = fmt.Fprintf(out, "Could not check what closing %s affects: %v\n", runID, err)
+		_, _ = fmt.Fprintf(errOut, "Could not check what closing %s affects: %v\n", runID, err)
 	}
 	if len(warnings) > 0 {
-		_, _ = fmt.Fprintf(out, "Before closing %s:\n", runID)
+		_, _ = fmt.Fprintf(errOut, "Before closing %s:\n", runID)
 		for _, w := range warnings {
-			_, _ = fmt.Fprintf(out, "  %s: %s\n", w.Kind, w.Detail)
+			_, _ = fmt.Fprintf(errOut, "  %s: %s\n", w.Kind, w.Detail)
 			if w.URL != "" {
-				_, _ = fmt.Fprintf(out, "    %s\n", w.URL)
+				_, _ = fmt.Fprintf(errOut, "    %s\n", w.URL)
 			}
 		}
-		if !force {
-			if !interactive {
-				return fmt.Errorf("no terminal to ask on; to close anyway: aether close %s --outcome %s --force", runID, outcome)
-			}
-			_, _ = fmt.Fprint(out, "Close anyway? [y/N]: ")
+		if interactive && !force {
+			_, _ = fmt.Fprint(errOut, "Close anyway? [y/N]: ")
 			if !yesAnswer(bufio.NewReader(in)) {
 				return fmt.Errorf("aether close: %s was not closed", runID)
 			}
@@ -78,9 +70,9 @@ func closeSession(c *protocol.Client, runID, outcome string, force, interactive 
 	return nil
 }
 
-func closeWarnings(c *protocol.Client, runID string) ([]protocol.CloseWarning, error) {
+func closeWarnings(c *protocol.Client, runID, outcome string) ([]protocol.CloseWarning, error) {
 	var check protocol.RunCloseCheckResult
-	if err := c.Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{runID}}, &check); err != nil {
+	if err := c.Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{runID}, Outcome: outcome}, &check); err != nil {
 		return nil, olderServer(err)
 	}
 	if len(check.Runs) != 1 {
