@@ -97,7 +97,7 @@ CI splits the suite into three jobs. To repeat one that failed:
 | `integration (server-flows, smoke)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Chaos\|Coordination)'`, then the same with `'^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'`, then the [smoke tests](#real-agent-smoke-tests) |
 | `integration (scheduler, rest, agents)` | `INTEGRATION_SKIP="./internal/harness ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'`, then [`make test-agents`](#real-agents-against-a-mock-model) |
 
-A pull request runs the Docker suites on amd64 only. A push to main and a
+A ready pull request runs the Docker suites on amd64 only. A push to main and a
 merge-queue entry also run the `arm64` job: the standard-image and
 browser-image builds, the smoke tests, `make browser-smoke` and the browser
 runtime tests on a native arm64 runner.
@@ -580,7 +580,7 @@ only the release keys built into it.
 
 It refuses to start while a container named `aether-edge` exists, removes
 everything it creates, and takes about two minutes with warm caches. CI runs
-it in `edge-image.yml` on pull requests that change the edge, and in
+it in `edge-image.yml` on ready pull requests that change the edge, and in
 `release.yml` before a release publishes.
 
 ## Dashboard component tests
@@ -749,10 +749,11 @@ the server". Nothing Aether builds or installs is excluded.
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
 every merge queue entry and every push to `main`. A draft pull request runs
 `changes`, `audit`, `lint` and `build-and-test` only; marking it ready for
-review (`gh pr ready <n>`) starts a run with every job. `CI gate` is the one
-required check: it passes when every other job passed or was skipped by its
-own rule, and fails when any failed or was cancelled. A new job must be added
-to its `needs` list to gate `main`.
+review (`gh pr ready <n>`) starts a run with every job the path classifiers
+below select. `CI gate` is the one required check: it passes when every other
+job passed or was skipped by its own rule, and fails when any failed or was
+cancelled, and on every run started while the pull request was a draft, rerun
+included. A new job must be added to its `needs` list to gate `main`.
 
 `main` takes changes through a merge queue. `gh pr merge <n> --squash` adds a
 ready pull request whose `CI gate` passed; the queue batches up to five

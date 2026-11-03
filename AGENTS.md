@@ -154,7 +154,8 @@ feat(cli)!: drop the aether dash command
 Many sessions share the same CI runners.
 
 - Keep a pull request as a draft while you iterate. A draft runs only
-  `changes`, `audit`, `lint` and `build-and-test`.
+  `changes`, `audit`, `lint` and `build-and-test`, and its `CI gate` fails
+  on purpose; read those four jobs instead.
 - Push milestones freely; Greptile reviews them. Do not wait on CI or rerun
   it between pushes.
 - Run the checks for what you changed locally first; see

@@ -917,7 +917,9 @@ jobs:
 
   # The one required check on main, for pull requests and merge queue
   # entries. It fails when any job failed or was cancelled; a job its own
-  # rule skipped passes. A job missing from needs does not gate main.
+  # rule skipped passes. A job missing from needs does not gate main. A
+  # draft run fails it too: a rerun keeps the draft payload, and a passing
+  # draft gate on the head commit would satisfy the required check.
   ci-gate:
     name: CI gate
     if: ${{ always() }}
@@ -946,8 +948,13 @@ jobs:
       - name: Require every job to pass or be skipped by its rule
         env:
           NEEDS: ${{ toJSON(needs) }}
+          DRAFT: ${{ github.event.pull_request.draft == true }}
         run: |
           printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"'
+          if [ "$DRAFT" != false ]; then
+            echo "::error::Draft run: only the fast jobs ran. Mark the pull request ready for review (gh pr ready) to run the rest."
+            exit 1
+          fi
           bad=$(printf '%s' "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(" ")')
           if [ -n "$bad" ]; then
             echo "::error::Not passed: $bad"
