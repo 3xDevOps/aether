@@ -1,6 +1,7 @@
 # Assistant v2: Proposal
 
-Status: proposal, no code. Builds on
+Status: approved with the [owner decisions](#owner-decisions) below, which
+override the text they name. Phases 1–4 are being built. Builds on
 [2026-11-03-assistant-signin-and-standing-jobs.md](2026-11-03-assistant-signin-and-standing-jobs.md)
 (assistant sign-in and `relay_to` on watches, being built now) and on
 [assistant.md](../assistant.md), [watches.md](../watches.md),
@@ -119,11 +120,12 @@ feature and needs the taint rule from phase 5 first.
   limit stays for cards raised during a turn the member is watching in the
   panel, where a quick decision is expected. Only cards from turns nobody is
   watching (connector, event, request) get 24 hours.
-- Assistant cards can be decided only from an approved Aether device
-  (dashboard, phone, desktop, CLI). Never from a connector, the assistant's
-  own tool socket or Slack. `aether_decide_approval` stays limited to agents'
-  permission requests. The model that raised a card must never be able to
-  approve it.
+- Assistant cards can be decided from an approved Aether device
+  (dashboard, phone, desktop, CLI), and a card raised in a connector turn
+  also from that connector (see [Deciding a card from a
+  connector](#deciding-a-card-from-a-connector)). Never from the
+  assistant's own tool socket or Slack. The model that raised a card must
+  never be able to approve it.
 
 ### `aether_ask_assistant`
 
@@ -150,17 +152,13 @@ feature and needs the taint rule from phase 5 first.
   tools for reads.
 - The direct tools stay unchanged.
 
-### Owner decision: connected apps and private context
+### Connected apps and private context
 
-Owner decision 2 ("same conversation and memory") and decision 3 ("private
-preferences and transcripts never reach connected apps") conflict for the
-member's own ChatGPT. Recommended: a connector turn runs in the same
-conversation with your preferences applied, but the tool returns only that
-turn's capped, redacted reply. A ChatGPT conversation an attacker has
-steered can still ask the assistant to paraphrase your preferences, and a
-paraphrase gets past the redaction. The strict alternative runs connector
-turns with preferences off, which breaks "same memory". This needs the
-owner's call.
+A connector turn runs in the same conversation with your preferences
+applied, and the tool returns only that turn's capped, redacted reply (owner
+decision 1). A ChatGPT conversation an attacker has steered can still ask the
+assistant to paraphrase your preferences, and a paraphrase gets past the
+redaction. The owner accepted that risk.
 
 ## 2. Approvals
 
@@ -209,11 +207,11 @@ Launch claude (acp) in api: "Fix the flaky login test"
 - **Who may create a rule:** only a person's click on a card or in Settings,
   from an approved device. Never the assistant, a connector or an inbound
   request.
-- **Rules and origin:** rules apply to turns from every origin except
-  `request:` (see [Prompt injection](#5-prompt-injection)). Blanket
-  auto-approval does not apply to `connector:` turns, because an external
-  host mixes in tools and content Aether cannot see. Those cards wait for a
-  click.
+- **Rules and origin:** rules and blanket auto-approval apply to turns
+  from every origin except `request:` (see [Prompt
+  injection](#5-prompt-injection)). Connector turns get the same passes as
+  dashboard turns (owner decision 2), because people using Claude or
+  ChatGPT often have no access to the Aether app.
 - Each pass is recorded as `Auto-approved by rule <id>: <summary>`, next to
   today's `Auto-approved:`.
 
@@ -223,9 +221,8 @@ Launch claude (acp) in api: "Fix the flaky login test"
   wording, the card it came from, when it was created, when it was last used
   and how many times. **Revoke** takes one click and applies to the live
   assistant at once, since the setting is read on every call as today.
-- A rule unused for 30 days expires and is listed as **Expired (unused 30
-  days)**, with **Restore**. This follows Android's reset-on-disuse, so
-  forgotten broad grants don't linger and nobody is nagged to renew.
+- Rules never expire (owner decision 3). They stay listed with their use
+  count and last use until revoked.
 - CLI:
 
 ```sh
@@ -305,7 +302,9 @@ recipient's main conversation can still discuss the request ("tell Grace
 yes, after lunch"). That turn is tainted (see [Prompt injection](#5-prompt-injection)),
 so its send waits for a click.
 
-In v1 an answer is never released without the recipient's click. Research
+Owner decision 4 replaces the rule in this paragraph: phase 6 decides when
+an answer may leave without a click. As proposed, an answer was never
+released without the recipient's click. Research
 found no product that lets one person's agent answer another without the
 owner's release, and LLM-only privacy judgement leaks about a quarter of the
 time even with privacy prompts (PrivacyLens). A teammate asking only for
@@ -383,9 +382,10 @@ Mechanics:
   notice id, so a restart never runs a wake twice.
 - The wake prompt holds only structured fields (ids, states, condition,
   outcome), with any text quoted as untrusted.
-- Budget: 20 wakes a day per member by default, shown in **Settings →
-  Assistant**. Past it, the notice still arrives as a plain line, with
-  `Not looked at: daily wake budget reached (20)`.
+- Budget: 100 wakes a day per member by default (owner decision 5), and
+  **Settings → Assistant** changes the limit. Past it, the notice still
+  arrives as a plain line, with `Not looked at: daily wake budget reached
+  (100)` and a one-click **Reset for today**.
 
 ### Notification levels
 
@@ -444,7 +444,7 @@ teammate's request body is raised to `request`, even if a member started it.
 | Origin | Rules | Approve everything | Notes |
 | --- | --- | --- | --- |
 | Member (dashboard, phone, desktop) | Yes | Yes | As today |
-| Connector | Yes | No: cards wait | External host mixes in tools Aether can't see |
+| Connector | Yes | Yes | Owner decision 2; its cards are also decidable from the same connector |
 | Event | Yes | Yes | Daily wake budget; structured wake prompt |
 | Request (a teammate's text was read) | No | No | Every side effect asks, including `notify` |
 
@@ -475,17 +475,19 @@ assistant cannot change a turn's origin.
 ### Connector
 
 - `aether_ask_assistant` returns only the turn's reply. No tool returns raw
-  transcripts or requests, and the connector cannot decide assistant cards.
-  `child.start`-class tools stay off the connector.
+  transcripts or requests. The connector decides only cards raised by its own
+  turns, and only by echoing the card's text. `child.start`-class tools stay
+  off the connector.
 
 ### What stays unenforced
 
 The main assistant still reads untrusted text in member turns, as today.
 With auto-approval on, a steered assistant can launch, message and stop your
-own sessions ([security.md](../security.md#the-assistant)). v2 narrows this
-risk but does not remove it: rules are narrower than auto-approval,
-connector turns lose blanket auto-approval, and request turns lose all
-automatic passes. `security.md` must say so.
+own sessions ([security.md](../security.md#the-assistant)). Connector turns
+keep that exposure, and add the external host's own tools and content, which
+Aether cannot see. v2 narrows the risk but does not remove it: rules are
+narrower than auto-approval and request turns lose all automatic passes.
+`security.md` must say so.
 
 ## 6. Cost: whose quota pays
 
@@ -493,7 +495,7 @@ automatic passes. `security.md` must say so.
 | --- | --- |
 | A turn from any Aether door | The member's assistant sign-in |
 | `aether_ask_assistant` | The external client's own subscription for its model, plus a turn on the member's assistant sign-in |
-| Judgement wake | The member's assistant sign-in, capped at 20 a day |
+| Judgement wake | The member's assistant sign-in, capped at 100 a day by default |
 | Server-run follow-up, `relay_to`, digest, push | No model tokens |
 | Composing and sending a request | The sender's assistant |
 | Request desk draft | The recipient's assistant, only when the recipient asks for a draft (or opted into auto-drafting, counted against their wake budget) |
@@ -533,8 +535,7 @@ numbers race.
 **Phase 1: approvals (M, 2 PRs).**
 - PR 1: rule store and migration, typed rule keys per method, matching in
   `approver` before auto-approval, the never-rule-able list,
-  `Auto-approved by rule` records, the narrowed nudge, 30-day expiry on
-  disuse.
+  `Auto-approved by rule` records, the narrowed nudge.
 - PR 2: setup question, card buttons, Settings → Assistant → Approval rules,
   `aether member assistant rules`.
 - Docs: `assistant.md`, `security.md`.
@@ -543,7 +544,8 @@ numbers race.
 
 **Phase 2: durable cards and the queue (M, 2 PRs).**
 - PR 1: parked actions with a 24-hour expiry for cards from turns nobody
-  watches, server-side execution with re-check, decide only from devices.
+  watches, server-side execution with re-check, decide from devices and,
+  for a connector turn's cards, from that connector.
 - PR 2: per-member queue with origins and the chip, `Queued` state, removal,
   restart handling.
 - Check: integration test where a card is approved after its turn ended,
@@ -551,7 +553,7 @@ numbers race.
 
 **Phase 3: `aether_ask_assistant` (S, 1 PR).**
 - The tool, the 25-second wait, `turn_id` polling, optional MCP Tasks, the
-  4 KiB cap and preference redaction.
+  4 KiB cap and preference redaction, and deciding the turn's cards by echo.
 - Keep `TestConnectorToolList` green. Docs: `connectors.md`.
 
 **Phase 4: notification levels (M, 2 PRs).**
@@ -682,11 +684,12 @@ flagged secondary in their reports are marked (2nd).
   or after a connector turn possible, but a stale approval could run against
   a changed world. Re-checking at run time and keeping 10 minutes for watched
   turns limits that.
-- **Rule expiry on disuse.** This bounds stale grants. A rule used once a
-  month would lapse; **Restore** is one click.
-- **No blanket auto-approval for connector turns.** This is safer, but a
-  member who chose "act without asking" will still see cards for ChatGPT
-  turns until they add rules. The card says why.
+- **Rules never expire.** A forgotten broad grant lingers until revoked.
+  The rules list shows each rule's last use, so a stale one is easy to
+  spot.
+- **Blanket auto-approval for connector turns.** People who only use Claude
+  or ChatGPT get the same assistant, but an external host's content can steer
+  it, and its passes run without a card.
 - **Human-released answers between members.** This is slower than letting
   assistants answer each other, but it is the only design we found that
   keeps private data from leaking through a model's judgement. A server-only
@@ -697,12 +700,82 @@ flagged secondary in their reports are marked (2nd).
 - **No `relay_to` changes.** v2 consumes `relay_to` as built and proposes
   only a member target as a follow-up.
 
-## Open questions for the owner
+## Owner decisions
 
-1. Connector turns: same conversation with preferences applied and a capped,
-   redacted reply (recommended), or preferences off for connector turns?
-2. Blanket auto-approval off for connector turns (recommended), or the same
-   as dashboard turns?
-3. Rules expire after 30 days unused (recommended), or never?
-4. Answers to a teammate's `ask` always need a click in v1 (recommended)?
-5. Default judgement-wake budget of 20 a day?
+The owner answered the open questions on 2026-11-03. These answers override
+the text above where it differs; the sections they touch are updated.
+
+1. **Connector turns** use the same conversation with preferences applied
+   and return a capped reply. The paraphrase risk is accepted.
+2. **Connector turns get the same auto-approval and rules as dashboard
+   turns**, because people using Claude or ChatGPT often have no access to
+   the Aether app. So a card raised in a connector turn must also be
+   decidable from the connector, in a way the external chat's human
+   controls. The assistant's own tool socket, and the model, still cannot
+   approve its own cards.
+3. **Always approve this kind** rules never expire. They stay listed and
+   revocable in Settings and the CLI.
+4. **Answers to a teammate's `ask` do not always need a click.** Phase 6
+   designs when an answer may leave without one; this proposal's v1 rule
+   ("never released without the recipient's click") is replaced there.
+5. **Judgement-wake budget:** 100 a day by default. When it is reached, the
+   notice offers **Reset for today**, and Settings changes the limit.
+
+## Implementation decisions
+
+Choices for phases 1–4 that the proposal left open.
+
+### When a card waits and when it parks
+
+- A card raised in a turn from an Aether door (dashboard, phone, desktop)
+  keeps today's flow: the tool call waits up to 10 minutes, and an approval
+  in that time returns the call's result to the model.
+- A card raised in a connector turn parks at once: the tool call returns
+  `Waiting for approval as card <id>; the server runs it when the member
+  approves and writes the outcome into this conversation. Do not call it
+  again.` The turn ends, so the queue moves on. The card stays open for 24
+  hours.
+- Either card outlives its turn. **Stop**, the turn's end or the tool
+  socket hanging up no longer withdraw it; a reset of the conversation
+  does. An approval after the call stopped waiting makes the server run the
+  parked call through the member's own caller, with the exact stored
+  parameters.
+- Every run is claimed first, keyed by card id, in the store. A card is
+  run at most once, whichever path runs it. A claim found unfinished after a
+  restart is marked `Failed: the server restarted while it ran; check
+  before retrying`, never rerun.
+- At run time the server rebuilds the card's summary from the stored
+  parameters. If it differs from the summary the member approved (the
+  session ended, changed owner, the template changed), the card fails with
+  the new state, for example `run-8x2 ended at 14:02; nothing was sent`.
+
+### Deciding a card from a connector
+
+- `aether_ask_assistant` returns each card its turn raised as `{card_id,
+  card}`, where `card` is the server-written summary.
+- The same tool decides one: `{card_id, decision: "approve" | "decline",
+  card}`. `card` must equal the card's summary byte for byte, as
+  `aether_decide_approval` requires the request text. A mismatch fails with
+  `card text does not match card <id>; show the person the card and pass its
+  text exactly`, and decides nothing.
+- Only a card raised in a turn that the same connector grant started can be
+  decided this way. A card from a dashboard turn, another connector or an
+  event fails with the same error as a missing id.
+- Approving needs the scope the direct tool for that method needs:
+  `write` for launches, messages, answers, memory notes, watches and session
+  lifecycle, `control` for everything else.
+- A card whose summary is longer than 600 characters is decided only in
+  Aether, as for permission requests.
+- The connector offers only **Approve** and **Decline**. Rules and
+  auto-approval change only from an Aether device.
+- The external host's own confirmation of the tool call is the human gate,
+  as for `aether_decide_approval`; the echo binds that confirmation to the
+  exact card. `security.md` says so.
+
+### Origin
+
+- The server stamps every queue entry's origin from the transport that
+  carried it. Only the connector route can create `connector:` entries.
+  Aether devices name their door (`dashboard`, `phone`, `desktop`) for the
+  chip; that choice decides nothing.
+- A card records the origin of the turn that raised it.
