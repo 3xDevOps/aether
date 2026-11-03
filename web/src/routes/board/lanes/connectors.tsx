@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { xOf } from '@/routes/board/lanes/axis'
 import type { LaneEdge } from '@/routes/board/lanes/edges'
 import type { LaneGeometry } from '@/routes/board/lanes/lane-row'
+import { mailControl } from '@/routes/board/lanes/mail-marks'
 
 export interface EdgeAnchor {
   /** The lane's top and the half height of what an edge attaches to. */
@@ -74,7 +75,7 @@ export function drawEdges(edges: LaneEdge[], anchors: Map<string, EdgeAnchor>, g
   return out.sort((x, y) => Number(x.near) - Number(y.near))
 }
 
-/** Links for the focused lane's mail, a picked link and overlaps, with their ends and counts; drawn under the lanes so bars and labels stay readable. */
+/** Strokes, ends and counts; drawn under the lanes so bars and labels stay readable. */
 export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { shapes: DrawnEdge[]; g: LaneGeometry; height: number }) {
   return (
     <>
@@ -116,16 +117,18 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
 })
 
 /** Transparent hit paths above the lanes, so a link stays clickable where it crosses a bar. */
-export const EdgeHits = memo(function EdgeHits({ shapes, g, height, onPick }: {
+export const EdgeHits = memo(function EdgeHits({ shapes, g, height, title, onPick }: {
   shapes: DrawnEdge[]
   g: LaneGeometry
   height: number
-  onPick: (edge: LaneEdge, x: number, y: number) => void
+  title: (edge: LaneEdge) => string
+  onPick: (edges: LaneEdge[], x: number, y: number) => void
 }) {
   return (
     <svg aria-hidden className="pointer-events-none absolute top-0 overflow-visible" style={{ left: g.labelWidth, width: g.width, height }}>
       {shapes.map(({ edge, shape }) => (
         <path
+          {...mailControl}
           key={edge.key}
           d={shape.d}
           fill="none"
@@ -135,9 +138,11 @@ export const EdgeHits = memo(function EdgeHits({ shapes, g, height, onPick }: {
           className="cursor-pointer"
           onClick={(event) => {
             event.stopPropagation()
-            onPick(edge, shape.mid.x, shape.mid.y)
+            onPick([edge], shape.mid.x, shape.mid.y)
           }}
-        />
+        >
+          {edge.messages && <title>{title(edge)}</title>}
+        </path>
       ))}
     </svg>
   )

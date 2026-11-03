@@ -2,7 +2,7 @@ import type { StateContext } from '@/lib/needs-you'
 import type { Event, Run } from '@/lib/types'
 import { agoLabel, tickStep, ticks, widerWindow, windowSpan } from '@/routes/board/lanes/axis'
 import { laneEdges, mailOf, type LaneEdge } from '@/routes/board/lanes/edges'
-import { conversationWords, conversationsByLane, mailMarks } from '@/routes/board/lanes/mail'
+import { bundleWords, conversationWords, conversationsByLane, mailMarks } from '@/routes/board/lanes/mail'
 import { buildLanes, layoutLanes, fineMetrics, type LanesInput, type FamilyLane, type RunLane } from '@/routes/board/lanes/model'
 import { runSegments, segmentTone, statusChanges, strongest } from '@/routes/board/lanes/segments'
 import { mapRuns } from '@/routes/board/selectors'
@@ -279,7 +279,7 @@ describe('laneEdges', () => {
 describe('mail', () => {
   const edge = (key: string, from: string, to: string, t: number, ids: string[], acked = false, outside?: string): LaneEdge => ({
     key, kind: 'message', from: { lane: from, run: `run-${from || outside}`, t }, to: { lane: to, run: `run-${to || outside}`, t }, outside,
-    messages: { ids, senders: [`run-${from}`], acked },
+    messages: { ids, senders: [`run-${from}`], acked, items: ids.map(() => ({ from: `run-${from || outside}`, to: `run-${to || outside}`, acked })) },
   })
   const order = new Map([['a', 0], ['b', 1], ['c', 2]])
 
@@ -303,5 +303,20 @@ describe('mail', () => {
     expect(talks.get('a')!.map((c) => [c.lane || c.run, c.sent, c.received, c.unacked])).toEqual([['b', 2, 1, 2], ['run-away', 1, 0, 1]])
     expect(conversationWords(talks.get('a')!, (c) => c.lane || 'Outside')).toBe('messages: sent 2 to b and received 1 from b, sent 1 to Outside, 3 not acknowledged')
     expect(talks.has('')).toBe(false)
+  })
+
+  it('keeps each session folded into one lane apart, and counts only the messages not acknowledged', () => {
+    const folded: LaneEdge = {
+      key: 'f', kind: 'message', from: { lane: 'a', run: 'run-a', t: 1 }, to: { lane: 'fold', run: 'run-x', t: 1 },
+      messages: { ids: ['m1', 'm2', 'm3'], senders: ['run-a'], acked: false, items: [
+        { from: 'run-a', to: 'run-x', acked: true },
+        { from: 'run-a', to: 'run-y', acked: false },
+        { from: 'run-a', to: 'run-y', acked: true },
+      ] },
+    }
+    const talks = conversationsByLane([folded])
+    expect(talks.get('a')!.map((c) => [c.lane, c.run, c.sent, c.unacked])).toEqual([['fold', 'run-y', 2, 1], ['fold', 'run-x', 1, 0]])
+    expect(talks.get('fold')!.map((c) => [c.run, c.received])).toEqual([['run-a', 3]])
+    expect(bundleWords(folded, (c) => c.run, '11:58')).toBe('3 messages from run-a to run-x, run-y · 11:58 · 1 not acknowledged')
   })
 })

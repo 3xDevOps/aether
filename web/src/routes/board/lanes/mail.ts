@@ -1,9 +1,7 @@
 import type { LaneEdge } from '@/routes/board/lanes/edges'
 
-/** Marks closer than this, on one edge of one lane, draw as one mark with a count. */
 export const mergePx = 8
 
-/** Agent mail on one lane at one moment: a dot where it was sent, a ring where it arrived. */
 export interface MailMark {
   key: string
   lane: string
@@ -16,7 +14,6 @@ export interface MailMark {
   edges: LaneEdge[]
 }
 
-/** Each mail bundle as a mark on each drawn end, merged per lane edge within `mergePx`. */
 export function mailMarks(edges: LaneEdge[], order: Map<string, number>, toX: (t: number) => number): MailMark[] {
   const ends: { lane: string; x: number; side: MailMark['side']; sent: boolean; edge: LaneEdge }[] = []
   for (const edge of edges) {
@@ -41,9 +38,9 @@ export function mailMarks(edges: LaneEdge[], order: Map<string, number>, toX: (t
   return out
 }
 
-/** One lane's mail with one other session in the window. */
+/** One lane's mail with one other session; a folded lane can hold several, so this is per session, not per lane. */
 export interface Conversation {
-  /** The other lane; empty for a session outside the view. */
+  /** The other session's lane; empty when it has none in this view. */
   lane: string
   run: string
   sent: number
@@ -52,32 +49,32 @@ export interface Conversation {
   edges: LaneEdge[]
 }
 
-/** Every lane's conversations, busiest first, in one pass over the mail. */
 export function conversationsByLane(edges: LaneEdge[]): Map<string, Conversation[]> {
   const byLane = new Map<string, Map<string, Conversation>>()
-  const add = (lane: string, other: LaneEdge['from'], sent: boolean, edge: LaneEdge) => {
+  const add = (lane: string, otherLane: string, otherRun: string, sent: boolean, acked: boolean, edge: LaneEdge) => {
     if (!lane) return
     const mine = byLane.get(lane) ?? new Map<string, Conversation>()
     byLane.set(lane, mine)
-    const key = other.lane || `outside:${other.run}`
-    const c = mine.get(key) ?? { lane: other.lane, run: other.run, sent: 0, received: 0, unacked: 0, edges: [] }
-    mine.set(key, c)
-    const n = edge.messages!.ids.length
-    if (sent) c.sent += n
-    else c.received += n
-    if (!edge.messages!.acked) c.unacked += n
-    c.edges.push(edge)
+    const c = mine.get(otherRun) ?? { lane: otherLane, run: otherRun, sent: 0, received: 0, unacked: 0, edges: [] }
+    mine.set(otherRun, c)
+    if (sent) c.sent++
+    else c.received++
+    if (!acked) c.unacked++
+    if (c.edges.at(-1) !== edge) c.edges.push(edge)
   }
   for (const edge of edges) {
     if (edge.kind !== 'message' || !edge.messages) continue
-    add(edge.from.lane, edge.to, true, edge)
-    add(edge.to.lane, edge.from, false, edge)
+    for (const item of edge.messages.items) {
+      add(edge.from.lane, edge.to.lane, item.to, true, item.acked, edge)
+      add(edge.to.lane, edge.from.lane, item.from, false, item.acked, edge)
+    }
   }
   return new Map([...byLane].map(([lane, list]) => [lane, [...list.values()].sort((a, b) => b.sent + b.received - (a.sent + a.received))]))
 }
 
-/** "messages: sent 3 to Reviewer and received 1 from Reviewer, 1 not acknowledged", for a lane's accessible name. */
-export function conversationWords(conversations: Conversation[], nameOf: (c: Pick<Conversation, 'lane' | 'run'>) => string): string {
+type NameOf = (session: { lane: string; run: string }) => string
+
+export function conversationWords(conversations: Conversation[], nameOf: NameOf): string {
   if (conversations.length === 0) return ''
   const parts = conversations.map((c) => [
     c.sent > 0 && `sent ${c.sent} to ${nameOf(c)}`,
@@ -87,7 +84,20 @@ export function conversationWords(conversations: Conversation[], nameOf: (c: Pic
   return [`messages: ${parts.join(', ')}`, unacked > 0 && `${unacked} not acknowledged`].filter(Boolean).join(', ')
 }
 
-/** Counts seen from the focused lane, as in its popover: → sent to that lane, ← received from it. */
+/** Seen from the focused lane, as in its popover. */
 export function conversationTag(c: Pick<Conversation, 'sent' | 'received'>): string {
   return [c.sent > 0 && `→${c.sent}`, c.received > 0 && `←${c.received}`].filter(Boolean).join(' ')
+}
+
+export function bundleWords(edge: LaneEdge, nameOf: NameOf, time: string): string {
+  const { items } = edge.messages!
+  const one = (run: string, lane: string) => `${nameOf({ lane, run })}${lane ? '' : ' (outside this view)'}`
+  const senders = [...new Set(items.map((item) => item.from))].map((run) => one(run, edge.from.lane)).join(', ')
+  const recipients = [...new Set(items.map((item) => item.to))].map((run) => one(run, edge.to.lane)).join(', ')
+  const unacked = items.filter((item) => !item.acked).length
+  return [
+    `${items.length === 1 ? 'Message' : `${items.length} messages`} from ${senders} to ${recipients}`,
+    time,
+    unacked > 0 && `${unacked} not acknowledged`,
+  ].filter(Boolean).join(' · ')
 }

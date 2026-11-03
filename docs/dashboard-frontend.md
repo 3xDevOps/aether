@@ -1629,8 +1629,9 @@ ring on the recipient's, at the send time, on the bar edge facing the other
 lane. Marks within 8px on one edge merge and show their message count. Mail
 into a folded family or Finished marks its header. Mail with a session that
 has no lane in this view (another workspace, hidden by **Mine**) keeps its
-drawn end, marked on the top edge. A mark's tooltip names the direction, the
-other session, the time and whether the recipient has acknowledged it.
+drawn end, marked on the top edge. A mark's or link's tooltip names sender,
+recipient, time and how many messages are not yet acknowledged; a session
+folded into a family or Finished keeps its own name and counts.
 Each lane's accessible name ends with its mail, such as "messages: sent 2 to
 Reviewer and received 1 from Reviewer, 2 not acknowledged".
 Mail is not parentage: subsessions show as a family, and nothing draws
@@ -1643,7 +1644,9 @@ labels count that mail from the focused lane's side: `↔ 3` on the focused
 lane (sessions it talks with), `→2 ←1` on each of them. Sessions past the
 scrolled rows get a pinned **↑**/**↓** button that moves to them, and mail with
 sessions outside the view gets a dashed note. File overlaps draw for the
-focused lane only, at the now line. Clicking a mark or link opens its facts;
+focused lane only, at the now line. Moving the pointer onto a link, mark or
+pinned button keeps the lane that drew it. Clicking a mark or link opens its
+facts, every bundle a merged mark holds;
 a mail link reads the bodies through `coord.messages.list` (the thread, else
 each sender's newest page, since a mark on a folded lane can bundle several
 senders) and shows them with `MessageRow`. [Styles: Lanes](styles.md#lanes)

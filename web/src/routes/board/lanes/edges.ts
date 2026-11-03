@@ -2,6 +2,13 @@ import type { CoordMessageAckedPayload, CoordMessagePayload, Event, OverlapPeer,
 import type { TimeWindow } from '@/routes/board/lanes/axis'
 import type { LaneEdgeKind } from '@/store/lanes'
 
+/** One message in a bundle: a folded lane can bundle mail from or to several sessions. */
+export interface MailItem {
+  from: string
+  to: string
+  acked: boolean
+}
+
 export interface EdgeEnd {
   lane: string
   run: string
@@ -14,7 +21,7 @@ export interface LaneEdge {
   from: EdgeEnd
   to: EdgeEnd
   /** Bundled mail: every message id, its sending runs, whether all were acknowledged, and the kind when they share one. */
-  messages?: { ids: string[]; senders: string[]; acked: boolean; kind?: RunMessageKind; correlation?: string }
+  messages?: { ids: string[]; senders: string[]; acked: boolean; kind?: RunMessageKind; correlation?: string; items: MailItem[] }
   files?: string[]
   /** Mail with a session that has no lane in this view: that run's ID; its end's lane is empty. */
   outside?: string
@@ -75,12 +82,14 @@ export function laneEdges(input: EdgesInput): LaneEdge[] {
       const to = drawnTo ?? { lane: '', run: p.to_run_id, t }
       const key = `message:${from.lane || from.run}>${to.lane || to.run}@${Math.floor(t / input.bucket)}`
       const bundle = bundles.get(key)
+      const item = { from: p.from_run_id, to: p.to_run_id, acked: acked.has(p.message_id) }
       if (!bundle) {
-        bundles.set(key, { key, kind: 'message', from, to, outside, messages: { ids: [p.message_id], senders: [p.from_run_id], acked: acked.has(p.message_id), kind: p.kind, correlation: p.correlation_id } })
+        bundles.set(key, { key, kind: 'message', from, to, outside, messages: { ids: [p.message_id], senders: [p.from_run_id], acked: item.acked, kind: p.kind, correlation: p.correlation_id, items: [item] } })
         continue
       }
       const m = bundle.messages!
       m.ids.push(p.message_id)
+      m.items.push(item)
       if (!m.senders.includes(p.from_run_id)) m.senders.push(p.from_run_id)
       m.acked &&= acked.has(p.message_id)
       if (m.kind !== p.kind) m.kind = undefined

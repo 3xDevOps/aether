@@ -13,7 +13,7 @@ import { EdgeHits, EdgeStrokes, drawEdges, edgeShape, type EdgeAnchor } from '@/
 import { laneEdges, type EdgesInput, type LaneEdge } from '@/routes/board/lanes/edges'
 import { EdgePopover, FamilyPopover, LaneConversations, LaneLinks, LanePopoverContent, RunPopover } from '@/routes/board/lanes/lane-popover'
 import { LaneRow, trackGutter, type LaneGeometry } from '@/routes/board/lanes/lane-row'
-import { conversationTag, conversationWords, conversationsByLane, mailMarks, type Conversation, type MailMark } from '@/routes/board/lanes/mail'
+import { bundleWords, conversationTag, conversationWords, conversationsByLane, mailMarks, type Conversation } from '@/routes/board/lanes/mail'
 import { MailMarks, OffscreenMail } from '@/routes/board/lanes/mail-marks'
 import { laneHeight, layoutLanes, type Lane, type LanesModel, type RunLane } from '@/routes/board/lanes/model'
 import { agentStateWord, openAgent } from '@/routes/run/subagent-cards'
@@ -29,7 +29,7 @@ const onlyOverlaps = new Set(['message'] as const)
 
 type Pop =
   | { kind: 'lane'; key: string; run?: string; x: number; y: number; h: number; at?: number; reply?: boolean }
-  | { kind: 'edge'; edge: LaneEdge; x: number; y: number }
+  | { kind: 'edge'; edges: LaneEdge[]; x: number; y: number }
 
 function treeLabel(lane: Lane, now: number): string {
   switch (lane.kind) {
@@ -134,8 +134,7 @@ export function LanesView(props: LanesViewProps) {
   )
   const edges = useMemo(() => [...props.edges, ...overlaps], [props.edges, overlaps])
   const talks = useMemo(() => conversationsByLane(props.edges), [props.edges])
-  // A run lane names its session; a folded lane names the session that sent or got the mail, not the fold.
-  const nameOf = useCallback((c: Pick<Conversation, 'lane' | 'run'>) => {
+  const nameOf = useCallback((c: { lane: string; run: string }) => {
     const lane = byKey.get(c.lane)
     if (lane?.kind === 'run') return lane.title
     const run = useStore.getState().runs[c.run]
@@ -151,7 +150,11 @@ export function LanesView(props: LanesViewProps) {
       })
     : model.lanes
   const edgeView = windowed ? viewport : null
-  const picked = pop?.kind === 'edge' ? pop.edge.key : undefined
+  const picked = useMemo(() => new Set(pop?.kind === 'edge' ? pop.edges.map((edge) => edge.key) : []), [pop])
+  const linked = useCallback(
+    (edge: LaneEdge) => edge.kind !== 'message' || (Boolean(edge.from.lane && edge.to.lane) && (picked.has(edge.key) || (focusKey !== undefined && (edge.from.lane === focusKey || edge.to.lane === focusKey)))),
+    [picked, focusKey],
+  )
   const shapes = useMemo(() => {
     const shownEdges = edgeView
       ? edges.filter((edge) => {
@@ -160,10 +163,8 @@ export function LanesView(props: LanesViewProps) {
           return Math.max(a, b) >= edgeView.top - overscan && Math.min(a, b) <= edgeView.top + edgeView.height + overscan
         })
       : edges
-    // Mail draws as marks; only the focused lane's mail and a picked link draw as links.
-    const linked = shownEdges.filter((edge) => edge.kind !== 'message' || edge.key === picked || (focusKey && (edge.from.lane === focusKey || edge.to.lane === focusKey)))
-    return drawEdges(linked, anchors, g, focusKey)
-  }, [edgeView, edges, anchors, g, focusKey, picked])
+    return drawEdges(shownEdges.filter(linked), anchors, g, focusKey)
+  }, [edgeView, edges, anchors, g, focusKey, linked])
   const order = useMemo(() => new Map(model.lanes.map((lane, i) => [lane.key, i])), [model.lanes])
   const shownKeys = windowed ? shown.map((lane) => lane.key).join('\n') : ''
   const marks = useMemo(() => {
@@ -172,23 +173,19 @@ export function LanesView(props: LanesViewProps) {
     const keep = new Set(shownKeys.split('\n'))
     return all.filter((mark) => keep.has(mark.lane))
   }, [props.edges, order, g.window, g.width, shownKeys])
-  const markTitle = useCallback((mark: MailMark) => mark.edges.map((edge) => {
-    const n = edge.messages!.ids.length
-    const sent = edge.from.lane === mark.lane
-    const other = sent ? edge.to : edge.from
-    const words = [
-      `${n === 1 ? 'Message' : `${n} messages`} ${sent ? 'sent to' : 'received from'} ${nameOf(other)}${edge.outside ? ' (outside this view)' : ''}`,
-      clockTime(new Date(edge.from.t).toISOString(), now),
-      !edge.messages!.acked && 'not acknowledged',
-    ]
-    return words.filter(Boolean).join(' · ')
-  }).join('\n'), [nameOf, now])
+  const edgeTitle = useCallback((edge: LaneEdge) => (edge.messages ? bundleWords(edge, nameOf, clockTime(new Date(edge.from.t).toISOString(), now)) : ''), [nameOf, now])
   const focusTalks = useMemo(() => (focusKey ? talks.get(focusKey) ?? [] : []), [focusKey, talks])
   const chips = useMemo(() => {
     const out = new Map<string, string>()
     if (!focusKey || focusTalks.length === 0) return out
     out.set(focusKey, `↔ ${focusTalks.length}`)
-    for (const c of focusTalks) if (c.lane) out.set(c.lane, conversationTag(c))
+    const byLane = new Map<string, { sent: number; received: number }>()
+    for (const c of focusTalks) {
+      if (!c.lane) continue
+      const sum = byLane.get(c.lane) ?? { sent: 0, received: 0 }
+      byLane.set(c.lane, { sent: sum.sent + c.sent, received: sum.received + c.received })
+    }
+    for (const [lane, sum] of byLane) out.set(lane, conversationTag(sum))
     return out
   }, [focusKey, focusTalks])
 
@@ -259,7 +256,7 @@ export function LanesView(props: LanesViewProps) {
     setHovered(model.lanes[lo].key)
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    hoverAt(event)
+    if (!(event.target as Element).closest('[data-mail-control]')) hoverAt(event)
     const d = drag.current
     if (!d || d.id !== event.pointerId) return
     const dx = event.clientX - d.x
@@ -327,7 +324,7 @@ export function LanesView(props: LanesViewProps) {
     // Mail with a session outside the view has one drawn end; its facts open there.
     const a = anchors.get(edge.from.lane) ?? anchors.get(edge.to.lane)!
     const { mid } = edgeShape(edge, a, anchors.get(edge.to.lane) ?? a, g)
-    setPop({ kind: 'edge', edge, x: mid.x, y: mid.y })
+    setPop({ kind: 'edge', edges: [edge], x: mid.x, y: mid.y })
   }
 
   const toggle = (lane: Lane, open: boolean) => {
@@ -367,8 +364,8 @@ export function LanesView(props: LanesViewProps) {
   latestActivate.current = activate
   const onRetry = useCallback((runID: string) => latest.current.onRetryAgents(runID), [])
   const onWiden = useCallback(() => latest.current.onWiden(), [])
-  const pickEdge = useCallback((edge: LaneEdge, x: number, y: number) => {
-    if (!drag.current?.moved) setPop({ kind: 'edge', edge, x, y })
+  const pickEdges = useCallback((edges: LaneEdge[], x: number, y: number) => {
+    if (!drag.current?.moved) setPop({ kind: 'edge', edges, x, y })
   }, [])
   // Swapping the lane popover for the reply composer unmounts its content too; only a real close returns focus.
   // Moving to a lane from a popover's message list closes the popover there, not on the lane it opened from.
@@ -539,8 +536,8 @@ export function LanesView(props: LanesViewProps) {
             />
           ))}
         </div>
-        <EdgeHits shapes={shapes} g={g} height={layout.height} onPick={pickEdge} />
-        <MailMarks marks={marks} anchors={anchors} g={g} height={layout.height} focus={focusKey} picked={picked} title={markTitle} onPick={pickEdge} />
+        <EdgeHits shapes={shapes} g={g} height={layout.height} title={edgeTitle} onPick={pickEdges} />
+        <MailMarks marks={marks} anchors={anchors} g={g} height={layout.height} focus={focusKey} linked={linked} title={edgeTitle} onPick={pickEdges} />
         {focusTalks.length > 0 && viewport.height > 0 && (
           <OffscreenMail
             above={focusTalks.filter((c) => offscreen(c, true))}
@@ -594,7 +591,11 @@ export function LanesView(props: LanesViewProps) {
             </LanePopoverContent>
           ) : pop?.kind === 'edge' ? (
             <LanePopoverContent label="Link" returnFocus={returnTo(active)}>
-              <EdgePopover edge={pop.edge} now={now} />
+              {pop.edges.map((edge, i) => (
+                <div key={edge.key} className={cn(i > 0 && 'mt-3 border-t border-seam pt-2')}>
+                  <EdgePopover edge={edge} now={now} />
+                </div>
+              ))}
             </LanePopoverContent>
           ) : null}
         </Popover>

@@ -183,7 +183,6 @@ export function LanePopoverContent({ label, children, returnFocus }: { label: st
   )
 }
 
-/** A lane's mail grouped by the session at the other end; each bundle opens its messages, and a name moves to that lane. */
 export function LaneConversations({ conversations, lane, nameOf, now, onPick, onJump }: {
   conversations: Conversation[]
   lane: string
