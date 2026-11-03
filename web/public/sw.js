@@ -49,13 +49,48 @@ async function display(message) {
     tag: message.tag || message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
     ...(message.quiet ? { silent: true } : { renotify: true }),
     icon: '/icons/icon-192.png',
-    data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url },
+    // An assistant card is decided from here with this device's own
+    // sign-in; the push carries only the card's id. Safari shows no
+    // actions, so a tap opens the card.
+    ...(message.card ? { actions: [{ action: 'approve', title: 'Approve' }, { action: 'decline', title: 'Decline' }] } : {}),
+    data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url, card: message.card },
+  })
+}
+
+// decide approves or declines card through assistant.confirm, and puts
+// the outcome, or the server's own error, in place of the notification.
+async function decide(notification, card, approve) {
+  let body = approve ? 'Approved' : 'Declined'
+  try {
+    const res = await fetch('/api/v1/assistant.confirm', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation_id: card, approve }),
+    })
+    if (!res.ok) {
+      const refusal = await res.json().catch(() => null)
+      body = `Not decided: ${refusal?.error?.message || `HTTP ${res.status}`}`
+    }
+  } catch (err) {
+    body = `Not decided: ${err instanceof Error ? err.message : String(err)}`
+  }
+  await self.registration.showNotification(notification.title || 'Aether', {
+    body,
+    tag: notification.tag,
+    silent: true,
+    icon: '/icons/icon-192.png',
+    data: { url: notification.data?.url },
   })
 }
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const { run, workspace, url } = event.notification.data ?? {}
+  const { run, workspace, url, card } = event.notification.data ?? {}
+  if (card && (event.action === 'approve' || event.action === 'decline')) {
+    event.waitUntil(decide(event.notification, card, event.action === 'approve'))
+    return
+  }
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })

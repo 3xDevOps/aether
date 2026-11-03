@@ -44,12 +44,19 @@ let openRun = () => {}
 let openLink = () => {}
 let selfID = null
 
+// Assistant cards shown, by id, so one decided anywhere closes here.
+const cardsShown = new Map()
+
 // When each run last raised a needs-you notification, by any path, and
 // under `<run> done` a finished one. The same transition can reach us as
 // run.status, as assistant.notice kind needs_attention and as a watch
 // notice; other notice kinds are different events.
 const lastShown = new Map()
 const duplicateWindowMs = 5000
+
+const cardTitle = 'Assistant asks for approval'
+// Opens the dashboard with the assistant panel, where the card is.
+const cardLink = '/?assistant=1'
 
 function recentlyShown(slot) {
   const duplicate = Date.now() - (lastShown.get(slot) || 0) < duplicateWindowMs
@@ -119,6 +126,10 @@ function connect(wsURL) {
     }
     if (ev.type === 'watch.changed') {
       void showWatchNotice(ev.payload || {})
+      return
+    }
+    if (ev.type === 'assistant.cards') {
+      void syncCards(ev.payload || {})
       return
     }
     if (!ev.run_id) return
@@ -229,11 +240,73 @@ function closeOwnFinished(runId) {
 // finishes end, so they close now rather than outlive them.
 function closeShown() {
   cleared = ++ends
+  for (const notification of cardsShown.values()) notification.close()
+  cardsShown.clear()
   for (const list of watchShown.values()) for (const { notification } of list) notification.close()
   for (const list of [...finishedShown.values(), ...ownFinished.values()]) for (const notification of list) notification.close()
   watchShown.clear()
   finishedShown.clear()
   ownFinished.clear()
+}
+
+async function gatewayCall(method, params) {
+  const res = await fetch(`${gateway.origin}/api/v1/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${gateway.token}` },
+    body: JSON.stringify(params),
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(body?.error?.message || `${method}: ${res.status}`)
+  return body
+}
+
+// assistant.cards says the member's cards changed: each pending one shows
+// with Approve and Decline, and one no longer pending closes. Approve and
+// Decline call assistant.confirm through this app's own gateway, as the
+// card in the window would; macOS shows the buttons, elsewhere a click
+// opens the card.
+async function syncCards(p) {
+  if (!Notification.isSupported()) return
+  let status
+  try {
+    if (p.member_id !== (await memberID())) return
+    status = await gatewayCall('assistant.status', {})
+  } catch (err) {
+    console.log(`notify: assistant cards: ${err.message}`)
+    return
+  }
+  const pending = (status.confirmations || []).filter((c) => c.state === 'pending')
+  for (const [id, notification] of cardsShown) {
+    if (pending.some((c) => c.id === id)) continue
+    notification.close()
+    cardsShown.delete(id)
+  }
+  for (const card of pending) {
+    if (cardsShown.has(card.id)) continue
+    const notification = new Notification({
+      title: cardTitle,
+      body: clip(card.summary || '', 240),
+      actions: [{ type: 'button', text: 'Approve' }, { type: 'button', text: 'Decline' }],
+    })
+    notification.on('click', () => openLink(cardLink))
+    notification.on('action', (_event, index) => void decideCard(card, index === 0))
+    cardsShown.set(card.id, notification)
+    notification.show()
+  }
+}
+
+async function decideCard(card, approve) {
+  let body = approve ? 'Approved' : 'Declined'
+  try {
+    await gatewayCall('assistant.confirm', { confirmation_id: card.id, approve })
+  } catch (err) {
+    body = `Not decided: ${err.message}`
+  }
+  cardsShown.get(card.id)?.close()
+  cardsShown.delete(card.id)
+  const notification = new Notification({ title: cardTitle, body, silent: true })
+  notification.on('click', () => openLink(cardLink))
+  notification.show()
 }
 
 async function readWatch(watchId) {

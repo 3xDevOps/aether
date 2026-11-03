@@ -77,6 +77,48 @@ describe('service worker', () => {
     expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ renotify: true }))
   })
 
+  it('offers Approve and Decline on an assistant card and decides it with this device’s sign-in', async () => {
+    const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const { self, dispatch } = worker()
+    await dispatch('push', {
+      data: { json: () => ({ title: 'Assistant asks for approval', body: 'Launch claude in api', tag: 'card:c1', url: '/?assistant=1', card: 'c1' }) },
+    })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Assistant asks for approval', expect.objectContaining({
+      tag: 'card:c1',
+      actions: [{ action: 'approve', title: 'Approve' }, { action: 'decline', title: 'Decline' }],
+      data: expect.objectContaining({ card: 'c1' }),
+    }))
+    const notification = { title: 'Assistant asks for approval', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1' }, close: vi.fn() }
+    await dispatch('notificationclick', { notification, action: 'approve' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/assistant.confirm', expect.objectContaining({
+      method: 'POST', credentials: 'same-origin', body: JSON.stringify({ confirmation_id: 'c1', approve: true }),
+    }))
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant asks for approval', expect.objectContaining({ tag: 'card:c1', body: 'Approved', silent: true }))
+    expect(self.clients.openWindow).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the server’s refusal when a card was already decided elsewhere', async () => {
+    const refusal = { error: { code: -32004, message: 'assistant: no such pending confirmation: c1' } }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(refusal), { status: 404 })))
+    const { self, dispatch } = worker()
+    const notification = { title: 'Assistant asks for approval', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1' }, close: vi.fn() }
+    await dispatch('notificationclick', { notification, action: 'decline' })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant asks for approval', expect.objectContaining({
+      body: 'Not decided: assistant: no such pending confirmation: c1',
+    }))
+    vi.unstubAllGlobals()
+  })
+
+  it('opens the card when a card notification is tapped, as on iOS', async () => {
+    const { self, dispatch } = worker()
+    const notification = { title: 'Assistant asks for approval', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1' }, close: vi.fn() }
+    await dispatch('notificationclick', { notification, action: '' })
+    expect(self.clients.openWindow).toHaveBeenCalledWith('/?assistant=1')
+  })
+
   it('quietly replaces the notification of a need that ended, keeping its title', async () => {
     const { self, dispatch } = worker([], [{ tag: 'run-7k2m9q4xbd', title: 'Fix the login redirect' }])
     await dispatch('push', {

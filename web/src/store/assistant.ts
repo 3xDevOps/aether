@@ -150,8 +150,11 @@ export interface AssistantSlice {
   resetAssistant: () => void
 }
 
+/** A notification of an assistant card opens the dashboard at ?assistant=1. */
+const openedForACard = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('assistant')
+
 export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => ({
-  assistantOpen: false,
+  assistantOpen: openedForACard(),
   assistantWidth: defaultAssistantWidth,
   assistantStatus: null,
   assistantStatusError: null,

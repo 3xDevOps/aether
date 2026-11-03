@@ -287,6 +287,7 @@ func (s *Service) raise(ctx context.Context, m *member, c *protocol.AssistantCon
 	}
 	s.expireAt(m, c.ID, c.ExpiresAt)
 	r.changed()
+	s.cardsChanged(m.id)
 	return answer, conv.Generation, nil
 }
 
@@ -401,6 +402,7 @@ func (s *Service) decide(ctx context.Context, m *member, id, state string) error
 		return fmt.Errorf("%w: %s", ErrNoConfirmation, id)
 	}
 	m.notify()
+	s.cardsChanged(m.id)
 	card, err := s.Card(context.WithoutCancel(ctx), m.id, id)
 	if err != nil {
 		// A card that cannot be read cannot run or be recorded.

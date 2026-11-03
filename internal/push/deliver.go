@@ -34,6 +34,7 @@ type Message struct {
 	Urgent           bool
 	Notice           bool
 	Clear            bool
+	Card             string
 }
 
 type message struct {
@@ -45,7 +46,7 @@ type message struct {
 // Deliver does not wait for member to leave a dashboard. No result means
 // member has no device.
 func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message) ([]DeviceResult, error) {
-	n := notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice}
+	n := notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice, Card: m.Card}
 	if m.Clear {
 		n.Body, n.Clear = clearedBody, true
 	}

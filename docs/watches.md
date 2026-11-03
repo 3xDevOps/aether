@@ -296,7 +296,7 @@ result counts your subscribed devices.
 
 | `level` | Pushed at once | In a digest |
 | --- | --- | --- |
-| `blockers` (**Blockers now, the rest daily**) | What needs you: a session's [Needs you](failure-handling.md#needs-you) push and a watch's `needs_you` notice | Everything else, daily at `digest.at` (default `09:00`) |
+| `blockers` (**Blockers now, the rest daily**) | What needs you: a session's [Needs you](failure-handling.md#needs-you) push, a watch's `needs_you` notice and an [assistant card](#assistant-cards) | Everything else, daily at `digest.at` (default `09:00`) |
 | `batched` (**Blockers now, the rest every half hour**, the default) | The same | Everything else, on the next half hour in `digest.tz` |
 | `all` (**Everything at once**) | Everything | Nothing |
 
@@ -332,6 +332,25 @@ error while it is tried again, then the result. A server that
 stops while it sends a digest can send that digest again after it starts. An
 item a source cannot read now, such as the need of a paused session, stays
 queued without making the digest due.
+
+### Assistant cards
+
+An [assistant approval card](assistant.md#approve-an-action) is pushed when it is
+raised, titled `Assistant asks for approval`, with the card's summary. On
+Android and desktop browsers, and in the desktop app on macOS, the notification
+carries **Approve** and **Decline**. They decide the card from that device as
+the card in the panel would; the notification then reads `Approved`,
+`Declined`, or `Not decided: <the server's error>`. A tap, and on iOS the only
+choice, opens the dashboard with the assistant panel, where **Always** options
+are. When the card is decided, expires or is withdrawn on any device, its
+notification is replaced quietly; one in a digest is dropped from it. See
+[security.md](security.md#the-assistant) for why a push cannot decide a card
+on its own.
+
+Seen anywhere, cleared everywhere: a session's push is replaced quietly once
+the session no longer needs you, including when you open its result on any
+device, and a digest drops what was answered, opened or decided before it is
+sent.
 
 Within 2 minutes after a push, further pushes join it: each replaces that
 notification with a summary, `3 need you` and one line per item, that opens

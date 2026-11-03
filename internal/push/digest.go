@@ -31,6 +31,7 @@ const (
 
 var kinds = []struct{ kind, label, action string }{
 	{KindNeed, "need you", "Answer"},
+	{KindCard, "to approve", "Approve"},
 	{KindFailed, "failed", "Open"},
 	{KindDone, "done", "Review"},
 	{KindMerged, "merged", "Open"},
@@ -299,8 +300,11 @@ func deviceErrors(results []DeviceResult) error {
 }
 
 func (s *Service) source(item *store.DigestItem) DigestSource {
-	if item.Source == runSource {
+	switch item.Source {
+	case runSource:
 		return runItems{s}
+	case cardSource:
+		return cardItems{s}
 	}
 	if source, ok := s.sources[item.Source]; ok {
 		return source

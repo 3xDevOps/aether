@@ -59,8 +59,19 @@ globalThis.WebSocket = class {
 const runs = new Map()
 let readFails = false
 const watches = new Map()
+let cards = []
+const decided = []
 globalThis.fetch = async (url, init) => {
   if (url.endsWith('/server.info')) return { ok: true, json: async () => ({ member: { id: 'me' } }) }
+  if (url.endsWith('/assistant.status')) return { ok: true, json: async () => ({ confirmations: cards }) }
+  if (url.endsWith('/assistant.confirm')) {
+    const params = JSON.parse(init.body)
+    decided.push(params)
+    const open = cards.some((c) => c.id === params.confirmation_id && c.state === 'pending')
+    cards = cards.filter((c) => c.id !== params.confirmation_id)
+    if (open) return { ok: true, json: async () => ({}) }
+    return { ok: false, status: 404, json: async () => ({ error: { message: `assistant: no such pending confirmation: ${params.confirmation_id}` } }) }
+  }
   if (url.endsWith('/watch.get')) {
     const got = watches.get(JSON.parse(init.body).watch_id)
     return { ok: Boolean(got), status: 404, json: async () => got }
@@ -99,6 +110,8 @@ let linked = []
 
 beforeEach(() => {
   linked = []
+  cards = []
+  decided.length = 0
   watches.clear()
   shown.length = 0
   readFails = false
@@ -555,4 +568,45 @@ test("a handoff closes the former owner's success notice", async () => {
   await status(run, { state: 'disconnected', reason: 'enhanced session ended: exit code 1' })
   assert.ok(shown[0].closed)
   assert.equal(shown.length, 1)
+})
+
+async function cardsChanged(member = 'me') {
+  socket.onmessage({ data: JSON.stringify({ type: 'assistant.cards', payload: { member_id: member } }) })
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+}
+
+test('an assistant card shows Approve and Decline, which decide it once through the gateway', async () => {
+  cards = [{ id: 'c1', state: 'pending', summary: 'Launch claude in api: "Write the docs"' }, { id: 'c2', state: 'running', summary: 'Already approved' }]
+  await cardsChanged()
+  assert.equal(shown.length, 1)
+  assert.equal(shown[0].options.body, 'Launch claude in api: "Write the docs"')
+  assert.deepEqual(shown[0].options.actions.map((a) => a.text), ['Approve', 'Decline'])
+  shown[0].handlers.click()
+  assert.deepEqual(linked, ['/?assistant=1'])
+
+  await cardsChanged()
+  assert.equal(shown.length, 1, 'a card already shown is not shown again')
+
+  shown[0].handlers.action({}, 0)
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(decided, [{ confirmation_id: 'c1', approve: true }])
+  assert.ok(shown[0].closed)
+  assert.equal(shown[1].options.body, 'Approved')
+
+  // A replayed action on a card decided elsewhere shows the server's refusal.
+  shown[0].handlers.action({}, 1)
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(decided.length, 2)
+  assert.equal(shown[2].options.body, 'Not decided: assistant: no such pending confirmation: c1')
+})
+
+test('a card decided on another device closes here, and another member’s cards never show', async () => {
+  cards = [{ id: 'c3', state: 'pending', summary: 'Stop run-8x2' }]
+  await cardsChanged('someone-else')
+  assert.equal(shown.length, 0)
+  await cardsChanged()
+  assert.equal(shown.length, 1)
+  cards = []
+  await cardsChanged()
+  assert.ok(shown[0].closed)
 })
