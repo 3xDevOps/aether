@@ -42,6 +42,7 @@
   --duration-glide: var(--duration-300);
   --duration-expand: var(--duration-250);
   --duration-pulse: var(--duration-1600);
+  --duration-mail-live: 4500ms;
 
   --default-transition-duration: var(--duration-hover);
   --default-transition-timing-function: var(--ease-hover);
@@ -73,6 +74,9 @@
   --animate-pop-in: pop-in var(--duration-250) var(--ease-pop) backwards;
   --animate-shake: shake var(--duration-360) var(--ease-in-out);
   --animate-bob: bob var(--duration-450) var(--ease-in-out) infinite alternate;
+  --animate-mail-live: mail-live var(--duration-mail-live) linear forwards;
+  --animate-mail-travel: mail-travel var(--duration-500) var(--ease-in-out) forwards;
+  --animate-mail-ping: mail-ping var(--duration-500) var(--ease-enter) var(--duration-450) both;
 
   /* Overlays grow from the Radix transform origin their content sets. */
   @keyframes overlay-in {
@@ -191,6 +195,42 @@
   @keyframes bob {
     to {
       transform: translateY(-3px);
+    }
+  }
+  /* A live mail arrow: in over 150ms, held to 2s, then out over 2.5s. */
+  @keyframes mail-live {
+    from {
+      opacity: 0;
+    }
+    3.3% {
+      opacity: 1;
+    }
+    44% {
+      opacity: 1;
+      animation-timing-function: var(--ease-in-out);
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  /* The pulse runs the arrow once, sender to recipient, set by --mail-travel. */
+  @keyframes mail-travel {
+    80% {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+      transform: translateY(var(--mail-travel));
+    }
+  }
+  @keyframes mail-ping {
+    from {
+      opacity: 0.9;
+      transform: scale(0.6);
+    }
+    to {
+      opacity: 0;
+      transform: scale(2.2);
     }
   }
 }

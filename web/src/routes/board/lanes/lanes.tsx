@@ -13,6 +13,7 @@ import { EdgeHits, EdgeStrokes, drawEdges, edgeShape, type EdgeAnchor } from '@/
 import { laneEdges, type EdgesInput, type LaneEdge } from '@/routes/board/lanes/edges'
 import { EdgePopover, FamilyPopover, LaneConversations, LaneLinks, LanePopoverContent, RunPopover } from '@/routes/board/lanes/lane-popover'
 import { LaneRow, trackGutter, type LaneGeometry } from '@/routes/board/lanes/lane-row'
+import { LiveMail, liveShapes, useLiveMail } from '@/routes/board/lanes/live-mail'
 import { bundleWords, conversationTag, conversationWords, conversationsByLane, mailMarks, type Conversation } from '@/routes/board/lanes/mail'
 import { MailMarks, OffscreenMail } from '@/routes/board/lanes/mail-marks'
 import { laneHeight, layoutLanes, type Lane, type LanesModel, type RunLane } from '@/routes/board/lanes/model'
@@ -140,6 +141,9 @@ export function LanesView(props: LanesViewProps) {
     const run = useStore.getState().runs[c.run]
     return run ? runLabel(run) : c.run
   }, [byKey])
+  const arrivals = useStore((s) => s.laneArrivals)
+  const mailShown = useStore((s) => !s.laneHidden.includes('message'))
+  const { live, announcement: mailAnnouncement } = useLiveMail({ arrivals, mail: props.edgeInput.mail, drawn: model.drawn, shown: mailShown, nameOf })
   const talkWords = useMemo(() => new Map([...talks].map(([lane, list]) => [lane, conversationWords(list, nameOf)])), [talks, nameOf])
 
   const windowed = model.lanes.length > windowAbove
@@ -440,6 +444,17 @@ export function LanesView(props: LanesViewProps) {
     if (top === undefined) return false
     return above ? top + laneHeight(byKey.get(c.lane)!, g.metrics) <= viewport.top : top >= visibleBottom
   }
+  // Before the first measure nothing counts as scrolled away.
+  const view = viewport.height > 0 ? { top: viewport.top, bottom: visibleBottom } : { top: -Infinity, bottom: Infinity }
+  const liveShown = liveShapes(live, anchors, g, view)
+  const focusAbove = focusTalks.filter((c) => offscreen(c, true))
+  const focusBelow = focusTalks.filter((c) => offscreen(c, false))
+  const focusOutside = focusTalks.filter((c) => !c.lane)
+  const jump = (key: string) => {
+    setHovered(null)
+    setActiveKey(key)
+    focusLaneEl(key)
+  }
   const highlights = [
     hoveredLane && hoveredLane.kind !== 'section' && hoveredLane.key !== popLane?.key && { key: hoveredLane.key, className: 'bg-hover' },
     popLane && { key: popLane.key, className: 'bg-selection' },
@@ -540,20 +555,24 @@ export function LanesView(props: LanesViewProps) {
         <MailMarks marks={marks} anchors={anchors} g={g} height={layout.height} focus={focusKey} linked={linked} title={edgeTitle} onPick={pickEdges} />
         {focusTalks.length > 0 && viewport.height > 0 && (
           <OffscreenMail
-            above={focusTalks.filter((c) => offscreen(c, true))}
-            below={focusTalks.filter((c) => offscreen(c, false))}
-            outside={focusTalks.filter((c) => !c.lane)}
+            above={focusAbove}
+            below={focusBelow}
+            outside={focusOutside}
             g={g}
             top={viewport.top}
             bottom={visibleBottom}
             nameOf={nameOf}
-            onJump={(key) => {
-              setHovered(null)
-              setActiveKey(key)
-              focusLaneEl(key)
-            }}
+            onJump={jump}
           />
         )}
+        <LiveMail
+          shapes={liveShown}
+          g={g}
+          view={view}
+          reserved={{ top: Number(focusAbove.length > 0) + Number(focusOutside.length > 0), bottom: Number(focusBelow.length > 0) }}
+          nameOf={nameOf}
+          onJump={jump}
+        />
         <Popover open={pop !== null} onOpenChange={(open) => { if (!open) setPop(null) }}>
           {pop && (
             <PopoverAnchor asChild>
@@ -600,6 +619,7 @@ export function LanesView(props: LanesViewProps) {
           ) : null}
         </Popover>
       </div>
+      <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{mailAnnouncement}</span>
       {treeFocused && activeLane?.kind === 'run' && (
         <LaneKeys
           onOpen={() => navigate('run', { runId: activeLane.card.run.id })}
