@@ -14,6 +14,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/control"
+	"github.com/3xDevOps/Aether/internal/devexec"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -44,6 +45,9 @@ type terminalTestExec struct {
 	// start is the attachment of a keeper or bridge exec.
 	start    runtime.Attachment
 	stopGate func(context.Context) error
+	// helperErr answers status and stop for an exec whose helper is gone;
+	// the command's process is left running, like a job it forked.
+	helperErr error
 }
 
 func newTerminalTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
@@ -134,6 +138,9 @@ func (e *terminalTestExec) Status(ctx context.Context) (runtime.ExecState, error
 	if err := ctx.Err(); err != nil {
 		return runtime.ExecState{}, err
 	}
+	if e.helperErr != nil {
+		return runtime.ExecState{}, e.helperErr
+	}
 	e.process.mu.Lock()
 	defer e.process.mu.Unlock()
 	state := runtime.ExecState{Running: e.process.exit == nil}
@@ -162,6 +169,9 @@ func (e *terminalTestExec) Wait(ctx context.Context) (runtime.ExitStatus, error)
 	}
 }
 func (e *terminalTestExec) Stop(ctx context.Context, _ time.Duration) (runtime.ExitStatus, error) {
+	if e.helperErr != nil {
+		return runtime.ExitStatus{}, e.helperErr
+	}
 	if e.stopGate != nil {
 		if err := e.stopGate(ctx); err != nil {
 			return runtime.ExitStatus{}, err
@@ -656,5 +666,55 @@ func TestDevelopmentTerminalReauthorizationRejectsPhysicalInput(t *testing.T) {
 	}
 	if terminalTestProcess(t, e, run.ID, terminal).process.stdinString() != "" {
 		t.Fatal("denied input reached owned process")
+	}
+}
+
+// A terminal whose exec helper died without an exit record cannot be
+// stopped, and its forked jobs may still run. Stopping it alone still fails,
+// but closing the session records it as lost with no exit status and
+// freezes the container; any other stop failure still blocks the close.
+func TestCloseRecordsTerminalWithLostHelper(t *testing.T) {
+	lost := fmt.Errorf("%w: command exit record unavailable: %w: dial unix control.sock: no such file or directory", runtime.ErrExecUnavailable, devexec.ErrNoSupervisor)
+	for name, tc := range map[string]struct {
+		stopErr error
+		closes  bool
+	}{
+		"helper lost":      {lost, true},
+		"helper unreached": {fmt.Errorf("%w: docker: connection refused", runtime.ErrExecUnavailable), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newTerminalTestEnv(t, nil)
+			run, primary := e.launchFake(t, "close with a lost terminal")
+			terminal := startTestTerminal(t, e, run.ID, "server")
+			execution := terminalTestProcess(t, e, run.ID, terminal)
+			execution.helperErr = tc.stopErr
+			if err := e.sched.StopDevelopmentTerminals(t.Context(), run.ID); !errors.Is(err, tc.stopErr) {
+				t.Fatalf("stop terminals = %v, want %v", err, tc.stopErr)
+			}
+
+			err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged)
+			if !tc.closes {
+				if !errors.Is(err, tc.stopErr) {
+					t.Fatalf("close = %v, want it blocked by %v", err, tc.stopErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("close with a lost terminal: %v", err)
+			}
+			if state := primary.currentState(); state != "paused" {
+				t.Fatalf("session container after close = %s, want paused", state)
+			}
+			if execution.process.currentState() != "running" {
+				t.Fatal("close pretended to stop a lost terminal's process")
+			}
+			got, err := e.sched.LookupDevelopmentTerminal(t.Context(), run.ID, terminal.TerminalID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Process.State != "unavailable" || got.Process.ExitCode != nil || !strings.Contains(got.Process.Reason, "exit status is unknown") {
+				t.Fatalf("lost terminal = %+v, want unavailable with an unknown exit status", got.Process)
+			}
+		})
 	}
 }
