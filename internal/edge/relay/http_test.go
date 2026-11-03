@@ -289,8 +289,6 @@ func holdData(t *testing.T, a *agent, release <-chan struct{}) <-chan struct{} {
 	return held
 }
 
-// post sends an empty JSON request to a's MCP path and returns its status
-// and body.
 func post(e *env, a *agent) string {
 	resp, err := http.Post(e.base+edgeproto.MCPPath(a.id), "application/json", strings.NewReader("{}"))
 	if err != nil {
@@ -301,9 +299,6 @@ func post(e *env, a *agent) string {
 	return resp.Status + " " + strings.TrimSpace(string(body))
 }
 
-// busy starts n requests to a, which holdData holds, and waits for the
-// first held ones to reach it. The returned channel gets each request's
-// answer.
 func busy(t *testing.T, e *env, a *agent, held <-chan struct{}, n, reached int) <-chan string {
 	t.Helper()
 	answers := make(chan string, n)
