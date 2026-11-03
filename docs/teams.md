@@ -217,7 +217,9 @@ aether workspace settings --message-others everyone     # the default
 ```
 
 A refused member sees `workspace restricts steer of others' sessions to their owner
-and admins`. `aether unprotect <session>` lifts a protection.
+and admins`. `aether unprotect <session>` lifts a protection. A lock marks a
+protected session in the sidebar, on the board and in the lanes, and closing
+one lists the protection among its close warnings.
 
 ## Workspaces
 

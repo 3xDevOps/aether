@@ -218,7 +218,7 @@ them. A connector lists only the tools of its scopes, and `aether mcp` shows
 each connector's scopes.
 
 The server also checks the scope of every call a connector makes, whatever the
-member's role. Reads such as `run.get`, `workspace.timeline`, `member.list`,
+member's role. Reads such as `run.get`, `run.close_check`, `workspace.timeline`, `member.list`,
 `memory.show`, `template.list`, `changes.list` and
 `launch.defaults.get` need `read`; `run.launch`, `template.launch`,
 `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
@@ -509,7 +509,11 @@ says to call again without `cursor`.
 
 `aether_mark_reviewed` completes only a session whose agent reported success and
 awaits your review; to end any other session, use `aether_stop_session` under
-`control`. A message to your own session that no one
+`control`. Both read `run.close_check` before they close: a close with
+warnings fails with `closing session <id> affects others: <kind>: <detail>; ...`
+until the call repeats with `acknowledge: true`, so the assistant shows you
+what each close affects first
+([failure-handling.md](failure-handling.md#before-a-close)). A message to your own session that no one
 controls in the dashboard, or to a session you control, reaches the agent at once. Any other message waits
 about 45 seconds for the member in control to approve it. `aether_decide_approval` allows
 or denies a permission request once; it never picks an "always" option, so it

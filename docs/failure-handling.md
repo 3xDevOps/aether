@@ -139,6 +139,27 @@ reports this task is finished. Mark it complete?**
 
 Any new turn clears the review, and a later success report asks again.
 
+### Before a close
+
+Closing a session that others still depend on asks first. **Close session…**,
+**Mark complete**, **Open in Standard** and `aether close` read
+`run.close_check` ([local-gateway.md](local-gateway.md#independent-execution-and-input-state))
+and list what the close affects: protection, an open pull request, commits no
+merged pull request holds, recent or unread mail from other sessions, sessions
+waiting for this one to finish, subsessions that close with it, and pending
+cleanup. With any of these the confirm button reads **Close anyway** and Cancel
+holds the focus. A check that fails shows its error and still lets you close.
+
+`aether close` asks `Close anyway? [y/N]` on a terminal. Without one it prints
+the warnings and refuses; `--force` closes anyway:
+
+```
+Closing run-d6ay38tj8j affects others:
+  pull_request: Pull request acme/api#7 is open, not merged
+    https://github.com/acme/api/pull/7
+Error: no terminal to ask on; to close anyway: aether close run-d6ay38tj8j --outcome merged --force
+```
+
 ### Needs you
 
 One rule decides whether a session needs a person. The **Needs you** list,

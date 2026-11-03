@@ -809,6 +809,27 @@ Each change publishes `run.review` with
 `{"review":"...","review_changed_at":"...","status_seq":N}`; apply it only
 when `status_seq` is above the one you hold.
 
+`run.close_check` takes `{"run_ids":["...", ...]}`, 1 to 50 sessions, and
+returns `{"runs":[{"run_id":"...","warnings":[...]}]}` in the same order: what
+closing each session would affect. It reads like `run.get`, so any approved
+member may call it; a session that does not exist answers with its own
+`error` and leaves the others unaffected. Each warning has a `kind`, a `detail`
+sentence and, where it applies, `url`, `count` and `run_ids`:
+
+| `kind` | When |
+| --- | --- |
+| `protected` | The session is protected (`aether protect`). |
+| `pull_request` | A pull request recorded for it is neither merged nor closed; `url` links it. |
+| `unmerged_work` | Its branch has commits past its base and no open or merged recorded pull request holds them. A pull request merged before the last commit does not. |
+| `messages` | Mail from other sessions it has not acknowledged, or any it got in the last 30 minutes; `count`. |
+| `awaited` | Live sessions wait on `run:<session-id>:finished`; `run_ids`. Closing wakes them with its outcome. |
+| `subsessions` | Attached subsessions not yet merged, abandoned, failed or interrupted, which close with it; `count`, `run_ids`. |
+| `cleanup_pending` | Its container cleanup is pending or failed; `detail` carries the error. |
+
+Closing stays allowed: `run.close` and `run.review` do not read the check.
+The dashboard, `aether close` and the connector's close tools show the
+warnings and ask first ([failure-handling.md](failure-handling.md#before-a-close)).
+
 The `push.*` methods manage Web Push for the caller's own browsers
 ([networking.md](networking.md#notifications)). `push.status` accepts an
 optional `{"endpoint":"..."}` and returns

@@ -2212,7 +2212,15 @@ A command with a `confirm` field - Kill, Delete and Free container - opens
 the session-naming confirmation (`run-command-confirmation.tsx`) from More or the
 palette, with Cancel initially focused. **Close session…** opens its own dialog,
 which asks whether the work was merged or abandoned; a choice closes it and
-shows the outcome at once. Palette confirmations
+shows the outcome at once. The dialog reads `run.close_check` when it opens
+and lists the warnings with `CloseWarnings` (`src/components/close-warnings.tsx`),
+which links a pull request and names awaited sessions and subsessions; with
+any, the buttons read **Close anyway as merged** and **Close anyway as
+abandoned**, and Cancel holds the focus. A command with `closes` (Mark
+complete) is checked by the runner itself before it runs: with warnings, or a
+check that failed, the runner opens `CloseConfirmation` instead, and **Close
+anyway** runs the command. **Open in Standard** lists the same warnings in its
+confirmation. Palette confirmations
 capture the authenticated identity with the session and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to
 another account. More locks while an unpredicted verb is in flight and shows
