@@ -15,10 +15,12 @@ import { useStore } from '@/store'
 export const liveMailMs = 4500
 /** Arrows on screen at once; a newer pair replaces the oldest. */
 export const liveMailCap = 3
-const slotPx = 8
+const slotPx = 16
 const nowGap = 28
 const stubPx = 22
 const bowMax = 56
+/** Shorter spans, such as adjacent lanes, stay straight: a bow there would tip the head toward the now line. */
+const bowFrom = 24
 const announceDelay = 1500
 /** Older mail is a reconnect replaying the log, not mail arriving now; the margin covers clock skew. */
 const replayMs = 60_000
@@ -197,6 +199,7 @@ export function liveShapes(live: LiveArrow[], drawn: Map<string, string>, anchor
 
 /** In proportion to the span, so every arc has the same shape and its head the same angle. */
 function bowOf(x: number, dy: number): number {
+  if (Math.abs(dy) < bowFrom) return 0
   return Math.max(0, Math.min(bowMax, Math.abs(dy) * 0.3, x - 6))
 }
 

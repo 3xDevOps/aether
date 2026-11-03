@@ -342,7 +342,7 @@ describe('live mail', () => {
     expect(down.y2).toBeGreaterThan(down.y1)
     expect([down.x, down.bow]).toEqual([g.width - 28, 56])
     expect([out.stub, out.offscreen]).toEqual(['out', undefined])
-    expect([out.x, out.bow]).toEqual([g.width - 28 - 8, 22 * 0.3])
+    expect([out.x, out.bow]).toEqual([g.width - 28 - 16, 0])
     const [up, stub] = liveShapes(addLiveMail([], [arrival('b', 'a', 0), { ...arrival('', 'a', 1), from: { lane: '', run: 'elsewhere' } }]), drawn, anchors, g, { top: 600, bottom: 1000 }, now)
     expect(up.offscreen).toEqual({ end: 'to', edge: 'top' })
     expect([stub.stub, stub.offscreen]).toEqual(['in', { end: 'to', edge: 'top' }])
