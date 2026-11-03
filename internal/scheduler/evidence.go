@@ -94,10 +94,16 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			return nil
 		}
 		packet, err = service.CaptureBeforeCleanup(ctx, req, cleanup)
-		if errors.Is(err, gitengine.ErrCheckoutNotFound) && len(r.Extras) == 0 {
-			// No retry can capture a checkout that is gone; what remains of
-			// the run is still removed. Extra repositories may still hold
-			// unpublished work, so their checkouts keep the retry.
+		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
+			// No retry can capture a checkout that is gone. Extra
+			// repositories may still hold work, so it is published before
+			// what remains of the run is removed.
+			if _, commitErr := s.commitAll(ctx, run, "wip: "+taskLine(r.Task)); commitErr != nil && !errors.Is(commitErr, gitengine.ErrCheckoutNotFound) {
+				return fmt.Errorf("scheduler: commit extra repositories: %w", commitErr)
+			}
+			if _, publishErr := s.cfg.Git.PublishRunBranch(ctx, run); publishErr != nil && !errors.Is(publishErr, gitengine.ErrCheckoutNotFound) {
+				return fmt.Errorf("scheduler: publish extra repositories: %w", publishErr)
+			}
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
 			cleanupErr := cleanup(cleanupCtx)
 			cancel()

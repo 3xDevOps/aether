@@ -198,3 +198,39 @@ func TestMissingCheckoutKeepsEarlierEvidence(t *testing.T) {
 		t.Fatalf("reason = %q, want no unavailable note beside a stored packet", row.Reason)
 	}
 }
+
+func TestCheckoutGCSettlesMissingCheckout(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = -time.Second
+		cfg.CheckoutTTL = time.Hour
+	})
+	ctx := t.Context()
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	e.sched.UseEvidence(capture)
+	run, _ := e.launchFake(t, "checkout gone before gc")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-2 * time.Hour)
+	row.FinishedAt = &old
+	if err := e.db.UpdateRun(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	capture.mu.Lock()
+	capture.refusal = checkoutMissing(run.ID)
+	capture.mu.Unlock()
+
+	e.sched.sweepCheckouts(ctx, time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
+	fresh, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Worktree != "" || !strings.Contains(fresh.Reason, evidenceUnavailableReason) {
+		t.Fatalf("after gc: worktree %q, reason %q; want cleared with %q", fresh.Worktree, fresh.Reason, evidenceUnavailableReason)
+	}
+}
