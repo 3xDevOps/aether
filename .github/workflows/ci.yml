@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # A draft pull request runs changes, audit, lint and build-and-test only.
+  # Every other job waits until the pull request is ready for review; the
+  # merge queue and pushes to main always run them.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 
 permissions:
@@ -234,7 +238,7 @@ jobs:
   integration-server-rest:
     name: integration (server-rest, browser)
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -288,7 +292,7 @@ jobs:
   integration-server-flows:
     name: integration (server-flows, smoke)
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -350,7 +354,7 @@ jobs:
   integration:
     name: integration (scheduler, rest, agents)
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -464,7 +468,7 @@ jobs:
   # A workflow of its own so it can be started by hand on any branch.
   edge-image:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.edge == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.edge == 'true') }}
     permissions:
       contents: read
     uses: ./.github/workflows/edge-image.yml
@@ -473,7 +477,7 @@ jobs:
 
   dashboard:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -507,7 +511,7 @@ jobs:
   dashboard-e2e:
     name: dashboard-e2e (${{ matrix.shard }}/2)
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -622,7 +626,7 @@ jobs:
   # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -713,7 +717,7 @@ jobs:
   # changed path can affect the desktop app.
   desktop-windows:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.desktop == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.desktop == 'true') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -740,7 +744,7 @@ jobs:
   # pull requests skip this job. changes does not choose the runner.
   windows:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -780,12 +784,12 @@ jobs:
   # the exact-commit CI success required by release authorization.
   windows-install:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.installer == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.installer == 'true') }}
     uses: ./.github/workflows/windows-install.yml
 
   release-build:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.release == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.release == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -835,7 +839,7 @@ jobs:
 
   android:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     # A wedged Gradle daemon must not hold the runner for the six-hour default.
     timeout-minutes: 45
@@ -910,3 +914,42 @@ jobs:
       - name: Scan both Windows clients
         shell: powershell
         run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe
+
+  # The one required check on main, for pull requests and merge queue
+  # entries. It fails when any job failed or was cancelled; a job its own
+  # rule skipped passes. A job missing from needs does not gate main.
+  ci-gate:
+    name: CI gate
+    if: ${{ always() }}
+    needs:
+      - changes
+      - audit
+      - lint
+      - build-and-test
+      - integration-server-rest
+      - integration-server-flows
+      - integration
+      - arm64
+      - edge-image
+      - dashboard
+      - dashboard-e2e
+      - desktop
+      - desktop-windows
+      - windows
+      - windows-install
+      - release-build
+      - android
+      - windows-defender
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass or be skipped by its rule
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"'
+          bad=$(printf '%s' "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(" ")')
+          if [ -n "$bad" ]; then
+            echo "::error::Not passed: $bad"
+            exit 1
+          fi

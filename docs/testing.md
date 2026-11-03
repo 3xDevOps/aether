@@ -747,7 +747,17 @@ the server". Nothing Aether builds or installs is excluded.
 ## How CI runs the suites
 
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
-every merge queue entry and every push to `main`.
+every merge queue entry and every push to `main`. A draft pull request runs
+`changes`, `audit`, `lint` and `build-and-test` only; marking it ready for
+review (`gh pr ready <n>`) starts a run with every job. `CI gate` is the one
+required check: it passes when every other job passed or was skipped by its
+own rule, and fails when any failed or was cancelled. A new job must be added
+to its `needs` list to gate `main`.
+
+`main` takes changes through a merge queue. `gh pr merge <n> --squash` adds a
+ready pull request whose `CI gate` passed; the queue batches up to five
+entries, runs the full suite on each batch's merge result, and moves `main`
+only when that run's `CI gate` passes.
 
 | Job | Sessions | Locally |
 | --- | --- | --- |
@@ -797,9 +807,9 @@ covers the Linux build, and `release.yml` repeats `release-build`, the
 Defender scan and `android` for each tag. All classifiers run from the pull
 request's base revision, so a pull request cannot change its own
 classification, and a renamed file counts by its old path as well as its new
-one. A push to `main`, a merge queue entry and a failed classification run
-everything, upgrade qualification included. A skipped job reports as skipped,
-not failed. `ci-classify-platform-test.sh` fails when `cmd/aether` starts
+one. A push to `main`, a merge queue entry and a failed classification on a
+ready pull request run everything, upgrade qualification included. A skipped
+job reports as skipped, not failed. `ci-classify-platform-test.sh` fails when `cmd/aether` starts
 importing a package the `client` mode does not list.
 
 To run the edge image jobs on a branch the classifier skips, with write access to the repository:
