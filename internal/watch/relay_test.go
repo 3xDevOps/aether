@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -89,5 +90,39 @@ func TestARelayToASessionTheMemberMayNotWriteToIsRefused(t *testing.T) {
 	}
 	if n := len(h.inbox.messages(theirs.ID)); n != 0 {
 		t.Fatalf("%d messages written to a session the member may not write to", n)
+	}
+}
+
+// A relay written before the server stopped, and not yet recorded, is
+// recorded delivered on the next start without a second message.
+func TestARelayWrittenBeforeAStopIsNotWrittenAgain(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	build, integrate := h.run(h.ada, "Build"), h.run(h.ada, "Integrate")
+	res, err := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{
+		Target: runTarget(build), Conditions: []string{protocol.WatchFinished}, RelayTo: []string{string(integrate.ID)},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	h.inbox.fail.Store(true)
+	h.status(build, domain.RunFailed, "", "tests failed")
+	h.eventually("a failed relay attempt", func() bool {
+		notes := h.notices(res.Watch.ID)
+		return len(notes) == 1 && strings.HasPrefix(relayOf(notes[0], integrate.ID).Detail, "Retry")
+	})
+	_ = h.svc.Close()
+	h.inbox.fail.Store(false)
+	key := "relay:" + h.notices(res.Watch.ID)[0].ID + ":" + string(integrate.ID)
+	if _, err = h.inbox.NotifyRun(h.ctx, integrate.ID, integrate.ID, "written before the stop", res.Watch.ID, key); err != nil {
+		t.Fatalf("NotifyRun: %v", err)
+	}
+	h.clock.advance(time.Hour)
+	h.restart()
+	h.eventually("the relay recorded delivered", func() bool {
+		return relayOf(h.notices(res.Watch.ID)[0], integrate.ID).Status == protocol.WatchStatusDelivered
+	})
+	if n := len(h.inbox.messages(integrate.ID)); n != 1 {
+		t.Fatalf("%d messages in the relay target's inbox, want 1", n)
 	}
 }

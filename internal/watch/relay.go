@@ -88,7 +88,6 @@ func (s *Service) mayRelay(ctx context.Context, member *domain.Member, ws domain
 	return nil
 }
 
-// deliverRelays writes each due relay into its session's inbox.
 func (s *Service) deliverRelays(ctx context.Context) {
 	due, err := s.store.DueWatchRelays(ctx, s.now())
 	if err != nil {
@@ -156,7 +155,16 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	if run.Status.Terminal() {
 		return s.ended(ctx, w, r, settle)
 	}
+	key := "relay:" + n.ID + ":" + string(r.RunID)
 	if r.Attempts >= maxPushAttempts {
+		// The last attempt was cut short, possibly after its write.
+		_, err = s.store.GetRunMessageByIdempotency(ctx, r.RunID, key)
+		if err == nil {
+			return settle(protocol.WatchStatusDelivered, "Written to the session's inbox", nil)
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
 		return settle(protocol.WatchStatusFailed, fmt.Sprintf("Not delivered after %d attempts; the last was cut short", maxPushAttempts), nil)
 	}
 	// Claimed before the write, so a second server pass waits out the
@@ -167,7 +175,6 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 		}
 		return err
 	}
-	key := "relay:" + n.ID + ":" + string(r.RunID)
 	written, err := s.notifier.NotifyRun(ctx, r.RunID, r.RunID, relayBody(w, member, n), w.ID, key)
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
@@ -193,7 +200,6 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	return settle(protocol.WatchStatusPending, fmt.Sprintf("Retry %d of %d at %s: %s", r.Attempts+1, maxPushAttempts, next.Format("15:04"), err), &next)
 }
 
-// ended clears r, whose session ended, and stops relaying to it.
 func (s *Service) ended(ctx context.Context, w *store.Watch, r *store.WatchRelay, settle func(status, detail string, next *time.Time) error) error {
 	if err := s.dropRelay(ctx, w.ID, r.RunID); err != nil {
 		return err
@@ -201,7 +207,6 @@ func (s *Service) ended(ctx context.Context, w *store.Watch, r *store.WatchRelay
 	return settle(protocol.WatchStatusCleared, "Not delivered: the session ended", nil)
 }
 
-// dropRelay stops watch id relaying to run.
 func (s *Service) dropRelay(ctx context.Context, id string, run domain.RunID) error {
 	for range 4 {
 		w, err := s.store.GetWatch(ctx, id)

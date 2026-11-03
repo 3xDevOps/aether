@@ -834,6 +834,11 @@ func (s *Server) summarizeRelay(ctx context.Context, req protocol.Request, c *pr
 	for _, id := range relay {
 		var probe protocol.AssistantConfirmation
 		run, rpcErr := s.ownedRun(ctx, id, &probe)
+		if rpcErr != nil && rpcErr.Code == protocol.CodeNotFound {
+			// The server drops a deleted session at the watch's next notice.
+			parts = append(parts, id+" (deleted)")
+			continue
+		}
 		if rpcErr != nil {
 			return rpcErr
 		}
