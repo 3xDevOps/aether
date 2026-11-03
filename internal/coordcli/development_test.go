@@ -127,7 +127,7 @@ func TestSubsessionSkillFollowsChildStart(t *testing.T) {
 		capabilities []string
 		want, absent string
 	}{
-		{[]string{protocol.MethodChildOptions, protocol.MethodChildStart}, "another member's account is refused", "not available"},
+		{[]string{protocol.MethodChildOptions, protocol.MethodChildStart}, "--account accepts only the owner's account", "not available"},
 		{[]string{protocol.MethodChildOptions}, "not available to this session now", "--task-file"},
 	} {
 		s := newCLISocket(t, func(protocol.Request) protocol.Response {

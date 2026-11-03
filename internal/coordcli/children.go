@@ -189,19 +189,21 @@ Steps:
    The task states the goal, the files it owns, the files it must not touch, how
    to verify, and what its final report must contain. Use repository-relative
    paths: it runs in another container.
-4. Keep working on your part. Its report arrives in your inbox and wakes you;
-   when only subsessions remain, report waiting --for agents. A success report
-   is refused while one is unfinished.
+4. Keep working on your part. Its report arrives in your inbox. When only
+   subsessions remain, wait for them the way aether-internal skill says for this
+   session: report waiting --for agents where mail wakes you, otherwise
+   aether-internal inbox --wait 30 inside your turn. A success report is refused
+   while one is unfinished.
 5. aether-internal subsession fetch --run-id <id>, then merge or cherry-pick
    refs/remotes/children/<id> and verify before you report success.
-Accounts: a subsession runs on your session owner's own sign-in for that agent.
---account accepts only that account; another member's account is refused and
-shared accounts are not offered. To delegate on another member's account, that
-member starts this session or is handed it.
+Accounts: a subsession starts on your session owner's own sign-in for that
+agent; only this session's launch fallback can move it to another account, as
+for any launch. --account accepts only the owner's account; another member's
+account is refused. To delegate on another member's account, that member
+starts this session or is handed it.
 A subsession cannot start subsessions.
 `
 
-// writeSubsessionSkill is the subsessions topic for status's capabilities.
 func writeSubsessionSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
 	text := "No mounted session socket: whether this session may start subsessions cannot be discovered.\n"
 	switch {
