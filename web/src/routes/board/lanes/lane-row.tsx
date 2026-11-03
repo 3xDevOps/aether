@@ -11,6 +11,7 @@ import { compactAge, elapsed } from '@/lib/format'
 import { stateLabel, stateTone, stateWords } from '@/lib/status'
 import { cn, focusRingInset } from '@/lib/utils'
 import { xOf, type TimeWindow } from '@/routes/board/lanes/axis'
+import { MailChip } from '@/routes/board/lanes/mail-marks'
 import type { Lane, LaneMetrics, RunLane } from '@/routes/board/lanes/model'
 import { segmentTone, type Segment, type Stretch } from '@/routes/board/lanes/segments'
 import { agentTone } from '@/routes/run/subagent-cards'
@@ -162,7 +163,7 @@ function Elbow({ x, last }: { x: number; last: boolean }) {
   )
 }
 
-function RunLabel({ lane, agentName, compact, now }: { lane: RunLane; agentName?: string; compact: boolean; now: number }) {
+function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agentName?: string; compact: boolean; now: number; mail?: string }) {
   const { card } = lane
   const state = card.group === 'needs-you' && !card.needsYou ? 'needs-you' : card.state
   const owner = (
@@ -193,7 +194,10 @@ function RunLabel({ lane, agentName, compact, now }: { lane: RunLane; agentName?
         <AgentGlyph agent={card.run.harness} />
         <span className="min-w-0 truncate">{`${agentName ?? card.run.harness} · ${modeLabel(card.run.mode)}`}</span>
         {card.workspaceName && <span className="min-w-0 truncate">· {card.workspaceName}</span>}
-        <span className="ml-auto shrink-0 tabular-nums">{compactAge(card.run.created_at, now)}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          {mail && <MailChip text={mail} />}
+          <span className="tabular-nums">{compactAge(card.run.created_at, now)}</span>
+        </span>
       </span>
     </span>
   )
@@ -212,12 +216,14 @@ export interface LaneRowProps {
   selected: boolean
   agentName?: string
   widen?: string
+  /** The focused lane's mail with this lane, as `MailChip` text. */
+  mail?: string
   onPick: (lane: Lane, x: number | undefined, chevron: boolean) => void
   onWiden: () => void
   onRetry: (runID: string) => void
 }
 
-export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, name, active, selected, agentName, widen, onPick, onWiden, onRetry }: LaneRowProps) {
+export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, name, active, selected, agentName, widen, mail, onPick, onWiden, onRetry }: LaneRowProps) {
   const nested = lane.kind === 'agent' || lane.kind === 'note' || (lane.kind === 'run' && lane.level > 2)
   const pad = g.compact ? (nested ? 12 : 8) : 12 + Math.max(0, lane.level - 2) * indent
   let label: ReactNode
@@ -274,7 +280,7 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
       label = (
         <>
           {lane.agentsOpen && <Chevron open />}
-          <RunLabel lane={lane} agentName={agentName} compact={g.compact} now={now} />
+          <RunLabel lane={lane} agentName={agentName} compact={g.compact} now={now} mail={mail} />
         </>
       )
       track = <RunBar lane={lane} g={g} now={now} />
@@ -332,6 +338,7 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
       <div className="relative flex min-w-0 shrink-0 items-center gap-1 pr-2" style={{ width: header ? g.labelWidth + g.width : g.labelWidth, paddingLeft: pad }}>
         {nested && <Elbow x={pad - 10} last={tree.posinset === tree.setsize} />}
         {label}
+        {mail && !g.compact && lane.kind !== 'run' && <MailChip text={mail} />}
       </div>
       {!header && (
         <div data-lane-track className="relative shrink-0" style={{ width: g.width }}>

@@ -759,6 +759,35 @@ describe('lanes view', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
   })
 
+  it('marks agent mail on both lanes and draws its link only for the focused lane, with words for screen readers', async () => {
+    seed([stopped, working])
+    const sent: Event = {
+      id: 'evt_mail', seq: 1, time: new Date(Date.now() - 10 * 60_000).toISOString(), workspace_id: workspace.id, run_id: working.id, actor_id: '',
+      type: 'coord.message', payload: { message_id: 'm1', workspace_id: workspace.id, from_run_id: working.id, to_run_id: stopped.id, kind: 'question' },
+    }
+    vi.mocked(api.workspaceTimeline).mockResolvedValueOnce({ events: [sent], next_seq: 0, more: false })
+    const tree = await openLanes()
+    await waitFor(() => expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(2))
+    expect(document.querySelector('[data-lane-mail] [data-mail="sent"] title')?.textContent).toMatch(/^Message from still going to waiting on you · .* · 1 not acknowledged$/)
+    expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(0)
+    const lane = within(tree).getByRole('treeitem', { name: /^still going/ })
+    expect(lane.getAttribute('aria-label')).toMatch(/messages: sent 1 to waiting on you, 1 not acknowledged$/)
+    act(() => lane.focus())
+    await waitFor(() => expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(1))
+    expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(0)
+    const link = document.querySelector('path[data-mail-control]')!
+    expect(link.querySelector('title')?.textContent).toMatch(/^Message from still going to waiting on you/)
+    expect(screen.getByText('↔ 1')).toBeDefined()
+    expect(screen.getByText('→1')).toBeDefined()
+    await userEvent.keyboard('{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: /^still going/ })
+    const messages = within(dialog).getByRole('region', { name: 'Messages' })
+    expect(within(messages).getByText('Messages with 1 session')).toBeDefined()
+    expect(within(messages).getByRole('button', { name: /^→ Agent message · .* · not acknowledged$/ })).toBeDefined()
+    await userEvent.click(within(messages).getByRole('button', { name: 'waiting on you' }))
+    await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^waiting on you.*received 1 from still going/))
+  })
+
   it('keeps the reply composer open after Reply in a lane popover', async () => {
     seed([stopped, working])
     const tree = await openLanes()
@@ -800,7 +829,7 @@ describe('lanes view', () => {
       id: `m_${run_id}`, workspace_id: workspace.id, from_run_id: run_id!, to_run_id: 'c', kind: 'message' as const, body: `from ${run_id}`, created_at: '2026-08-14T10:30:00Z',
     }] })
     vi.mocked(api.coordMessagesList).mockImplementationOnce(sent).mockImplementationOnce(sent)
-    render(<EdgePopover edge={{ key: 'mail', kind: 'message', from: { lane: 'a', run: 'a', t: 0 }, to: { lane: 'c', run: 'c', t: 0 }, messages: { ids: ['m_a', 'm_b'], senders: ['a', 'b'], acked: false } }} now={Date.now()} />)
+    render(<EdgePopover edge={{ key: 'mail', kind: 'message', from: { lane: 'a', run: 'a', t: 0 }, to: { lane: 'c', run: 'c', t: 0 }, messages: { ids: ['m_a', 'm_b'], senders: ['a', 'b'], acked: false, items: [{ from: 'a', to: 'c', acked: false }, { from: 'b', to: 'c', acked: false }] } }} now={Date.now()} />)
     expect(await screen.findByText('from a')).toBeDefined()
     expect(await screen.findByText('from b')).toBeDefined()
   })

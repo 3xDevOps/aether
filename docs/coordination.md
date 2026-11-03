@@ -442,8 +442,9 @@ delivery word, such as `run-child → run-parent · Delivered`. An
 acknowledgement shows as `run-child → run-parent · Acknowledged`.
 `aether timeline` prints the send as `<from-run> -> <to-run> · question`.
 Neither shows the body. Bodies come from `coord.messages.list`.
-Board > **Lanes** draws each send as a dotted link from sender to recipient
-at the time it was sent, and clicking it shows the bodies
+Board > **Lanes** marks each send on the sender's and recipient's lanes at
+the time it was sent, draws it as a link for the focused lane, and clicking
+it shows the bodies
 ([dashboard-frontend.md](dashboard-frontend.md#lanes)).
 
 `workspace.timeline` pages forward from `after_seq`, or with `newest: true`

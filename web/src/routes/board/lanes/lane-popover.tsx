@@ -8,6 +8,7 @@ import { clockTime, elapsed } from '@/lib/format'
 import { stateName, stateWords } from '@/lib/status'
 import { CardActionButton, cardAction } from '@/routes/board/card-action'
 import type { LaneEdge } from '@/routes/board/lanes/edges'
+import type { Conversation } from '@/routes/board/lanes/mail'
 import type { FamilyLane, RunLane } from '@/routes/board/lanes/model'
 import { segmentLabel } from '@/routes/board/lanes/segments'
 import { useStore } from '@/store'
@@ -179,5 +180,40 @@ export function LanePopoverContent({ label, children, returnFocus }: { label: st
     >
       {children}
     </PopoverContent>
+  )
+}
+
+export function LaneConversations({ conversations, lane, nameOf, now, onPick, onJump }: {
+  conversations: Conversation[]
+  lane: string
+  nameOf: (c: Pick<Conversation, 'lane' | 'run'>) => string
+  now: number
+  onPick: (edge: LaneEdge) => void
+  onJump: (lane: string) => void
+}) {
+  if (conversations.length === 0) return null
+  return (
+    <section aria-label="Messages" className="mt-3 border-t border-seam pt-2">
+      <Header>Messages with {conversations.length} {conversations.length === 1 ? 'session' : 'sessions'}</Header>
+      <ul className="mt-1 flex flex-col gap-2">
+        {conversations.map((c) => (
+          <li key={c.run} className="min-w-0">
+            {c.lane
+              ? <Button variant="link" size="sm" className="max-w-full truncate" onClick={() => onJump(c.lane)}>{nameOf(c)}</Button>
+              : <p className="truncate text-ui-sm">{nameOf(c)} <span className="text-muted">(outside this view)</span></p>}
+            <p className="text-ui-xs text-muted tabular-nums">{[c.sent > 0 && `→ sent ${c.sent}`, c.received > 0 && `← received ${c.received}`].filter(Boolean).join(' · ')}</p>
+            <ul className="flex flex-col">
+              {c.edges.map((edge) => (
+                <li key={edge.key}>
+                  <Button variant="link" size="sm" className="text-muted" onClick={() => onPick(edge)}>
+                    {edge.from.lane === lane ? '→' : '←'} {edgeHead(edge, now)}{!edge.messages?.acked && ' · not acknowledged'}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
