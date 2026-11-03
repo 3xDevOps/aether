@@ -3255,9 +3255,10 @@ removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
 session with no agent terminal, such as an Enhanced session, shows "No agent
 terminal" and the shell controls. Under 768px (`useIsMobile`), the first time
-the Terminal view shows for such a session `useShellOnPhone` refreshes the
-shell list and shows a running shell, or opens one with `shells.open`; a shell
-closed after that leaves the empty state. The frame renders one `TakeoverDialog`
+the Terminal view shows for such a session `useShellOnPhone` reads the shell
+list itself with `dev.terminal.list` and shows a running shell, or opens one
+with `shells.open`; a failed read shows its error, and a shell closed after
+that leaves the empty state. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
@@ -3310,8 +3311,9 @@ open a shell in it" in place of the terminal.
 `TerminalTools` in `src/components/terminal-pane.tsx` is the **Tools** menu
 (named "Terminal tools"): **Find** (**Find in recorded output** while
 reading history), the text size with **Smaller text**, **Larger text** and
-**Reset text size** (on `phoneScreen`, only **Fit to width**, because the
-toolbar carries **A−** and **A+** and the trigger is icon-only), **Copy selection**, **Copy screen**, **Paste**,
+**Reset text size**, each stepping a whole pixel from the drawn size
+(`textSizeSteps`); on `phoneScreen` **Fit to width** replaces the reset and
+the trigger is icon-only, so the toolbar fits 360px, **Copy selection**, **Copy screen**, **Paste**,
 **Upload image…** and, on a session, **Captures…**. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
@@ -3503,11 +3505,12 @@ pans. It grows only when the pane, the grid or the preference changes; a
 render only shrinks an overflow, so device-pixel rounding cannot make it
 oscillate. 80 columns fit a 360px screen at about 7px. The fitted size is
 not stored: the store keeps `terminalFitWidth` (persisted, default on) beside
-`terminalFontSize`, and `setTerminalFontSize` turns fitting off. **A−** and
-**A+** (`TextSizeButtons` in the toolbar, 44px) step one whole pixel from
-the drawn size, within the 8-32px zoom range. A two-finger pinch on the host
+`terminalFontSize`, and `setTerminalFontSize` turns fitting off. **A−**,
+**A+** and **Fit** head the more-keys sheet, and **A−**/**A+** step one
+whole pixel from the drawn size, within the 8-32px zoom range. A two-finger pinch on the host
 scales the drawn size live in 0.5px steps and on release stores it, or
-returns to fitting when it ends at or below the fitted size or below 8px.
+returns to fitting when it ends at or below the size fitting would draw or
+below 8px.
 
 **Read first.** On `phoneScreen` `focusTerminal()` does nothing, so no
 effect - a new shell, a tab change, a closed find bar - raises the soft
@@ -3518,7 +3521,7 @@ the more-keys sheet, focuses it.
 terminal is writable, a tablet included. Its row does not scroll: **Ctrl**,
 **Alt**, Esc, Tab, the arrows, Enter and **More keys** share the width at
 44px tall. **More keys** is a non-modal `Popover` above the row that keeps
-focus where it was: symbols a phone keyboard buries, ^C, Home/End,
+focus where it was: A−, A+ and Fit, symbols a phone keyboard buries, ^C, Home/End,
 PgUp/PgDn, Del, F1-F12 and Show/Hide keyboard. Every key goes through
 `terminal.input`, so the replay gate and `disableStdin` treat a tap exactly
 like a keystroke, refuses focus on `pointerdown` so the keyboard stays as it

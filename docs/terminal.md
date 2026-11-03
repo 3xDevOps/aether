@@ -123,7 +123,7 @@ when the container is kept. Without permission to steer, the line under the
 toolbar reads **You can watch this session but not type in it.**
 
 The **Tools** menu has **Find**, **Smaller text**, **Larger text**, **Reset
-text size** (on a phone, **Fit to width** in their place), **Copy selection**, **Copy screen**, **Paste** and **Upload
+text size** (on a phone, **Fit to width** in its place), **Copy selection**, **Copy screen**, **Paste** and **Upload
 image…**. Sessions add **Captures…**. **Copy screen** copies the visible rows, which
 is how to copy on a touch screen.
 
@@ -339,8 +339,8 @@ These work in every terminal Aether draws, when it has focus:
 On a touch screen, a key row below the terminal has **Ctrl**, **Alt**,
 **Esc**, **Tab**, the arrows, **Enter** and **More keys**, which opens the
 rest: `|`, `~`, `/`, `\`, `-`, `_`, `` ` ``, `^`, **^C**, **Home**,
-**End**, **PgUp**, **PgDn**, **Del**, **F1** to **F12** and **Show
-keyboard**. **Ctrl** and **Alt** are sticky: tap once and they apply to the
+**End**, **PgUp**, **PgDn**, **Del**, **F1** to **F12**, **Show
+keyboard**, and **A−**, **A+** and **Fit** for the text size. **Ctrl** and **Alt** are sticky: tap once and they apply to the
 next key, so **Ctrl** then `d` sends `Ctrl+D`; tap twice quickly to lock
 one on until you tap it again. They also modify the arrows, **Home**/**End**,
 paging and function keys.
@@ -353,9 +353,9 @@ On a phone:
 - **Text fits the screen's width.** A phone shows the session at the size
   the other viewers gave it, so instead of panning across 80 or more
   columns it draws the text smaller until the whole width fits, down to
-  6 px. **A−** and **A+** in the toolbar, or a two-finger pinch, choose a
-  size of your own; pinch back in, or choose **Tools → Fit to width**, to
-  fit again. The choice is kept on that device. Swipe to reach the parts of
+  6 px. **A−** and **A+** in **More keys**, **Tools → Smaller text** or
+  **Larger text**, or a two-finger pinch choose a size of your own; pinch
+  back in, or choose **Fit** or **Tools → Fit to width**, to fit again. The choice is kept on that device. Swipe to reach the parts of
   a grid wider than the screen at the size you chose.
 - **An Enhanced session's Terminal tab opens a shell** in the session's
   container, or shows one that is already running, instead of an empty

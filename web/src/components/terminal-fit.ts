@@ -81,7 +81,7 @@ export function useTerminalFit(terminal: Terminal | null, enabled: boolean): num
       // Pinching in to the fitted size hands sizing back to the fit; the
       // smallest chosen size is the zoom minimum, so a pinch between the two
       // fits too.
-      if (size < minTerminalFontSize || size <= widthFit) {
+      if (size < minTerminalFontSize || size <= Math.min(chosen, widthFit)) {
         useStore.getState().fitTerminalWidth()
         apply(Math.min(chosen, widthFit))
       } else {

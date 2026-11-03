@@ -3,8 +3,10 @@ import { connectionLabel } from '@/components/shell/connection'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { isRetainedRun } from '@/lib/commands'
+import { message } from '@/lib/format'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { usePresenceSummary } from '@/routes/run/multiplayer-controls'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
@@ -70,18 +72,26 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
 function useShellOnPhone(shells: RunShells, wanted: boolean) {
   const mobile = useIsMobile()
   const asked = useRef(false)
-  const { runID, visible, canOpen, atLimit, refresh, open, show } = shells
+  const { runID, visible, canOpen, atLimit, open, show, setError } = shells
   useEffect(() => {
     if (!mobile || !wanted || !visible || !canOpen || asked.current) return
     asked.current = true
     void (async () => {
-      // The poll may not have listed the session's shells yet.
-      await refresh().catch(() => {})
-      const running = useStore.getState().shellDocks[runID]?.terminals.find((terminal) => !shellEnded(terminal))
+      // Decided from a list this request read itself: the poll may not have
+      // listed the session's shells yet, and may supersede a refresh.
+      let terminals
+      try {
+        terminals = (await api.devTerminalList({ run_id: runID })).terminals
+      } catch (cause) {
+        setError(message(cause))
+        return
+      }
+      useStore.getState().syncShellTerminals(runID, terminals)
+      const running = terminals.find((terminal) => !shellEnded(terminal))
       if (running) show(running.terminal_id)
       else if (!atLimit) await open()
     })()
-  }, [atLimit, canOpen, mobile, open, refresh, runID, show, visible, wanted])
+  }, [atLimit, canOpen, mobile, open, runID, setError, show, visible, wanted])
 }
 
 export function TerminalView({ run, agent, shells, onCaptures }: {

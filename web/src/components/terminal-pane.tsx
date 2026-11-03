@@ -21,17 +21,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { type TerminalImageController, useTerminalImage } from '@/components/terminal-image'
-import { TerminalKeys } from '@/components/terminal-keys'
+import { TerminalKeys, textSizeSteps } from '@/components/terminal-keys'
 import { ControlMatrix, type ControlAppearance } from '@/components/control-matrix'
 import { useTerminalFit } from '@/components/terminal-fit'
 import { useTerminalPan } from '@/components/terminal-pan'
 import { coarsePointer, phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { copyScreen, copySelection } from '@/lib/term-clipboard'
-import {
-  defaultTerminalFontSize,
-  maxTerminalFontSize,
-  minTerminalFontSize,
-} from '@/lib/term-font'
+import { defaultTerminalFontSize } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 
@@ -50,54 +46,26 @@ const stay = (event: Event) => event.preventDefault()
 /** The clipboard fallback focuses a helper field, which the open menu's focus trap would refuse. */
 const afterClose = (action: () => void) => () => window.setTimeout(action)
 
-/** A phone's A-/A+: one step from the size the terminal is drawn at, fitted or chosen. */
-function TextSizeButtons({ controller, fontSize }: { controller: XtermController; fontSize: number }) {
-  const setFontSize = useStore((state) => state.setTerminalFontSize)
-  const smaller = Math.max(minTerminalFontSize, Math.ceil(fontSize) - 1)
-  const larger = Math.min(maxTerminalFontSize, Math.floor(fontSize) + 1)
-  return (
-    <>
-      <Button
-        variant="ghost"
-        size="icon"
-        label="Smaller text"
-        disabled={!controller.terminal || smaller >= fontSize}
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => setFontSize(smaller)}
-      >
-        <span aria-hidden className="text-ui font-semibold">A−</span>
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        label="Larger text"
-        disabled={!controller.terminal || larger <= fontSize}
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => setFontSize(larger)}
-      >
-        <span aria-hidden className="text-ui font-semibold">A+</span>
-      </Button>
-    </>
-  )
-}
-
 function TerminalTools({
   controller,
   image,
   phone,
+  fontSize,
   readingSurface,
   onCaptures,
 }: {
   controller: XtermController
   image: TerminalImageController
   phone: boolean
+  /** The size the terminal is drawn at: fitted on a phone, else the chosen one. */
+  fontSize: number
   readingSurface?: React.RefObject<TerminalReadSurface | null>
   onCaptures?: (returnTo: HTMLElement | null) => void
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const terminal = controller.terminal
-  const fontSize = useStore((state) => state.terminalFontSize)
   const setFontSize = useStore((state) => state.setTerminalFontSize)
+  const { smaller, larger } = textSizeSteps(fontSize)
   const fitWidth = useStore((state) => state.terminalFitWidth)
   const fitTerminalWidth = useStore((state) => state.fitTerminalWidth)
 
@@ -123,20 +91,16 @@ function TerminalTools({
         </MenuItem>
         <MenuSeparator />
         <MenuLabel>Text size {phone && fitWidth ? 'fitted to width' : `${fontSize}px`}</MenuLabel>
-        {!phone && (
-          <>
-            <MenuItem disabled={!terminal || fontSize <= minTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize - 1) }}>
-              <Minus />
-              Smaller text
-              <span className="ml-auto text-ui-sm text-muted">Ctrl+-</span>
-            </MenuItem>
-            <MenuItem disabled={!terminal || fontSize >= maxTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize + 1) }}>
-              <Plus />
-              Larger text
-              <span className="ml-auto text-ui-sm text-muted">Ctrl+=</span>
-            </MenuItem>
-          </>
-        )}
+        <MenuItem disabled={!terminal || smaller >= fontSize} onSelect={(event) => { stay(event); setFontSize(smaller) }}>
+          <Minus />
+          Smaller text
+          {!phone && <span className="ml-auto text-ui-sm text-muted">Ctrl+-</span>}
+        </MenuItem>
+        <MenuItem disabled={!terminal || larger <= fontSize} onSelect={(event) => { stay(event); setFontSize(larger) }}>
+          <Plus />
+          Larger text
+          {!phone && <span className="ml-auto text-ui-sm text-muted">Ctrl+=</span>}
+        </MenuItem>
         {phone ? (
           <MenuItem disabled={!terminal || fitWidth} onSelect={(event) => { stay(event); fitTerminalWidth() }}>
             <RotateCcw />
@@ -400,8 +364,7 @@ export function TerminalPane({
           ) : (
             <>
               {tabs}
-              <TerminalTools controller={controller} image={image} phone={phone} readingSurface={readingSurface} onCaptures={onCaptures} />
-              {phone && <TextSizeButtons controller={controller} fontSize={fontSize} />}
+              <TerminalTools controller={controller} image={image} phone={phone} fontSize={fontSize} readingSurface={readingSurface} onCaptures={onCaptures} />
             </>
           )}
         </div>
@@ -429,7 +392,7 @@ export function TerminalPane({
       />
         {surface}
       </div>
-      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} />}
+      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} fontSize={fontSize} />}
       {children}
       {replaying && !readingSurface && (
         <div

@@ -9,11 +9,12 @@ import type { ModifierKey } from '@/components/terminal-modifiers'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { maxTerminalFontSize, minTerminalFontSize } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/store'
 
 interface Key { label: string; bytes: string; icon?: React.ReactNode; name?: string }
 
-/** The row, in order after the modifiers. */
 const rowKeys: Key[] = [
   { label: 'Esc', bytes: '\x1b' },
   { label: 'Tab', bytes: '\t' },
@@ -24,7 +25,6 @@ const rowKeys: Key[] = [
   { label: 'Enter', bytes: '\r', icon: <CornerDownLeft /> },
 ]
 
-/** What the "more keys" sheet offers: symbols a phone keyboard buries, then navigation and function keys. */
 const moreKeys: Key[] = [
   ...['|', '~', '/', '\\', '-', '_', '`', '^'].map((symbol) => ({ label: symbol, bytes: symbol })),
   { label: 'Ctrl+C', bytes: '\x03', name: '^C' },
@@ -37,18 +37,31 @@ const moreKeys: Key[] = [
   ...[15, 17, 18, 19, 20, 21, 23, 24].map((code, index) => ({ label: `F${index + 5}`, bytes: `\x1b[${code}~` })),
 ]
 
+/**
+ * One whole pixel either way from the drawn size, which a phone's fit can
+ * leave between two pixels, kept inside the zoom range.
+ */
+export function textSizeSteps(drawn: number) {
+  return {
+    smaller: Math.max(minTerminalFontSize, Math.ceil(drawn) - 1),
+    larger: Math.min(maxTerminalFontSize, Math.floor(drawn) + 1),
+  }
+}
+
 /** Taking focus would drop the soft keyboard between two keys. */
 const keepFocus = (event: React.PointerEvent) => event.preventDefault()
 
 function KeyButton({
   label,
   pressed,
+  disabled,
   className,
   onPress,
   children,
 }: {
   label: string
   pressed?: boolean
+  disabled?: boolean
   className?: string
   onPress: () => void
   children: React.ReactNode
@@ -60,6 +73,7 @@ function KeyButton({
       variant={pressed ? 'primary' : 'secondary'}
       aria-label={label}
       aria-pressed={pressed}
+      disabled={disabled}
       className={cn('h-11 min-w-0 px-0 font-code text-ui coarse:h-11', className)}
       onPointerDown={keepFocus}
       onClick={onPress}
@@ -71,13 +85,20 @@ function KeyButton({
 
 export function TerminalKeys({
   controller,
+  fontSize,
   className,
 }: {
   controller: XtermController
+  /** The size the terminal is drawn at, for the sheet's A- and A+. */
+  fontSize: number
   className?: string
 }) {
   const { terminal, modifiers, tapModifier, focusTerminal } = controller
   const [more, setMore] = useState(false)
+  const setFontSize = useStore((state) => state.setTerminalFontSize)
+  const fitWidth = useStore((state) => state.terminalFitWidth)
+  const fitTerminalWidth = useStore((state) => state.fitTerminalWidth)
+  const { smaller, larger } = textSizeSteps(fontSize)
   // On a phone focusTerminal does nothing, so a key taps through without
   // raising the soft keyboard; a tablet keeps typing where the key left it.
   const send = (bytes: string) => {
@@ -132,6 +153,9 @@ export function TerminalKeys({
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
+          <KeyButton label="Smaller text" className="col-span-2" disabled={smaller >= fontSize} onPress={() => setFontSize(smaller)}>A−</KeyButton>
+          <KeyButton label="Larger text" className="col-span-2" disabled={larger <= fontSize} onPress={() => setFontSize(larger)}>A+</KeyButton>
+          <KeyButton label="Fit to width" className="col-span-2" disabled={fitWidth} onPress={fitTerminalWidth}>Fit</KeyButton>
           {moreKeys.map((key) => (
             <KeyButton
               key={key.label}
