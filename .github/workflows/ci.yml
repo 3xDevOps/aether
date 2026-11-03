@@ -34,26 +34,23 @@ concurrency:
 
 jobs:
   # Lists changed files and decides whether the code jobs run. A push to
-  # main and a merge-queue entry always run them. A pull request runs them
-  # unless every changed path is under docs/ or is a root-level markdown
-  # file. The go and web outputs narrow that further: a change confined to
-  # web/ skips the Go jobs, and one that no dashboard input can see skips
-  # dashboard and dashboard-e2e. A failed file list fails open and runs
-  # them. The checkout carries no credentials. The classifier is the base
-  # revision of
-  # scripts/ci-classify-changes.sh: a pull request can edit its own copy,
-  # and that copy is not what this job runs. A rename is classified by its
-  # old path as well as its new one, so a move into docs/ still runs the
-  # code jobs. The edge, desktop, client, installer and release outputs
-  # follow the same rules with scripts/ci-classify-edge.sh,
-  # scripts/ci-classify-desktop.sh and scripts/ci-classify-platform.sh, with
-  # scripts/ci-classify-areas.sh for go and web, and a failure of any
-  # classifier alone also fails open.
+  # main and a merge-queue entry always run them. On a pull request
+  # scripts/ci-classify-areas.sh sets go and web: a change confined to
+  # docs/ and root-level markdown files skips both, one confined to web/
+  # skips the Go jobs, and one that no dashboard input can see skips
+  # dashboard and dashboard-e2e. The edge, desktop, client, installer and
+  # release outputs follow the same rules with scripts/ci-classify-edge.sh,
+  # scripts/ci-classify-desktop.sh and scripts/ci-classify-platform.sh.
+  # Each classifier is the base revision's copy: a pull request can edit
+  # its own, and that copy is not what this job runs. A rename is
+  # classified by its old path as well as its new one, so a move into docs/
+  # still runs the code jobs. A failed file list, or a failure of any
+  # classifier alone, fails open and runs them. The checkout carries no
+  # credentials.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      code: ${{ steps.classify.outputs.code }}
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
       edge: ${{ steps.classify.outputs.edge }}
@@ -68,7 +65,6 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-areas.sh
-            scripts/ci-classify-changes.sh
             scripts/ci-classify-desktop.sh
             scripts/ci-classify-edge.sh
             scripts/ci-classify-platform.sh
@@ -80,17 +76,15 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            printf '%s\n' code=true go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
-            printf '%s\n' code=true go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          code=$(printf '%s\n' "$files" | sh scripts/ci-classify-changes.sh)
-          echo "code=$code" >> "$GITHUB_OUTPUT"
           for mode in go web; do
             if ! out=$(printf '%s\n' "$files" | sh scripts/ci-classify-areas.sh "$mode"); then
               out=true

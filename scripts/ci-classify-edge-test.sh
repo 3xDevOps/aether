@@ -69,7 +69,6 @@ expect false internal/edgeish/x.go
 expect false cmd/aether/main.go
 expect false cmd/aether-edge-other/main.go
 expect false scripts/install.sh
-expect false scripts/ci-classify-changes.sh
 expect false scripts/ci-classify-desktop.sh
 expect false .github/workflows/windows-install.yml
 expect false .github/actions/go-cache/action.yml
