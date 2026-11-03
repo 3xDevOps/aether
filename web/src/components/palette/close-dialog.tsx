@@ -1,7 +1,8 @@
 // Recording either outcome also makes the server stop a still-live container.
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { CloseWarnings, useCloseCheck } from '@/components/close-warnings'
 import { Archive, GitMerge } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,6 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
+import { closeWarned } from '@/lib/close-check'
 import { closeCommand, useCommandRunner } from '@/lib/commands'
 import { errorSentence } from '@/lib/format'
 import { runLabel } from '@/lib/status'
@@ -31,6 +33,9 @@ export function CloseDialog() {
   const [closing, setClosing] = useState<Outcome | null>(null)
   const late = usePastDeadline(closing !== null)
   const [error, setError] = useState<string | null>(null)
+  const check = useCloseCheck(runID)
+  const warned = closeWarned(check)
+  const cancel = useRef<HTMLButtonElement>(null)
 
   const finish = async (outcome: Outcome) => {
     if (!runID) return
@@ -55,10 +60,21 @@ export function CloseDialog() {
   }
 
   const pending = late ? stillWaiting : 'Closing…'
+  const label = (outcome: Outcome, plain: string) => {
+    if (closing === outcome) return pending
+    if (!check) return 'Checking…'
+    return warned ? `Close anyway as ${outcome}` : plain
+  }
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent {...returnFocus} className="max-h-[calc(100dvh-2rem)] max-w-[min(480px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+      <DialogContent
+        {...returnFocus}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          cancel.current?.focus()
+        }}
+        className="max-h-[calc(100dvh-2rem)] max-w-[min(480px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Close this session?</DialogTitle>
           <DialogDescription>
@@ -66,7 +82,9 @@ export function CloseDialog() {
             board. Its branch stays.
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 min-w-0 overflow-y-auto px-3 py-3 sm:px-4">
+        <div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto px-3 py-3 sm:px-4">
+          {!check && <p className="text-ui-sm text-muted">Checking what closing affects…</p>}
+          {check && run && <CloseWarnings check={check} run={run} onLeave={close} />}
           {error && (
             <p role="alert" className="break-words text-ui-sm text-state-failed">
               {error}
@@ -74,16 +92,16 @@ export function CloseDialog() {
           )}
         </div>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
-          <Button variant="secondary" onClick={close}>
+          <Button ref={cancel} variant="secondary" onClick={close}>
             Cancel
           </Button>
-          <Button variant="secondary" disabled={closing !== null} onClick={() => void finish('abandoned')}>
+          <Button variant="secondary" disabled={closing !== null || !check} onClick={() => void finish('abandoned')}>
             <Archive aria-hidden />
-            {closing === 'abandoned' ? pending : 'Abandoned'}
+            {label('abandoned', 'Abandoned')}
           </Button>
-          <Button disabled={closing !== null} onClick={() => void finish('merged')}>
+          <Button disabled={closing !== null || !check} onClick={() => void finish('merged')}>
             <GitMerge aria-hidden />
-            {closing === 'merged' ? pending : 'Merged'}
+            {label('merged', 'Merged')}
           </Button>
         </DialogFooter>
       </DialogContent>

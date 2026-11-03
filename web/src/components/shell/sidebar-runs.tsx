@@ -6,6 +6,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { ChevronRight, Network } from '@/components/icons'
 import { CountBadge } from '@/components/ui/count-badge'
+import { ProtectedMark } from '@/components/protected-mark'
 import { ListRow } from '@/components/ui/list-row'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -339,6 +340,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
   ].filter(Boolean).join(' · ')
   const indicators = (
     <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
+      {run.protected && <ProtectedMark />}
       <RelativeTime at={since} compact title={undefined} />
       {childRuns && (
         <span className="flex items-center gap-0.5" title={counts}>

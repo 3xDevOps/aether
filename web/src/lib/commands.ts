@@ -39,6 +39,7 @@ import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
 import type { LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
+import { closeWarned, readCloseCheck } from '@/lib/close-check'
 import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
@@ -77,6 +78,8 @@ export interface Command {
   predict?: () => Prediction
   /** The server answers only once the change is done, which can outlast the deadline, so the prediction waits for that answer. */
   slow?: boolean
+  /** The run this verb closes: the runner reads `run.close_check` first and asks before a close that affects others. */
+  closes?: string
   perform: (deps: CommandDeps) => Promise<unknown> | void
 }
 
@@ -385,6 +388,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
           : { review: 'accepted' },
       }),
       slow: live,
+      closes: id,
       perform: (d) => d.api.runReview(id, 'complete'),
     })
     if (run.review === 'ready') {
@@ -999,6 +1003,7 @@ export function useCommandRunner(
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
+  const openCloseConfirmation = useStore((s) => s.openCloseConfirmation)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
   const setTheme = useStore((s) => s.setTheme)
@@ -1007,6 +1012,13 @@ export function useCommandRunner(
   return useCallback(
     async (command: Command) => {
       onDone?.()
+      if (command.closes) {
+        const check = await readCloseCheck(command.closes)
+        if (closeWarned(check)) {
+          openCloseConfirmation({ check, command: { ...command, closes: undefined } })
+          return
+        }
+      }
       const deps: CommandDeps = {
         api,
         navigate,
@@ -1046,6 +1058,7 @@ export function useCommandRunner(
       navigate,
       onDone,
       onTemplates,
+      openCloseConfirmation,
       openDialog,
       openForwardDialog,
       recordPull,

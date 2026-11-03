@@ -100,6 +100,24 @@ interface WaitObserved {
   run_status?: string
 }
 
+export type CloseWarningKind = 'protected' | 'pull_request' | 'unmerged_work' | 'messages' | 'awaited' | 'subsessions' | 'cleanup_pending'
+
+/** One thing closing a run would affect, from `run.close_check`. */
+export interface CloseWarning {
+  kind: CloseWarningKind
+  detail: string
+  url?: string
+  count?: number
+  run_ids?: string[]
+}
+
+/** A run's close warnings, or the error reading them. */
+export interface RunCloseCheck {
+  run_id: string
+  warnings: CloseWarning[]
+  error?: { code: number; message: string }
+}
+
 /** One condition a run registered with `report --outcome waiting --until`. */
 export interface WaitCondition {
   id: string

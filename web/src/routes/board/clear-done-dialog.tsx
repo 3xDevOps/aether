@@ -59,6 +59,13 @@ export function ClearDoneConfirm({
             )}
           </ul>
         )}
+        {n > 0 && (
+          <ul aria-label="Sessions to archive" className="max-h-40 space-y-1 overflow-y-auto text-ui">
+            {plan.eligible.map((run) => (
+              <li key={run.id} className="truncate">{runLabel(run)}</li>
+            ))}
+          </ul>
+        )}
         <DialogFooter>
           <Button variant="secondary" disabled={running} onClick={onCancel}>
             {n === 0 ? 'Close' : 'Cancel'}

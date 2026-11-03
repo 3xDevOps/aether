@@ -33,7 +33,7 @@ describe('close dialog', () => {
     const answer = Promise.withResolvers<never>()
     vi.mocked(api.runClose).mockReturnValueOnce(answer.promise)
     render(<CloseDialog />)
-    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Merged' }))
     expect(api.runClose).toHaveBeenCalledWith('run_1', 'merged')
     expect(useStore.getState().paletteDialog).toBeNull()
     expect(status()).toBe('merged')
@@ -46,7 +46,7 @@ describe('close dialog', () => {
     vi.mocked(api.runClose).mockRejectedValueOnce(Object.assign(new Error('session is finishing'), { code: -32001 }))
     vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'completed' }))
     render(<CloseDialog />)
-    fireEvent.click(screen.getByRole('button', { name: 'Abandoned' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Abandoned' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Closed as abandoned failed: session is finishing'))
     expect(status()).toBe('completed')
   })
@@ -56,7 +56,7 @@ describe('close dialog', () => {
     vi.mocked(api.runClose).mockReturnValueOnce(answer.promise)
     vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'merged', reason: 'closed', state: undefined, status_seq: 1 }))
     render(<CloseDialog />)
-    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Merged' }))
     act(() => useStore.getState().applyRunStatus('run_1', { to: 'merged', reason: 'closed', status_seq: 1 }, new Date().toISOString()))
     await act(async () => answer.reject(Object.assign(new Error('run.close: scheduler: evidence session lookup: database is locked'), { code: -32603 })))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Closed as merged failed: evidence session lookup: database is locked'))
@@ -67,10 +67,35 @@ describe('close dialog', () => {
     vi.mocked(api.runClose).mockRejectedValueOnce(Object.assign(new Error('session finalization is in progress'), { code: codeInvalidState }))
     vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'merged', state: undefined }))
     render(<CloseDialog />)
-    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Merged' }))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Closed as merged'))
     expect(toast.error).not.toHaveBeenCalled()
     expect(status()).toBe('merged')
+  })
+
+  it('lists what closing affects and says Close anyway, with Cancel focused', async () => {
+    useStore.setState({ runs: { run_1: toRecord(run({ id: 'run_1', status: 'completed' })), run_2: toRecord(run({ id: 'run_2', title: 'Coordinator' })) } })
+    vi.mocked(api.runCloseCheck).mockResolvedValueOnce([{ run_id: 'run_1', warnings: [
+      { kind: 'pull_request', detail: 'Pull request acme/api#7 is open, not merged', url: 'https://github.com/acme/api/pull/7' },
+      { kind: 'awaited', detail: 'Waiting for it to finish: run_2 (Coordinator)', run_ids: ['run_2'] },
+    ] }])
+    render(<CloseDialog />)
+    const merged = await screen.findByRole('button', { name: 'Close anyway as merged' })
+    expect(screen.getByRole('button', { name: 'Close anyway as abandoned' })).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
+    const list = screen.getByRole('list', { name: 'What closing affects' })
+    expect(list.textContent).toContain('Pull request acme/api#7 is open, not merged.')
+    expect(screen.getByRole('link', { name: 'Open the pull request' }).getAttribute('href')).toBe('https://github.com/acme/api/pull/7')
+    expect(list.textContent).toContain('Waiting for it to finish: Coordinator. Closing wakes them with its outcome.')
+    fireEvent.click(merged)
+    expect(api.runClose).toHaveBeenCalledWith('run_1', 'merged')
+  })
+
+  it('shows a failed check and still lets the owner close', async () => {
+    vi.mocked(api.runCloseCheck).mockRejectedValueOnce(new Error('method not found: run.close_check'))
+    render(<CloseDialog />)
+    await screen.findByRole('button', { name: 'Close anyway as merged' })
+    expect(screen.getByRole('alert').textContent).toBe('Could not check what closing affects: method not found: run.close_check')
   })
 
   it('waits for the server, naming the choice, over another verb\'s pending prediction', async () => {
@@ -78,7 +103,7 @@ describe('close dialog', () => {
     vi.mocked(api.runClose).mockReturnValueOnce(answer.promise)
     useStore.setState({ predicting: { run_1: {} } })
     render(<CloseDialog />)
-    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Merged' }))
     expect(screen.getByRole('button', { name: 'Closing…' })).toHaveProperty('disabled', true)
     expect(screen.getByRole('button', { name: 'Abandoned' })).toHaveProperty('disabled', true)
     expect(useStore.getState().paletteDialog).toBe('close')

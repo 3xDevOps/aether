@@ -201,6 +201,14 @@ describe('board columns', () => {
     expect(cardOf('still going').queryByText('+13')).toBeNull()
   })
 
+  it('marks a protected session card with a lock and no other', () => {
+    seed([working, run({ ...queued, protected: true })])
+    renderBoard()
+    const lock = { name: 'Protected: only its owner or an admin can steer, message or close it' }
+    expect(cardOf('not started').getByRole('img', lock)).toBeDefined()
+    expect(cardOf('still going').queryByRole('img', lock)).toBeNull()
+  })
+
   it('opens the run from anywhere on the card', () => {
     seed([working])
     renderBoard()
@@ -500,6 +508,7 @@ describe('Finished footer', () => {
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive closed sessions…' }))
     const dialog = within(await screen.findByRole('dialog'))
     expect(dialog.getByText(/1 session stays: completed but not yet closed/)).toBeDefined()
+    expect(within(dialog.getByRole('list', { name: 'Sessions to archive' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['landed already'])
     fireEvent.click(dialog.getByRole('button', { name: 'Archive 1' }))
 
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 session'))

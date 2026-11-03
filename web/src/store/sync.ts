@@ -216,7 +216,7 @@ export async function hydrate(
       store.getState().resetFiles()
       store.getState().resetNotes()
       store.getState().resetAssistant()
-      store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {}, deletingRuns: {}, laneHistory: {}, watches: {}, watchNotices: {}, watchesFor: null })
+      store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {}, deletingRuns: {}, laneHistory: {}, watches: {}, watchNotices: {}, watchesFor: null, closeConfirmation: null })
     }
     s.setIdentityKey(incomingIdentity)
     noteServerTime(store, info.time)

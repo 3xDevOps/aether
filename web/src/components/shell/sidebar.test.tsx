@@ -115,6 +115,14 @@ describe('run rows', () => {
     expect(runList().getAllByRole('button', { name: /^Needs you · question/ })).toHaveLength(7)
   })
 
+  it('marks a protected session row with a lock and no other', () => {
+    const lock = { name: 'Protected: only its owner or an admin can steer, message or close it' }
+    useStore.setState({ runs: { run_1: toRecord(run({ protected: true })), run_2: toRecord(run({ id: 'run_2', task: 'open session' })) } })
+    render(<AppShell />)
+
+    expect(runList().getAllByRole('img', lock)).toHaveLength(1)
+  })
+
   it('sorts an Enhanced run by what it waits on', () => {
     const enhanced = { mode: 'acp', acp: true } as const
     useStore.setState({

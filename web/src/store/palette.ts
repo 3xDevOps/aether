@@ -1,4 +1,5 @@
-import type { WatchTarget } from '@/lib/types'
+import type { Command } from '@/lib/commands'
+import type { RunCloseCheck, WatchTarget } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Every form the shell hosts; sweep this list rather than keep a copy. */
@@ -14,11 +15,15 @@ export interface PaletteSlice {
   paletteForwardTarget: string | null
   /** The pull request the Watch form is for; a run's comes from paletteRunID. */
   paletteWatchTarget: WatchTarget | null
+  /** A verb that closes a run with close warnings, held until the owner confirms. */
+  closeConfirmation: { check: RunCloseCheck; command: Command } | null
   togglePalette: (open?: boolean) => void
   openPaletteDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
   openWatchDialog: (target: WatchTarget) => void
   closePaletteDialog: () => void
+  openCloseConfirmation: (confirmation: { check: RunCloseCheck; command: Command }) => void
+  dismissCloseConfirmation: () => void
 }
 
 export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
@@ -27,6 +32,7 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
   paletteRunID: null,
   paletteForwardTarget: null,
   paletteWatchTarget: null,
+  closeConfirmation: null,
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
   openPaletteDialog: (dialog, runID) =>
     set({
@@ -59,4 +65,6 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
       paletteForwardTarget: null,
       paletteWatchTarget: null,
     }),
+  openCloseConfirmation: (confirmation) => set({ paletteOpen: false, closeConfirmation: confirmation }),
+  dismissCloseConfirmation: () => set({ closeConfirmation: null }),
 })

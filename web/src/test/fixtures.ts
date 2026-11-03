@@ -441,6 +441,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       usage: { runs: 1, metered_runs: 0, unmetered_runs: 1, input_tokens: 0, output_tokens: 0, cost_usd: 0, by_account: [] },
     })),
     runChildrenAllow: vi.fn<Api['runChildrenAllow']>(async (_, children) => ({ children })),
+    runCloseCheck: vi.fn(async (ids: string[]) => ids.map((run_id) => ({ run_id, warnings: [] }))),
     runWaitCancel: vi.fn(async () => needsOverride('runWaitCancel')),
     workspaceChildLimits: vi.fn<Api['workspaceChildLimits']>(async (_, limits) => ({ max_live: 8, ...limits })),
     runRelease: vi.fn(async () => ({})),
