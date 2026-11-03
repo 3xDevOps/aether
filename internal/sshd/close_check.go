@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // recentMail is how long mail from another session warns a close even
@@ -98,6 +100,9 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	// affect is part of this close.
 	for _, childID := range deps.Children {
 		child, err := s.cfg.Store.GetRun(ctx, childID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -172,7 +177,11 @@ func (s *Server) runLabels(ctx context.Context, ids []domain.RunID) string {
 	labels := make([]string, len(ids))
 	for i, id := range ids {
 		labels[i] = string(id)
-		if r, err := s.cfg.Store.GetRun(ctx, id); err == nil && r.Title != "" {
+		r, err := s.cfg.Store.GetRun(ctx, id)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			labels[i] += " (queued)"
+		case err == nil && r.Title != "":
 			labels[i] += " (" + r.Title + ")"
 		}
 	}

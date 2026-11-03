@@ -139,6 +139,12 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	lead := newRun("lead", nil)
 	worker := child(lead, "worker", domain.RunRunning)
 	pr(worker, 11, "open", nil)
+	queued, _, err := db.ReserveChild(ctx, &domain.ChildReservation{ParentRunID: lead.ID, RootRunID: lead.ID, TreeKey: string(lead.ID),
+		WorkspaceID: e.ws.ID, OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "claude", Mode: domain.LaunchTUI, Purpose: "later",
+		Task: "later", IdempotencyKey: "queued", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	helper := child(worker, "helper", domain.RunRunning)
 	pr(helper, 12, "open", nil)
 	await(helper, worker)
@@ -174,8 +180,8 @@ func TestRunCloseCheckKinds(t *testing.T) {
 		{parent, "", []protocol.CloseWarning{{Kind: "subsessions", Count: 1, RunIDs: []string{string(kid.ID)},
 			Detail: "1 subsession close with it: " + string(kid.ID) + " (kid)"}}},
 		{lead, "", []protocol.CloseWarning{
-			{Kind: "subsessions", Count: 2, RunIDs: []string{string(worker.ID), string(helper.ID)},
-				Detail: "2 subsessions close with it: " + string(worker.ID) + " (worker), " + string(helper.ID) + " (helper)"},
+			{Kind: "subsessions", Count: 3, RunIDs: []string{string(worker.ID), string(queued.RunID), string(helper.ID)},
+				Detail: "3 subsessions close with it: " + string(worker.ID) + " (worker), " + string(queued.RunID) + " (queued), " + string(helper.ID) + " (helper)"},
 			{Kind: "pull_request", Subsession: string(worker.ID), URL: "https://github.com/acme/api/pull/11",
 				Detail: "Subsession " + string(worker.ID) + " (worker): Pull request acme/api#11 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z"},
 			{Kind: "awaited", Subsession: string(worker.ID), RunIDs: []string{string(watcher.ID)},
