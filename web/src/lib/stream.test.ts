@@ -240,4 +240,31 @@ describe('connectEvents', () => {
 
     expect(StubSocket.opened).toHaveLength(1)
   })
+
+  it('reopens a socket a frozen page left half open, without any event', () => {
+    const stop = open()
+    StubSocket.last().onopen?.()
+    const before = StubSocket.opened.length
+
+    // The page was frozen: Date jumps while no timer or event ran.
+    vi.setSystemTime(Date.now() + 60_000)
+    vi.advanceTimersByTime(5_000)
+
+    expect(StubSocket.opened).toHaveLength(before + 1)
+    stop()
+  })
+
+  it('collapses a burst of network-change events into one reconnect', () => {
+    const connection = new EventTarget()
+    vi.stubGlobal('navigator', { connection })
+    const stop = open()
+    StubSocket.last().onopen?.()
+    const before = StubSocket.opened.length
+
+    for (let n = 0; n < 5; n++) connection.dispatchEvent(new Event('change'))
+    vi.advanceTimersByTime(1_000)
+
+    expect(StubSocket.opened).toHaveLength(before + 1)
+    stop()
+  })
 })

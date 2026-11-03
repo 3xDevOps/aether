@@ -2421,7 +2421,10 @@ Both transports reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires
 `visibilitychange` (visible) or `online`. A phone freezes a background tab's
 timers, so without those two events a tab returning from the pocket would sit
-out the rest of a 30-second wait. A foreground return leaves a socket that is
+out the rest of a 30-second wait. The events stream also treats a watchdog tick
+more than 15 seconds late, a `pageshow`, and a settled `navigator.connection`
+`change` as those two events ([dashboard-frontend.md](dashboard-frontend.md)).
+A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.

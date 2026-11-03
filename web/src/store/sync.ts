@@ -3,6 +3,7 @@ import { api, ApiError, type Api, type ApiErrorData } from '@/lib/api'
 import { edgeHost, errorSentence } from '@/lib/format'
 import { watchPush } from '@/lib/push'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
+import { clearSnapshot, paintSnapshot, saveSnapshot } from '@/lib/snapshot-cache'
 import { redirectRoute } from '@/lib/url-state'
 import type {
   CoordMessageAckedPayload,
@@ -169,6 +170,8 @@ export async function hydrate(
 ): Promise<boolean> {
   if (signal?.aborted) return false
   const s = store.getState()
+  // A painted snapshot is not a first load: selection and onboarding still apply.
+  const first = !s.hydrated || s.staleSince !== null
   try {
     const memberRead = client.memberList()
     const [info, workspaces, members, keptMembers, runs, overlaps, capabilities] =
@@ -194,7 +197,7 @@ export async function hydrate(
     if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin
     const incomingIdentity = `${origin}\u0000${info.tailnet_hostname ?? ''}\u0000${info.member.id}`
-    if (!s.hydrated && capabilities?.local?.includes('workspace.selection')) {
+    if (first && capabilities?.local?.includes('workspace.selection')) {
       try {
         const saved = await client.localWorkspaceSelection()
         if (signal?.aborted) return false
@@ -212,6 +215,7 @@ export async function hydrate(
     const previousIdentity = store.getState().identityKey
     const identityChanged = Boolean(previousIdentity) && previousIdentity !== incomingIdentity
     if (identityChanged) {
+      clearSnapshot()
       // Reconnects retain drafts; a different authenticated owner must not.
       store.getState().resetFiles()
       store.getState().resetNotes()
@@ -249,18 +253,19 @@ export async function hydrate(
         const linkStatus = await client.localLinkStatus()
         if (signal?.aborted) return false
         s.setLinkStatus(linkStatus)
-        if (!s.hydrated && (linkStatus.linked === true || linkStatus.server_configured === true) && !store.getState().onboardingWorkspace) s.setOnboarded(true)
+        if (first && (linkStatus.linked === true || linkStatus.server_configured === true) && !store.getState().onboardingWorkspace) s.setOnboarded(true)
       } catch {
         ignore()
       }
     }
     if (signal?.aborted) return false
     s.setHydrated(true)
+    store.setState({ staleSince: null })
     const current = store.getState()
     const linked = current.route.params.runId
-    const unknownLink = !s.hydrated && current.route === s.route && !!linked && !current.runs[linked]
+    const unknownLink = first && current.route === s.route && !!linked && !current.runs[linked]
     if (
-      !s.hydrated &&
+      first &&
       (s.route.name === 'board' || unknownLink) &&
       current.route === s.route &&
       !current.onboarded &&
@@ -275,6 +280,7 @@ export async function hydrate(
     }
     else if (unknownLink) redirectRoute(store, { name: 'board', params: {} })
     s.setUnreachable(null)
+    saveSnapshot(store)
     return true
   } catch (err) {
     if (signal?.aborted) return false
@@ -833,6 +839,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       })
   })
 
+  paintSnapshot(store)
   const stopOutcomeSeen = watchOutcomeSeen(store, client)
   const stopPush = watchPush(store, client)
 
@@ -961,6 +968,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (probe && 'rejected' in probe) {
       // Every reconnect would carry the same rejected credential, so the
       // stream is never opened.
+      clearSnapshot()
       store.getState().setStreamDead()
       store.getState().setConnection('offline')
       store.getState().setHydrated(false, probe.rejected)

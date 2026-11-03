@@ -45,24 +45,61 @@ export function backoff(attempt: number): number {
  * socket half open and still reading as connected. */
 type WakeKind = 'visible' | 'online'
 
+/** A tick this much later than its period means the page was frozen. */
+const suspendGapMs = 15_000
+const watchdogMs = 5_000
+/** Network-change events arrive in bursts as an interface comes up. */
+const networkSettleMs = 1_000
+
 /**
  * Calls back when the tab comes to the foreground or the network returns.
  * A phone suspends a background tab: the socket dies and the pending retry
  * timer is frozen, so on return the client would sit out a backoff of up to
- * 30 seconds before trying anything. These two events are the evidence that
- * a reconnect can work now. Returns a disposer.
+ * 30 seconds before trying anything. These events are the evidence that
+ * a reconnect can work now. A change of connection type (wifi to cellular)
+ * counts as `online` once it settles. Returns a disposer.
  */
 export function onWake(wake: (kind: WakeKind) => void): () => void {
   const visible = () => {
     if (document.visibilityState === 'visible') wake('visible')
   }
   const online = () => wake('online')
+  let settle: ReturnType<typeof setTimeout> | null = null
+  const changed = () => {
+    if (settle) clearTimeout(settle)
+    settle = setTimeout(() => {
+      settle = null
+      wake('online')
+    }, networkSettleMs)
+  }
+  const connection = (navigator as Navigator & { connection?: EventTarget }).connection
   document.addEventListener('visibilitychange', visible)
   window.addEventListener('online', online)
+  window.addEventListener('pageshow', visible)
+  connection?.addEventListener('change', changed)
   return () => {
     document.removeEventListener('visibilitychange', visible)
     window.removeEventListener('online', online)
+    window.removeEventListener('pageshow', visible)
+    connection?.removeEventListener('change', changed)
+    if (settle) clearTimeout(settle)
   }
+}
+
+/**
+ * Calls back when a tick arrives far later than scheduled: the page was
+ * frozen, and a resume that fired no `visibilitychange` or `online` still
+ * left its sockets half open. Returns a disposer.
+ */
+function onFrozen(frozen: () => void): () => void {
+  let last = Date.now()
+  const watchdog = setInterval(() => {
+    const now = Date.now()
+    const gap = now - last
+    last = now
+    if (gap > suspendGapMs && document.visibilityState === 'visible') frozen()
+  }, watchdogMs)
+  return () => clearInterval(watchdog)
 }
 
 /** Opens the event stream and keeps it open. Returns a disposer. */
@@ -156,7 +193,7 @@ export function connectEvents(h: StreamHandlers): () => void {
     ws.close()
   }
 
-  const stopWake = onWake((kind) => {
+  const onWakeKind = (kind: WakeKind) => {
     if (closed) return
     // The frozen timer and the backoff it was counting are stale whatever we
     // do next: a tab that was away has no idea how long the failure lasted.
@@ -175,13 +212,16 @@ export function connectEvents(h: StreamHandlers): () => void {
     // cheaper mistake.
     drop()
     open()
-  })
+  }
+  const stopWake = onWake(onWakeKind)
+  const stopFrozen = onFrozen(() => onWakeKind('online'))
 
   open()
 
   return () => {
     closed = true
     stopWake()
+    stopFrozen()
     if (timer) clearTimeout(timer)
     drop()
   }

@@ -6,6 +6,7 @@ import type {
   UpdateBuildStatus,
   UpdateStatus,
 } from '@/lib/types'
+import { compareVersions } from '@/lib/version'
 import type { RootState } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 
@@ -323,4 +324,22 @@ export function serverTarget(s: RootState, now: number): UpdateTarget {
   // Only a release check that answered can say there is nothing newer.
   if (status && (status.latest_version || status.latest)) return { state: 'up_to_date', version: running, checkedAt: status.checked_at }
   return { state: 'unknown' }
+}
+
+/** The release core of a version, so a prerelease or source build of a release is not "newer" than it. */
+function core(version: string): string {
+  return /^v?[0-9]+\.[0-9]+\.[0-9]+/.exec(version)?.[0] ?? ''
+}
+
+/**
+ * The server runs an older release than this client. The server refuses
+ * only clients older than itself, so this is not a refusal: it is the
+ * reverse direction, where new client features have no server to serve them.
+ */
+export function serverTooOld(update: UpdateStatus | null): { client: string; server: string } | null {
+  if (!update?.server_version) return null
+  const client = core(update.cli.version)
+  const server = core(update.server_version)
+  if (!client || !server) return null
+  return (compareVersions(client, server) ?? 0) > 0 ? { client: update.cli.version, server: update.server_version } : null
 }

@@ -40,6 +40,17 @@ request ([What an edge stores](#what-an-edge-stores)).
   preferences in origin-local `aether.ui` storage: they are separate for each
   server origin, including its port. Nothing reads them but the dashboard,
   and they last until you uninstall the app. Both are private to the app.
+- **The last snapshot the dashboard loaded**, in `localStorage` under
+  `aether.snapshot.v1:<origin>`, so the next launch paints at once, marked
+  *Saved state from ...*, until the live state arrives. It holds the server
+  info (version, your member and the tailnet host name), the workspace list,
+  every session the server listed (including its task text, title, branch
+  and pending questions), the member list without git names and emails,
+  and the gateway's capability list. It holds no token, key, environment
+  variable, transcript, file or terminal output, and no disk usage. It is
+  replaced after every successful load, deleted when the dashboard sees a
+  different member or server, or a rejected link token, and skipped above
+  1 MB. It is not sent anywhere. In a browser, *Clear site data* deletes it.
 
 In Tailscale mode the app stores no account, password, token, cookie or key:
 there is no dashboard sign-in, and the phone's Tailscale login identifies it

@@ -9,7 +9,9 @@ import {
   readServerStatus,
   SERVER_UPDATE_TIMEOUT_MS,
   serverTarget,
+  serverTooOld,
 } from '@/store/updates'
+import type { UpdateStatus } from '@/lib/types'
 import { fakeApi, serverInfo, serverUpdateStatus, updateStatus } from '@/test/fixtures'
 
 function store() {
@@ -315,5 +317,18 @@ describe('readServerStatus', () => {
     await older
     expect(s.getState().serverUpdate?.phase).toBe('applied')
     expect(s.getState().serverChecking).toBe(false)
+  })
+})
+
+describe('serverTooOld', () => {
+  const status = (client: string, server: string) =>
+    ({ cli: { version: client }, server_version: server }) as UpdateStatus
+
+  it('names a client newer than its server and ignores prereleases of the same release', () => {
+    expect(serverTooOld(status('v0.9.0', 'v0.8.5'))).toEqual({ client: 'v0.9.0', server: 'v0.8.5' })
+    expect(serverTooOld(status('v0.8.5-3-gabcdef1', 'v0.8.5'))).toBeNull()
+    expect(serverTooOld(status('v0.8.5', 'v0.9.0'))).toBeNull()
+    expect(serverTooOld(status('dev', 'v0.8.5'))).toBeNull()
+    expect(serverTooOld(status('v0.9.0', ''))).toBeNull()
   })
 })

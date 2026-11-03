@@ -1149,6 +1149,27 @@ Removal also repairs the selection and open route before any refresh awaits.
   there is no token check: WhoIs identifies the source address on every
   request, while a tagged node is denied and an unavailable identity service
   reports its own `403` or `503` refusal.
+- **The last snapshot paints before the network answers.** After every
+  successful hydration `saveSnapshot` (`src/lib/snapshot-cache.ts`) writes the
+  workspaces, sessions, members, server info and capabilities to
+  `localStorage` (`aether.snapshot.v1:<origin>`; contents and deletion in
+  [privacy.md](privacy.md#what-the-app-stores-on-the-phone)). `connect`
+  calls `paintSnapshot` first: it fills the store, sets `hydrated` and
+  `staleSince` (the save time), and seeds `identityKey` so hydration treats a
+  different member or server as an identity change and drops the cache.
+  `hydrate` still counts a painted store as a first load (workspace
+  selection, onboarding redirect) and clears `staleSince` when it succeeds.
+  While `staleSince` is set, or a refresh failed, `StaleBanner` shows one
+  line under the top bar: *Saved state from 3 minutes ago*, then the
+  hydration error verbatim (or *reconnecting*), and **Retry**, which fires
+  the `online` wake below. A rejected link token clears the cache and shows
+  the expired-link page as before.
+- **Resuming from the pocket also reconnects without an event.**
+  `connectEvents` runs a 5 s watchdog; a tick more than 15 s late while the
+  tab is visible means the page was frozen, and it replaces the socket like
+  `online`. `pageshow` (back/forward cache) counts as a foreground return, and
+  a `navigator.connection` `change` counts as `online` after it has been
+  quiet for 1 s, so a burst of interface events reconnects once.
 - **The sockets reopen on a foreground or network return.** Both
   `connectEvents` and `connectAttach` subscribe to `visibilitychange`
   (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
@@ -6793,6 +6814,15 @@ that runs a newer release than a client refuses that client
   is refused everything except `server.info` and `server.update_status`.
   The hydration retry and the event stream stop for good, since every
   retry would be refused the same way.
+
+  The reverse direction is `ServerTooOldGate`: when `update.check` reports a
+  server release older than this client's (release cores compared, so a
+  source build of the same release does not count), `App` shows *This server
+  is older than this app*, the versions and `aether server update`. The server
+  refuses nothing in this direction, so **Continue anyway** dismisses it for
+  that pair of versions until reload. It is only reachable where
+  `update.check` is: the local gateway, which includes the Android app. The
+  server gateway serves a dashboard built into the server itself.
 
   The gate cannot be dismissed. It is a region labelled by its heading,
   which takes focus when the gate appears. It shows the server's own
