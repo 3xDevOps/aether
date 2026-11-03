@@ -797,14 +797,16 @@ work resumes, Close or another status change. `finish_unopened` is `true`
 from the finish until a member opens or closes the session, `false` after work
 resumes.
 
-`run.review` accepts `{"run_id":"...","action":"complete"}` or
-`"action":"later"` and returns a `RunResult`. It needs the kill permission,
+`run.review` accepts `{"run_id":"...","action":"complete"}`,
+`"action":"later"` or `"action":"not-yet"` and returns a `RunResult`. It needs the kill permission,
 as `run.close` does. `complete` closes a live session as `run.close` does but
 records `completed`, or only records the acceptance on a `completed` session,
 and sets `review` to `accepted`; it is idempotent once accepted, and refused
 with `-32002` for other terminal statuses. `later` without a `ready` or `later`
-review is `-32002` too. `later` sets
-`review` to `later` and leaves the session where it is.
+review is `-32002` too, and so is `not-yet`, which a live session also
+needs. `later` sets `review` to `later` and leaves the session where it is;
+`not-yet` clears `review`, so the session awaits no review until its agent
+reports success again.
 Each change publishes `run.review` with
 `{"review":"...","review_changed_at":"...","status_seq":N}`; apply it only
 when `status_seq` is above the one you hold.

@@ -1820,7 +1820,8 @@ a `run.review` event under the same `status_seq` rule.
 ([failure-handling.md](failure-handling.md#review)). `run.review` with
 `action` `complete` closes a live session as `completed` (or records it on a
 `completed` run) and sets `review` to `accepted`; `later` sets it to `later`
-and leaves the session where it is. Both return `{"run": Run}` and need the same
+and leaves the session where it is; `not-yet` clears it on a live session. All
+return `{"run": Run}` and need the same
 permission as `run.close`.
 
 The Needs you group, its counts and badges follow the session-state attention
@@ -1963,16 +1964,23 @@ change it, so the session stays in Needs you. While the open session is `ready`,
 callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
 finished. Mark it complete?", the summary of the session's latest success
-report when its agent messages are loaded, **Mark complete** and **Not
-yet**. Both are run commands
-(`src/lib/commands.ts`) that follow [Actions](#actions): **Mark complete**
-sends `run.review {action: "complete"}` and predicts `review` `accepted`
-and, for a live session, status `completed`; **Not yet** sends `action:
-"later"` and predicts `later`. A refusal puts the callout back and toasts the
-server's error. After Not yet the callout stays hidden until a new success
-report sets `ready` again, and **Mark complete** stays in the session's actions
-menu and the palette for any session that reads Ready for review. Both need the
-gateway's `run.review` method and the kill permission.
+report when its agent messages are loaded, **Mark complete**, **Not yet** and
+**Review later**. No button takes focus on its own. Each is a run command
+(`src/lib/commands.ts`) that follows [Actions](#actions): **Mark complete**
+(`complete`) sends `run.review {action: "complete"}` and predicts `review`
+`accepted` and, for a live session, status `completed`; **Not yet**
+(`not-yet`) sends `action: "not-yet"`, predicts `""` and focuses the composer,
+whose placeholder then reads "Say what is left to do"; **Review later**
+(`review-later`) sends `action: "later"` and predicts `later`. A refusal puts
+the callout back and toasts the server's error. While `review` is `later` the
+callout folds to one line, "Finished: review later", whose **Review now**
+unfolds it. After Not yet the session reads Answered, "Not finished yet: you
+chose Not yet" (`notFinishedYet` in `src/lib/status.ts`), and the callout
+stays hidden until a new success report sets `ready` again. The session's
+actions menu and the palette offer the same commands, except that a session
+whose `finish_unopened` is set offers **Review the result**, which opens its
+Chat view, in place of **Mark complete**. All need the gateway's `run.review`
+method and the kill permission.
 An interactive session still accepts messages and terminal input; the reason
 line says it remains open for follow-up. Its next working turn returns it
 to Working. Archive eligibility and input gates use the wire status, not

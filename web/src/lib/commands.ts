@@ -30,6 +30,7 @@ import {
   Square,
   Sun,
   Trash2,
+  Undo2,
   UserPlus,
 } from '@/components/icons'
 import { api, ApiError, codeInvalidState, codeNotFound, type Api } from '@/lib/api'
@@ -365,34 +366,57 @@ export function runCommands(ctx: RunCommandContext): Command[] {
 
   if (cap.hasMethod('run.review') && mayKill && completable(run)) {
     const live = !finished
-    list.push({
-      id: 'complete',
-      label: 'Mark complete',
-      Icon: Check,
-      value: 'done accept',
-      done: 'Marked complete',
-      predict: () => ({
-        runID: id,
-        record: live
-          ? {
-              review: 'accepted',
-              status: 'completed',
-              state: '',
-              stateChangedAt: new Date().toISOString(),
-              stateChangedAtEstimated: true,
-              stateChangedAtPredicted: true,
-            }
-          : { review: 'accepted' },
-      }),
-      slow: live,
-      perform: (d) => d.api.runReview(id, 'complete'),
-    })
-    if (run.review === 'ready') {
+    // Mark complete is a close, so it waits until a member has opened what the agent left.
+    if (run.finish_unopened) {
+      list.push({
+        id: 'review',
+        label: 'Review the result',
+        Icon: Eye,
+        value: 'finished open complete',
+        perform: (d) => d.navigate('run', { runId: id, view: 'session' }),
+      })
+    } else {
+      list.push({
+        id: 'complete',
+        label: 'Mark complete',
+        Icon: Check,
+        value: 'done accept',
+        done: 'Marked complete',
+        predict: () => ({
+          runID: id,
+          record: live
+            ? {
+                review: 'accepted',
+                status: 'completed',
+                state: '',
+                stateChangedAt: new Date().toISOString(),
+                stateChangedAtEstimated: true,
+                stateChangedAtPredicted: true,
+              }
+            : { review: 'accepted' },
+        }),
+        slow: live,
+        perform: (d) => d.api.runReview(id, 'complete'),
+      })
+    }
+    if (live && awaitsCompletion(run)) {
       list.push({
         id: 'not-yet',
-        label: 'Not yet: keep the session open',
+        label: 'Not yet: the work is not finished',
+        Icon: Undo2,
+        value: 'continue unfinished',
+        done: 'Marked not finished',
+        predict: () => ({ runID: id, record: { review: '' } }),
+        perform: (d) => d.api.runReview(id, 'not-yet'),
+      })
+    }
+    if (run.review === 'ready') {
+      list.push({
+        id: 'review-later',
+        label: 'Review later',
         Icon: Hourglass,
-        done: 'Kept open',
+        value: 'snooze defer',
+        done: 'Review put off',
         predict: () => ({ runID: id, record: { review: 'later' } }),
         perform: (d) => d.api.runReview(id, 'later'),
       })
@@ -594,7 +618,7 @@ export function closeCommand(runID: string, outcome: 'merged' | 'abandoned'): Co
 
 /** A run whose agent reported success and that its owner has not marked complete. */
 function completable(run: RunRecord): boolean {
-  return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review !== 'accepted')
+  return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review === undefined)
 }
 
 /** Older agent-report finishes can still have a retained interactive runtime. */

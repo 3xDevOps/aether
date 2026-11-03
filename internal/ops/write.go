@@ -110,8 +110,8 @@ var writeOps = []Op{
 		"Use this when the user wants a paused session to continue.", pauseRun(protocol.MethodRunResume, "Resumed")).hints(false, true).
 		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunResume, protocol.MethodRunGet),
 	opOf("aether_mark_reviewed", "Mark session reviewed", ScopeWrite, true, nextRuns,
-		"Use this when the user has checked a session's reported success: complete accepts it and closes the session, later puts it off.", markReviewed).
-		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater).hints(true, false).
+		"Use this when the user has checked a session's reported success: complete accepts it and closes the session, later puts it off, not-yet says the work is not finished.", markReviewed).
+		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater, protocol.RunReviewNotYet).hints(true, false).
 		calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodRunReview),
 }
 

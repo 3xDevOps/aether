@@ -321,7 +321,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           </div>
           {docked && <BrowserDock available={frame.width}>{browserView}</BrowserDock>}
         </div>
-        {view !== 'session' && <CompletionPrompt run={run} className="border-t border-seam p-2" />}
+        {view !== 'session' && <CompletionPrompt run={run} focusComposer={nav.focusComposer} className="border-t border-seam p-2" />}
       </div>
       {agentInline && agentID && (
         <aside aria-label="Subagent" className="flex w-[28rem] shrink-0 flex-col border-l border-seam bg-canvas">

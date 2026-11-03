@@ -12,7 +12,9 @@ import (
 // Review records what actor did with a run's outcome. complete accepts it:
 // a live run closes as completed the way CloseRun closes one, and a
 // completed run only records the acceptance. later puts a reported success
-// off and leaves the run where it is; a new success report asks again.
+// off and leaves the run where it is; not-yet withdraws it from a live run,
+// which then awaits no review. After either, a new success report asks
+// again.
 // reportedOnly completes a live run only when its reported success awaits
 // review, judged here and again by closeRun under the run's lifecycle lock,
 // which Relaunch also holds, so a run completed and reopened in between is
@@ -29,9 +31,15 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 			return nil, fmt.Errorf("%w: session %s has no reported success to review later", ErrInvalidTransition, run)
 		}
 		return s.setReview(ctx, run, actor, domain.ReviewLater, domain.ReviewReady)
+	case protocol.RunReviewNotYet:
+		if r.Review != domain.ReviewReady && r.Review != domain.ReviewLater {
+			return nil, fmt.Errorf("%w: session %s has no reported success to mark not finished", ErrInvalidTransition, run)
+		}
+		return s.setReview(ctx, run, actor, "", domain.ReviewReady, domain.ReviewLater)
 	case protocol.RunReviewComplete:
 	default:
-		return nil, fmt.Errorf("%w: review action must be %q or %q, got %q", ErrInvalidTransition, protocol.RunReviewComplete, protocol.RunReviewLater, action)
+		return nil, fmt.Errorf("%w: review action must be %q, %q or %q, got %q", ErrInvalidTransition,
+			protocol.RunReviewComplete, protocol.RunReviewLater, protocol.RunReviewNotYet, action)
 	}
 	switch {
 	case r.Review == domain.ReviewAccepted:
@@ -56,16 +64,21 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 // setReview moves the run's review and announces it. s.mu orders the write
 // and its event against the run.status events that also carry the review,
 // and against a Relaunch that reopens the run between its close and here.
+// Only a completed run is accepted and only a live one is not finished yet:
+// a completed run that dropped its review would read as an ordinary close.
 func (s *Scheduler) setReview(ctx context.Context, run domain.RunID, actor domain.MemberID, review domain.RunReview, from ...domain.RunReview) (*domain.Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if review == domain.ReviewAccepted {
+	if review == domain.ReviewAccepted || review == "" {
 		current, err := s.cfg.Store.GetRun(ctx, run)
 		if err != nil {
 			return nil, err
 		}
-		if current.Status != domain.RunCompleted {
+		if review == domain.ReviewAccepted && current.Status != domain.RunCompleted {
 			return nil, fmt.Errorf("%w: session %s is %s, not completed", ErrInvalidTransition, run, current.Status)
+		}
+		if review == "" && !current.Status.Live() {
+			return nil, fmt.Errorf("%w: session %s is %s; relaunch it to keep working", ErrInvalidTransition, run, current.Status)
 		}
 	}
 	stamp, changed, err := s.cfg.Store.SetRunReview(ctx, run, review, from...)

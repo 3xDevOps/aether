@@ -262,7 +262,7 @@ The connector has these tools and no others:
 | `aether_watches` | Your [watches](watches.md), each with its state, conditions and last notice; with `watch_id`, one watch with its 10 newest notices and where each was delivered | `read` |
 | `aether_launch_session` | Start a session, from a task or a saved [template](teams.md#task-templates-and-schedules), on any account you may use, with a fallback policy and extra repositories | `write` |
 | `aether_message_session`, `aether_answer` | Message a session; answer an agent's or a teammate's question | `write` |
-| `aether_pause_session`, `aether_resume_session`, `aether_mark_reviewed` | Pause or resume a session; accept a reported success, which closes the session, or put it off | `write` |
+| `aether_pause_session`, `aether_resume_session`, `aether_mark_reviewed` | Pause or resume a session; accept a reported success, which closes the session, put it off, or say the work is not finished | `write` |
 | `aether_session_lifecycle` | Relaunch a stopped session, protect or unprotect it, archive or restore it | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
 | `aether_watch`, `aether_unwatch` | Watch a session (`run_id`) or pull request (`pr`: `owner/name#7` or its GitHub URL) for `conditions`, or with `watch_id` change its conditions or `expires_at`, or pause or resume it; delete a watch and its notices | `write` |

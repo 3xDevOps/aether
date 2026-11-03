@@ -8,25 +8,45 @@ import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { TimelinePayload } from '@/store/sessions'
 
-/** Asks the owner to accept a reported success; Not yet hides it until the agent reports success again. */
-export function CompletionPrompt({ run, className }: { run: RunRecord; className?: string }) {
+/** Asks the owner to accept a reported success; Review later folds it to one line, Not yet withdraws it until the agent reports success again. */
+export function CompletionPrompt({ run, focusComposer, className }: { run: RunRecord; focusComposer: () => void; className?: string }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
   const predicting = useStore((s) => Boolean(s.predicting[run.id]))
   const members = useStore((s) => s.members)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
-  if (run.review !== 'ready' || run.member_id !== self.id) return null
-  const commands = runCommands({ run, paused, cap, members, self, steerOthers, predicting })
+  if ((run.review !== 'ready' && run.review !== 'later') || run.member_id !== self.id) return null
+  // The prompt shows with the session, so what the agent left is open.
+  const commands = runCommands({ run: { ...run, finish_unopened: false }, paused, cap, members, self, steerOthers, predicting })
   const complete = commands.find((command) => command.id === 'complete')
-  const later = commands.find((command) => command.id === 'not-yet')
-  if (!complete || !later) return null
-  return <Ask run={run} complete={complete} later={later} className={className} />
+  const notYet = commands.find((command) => command.id === 'not-yet')
+  if (!complete || !notYet) return null
+  const later = commands.find((command) => command.id === 'review-later')
+  return <Ask run={run} complete={complete} notYet={notYet} later={later} focusComposer={focusComposer} className={className} />
 }
 
-function Ask({ run, complete, later, className }: { run: RunRecord; complete: Command; later: Command; className?: string }) {
+function Ask({ run, complete, notYet, later, focusComposer, className }: {
+  run: RunRecord
+  complete: Command
+  notYet: Command
+  later?: Command
+  focusComposer: () => void
+  className?: string
+}) {
   const perform = useCommandRunner()
   const summary = useReportedSummary(run)
+  const [reviewing, setReviewing] = useState(false)
+  if (run.review === 'later' && !reviewing) {
+    return (
+      <div className={className}>
+        <div role="region" aria-label="Completion" className="flex items-center gap-2 text-ui-sm text-muted">
+          <span>Finished: review later</span>
+          <Button size="sm" variant="link" onClick={() => setReviewing(true)}>Review now</Button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={className}>
       <Callout
@@ -37,7 +57,17 @@ function Ask({ run, complete, later, className }: { run: RunRecord; complete: Co
         actions={
           <>
             <Button size="sm" onClick={() => void perform(complete)}>Mark complete</Button>
-            <Button size="sm" variant="ghost" onClick={() => void perform(later)}>Not yet</Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void perform(notYet)
+                focusComposer()
+              }}
+            >
+              Not yet
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
           </>
         }
       >

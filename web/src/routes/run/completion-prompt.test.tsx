@@ -28,14 +28,17 @@ function seed(over: Partial<Run> = {}) {
   })
 }
 
+const focusComposer = vi.fn()
+
 function Prompt() {
   const record = useStore((s) => s.runs.run_1)
-  return record ? <CompletionPrompt run={record} /> : null
+  return record ? <CompletionPrompt run={record} focusComposer={focusComposer} /> : null
 }
 
 const banner = () => screen.queryByRole('region', { name: 'Completion' })
 
 beforeEach(() => {
+  focusComposer.mockClear()
   vi.mocked(api.runReview).mockClear()
   vi.mocked(toast.error).mockClear()
 })
@@ -54,16 +57,13 @@ describe('CompletionPrompt', () => {
     render(<Prompt />)
     await waitFor(() => expect(banner()?.textContent).toContain('checkout rewritten and tested'))
     expect(banner()?.textContent).toContain('Your agent reports this task is finished. Mark it complete?')
-    expect(screen.getByRole('button', { name: 'Mark complete' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Not yet' })).toBeDefined()
+    for (const name of ['Mark complete', 'Not yet', 'Review later']) expect(screen.getByRole('button', { name })).toBeDefined()
+    expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'Mark complete' }))
   })
 
-  it('stays away after Not yet, for a run that is not ready or not the viewer’s own, and while a verb is pending', () => {
-    seed({ review: 'later' })
-    const { rerender } = render(<Prompt />)
-    expect(banner()).toBeNull()
+  it('stays away with no review to answer, for a run not the viewer’s own, and while a verb is pending', () => {
     seed({ review: '' })
-    rerender(<Prompt />)
+    const { rerender } = render(<Prompt />)
     expect(banner()).toBeNull()
     seed({ member_id: bob.id })
     rerender(<Prompt />)
@@ -74,13 +74,29 @@ describe('CompletionPrompt', () => {
     expect(banner()).toBeNull()
   })
 
-  it('hides at once on Not yet and records it', async () => {
+  it('withdraws the review on Not yet and focuses the composer', async () => {
     seed()
     render(<Prompt />)
     fireEvent.click(screen.getByRole('button', { name: 'Not yet' }))
     expect(banner()).toBeNull()
+    expect(useStore.getState().runs.run_1.review).toBe('')
+    expect(focusComposer).toHaveBeenCalledOnce()
+    await waitFor(() => expect(api.runReview).toHaveBeenCalledWith('run_1', 'not-yet'))
+  })
+
+  it('folds to one line on Review later, and Review now asks again', async () => {
+    seed()
+    render(<Prompt />)
+    fireEvent.click(screen.getByRole('button', { name: 'Review later' }))
     expect(useStore.getState().runs.run_1.review).toBe('later')
     await waitFor(() => expect(api.runReview).toHaveBeenCalledWith('run_1', 'later'))
+    expect(banner()?.textContent).toBe('Finished: review laterReview now')
+    expect(screen.queryByRole('button', { name: 'Mark complete' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Review now' }))
+    expect(banner()?.textContent).toContain('Mark it complete?')
+    fireEvent.click(screen.getByRole('button', { name: 'Review later' }))
+    expect(banner()?.textContent).toBe('Finished: review laterReview now')
+    expect(api.runReview).toHaveBeenCalledOnce()
   })
 
   it('completes the run at once on Mark complete', async () => {

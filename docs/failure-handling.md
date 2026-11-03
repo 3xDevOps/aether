@@ -135,7 +135,12 @@ reports this task is finished. Mark it complete?**
 
 - **Mark complete** closes a live session as `completed`: it commits, publishes
   the branch and keeps the container like **Close**.
-- **Not yet** keeps the session open and takes it out of **Needs you**.
+- **Not yet** says the work is not finished: the session leaves review and
+  reads **Answered**, "Not finished yet: you chose Not yet", and the composer
+  takes focus so you can say what is left.
+- **Review later** keeps the session open and in review without a new
+  notification; the prompt folds to one line, **Finished: review later**, with
+  **Review now** to open it again.
 
 Any new turn clears the review, and a later success report asks again.
 
@@ -157,7 +162,7 @@ waiting on agents, CI or a process and a reported success.
 | `failed`, result not yet seen by the owner | Yes, while the session is live | Once: `Failed, review the result`. |
 | `failed`, result seen | No | No. |
 | Review ready, live or `completed` | Yes | Once per success: `Agent reported success, review the result`, at normal urgency. |
-| Review marked **Not yet** or complete | No | No. |
+| Review marked **Review later**, **Not yet** or complete | No | No. |
 | A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |
 | Any state while the session is paused | No | Checked again on resume. |

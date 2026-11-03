@@ -579,9 +579,11 @@ type RunArchiveParams struct {
 const (
 	RunReviewComplete = "complete"
 	RunReviewLater    = "later"
+	RunReviewNotYet   = "not-yet"
 )
 
-// RunReviewParams.Action is RunReviewComplete or RunReviewLater.
+// RunReviewParams.Action is RunReviewComplete, RunReviewLater or
+// RunReviewNotYet.
 type RunReviewParams struct {
 	RunID  string `json:"run_id"`
 	Action string `json:"action"`

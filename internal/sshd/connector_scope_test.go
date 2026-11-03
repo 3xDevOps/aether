@@ -91,6 +91,7 @@ func TestConnectorScopesGateEachMethod(t *testing.T) {
 		{"write scope cannot complete a live session", connector(write), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewComplete),
 			"run.review complete of a session with no reported success awaiting review needs the control scope"},
 		{"write scope puts a review off", connector(write), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewLater), ""},
+		{"write scope says a success is not finished", connector(write), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewNotYet), ""},
 		{"write scope completes a reported success", connector(write), protocol.MethodRunReview, review(ready.ID, protocol.RunReviewComplete), ""},
 		{"control scope completes a live session", connector(all), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewComplete), ""},
 		{"read scope reads a room", connector(read), protocol.MethodRunRoomList,
