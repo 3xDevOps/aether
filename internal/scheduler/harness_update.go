@@ -92,7 +92,11 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 	// replacing the file by rename strands their pins on the old one, and
 	// a write the pin refuses keeps the new token only in that process.
 	// The update needs no sign-in, so it sees none.
-	noLogin, err := s.updaterNoLogin()
+	noLogin := filepath.Join(s.cfg.StateDir, "updater-no-login")
+	f, err := os.OpenFile(noLogin, os.O_CREATE|os.O_RDONLY, 0o644)
+	if err == nil {
+		err = f.Close()
+	}
 	if err != nil {
 		s.mu.Lock()
 		state.running = nil
@@ -198,16 +202,6 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 			_ = s.cfg.Homes.SetCacheRuntimeCleanupError(member, "terminal", "Updater cleanup pending; cache protected")
 		}
 	}
-}
-
-// updaterNoLogin is the empty file mounted over the updater's logins.
-func (s *Scheduler) updaterNoLogin() (string, error) {
-	path := filepath.Join(s.cfg.StateDir, "updater-no-login")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o644)
-	if err != nil {
-		return "", err
-	}
-	return path, f.Close()
 }
 
 // updateInContainer runs script in a throwaway container with the run's

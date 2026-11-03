@@ -93,6 +93,14 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 	if !current {
 		return
 	}
+	if sess.State().TurnInFlight {
+		// A newer turn started after the refusal, so the agent is not
+		// stopped under it; a refusal of that turn may restart it.
+		d.s.mu.Lock()
+		entry.authLostAt = time.Time{}
+		d.s.mu.Unlock()
+		return
+	}
 	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again; send the refused message again."); err != nil {
 		slog.Warn("scheduler: record the sign-in notice", "run", entry.runID, "error", err)
 	}
