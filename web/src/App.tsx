@@ -118,7 +118,7 @@ export function App() {
       <LaunchSplash />
       <UpdateChecks />
       <div className="flex min-w-0 h-full flex-col">
-        {(blocked || gated) && desktopBridge() && <TopBar navigation={false} />}
+        {(blocked || gated || (tooOld.client !== '' && continued !== `${tooOld.client}/${tooOld.server}`)) && desktopBridge() && <TopBar navigation={false} />}
         <div className="min-h-0 min-w-0 flex-1">
           {gated ? (
             <>

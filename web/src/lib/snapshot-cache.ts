@@ -40,7 +40,9 @@ export function clearSnapshot(): void {
 export function saveSnapshot(store: RootStore): void {
   const s = store.getState()
   if (!s.info || !s.identityKey || !s.hydrated) return
-  const { disk: _disk, diskError: _diskError, ...info } = s.info
+  const { disk: _disk, diskError: _diskError, ...rest } = s.info
+  const { git_name: _n, git_email: _e, ...member } = rest.member
+  const info = { ...rest, member }
   const members: MemberList = {
     members: Object.values(s.members).map(({ git_name: _name, git_email: _email, ...member }) => member),
     merged_into: s.mergedInto,
@@ -77,6 +79,7 @@ export function paintSnapshot(store: RootStore): void {
   s.setCapabilities(saved.capabilities)
   s.setWorkspaces(saved.workspaces)
   s.setMemberList(saved.members)
-  s.setRuns(saved.runs)
+  // Display only: a live snapshot must replace these whatever their order.
+  s.setRuns(saved.runs.map((run) => ({ ...run, status_seq: 0 })))
   store.setState({ hydrated: true, staleSince: saved.savedAt })
 }

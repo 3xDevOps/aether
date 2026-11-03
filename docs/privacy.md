@@ -50,7 +50,9 @@ request ([What an edge stores](#what-an-edge-stores)).
   variable, transcript, file or terminal output, and no disk usage. It is
   replaced after every successful load, deleted when the dashboard sees a
   different member or server, or a rejected link token, and skipped above
-  1 MB. It is not sent anywhere. In a browser, *Clear site data* deletes it.
+  1 MB. It is keyed by origin, so two members who share one browser profile
+  and one dashboard address see each other's saved state until the first live
+  load replaces it; sign in with separate browser profiles. It is not sent anywhere. In a browser, *Clear site data* deletes it.
 
 In Tailscale mode the app stores no account, password, token, cookie or key:
 there is no dashboard sign-in, and the phone's Tailscale login identifies it

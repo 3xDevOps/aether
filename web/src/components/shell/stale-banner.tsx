@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { useClock } from '@/lib/clock'
 import { timeAgo } from '@/lib/format'
 import { useStore } from '@/store'
 
@@ -11,8 +12,9 @@ export function StaleBanner() {
   const staleSince = useStore((s) => s.staleSince)
   const error = useStore((s) => s.hydrationError)
   const connection = useStore((s) => s.connection)
+  const now = useClock()
   if (staleSince === null && error === null) return null
-  const saved = staleSince === null ? '' : `Saved state from ${timeAgo(new Date(staleSince).toISOString())}`
+  const saved = staleSince === null ? '' : `Saved state from ${timeAgo(new Date(staleSince).toISOString(), Math.max(now, staleSince))}`
   const state = error ?? (connection === 'live' ? 'refreshing' : 'reconnecting')
   return (
     <div
