@@ -150,7 +150,7 @@ aarch64 | arm64) arch="arm64" ;;
 esac
 
 if [ -z "$COMPONENTS" ]; then
-	# The server is Linux-only (v1 cut-line); elsewhere install the client.
+	# The server is Linux-only; elsewhere install the client.
 	if [ "$os" = "linux" ]; then COMPONENTS="both"; else COMPONENTS="client"; fi
 fi
 if [ "$COMPONENTS" != "client" ] && [ "$os" != "linux" ]; then
