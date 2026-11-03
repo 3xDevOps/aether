@@ -821,6 +821,14 @@ func (s *Server) summarizeRelay(ctx context.Context, req protocol.Request, c *pr
 	} else {
 		p, _ := protocol.DecodeParams[protocol.WatchUpdateParams](req.Params)
 		watched = "watch " + p.WatchID
+		// The approved call applies the sessions the card names, whatever
+		// another client sets while it waits.
+		p.RelayTo = &relay
+		params, err := json.Marshal(p)
+		if err != nil {
+			return &protocol.Error{Code: protocol.CodeInternal, Message: req.Method + ": " + err.Error()}
+		}
+		c.Params = params
 	}
 	parts := make([]string, 0, len(relay))
 	for _, id := range relay {

@@ -156,6 +156,9 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	if run.Status.Terminal() {
 		return s.ended(ctx, w, r, settle)
 	}
+	if r.Attempts >= maxPushAttempts {
+		return settle(protocol.WatchStatusFailed, fmt.Sprintf("Not delivered after %d attempts; the last was cut short", maxPushAttempts), nil)
+	}
 	// Claimed before the write, so a second server pass waits out the
 	// lease; the inbox key keeps a retry after a crash from writing twice.
 	if err = s.store.ClaimWatchRelay(ctx, r, "Writing to the session's inbox", now, now.Add(backoff(r.Attempts+1))); err != nil {
