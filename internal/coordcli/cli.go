@@ -269,6 +269,9 @@ func writeHelp(out io.Writer, command string) (int, error) {
 	if !ok {
 		text, ok = developmentHelp(command)
 	}
+	if fields := strings.Fields(command); !ok && len(fields) > 0 && fields[0] == "subsession" {
+		text, ok = childUsage, true
+	}
 	if command == "" {
 		text, ok = topUsage, true
 	}
