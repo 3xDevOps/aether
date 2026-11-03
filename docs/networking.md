@@ -342,8 +342,8 @@ It needs:
 - A browser with Web Push: Chrome, Edge and Firefox on a computer or Android,
   Safari on a Mac. On an iPhone or iPad it works only in the dashboard added to
   the home screen, on iOS 16.4 or later. The
-  [Android app](install.md#android-app) cannot receive notifications: install
-  the dashboard from Chrome instead.
+  [Android app](install.md#android-app) needs a UnifiedPush distributor
+  ([below](#in-the-android-app)).
 - Outbound HTTPS from the server on port 443 to the browser vendors' push
   services: `fcm.googleapis.com` (Chrome), `updates.push.services.mozilla.com`
   (Firefox), `web.push.apple.com` (Safari) and `*.notify.windows.com` (Edge).
@@ -355,6 +355,51 @@ The server signs messages with a key it creates on first start,
 on again on each device. A refused message is logged as `push: notification not
 delivered` with the service's answer. What the push service receives is in
 [privacy.md](privacy.md#push-notifications).
+
+### In the Android app
+
+The app's WebView has no Web Push, so the app subscribes itself through
+[UnifiedPush](https://unifiedpush.org): a distributor app on the phone, such
+as [ntfy](https://ntfy.sh) from Google Play or F-Droid, holds one connection
+to its push server for every app that uses it. The switch is the same
+**Settings → Notify this device when a session needs me**, in either
+connection mode, `aether gui`'s Edge gateway included.
+
+Turning it on asks Android for permission to notify, then asks the
+distributor for an address and Web Push keys, picking the default
+distributor or showing Android's picker when there are several. The app hands
+the address and keys to `push.subscribe` itself, as the dashboard would. The
+server encrypts and signs exactly as it does for Chrome; the connector library
+in the app decrypts, and the app drops any message not encrypted to its keys.
+
+With no distributor installed the switch row says `The app gets notifications
+through a UnifiedPush distributor, and this phone has none.` Install ntfy and
+turn the switch on, or open the dashboard in Chrome and install it there.
+A distributor that refuses shows its reason, such as `The push distributor
+refused to register Aether: ACTION_REQUIRED` (sign in to it, then try again).
+
+An assistant card's notification follows the dashboard's rules: **Approve**
+opens the card, **Decline** declines it without opening the app, and a
+private card or one over 240 characters has no buttons. **Decline** needs
+**Tailscale** mode: it calls `assistant.confirm` on the server's dashboard,
+identified by the phone's tailnet login like any dashboard request. In
+**Aether Edge** mode the identity is the CLI the app runs only while it is
+open, so there a card's notification only opens it. The outcome, or the
+server's own refusal (`Not decided: <error>`), replaces the notification.
+When a session stops needing you, its notification goes away.
+
+Limits:
+
+- The server posts only to public addresses. A self-hosted ntfy reachable
+  only on the tailnet or LAN fails with `refusing to connect to <ip>: not a
+  public address` in the server's `push: notification not delivered` log
+  line. Use ntfy.sh or an ntfy server with a public address.
+- In **Aether Edge** mode the server learns a new address from the
+  distributor only while the app is open; until then notifications go to the
+  old one, which the server drops once the push service reports it gone.
+- ntfy keeps a connection open, which its authors measure at about 0-1% of
+  battery over 17 hours. ntfy from Google Play delivers ntfy.sh messages
+  through Firebase unless instant delivery is on.
 
 ### When it does not start
 

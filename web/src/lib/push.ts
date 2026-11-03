@@ -3,6 +3,7 @@
 // internal/push; the worker that shows them is public/sw.js.
 
 import { desktopBridge } from '@/components/shell/window-bar'
+import { androidPush, androidShell, type AndroidPushState } from '@/lib/android-push'
 import { ApiError, type Api } from '@/lib/api'
 import { pushedEntry, routeFromQuery } from '@/lib/url-state'
 import { runRoute } from '@/routes/run/views'
@@ -11,7 +12,7 @@ import { capability } from '@/store/hooks'
 
 export type PushState =
   | { kind: 'on' | 'off' | 'blocked' }
-  | { kind: 'unsupported'; why: 'desktop' | 'gateway' | 'home-screen' | 'browser' }
+  | { kind: 'unsupported'; why: 'desktop' | 'gateway' | 'home-screen' | 'browser' | 'distributor' }
 
 const worker = '/sw.js'
 
@@ -38,7 +39,18 @@ async function subscription(): Promise<PushSubscription | null> {
  * the server's own has an address a notification can open later: `aether
  * gui` is a loopback port behind a per-process token.
  */
+function fromAndroid(state: AndroidPushState): PushState {
+  if (state.kind === 'no-distributor') return { kind: 'unsupported', why: 'distributor' }
+  if (state.kind === 'on' || state.kind === 'blocked') return { kind: state.kind }
+  return { kind: 'off' }
+}
+
+/**
+ * The Android app opens a notification itself, so there `aether gui`'s
+ * loopback dashboard is no obstacle.
+ */
 export async function readPush(client: Api, gateway: string | undefined): Promise<PushState> {
+  if (androidShell()) return fromAndroid(await androidPush('state'))
   if (desktopBridge()) return { kind: 'unsupported', why: 'desktop' }
   if (gateway !== 'server') return { kind: 'unsupported', why: 'gateway' }
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
@@ -63,6 +75,11 @@ function sameKey(held: ArrayBuffer | null, key: Uint8Array): boolean {
 }
 
 export async function enablePush(client: Api): Promise<PushState> {
+  if (androidShell()) {
+    const state = await androidPush('enable')
+    if (state.kind === 'off' && state.error) throw new Error(state.error)
+    return fromAndroid(state)
+  }
   // Safari grants the prompt only straight from the tap, before any other await.
   const permission = await Notification.requestPermission()
   if (permission === 'denied') return { kind: 'blocked' }
@@ -83,6 +100,7 @@ export async function enablePush(client: Api): Promise<PushState> {
 }
 
 export async function disablePush(client: Api): Promise<PushState> {
+  if (androidShell()) return fromAndroid(await androidPush('disable'))
   const current = await subscription()
   if (current) {
     await client.pushUnsubscribe(current.endpoint).catch((err: unknown) => {
@@ -95,9 +113,9 @@ export async function disablePush(client: Api): Promise<PushState> {
 }
 
 export async function testPush(client: Api): Promise<void> {
-  const current = await subscription()
-  if (!current) throw new Error('This device has no push subscription. Turn notifications off and on again.')
-  await client.pushTest(current.endpoint)
+  const endpoint = androidShell() ? (await androidPush('state')).endpoint : (await subscription())?.endpoint
+  if (!endpoint) throw new Error('This device has no push subscription. Turn notifications off and on again.')
+  await client.pushTest(endpoint)
 }
 
 const activityEvents = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const

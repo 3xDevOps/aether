@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
     private var mode = ConnectionMode.TAILSCALE
     private var gateway: Gateway? = null
     private var updates: UpdateNotice? = null
+    private lateinit var push: PushBridge
     private var gate: UpdateGate? = null
 
     /** The running gateway's address, once it has printed it. */
@@ -141,7 +142,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Back walks the dashboard's own history, then goes to the dashboard's
-     * home from a page opened with nothing behind it - a share,
+     * home from a page opened with nothing behind it - a share, a notification,
      * a link - and only from home leaves the app running: finishing
      * would drop the terminal's scrollback on the way to the home screen.
      * Where the platform does that itself the callback stands down at home,
@@ -225,6 +226,7 @@ class MainActivity : ComponentActivity() {
                 if (granted) request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else request.deny()
             }
 
+        push = PushBridge(this)
         applyInsets()
         syncBarIcons()
         configureWebView()
@@ -274,6 +276,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         updates?.resume()
+        push.resume()
         if (mode == ConnectionMode.EDGE && gateway?.isActive != true &&
             gatewayError.visibility != View.VISIBLE
         ) {
@@ -285,6 +288,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         updates?.destroy()
         gate?.destroy()
+        push.destroy()
         stopGateway()
         super.onDestroy()
     }
@@ -296,6 +300,7 @@ class MainActivity : ComponentActivity() {
         // dashboard loads again even at an unchanged address.
         val reload = rendererLost
         rendererLost = false
+        installBridge()
         when (mode) {
             ConnectionMode.TAILSCALE -> {
                 stopGateway()
@@ -403,6 +408,7 @@ class MainActivity : ComponentActivity() {
             allowContentAccess = false
         }
         applyModeSettings()
+        installBridge()
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         // Lets `chrome://inspect` attach to a debuggable build; a release
         // build stays closed. See docs/dashboard-frontend.md.
@@ -784,6 +790,10 @@ class MainActivity : ComponentActivity() {
                 gatewayPort(),
                 onReady = { url ->
                     gatewayUrl = url
+                    LiveGateway.url = url
+                    // An endpoint the distributor handed over while no
+                    // gateway ran reaches the server now.
+                    PushRegistration.sync(this)
                     // A new address is a new origin: what the old one has in
                     // flight stops before it can be read as an escape.
                     web.stopLoading()
@@ -798,12 +808,14 @@ class MainActivity : ComponentActivity() {
                 },
                 onExited = {
                     gatewayUrl = null
+                    LiveGateway.url = null
                     loaded = null
                     web.stopLoading()
                     web.loadUrl("about:blank")
                 },
                 onFailed = { message ->
                     gatewayUrl = null
+                    LiveGateway.url = null
                     loaded = null
                     rendererLost = false
                     showFailure(getString(R.string.gateway_stopped), message)
@@ -820,6 +832,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopGateway() {
+        LiveGateway.url = null
         gateway?.stop()
         gateway = null
     }
@@ -835,10 +848,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The dashboard path a share opens, or null for any
-     * other intent. Another app can send one: a share only ever prefills a
-     * prompt, and extras filled with a class this app lacks are no path at
-     * all.
+     * The dashboard path a share or a notification opens, or null for any
+     * other intent. Another app can send either: a share only ever prefills
+     * a prompt, a notification's path is held to [isDashboardPath], and
+     * extras filled with a class this app lacks are no path at all.
      */
     private fun intentPath(intent: Intent?): String? =
         try {
@@ -854,11 +867,22 @@ class MainActivity : ComponentActivity() {
                     }
                     sharePath(text)
                 }
+                ACTION_OPEN -> intent.getStringExtra(EXTRA_PATH)?.takeIf(::isDashboardPath)
                 else -> null
             }
         } catch (_: RuntimeException) {
             null
         }
+
+    /** The bridge for the dashboard this window is about to load. */
+    private fun installBridge() {
+        val dashboard =
+            when (mode) {
+                ConnectionMode.TAILSCALE -> storedDashboardUrl()
+                ConnectionMode.EDGE -> "http://127.0.0.1:${gatewayPort()}/"
+            } ?: return
+        push.install(web, dashboard)
+    }
 
     private fun openSetup() {
         startActivity(Intent(this, SetupActivity::class.java))

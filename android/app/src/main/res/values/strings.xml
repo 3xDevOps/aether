@@ -60,5 +60,10 @@
     <string name="update_gate_check_failed">Could not check again: %1$s</string>
     <string name="share_label">New session</string>
     <string name="share_cut">The shared text was cut to its first %1$d characters.</string>
+    <string name="push_channel">Sessions that need you</string>
+    <string name="push_approve">Approve</string>
+    <string name="push_decline">Decline</string>
+    <string name="push_declined">Declined</string>
+    <string name="push_not_decided">Not decided: %1$s</string>
     <string name="no_app_for_link">No app on this phone opens %1$s</string>
 </resources>

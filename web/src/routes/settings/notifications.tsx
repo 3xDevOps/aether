@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Radio, RadioGroup } from '@/components/ui/radio'
 import type { NotifyLevel, NotifyPrefs, NotifyPrefsSetParams, SlackLinkResult, SlackStatusResult } from '@/lib/types'
 import { errorSentence } from '@/lib/format'
+import { androidShell } from '@/lib/android-push'
 import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
@@ -28,6 +29,7 @@ const hosted = <Guide to="the-dashboard">the dashboard your server hosts</Guide>
 function help(state: PushState | null, hinted = false): ReactNode {
   if (!state) return 'Reading this device…'
   if (state.kind === 'blocked') {
+    if (androidShell()) return 'Android blocks notifications from Aether. Allow them under App info → Notifications (long-press the Aether icon), then turn this on.'
     return 'This browser blocks notifications from this dashboard. Allow them in its site settings, then reload.'
   }
   if (state.kind !== 'unsupported') {
@@ -41,6 +43,8 @@ function help(state: PushState | null, hinted = false): ReactNode {
     case 'home-screen':
       if (hinted) return 'On iPhone and iPad, only the home-screen app gets notifications.'
       return <>On iPhone and iPad, notifications reach Aether only when it is opened from the home screen. <Guide to="add-it-to-your-home-screen">Add it to your home screen</Guide>, open it from there and turn this on.</>
+    case 'distributor':
+      return <>The app gets notifications through a UnifiedPush distributor, and this phone has none. Install ntfy from Google Play or F-Droid, then turn this on. Or open {hosted} in Chrome and install it. <Guide to="in-the-android-app">Android notifications</Guide></>
     case 'browser':
       return <>This browser cannot receive push notifications. On a phone, open this dashboard in Chrome or Safari and <Guide to="add-it-to-your-home-screen">add it to your home screen</Guide>.</>
   }
@@ -213,7 +217,7 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
           <Checkbox
             id="settings-push"
             checked={on}
-            disabled={busy || (state?.kind !== 'on' && state?.kind !== 'off')}
+            disabled={busy || (state?.kind !== 'on' && state?.kind !== 'off' && !(state?.kind === 'unsupported' && state.why === 'distributor'))}
             onCheckedChange={(checked) => act((checked === true ? enablePush(client) : disablePush(client)).finally(() => onSubscriptionChange?.()))}
           />
         )}
