@@ -224,8 +224,8 @@ func TestConnectorToolsThroughTheEdge(t *testing.T) {
 
 // A connector launch runs at the permission tier it names, or else at the
 // member's saved tier as the dashboard preselects it, and both the launch
-// and aether_get_session say which; the tool's schema refuses a tier it
-// does not list.
+// and aether_get_session say which; an omitted tier and Default replay one
+// idempotency key; the tool's schema refuses a tier it does not list.
 func TestConnectorLaunchPermissionThroughTheEdge(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -254,8 +254,12 @@ func TestConnectorLaunchPermissionThroughTheEdge(t *testing.T) {
 		return out["launch"].(map[string]any)["permission"], run.Permission, read["launch"].(map[string]any)["permission"]
 	}
 
-	if receipt, stored, got := tier(launch("k-none", nil)); receipt != "default" || stored != domain.PermissionDefault || got != "default" {
+	none := launch("k-none", nil)
+	if receipt, stored, got := tier(none); receipt != "default" || stored != domain.PermissionDefault || got != "default" {
 		t.Fatalf("a launch with no tier and none saved: receipt %v, stored %v, aether_get_session %v; want default", receipt, stored, got)
+	}
+	if again := launch("k-none", map[string]any{"permission": "default"}); again["run_id"] != none["run_id"] || again["replayed"] != true {
+		t.Fatalf("the same key naming Default = %v, want a replay of %v", again, none["run_id"])
 	}
 	if receipt, stored, got := tier(launch("k-isolated", map[string]any{"permission": "isolated"})); receipt != "isolated" || stored != domain.PermissionIsolated || got != "isolated" {
 		t.Fatalf("an isolated launch: receipt %v, stored %v, aether_get_session %v", receipt, stored, got)

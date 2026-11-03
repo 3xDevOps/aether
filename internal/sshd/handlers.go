@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -176,6 +177,14 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Children != "" && p.Children != domain.ChildrenOn && p.Children != domain.ChildrenOff {
 		return nil, invalidParams(`children must be "on", "off" or empty`)
 	}
+	permission, err := domain.ParsePermission(p.Permission)
+	if err != nil {
+		return nil, invalidParams(protocol.MethodRunLaunch + ": " + err.Error())
+	}
+	// An omitted tier and "default" are one launch to its idempotency key.
+	if permission == domain.PermissionDefault {
+		p.Permission = ""
+	}
 	if p.Limits != nil {
 		if err := scheduler.ValidateRunBudgets(p.Limits.CPUs, p.Limits.MemoryBytes, p.Limits.Pids); err != nil {
 			return nil, invalidParams(err.Error())
@@ -250,10 +259,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	if p.Limits != nil {
 		limits = domain.RunLimits{CPUs: p.Limits.CPUs, MemoryBytes: p.Limits.MemoryBytes, Pids: p.Limits.Pids}
 	}
-	permission, err := domain.ParsePermission(p.Permission)
-	if err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: protocol.MethodRunLaunch + ": " + err.Error()}
-	}
+	permission := cmp.Or(domain.Permission(p.Permission), domain.PermissionDefault)
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		Limits:     limits,
 		CachedBase: p.CachedBase, Model: p.Model, Effort: p.Effort, Permission: permission, RequestedAccount: requested, Fallback: policy,
