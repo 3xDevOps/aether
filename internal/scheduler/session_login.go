@@ -136,7 +136,7 @@ func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, lau
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: copy %s's %s login: %w", account, profile.Name, err)
 	}
-	file, err := s.writeSessionLogin(run.ID, account, profile.Name, login, user)
+	file, err := s.writeLaunchSessionLogin(ctx, run.ID, launcher, account, profile.Name, login, user)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +151,24 @@ func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, lau
 	// Read-only: the ownership pass chowns only directories, and neither
 	// CLI writes a login it holds no refresh token for.
 	return []runtime.Mount{{HostPath: file, ContainerPath: path.Join(home, rel), ReadOnly: true, CheckInode: true}}, nil
+}
+
+// writeLaunchSessionLogin writes a launch's first copy while the share
+// still holds, under the lock a revocation takes: the launch's admission
+// released it before a refresh that may have waited on the vendor.
+func (s *Scheduler) writeLaunchSessionLogin(ctx context.Context, run domain.RunID, launcher, account domain.MemberID, agent string, login []byte, user string) (string, error) {
+	if f := s.usageFallbackSeam(); f != nil && f.AuthorizationMu != nil {
+		f.AuthorizationMu.Lock()
+		defer f.AuthorizationMu.Unlock()
+	}
+	shared, err := s.cfg.Store.AccountSharedWith(ctx, account, launcher)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: check %s's share: %w", account, err)
+	}
+	if !shared {
+		return "", fmt.Errorf("scheduler: %s no longer shares their account with %s", account, launcher)
+	}
+	return s.writeSessionLogin(run, account, agent, login, user)
 }
 
 // writeSessionLogin writes run's copy of the agent's login with one write

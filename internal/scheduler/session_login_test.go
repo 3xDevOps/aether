@@ -656,3 +656,31 @@ func TestSessionLoginRefusedWithoutLoginPins(t *testing.T) {
 		t.Fatalf("Launch on an engine without subpath mounts = %+v, %v; want refused with no container", run, err)
 	}
 }
+
+// A share revoked while a launch refreshes the owner's login refuses the
+// launch before any copy is written.
+func TestSessionLoginLaunchRechecksTheShareAfterRefresh(t *testing.T) {
+	t.Parallel()
+	e := newSessionLoginEnv(t)
+	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-old", "grace~1", time.Now().Add(5*time.Minute)))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/claude/token" {
+			if _, err := e.db.RevokeAccountShare(r.Context(), e.owner.ID, e.member.ID); err != nil {
+				t.Error(err)
+			}
+		}
+		e.issuer.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	e.sched.cfg.AssistantIssuer.ClaudeToken = srv.URL + "/claude/token"
+	run, err := e.launch(t, "claude")
+	if err == nil || !strings.Contains(err.Error(), "no longer shares their account") || run != nil || e.containerCount() != 0 {
+		t.Fatalf("Launch revoked during its refresh = %+v, %v; want refused with no container", run, err)
+	}
+	entries, _ := os.ReadDir(e.sched.sessionLoginRoot())
+	for _, entry := range entries {
+		if files, _ := filepath.Glob(filepath.Join(e.sched.sessionLoginRoot(), entry.Name(), "*", "*")); len(files) != 0 {
+			t.Fatalf("copies written for a revoked launch: %v", files)
+		}
+	}
+}
