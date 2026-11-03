@@ -151,7 +151,8 @@ cleanup. With any of these the confirm button reads **Close anyway** and Cancel
 holds the focus. A check that fails shows its error and still lets you close.
 
 `aether close` asks `Close anyway? [y/N]` on a terminal. Without one it prints
-the warnings and refuses; `--force` closes anyway:
+the warnings and refuses. `--force` closes anyway, and also when the check
+itself fails, such as on a server older than the CLI:
 
 ```
 Closing run-d6ay38tj8j affects others:

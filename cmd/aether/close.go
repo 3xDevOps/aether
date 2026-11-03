@@ -45,17 +45,14 @@ func runClose(args []string) error {
 // closeSession prints what closing runID would affect and, unless force,
 // asks before it closes.
 func closeSession(c *protocol.Client, runID, outcome string, force, interactive bool, in io.Reader, out io.Writer) error {
-	var check protocol.RunCloseCheckResult
-	if err := c.Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{runID}}, &check); err != nil {
-		return err
+	warnings, err := closeWarnings(c, runID)
+	if err != nil {
+		if !force {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "Could not check what closing %s affects: %v\n", runID, err)
 	}
-	if len(check.Runs) != 1 {
-		return fmt.Errorf("run.close_check answered for %d sessions, want 1", len(check.Runs))
-	}
-	if check.Runs[0].Error != nil {
-		return runNotFound(runID, check.Runs[0].Error)
-	}
-	if warnings := check.Runs[0].Warnings; len(warnings) > 0 {
+	if len(warnings) > 0 {
 		_, _ = fmt.Fprintf(out, "Closing %s affects others:\n", runID)
 		for _, w := range warnings {
 			_, _ = fmt.Fprintf(out, "  %s: %s\n", w.Kind, w.Detail)
@@ -74,9 +71,23 @@ func closeSession(c *protocol.Client, runID, outcome string, force, interactive 
 		}
 	}
 	var res protocol.RunResult
-	if err := c.Call(protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID, Outcome: outcome}, &res); err != nil {
+	if err = c.Call(protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID, Outcome: outcome}, &res); err != nil {
 		return runNotFound(runID, err)
 	}
 	_, _ = fmt.Fprintf(out, "session %s %s\n", res.Run.ID, res.Run.Status)
 	return nil
+}
+
+func closeWarnings(c *protocol.Client, runID string) ([]protocol.CloseWarning, error) {
+	var check protocol.RunCloseCheckResult
+	if err := c.Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{runID}}, &check); err != nil {
+		return nil, olderServer(err)
+	}
+	if len(check.Runs) != 1 {
+		return nil, fmt.Errorf("run.close_check answered for %d sessions, want 1", len(check.Runs))
+	}
+	if check.Runs[0].Error != nil {
+		return nil, runNotFound(runID, check.Runs[0].Error)
+	}
+	return check.Runs[0].Warnings, nil
 }
