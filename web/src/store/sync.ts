@@ -981,7 +981,11 @@ export function connect(store: RootStore, client: Api = api): () => void {
       recordUnreachable(store, client, refusalKind(refused, store), refused.data?.refusal?.approval_code, measuredAt(store, refused.data))
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
-      store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))
+      // An unreachable server keeps a painted snapshot on screen; an access
+      // refusal (403) must not show data the member may no longer read.
+      const keep = refused.status === 503 && store.getState().staleSince !== null
+      store.getState().setHydrated(keep, refused.message.replace(/^[^\s:]+: /, ''))
+      if (!keep) clearSnapshot()
     } else if (probe) {
       store.getState().setCapabilities(probe.unlinked.capabilities)
       store.getState().setLinkStatus(probe.unlinked.status)

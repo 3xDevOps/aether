@@ -32,21 +32,21 @@ test('a returning phone paints the saved state, shows the real error and reconne
   )
 
   await page.goto(alice.url)
-  const footer = page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline)$/ })
-  await expect(page.getByText('project').first()).toBeVisible()
+  await expect(page.getByText('Needs you').first()).toBeVisible()
   await expect(page.getByText(/Saved state from/)).toHaveCount(0)
 
   // Back from the pocket: the page reloads with no network at all.
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('aether.snapshot.v1:')))).toBe(true)
+  const before = sockets.length
   offline = true
   await page.reload()
   await expect(page.getByText(/^Saved state from /)).toBeVisible()
-  await expect(page.getByText('project').first()).toBeVisible()
-  await expect(page.getByRole('heading', { name: /offline|unreachable/i })).toHaveCount(0)
+  await expect(page.getByText('Insights')).toBeVisible()
   await expect(page.getByText(refusal).first()).toBeVisible()
 
   offline = false
   await page.getByRole('button', { name: 'Retry' }).click()
   await expect(page.getByText(/Saved state from/)).toHaveCount(0, { timeout: 5_000 })
-  await expect(footer).toHaveAccessibleName(/, Live$/)
-  expect(sockets.length).toBeGreaterThan(0)
+  await expect(page.getByText(refusal)).toHaveCount(0)
+  expect(sockets.length).toBeGreaterThan(before)
 })

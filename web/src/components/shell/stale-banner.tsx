@@ -19,7 +19,7 @@ export function StaleBanner() {
       role="status"
       className="flex min-w-0 items-center gap-2 border-b border-seam bg-chrome px-3 py-1 text-ui-sm text-muted"
     >
-      <p className="min-w-0 flex-1 truncate" title={error ?? undefined}>
+      <p className="line-clamp-2 min-w-0 flex-1 break-words" title={error ?? undefined}>
         {saved && <span className="text-text">{saved} · </span>}
         {state}
       </p>
