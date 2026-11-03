@@ -95,7 +95,9 @@ The first time you open the panel, while no agent has ever been signed in for
 the assistant, the panel starts the sign-in of the first agent the server
 lists, Claude Code before Codex. It never starts one on its own again: the
 server reports `sign_in_recorded` in the assistant status once any agent's
-sign-in has begun, and the dashboard starts at most one per page load.
+sign-in has begun (`<data>/assistant/<member>/signin/started`, kept when a
+sign-in is abandoned or forgotten), and the dashboard starts at most one per
+page load.
 Otherwise select **Sign in** on a row.
 
 The sign-in runs in the assistant's container: `claude-agent-acp --cli auth
@@ -107,6 +109,11 @@ the adapter first if needed. The panel reads the sign-in's output and shows:
   sign-in, followed by Enter.
 - Codex: **Open Codex sign-in** and the one-time code to enter there, with a
   copy button.
+
+The button opens only a URL on the vendor's own hosts (`claude.com`,
+`claude.ai`, `anthropic.com`; `openai.com`, `chatgpt.com`), the newest one the
+sign-in printed. After you send a code the terminal opens, since the sign-in
+reports only there whether the code worked.
 
 **Show terminal** shows the sign-in's own terminal; when the sign-in exits or
 cannot start, the panel shows the terminal and the real error. In **Settings >

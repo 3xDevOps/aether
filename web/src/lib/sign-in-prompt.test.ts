@@ -11,20 +11,26 @@ const codex = '\nWelcome to Codex [v\x1b[90m0.130.0\x1b[0m]\n\x1b[90mOpenAI\'s c
 
 describe('readSignInPrompt', () => {
   it('reads the Claude sign-in URL out of its terminal link', () => {
-    expect(readSignInPrompt(claude)).toEqual({ url: claudeURL, code: undefined })
+    expect(readSignInPrompt(claude, 'claude')).toEqual({ url: claudeURL, code: undefined })
   })
 
   it('reads the link target of a URL wrapped across lines', () => {
     const wrapped = claude.replace(`\x1b[94m${claudeURL}`, `\x1b[94m${claudeURL.slice(0, 40)}\r\n${claudeURL.slice(40)}`)
-    expect(readSignInPrompt(wrapped).url).toBe(claudeURL)
+    expect(readSignInPrompt(wrapped, 'claude').url).toBe(claudeURL)
   })
 
   it('reads the Codex device URL and code', () => {
-    expect(readSignInPrompt(codex)).toEqual({ url: 'https://auth.openai.com/codex/device', code: 'WXYZ-12345' })
+    expect(readSignInPrompt(codex, 'codex')).toEqual({ url: 'https://auth.openai.com/codex/device', code: 'WXYZ-12345' })
+  })
+
+  it("offers only the vendor's sign-in host, and the newest URL", () => {
+    expect(readSignInPrompt('See https://example.com/claude for help\n', 'claude')).toEqual({ url: undefined, code: undefined })
+    const retried = `${claude}\r\nInvalid code. Visit: \x1b]8;;${claudeURL}2\x07${claudeURL}2\x1b]8;;\x07\r\n`
+    expect(readSignInPrompt(retried, 'claude').url).toBe(`${claudeURL}2`)
   })
 
   it('waits for the rest of a URL or code cut by a chunk', () => {
-    expect(readSignInPrompt(claude.slice(0, claude.indexOf('&state')))).toEqual({})
-    expect(readSignInPrompt(codex.slice(0, codex.indexOf('-12345')))).toEqual({ url: 'https://auth.openai.com/codex/device' })
+    expect(readSignInPrompt(claude.slice(0, claude.indexOf('&state')), 'claude')).toEqual({})
+    expect(readSignInPrompt(codex.slice(0, codex.indexOf('-12345')), 'codex')).toEqual({ url: 'https://auth.openai.com/codex/device' })
   })
 })

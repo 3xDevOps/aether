@@ -40,7 +40,7 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
       onData: (chunk) => {
         output.current.push(chunk)
         text += decoder.decode(chunk, { stream: true })
-        setPrompt(readSignInPrompt(text))
+        setPrompt(readSignInPrompt(text, agent.name))
         live.current?.write(chunk)
       },
       onAttached: () => {
@@ -92,6 +92,8 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
     attachment.current?.send(code.trim())
     attachment.current?.send('\r')
     setCode('')
+    // Whether the code worked, the sign-in says only in its output.
+    setShown(true)
   }
   return (
     <section aria-label={`Sign in to ${agent.display_name}`} className="flex flex-col gap-3">

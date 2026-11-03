@@ -293,7 +293,7 @@ func TestAssistantSignInThatWroteNothingUsable(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(assistantSignInDir(assistantDir, e.member.ID), "claude.pending")); !os.IsNotExist(err) {
 		t.Fatalf("the unusable sign-in is still pending: %v", err)
 	}
-	recorded(false, "after the unusable sign-in was forgotten")
+	recorded(true, "after the unusable sign-in was forgotten, so nothing starts on its own again")
 	if _, err := e.sched.StartAssistantLogin(t.Context(), e.member.ID, "claude", 80, 24); err != nil {
 		t.Fatalf("a sign-in after the unusable one: %v", err)
 	}
