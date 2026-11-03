@@ -86,11 +86,23 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 	member := domain.MemberID(filepath.Base(home.HostPath))
 	name := "harness-update-" + string(member) + "-" + profile.Name
 	mounts := []runtime.Mount{home}
-	// The updater runs the CLI too, which replaces an unpinned login by
-	// rename and so detaches it from every running container's pin.
+	// Every running session shares the member's login through its pin, and
+	// a CLI that refreshes it spends the one refresh token they all hold:
+	// replacing the file by rename strands their pins on the old one, and
+	// a write the pin refuses keeps the new token only in that process.
+	// The update needs no sign-in, so it sees none.
+	noLogin, err := s.updaterNoLogin()
+	if err != nil {
+		s.mu.Lock()
+		state.running = nil
+		close(update.done)
+		s.mu.Unlock()
+		slog.Warn("scheduler: hide the login from the updater", "member", filepath.Base(home.HostPath), "error", err)
+		return
+	}
 	for _, m := range plan.Mounts {
 		if m.HostPath == home.HostPath && m.Subpath != "" {
-			mounts = append(mounts, m)
+			mounts = append(mounts, runtime.Mount{HostPath: noLogin, ContainerPath: m.ContainerPath, ReadOnly: true})
 		}
 	}
 	env := maps.Clone(plan.Env)
@@ -183,6 +195,16 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 			_ = s.cfg.Homes.SetCacheRuntimeCleanupError(member, "terminal", "Updater cleanup pending; cache protected")
 		}
 	}
+}
+
+// updaterNoLogin is the empty file mounted over the updater's logins.
+func (s *Scheduler) updaterNoLogin() (string, error) {
+	path := filepath.Join(s.cfg.StateDir, "updater-no-login")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o644)
+	if err != nil {
+		return "", err
+	}
+	return path, f.Close()
 }
 
 // updateInContainer runs script in a throwaway container with the run's

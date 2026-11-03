@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -471,10 +472,9 @@ func TestHarnessUpdateHeadless(t *testing.T) {
 	}
 }
 
-// The updater runs the vendor CLI over the member's home like a session,
-// so it pins the same login files: a rename there would detach them from
-// every running session's container.
-func TestHarnessUpdatePinsTheLogins(t *testing.T) {
+// The updater runs the vendor CLI over the member's home but sees no login:
+// a refresh there would spend the token every running session holds.
+func TestHarnessUpdateHidesTheLogins(t *testing.T) {
 	t.Parallel()
 	e, rt, _ := newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
@@ -484,7 +484,11 @@ func TestHarnessUpdatePinsTheLogins(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("updates = %d, want one", len(updates))
 	}
-	if !slices.ContainsFunc(updates[0].Mounts, func(m runtime.Mount) bool { return m.Subpath == ".claude/.credentials.json" }) {
-		t.Fatalf("updater mounts %+v pin no Claude login", updates[0].Mounts)
+	home := updates[0].Mounts[0]
+	hidden := slices.ContainsFunc(updates[0].Mounts, func(m runtime.Mount) bool {
+		return m.ContainerPath == path.Join(home.ContainerPath, ".claude/.credentials.json") && m.ReadOnly && m.HostPath != home.HostPath
+	})
+	if !hidden {
+		t.Fatalf("updater mounts %+v leave the Claude login visible", updates[0].Mounts)
 	}
 }
