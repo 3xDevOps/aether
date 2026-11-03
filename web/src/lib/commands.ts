@@ -408,8 +408,9 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         done: 'Marked not finished',
         predict: () => ({ runID: id, record: { review: '' } }),
         perform: async (d) => {
+          const same = sameIdentity()
           await d.api.runReview(id, 'not-yet')
-          d.navigate('run', { runId: id, view: 'session', focus: 'composer' })
+          if (same()) d.navigate('run', { runId: id, view: 'session', focus: 'composer' })
         },
       })
     }

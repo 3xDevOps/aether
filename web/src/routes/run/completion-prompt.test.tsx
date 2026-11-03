@@ -89,6 +89,21 @@ describe('CompletionPrompt', () => {
     expect(api.runReview).toHaveBeenCalledWith('run_1', 'not-yet')
   })
 
+  it('leaves the view alone when the answer to Not yet arrives after the identity changed', async () => {
+    seed()
+    const route = { name: 'run', params: { runId: 'run_1', view: 'changes' } }
+    useStore.setState({ route, identityKey: 'alice' })
+    let answer!: (run: Run) => void
+    vi.mocked(api.runReview).mockImplementationOnce(() => new Promise((resolve) => { answer = resolve }))
+    render(<Prompt />)
+    fireEvent.click(screen.getByRole('button', { name: 'Not yet' }))
+    await waitFor(() => expect(api.runReview).toHaveBeenCalledWith('run_1', 'not-yet'))
+    useStore.setState({ identityKey: 'bob' })
+    answer(reported({ review: '' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(useStore.getState().route).toEqual(route)
+  })
+
   it('leaves the view alone when Not yet is refused', async () => {
     seed()
     const route = { name: 'run', params: { runId: 'run_1', view: 'changes' } }
