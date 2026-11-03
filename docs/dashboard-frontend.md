@@ -1637,6 +1637,18 @@ Reviewer and received 1 from Reviewer, 2 not acknowledged".
 Mail is not parentage: subsessions show as a family, and nothing draws
 dependencies.
 
+Mail that arrives while the view is open (`appendLaneEvent` records it in
+`laneArrivals`; history pages never do) also draws a dashed arrow from
+sender to recipient that fades out by 4.5s and leaves the marks. More mail
+on the same lane pair restarts its arrow with a count, at most three show at
+once (a new pair replaces the oldest), and arrows at one moment step 8px
+apart. An end scrolled past the rows gets a pinned **to**/**from** button
+that moves to it; mail with a session outside the view draws a short stub
+labelled with that session. Nothing draws while the tab is hidden or Agent
+messages is off. A second polite status line announces each burst once,
+1.5s after its first message ("New message from Lead to Reviewer", or "3 new
+messages: ...", listing at most three pairs).
+
 Hovering, focusing or selecting a lane draws its mail as solid links (a dot
 at the sender, an arrowhead at the recipient, hollow until every bundled
 message is acknowledged) and greys every other mark. Chips on the lanes'

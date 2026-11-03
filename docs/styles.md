@@ -321,6 +321,7 @@ Mail marks and links use the categorical series by meaning:
 | --- | --- | --- | --- |
 | Agent message, at rest | `text-series-5` | sent: 5.5px filled dot with a 1px `--canvas` halo; received: 6px `--canvas` ring, 1.5px stroke; 2px outside the bar edge facing the other lane | a `text-ui-xs` tabular count on a `--canvas` halo when marks merge |
 | Agent message, focused lane | `text-series-5` | solid 1.5px, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a count chip on bundles |
+| Agent message, live | `text-series-5` over a 4px `--canvas` halo | dashed `4 3` 1.5px, round caps | dot at the sender, filled arrowhead at the recipient; a `×n` chip left of the line |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
@@ -330,7 +331,15 @@ under the bars and labels, over the hover and selection fills; only their
 every other mark turns `text-icon-faint`. Label chips are 16px
 `rounded-chip`, `border-series-5` on `bg-raised` with the `MessageSquare`
 glyph, left of the age. A mark added after the view opens fades in once with
-`motion-safe:animate-fade-in`; nothing loops. Tree focus without hover or a
+`motion-safe:animate-fade-in`; nothing loops. A live arrow draws above the
+bars for `--duration-mail-live` (4.5s, under WCAG 2.2.2's five seconds):
+`animate-mail-live` fades it in over 150ms, holds it to 2s and fades it out
+on `--ease-in-out`; `animate-mail-travel` runs a 6px dot from sender to
+recipient once over 500ms, and `animate-mail-ping` grows a ring at the head
+once. Each arrow is its own HTML box and animates only `opacity` and
+`transform`, which an SVG child could not keep on the compositor. Under
+reduced motion the arrow shows still, without the dot or ring, and goes when
+its time ends. Tree focus without hover or a
 popover takes the `bg-hover` row fill, like hover. nothing uses opacity. The axis is 28px with `text-ui-xs` muted tabular labels
 over dashed `border-seam` gridlines, dropping any label within 48px of the
 now chip; the now line is 1px `bg-icon-faint` under a neutral `bg-raised`
