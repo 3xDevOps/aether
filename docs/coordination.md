@@ -606,7 +606,7 @@ Write your reply to the person as message text before the report; neither your t
 - waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you. Waiting on a PR, its checks or another session? Add --until (until in aether_report; conditions in report --help) and the server wakes you when one resolves. Nothing else wakes you when CI or a process finishes; never ask people to message you when it lands. Not while aether_status shows protected: mail never wakes a protected session, so wait in your turn.
 - needs-input: only a question a human must answer; the reply comes as your next prompt.
 - blocked: a human must act, such as missing access or a broken environment; not a way to wait.
-- success | failure: the work you own is verified done or cannot be done; the session stays open for follow-up. Success shows the session as Ready for review until the user marks it complete or later.
+- success | failure: the work you own is verified done or cannot be done; the session stays open for follow-up. Success shows the session as Finished: review until the user marks it complete or later.
 Never ask the human in prose and stop; use needs-input.
 Never report while still working, and report only what you verified.
 Subagents and spawned workflows never report; they return their results to the agent that started them.

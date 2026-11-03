@@ -481,12 +481,13 @@ func TestConnectorReadTools(t *testing.T) {
 	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many})
 	text, out = run(t, cs, "aether_needs_attention", nil)
 	items := out["items"].([]any)
-	if text != "30 of 45 items that need you, pending requests first, then oldest first." || len(items) != 30 || out["total"] != float64(45) {
+	if text != "Showing 30 of 45 items. 5 items need you, pending requests first, then oldest first. 40 finished sessions await review last; they are not blocking." ||
+		len(items) != 30 || out["total"] != float64(45) {
 		t.Fatalf("aether_needs_attention past the cap = %q", text)
 	}
-	want := []string{"run-3", "run-10", "run-20", "run-44"}
+	want := []string{"run-3", "run-10", "run-20", "run-44", "run-40"}
 	for i := 0; len(want) < 30; i++ {
-		if !slices.Contains([]int{3, 10, 20, 44}, i) {
+		if !slices.Contains([]int{3, 10, 20, 40, 44}, i) {
 			want = append(want, fmt.Sprintf("run-%d", i))
 		}
 	}

@@ -85,8 +85,15 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 			}
 		}
 	}
+	// A finished run asks nothing of anyone, so it follows every row that does.
 	slices.SortStableFunc(items, func(a, b protocol.AttentionItem) int {
-		return cmp.Or(compareSince(a.Since, b.Since), cmp.Compare(a.RunID, b.RunID))
+		finished := func(it protocol.AttentionItem) int {
+			if it.Kind == protocol.AttentionKindReady {
+				return 1
+			}
+			return 0
+		}
+		return cmp.Or(cmp.Compare(finished(a), finished(b)), compareSince(a.Since, b.Since), cmp.Compare(a.RunID, b.RunID))
 	})
 	return protocol.AttentionListResult{Items: items}, nil
 }
@@ -386,7 +393,7 @@ var attentionRows = []attentionRow{
 		},
 		resolvers: owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			item.Reason = "Your agent reports this task is finished"
+			item.Reason = "Finished: review the result"
 			if at := since(r.run.ReviewChangedAt); at != "" {
 				item.Since = at
 			}

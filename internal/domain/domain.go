@@ -166,20 +166,27 @@ const ReportedSuccessReason = "agent reported success"
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether sessions --needs-you and
 // the dashboard's Needs you list share: a live run with an open human
-// request, a disconnected agent, or a failure nobody has seen, or a reported
-// success awaiting review. A paused run never does.
+// request, a disconnected agent, or a failure nobody has seen. A reported
+// success is AwaitsReview, never this. A paused run never does.
 func (r *Run) NeedsAttention(paused bool) bool {
 	switch {
-	case paused:
-		return false
-	case r.Review == ReviewReady && (r.Status.Live() || r.Status == RunCompleted):
-		return true
-	case !r.Status.Live():
+	case paused, !r.Status.Live():
 		return false
 	case r.Activity == ActivityNeedsYou, r.Activity == ActivityDisconnected:
 		return true
 	}
 	return r.Activity == ActivityFailed && r.OutcomeUnseen
+}
+
+// AwaitsReview is the one rule for Finished: review the result: a success
+// its agent reported that the owner has not marked complete, on a live
+// finished run or a completed one. It asks nothing of anyone, so it is never
+// NeedsAttention. A paused run never does.
+func (r *Run) AwaitsReview(paused bool) bool {
+	if paused || r.Review != ReviewReady && r.Review != ReviewLater {
+		return false
+	}
+	return r.Status == RunCompleted || r.Status.Live() && r.Activity == ActivityFinished
 }
 
 // NeedKey identifies the standing the run is in: its status, state and

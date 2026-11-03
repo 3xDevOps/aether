@@ -26,6 +26,7 @@ const (
 	turnEndedPrefix  = "turn ended: "
 	waitBrokenPrefix = "wait broken: "
 	reportedFailure  = "agent reported failure"
+	finishedBody     = "Finished: review the result"
 
 	// fallbackTitleRunes matches fallbackLabelLength in web/src/lib/status.ts.
 	fallbackTitleRunes = 120
@@ -76,14 +77,25 @@ func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need
 	}
 	body := statusBody(run)
 	if body == "" {
-		return nil
+		return finishedOf(run)
 	}
 	n := &need{key: "status:" + run.NeedKey(), body: clip(body, maxBodyRunes), urgency: urgencyHigh}
-	if run.Activity == domain.ActivityFinished || run.Status == domain.RunCompleted {
-		n.urgency = urgencyNormal
-	}
 	if run.StatusChangedAt != nil {
 		n.since = *run.StatusChangedAt
+	}
+	return n
+}
+
+// finishedOf announces a success ready for review once and quietly: it asks
+// nothing of the member, so it is not a need. One put off for later is not
+// announced again.
+func finishedOf(run *domain.Run) *need {
+	if run.Review != domain.ReviewReady || !run.AwaitsReview(false) {
+		return nil
+	}
+	n := &need{key: "finished:" + run.NeedKey(), body: finishedBody, urgency: urgencyNormal}
+	if run.ReviewChangedAt != nil {
+		n.since = *run.ReviewChangedAt
 	}
 	return n
 }
@@ -93,8 +105,8 @@ func AttentionBody(run *domain.Run) string {
 }
 
 // statusBody announces a run only when it needs a member
-// (domain.Run.NeedsAttention) or failed with a result nobody has seen. A
-// success put off for later or accepted, waiting and working never do.
+// (domain.Run.NeedsAttention) or failed with a result nobody has seen.
+// Waiting and working never do; a reported success is finishedOf's.
 func statusBody(run *domain.Run) string {
 	if !run.NeedsAttention(false) {
 		if !run.OutcomeUnseen || run.Status != domain.RunFailed {
@@ -130,9 +142,6 @@ func statusBody(run *domain.Run) string {
 			}
 		}
 		return "Agent disconnected"
-	}
-	if run.Review == domain.ReviewReady {
-		return "Agent reported success, review the result"
 	}
 	if rest, ok := strings.CutPrefix(run.Reason, turnFailedPrefix); ok {
 		return "Turn failed: " + rest

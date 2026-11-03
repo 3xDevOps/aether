@@ -407,7 +407,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, OutcomeUnseen: true})
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported success, review the result", Run: id})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Finished: review the result", Run: id})
 	stamp, _, err := h.db.SetRunReview(h.ctx, run.ID, domain.ReviewAccepted, domain.ReviewReady)
 	if err != nil {
 		t.Fatalf("SetRunReview: %v", err)
@@ -463,7 +463,7 @@ func TestAnOpenedNeedIsNotPushedAgain(t *testing.T) {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported success, review the result", Run: id})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Finished: review the result", Run: id})
 	if got := phone.urgency.Load(); got != urgencyNormal {
 		t.Errorf("finished urgency = %v, want %s", got, urgencyNormal)
 	}

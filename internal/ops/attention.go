@@ -52,7 +52,7 @@ var attentionLabels = map[string]string{
 	protocol.AttentionKindDisconnected:  "Agent disconnected",
 	protocol.AttentionKindBlocked:       "The agent reports it is blocked",
 	protocol.AttentionKindNeedsInput:    "The agent needs your input",
-	protocol.AttentionKindReady:         "The agent reports the task finished",
+	protocol.AttentionKindReady:         "Finished: review the result. Not blocking; nothing waits on the user",
 	protocol.AttentionKindFailed:        "The agent reported failure",
 }
 
@@ -112,6 +112,8 @@ func rank(it protocol.AttentionItem) int {
 	switch it.Kind {
 	case protocol.AttentionKindPermission, protocol.AttentionKindQuestion, protocol.AttentionKindQueuedMessage, protocol.AttentionKindRoomQuestion:
 		return 0
+	case protocol.AttentionKindReady:
+		return 2
 	}
 	return 1
 }
@@ -126,7 +128,8 @@ func needsAttention(ctx context.Context, c calls, in workspaceFilterInput) (stri
 		return "", nil, err
 	}
 	// A request blocks its agent and a sudo request expires in minutes, so
-	// past the cap it must not fall behind sessions only awaiting review.
+	// past the cap it must not fall behind other items; a finished session
+	// blocks nothing, so it comes last.
 	slices.SortStableFunc(items, func(a, b protocol.AttentionItem) int {
 		return cmp.Compare(rank(a), rank(b))
 	})
@@ -135,12 +138,22 @@ func needsAttention(ctx context.Context, c calls, in workspaceFilterInput) (stri
 		rows = append(rows, attentionRowOf(it, l))
 	}
 	out := map[string]any{"items": rows}
+	finished := 0
+	for _, it := range items {
+		if it.Kind == protocol.AttentionKindReady {
+			finished++
+		}
+	}
+	text := fmt.Sprintf("%d items need you, pending requests first, then oldest first.", len(items)-finished)
+	if finished > 0 {
+		text += fmt.Sprintf(" %d finished sessions await review last; they are not blocking.", finished)
+	}
 	switch {
 	case len(items) == 0:
 		return "Nothing needs you.", out, nil
 	case len(items) > len(rows):
 		out["total"], out["truncated"] = len(items), true
-		return fmt.Sprintf("%d of %d items that need you, pending requests first, then oldest first.", len(rows), len(items)), out, nil
+		return fmt.Sprintf("Showing %d of %d items. ", len(rows), len(items)) + text, out, nil
 	}
-	return fmt.Sprintf("%d items need you, pending requests first, then oldest first.", len(rows)), out, nil
+	return text, out, nil
 }

@@ -50,6 +50,10 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		return run
 	}
 
+	finished := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished)
+	if _, _, err := e.store.SetRunReview(ctx, finished.ID, domain.ReviewReady, ""); err != nil {
+		t.Fatal(err)
+	}
 	permission := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "", domain.ActivityNeedsYou)
 	e.runs.mu.Lock()
 	e.runs.acpPending = map[domain.RunID][]acphost.Request{permission.ID: {{
@@ -66,6 +70,9 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 	paused := newRun(e.member.ID, domain.LaunchTUI, domain.RunNeedsAttention, "needs input: still there?", domain.ActivityNeedsYou)
 	e.runs.setPaused(paused.ID, true)
 	working := newRun(e.member.ID, domain.LaunchTUI, domain.RunRunning, "", domain.ActivityWorking)
+	subsessions := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "waiting on 2 subsessions", domain.ActivityWaitingAgents)
+	ci := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "CI on PR 12", domain.ActivityWaitingCI)
+	process := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "release build", domain.ActivityWaitingTools)
 	failed := newRun(e.member.ID, domain.LaunchTUI, domain.RunRunning, "", domain.ActivityWorking)
 	if _, err := e.store.FinishRunReported(ctx, failed.ID, domain.RunNeedsAttention, "agent reported failure", domain.ActivityFailed, nil, nil); err != nil {
 		t.Fatal(err)
@@ -85,6 +92,7 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		disconnected.ID: {protocol.AttentionKindDisconnected, "Agent disconnected: eof"},
 		blocked.ID:      {protocol.AttentionKindBlocked, "Blocked: no credentials"},
 		failed.ID:       {protocol.AttentionKindFailed, "Agent reported failure; review the result. Session remains open for follow-up."},
+		finished.ID:     {protocol.AttentionKindReady, "Finished: review the result"},
 	}
 	for id, w := range want {
 		item, ok := got[id]
@@ -92,10 +100,21 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 			t.Errorf("session %s = %+v, want kind %q reason %q", id, item, w[0], w[1])
 		}
 	}
-	for _, id := range []domain.RunID{paused.ID, working.ID, bobs.ID, e.run.ID} {
+	for _, id := range []domain.RunID{paused.ID, working.ID, subsessions.ID, ci.ID, process.ID, bobs.ID, e.run.ID} {
 		if item, ok := got[id]; ok {
 			t.Errorf("session %s listed for Ada: %+v", id, item)
 		}
+	}
+	raw, perr := callJSON(t, e, e.member.ID, protocol.MethodAttentionList, protocol.AttentionListParams{})
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	var listed protocol.AttentionListResult
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		t.Fatal(err)
+	}
+	if last := listed.Items[len(listed.Items)-1]; last.RunID != string(finished.ID) {
+		t.Errorf("last item = %s, want the oldest item, finished, after every item that asks something", last.RunID)
 	}
 	p := got[permission.ID]
 	if p.Title != "fix the build" || p.Harness != "codex" || p.WorkspaceID != string(e.ws.ID) || p.Request == nil ||
