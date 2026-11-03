@@ -89,9 +89,9 @@ export function App() {
 
   useEffect(() => {
     if (!hydrationError || blocked || gated) return
-    // A dead token is not an unreachable server; its error already says how to recover.
+    // An unreachable server is the banner's line, with its Retry; only a dead
+    // token, whose error says how to recover, has no banner of its own.
     if (streamDead) toast.error(hydrationError)
-    else toast.error(`Could not reach the server: ${hydrationError}`)
   }, [hydrationError, streamDead, blocked, gated])
 
   const retry = useCallback(() => {
