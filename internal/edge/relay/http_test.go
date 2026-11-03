@@ -10,7 +10,6 @@ import (
 	"net/netip"
 	"net/textproto"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -290,39 +289,90 @@ func holdData(t *testing.T, a *agent, release <-chan struct{}) <-chan struct{} {
 	return held
 }
 
-// A request that waits past HTTPConnWait for one of its server's busy
-// connections is refused with 503, naming the limit.
-func TestHTTPConnWait(t *testing.T) {
-	e := newEnv(t)
-	e.r.httpConnWait = 200 * time.Millisecond
-	a := claimedAgent(t, e)
-	release := make(chan struct{})
-	held := holdData(t, a, release)
-	var wg sync.WaitGroup
-	for range edgeproto.MaxHTTPConnsPerServer {
-		wg.Go(func() {
-			if resp, err := http.Post(e.base+edgeproto.MCPPath(a.id), "application/json", strings.NewReader("{}")); err == nil {
-				_ = resp.Body.Close()
-			}
-		})
-	}
-	for range edgeproto.MaxHTTPConnsPerServer {
-		<-held
-	}
-	start := time.Now()
+// post sends an empty JSON request to a's MCP path and returns its status
+// and body.
+func post(e *env, a *agent) string {
 	resp, err := http.Post(e.base+edgeproto.MCPPath(a.id), "application/json", strings.NewReader("{}"))
 	if err != nil {
-		t.Fatal(err)
+		return err.Error()
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	want := "this server already has 8 MCP connector requests in progress through the edge; retry shortly"
-	if resp.StatusCode != http.StatusServiceUnavailable || strings.TrimSpace(string(body)) != want {
-		t.Errorf("a request past the busy connections: %s %q, want 503 %q", resp.Status, body, want)
+	return resp.Status + " " + strings.TrimSpace(string(body))
+}
+
+// busy starts n requests to a, which holdData holds, and waits for the
+// first held ones to reach it. The returned channel gets each request's
+// answer.
+func busy(t *testing.T, e *env, a *agent, held <-chan struct{}, n, reached int) <-chan string {
+	t.Helper()
+	answers := make(chan string, n)
+	for range n {
+		go func() { answers <- post(e, a) }()
 	}
-	if waited := time.Since(start); waited < e.r.httpConnWait {
-		t.Errorf("refused after %s, before the %s wait", waited, e.r.httpConnWait)
+	for range reached {
+		select {
+		case <-held:
+		case s := <-answers:
+			t.Fatalf("a request meant to hold a connection ended with %s", s)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a request meant to hold a connection did not reach the server within 5s")
+		}
 	}
-	close(release)
-	wg.Wait()
+	return answers
+}
+
+// A request that waits past HTTPConnWait for one of its server's busy
+// connections is refused with 503, naming the limit, and so is one past
+// MaxHTTPWaitersPerServer waiting requests, at once.
+func TestHTTPConnWait(t *testing.T) {
+	const want = "503 Service Unavailable this server already has 8 MCP connector requests in progress through the edge; retry shortly"
+	t.Run("wait", func(t *testing.T) {
+		e := newEnv(t)
+		e.r.httpConnWait = 200 * time.Millisecond
+		a := claimedAgent(t, e)
+		release := make(chan struct{})
+		answers := busy(t, e, a, holdData(t, a, release), edgeproto.MaxHTTPConnsPerServer, edgeproto.MaxHTTPConnsPerServer)
+		start := time.Now()
+		if got := post(e, a); got != want {
+			t.Errorf("a request past the busy connections: %q, want %q", got, want)
+		}
+		if waited := time.Since(start); waited < e.r.httpConnWait {
+			t.Errorf("refused after %s, before the %s wait", waited, e.r.httpConnWait)
+		}
+		close(release)
+		for range edgeproto.MaxHTTPConnsPerServer {
+			if got := <-answers; got != "200 OK {}" {
+				t.Errorf("a held request ended with %q", got)
+			}
+		}
+	})
+	t.Run("waiters", func(t *testing.T) {
+		e := newEnv(t)
+		a := claimedAgent(t, e)
+		release := make(chan struct{})
+		held := holdData(t, a, release)
+		holding := busy(t, e, a, held, edgeproto.MaxHTTPConnsPerServer, edgeproto.MaxHTTPConnsPerServer)
+		waiting := busy(t, e, a, held, edgeproto.MaxHTTPWaitersPerServer, 0)
+		eventually(t, "every waiter queued", func() bool {
+			e.r.mu.Lock()
+			defer e.r.mu.Unlock()
+			return e.r.httpWaiting[a.id] == edgeproto.MaxHTTPWaitersPerServer
+		})
+		start := time.Now()
+		if got := post(e, a); got != want {
+			t.Errorf("a request past the waiters: %q, want %q", got, want)
+		}
+		if waited := time.Since(start); waited >= edgeproto.HTTPConnWait {
+			t.Errorf("refused after %s; want at once, not after the wait", waited)
+		}
+		close(release)
+		for _, answers := range []<-chan string{holding, waiting} {
+			for range cap(answers) {
+				if got := <-answers; got != "200 OK {}" {
+					t.Errorf("a held or waiting request ended with %q", got)
+				}
+			}
+		}
+	})
 }

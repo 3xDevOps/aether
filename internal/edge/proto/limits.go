@@ -13,9 +13,13 @@ const (
 	// MaxHTTPConnsPerServer bounds a server's KindHTTP connections, apart
 	// from its SSH connections. Each carries one request at a time; a
 	// request past them waits up to HTTPConnWait for one to come free.
-	MaxHTTPConnsPerServer  = 8
-	MaxConnsPerDevice      = 16
-	MaxUnclaimedPerAddress = 3
+	MaxHTTPConnsPerServer = 8
+	// MaxHTTPWaitersPerServer bounds a server's requests that hold their
+	// body without a connection yet, including those one is being opened
+	// for.
+	MaxHTTPWaitersPerServer = 2 * MaxHTTPConnsPerServer
+	MaxConnsPerDevice       = 16
+	MaxUnclaimedPerAddress  = 3
 	// UnclaimedTTL is how long an unclaimed registration is kept.
 	UnclaimedTTL = 30 * time.Minute
 	// AttachDeadline is how long the edge waits for a data socket after

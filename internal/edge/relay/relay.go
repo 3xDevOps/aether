@@ -156,6 +156,9 @@ type Relay struct {
 	closing bool
 	servers map[string]*registration
 	conns   map[string]*relayConn
+	// httpWaiting counts, per server id, the requests waiting for one of
+	// its http connections.
+	httpWaiting map[string]int
 	// claims holds, by connection id, the claim connections a server may
 	// still report as claimed.
 	claims map[string]claimGrant
@@ -221,6 +224,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		maxConnsPerAddress: maxConnsPerAddress,
 		servers:            map[string]*registration{},
 		conns:              map[string]*relayConn{},
+		httpWaiting:        map[string]int{},
 		claims:             map[string]claimGrant{},
 		directories:        map[string]*directoryWrite{},
 		addrConns:          map[netip.Prefix]int{},

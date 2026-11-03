@@ -164,9 +164,12 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID strin
 	client := req
 	ctx, cancel := context.WithCancelCause(req.Context())
 	defer cancel(nil)
-	queued := time.AfterFunc(r.httpConnWait, func() { cancel(errHTTPLimit) })
-	defer queued.Stop()
-	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { queued.Stop() }})
+	cw := &connWait{r: r, serverID: serverID, cancel: cancel}
+	defer cw.got()
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GetConn: func(string) { cw.wait() },
+		GotConn: func(httptrace.GotConnInfo) { cw.got() },
+	})
 	req = req.WithContext(ctx)
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
@@ -191,6 +194,48 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID strin
 		},
 	}
 	proxy.ServeHTTP(&responseFilter{ResponseWriter: w}, req)
+}
+
+// connWait is one forwarded request's wait for a connection of its
+// server, from each attempt's GetConn to its GotConn: a transport retry
+// waits again, for at most httpConnWait each time. At most
+// MaxHTTPWaitersPerServer requests wait on a server, so the bodies they
+// hold stay bounded.
+type connWait struct {
+	r        *Relay
+	serverID string
+	cancel   context.CancelCauseFunc
+	// timer and waiting are guarded by r.mu.
+	timer   *time.Timer
+	waiting bool
+}
+
+func (c *connWait) wait() {
+	c.r.mu.Lock()
+	defer c.r.mu.Unlock()
+	if c.waiting {
+		return
+	}
+	if c.r.httpWaiting[c.serverID] >= edgeproto.MaxHTTPWaitersPerServer {
+		c.cancel(errHTTPLimit)
+		return
+	}
+	c.r.httpWaiting[c.serverID]++
+	c.waiting = true
+	c.timer = time.AfterFunc(c.r.httpConnWait, func() { c.cancel(errHTTPLimit) })
+}
+
+func (c *connWait) got() {
+	c.r.mu.Lock()
+	defer c.r.mu.Unlock()
+	if !c.waiting {
+		return
+	}
+	c.waiting = false
+	c.timer.Stop()
+	if c.r.httpWaiting[c.serverID]--; c.r.httpWaiting[c.serverID] == 0 {
+		delete(c.r.httpWaiting, c.serverID)
+	}
 }
 
 // refuseHTTP answers a request that reached no server, or whose server's
