@@ -124,7 +124,7 @@ can push branches and open pull requests.
 | `aether_message_session`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back, and the agent acts on it |
 | `aether_pause_session` | no | no | no | Freezes the session's container; resume continues it |
 | `aether_resume_session` | no | no | yes | The agent goes on working and can push |
-| `aether_mark_reviewed` | no | yes | no | `complete` closes the session, which cannot be reopened; records state on the server only |
+| `aether_mark_reviewed` | no | yes | no | `complete` closes the session, which cannot be reopened; `later` puts the review off; `not-yet` withdraws it until the agent reports success again; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
 | `aether_stop_session` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
 | `aether_session_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |

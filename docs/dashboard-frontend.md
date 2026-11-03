@@ -1788,9 +1788,9 @@ running".
 | Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked session with no `state`: the turn ended without a verified reason. Asks nothing | Working |
 | Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
 | Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
-| Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
+| Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action. Also a live `finished` session its owner answered **Not yet** (no `review`, with a `review_changed_at`), read "Not finished yet: you chose Not yet" | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Ready for review | filled accent circle with a check | `finished` (a reported success on a live session), or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
+| Ready for review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
 | Completed / Merged | check | `completed`, `merged` | Finished |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
@@ -1970,17 +1970,20 @@ secondary button, and no button takes focus on its own. Each is a run command
 (`src/lib/commands.ts`) that follows [Actions](#actions): **Mark complete**
 (`complete`) sends `run.review {action: "complete"}` and predicts `review`
 `accepted` and, for a live session, status `completed`; **Not yet**
-(`not-yet`) sends `action: "not-yet"`, predicts `""` and focuses the composer,
-whose placeholder then reads "Say what is left to do"; **Review later**
+(`not-yet`) sends `action: "not-yet"` and predicts `""`; once the server
+accepts it, the command opens the Chat view with the composer focused, from
+the callout, the actions menu or the palette alike, and the composer's
+placeholder reads "Say what is left to do". **Review later**
 (`review-later`) sends `action: "later"` and predicts `later`. A refusal puts
 the callout back and toasts the server's error. While `review` is `later` the
 callout folds to one line, "Finished:" and a **Review later** chip, whose
 **Review now** unfolds it. After Not yet the session reads Answered, "Not finished yet: you
 chose Not yet" (`notFinishedYet` in `src/lib/status.ts`), and the callout
 stays hidden until a new success report sets `ready` again. The session's
-actions menu and the palette offer the same commands, except that a session
-whose `finish_unopened` is set offers **Review the result**, which opens its
-Chat view, in place of **Mark complete**. All need the gateway's `run.review`
+actions menu and the palette offer the same commands, except that until
+someone opens the result (`finish_unopened`, which any member opening the
+session clears) they offer **Review the result**, which opens its Chat view,
+in place of **Mark complete**. All need the gateway's `run.review`
 method and the kill permission.
 An interactive session still accepts messages and terminal input; the reason
 line says it remains open for follow-up. Its next working turn returns it
