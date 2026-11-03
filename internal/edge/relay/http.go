@@ -8,9 +8,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/http/httputil"
 	"net/netip"
 	"strings"
+	"time"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
@@ -159,6 +161,16 @@ func (r *Relay) Version(serverID string) int {
 }
 
 func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID string, body []byte, browser string) {
+	client := req
+	ctx, cancel := context.WithCancelCause(req.Context())
+	defer cancel(nil)
+	cw := &connWait{r: r, serverID: serverID, cancel: cancel}
+	defer cw.got()
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GetConn: func(string) { cw.wait() },
+		GotConn: func(httptrace.GotConnInfo) { cw.got() },
+	})
+	req = req.WithContext(ctx)
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
@@ -177,11 +189,53 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID strin
 		},
 		Transport:     r.http,
 		FlushInterval: -1,
-		ErrorHandler: func(_ http.ResponseWriter, out *http.Request, err error) {
-			r.refuseHTTP(w, out, serverID, err)
+		ErrorHandler: func(_ http.ResponseWriter, _ *http.Request, err error) {
+			r.refuseHTTP(w, client, serverID, err)
 		},
 	}
 	proxy.ServeHTTP(&responseFilter{ResponseWriter: w}, req)
+}
+
+// connWait is one forwarded request's wait for a connection of its
+// server, from each attempt's GetConn to its GotConn: a transport retry
+// waits again, for at most httpConnWait each time. At most
+// MaxHTTPWaitersPerServer requests wait on a server, so the bodies they
+// hold stay bounded.
+type connWait struct {
+	r        *Relay
+	serverID string
+	cancel   context.CancelCauseFunc
+	// timer and waiting are guarded by r.mu.
+	timer   *time.Timer
+	waiting bool
+}
+
+func (c *connWait) wait() {
+	c.r.mu.Lock()
+	defer c.r.mu.Unlock()
+	if c.waiting {
+		return
+	}
+	if c.r.httpWaiting[c.serverID] >= edgeproto.MaxHTTPWaitersPerServer {
+		c.cancel(errHTTPLimit)
+		return
+	}
+	c.r.httpWaiting[c.serverID]++
+	c.waiting = true
+	c.timer = time.AfterFunc(c.r.httpConnWait, func() { c.cancel(errHTTPLimit) })
+}
+
+func (c *connWait) got() {
+	c.r.mu.Lock()
+	defer c.r.mu.Unlock()
+	if !c.waiting {
+		return
+	}
+	c.waiting = false
+	c.timer.Stop()
+	if c.r.httpWaiting[c.serverID]--; c.r.httpWaiting[c.serverID] == 0 {
+		delete(c.r.httpWaiting, c.serverID)
+	}
 }
 
 // refuseHTTP answers a request that reached no server, or whose server's

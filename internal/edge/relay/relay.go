@@ -143,6 +143,7 @@ type Relay struct {
 
 	// Durations, rates and limits that tests shorten.
 	attachDeadline     time.Duration
+	httpConnWait       time.Duration
 	unclaimedTTL       time.Duration
 	pingInterval       time.Duration
 	idleTimeout        time.Duration
@@ -155,6 +156,9 @@ type Relay struct {
 	closing bool
 	servers map[string]*registration
 	conns   map[string]*relayConn
+	// httpWaiting counts, per server id, the requests waiting for one of
+	// its http connections.
+	httpWaiting map[string]int
 	// claims holds, by connection id, the claim connections a server may
 	// still report as claimed.
 	claims map[string]claimGrant
@@ -210,6 +214,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		budget:             cfg.EgressBudget,
 		flushed:            make(chan struct{}),
 		attachDeadline:     edgeproto.AttachDeadline,
+		httpConnWait:       edgeproto.HTTPConnWait,
 		unclaimedTTL:       edgeproto.UnclaimedTTL,
 		pingInterval:       edgeproto.PingInterval,
 		idleTimeout:        edgeproto.ControlIdleTimeout,
@@ -219,6 +224,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		maxConnsPerAddress: maxConnsPerAddress,
 		servers:            map[string]*registration{},
 		conns:              map[string]*relayConn{},
+		httpWaiting:        map[string]int{},
 		claims:             map[string]claimGrant{},
 		directories:        map[string]*directoryWrite{},
 		addrConns:          map[netip.Prefix]int{},
@@ -229,6 +235,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 	}
 	r.http = &http.Transport{
 		DialContext:         r.dialHTTP,
+		MaxConnsPerHost:     edgeproto.MaxHTTPConnsPerServer,
 		MaxIdleConnsPerHost: edgeproto.MaxHTTPConnsPerServer,
 		IdleConnTimeout:     edgeproto.HTTPIdleTimeout,
 		DisableCompression:  true,

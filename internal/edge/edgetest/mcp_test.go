@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
@@ -100,8 +101,8 @@ func mcpRequest(t *testing.T, method, target string, header http.Header, body io
 // unchanged, the request's headers pass but for cookies and forwarding
 // headers, only the listed answer headers pass, every answer is
 // sandboxed, a streamed answer streams, bodies are capped at 1 MiB, a
-// server holds at most 8 connections apart from its SSH ones, and the
-// edge refuses, with the cause, a server that serves no connector, a
+// server holds at most 8 connections apart from its SSH ones and a
+// request past them waits for one, and the edge refuses, with the cause, a server that serves no connector, a
 // path on the wrong host and an offline server.
 func TestMCPConnector(t *testing.T) {
 	t.Parallel()
@@ -219,9 +220,10 @@ func TestMCPConnector(t *testing.T) {
 	})
 
 	t.Run("per-server cap", func(t *testing.T) {
+		const extra = 4
 		var wg sync.WaitGroup
-		results := make(chan string, edgeproto.MaxHTTPConnsPerServer)
-		for range edgeproto.MaxHTTPConnsPerServer {
+		results := make(chan string, edgeproto.MaxHTTPConnsPerServer+extra)
+		for range edgeproto.MaxHTTPConnsPerServer + extra {
 			wg.Go(func() {
 				resp, err := http.Post(base+"/hold", "text/plain", nil)
 				if err != nil {
@@ -235,10 +237,12 @@ func TestMCPConnector(t *testing.T) {
 		for range edgeproto.MaxHTTPConnsPerServer {
 			<-conn.held
 		}
-		resp, body := mcpRequest(t, http.MethodPost, base, nil, nil)
-		want := fmt.Sprintf("this server already has %d MCP connector requests in progress through the edge; retry shortly", edgeproto.MaxHTTPConnsPerServer)
-		if resp.StatusCode != http.StatusServiceUnavailable || strings.TrimSpace(body) != want {
-			t.Errorf("request past the cap: %s %q, want 503 %q", resp.Status, body, want)
+		select {
+		case <-conn.held:
+			t.Fatalf("a request past the %d connections reached the server while they were busy", edgeproto.MaxHTTPConnsPerServer)
+		case res := <-results:
+			t.Fatalf("a request past the %d busy connections ended with %s; want it to wait", edgeproto.MaxHTTPConnsPerServer, res)
+		case <-time.After(200 * time.Millisecond):
 		}
 		_ = h.mustDial(al, s).Close()
 		close(conn.release)
@@ -248,9 +252,6 @@ func TestMCPConnector(t *testing.T) {
 			if res != "200 OK" {
 				t.Errorf("a held request ended with %s", res)
 			}
-		}
-		if resp, body := mcpRequest(t, http.MethodPost, base, nil, nil); resp.StatusCode != http.StatusOK {
-			t.Errorf("request after the held ones: %s %q", resp.Status, body)
 		}
 	})
 

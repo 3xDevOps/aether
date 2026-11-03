@@ -555,7 +555,9 @@ The edge answers `404 unknown server`, `503 server is not connected to the edge`
 (<id>) runs aether-server <version>, which has no MCP endpoint; upgrade it: sudo
 aether-server update`, `403 this server does not serve MCP connectors`, `503 this
 server already has 8 MCP connector requests in progress through the edge; retry
-shortly` and `413 request body is over the edge's limit of 1048576 bytes`. On the
+shortly` for a request that waited 15 seconds for one of them to finish or found
+16 others already waiting, and
+`413 request body is over the edge's limit of 1048576 bytes`. On the
 universal URL it also answers `401` with `WWW-Authenticate` naming the metadata
 for a request without a token or whose token names no server, `400
 invalid_grant` for a code or refresh token that names none, and `501 server
@@ -565,7 +567,9 @@ at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
 ### Limits
 
 - 48 concurrent SSH connections and 8 MCP connector requests per server, and 16
-  connections per device.
+  connections per device. A connector request past the 8 waits up to 15 seconds
+  for one to finish; at most 16 wait per server, counting those whose connection
+  is being opened.
 - Universal connector URL: 20 server choices and consent pages at once, then 1
   every 3 seconds per address; 60 token requests at once, then 1 a second per
   address and server.
