@@ -11,7 +11,7 @@ const codex = '\nWelcome to Codex [v\x1b[90m0.130.0\x1b[0m]\n\x1b[90mOpenAI\'s c
 
 describe('readSignInPrompt', () => {
   it('reads the Claude sign-in URL out of its terminal link', () => {
-    expect(readSignInPrompt(claude, 'claude')).toEqual({ url: claudeURL, code: undefined })
+    expect(readSignInPrompt(claude, 'claude')).toEqual({ url: claudeURL, linked: true, code: undefined })
   })
 
   it('reads the link target of a URL wrapped across lines', () => {

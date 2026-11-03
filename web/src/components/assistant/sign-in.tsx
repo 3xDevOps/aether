@@ -26,6 +26,9 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
   const [refused, setRefused] = useState<string>()
   const [ended, setEnded] = useState(false)
   const [shown, setShown] = useState(terminalFirst)
+  // A reattach replays a rendered screen, where a wrapped URL without its
+  // link target cannot be read whole.
+  const [replayed, setReplayed] = useState(false)
   const codeText = useRef<HTMLElement>(null)
   const controller = useXterm({
     onData: (data) => attachment.current?.send(data),
@@ -37,7 +40,8 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
     let decoder = new TextDecoder()
     let text = ''
     const attached = connectAttach(() => client.assistantLoginSocket(agent.name), {
-      onData: (chunk) => {
+      onData: (chunk, kind) => {
+        if (kind !== 'live') setReplayed(true)
         output.current.push(chunk)
         text += decoder.decode(chunk, { stream: true })
         setPrompt(readSignInPrompt(text, agent.name))
@@ -49,7 +53,10 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
         decoder = new TextDecoder()
         text = ''
         live.current?.reset()
+        setReplayed(false)
         setRefused(undefined)
+        // A size measured before the attach was accepted was dropped.
+        if (live.current) attached.resize(live.current.cols, live.current.rows)
       },
       // A reconnect after the sign-in finished while disconnected would
       // start another sign-in and delete the one just made.
@@ -85,6 +92,7 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
   }, [terminal])
   // What the sign-in printed last is its real outcome or error.
   const settled = ended || refused !== undefined
+  const url = prompt.linked || !replayed ? prompt.url : undefined
   const name = vendor[agent.name] ?? agent.display_name
   const sendCode = (event: FormEvent) => {
     event.preventDefault()
@@ -101,9 +109,9 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
         Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own container and is kept there, apart from your sessions, which cannot read or change it.
       </p>
       {refused && <Callout tone="failed" role="alert" title="The sign-in could not start">{refused}</Callout>}
-      {!settled && (prompt.url ? (
+      {!settled && (url ? (
         <div className="flex flex-col items-start gap-3">
-          <a className={buttonVariants({ size: 'sm' })} href={prompt.url} target="_blank" rel="noopener noreferrer">Open {name} sign-in</a>
+          <a className={buttonVariants({ size: 'sm' })} href={url} target="_blank" rel="noopener noreferrer">Open {name} sign-in</a>
           {prompt.code && (
             <p className="flex items-center gap-1 text-ui">
               Enter this code there: <code ref={codeText} className="select-all font-code font-medium">{prompt.code}</code>
@@ -121,9 +129,9 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
           )}
         </div>
       ) : (
-        <p role="status" className="text-ui-sm text-muted">Starting the sign-in…</p>
+        <p role="status" className="text-ui-sm text-muted">{prompt.url ? 'Open the link the sign-in printed in the terminal below.' : 'Starting the sign-in…'}</p>
       ))}
-      {(shown || settled) && (
+      {(shown || settled || (prompt.url && !url)) && (
         // The fit addon sizes the terminal from this box, so its height must not follow the terminal's.
         <div className="h-[min(32rem,70dvh)] min-h-64">
           <TerminalPane controller={controller} />

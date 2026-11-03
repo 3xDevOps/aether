@@ -268,6 +268,24 @@ describe('states', () => {
     expect(signIns()).toHaveLength(1)
   })
 
+  it('keeps the sign-in the member chose over an automatic start still waiting on its read', async () => {
+    const agents = [
+      { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' },
+      { name: 'codex', display_name: 'Codex', ready: false, reason: 'Not signed in for the assistant' },
+    ]
+    const setup = status({ state: 'setup', agent: undefined, sign_in_recorded: false, agents })
+    useStore.getState().setAssistantStatus(setup)
+    const waiting: ((value: typeof setup) => void)[] = []
+    vi.mocked(api.assistantStatus).mockImplementation(() => new Promise((resolve) => { waiting.push(resolve) }))
+    const aside = await openPanel()
+    const list = await within(aside).findByRole('list', { name: 'Agents' })
+    await userEvent.click(within(within(list).getByText('Codex').closest('li')!).getByRole('button', { name: 'Sign in' }))
+    expect(waiting.length).toBeGreaterThan(0)
+    await act(async () => waiting.forEach((resolve) => resolve(setup)))
+    expect(await within(aside).findByRole('region', { name: 'Sign in to Codex' })).toBeDefined()
+    expect(StubSocket.opened.filter((socket) => socket.url.includes('assistant_login=claude'))).toHaveLength(0)
+  })
+
   it('starts no sign-in on its own when the status read on load is stale', async () => {
     const agents = [{ name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' }]
     useStore.getState().setAssistantStatus(status({ state: 'setup', agent: undefined, sign_in_recorded: false, agents }))

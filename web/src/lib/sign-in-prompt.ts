@@ -6,6 +6,8 @@ const escapes = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[
 
 export interface SignInPrompt {
   url?: string
+  /** The URL came from a terminal link, which keeps it whole when the screen wraps it. */
+  linked?: boolean
   /** Codex's device code, entered on the page the URL opens. */
   code?: string
 }
@@ -30,6 +32,7 @@ export function readSignInPrompt(output: string, agent: string): SignInPrompt {
   const links = [...output.matchAll(/\x1b\]8;[^;\x07\x1b]*;(https:\/\/[^\x07\x1b]+)(?:\x07|\x1b\\)/g)].map((m) => m[1]!)
   const plain = [...text.matchAll(/https:\/\/\S+(?=\s)/g)].map((m) => m[0])
   const url = (links.length ? links : plain).filter((u) => vendorURL(agent, u)).at(-1)
+  const linked = links.length > 0 && url !== undefined
   const code = /one-time code[^\n]*\n\s*(\S+)\s/.exec(text)?.[1]
-  return { url, code }
+  return linked ? { url, linked, code } : { url, code }
 }
