@@ -43,7 +43,7 @@ func TestAssistantAccountNeverTouchesTheEnvironmentLogin(t *testing.T) {
 	if err := os.MkdirAll(signin, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for agent, account := range map[string]string{"claude": "account=alice;organization=org-alice", "codex": "chatgpt:acct-alice"} {
+	for agent, account := range map[string]string{"claude": "account=alice;organization=org-alice", "codex": "chatgpt:acct-alice:key=0123abcd"} {
 		if err := os.WriteFile(filepath.Join(signin, agent+".json"), []byte(account), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +53,7 @@ func TestAssistantAccountNeverTouchesTheEnvironmentLogin(t *testing.T) {
 		return fmt.Sprintf(`{"claudeAiOauth":{"accessToken":%q,"refreshToken":"alice~0","expiresAt":%d,"scopes":["user:inference"]}}`, token, expiresAt.UnixMilli())
 	}
 	codex := func(account string) string {
-		return `{"auth_mode":"chatgpt","tokens":{"id_token":"` + codexToken(account) + `","access_token":"opaque","refresh_token":"` + account + `~0"}}`
+		return `{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-synthetic-env","tokens":{"id_token":"` + codexToken(account) + `","access_token":"opaque","refresh_token":"` + account + `~0"}}`
 	}
 	later, earlier := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
 	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -71,10 +71,12 @@ func TestAssistantAccountNeverTouchesTheEnvironmentLogin(t *testing.T) {
 			want: protocol.AssistantAccount{Agent: "claude", State: protocol.AssistantAccountExpired}},
 		{name: "Claude token the profile refuses", agent: "claude", content: claude("revoked", later), wantErr: "Anthropic answered 401 Unauthorized, refusing your environment's Claude token"},
 		{name: "profile down", agent: "claude", content: claude("access-alice", later), profileDown: true, wantErr: "couldn't verify your environment's sign-in with Anthropic: 503"},
-		{name: "same Codex account", agent: "codex", content: codex("acct-alice"),
+		{name: "same Codex account under another API key", agent: "codex", content: codex("acct-alice"),
 			want: protocol.AssistantAccount{Agent: "codex", State: protocol.AssistantAccountSame}},
 		{name: "another Codex account", agent: "codex", content: codex("acct-mallory"),
 			want: protocol.AssistantAccount{Agent: "codex", State: protocol.AssistantAccountOther, Environment: "ChatGPT account acct-mallory"}},
+		{name: "Codex API key", agent: "codex", content: `{"OPENAI_API_KEY":"sk-synthetic-env"}`,
+			want: protocol.AssistantAccount{Agent: "codex", State: protocol.AssistantAccountOther, Environment: "an API key"}},
 		{name: "no Codex login", agent: "codex", wantErr: "your environment has no ~/.codex/auth.json"},
 	} {
 		rel := assistantSignInRel[tc.agent]

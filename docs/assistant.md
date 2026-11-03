@@ -118,8 +118,9 @@ file's token claims, with no network call. The line reads one of:
 
 - `Same Claude account as your sessions`, with the email when the profile
   names one.
-- `Your sessions use another Claude account (account <uuid>, organization <uuid>)`,
-  or for Codex `(ChatGPT account <id>)` or `(an API key)`.
+- `Your sessions use another Claude account (account <uuid>, organization <uuid>, <email>)`,
+  or for Codex `(ChatGPT account <id>)` or `(an API key)`. Codex compares the
+  ChatGPT account only; the API key a ChatGPT login holds is its own.
 - `Can't compare: your environment's Claude token is expired. Start a session to refresh it`.
   Codex has no such case, because its claims are read without the vendor.
 - `Can't compare with your sessions' <vendor> account: <error>`, for example

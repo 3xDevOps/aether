@@ -15,8 +15,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/quota"
 )
 
-const environmentSignIn = "your environment's sign-in"
-
 // AssistantAccount compares the account recorded for agent's assistant
 // sign-in with the login in the member's environment. It only reads that
 // login and never refreshes it: a refresh would spend the refresh token the
@@ -28,7 +26,7 @@ func (s *Scheduler) AssistantAccount(ctx context.Context, member domain.MemberID
 		return out, fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
 	pin, err := os.ReadFile(filepath.Join(assistantSignInDir(s.cfg.AssistantDir, member), agent+".json"))
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) || err == nil && len(pin) == 0 {
 		out.State = protocol.AssistantAccountUnrecorded
 		return out, nil
 	}
@@ -60,7 +58,7 @@ func (s *Scheduler) AssistantAccount(ctx context.Context, member domain.MemberID
 		if err != nil {
 			return failed(fmt.Errorf("~/%s: %w", rel, err))
 		}
-		profile, err := s.cfg.AssistantIssuer.withDefaults().claudeProfile(ctx, environmentSignIn, token)
+		profile, err := s.cfg.AssistantIssuer.withDefaults().claudeProfile(ctx, "your environment's sign-in", token)
 		if errors.Is(err, ErrAssistantSignInRefused) {
 			return failed(fmt.Errorf("%s, refusing your environment's Claude token. Start a session to refresh it", strings.TrimSuffix(err.Error(), ": "+ErrAssistantSignInRefused.Error())))
 		}
@@ -88,10 +86,11 @@ func (s *Scheduler) AssistantAccount(ctx context.Context, member domain.MemberID
 		if err != nil {
 			return failed(fmt.Errorf("~/%s: %w", rel, err))
 		}
-		account, out.Environment = "chatgpt:"+chatgpt+auth.keyID, "ChatGPT account "+chatgpt
-		if auth.keyID != "" {
-			out.Environment += " with an API key"
-		}
+		// The pin includes the assistant's own API key, which another
+		// login of the same account does not share.
+		account, out.Environment = "chatgpt:"+chatgpt, "ChatGPT account "+chatgpt
+		pinned, _, _ := strings.Cut(string(pin), ":key=")
+		pin = []byte(pinned)
 	}
 	out.State = protocol.AssistantAccountOther
 	if account == string(pin) {

@@ -464,8 +464,8 @@ func (i AssistantIssuer) post(ctx context.Context, vendor, url string, body map[
 	return i.do(req, assistantSignIn, vendor, out)
 }
 
-// do sends req to check the sign-in what names and decodes a 2xx answer
-// into out. A 400 or 401 is the issuer refusing the sign-in; any other
+// do sends req to verify what, a sign-in, and decodes a 2xx answer into
+// out. A 400 or 401 is the issuer refusing the sign-in; any other
 // failure is reported with the issuer's answer.
 func (i AssistantIssuer) do(req *http.Request, what, vendor string, out any) error {
 	resp, err := i.Client.Do(req)
