@@ -185,7 +185,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			return nil, adoptErr
 		}
 		if destroyErr := s.destroyTerminalContainer(ctx, runtime.ID(row.ContainerID)); destroyErr != nil {
-			s.retainTerminalAfterRuntimeError(m, row, runtime.ID(row.ContainerID))
+			s.retainTerminalAfterRuntimeError(m, row, runtime.ID(row.ContainerID), terminalUnknownUser)
 			return nil, fmt.Errorf("scheduler: destroy stale terminal: %w", destroyErr)
 		}
 	}
@@ -247,6 +247,12 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		Sudo:             plan.Sudo,
 	}
 	spec.Fingerprint = terminalFingerprint(spec, s.cfg.StandardImage)
+	// A container this call creates runs as plan.User; a kept one or a
+	// root one leaves its user to inspection.
+	createdUser := plan.User
+	if createdUser == "" || kept != "" {
+		createdUser = terminalUnknownUser
+	}
 	cid, image, err := s.startOrCreateTerminal(ctx, kept, spec)
 	if err != nil {
 		if cid == "" {
@@ -255,7 +261,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			if updateErr := s.updateTerminalCoordination(member, cid); updateErr != nil {
 				slog.Warn("scheduler: retain terminal coordination container reference", "member", member, "container", cid, "error", updateErr)
 			}
-			s.retainTerminalAfterRuntimeError(m, nil, cid)
+			s.retainTerminalAfterRuntimeError(m, nil, cid, createdUser)
 		}
 		s.releaseTerminalReservation(terminalReservation)
 		return nil, err
@@ -266,7 +272,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			if destroyErr == nil || errors.Is(destroyErr, runtime.ErrNotFound) {
 				s.releaseTerminalCoordination(member)
 			} else {
-				s.retainTerminalAfterRuntimeError(m, nil, cid)
+				s.retainTerminalAfterRuntimeError(m, nil, cid, createdUser)
 			}
 			s.releaseTerminalReservation(terminalReservation)
 			if destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
@@ -605,7 +611,7 @@ func terminalOwnershipConflict(member domain.MemberID, other *credentialUserRese
 		user = "root"
 	}
 	return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
-		member, other.owner, other.user, user)
+		member, other.holder(), other.user, user)
 }
 
 func (s *Scheduler) retainTerminalReservation(entry *terminalSupervision, user string) {
@@ -666,17 +672,17 @@ func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member,
 	case ctx.Err() != nil:
 		return nil, false, ctx.Err()
 	default:
-		s.retainTerminalAfterRuntimeError(member, row, cid)
+		s.retainTerminalAfterRuntimeError(member, row, cid, terminalUnknownUser)
 		return nil, false, fmt.Errorf("scheduler: probe terminal container: %w", waitErr)
 	}
-	return s.pendingTerminalAdoption(member, row, cid), true, nil
+	return s.pendingTerminalAdoption(member, row, cid, terminalUnknownUser), true, nil
 }
 
 // pendingTerminalAdoption captures ownership before runtime metadata, PTY
 // attach, or durable persistence is repaired. The reservation is deliberately
 // unknown until Inspect succeeds; treating an inconclusive probe as root would
 // allow another container to take ownership of the member home.
-func (s *Scheduler) pendingTerminalAdoption(member *domain.Member, row *domain.Terminal, cid runtime.ID) *terminalAdoption {
+func (s *Scheduler) pendingTerminalAdoption(member *domain.Member, row *domain.Terminal, cid runtime.ID, user string) *terminalAdoption {
 	terminal := terminalForAdoption(member, row, cid, "")
 	if terminal.Image == "" {
 		terminal.Image = s.cfg.StandardImage
@@ -685,15 +691,15 @@ func (s *Scheduler) pendingTerminalAdoption(member *domain.Member, row *domain.T
 		member: member.ID, containerID: cid, image: terminal.Image,
 		startedAt: terminal.StartedAt, metadataPending: true,
 	}
-	s.retainTerminalReservation(entry, terminalUnknownUser)
+	s.retainTerminalReservation(entry, user)
 	return &terminalAdoption{
 		terminal: terminal, home: "", reservation: entry.userReservation,
 		metadataPending: true, persistPending: row == nil || row.ContainerID != string(cid),
 	}
 }
 
-func (s *Scheduler) retainTerminalAfterRuntimeError(member *domain.Member, row *domain.Terminal, cid runtime.ID) {
-	s.registerAdoptedTerminal(s.pendingTerminalAdoption(member, row, cid))
+func (s *Scheduler) retainTerminalAfterRuntimeError(member *domain.Member, row *domain.Terminal, cid runtime.ID, user string) {
+	s.registerAdoptedTerminal(s.pendingTerminalAdoption(member, row, cid, user))
 }
 
 func terminalForAdoption(member *domain.Member, row *domain.Terminal, cid runtime.ID, image string) *domain.Terminal {
