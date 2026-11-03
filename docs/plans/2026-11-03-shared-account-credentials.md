@@ -153,7 +153,9 @@ current login into its old inode forks the refresh-token chain.
    <member-id>,...`, which lists the accounts whose shares use session login
    copies. Every other share keeps today's mounts.
 3. The canary lists only the owner's own account, shared with a test member
-   the owner picks, through at least two real refreshes of each CLI. Phase 2
+   the owner picks, through at least two real refreshes of each CLI. The flag
+   selects whole accounts, so every existing share of that account joins the
+   canary too; `aether account list` shows them before it starts. Phase 2
    waits for it to pass and for the owner's go.
 
 ## Phases
