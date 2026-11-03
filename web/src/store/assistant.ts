@@ -117,6 +117,9 @@ export interface AssistantSlice {
   assistantGeneration: number
   /** Run notices from the assistant that arrived while the panel was closed. */
   assistantNotices: number
+  /** The panel started a sign-in on its own; it never does again while the page lives. */
+  assistantSignInStarted: boolean
+  noteAssistantSignInStarted: () => void
   noteAssistantNotice: () => void
   /** A card's Approve everything from now on approved it: the panel asks to confirm turning auto-approval on. */
   assistantConfirmAutoApprove: boolean
@@ -175,6 +178,8 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   assistantFocus: false,
   assistantGeneration: 0,
   assistantNotices: 0,
+  assistantSignInStarted: false,
+  noteAssistantSignInStarted: () => set({ assistantSignInStarted: true }),
   noteAssistantNotice: () => set((s) => (s.assistantOpen ? s : { assistantNotices: s.assistantNotices + 1 })),
   assistantConfirmAutoApprove: false,
   setAssistantConfirmAutoApprove: (assistantConfirmAutoApprove) => set({ assistantConfirmAutoApprove }),

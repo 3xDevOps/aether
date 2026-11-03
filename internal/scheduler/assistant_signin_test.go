@@ -272,12 +272,20 @@ func TestAssistantSignInThatWroteNothingUsable(t *testing.T) {
 		_, err := e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, "")
 		return err
 	}
+	recorded := func(want bool, when string) {
+		t.Helper()
+		if got, err := e.sched.AssistantSignInRecorded(e.member.ID); err != nil || got != want {
+			t.Fatalf("%s: sign-in recorded = %v, %v; want %v", when, got, err, want)
+		}
+	}
 	if err := start(); !errors.Is(err, ErrAssistantNotSignedIn) {
 		t.Fatalf("a start with no sign-in = %v, want not signed in", err)
 	}
+	recorded(false, "before any sign-in")
 	if err := e.sched.markAssistantSignIn(e.member.ID, "claude"); err != nil {
 		t.Fatal(err)
 	}
+	recorded(true, "a sign-in that has not written anything yet")
 	writeHomeFile(t, home, ".claude/.credentials.json", `{}`)
 	if err := start(); !errors.Is(err, ErrAssistantNotSignedIn) {
 		t.Fatalf("a start after an unusable sign-in = %v, want not signed in", err)
@@ -285,9 +293,11 @@ func TestAssistantSignInThatWroteNothingUsable(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(assistantSignInDir(assistantDir, e.member.ID), "claude.pending")); !os.IsNotExist(err) {
 		t.Fatalf("the unusable sign-in is still pending: %v", err)
 	}
+	recorded(false, "after the unusable sign-in was forgotten")
 	if _, err := e.sched.StartAssistantLogin(t.Context(), e.member.ID, "claude", 80, 24); err != nil {
 		t.Fatalf("a sign-in after the unusable one: %v", err)
 	}
+	recorded(true, "a running sign-in")
 }
 
 // TestAssistantPendingSignInIsRecordedBeforeAnotherAgentRuns records a

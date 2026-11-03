@@ -35,6 +35,7 @@ func (h *fakeHost) RemoveAssistant(_ context.Context, member domain.MemberID) er
 }
 
 func (*fakeHost) AssistantLoginFound(domain.MemberID, string) (bool, error) { return false, nil }
+func (*fakeHost) AssistantSignInRecorded(domain.MemberID) (bool, error)    { return false, nil }
 
 func (*fakeHost) AssistantAccount(context.Context, domain.MemberID, string) (protocol.AssistantAccount, error) {
 	return protocol.AssistantAccount{}, nil

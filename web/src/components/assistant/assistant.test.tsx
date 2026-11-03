@@ -215,6 +215,7 @@ describe('states', () => {
     vi.mocked(api.assistantStatus).mockResolvedValue(status({
       state: 'setup',
       agent: undefined,
+      sign_in_recorded: true,
       agents: [
         { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'No login was found' },
         { name: 'codex', display_name: 'Codex', ready: false, reason: 'The Enhanced adapter is not installed' },
@@ -226,6 +227,45 @@ describe('states', () => {
     expect(agents.getByText('No login was found')).toBeDefined()
     expect(agents.getByText('The Enhanced adapter is not installed')).toBeDefined()
     expect(StubSocket.opened).toHaveLength(0)
+  })
+
+  it('starts the first agent\'s sign-in on its own only on the first open, without the terminal', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({
+      state: 'setup',
+      agent: undefined,
+      sign_in_recorded: false,
+      agents: [
+        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' },
+        { name: 'codex', display_name: 'Codex', ready: false, reason: 'Not signed in for the assistant' },
+      ],
+    }))
+    const signIns = () => StubSocket.opened.filter((socket) => socket.url.includes('assistant_login='))
+    const aside = await openPanel()
+    const region = await within(aside).findByRole('region', { name: 'Sign in to Claude Code' })
+    await waitFor(() => expect(signIns().map((socket) => socket.url)).toEqual([expect.stringMatching(/assistant_login=claude$/)]))
+    expect(region.querySelector('.xterm')).toBeNull()
+
+    const url = 'https://claude.com/cai/oauth/authorize?code=true&state=s'
+    const socket = signIns()[0]!
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({ data: JSON.stringify({ ok: true, has_control: true, cols: 80, rows: 24, replay: 0 }) })
+      socket.onmessage?.({ data: new TextEncoder().encode(`visit: \x1b]8;;${url}\x07\x1b[94m${url}\x1b[39m\x1b]8;;\x07\r\nPaste code here if prompted > `).buffer })
+    })
+    expect((await within(region).findByRole('link', { name: 'Open Claude sign-in' })).getAttribute('href')).toBe(url)
+    await userEvent.type(within(region).getByLabelText('Paste the code'), 'code-123#state')
+    await userEvent.click(within(region).getByRole('button', { name: 'Send code' }))
+    expect(socket.frames().filter((frame) => (frame as { type?: string }).type === 'input')).toEqual([
+      { type: 'input', data: 'code-123#state' },
+      { type: 'input', data: '\r' },
+    ])
+
+    await userEvent.click(within(region).getByRole('button', { name: 'Close' }))
+    expect(await within(aside).findByRole('list', { name: 'Agents' })).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'Close assistant' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    expect(await within(await panel()).findByRole('list', { name: 'Agents' })).toBeDefined()
+    expect(signIns()).toHaveLength(1)
   })
 
   it('signs an agent in for the assistant alone and leaves setup once it is ready', async () => {

@@ -91,16 +91,32 @@ Codex. An agent is ready when you signed it in for the assistant; a sign-in in
 your environment does not count, because your sessions can change it. A row that
 is not ready says `Not signed in for the assistant` and has **Sign in**.
 
-**Sign in** opens a terminal running the agent's sign-in in the assistant's
-container: `claude-agent-acp --cli auth login` for Claude Code, which prints a
-URL and asks for the code the page shows, or `codex login --device-auth` for
-Codex, which prints a URL and a code to enter there. It installs the adapter
-first if needed. Starting a sign-in deletes that agent's earlier sign-in, so
-what the server records is what the sign-in writes. The sign-in is written to
-the assistant's home only. Starting
-it stops a running assistant; the next prompt starts it again, and a
-prompt sent while the sign-in runs fails until it exits. Select **Done** when
-it exits.
+The first time you open the panel, while no agent has ever been signed in for
+the assistant, the panel starts the sign-in of the first agent the server
+lists, Claude Code before Codex. It never starts one on its own again: the
+server reports `sign_in_recorded` in the assistant status once any agent's
+sign-in has begun, and the dashboard starts at most one per page load.
+Otherwise select **Sign in** on a row.
+
+The sign-in runs in the assistant's container: `claude-agent-acp --cli auth
+login` for Claude Code, or `codex login --device-auth` for Codex. It installs
+the adapter first if needed. The panel reads the sign-in's output and shows:
+
+- Claude Code: **Open Claude sign-in**, the URL the sign-in printed, and a
+  **Paste the code** field that types the code the page shows into the
+  sign-in, followed by Enter.
+- Codex: **Open Codex sign-in** and the one-time code to enter there, with a
+  copy button.
+
+**Show terminal** shows the sign-in's own terminal; when the sign-in exits or
+cannot start, the panel shows the terminal and the real error. In **Settings >
+Assistant > Sign-in** the terminal shows from the start.
+
+Starting a sign-in deletes that agent's earlier sign-in, so what the server
+records is what the sign-in writes. The sign-in is written to the assistant's
+home only. Starting it stops a running assistant; the next prompt starts it
+again, and a prompt sent while the sign-in runs fails until it exits. Select
+**Done** when it exits.
 
 Aether checks only that the sign-in file exists, not that it still works. When
 the sign-in expires or you want another account, use **Settings > Assistant >

@@ -88,6 +88,7 @@ type Host interface {
 	RemoveAssistant(ctx context.Context, member domain.MemberID) error
 	AssistantLoginFound(member domain.MemberID, agent string) (bool, error)
 	AssistantAccount(ctx context.Context, member domain.MemberID, agent string) (protocol.AssistantAccount, error)
+	AssistantSignInRecorded(member domain.MemberID) (bool, error)
 }
 
 type Service struct {
@@ -326,6 +327,10 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	if err != nil {
 		return protocol.AssistantStatus{}, err
 	}
+	recorded, err := s.cfg.Host.AssistantSignInRecorded(id)
+	if err != nil {
+		return protocol.AssistantStatus{}, err
+	}
 	queue, err := s.queueOf(ctx, id, row.Generation)
 	if err != nil {
 		return protocol.AssistantStatus{}, err
@@ -334,6 +339,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 		Agents: agents, Error: failure, Confirmations: cards, Queue: queue,
 		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
 		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary, ApprovalChosen: settings.ApprovalChosen,
+		SignInRecorded: recorded,
 	}
 	switch {
 	case live != nil:

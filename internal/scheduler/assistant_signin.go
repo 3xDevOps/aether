@@ -147,6 +147,18 @@ func (s *Scheduler) assistantSignedIn(member domain.MemberID, agent string) (boo
 	return false, nil
 }
 
+// AssistantSignInRecorded reports whether any agent has a sign-in record or
+// a pending one: whether a sign-in for the member's assistant ever began
+// and was not forgotten.
+func (s *Scheduler) AssistantSignInRecorded(member domain.MemberID) (bool, error) {
+	for _, agent := range assistantAgents {
+		if ok, err := s.assistantSignedIn(member, agent); err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
 // verifyAssistantSignIn refreshes agent's sign-in with its issuer, writes the
 // rotated tokens back, and checks the account the issuer names against the
 // one recorded, recording it first when a sign-in is pending. A sign-in the

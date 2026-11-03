@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AssistantSignIn } from '@/components/assistant/sign-in'
 import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -49,6 +49,15 @@ function usePagePrompts(): Example[] {
 export function AssistantSetup({ status }: { status: AssistantStatus }) {
   const [signing, setSigning] = useState('')
   const signingIn = status.agents.find((agent) => agent.name === signing)
+  // A sign-in deletes the agent's earlier one and stops a running assistant,
+  // so only the first, with nothing to lose, starts on its own.
+  const first = status.sign_in_recorded === false ? status.agents[0]?.name : undefined
+  useEffect(() => {
+    const store = useStore.getState()
+    if (!first || store.assistantSignInStarted) return
+    store.noteAssistantSignInStarted()
+    setSigning(first)
+  }, [first])
   if (signingIn) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
@@ -59,6 +68,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
           key={signingIn.name}
           agent={signingIn}
           client={api}
+          terminal={false}
           onDone={() => {
             setSigning('')
             void refreshAssistant(useStore, api)
