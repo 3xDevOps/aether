@@ -476,6 +476,7 @@ sudo systemctl restart aether-server
 | `--run-memory` | 8 GiB | Memory ceiling per session and environment, in bytes. Swap adds a quarter of it. | Raise when sessions hit out-of-memory kills. |
 | `--run-pids` | `4096` | Process and thread ceiling per container. | Raise for builds that start many processes. |
 | `--agent-update` | `true` | Update a shipped agent in the member's home, in the background, when a session launches. | Turn off on a host without internet access, or to hold a version. |
+| `--session-login-accounts` | empty | Member IDs, comma-separated, whose `claude` and `codex` shares mount a refresh-token-free copy of the login that the server refreshes ([security.md](security.md#session-login-copies)). | List an account to keep its refresh token out of recipients' sessions. |
 
 The CPU, memory and process ceilings apply to containers created after the
 change. A host-wide out-of-memory kill takes agent processes before the server

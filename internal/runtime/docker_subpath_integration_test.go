@@ -428,6 +428,44 @@ func TestDockerSubpathLoginNotSeenIsRefused(t *testing.T) {
 	}
 }
 
+// TestDockerCheckedBindFollowsItsInode binds a login copy from outside the
+// launcher's home over the launcher's own login with CheckInode: the
+// container reads the copy and an in-place rewrite of it, and once a rename
+// on the host leaves the container holding another inode than the source
+// path, a check at start refuses it.
+func TestDockerCheckedBindFollowsItsInode(t *testing.T) {
+	t.Parallel()
+	d := newTestDocker(t)
+	h := newSubpathHomes(t)
+	writeTree(t, h.launcher, map[string]string{loginRel: "launcher-login"})
+	writeTree(t, h.victim, map[string]string{"copy.json": "copy-1"})
+	source := filepath.Join(h.victim, "copy.json")
+	spec := subpathSpec("checked", h.home(), Mount{HostPath: source, ContainerPath: loginTarget, ReadOnly: true, CheckInode: true})
+	id := createContainer(t, d, spec)
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("Start(): %v", err)
+	}
+	wantContent(t, d, id, loginTarget, "copy-1")
+	if err := os.WriteFile(source, []byte("copy-2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantContent(t, d, id, loginTarget, "copy-2")
+	if code, out := sh(t, d, id, "printf mine > "+loginTarget); code == 0 {
+		t.Fatalf("the container wrote its read-only login: %s", out)
+	}
+
+	held := inode(t, source)
+	writeTree(t, h.victim, map[string]string{"copy.new": "replaced"})
+	if err := os.Rename(filepath.Join(h.victim, "copy.new"), source); err != nil {
+		t.Fatal(err)
+	}
+	wantContent(t, d, id, loginTarget, "copy-2")
+	want := fmt.Sprintf("%s in the container is inode %d, not %s (inode %d); Docker lists the mount", loginTarget, held, source, inode(t, source))
+	if err := d.Start(t.Context(), id); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Start() after the rename = %v, want an error containing %q", err, want)
+	}
+}
+
 // TestDockerSubpathLoginBehindALinkIsSeen: the image's /lib64 links to lib,
 // so the engine mounts the login at /lib/aether-login and the mount table
 // lists that path. Start finds the mount there.
@@ -489,7 +527,7 @@ func TestDockerSubpathLoginSurvivesOnlyPinnedRefreshes(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := loginTarget + " is not a mount point in the container; Docker lists the mount"
-			if err := d.checkSubpathMounts(t.Context(), shared, info.Container.HostConfig.Mounts); err == nil || !strings.Contains(err.Error(), want) {
+			if err := d.checkMountInodes(t.Context(), shared, info.Container.HostConfig.Mounts, ""); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("check after the login was detached = %v, want an error containing %q", err, want)
 			}
 		})

@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordcli"
+	"github.com/3xDevOps/Aether/internal/domain"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -209,6 +211,7 @@ type serveOptions struct {
 	edgeReviewer         *bool
 	conflictCoordination *bool
 	agentUpdate          *bool
+	sessionLoginAccounts *memberListValue
 	stallThreshold       *time.Duration
 	firstEventGrace      *time.Duration
 	streamQuietGrace     *time.Duration
@@ -257,6 +260,9 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 			"with aether member link --reviewer; needs edge-access account; changed only on this host")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping sessions exchange coordination messages")
 	o.agentUpdate = fs.Bool("agent-update", true, "update a shipped agent installed in the member home before launching it")
+	o.sessionLoginAccounts = new(memberListValue)
+	fs.Var(o.sessionLoginAccounts, "session-login-accounts",
+		"comma-separated member IDs whose shared claude and codex logins reach other members' sessions as access-token-only copies the server refreshes")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a session may go with no output and no file changes before it parks needs-attention (0 = 10m)")
 	o.firstEventGrace = fs.Duration("first-event-grace", 0,
@@ -280,6 +286,39 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"OCI runtime for run and member environment containers: auto uses sysbox-runc when Docker has it registered "+
 			"(Docker inside sessions without --privileged), otherwise the daemon default; any other value is used as given, e.g. runc to opt out")
 	return o
+}
+
+// memberListValue is a comma-separated list of member IDs.
+type memberListValue []domain.MemberID
+
+func (v *memberListValue) String() string {
+	ids := make([]string, len(*v))
+	for i, id := range *v {
+		ids[i] = string(id)
+	}
+	return strings.Join(ids, ",")
+}
+
+func (v *memberListValue) Set(s string) error {
+	*v = nil
+	if s == "" {
+		return nil
+	}
+	for _, id := range strings.Split(s, ",") {
+		if id = strings.TrimSpace(id); id == "" {
+			return fmt.Errorf("empty member ID in %q", s)
+		}
+		*v = append(*v, domain.MemberID(id))
+	}
+	return nil
+}
+
+func (v *memberListValue) set() map[domain.MemberID]bool {
+	out := make(map[domain.MemberID]bool, len(*v))
+	for _, id := range *v {
+		out[id] = true
+	}
+	return out
 }
 
 func serve(args []string) error {
@@ -341,6 +380,8 @@ func serve(args []string) error {
 		CoordinationDisabled: !*o.conflictCoordination,
 
 		HarnessUpdateDisabled: !*o.agentUpdate,
+
+		SessionLoginAccounts: o.sessionLoginAccounts.set(),
 
 		// The one place a process is granted the right to replace itself
 		// and to ask systemd for a restart. Nothing else supplies it, so

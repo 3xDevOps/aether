@@ -43,6 +43,9 @@ const (
 	labelCreationKey = "aether.creation-key"
 	// labelFingerprint persists Spec.Fingerprint, readable through Inspect.
 	labelFingerprint = "aether.fingerprint"
+	// labelInodeChecks holds the targets of the CheckInode binds, as a JSON
+	// array: Docker records no field of its own a bind could carry it in.
+	labelInodeChecks = "aether.inode-checks"
 
 	// RuntimeAuto picks sysbox-runc when the daemon has it registered.
 	RuntimeAuto   = "auto"
@@ -297,14 +300,25 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	// A saved image carries these labels from the container it was committed
 	// from, and Docker merges image labels into new containers; empty values
 	// keep them from reaching a container that has no gate or dockerd.
-	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSudo, labelSecretEnv} {
+	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSudo, labelSecretEnv, labelInodeChecks} {
 		cfg.Labels[key] = ""
 	}
 	cfg.Labels[labelFingerprint] = spec.Fingerprint
 	nestedDockerd := spec.NestedDocker && containerRuntime == runtimeSysbox
-	// Gated so the agent starts only once Start has checked every subpath mount.
+	// Gated so the agent starts only once Start has checked every subpath
+	// mount and CheckInode bind.
+	var checked []string
+	for _, m := range spec.Mounts {
+		if m.CheckInode && m.Subpath == "" && m.Overlay == "" {
+			checked = append(checked, m.ContainerPath)
+		}
+	}
+	if len(checked) > 0 {
+		targets, _ := json.Marshal(checked)
+		cfg.Labels[labelInodeChecks] = string(targets)
+	}
 	subpaths := slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" })
-	if spec.SetupScript != "" || nestedDockerd || subpaths || unprivileged(spec.User) {
+	if spec.SetupScript != "" || nestedDockerd || subpaths || len(checked) > 0 || unprivileged(spec.User) {
 		sentinel := newSetupSentinel()
 		cfg.Entrypoint = gateEntrypoint(sentinel)
 		cfg.Cmd = spec.Command
@@ -543,7 +557,7 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 		}
 		return fmt.Errorf("runtime: start container: %w", err)
 	}
-	if err := d.checkSubpathMounts(ctx, id, info.Container.HostConfig.Mounts); err != nil {
+	if err := d.checkMountInodes(ctx, id, info.Container.HostConfig.Mounts, info.Container.Config.Labels[labelInodeChecks]); err != nil {
 		if !wasRunning {
 			_, _ = d.cli.ContainerKill(context.WithoutCancel(ctx), string(id), client.ContainerKillOptions{Signal: "KILL"})
 		}

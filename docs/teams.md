@@ -487,6 +487,11 @@ lists exactly what is shared.
   home> (inode <m>); Docker lists the mount, so container runtime "<name>" did
   not apply it`, or `...; Docker did not mount it (container runtime
   "<name>")`.
+- An admin can list accounts with `aether-server --session-login-accounts
+  <member-id>,...`. Their `claude` and `codex` shares then give each recipient
+  session a copy of the login without its refresh token, which the server
+  refreshes and keeps current, and signs out on revoke.
+  [security.md](security.md#session-login-copies) gives the details.
 - Shared accounts need Docker Engine 26.0 or newer on the server, or the launch
   fails with `runtime: docker engine API "1.44" cannot mount a path beneath a
   member home; that needs API 1.45 (Docker Engine 26.0) or newer`.

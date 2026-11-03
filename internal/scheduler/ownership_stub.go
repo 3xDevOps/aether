@@ -24,3 +24,8 @@ func (s *Scheduler) applyRunOwnership(_ *domain.Workspace, _ *domain.Run, _ doma
 func (s *Scheduler) applyLoginOwnership(_ *supervised, _ domain.MemberID, _ []runtime.Mount, _ string) error {
 	return nil
 }
+
+// parseNumericUser refuses every user, as applyRunOwnership does.
+func parseNumericUser(_ string) (uid, gid int, err error) {
+	return 0, 0, errors.New("scheduler: non-root session users require a linux host")
+}

@@ -73,26 +73,11 @@ func (s *Scheduler) sweepScratch(ctx context.Context) {
 		}
 		return
 	}
-	active, err := s.cfg.Store.ListActiveRuns(ctx)
+	owned, err := s.ownedScratch(ctx)
 	if err != nil {
-		slog.Warn("scheduler: scratch sweep: list active runs", "error", err)
+		slog.Warn("scheduler: scratch sweep", "error", err)
 		return
 	}
-	owned := make(map[string]bool, len(active))
-	for _, run := range active {
-		owned[string(run.ID)] = true
-	}
-	s.mu.Lock()
-	for id := range s.runs {
-		owned[string(id)] = true
-	}
-	for id := range s.pending {
-		owned[string(id)] = true
-	}
-	for member := range s.terminals {
-		owned[terminalScratchName(member)] = true
-	}
-	s.mu.Unlock()
 	for _, entry := range entries {
 		name := entry.Name()
 		if owned[name] {
@@ -111,6 +96,31 @@ func (s *Scheduler) sweepScratch(ctx context.Context) {
 		}
 		s.removeScratch(name)
 	}
+}
+
+// ownedScratch names the runs and terminals that own their scratch: active
+// rows, and the runs and terminals the scheduler holds.
+func (s *Scheduler) ownedScratch(ctx context.Context) (map[string]bool, error) {
+	active, err := s.cfg.Store.ListActiveRuns(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list active runs: %w", err)
+	}
+	owned := make(map[string]bool, len(active))
+	for _, run := range active {
+		owned[string(run.ID)] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.runs {
+		owned[string(id)] = true
+	}
+	for id := range s.pending {
+		owned[string(id)] = true
+	}
+	for member := range s.terminals {
+		owned[terminalScratchName(member)] = true
+	}
+	return owned, nil
 }
 
 // sweepTerminalScratch removes a terminal's scratch only under its terminal
