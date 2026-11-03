@@ -594,7 +594,7 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `Withdrawn: the turn ended before you answered`, `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
   not, or `Not confirmed: check status before retrying` for an
-  `aether_pr_create` whose result says `write: "pending"`) with `approved by you` or `auto-approved`, and its time. A call
+  `aether_pr_create` whose result says `write: "pending"`) with `approved by you`, `auto-approved` or `approved by your rule <id>` (a record with `approval: "rule"` and its `rule_id`), and its time. A call
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
