@@ -139,6 +139,9 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	lead := newRun("lead", nil)
 	worker := child(lead, "worker", domain.RunRunning)
 	pr(worker, 11, "open", nil)
+	helper := child(worker, "helper", domain.RunRunning)
+	pr(helper, 12, "open", nil)
+	await(helper, worker)
 	watcher := newRun("watcher", nil)
 	await(watcher, worker)
 	await(lead, worker)
@@ -171,11 +174,14 @@ func TestRunCloseCheckKinds(t *testing.T) {
 		{parent, "", []protocol.CloseWarning{{Kind: "subsessions", Count: 1, RunIDs: []string{string(kid.ID)},
 			Detail: "1 subsession close with it: " + string(kid.ID) + " (kid)"}}},
 		{lead, "", []protocol.CloseWarning{
-			{Kind: "subsessions", Count: 1, RunIDs: []string{string(worker.ID)}, Detail: "1 subsession close with it: " + string(worker.ID) + " (worker)"},
+			{Kind: "subsessions", Count: 2, RunIDs: []string{string(worker.ID), string(helper.ID)},
+				Detail: "2 subsessions close with it: " + string(worker.ID) + " (worker), " + string(helper.ID) + " (helper)"},
 			{Kind: "pull_request", Subsession: string(worker.ID), URL: "https://github.com/acme/api/pull/11",
 				Detail: "Subsession " + string(worker.ID) + " (worker): Pull request acme/api#11 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z"},
 			{Kind: "awaited", Subsession: string(worker.ID), RunIDs: []string{string(watcher.ID)},
 				Detail: "Subsession " + string(worker.ID) + " (worker): Waiting for it to finish: " + string(watcher.ID) + " (watcher)"},
+			{Kind: "pull_request", Subsession: string(helper.ID), URL: "https://github.com/acme/api/pull/12",
+				Detail: "Subsession " + string(helper.ID) + " (helper): Pull request acme/api#12 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z"},
 		}},
 		{retained, "", []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup of its container and checkout is still pending"}}},
 		{failedCleanup, "", []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup failed: remove container: device busy"}}},

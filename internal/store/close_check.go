@@ -17,8 +17,8 @@ type CloseDependents struct {
 	Messages int
 	// Awaiting lists the live runs with a pending wait on it finishing.
 	Awaiting []domain.RunID
-	// Children lists its attached subsessions that close with it: those
-	// not final and not already accepted.
+	// Children lists the attached subsessions that close with it, theirs
+	// included: those not final and not already accepted.
 	Children []domain.RunID
 }
 
@@ -45,10 +45,13 @@ func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.
 		ORDER BY w.owner_run_id`, run); err != nil {
 		return out, fmt.Errorf("store: close dependents: awaiting: %w", err)
 	}
-	if out.Children, err = d.runIDs(ctx, `SELECT rc.run_id FROM run_children rc LEFT JOIN runs r ON r.id = rc.run_id
-		WHERE rc.parent_run_id = ?1 AND rc.detached = 0 AND (rc.state IN ('queued', 'launching')
-			OR (rc.state = 'started' AND r.status NOT IN ('merged', 'abandoned', 'failed', 'interrupted') AND NOT (r.status = 'completed' AND r.review = 'accepted')))
-		ORDER BY rc.created_at, rc.run_id`, run); err != nil {
+	if out.Children, err = d.runIDs(ctx, `WITH RECURSIVE tree(run_id, created_at) AS (
+			SELECT ?1, 0
+			UNION
+			SELECT rc.run_id, rc.created_at FROM run_children rc JOIN tree t ON rc.parent_run_id = t.run_id LEFT JOIN runs r ON r.id = rc.run_id
+			WHERE rc.detached = 0 AND (rc.state IN ('queued', 'launching')
+				OR (rc.state = 'started' AND r.status NOT IN ('merged', 'abandoned', 'failed', 'interrupted') AND NOT (r.status = 'completed' AND r.review = 'accepted'))))
+		SELECT run_id FROM tree WHERE run_id <> ?1 ORDER BY created_at, run_id`, run); err != nil {
 		return out, fmt.Errorf("store: close dependents: subsessions: %w", err)
 	}
 	return out, nil

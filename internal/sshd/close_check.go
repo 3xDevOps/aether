@@ -109,7 +109,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		waiters := slices.DeleteFunc(childDeps.Awaiting, func(w domain.RunID) bool { return w == id })
+		waiters := slices.DeleteFunc(childDeps.Awaiting, func(w domain.RunID) bool { return w == id || slices.Contains(deps.Children, w) })
 		prefix := "Subsession " + s.runLabels(ctx, []domain.RunID{childID}) + ": "
 		for _, w := range append(childWork, s.awaitedWarnings(ctx, waiters, prefix)...) {
 			if w.Kind != protocol.CloseWarningAwaited {
