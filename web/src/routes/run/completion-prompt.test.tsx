@@ -28,17 +28,14 @@ function seed(over: Partial<Run> = {}) {
   })
 }
 
-const focusComposer = vi.fn()
-
 function Prompt() {
   const record = useStore((s) => s.runs.run_1)
-  return record ? <CompletionPrompt run={record} focusComposer={focusComposer} /> : null
+  return record ? <CompletionPrompt run={record} /> : null
 }
 
 const banner = () => screen.queryByRole('region', { name: 'Completion' })
 
 beforeEach(() => {
-  focusComposer.mockClear()
   vi.mocked(api.runReview).mockClear()
   vi.mocked(toast.error).mockClear()
 })
@@ -81,14 +78,27 @@ describe('CompletionPrompt', () => {
     expect(screen.queryByRole('button', { name: 'Not yet' })).toBeNull()
   })
 
-  it('withdraws the review on Not yet and focuses the composer', async () => {
+  it('withdraws the review on Not yet, then opens Chat with the composer focused', async () => {
     seed()
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1', view: 'changes' } } })
     render(<Prompt />)
     fireEvent.click(screen.getByRole('button', { name: 'Not yet' }))
     expect(banner()).toBeNull()
     expect(useStore.getState().runs.run_1.review).toBe('')
-    expect(focusComposer).toHaveBeenCalledOnce()
-    await waitFor(() => expect(api.runReview).toHaveBeenCalledWith('run_1', 'not-yet'))
+    await waitFor(() => expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'session', focus: 'composer' } }))
+    expect(api.runReview).toHaveBeenCalledWith('run_1', 'not-yet')
+  })
+
+  it('leaves the view alone when Not yet is refused', async () => {
+    seed()
+    const route = { name: 'run', params: { runId: 'run_1', view: 'changes' } }
+    useStore.setState({ route })
+    vi.mocked(api.runReview).mockRejectedValueOnce(new ApiError(400, 'session run_1 is completed', -32002))
+    vi.mocked(api.runGet).mockResolvedValueOnce(reported())
+    render(<Prompt />)
+    fireEvent.click(screen.getByRole('button', { name: 'Not yet' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('session run_1 is completed')))
+    expect(useStore.getState().route).toEqual(route)
   })
 
   it('folds to one line on Review later, and Review now asks again', async () => {

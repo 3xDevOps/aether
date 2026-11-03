@@ -407,7 +407,10 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         value: 'continue unfinished',
         done: 'Marked not finished',
         predict: () => ({ runID: id, record: { review: '' } }),
-        perform: (d) => d.api.runReview(id, 'not-yet'),
+        perform: async (d) => {
+          await d.api.runReview(id, 'not-yet')
+          d.navigate('run', { runId: id, view: 'session', focus: 'composer' })
+        },
       })
     }
     if (run.review === 'ready') {

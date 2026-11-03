@@ -10,7 +10,7 @@ import type { RunRecord } from '@/store/runs'
 import type { TimelinePayload } from '@/store/sessions'
 
 /** Asks the owner to accept a reported success; Review later folds it to one line, Not yet withdraws it until the agent reports success again. */
-export function CompletionPrompt({ run, focusComposer, className }: { run: RunRecord; focusComposer: () => void; className?: string }) {
+export function CompletionPrompt({ run, className }: { run: RunRecord; className?: string }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
   const predicting = useStore((s) => Boolean(s.predicting[run.id]))
   const members = useStore((s) => s.members)
@@ -24,15 +24,14 @@ export function CompletionPrompt({ run, focusComposer, className }: { run: RunRe
   const notYet = commands.find((command) => command.id === 'not-yet')
   if (!complete) return null
   const later = commands.find((command) => command.id === 'review-later')
-  return <Ask run={run} complete={complete} notYet={notYet} later={later} focusComposer={focusComposer} className={className} />
+  return <Ask run={run} complete={complete} notYet={notYet} later={later} className={className} />
 }
 
-function Ask({ run, complete, notYet, later, focusComposer, className }: {
+function Ask({ run, complete, notYet, later, className }: {
   run: RunRecord
   complete: Command
   notYet?: Command
   later?: Command
-  focusComposer: () => void
   className?: string
 }) {
   const perform = useCommandRunner()
@@ -59,18 +58,7 @@ function Ask({ run, complete, notYet, later, focusComposer, className }: {
         actions={
           <>
             <Button size="sm" variant="secondary" onClick={() => void perform(complete)}>Mark complete</Button>
-            {notYet && (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  void perform(notYet)
-                  focusComposer()
-                }}
-              >
-                Not yet
-              </Button>
-            )}
+            {notYet && <Button size="sm" variant="secondary" onClick={() => void perform(notYet)}>Not yet</Button>}
             <Button size="sm" variant="ghost" onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
           </>
         }
