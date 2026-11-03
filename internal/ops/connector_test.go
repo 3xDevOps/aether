@@ -971,8 +971,10 @@ func TestConnectorCloseNeedsAcknowledgment(t *testing.T) {
 	} {
 		f.calls = nil
 		text, _, failed := try(t, cs, c.name, c.args)
-		if want := "closing session run-1 has warnings: pull_request: Pull request acme/api#7 is open, not merged (https://github.com/acme/api/pull/7); show the user, then retry with acknowledge true to close anyway"; !failed || !strings.HasPrefix(text, want) {
-			t.Fatalf("%s without acknowledge = %q, want a refusal starting %q", c.name, text, want)
+		want := "closing session run-1 has warnings (pull_request), listed under untrusted.warnings; show them to the user, then retry with acknowledge true to close anyway\n" +
+			`{"untrusted":{"warnings":[{"kind":"pull_request","detail":"Pull request acme/api#7 is open, not merged","url":"https://github.com/acme/api/pull/7"}]}}`
+		if !failed || text != want {
+			t.Fatalf("%s without acknowledge = %q, want %q", c.name, text, want)
 		}
 		for _, call := range f.calls {
 			if call.scope != ScopeRead {

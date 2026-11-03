@@ -16,12 +16,7 @@ type summarizer func(s *Server, ctx context.Context, req protocol.Request, c *pr
 
 var actSummaries = map[string]summarizer{
 	protocol.MethodRunRelaunch: runSummary(func(protocol.RunIDParams) string { return "Relaunch %s" }),
-	protocol.MethodRunClose: runSummary(func(p protocol.RunCloseParams) string {
-		if p.Outcome == "merged" {
-			return "Close %s as merged"
-		}
-		return "Close %s as abandoned"
-	}),
+	protocol.MethodRunClose:    (*Server).summarizeClose,
 	protocol.MethodRunModeSwitch: runSummary(func(p protocol.RunModeSwitchParams) string {
 		if p.Mode == "acp" {
 			return "Switch %s to Enhanced mode"
@@ -74,6 +69,43 @@ func runSummary[P runParams](verb func(P) string) summarizer {
 		c.Summary = fmt.Sprintf(verb(p), fmt.Sprintf("session %s (%q)", id.RunID, runLabel(run))) + ownedBy(c)
 		return nil
 	}
+}
+
+var closeVerb = runSummary(func(p protocol.RunCloseParams) string {
+	if p.Outcome == "merged" {
+		return "Close %s as merged"
+	}
+	return "Close %s as abandoned"
+})
+
+// summarizeClose names on the card what run.close_check says the close
+// affects, so the person approving it sees what the dashboard would show.
+func (s *Server) summarizeClose(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	if perr := closeVerb(s, ctx, req, c); perr != nil {
+		return perr
+	}
+	p, _ := protocol.DecodeParams[protocol.RunCloseParams](req.Params)
+	var res protocol.RunCloseCheckResult
+	perr := s.call(ctx, protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{p.RunID}, Outcome: p.Outcome}, &res)
+	switch {
+	case perr != nil:
+	case len(res.Runs) != 1:
+		perr = &protocol.Error{Code: protocol.CodeInternal, Message: fmt.Sprintf("run.close_check answered for %d sessions, want 1", len(res.Runs))}
+	default:
+		perr = res.Runs[0].Error
+	}
+	if perr != nil {
+		c.Summary += "; what closing affects could not be read: " + perr.Message
+		return nil
+	}
+	details := make([]string, len(res.Runs[0].Warnings))
+	for i, w := range res.Runs[0].Warnings {
+		details[i] = w.Detail
+	}
+	if len(details) > 0 {
+		c.Summary += ". Before closing: " + strings.Join(details, "; ")
+	}
+	return nil
 }
 
 func (s *Server) summarizeHandoff(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {

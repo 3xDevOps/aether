@@ -651,7 +651,7 @@ func markReviewed(ctx context.Context, c calls, in reviewInput) (string, any, er
 			return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
 				"session %s has no reported success awaiting review (review %q); to end it, aether_stop_session, which needs the control scope", r.ID, r.Review)}
 		}
-		if err := closeWarned(ctx, c.read, in.RunID, in.Acknowledge); err != nil {
+		if err := closeWarned(ctx, c.read, in.RunID, string(domain.RunCompleted), in.Acknowledge); err != nil {
 			return "", nil, err
 		}
 	}
@@ -660,12 +660,12 @@ func markReviewed(ctx context.Context, c calls, in reviewInput) (string, any, er
 
 // closeWarned refuses to close run while it has close warnings the caller
 // did not acknowledge, naming each one.
-func closeWarned(ctx context.Context, read Call, id string, acknowledged bool) error {
+func closeWarned(ctx context.Context, read Call, id, outcome string, acknowledged bool) error {
 	if acknowledged {
 		return nil
 	}
 	var res protocol.RunCloseCheckResult
-	if err := read(ctx, protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{id}}, &res); err != nil {
+	if err := read(ctx, protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{id}, Outcome: outcome}, &res); err != nil {
 		return err
 	}
 	if len(res.Runs) != 1 {
@@ -678,15 +678,13 @@ func closeWarned(ctx context.Context, read Call, id string, acknowledged bool) e
 	if len(warnings) == 0 {
 		return nil
 	}
-	lines := make([]string, len(warnings))
+	kinds := make([]string, len(warnings))
 	for i, w := range warnings {
-		lines[i] = w.Kind + ": " + w.Detail
-		if w.URL != "" {
-			lines[i] += " (" + w.URL + ")"
-		}
+		kinds[i] = w.Kind
 	}
-	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-		"closing session %s has warnings: %s; show the user, then retry with acknowledge true to close anyway", id, strings.Join(lines, "; "))}
+	return &untrustedError{untrusted: map[string]any{"warnings": warnings}, err: &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+		"closing session %s has warnings (%s), listed under untrusted.warnings; show them to the user, then retry with acknowledge true to close anyway",
+		id, strings.Join(slices.Compact(kinds), ", "))}}
 }
 
 // decidable refuses a request the connector showed cut, since deciding it
@@ -757,7 +755,7 @@ func stopRun(ctx context.Context, c calls, in stopInput) (string, any, error) {
 	if in.Outcome == "" {
 		return runAction(ctx, c, protocol.MethodRunKill, in.RunID, "Stopped", protocol.RunIDParams{RunID: in.RunID})
 	}
-	if err := closeWarned(ctx, c.read, in.RunID, in.Acknowledge); err != nil {
+	if err := closeWarned(ctx, c.read, in.RunID, in.Outcome, in.Acknowledge); err != nil {
 		return "", nil, err
 	}
 	return runAction(ctx, c, protocol.MethodRunClose, in.RunID, "Closed ("+in.Outcome+")", protocol.RunCloseParams{RunID: in.RunID, Outcome: in.Outcome})
