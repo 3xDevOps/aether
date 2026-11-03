@@ -288,7 +288,6 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	return o
 }
 
-// memberListValue is a comma-separated list of member IDs.
 type memberListValue []domain.MemberID
 
 func (v *memberListValue) String() string {

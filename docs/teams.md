@@ -487,7 +487,7 @@ lists exactly what is shared.
   home> (inode <m>); Docker lists the mount, so container runtime "<name>" did
   not apply it`, or `...; Docker did not mount it (container runtime
   "<name>")`.
-- An admin can list accounts with `aether-server --session-login-accounts
+- An admin can list accounts with `aether-server serve --session-login-accounts
   <member-id>,...`. Their `claude` and `codex` shares then give each recipient
   session a copy of the login without its refresh token, which the server
   refreshes and keeps current, and signs out on revoke.

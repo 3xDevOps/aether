@@ -158,7 +158,7 @@ func TestSharedLaunchMountsASessionLoginForListedAccounts(t *testing.T) {
 		}
 		spec := e.rt.byName(string(run.ID)).spec
 		e.assertOwnerExposedOnlyAt(t, spec)
-		file, err := filepath.EvalSymlinks(e.sched.sessionLoginPath(run.ID, tc.agent))
+		file, err := filepath.EvalSymlinks(e.sched.sessionLoginPath(run.ID, e.owner.ID, tc.agent))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +173,7 @@ func TestSharedLaunchMountsASessionLoginForListedAccounts(t *testing.T) {
 		if got := readFile(t, file); got != string(copied) {
 			t.Fatalf("%s: session login = %s, want %s", tc.agent, got, copied)
 		}
-		for name, mode := range map[string]os.FileMode{file: 0o600, filepath.Dir(file): 0o700 | os.ModeDir, e.sched.sessionLoginRoot(): 0o700 | os.ModeDir} {
+		for name, mode := range map[string]os.FileMode{file: 0o600, filepath.Dir(file): 0o700 | os.ModeDir, filepath.Dir(filepath.Dir(file)): 0o700 | os.ModeDir, e.sched.sessionLoginRoot(): 0o700 | os.ModeDir} {
 			if info, statErr := os.Stat(name); statErr != nil || info.Mode() != mode {
 				t.Fatalf("%s: %s = %v, %v; want mode %v", tc.agent, name, info, statErr, mode)
 			}
@@ -198,8 +198,7 @@ func TestSharedLaunchMountsASessionLoginForListedAccounts(t *testing.T) {
 }
 
 // Every other share keeps mounting the owner's own login: an unlisted
-// account, an API-key login, a claude login without a refresh token, and an
-// agent other than claude and codex.
+// account and an agent other than claude and codex.
 func TestSharedLaunchKeepsTheOwnersLoginOtherwise(t *testing.T) {
 	t.Parallel()
 	in := time.Now().Add(8 * time.Hour)
@@ -208,8 +207,6 @@ func TestSharedLaunchKeepsTheOwnersLoginOtherwise(t *testing.T) {
 		unlisted                bool
 	}{
 		{"unlisted account", "claude", claudeLogin, claudeOwnerLogin("access-grace", "grace~1", in), true},
-		{"codex API key", "codex", codexLogin, `{"OPENAI_API_KEY":"sk-test","tokens":null}`, false},
-		{"claude without refresh token", "claude", claudeLogin, `{"claudeAiOauth":{"accessToken":"a","expiresAt":1}}`, false},
 		{"omp", "omp", ".omp/agent", "", false},
 	} {
 		e := newSessionLoginEnv(t)
@@ -287,7 +284,7 @@ func TestSessionLoginRefreshesTheOwnersLoginInPlace(t *testing.T) {
 	if got := inodeOf(t, e.ownerFile(claudeLogin)); got != before[claudeLogin] {
 		t.Fatalf("owner's login inode = %d, want %d: the refresh replaced the file", got, before[claudeLogin])
 	}
-	copied := readFile(t, e.sched.sessionLoginPath(run.ID, "claude"))
+	copied := readFile(t, e.sched.sessionLoginPath(run.ID, e.owner.ID, "claude"))
 	want, err := sessionLoginCopy("claude", []byte(readFile(t, e.ownerFile(claudeLogin))))
 	if err != nil || copied != string(want) {
 		t.Fatalf("session login = %s, %v; want %s", copied, err, want)
@@ -372,8 +369,8 @@ func TestSessionLoginRefusedRefreshLeavesTheOwnersLogin(t *testing.T) {
 	if e.posts.Load() != 1 || readFile(t, e.ownerFile(claudeLogin)) != claude || inodeOf(t, e.ownerFile(claudeLogin)) != before {
 		t.Fatalf("%d refreshes; owner's login after refusal = %s", e.posts.Load(), readFile(t, e.ownerFile(claudeLogin)))
 	}
-	if !strings.Contains(readFile(t, e.sched.sessionLoginPath(run.ID, "claude")), `"accessToken":"access-old"`) {
-		t.Fatalf("session login = %s, want the current access token", readFile(t, e.sched.sessionLoginPath(run.ID, "claude")))
+	if !strings.Contains(readFile(t, e.sched.sessionLoginPath(run.ID, e.owner.ID, "claude")), `"accessToken":"access-old"`) {
+		t.Fatalf("session login = %s, want the current access token", readFile(t, e.sched.sessionLoginPath(run.ID, e.owner.ID, "claude")))
 	}
 }
 
@@ -390,7 +387,7 @@ func TestSessionLoginPumpFollowsTheOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
-	file := e.sched.sessionLoginPath(run.ID, "claude")
+	file := e.sched.sessionLoginPath(run.ID, e.owner.ID, "claude")
 	inode := inodeOf(t, file)
 	ownerLogin := claudeOwnerLogin("access-2", "grace~2", in)
 	e.writeOwner(t, claudeLogin, ownerLogin)
@@ -453,7 +450,7 @@ func TestSessionLoginSurvivesRecoveryAndGoesWithTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file := e.sched.sessionLoginPath(run.ID, "codex")
+	file := e.sched.sessionLoginPath(run.ID, e.owner.ID, "codex")
 	if got := readFile(t, file); got != string(want) {
 		t.Fatalf("session login after recovery = %s, want %s", got, want)
 	}
@@ -465,7 +462,7 @@ func TestSessionLoginSurvivesRecoveryAndGoesWithTheRun(t *testing.T) {
 		_, err := os.Stat(s2.sidecarPath(run.ID))
 		return errors.Is(err, os.ErrNotExist)
 	})
-	if _, err := os.Stat(filepath.Dir(file)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(s2.sessionLoginRoot(), string(run.ID))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("session login directory after close = %v, want removed", err)
 	}
 
@@ -499,6 +496,125 @@ func TestLoginDue(t *testing.T) {
 	} {
 		if got := loginDue(tc.agent, []byte(tc.login), now); got != tc.due {
 			t.Errorf("%s: due = %v, want %v", tc.name, got, tc.due)
+		}
+	}
+}
+
+// A listed account never shares the owner's login file itself: a login
+// without an OAuth refresh token gives the session a signed-out copy, and a
+// login that stays unreadable refuses the launch.
+func TestSessionLoginNeverFallsBackToTheOwnersLogin(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, agent, rel, owner, err string
+	}{
+		{"codex API key", "codex", codexLogin, `{"OPENAI_API_KEY":"sk-test","tokens":null}`, ""},
+		{"blanked claude login", "claude", claudeLogin, `{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}`, ""},
+		{"torn claude login", "claude", claudeLogin, `{"claudeAiOauth":{"accessT`, "is not JSON"},
+	} {
+		e := newSessionLoginEnv(t)
+		e.writeOwner(t, tc.rel, tc.owner)
+		run, err := e.launch(t, tc.agent)
+		if tc.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.err) || run != nil {
+				t.Fatalf("%s: Launch = %+v, %v; want an error containing %q", tc.name, run, err, tc.err)
+			}
+			if e.containerCount() != 0 {
+				t.Fatalf("%s: %d containers, want none", tc.name, e.containerCount())
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: Launch: %v", tc.name, err)
+		}
+		spec := e.rt.byName(string(run.ID)).spec
+		e.assertOwnerExposedOnlyAt(t, spec)
+		file := e.sched.sessionLoginPath(run.ID, e.owner.ID, tc.agent)
+		if got, ok := mountFor(spec, "/root/"+tc.rel); !ok || got.HostPath != file {
+			t.Fatalf("%s: login mount = %+v, want the session copy", tc.name, got)
+		}
+		if got := readFile(t, file); got != "{}" {
+			t.Fatalf("%s: session login = %s, want signed out", tc.name, got)
+		}
+	}
+}
+
+// An owner login read while it is being rewritten in place is read again.
+func TestOwnerLoginRereadsATornLogin(t *testing.T) {
+	t.Parallel()
+	e := newSessionLoginEnv(t)
+	login := claudeOwnerLogin("access-1", "grace~1", time.Now().Add(8*time.Hour))
+	e.writeOwner(t, claudeLogin, "")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		time.Sleep(ownerLoginRetry + ownerLoginRetry/2)
+		e.writeOwner(t, claudeLogin, login)
+	}()
+	got, err := e.sched.ownerLogin(e.owner.ID, "claude")
+	<-done
+	if err != nil || string(got) != login {
+		t.Fatalf("ownerLogin = %s, %v; want the rewritten login", got, err)
+	}
+}
+
+// The pump signs a copy out when the owner signs out or switches to an API
+// key, keeps a retained run's copy current for its reopen, and never writes a
+// token it refreshed after the share was revoked.
+func TestSessionLoginPumpFollowsSignOutAndRevokeDuringRefresh(t *testing.T) {
+	t.Parallel()
+	e := newSessionLoginEnv(t)
+	in := time.Now().Add(8 * time.Hour)
+	e.writeOwner(t, codexLogin, codexOwnerLogin(codexAccess("grace", in), "grace~1"))
+	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-1", "grace~1", in))
+	codexRun, err := e.launch(t, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexFile := e.sched.sessionLoginPath(codexRun.ID, e.owner.ID, "codex")
+	e.writeOwner(t, codexLogin, `{"OPENAI_API_KEY":"sk-test","tokens":null}`)
+	e.sched.syncSessionLogins(t.Context())
+	if got := readFile(t, codexFile); got != "{}" {
+		t.Fatalf("copy after the owner switched to an API key = %s, want signed out", got)
+	}
+	if err := os.Remove(e.ownerFile(codexLogin)); err != nil {
+		t.Fatal(err)
+	}
+	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-1", "grace~1", in))
+
+	claudeRun, err := e.launch(t, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudeFile := e.sched.sessionLoginPath(claudeRun.ID, e.owner.ID, "claude")
+	e.sched.mu.Lock()
+	entry := e.sched.runs[claudeRun.ID]
+	entry.retained, entry.status = true, domain.RunCompleted
+	e.sched.mu.Unlock()
+	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-2", "grace~1", in))
+	e.sched.syncSessionLogins(t.Context())
+	if got := readFile(t, claudeFile); !strings.Contains(got, `"accessToken":"access-2"`) {
+		t.Fatalf("retained run's copy = %s, want the owner's current token", got)
+	}
+
+	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-old", "grace~1", time.Now().Add(5*time.Minute)))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/claude/token" {
+			if _, err := e.db.RevokeAccountShare(r.Context(), e.owner.ID, e.member.ID); err != nil {
+				t.Error(err)
+			}
+		}
+		e.issuer.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	e.sched.cfg.AssistantIssuer.ClaudeToken = srv.URL + "/claude/token"
+	e.sched.syncSessionLogins(t.Context())
+	if !strings.Contains(readFile(t, e.ownerFile(claudeLogin)), `"accessToken":"access-grace"`) {
+		t.Fatalf("owner's login = %s, want it refreshed", readFile(t, e.ownerFile(claudeLogin)))
+	}
+	for name, file := range map[string]string{"claude": claudeFile, "codex": codexFile} {
+		if got := readFile(t, file); got != "{}" {
+			t.Fatalf("%s copy after a revoke during the refresh = %s, want signed out", name, got)
 		}
 	}
 }

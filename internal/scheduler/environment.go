@@ -185,13 +185,15 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 					}
 				}
 			}
-			logins, err := s.sessionLoginMounts(ctx, run, member.ID, profile, home, user)
-			if err != nil {
-				return nil, err
-			}
-			if len(logins) > 0 {
+			var logins []runtime.Mount
+			var err error
+			if s.sessionLoginAccount(run.AccountMemberID, profile) {
+				logins, err = s.sessionLoginMounts(ctx, run, member.ID, profile, home, user)
 				plan.SessionLogin = profile.Name
-			} else if logins, err = s.loginMounts(ctx, member.ID, run.AccountMemberID, profile, home); err != nil {
+			} else {
+				logins, err = s.loginMounts(ctx, member.ID, run.AccountMemberID, profile, home)
+			}
+			if err != nil {
 				return nil, err
 			}
 			if len(logins) > 0 {

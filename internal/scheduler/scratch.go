@@ -98,8 +98,6 @@ func (s *Scheduler) sweepScratch(ctx context.Context) {
 	}
 }
 
-// ownedScratch names the runs and terminals that own their scratch: active
-// rows, and the runs and terminals the scheduler holds.
 func (s *Scheduler) ownedScratch(ctx context.Context) (map[string]bool, error) {
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err != nil {

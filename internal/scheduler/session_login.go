@@ -30,6 +30,10 @@ const (
 	// sessionLoginAhead is how long before its access token expires the
 	// server refreshes an owner's login for session login copies.
 	sessionLoginAhead = 15 * time.Minute
+	// ownerLoginReads is how often an empty or unparsable owner login is
+	// read before it counts: both CLIs and the server rewrite it in place.
+	ownerLoginReads = 5
+	ownerLoginRetry = 50 * time.Millisecond
 )
 
 // sessionLoginLocks are the locks each CLI rereads and refreshes its login
@@ -48,48 +52,87 @@ func (s *Scheduler) sessionLoginRoot() string {
 	return filepath.Join(s.cfg.StateDir, sessionLoginDirName)
 }
 
-func (s *Scheduler) sessionLoginPath(run domain.RunID, agent string) string {
-	return filepath.Join(s.sessionLoginRoot(), string(run), path.Base(assistantSignInRel[agent]))
+// sessionLoginPath is run's copy of account's login. A run that moves to
+// another account mounts another file, so a write for the old account never
+// reaches the new container.
+func (s *Scheduler) sessionLoginPath(run domain.RunID, account domain.MemberID, agent string) string {
+	return filepath.Join(s.sessionLoginRoot(), string(run), string(account), path.Base(assistantSignInRel[agent]))
 }
 
-// sessionLoginMounts mounts, at the agent's login path, a copy of the
-// account owner's login without its refresh token, written for run alone.
-// It returns no mount, for loginMounts to share the owner's own login,
-// unless the account is one of SessionLoginAccounts and holds a claude or
-// codex OAuth login.
-func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, launcher domain.MemberID, profile harness.Profile, home, user string) ([]runtime.Mount, error) {
-	account := run.AccountMemberID
+// sessionLoginAccount reports whether a launch of profile on account mounts a
+// session login copy rather than the owner's login.
+func (s *Scheduler) sessionLoginAccount(account domain.MemberID, profile harness.Profile) bool {
 	rel, known := assistantSignInRel[profile.Name]
 	if !known || !s.cfg.SessionLoginAccounts[account] {
-		return nil, nil
+		return false
 	}
-	if paths, err := profile.LoginPaths(); err != nil || !slices.Equal(paths, []string{rel}) {
-		return nil, nil
+	paths, err := profile.LoginPaths()
+	return err == nil && slices.Equal(paths, []string{rel})
+}
+
+// ownerLogin reads account's login for agent, rereading an empty or
+// unparsable one so that a read torn by an in-place rewrite never passes for
+// a missing login.
+func (s *Scheduler) ownerLogin(account domain.MemberID, agent string) ([]byte, error) {
+	var data []byte
+	var err error
+	for i := range ownerLoginReads {
+		if i > 0 {
+			time.Sleep(ownerLoginRetry)
+		}
+		data, err = s.cfg.Homes.ReadLogin(account, assistantSignInRel[agent])
+		if err == nil && json.Valid(data) || err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return data, err
+		}
 	}
-	owner, err := s.cfg.Homes.ReadLogin(account, rel)
+	if err == nil {
+		err = fmt.Errorf("memberhome: %s in %q is not JSON", assistantSignInRel[agent], account)
+	}
+	return nil, err
+}
+
+// sessionLogin is the copy of the owner's login a session gets: the OAuth
+// login without its refresh token, or a signed-out login when the owner holds
+// none.
+func sessionLogin(agent string, owner []byte) ([]byte, error) {
+	login, err := sessionLoginCopy(agent, owner)
+	if errors.Is(err, errNotOAuthLogin) {
+		return signedOutLogin, nil
+	}
+	return login, err
+}
+
+// sessionLoginMounts mounts, at the agent's login path, run's copy of the
+// account owner's login, written for run alone. A missing owner login refuses
+// the launch as loginMounts would.
+func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, launcher domain.MemberID, profile harness.Profile, home, user string) ([]runtime.Mount, error) {
+	account := run.AccountMemberID
+	owner, err := s.ownerLogin(account, profile.Name)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		_, err = s.accountLogins(ctx, account, profile)
+		if err == nil {
+			err = fmt.Errorf("scheduler: %s's %s login disappeared during the launch", account, profile.Name)
+		}
+		return nil, err
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
-	if _, copyErr := sessionLoginCopy(profile.Name, owner); errors.Is(copyErr, errNotOAuthLogin) {
-		return nil, nil
-	}
 	if loginDue(profile.Name, owner, time.Now()) {
 		s.refreshOwnerLogin(ctx, account, profile.Name)
-		if owner, err = s.cfg.Homes.ReadLogin(account, rel); err != nil {
+		if owner, err = s.ownerLogin(account, profile.Name); err != nil {
 			return nil, fmt.Errorf("scheduler: %w", err)
 		}
 	}
-	login, err := sessionLoginCopy(profile.Name, owner)
+	login, err := sessionLogin(profile.Name, owner)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: copy %s's %s login: %w", account, profile.Name, err)
 	}
-	file, err := s.writeSessionLogin(run.ID, profile.Name, login, user)
+	file, err := s.writeSessionLogin(run.ID, account, profile.Name, login, user)
 	if err != nil {
 		return nil, err
 	}
+	rel := assistantSignInRel[profile.Name]
 	if err := s.cfg.Homes.PrepareLoginMountpoint(launcher, rel, false); err != nil {
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
@@ -106,8 +149,8 @@ func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, lau
 // writeSessionLogin writes run's copy of the agent's login with one write
 // after the truncate, on the file's own inode: a rename would detach the
 // container's bind of it.
-func (s *Scheduler) writeSessionLogin(run domain.RunID, agent string, login []byte, user string) (string, error) {
-	file := s.sessionLoginPath(run, agent)
+func (s *Scheduler) writeSessionLogin(run domain.RunID, account domain.MemberID, agent string, login []byte, user string) (string, error) {
+	file := s.sessionLoginPath(run, account, agent)
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return "", fmt.Errorf("scheduler: create the session login directory: %w", err)
 	}
@@ -134,8 +177,8 @@ func (s *Scheduler) writeSessionLogin(run domain.RunID, agent string, login []by
 // rewriteSessionLogin writes login over run's copy when the copy holds
 // anything else. It never creates the copy: a new file is not the inode the
 // container mounts.
-func (s *Scheduler) rewriteSessionLogin(run domain.RunID, agent string, login []byte) error {
-	file := s.sessionLoginPath(run, agent)
+func (s *Scheduler) rewriteSessionLogin(run domain.RunID, account domain.MemberID, agent string, login []byte) error {
+	file := s.sessionLoginPath(run, account, agent)
 	current, err := os.ReadFile(file)
 	if err != nil {
 		return fmt.Errorf("scheduler: read the session login: %w", err)
@@ -216,8 +259,6 @@ func (s *Scheduler) refreshOwnerLogin(ctx context.Context, account domain.Member
 	}
 }
 
-// pumpSessionLogins keeps every live session login copy on its owner's
-// current login until ctx ends.
 func (s *Scheduler) pumpSessionLogins(ctx context.Context) {
 	tick := time.NewTicker(sessionLoginInterval)
 	defer tick.Stop()
@@ -241,70 +282,86 @@ type sessionLoginRun struct {
 	launcher domain.MemberID
 }
 
-// syncSessionLogins refreshes each account's login at most once for all
-// its live session login runs, and writes each run its copy, or a signed-out
-// login once the account is no longer shared with the run's launcher.
+// syncSessionLogins writes every session login copy its owner's current
+// login, refreshed first when due, or a signed-out login once the account is
+// no longer shared with the run's launcher. Retained runs are kept current
+// too, since a reopen thaws them with the copy they hold. Signed-out copies
+// are written before any refresh, so a slow issuer cannot delay them.
 func (s *Scheduler) syncSessionLogins(ctx context.Context) {
 	groups := map[sessionLoginKey][]sessionLoginRun{}
 	s.mu.Lock()
 	for id, entry := range s.runs {
-		if entry.sessionLogin == "" || entry.loginMember == "" || entry.retained || entry.status.Terminal() {
+		if entry.sessionLogin == "" || entry.loginMember == "" || entry.status.Terminal() && !entry.retained {
 			continue
 		}
 		key := sessionLoginKey{account: entry.loginMember, agent: entry.sessionLogin}
 		groups[key] = append(groups[key], sessionLoginRun{run: id, launcher: entry.memberID})
 	}
 	s.mu.Unlock()
+	live := map[sessionLoginKey][]sessionLoginRun{}
 	for key, runs := range groups {
-		s.syncSessionLoginGroup(ctx, key, runs)
+		for _, r := range runs {
+			shared, err := s.cfg.Store.AccountSharedWith(ctx, key.account, r.launcher)
+			switch {
+			case err != nil:
+				slog.Warn("scheduler: check the share behind a session login", "run", r.run, "account", key.account, "error", err)
+			case shared:
+				live[key] = append(live[key], r)
+			default:
+				s.writeSessionLoginCopy(ctx, key, r, signedOutLogin)
+			}
+		}
+	}
+	for key, runs := range live {
+		login := s.ownerSessionLogin(ctx, key)
+		if login == nil {
+			continue
+		}
+		for _, r := range runs {
+			s.writeSessionLoginCopy(ctx, key, r, login)
+		}
 	}
 }
 
-func (s *Scheduler) syncSessionLoginGroup(ctx context.Context, key sessionLoginKey, runs []sessionLoginRun) {
-	shared := map[domain.MemberID]bool{}
-	anyShared := false
-	for _, r := range runs {
-		if _, seen := shared[r.launcher]; seen {
-			continue
+// writeSessionLoginCopy writes login over r's copy. A login that is not
+// signed out is written only while the share still holds, under the lock a
+// revocation takes, so a revocation during a refresh never receives the
+// refreshed token.
+func (s *Scheduler) writeSessionLoginCopy(ctx context.Context, key sessionLoginKey, r sessionLoginRun, login []byte) {
+	if !bytes.Equal(login, signedOutLogin) {
+		if f := s.usageFallbackSeam(); f != nil && f.AuthorizationMu != nil {
+			f.AuthorizationMu.Lock()
+			defer f.AuthorizationMu.Unlock()
 		}
-		ok, err := s.cfg.Store.AccountSharedWith(ctx, key.account, r.launcher)
+		shared, err := s.cfg.Store.AccountSharedWith(ctx, key.account, r.launcher)
 		if err != nil {
-			slog.Warn("scheduler: check the share behind session logins", "account", key.account, "launcher", r.launcher, "error", err)
+			slog.Warn("scheduler: check the share behind a session login", "run", r.run, "account", key.account, "error", err)
 			return
 		}
-		shared[r.launcher] = ok
-		anyShared = anyShared || ok
+		if !shared {
+			login = signedOutLogin
+		}
 	}
-	var login []byte
-	if anyShared {
-		login = s.ownerSessionLogin(ctx, key)
-	}
-	for _, r := range runs {
-		want := login
-		if !shared[r.launcher] {
-			want = signedOutLogin
-		}
-		if want == nil {
-			continue
-		}
-		if err := s.rewriteSessionLogin(r.run, key.agent, want); err != nil {
-			slog.Warn("scheduler: update the session login", "run", r.run, "account", key.account, "error", err)
-		}
+	if err := s.rewriteSessionLogin(r.run, key.account, key.agent, login); err != nil {
+		slog.Warn("scheduler: update the session login", "run", r.run, "account", key.account, "error", err)
 	}
 }
 
-// ownerSessionLogin is the copy of the owner's current login, refreshed
-// first when due, or nil when the owner holds no OAuth login to copy.
+// ownerSessionLogin is the session copy of the owner's current login,
+// refreshed first when due: signed out when the owner holds no OAuth login,
+// nil when the login cannot be read now.
 func (s *Scheduler) ownerSessionLogin(ctx context.Context, key sessionLoginKey) []byte {
-	rel := assistantSignInRel[key.agent]
-	owner, err := s.cfg.Homes.ReadLogin(key.account, rel)
+	owner, err := s.ownerLogin(key.account, key.agent)
 	if err == nil && loginDue(key.agent, owner, time.Now()) {
 		s.refreshOwnerLogin(ctx, key.account, key.agent)
-		owner, err = s.cfg.Homes.ReadLogin(key.account, rel)
+		owner, err = s.ownerLogin(key.account, key.agent)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return signedOutLogin
 	}
 	var login []byte
 	if err == nil {
-		login, err = sessionLoginCopy(key.agent, owner)
+		login, err = sessionLogin(key.agent, owner)
 	}
 	if err != nil {
 		slog.Warn("scheduler: read the account's login for session logins", "account", key.account, "agent", key.agent, "error", err)

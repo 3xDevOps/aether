@@ -299,9 +299,9 @@ sudo aether-server config set session-login-accounts <member-id>,<member-id>
 sudo systemctl restart aether-server
 ```
 
-For a listed account whose login is a Claude Code or Codex ChatGPT sign-in,
-the session mounts `<data-dir>/scheduler/logins/<session-id>/.credentials.json`
-(or `auth.json`) read-only at the agent's login path. The copy holds the access
+A `claude` or `codex` session on a listed account mounts
+`<data-dir>/scheduler/logins/<session-id>/<account-member-id>/.credentials.json`
+(or `auth.json`) read-only at the agent's login path, never the owner's file. The copy holds the access
 token and the plan, never the refresh token, so the session cannot keep,
 revoke or overwrite your login. The server:
 
@@ -310,7 +310,9 @@ revoke or overwrite your login. The server:
   under (`~/.claude/.oauth_refresh.lock`, `~/.codex/auth.lock`), and writes
   the result back in place in your home;
 - rewrites every recipient's copy within 30 seconds of your login changing;
-- writes a signed-out copy (`{}`) within 30 seconds of a revoke. Claude Code
+- writes a signed-out copy (`{}`) while your login is not a Claude Code or
+  Codex ChatGPT sign-in, for example signed out or a Codex API key, and
+  within 30 seconds of a revoke. Claude Code
   rereads the file before each request and shows `Not logged in`; Codex
   rereads it only on a 401 or near expiry, so it runs until its access token
   expires. The access token stays valid at the vendor until then.
@@ -319,8 +321,7 @@ A refresh the vendor refuses leaves your login file untouched and is logged as
 `scheduler: refresh the account's login for session logins`; sign in again in
 your environment. The server checks that the container sees the copy before
 the agent starts, or the launch fails with `runtime: <login path> in the
-container is inode <n>, not <copy> (inode <m>)`. An unlisted account, an
-API-key login and every other agent keep the mount described above.
+container is inode <n>, not <copy> (inode <m>)`. An unlisted account and every other agent keep the mount described above.
 
 ## GitHub credentials and signing keys
 
