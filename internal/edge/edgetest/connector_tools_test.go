@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -218,5 +219,69 @@ func TestConnectorToolsThroughTheEdge(t *testing.T) {
 	}
 	if text := res.Content[0].(*mcp.TextContent).Text; !res.IsError || !strings.Contains(text, "permission denied: launching sessions requires the collaborator role") {
 		t.Fatalf("a viewer's launch = %v %s, want refused for the role", res.IsError, text)
+	}
+}
+
+// A connector launch runs at the permission tier it names, or else at the
+// member's saved tier as the dashboard preselects it, and both the launch
+// and aether_get_session say which; the tool's schema refuses a tier it
+// does not list.
+func TestConnectorLaunchPermissionThroughTheEdge(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	client := newConnectorClient(t)
+	s := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{})
+	clients := h.login(alice, bob)
+	h.claimServer(clients[0], s)
+	h.join(h.control(clients[0], s), clients[1], s, string(domain.RoleCollaborator))
+	ws := &domain.Workspace{Name: "api", BaseBranch: "main"}
+	if err := s.db.CreateWorkspace(t.Context(), ws); err != nil {
+		t.Fatal(err)
+	}
+	session := connectAs(t, h.control(clients[1], s), client, h.relayURL+edgeproto.MCPPath(s.id), "write")
+	launch := func(key string, extra map[string]any) map[string]any {
+		args := map[string]any{"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "idempotency_key": key}
+		maps.Copy(args, extra)
+		return structured(t, session, "aether_launch_session", args)
+	}
+	tier := func(out map[string]any) (receipt, stored, got any) {
+		runID := out["run_id"].(string)
+		run, err := s.db.GetRun(t.Context(), domain.RunID(runID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		read := structured(t, session, "aether_get_session", map[string]any{"run_id": runID})
+		return out["launch"].(map[string]any)["permission"], run.Permission, read["launch"].(map[string]any)["permission"]
+	}
+
+	if receipt, stored, got := tier(launch("k-none", nil)); receipt != "default" || stored != domain.PermissionDefault || got != "default" {
+		t.Fatalf("a launch with no tier and none saved: receipt %v, stored %v, aether_get_session %v; want default", receipt, stored, got)
+	}
+	if receipt, stored, got := tier(launch("k-isolated", map[string]any{"permission": "isolated"})); receipt != "isolated" || stored != domain.PermissionIsolated || got != "isolated" {
+		t.Fatalf("an isolated launch: receipt %v, stored %v, aether_get_session %v", receipt, stored, got)
+	}
+
+	if err := s.db.PutLaunchDefaults(t.Context(), s.memberOf(t, bob).ID, store.LaunchDefaults{Permission: domain.PermissionRoot, Source: protocol.LaunchSourceMember}, 0); err != nil {
+		t.Fatal(err)
+	}
+	saved := launch("k-saved", nil)
+	if receipt, stored, got := tier(saved); receipt != "root" || stored != domain.PermissionRoot || got != "root" ||
+		!slices.Contains(saved["launch"].(map[string]any)["defaults_applied"].([]any), "permission") {
+		t.Fatalf("a launch with root saved: receipt %v, stored %v, aether_get_session %v, launch %v", receipt, stored, got, saved["launch"])
+	}
+	if receipt, _, _ := tier(launch("k-given", map[string]any{"permission": "default"})); receipt != "default" {
+		t.Fatalf("a default launch with root saved runs at %v", receipt)
+	}
+	if receipt, _, _ := tier(launch("k-ignore", map[string]any{"saved_defaults": "ignore"})); receipt != "default" {
+		t.Fatalf("a launch ignoring saved root runs at %v", receipt)
+	}
+
+	res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_session",
+		Arguments: map[string]any{"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "permission": "admin", "idempotency_key": "k-bad"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := res.Content[0].(*mcp.TextContent).Text; !res.IsError || !strings.Contains(text, "/properties/permission: enum: admin does not equal any of") {
+		t.Fatalf("a launch at tier admin = %v %s, want the schema's refusal", res.IsError, text)
 	}
 }

@@ -588,6 +588,9 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	if p.Children != "" {
 		summary += ", subsessions " + p.Children
 	}
+	if p.Permission != "" {
+		summary += ", permission " + p.Permission
+	}
 	c.Summary = fmt.Sprintf("%s: \"%s\"", summary, firstLine(p.Task))
 	return nil
 }

@@ -112,8 +112,8 @@ func agentLister(ctx context.Context, read Call, book accountBook) func(account 
 // launchSlots are the fields of a launch's input the saved choices may
 // fill.
 type launchSlots struct {
-	harness, mode, model *string
-	account              *accountChoice
+	harness, mode, model, permission *string
+	account                          *accountChoice
 }
 
 // fillSaved fills each field in slots the caller left empty from saved,
@@ -159,6 +159,10 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 			a.NoFallback = len(a.FallbackAccountMemberIDs) == 0
 		}
 		fill.apply("fallback")
+	}
+	if *slots.permission == "" && d.Permission != "" {
+		*slots.permission = d.Permission
+		fill.apply("permission")
 	}
 	if *slots.harness == "" && d.Agent != "" {
 		reason, err := agentRefused(d.Agent, a.AccountMemberID, agentsOn, book)

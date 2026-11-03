@@ -292,7 +292,7 @@ func TestConnectorToolList(t *testing.T) {
 		}
 	}
 	// An optional value may be sent empty for its default.
-	if want := map[string]string{"aether_launch_session.mode": ",tui,headless,acp", "aether_launch_session.children": ",on,off", "aether_launch_session.saved_defaults": ",apply,ignore", "aether_activity_summary.period": ",today,yesterday,week",
+	if want := map[string]string{"aether_launch_session.mode": ",tui,headless,acp", "aether_launch_session.children": ",on,off", "aether_launch_session.permission": ",root,default,isolated", "aether_launch_session.saved_defaults": ",apply,ignore", "aether_activity_summary.period": ",today,yesterday,week",
 		"aether_decide_approval.decision": "allow,deny", "aether_stop_session.outcome": ",merged,abandoned",
 		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
 		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",

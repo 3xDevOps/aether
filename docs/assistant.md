@@ -227,7 +227,10 @@ Save your environment as a new image; new sessions and terminals start from it
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. A template launch's card shows the whole task its
+task, and how you hear back. Its title names the
+[permission tier](security.md#permission-tiers) when the launch sets one, from
+your request or your saved choices, as in `Launch claude (acp) in api,
+permission root`. A template launch's card shows the whole task its
 parameters fill in. When the assistant gives a one-line reason for a launch,
 the card shows it as a **Reason** row above the rest. The assistant fills what you did not say from
 your [saved launch choices](teams.md#saved-launch-choices): **From your saved
