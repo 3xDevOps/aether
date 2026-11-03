@@ -112,18 +112,26 @@ func (s *Server) developmentAuthority(ctx context.Context, member domain.MemberI
 	if runID == "" {
 		return nil, principal, nil, invalidParams("run_id is required")
 	}
+	// Removing a member also drops the account shares it held, so a removal
+	// committed between these reads fails the share check. The member is
+	// read again on any failure so a removal is never reported as lost steer.
 	authorize := func(ctx context.Context) error {
 		if err := s.checkMember(ctx, member); err != nil {
 			return err
 		}
-		if err := checkSteer(ctx, s.cfg.Store, member, domain.RunID(runID)); err != nil {
-			return err
+		err := checkSteer(ctx, s.cfg.Store, member, domain.RunID(runID))
+		var current *domain.Run
+		if err == nil {
+			current, err = s.cfg.Store.GetRun(ctx, domain.RunID(runID))
 		}
-		current, err := s.cfg.Store.GetRun(ctx, domain.RunID(runID))
+		if err == nil {
+			_, err = fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(current.AccountMember()))
+		}
 		if err != nil {
-			return err
+			if memberErr := s.checkMember(ctx, member); memberErr != nil {
+				return memberErr
+			}
 		}
-		_, err = fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(current.AccountMember()))
 		return err
 	}
 	if err := authorize(ctx); err != nil {
