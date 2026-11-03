@@ -1,6 +1,7 @@
 package push
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -65,18 +66,19 @@ func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message
 }
 
 // Push is Deliver for a new notification: within burstWindow of member's
-// last push it replaces that one quietly with a summary of both, and
-// reports joined. m.Topic must be set.
+// last push it replaces that one with a summary of both, and reports
+// joined. m.Topic must be set; m.Run, when set, names the item instead.
 func (s *Service) Push(ctx context.Context, member domain.MemberID, m Message, need bool) ([]DeviceResult, bool, error) {
-	summary, topic, err := s.join(member, m.Topic, topicOf(m.Topic), m.Title, m.Body, need)
+	key := cmp.Or(string(m.Run), m.Topic)
+	sum, err := s.join(member, key, m.Topic, topicOf(m.Topic), m.Title, m.Body, need)
 	if err != nil {
 		return nil, false, err
 	}
-	if summary == nil {
+	if sum == nil {
 		results, deliverErr := s.Deliver(ctx, member, m)
 		return results, false, deliverErr
 	}
-	results, err := s.deliverPayload(ctx, member, summary, topic, urgencyNormal)
+	results, err := s.deliverPayload(ctx, member, sum.payload, sum.topic, sum.urgency)
 	return results, true, err
 }
 

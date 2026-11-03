@@ -44,13 +44,9 @@ func RouteOf(p store.NotifyPrefs, kind string, now time.Time) Route {
 	return RouteDigest
 }
 
-// batchWindow is how often the batched level sends its digest, on the
-// clock's half hours.
-const batchWindow = 30 * time.Minute
-
 // digestDue is when items, a member's queue, oldest first, are sent: when
 // quiet hours end, at once after them if they held any, else on the next
-// half hour after the oldest at the batched level, at the next digest time
+// half hour in the member's zone after the oldest at the batched level, at the next digest time
 // at the blockers level, and at once at all.
 func digestDue(p store.NotifyPrefs, items []*store.DigestItem, now time.Time) time.Time {
 	if until, quiet := QuietUntil(p, now); quiet {
@@ -64,7 +60,8 @@ func digestDue(p store.NotifyPrefs, items []*store.DigestItem, now time.Time) ti
 	oldest := items[0].CreatedAt
 	switch p.Level {
 	case protocol.NotifyBatched:
-		return oldest.Truncate(batchWindow).Add(batchWindow)
+		local := oldest.In(Zone(p.DigestTZ))
+		return time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), (local.Minute()/30+1)*30, 0, 0, local.Location())
 	case protocol.NotifyBlockers:
 		return nextClock(p.DigestAt, Zone(p.DigestTZ), oldest)
 	}
@@ -109,10 +106,11 @@ func QuietUntil(p store.NotifyPrefs, now time.Time) (time.Time, bool) {
 	return until, true
 }
 
-// Zone is the IANA zone name, UTC when it is empty or unknown.
+// Zone is the IANA zone name, UTC when it is empty, unknown or Local: the
+// server's own zone is not the member's.
 func Zone(name string) *time.Location {
 	loc, err := time.LoadLocation(name)
-	if err != nil {
+	if err != nil || name == "Local" {
 		return time.UTC
 	}
 	return loc

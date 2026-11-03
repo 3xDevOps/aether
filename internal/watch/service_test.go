@@ -1537,3 +1537,22 @@ func TestTheLevelBatchesWhatDoesNotBlock(t *testing.T) {
 	h.status(c, domain.RunInterrupted, "", "")
 	h.eventually("the end pushed at once", func() bool { return h.pushStatus(wc.ID) == protocol.WatchStatusDelivered })
 }
+
+func TestNotificationPreferencesRefuseTheServersOwnZone(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	for _, p := range []protocol.NotifyPrefs{
+		{Digest: &protocol.NotifyDigest{At: "09:00", TZ: "Local"}},
+		{QuietHours: &protocol.QuietHours{Start: "22:00", End: "07:00", TZ: "Local"}},
+		{Level: "sometimes"},
+		{Digest: &protocol.NotifyDigest{At: "9am", TZ: "UTC"}},
+	} {
+		if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, p); !errors.Is(err, ErrInvalid) {
+			t.Errorf("SetPrefs(%+v) = %v, want refused", p, err)
+		}
+	}
+	got, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Level: protocol.NotifyBlockers, Digest: &protocol.NotifyDigest{At: "08:30", TZ: "Europe/Berlin"}})
+	if err != nil || got.Level != protocol.NotifyBlockers || *got.Digest != (protocol.NotifyDigest{At: "08:30", TZ: "Europe/Berlin"}) {
+		t.Fatalf("SetPrefs = %+v, %v, want the level and digest time saved", got, err)
+	}
+}

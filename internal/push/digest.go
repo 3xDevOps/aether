@@ -127,8 +127,15 @@ func digestLine(item *store.DigestItem, action string) string {
 	return line + "  [" + action + "]"
 }
 
-// plain is text an agent may have written, on one line.
+// plain is text an agent may have written, on one line, without control
+// or format characters such as bidirectional overrides.
 func plain(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
 	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }), " ")
 }
 
@@ -179,9 +186,8 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 	if err != nil || len(items) == 0 {
 		return err
 	}
-	if digestDue(prefs, items, now).After(now) {
-		return nil
-	}
+	// Each item is read again before the due time is: one that waits
+	// (ErrNotYet) or cannot be read now must not make the rest due.
 	var current, stale []*store.DigestItem
 	var errs []error
 	for _, item := range items {
@@ -189,19 +195,21 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 		switch {
 		case errors.Is(staleErr, ErrNotYet):
 		case staleErr != nil:
-			errs = append(errs, staleErr)
+			slog.Warn("push: read a digest item again; it stays queued", "member", member, "source", item.Source, "key", item.Key, "error", staleErr)
 		case reason != "":
-			errs = append(errs, s.source(item).Dropped(ctx, item, reason))
+			if err = s.source(item).Dropped(ctx, item, reason); err != nil {
+				errs = append(errs, err)
+			}
 			stale = append(stale, item)
 		default:
 			current = append(current, item)
 		}
 	}
 	if err = s.store.DeleteDigestItems(ctx, member, stale); err != nil {
-		return errors.Join(append(errs, err)...)
+		errs = append(errs, err)
 	}
-	if err = errors.Join(errs...); err != nil || len(current) == 0 {
-		return err
+	if len(current) == 0 || digestDue(prefs, current, now).After(now) {
+		return errors.Join(errs...)
 	}
 	title, body := digestText(current)
 	payload, err := json.Marshal(message{
@@ -227,9 +235,14 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 	delete(s.digestRetry, member)
 	s.mu.Unlock()
 	for _, item := range current {
-		errs = append(errs, s.source(item).Sent(ctx, item, results, err))
+		if sentErr := s.source(item).Sent(ctx, item, results, err); sentErr != nil {
+			errs = append(errs, sentErr)
+		}
 	}
-	return errors.Join(append(errs, s.store.DeleteDigestItems(ctx, member, current))...)
+	if err = s.store.DeleteDigestItems(ctx, member, current); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // failed reports whether a member with a device had none take a push.

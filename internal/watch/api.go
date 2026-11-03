@@ -660,8 +660,8 @@ func (s *Service) SetPrefs(ctx context.Context, member domain.MemberID, p protoc
 		if _, ok := push.ParseClock(d.At); !ok {
 			return protocol.NotifyPrefs{}, invalid("digest.at is HH:MM, such as 09:00")
 		}
-		if _, err := time.LoadLocation(d.TZ); err != nil {
-			return protocol.NotifyPrefs{}, invalid("digest.tz %q is not an IANA time zone: %v", d.TZ, err)
+		if _, err := time.LoadLocation(d.TZ); err != nil || d.TZ == "Local" {
+			return protocol.NotifyPrefs{}, invalid("digest.tz %q is not an IANA time zone such as Europe/Berlin", d.TZ)
 		}
 		rec.DigestAt, rec.DigestTZ = d.At, d.TZ
 	}
@@ -676,6 +676,9 @@ func (s *Service) SetPrefs(ctx context.Context, member domain.MemberID, p protoc
 		}
 		if q.TZ == "" {
 			return protocol.NotifyPrefs{}, invalid("quiet_hours.tz is required, an IANA time zone such as Europe/Berlin")
+		}
+		if q.TZ == "Local" {
+			return protocol.NotifyPrefs{}, invalid("quiet_hours.tz %q is not an IANA time zone such as Europe/Berlin", q.TZ)
 		}
 		if _, err := time.LoadLocation(q.TZ); err != nil {
 			return protocol.NotifyPrefs{}, invalid("quiet_hours.tz %q is not an IANA time zone: %v", q.TZ, err)

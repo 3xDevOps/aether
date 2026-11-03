@@ -276,7 +276,8 @@ finishes" needs no one polling:
 `push` sends watch notices to your Web Push devices; it defaults to `true`.
 `level` and `digest` are described in [Notification levels](#notification-levels).
 A `notify.prefs.set` that omits `push`, `level` or `digest` keeps its current
-value. `digest.tz` is an IANA zone; empty means UTC. **Settings →
+value. `digest.tz` is an IANA zone; empty means UTC, and `Local` is refused
+because the server's zone is not yours. **Settings →
 Notifications** saves the browser's zone with the time.
 
 During quiet hours every push is held: watch notices and your own sessions'
@@ -296,7 +297,7 @@ result counts your subscribed devices.
 | `level` | Pushed at once | In a digest |
 | --- | --- | --- |
 | `blockers` (**Only what blocks me**) | What needs you: a session's [Needs you](failure-handling.md#needs-you) push and a watch's `needs_you` notice | Everything else, daily at `digest.at` (default `09:00`) |
-| `batched` (**Blockers now, the rest batched**, the default) | The same | Everything else, on the clock's next half hour |
+| `batched` (**Blockers now, the rest batched**, the default) | The same | Everything else, on the next half hour in `digest.tz` |
 | `all` (**Everything as it happens**) | Everything | Nothing |
 
 "Everything else" is a finished, failed or stopped session (a success to
@@ -326,13 +327,18 @@ a result you opened or put off on any device, and a notice whose watch you
 paused or deleted are dropped; a digest left empty is not sent. A need of a paused
 session waits until it resumes. While you use a dashboard the digest waits, as
 other pushes do. When no device takes it, it is tried again every minute, 5
-times in all, and each watch notice in it records the result.
+times in all, and each watch notice in it records the result. A server that
+stops while it sends a digest can send that digest again after it starts. An
+item a source cannot read now, such as the need of a paused session, stays
+queued without making the digest due.
 
-Within 2 minutes after a push, further pushes do not alert again. Each replaces
-that notification quietly with a summary, `3 need you` and one line per item,
-and opens the dashboard. A newer push about the same session or watch replaces
-its own line. The summary stays until you dismiss it; the Needs you list is
-current.
+Within 2 minutes after a push, further pushes join it: each replaces that
+notification with a summary, `3 need you` and one line per item, that opens
+the dashboard. It alerts only when it brings the first need; otherwise it
+replaces the notification quietly. A session counts once, whether its own
+push or a watch's notice about it joined. When a session in the summary stops
+needing you, its line goes and the summary is sent again quietly; once none
+needs you, it is replaced with `No longer needs you`.
 
 ## Methods
 

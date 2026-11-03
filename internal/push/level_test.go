@@ -56,6 +56,8 @@ func TestDigestsFallDueByLevel(t *testing.T) {
 		want string
 	}{
 		{"batched: the half hour after the oldest", store.NotifyPrefs{Level: protocol.NotifyBatched}, "2026-11-03T14:30:00Z"},
+		{"batched: the half hour in the member's zone", store.NotifyPrefs{Level: protocol.NotifyBatched, DigestTZ: "Asia/Kathmandu"}, "2026-11-03T14:15:00Z"},
+		{"batched: Local is not the member's zone", store.NotifyPrefs{Level: protocol.NotifyBatched, DigestTZ: "Local"}, "2026-11-03T14:30:00Z"},
 		{"blockers: the next digest time in its zone", store.NotifyPrefs{Level: protocol.NotifyBlockers, DigestAt: "09:00", DigestTZ: "Europe/Berlin"}, "2026-11-04T08:00:00Z"},
 		{"blockers: UTC without a zone", store.NotifyPrefs{Level: protocol.NotifyBlockers, DigestAt: "16:00"}, "2026-11-03T16:00:00Z"},
 		{"quiet hours: when they end", store.NotifyPrefs{Level: protocol.NotifyBatched, QuietStart: "14:00", QuietEnd: "15:15", QuietTZ: "UTC"}, "2026-11-03T15:15:00Z"},
@@ -76,7 +78,7 @@ func TestTheDigestHasAFixedShape(t *testing.T) {
 		{Kind: KindDone, Workspace: "api", Title: "Rotate the staging keys", Body: "Agent reported done"},
 		{Kind: KindNeed, Workspace: "api", Title: "Fix login test", Body: "asks \"run the migration?\""},
 		{Kind: KindFailed, Workspace: "web", Title: "Bump deps across every package in the monorepo", Body: "Failed: checks failed (lint)"},
-		{Kind: KindDone, Workspace: "api", Title: "Write docs", Body: "Completed"},
+		{Kind: KindDone, Workspace: "api", Title: "Write\u202e docs", Body: "Comp\u200bleted"},
 		{Kind: KindNeed, Workspace: "api", Title: "Launch docs session", Body: "Permission:\nrm -rf\x1b[2J build/"},
 		{Kind: KindDone, Workspace: "web", Title: "Add a test", Body: "Agent reported done"},
 		{Kind: KindMerged, Title: "acme/web#42: Add a test", Body: "PR #42 merged on GitHub"},

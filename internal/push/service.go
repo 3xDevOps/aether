@@ -136,7 +136,7 @@ type Service struct {
 	// notices holds, for every admin with a workspace's budget notice
 	// to send, what hands its watcher the state to announce.
 	notices map[budgetKey]chan budgetDue
-	bursts  map[domain.MemberID]*burst
+	bursts  map[domain.MemberID][]*burst
 	// digestRetry and digestAttempts hold, for a member whose digest no
 	// device took, when to try again and how often it was tried.
 	digestRetry    map[domain.MemberID]time.Time
@@ -197,7 +197,7 @@ func New(cfg Config) (*Service, error) {
 		active:  map[domain.MemberID]time.Time{},
 		watched: map[domain.RunID]chan struct{}{},
 		notices: map[budgetKey]chan budgetDue{},
-		bursts:  map[domain.MemberID]*burst{},
+		bursts:  map[domain.MemberID][]*burst{},
 
 		digestRetry:    map[domain.MemberID]time.Time{},
 		digestAttempts: map[domain.MemberID]int{},
@@ -316,6 +316,7 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			if devicesErr != nil {
 				slog.Warn("push: a device was not told a need ended; trying again later", "run", id, "in", retry, "error", devicesErr)
 			}
+			s.unjoin(ctx, string(id))
 			if err = s.sink.Clear(ctx, id); err != nil {
 				slog.Warn("push: the sink did not clear a need; trying again later", "run", id, "in", retry, "error", err)
 			}
@@ -517,11 +518,11 @@ func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
 		}
 		slog.Warn("push: queue a notification for the digest; pushing at once", "run", run.ID, "error", err)
 	}
-	summary, topic, err := s.join(n.member, string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed)
-	if err != nil || summary == nil {
+	sum, err := s.join(n.member, string(run.ID), string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed)
+	if err != nil || sum == nil {
 		return false
 	}
-	if _, err := s.deliverPayload(ctx, n.member, summary, topic, urgencyNormal); err != nil {
+	if _, err := s.deliverPayload(ctx, n.member, sum.payload, sum.topic, sum.urgency); err != nil {
 		slog.Warn("push: summary not delivered", "member", n.member, "error", err)
 	}
 	return true

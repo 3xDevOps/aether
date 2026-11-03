@@ -1,6 +1,7 @@
 package push
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -49,16 +50,64 @@ func TestPushesWithinTwoMinutesJoinTheFirstAsOneNotification(t *testing.T) {
 	phone.expect(t, notification{Title: "Fix login test", Body: "run the migration?", Run: string(a.ID)})
 	h.clock.advance(time.Minute)
 	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: no docs key")
-	phone.expect(t, notification{
-		Title: "2 need you", Body: "Fix login test: run the migration?\nLaunch docs: Blocked: no docs key", Notice: true, Quiet: true,
-	})
+	phone.expect(t, notification{Title: "2 need you", Body: "Fix login test: run the migration?\nLaunch docs: Blocked: no docs key", Quiet: true})
 	if got, want := phone.topic.Load(), topicOf(string(a.ID)); got != want {
 		t.Errorf("summary topic = %v, want the first push's %s, which it replaces", got, want)
 	}
+	if got := phone.urgency.Load(); got != urgencyHigh {
+		t.Errorf("summary urgency = %v, want %s while it holds a need", got, urgencyHigh)
+	}
+
+	// An item whose need ends leaves the summary; once none is left, it is
+	// cleared like a need that ended.
+	h.status(b, domain.RunRunning, domain.ActivityWorking, "")
+	phone.expect(t, notification{Title: "1 need you", Body: "Fix login test: run the migration?", Quiet: true})
+	h.status(a, domain.RunRunning, domain.ActivityWorking, "")
+	phone.expect(t, notification{Title: "Fix login test", Body: clearedBody, Run: string(a.ID), Clear: true})
+	phone.expect(t, notification{Body: clearedBody, Clear: true})
 
 	h.clock.advance(burstWindow)
 	h.status(c, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: lockfile conflict")
 	phone.expect(t, notification{Title: "Bump deps", Body: "Blocked: lockfile conflict", Run: string(c.ID)})
+}
+
+// waiting is a digest source whose items stay queued, as a paused
+// session's need does.
+type waiting struct{}
+
+func (waiting) Stale(context.Context, *store.DigestItem) (string, error) { return "", ErrNotYet }
+func (waiting) Sent(context.Context, *store.DigestItem, []DeviceResult, error) error {
+	return nil
+}
+func (waiting) Dropped(context.Context, *store.DigestItem, string) error { return nil }
+
+func TestAnItemThatWaitsDoesNotMakeTheDigestDue(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	h.svc.UseDigestSource("waiting", waiting{})
+	if err := h.svc.Queue(h.ctx, &store.DigestItem{
+		MemberID: h.ada.ID, Source: "waiting", Key: "old", Kind: KindNeed, Title: "Paused", CreatedAt: h.clock.now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	h.clock.advance(30*time.Minute + time.Second)
+	h.finish(run)
+	h.eventuallyQueued(h.ada, 2)
+	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	phone.expectNone(t, testQuiet)
+
+	h.clock.advance(30 * time.Minute)
+	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	phone.expect(t, notification{Title: "Aether · 1 done", Body: "proj  Upgrade the linter: Finished: review the result  [Review]", Notice: true})
+	if got := h.digestItems(h.ada); len(got) != 1 || got[0].Key != "old" {
+		t.Fatalf("digest holds %+v, want the waiting item alone", got)
+	}
 }
 
 func TestTheBatchedLevelSendsOneDigestOnTheHalfHour(t *testing.T) {
@@ -75,7 +124,7 @@ func TestTheBatchedLevelSendsOneDigestOnTheHalfHour(t *testing.T) {
 	h.svc.sendDigests(h.ctx)
 	phone.expectNone(t, testQuiet)
 
-	h.clock.advance(batchWindow)
+	h.clock.advance(30 * time.Minute)
 	h.svc.sendDigests(h.ctx)
 	phone.expect(t, notification{
 		Title:  "Aether · 2 done",
@@ -102,7 +151,7 @@ func TestAnItemSeenBeforeTheDigestIsDroppedAndAnEmptyDigestIsNotSent(t *testing.
 	if _, _, err := h.db.SetRunReview(h.ctx, run.ID, domain.ReviewAccepted, domain.ReviewReady); err != nil {
 		t.Fatalf("SetRunReview: %v", err)
 	}
-	h.clock.advance(batchWindow)
+	h.clock.advance(30 * time.Minute)
 	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +165,7 @@ func TestAnItemSeenBeforeTheDigestIsDroppedAndAnEmptyDigestIsNotSent(t *testing.
 	if _, _, err := h.db.SetRunReview(h.ctx, late.ID, domain.ReviewAccepted, domain.ReviewReady); err != nil {
 		t.Fatalf("SetRunReview: %v", err)
 	}
-	h.clock.advance(batchWindow)
+	h.clock.advance(30 * time.Minute)
 	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
 		t.Fatal(err)
 	}
