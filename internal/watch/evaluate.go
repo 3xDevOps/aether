@@ -463,7 +463,10 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 		if w.Source == protocol.WatchSourceAssistant && s.assistant != nil {
 			rec.Deliveries = append(rec.Deliveries, store.WatchDelivery{Channel: protocol.WatchChannelAssistant, Status: protocol.WatchStatusPending, At: now})
 		}
-		rec.Deliveries = append(rec.Deliveries, relayDeliveries(w, now)...)
+		for _, run := range w.RelayTo {
+			rec.Deliveries = append(rec.Deliveries, store.WatchDelivery{Channel: protocol.WatchChannelRelay, Status: protocol.WatchStatusPending,
+				Detail: "Waiting to write to the session's inbox", At: now, RunID: run})
+		}
 		out = append(out, rec)
 	}
 	return out, nil

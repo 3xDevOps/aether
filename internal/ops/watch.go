@@ -165,6 +165,13 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	if in.RelayTo != nil {
+		ids := make([]string, 0, len(*in.RelayTo))
+		for _, id := range *in.RelayTo {
+			ids = append(ids, strings.TrimPrefix(id, runPrefix))
+		}
+		in.RelayTo = &ids
+	}
 	var res protocol.WatchResult
 	if in.WatchID != "" {
 		if in.RunID != "" || in.PR != "" {

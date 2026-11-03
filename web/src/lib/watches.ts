@@ -97,7 +97,7 @@ export function deliveryText(delivery: WatchDelivery): string {
     case 'relay':
       switch (delivery.status) {
         case 'delivered':
-          return `Relayed to ${delivery.run_id}`
+          return `Relayed to ${delivery.run_id}${detail ? `: ${detail}` : ''}`
         case 'failed':
           return `Relay to ${delivery.run_id} failed: ${detail || 'no reason given'}`
         case 'pending':

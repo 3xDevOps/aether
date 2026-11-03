@@ -86,14 +86,6 @@ func (s *Service) mayRelay(ctx context.Context, member *domain.Member, ws domain
 	return nil
 }
 
-func relayDeliveries(w *store.Watch, now time.Time) []store.WatchDelivery {
-	out := make([]store.WatchDelivery, 0, len(w.RelayTo))
-	for _, run := range w.RelayTo {
-		out = append(out, store.WatchDelivery{Channel: protocol.WatchChannelRelay, Status: protocol.WatchStatusPending, Detail: "Waiting to write to the session's inbox", At: now, RunID: run})
-	}
-	return out
-}
-
 // deliverRelays writes each due relay into its session's inbox.
 func (s *Service) deliverRelays(ctx context.Context) {
 	due, err := s.store.DueWatchRelays(ctx, s.now())
@@ -121,6 +113,10 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	}
 	if err != nil {
 		return err
+	}
+	// Paused after the due rows were listed.
+	if w.State == protocol.WatchPaused {
+		return nil
 	}
 	now := s.now()
 	settle := func(status, detail string, next *time.Time) error {
