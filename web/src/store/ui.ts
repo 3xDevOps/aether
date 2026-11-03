@@ -109,7 +109,7 @@ export function onboardingStepIndex(step: OnboardingStep): number {
 
 export const minSidebarWidth = 220
 export const maxSidebarWidth = 400
-export const defaultSidebarWidth = 260
+const defaultSidebarWidth = 260
 
 export type LaunchDefaults = Record<string, { mode: LaunchMode; model?: string; at: number }>
 

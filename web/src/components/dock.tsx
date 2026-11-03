@@ -6,7 +6,7 @@ import { coarsePointer, useDrag, useMediaQuery, useWindowHeight } from '@/lib/ho
 import { onTabListKeyDown, splitterTarget } from '@/lib/keys'
 import { cn, focusRing } from '@/lib/utils'
 
-export interface DockTab {
+interface DockTab {
   id: string
   label: string
   permanent?: boolean
@@ -14,7 +14,7 @@ export interface DockTab {
 
 export type DockContainment = 'viewport' | 'parent' | 'fill'
 
-export interface DockProps {
+interface DockProps {
   tabs: DockTab[]
   activeTab: string
   onSelectTab: (id: string) => void

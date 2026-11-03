@@ -40,7 +40,6 @@ export interface RunRow {
 
 /** The runs under a tree's root, at any depth. */
 export interface TreeSummary {
-  collapsed: boolean
   counts: { working: number; needsYou: number; done: number; failed: number }
   members: RunRow[]
 }
@@ -56,7 +55,7 @@ export interface RunTree extends RunRow {
   childRuns?: TreeSummary
 }
 
-export interface RunGroups {
+interface RunGroups {
   'needs-you': RunTree[]
   working: RunTree[]
   review: RunTree[]
@@ -124,7 +123,7 @@ function childRunTree(root: RunRow, members: RunRow[]): RunTree {
     group: children.length > 0 ? 'needs-you' : root.group,
     waitingSince: waits.map((row) => row.waitingSince).sort()[0] ?? root.waitingSince,
     children,
-    childRuns: { collapsed: children.length < members.length, counts, members },
+    childRuns: { counts, members },
   }
 }
 

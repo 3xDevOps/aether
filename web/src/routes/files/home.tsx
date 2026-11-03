@@ -11,7 +11,7 @@ import { sameIdentity, useStore } from '@/store'
 import { homeKey } from '@/store/files'
 
 /** What the tree's inline field is naming: a new entry in `parent`, or `path`. */
-export type Naming = { kind: 'file' | 'dir'; parent: string } | { kind: 'rename'; path: string }
+type Naming = { kind: 'file' | 'dir'; parent: string } | { kind: 'rename'; path: string }
 
 /** Marks a drag of a Home row, as opposed to files dragged from the desktop. */
 const rowDrag = 'application/x-aether-home-path'

@@ -28,7 +28,7 @@ import { emptyTraceView, type TraceView as TraceViewState } from '@/store/trace-
 import { flattenTrace, type TraceRow } from '@/store/trace-rows'
 
 /** Below this width the rows stack: the name line, then the bar on its own track. */
-export const stackBelow = 561
+const stackBelow = 561
 
 const zoomPad = 0.05
 const labelRoom = 40

@@ -50,7 +50,7 @@ const savedFields: Record<string, string> = {
 }
 
 /** The rows a launch card shows, or undefined when `method` launches nothing. */
-export function launchRows(s: RootState, method: string, params: unknown, defaults?: AssistantConfirmation['defaults']): [string, string][] | undefined {
+function launchRows(s: RootState, method: string, params: unknown, defaults?: AssistantConfirmation['defaults']): [string, string][] | undefined {
   if (!launchMethods.has(method) || params === null || typeof params !== 'object') return undefined
   const p = params as Params
   const workspace = str(p.workspace_id)

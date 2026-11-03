@@ -56,7 +56,7 @@ export function edgeShape(edge: LaneEdge, a: EdgeAnchor, b: EdgeAnchor, g: LaneG
 
 const dash: Partial<Record<LaneEdge['kind'], string>> = { overlap: '4 2' }
 
-export interface DrawnEdge {
+interface DrawnEdge {
   edge: LaneEdge
   shape: Shape
   tone: string

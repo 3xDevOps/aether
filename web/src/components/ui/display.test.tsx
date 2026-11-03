@@ -12,7 +12,6 @@ import { PaneHeader } from '@/components/ui/pane-header'
 import { Clamped } from '@/components/ui/request-card'
 import { SectionLabel } from '@/components/ui/section-label'
 import { ToolValue } from '@/components/ui/session-blocks'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { StateLine, StatusDot, type Tone, toneClasses } from '@/components/ui/status-dot'
@@ -178,7 +177,6 @@ test('the small text primitives render their elements', () => {
       <Kbd>K</Kbd>
       <Code>main</Code>
       <CodeBlock>go test ./...</CodeBlock>
-      <Separator decorative={false} />
     </>,
   )
   expect(screen.getByRole('heading', { name: 'No sessions yet' })).toBeDefined()
@@ -186,7 +184,6 @@ test('the small text primitives render their elements', () => {
   expect(screen.getByText('K').tagName).toBe('KBD')
   expect(screen.getByText('main').tagName).toBe('CODE')
   expect(screen.getByText('go test ./...').tagName).toBe('PRE')
-  expect(screen.getByRole('separator')).toBeDefined()
 })
 
 test('a clipped tool value selects every line for a manual copy', async () => {

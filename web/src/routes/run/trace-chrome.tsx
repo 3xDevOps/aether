@@ -94,7 +94,7 @@ export function TraceStatsStrip({
 }
 
 /** The track's place in a row or overlay, in pixels. */
-export function trackBox(wide: boolean, track: number): React.CSSProperties {
+function trackBox(wide: boolean, track: number): React.CSSProperties {
   return { left: wide ? treeWidth : stackedInset, width: track }
 }
 

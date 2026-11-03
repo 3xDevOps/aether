@@ -21,7 +21,7 @@ export function fallbackToSaved(fallback: Fallback, accounts: Member[], skip: st
   return { policy: 'automatic' }
 }
 
-export function issueField(field: string): string {
+function issueField(field: string): string {
   if (field === 'agent') return 'Agent'
   if (field === 'account_member_id') return 'Account'
   if (field === 'fallback.order') return 'Fallback account'

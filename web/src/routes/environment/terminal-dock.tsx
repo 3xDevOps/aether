@@ -62,7 +62,7 @@ interface StructuralReplayState {
   revision: number
 }
 
-export interface TerminalDockProps {
+interface TerminalDockProps {
   client?: Api
   openOnMount?: boolean
   /** A line to type into the main tab after its first attach. */

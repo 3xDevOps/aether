@@ -3,7 +3,7 @@ import { routeFromQuery } from '@/lib/url-state'
 import type { Route } from '@/store/ui'
 import type { Watch, WatchCondition, WatchDelivery, WatchState, WatchTarget, WatchTargetKind } from '@/lib/types'
 
-export interface ConditionChoice {
+interface ConditionChoice {
   value: WatchCondition
   label: string
   description: string

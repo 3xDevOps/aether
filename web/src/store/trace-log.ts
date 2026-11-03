@@ -4,7 +4,7 @@ import type { Event } from '@/lib/types'
 import type { RootStore } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 
-export const traceEventTypes = ['run.status', 'run.cost']
+const traceEventTypes = ['run.status', 'run.cost']
 
 const pageSize = 500
 const readCap = 2000

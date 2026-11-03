@@ -22,7 +22,7 @@ export function limitsText(limits: ChildLimits): string {
 }
 
 /** The workspace's child-run limits as a sentence: read, reading, or the refusal. */
-export function useChildLimitsText(client: Api, workspaceID: string, seq = 0): string {
+function useChildLimitsText(client: Api, workspaceID: string, seq = 0): string {
   const [read, setRead] = useState<{ workspaceID: string; text: string } | null>(null)
   useEffect(() => {
     let live = true

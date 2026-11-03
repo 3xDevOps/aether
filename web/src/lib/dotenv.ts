@@ -1,7 +1,7 @@
 // The format `aether workspace env import` reads; cmd/aether/workspace_env.go
 // holds the same rules and the same test cases.
 
-export interface DotenvResult {
+interface DotenvResult {
   /** In file order; a later line replaces an earlier one of the same name. */
   variables: { name: string; value: string }[]
   /** 1-based numbers of the lines that are not NAME=VALUE. */

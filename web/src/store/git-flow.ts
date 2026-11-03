@@ -3,7 +3,7 @@ import type { GitLogCommit, RunGitLogResult, RunPRCheck, RunPRFeedbackResult, Ru
 import { checkState, countChecks } from '@/routes/diff/publish-pr'
 
 export const rowHeight = 28
-export const foldAt = 8
+const foldAt = 8
 const upstreamKept = 3
 
 /** Lane 0 is the run branch, lane 1 its base. */
@@ -130,7 +130,7 @@ export function layoutGraph(log: RunGitLogResult, expanded = false, previous?: G
   return { rows, edges: [...edges.values()], lanes }
 }
 
-export type ItemState = 'ok' | 'pending' | 'blocked' | 'unknown'
+type ItemState = 'ok' | 'pending' | 'blocked' | 'unknown'
 
 export interface ReadinessItem {
   key: 'draft' | 'checks' | 'conflicts' | 'review' | 'base'
@@ -147,7 +147,7 @@ export interface Readiness {
   ready: boolean
 }
 
-export const notChecked = 'Not checked yet'
+const notChecked = 'Not checked yet'
 
 const labels: Record<ReadinessItem['key'], string> = { draft: 'Draft', checks: 'Checks', conflicts: 'Conflicts', review: 'Review', base: 'Base' }
 const tones: Record<ItemState, Tone> = { ok: 'done', pending: 'needs-you', blocked: 'failed', unknown: 'neutral' }
@@ -197,7 +197,7 @@ function reviewItem(feedback: RunPRFeedbackResult | undefined): ReadinessItem {
 }
 
 /** The log, when it measured what the pull request would merge: the same head, into the same base. */
-export function comparedWith(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): RunGitLogResult | undefined {
+function comparedWith(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): RunGitLogResult | undefined {
   if (!log || log.error) return undefined
   if (pr && log.base_ref !== pr.base_branch && log.base_ref !== `origin/${pr.base_branch}`) return undefined
   if (pr?.state === 'open' && log.head !== pr.head_oid) return undefined
@@ -266,7 +266,7 @@ export function readiness(log: RunGitLogResult | undefined, feedback: RunPRFeedb
   return { items, ready: items.every((entry) => entry.state === 'ok') }
 }
 
-export type PRWord = 'Draft' | 'Open' | 'Merged' | 'Closed'
+type PRWord = 'Draft' | 'Open' | 'Merged' | 'Closed'
 
 export function prWord(pr: RunPullRequest): PRWord {
   if (pr.state === 'merged') return 'Merged'

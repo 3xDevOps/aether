@@ -19,7 +19,7 @@ export interface BoardColumn {
   cards: BoardCard[]
 }
 
-export interface BoardData {
+interface BoardData {
   columns: BoardColumn[]
   /** Finished, archived runs in scope - hidden from Finished, shown behind its toggle. */
   archivedCards: BoardCard[]

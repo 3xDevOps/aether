@@ -5,7 +5,7 @@ import { useStore } from '@/store'
 import { pruneRuns } from '@/store/runs'
 
 /** The page a note was written on, as its message names it. */
-export interface NotePage {
+interface NotePage {
   url: string
   width: number
   height: number

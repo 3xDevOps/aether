@@ -36,7 +36,6 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"edge.logout":         (*Gateway).localEdgeLogout,
 	"edge.servers":        (*Gateway).localEdgeServers,
 	"edge.status":         (*Gateway).localEdgeStatus,
-	"env.agents":          (*Gateway).localEnvAgents,
 	"forward.start":       (*Gateway).localForwardStart,
 	"forward.status":      (*Gateway).localForwardStatus,
 	"forward.stop":        (*Gateway).localForwardStop,
@@ -59,11 +58,11 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"workspace.selection": (*Gateway).localWorkspaceSelection,
 }
 
-// needsHost lists the verbs that need a git checkout, a service manager or
-// local coding agents, which a packaged gateway's phone has none of, and the
-// port forwards, whose loopback listener every app on a phone can reach.
+// needsHost lists the verbs that need a git checkout or a service manager,
+// which a packaged gateway's phone has neither of, and the port forwards,
+// whose loopback listener every app on a phone can reach.
 var needsHost = []string{
-	"daemon.install", "daemon.status", "env.agents", "forward.start", "forward.status", "forward.stop",
+	"daemon.install", "daemon.status", "forward.start", "forward.status", "forward.stop",
 	"git.identity", "link.repo", "pull", "pull.switch", "repo.fast-forward", "repo.push",
 	"sync.start", "sync.status", "sync.stop",
 }
@@ -995,54 +994,4 @@ func (g *Gateway) localDaemonStatus(*http.Request, []byte) (any, *protocol.Error
 		Installed bool   `json:"installed"`
 		UnitPath  string `json:"unit_path"`
 	}{Installed: installed, UnitPath: unitPath}, nil
-}
-
-// loginPathTimeout bounds the login shell asked for its PATH before a
-// agent lookup; an rc file that hangs must not hold it back.
-const loginPathTimeout = 5 * time.Second
-
-// localEnvAgents reports which setup-capable agents are installed
-// on this machine, for the onboarding wizard's agent picker. PATH is
-// widened from the login shell first, so an agent installed through a
-// shell profile, or since the gateway started, is found; a failed probe
-// becomes the warning and only the standard folders are checked. The
-// folders searched let the wizard say where it looked when nothing is
-// found, and repo_path is the one repository folder the saved link config
-// knows (when exactly one is known) so the wizard can prefill the
-// from-repo folder input.
-func (g *Gateway) localEnvAgents(r *http.Request, _ []byte) (any, *protocol.Error) {
-	ctx, cancel := context.WithTimeout(r.Context(), loginPathTimeout)
-	defer cancel()
-	var warning string
-	if _, err := localops.AdoptLoginPath(ctx); err != nil {
-		warning = err.Error()
-	}
-	return struct {
-		Agents   []localops.HarnessStatus `json:"agents"`
-		Searched []string                 `json:"searched"`
-		Warning  string                   `json:"warning,omitempty"`
-		RepoPath string                   `json:"repo_path,omitempty"`
-	}{
-		Agents:   localops.DetectHarnesses(),
-		Searched: localops.SearchedDirs(),
-		Warning:  warning,
-		RepoPath: suggestedRepo(g.local.snapshot()),
-	}, nil
-}
-
-// suggestedRepo returns the single repository folder the link config
-// carries, across the default link and every named profile. Several
-// distinct folders mean there is no safe guess, so nothing is suggested.
-func suggestedRepo(cfg cli.Config) string {
-	repo := cfg.Repo
-	for _, l := range cfg.Links {
-		switch {
-		case l.Repo == "" || l.Repo == repo:
-		case repo == "":
-			repo = l.Repo
-		default:
-			return ""
-		}
-	}
-	return repo
 }

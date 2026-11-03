@@ -40,7 +40,7 @@ function latestEnd(): number {
   return Date.now() + maxExpiryDays * dayMs - 60_000
 }
 
-export function LinkTo({ link, children, className }: { link: string; children: ReactNode; className?: string }) {
+function LinkTo({ link, children, className }: { link: string; children: ReactNode; className?: string }) {
   const navigate = useStore((s) => s.navigate)
   const target = linkTarget(link)
   if ('href' in target) {

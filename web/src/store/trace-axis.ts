@@ -115,7 +115,7 @@ export function tickLabel(ms: number): string {
 }
 
 /** The largest unit only: "2h", "45m". */
-export function roughDuration(ms: number): string {
+function roughDuration(ms: number): string {
   return tickLabel(ms).split(' ')[0]!
 }
 

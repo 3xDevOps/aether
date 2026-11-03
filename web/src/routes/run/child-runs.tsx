@@ -41,7 +41,7 @@ export function costText(usage: Pick<ChildUsage, 'cost_usd' | 'metered_runs' | '
   return `At least ${money.format(usage.cost_usd)}: ${usage.unmetered_runs} ${usage.unmetered_runs === 1 ? 'session reports' : 'sessions report'} no cost`
 }
 
-export function tokensText(usage: Pick<ChildUsage, 'input_tokens' | 'output_tokens'>): string | null {
+function tokensText(usage: Pick<ChildUsage, 'input_tokens' | 'output_tokens'>): string | null {
   if (usage.input_tokens === 0 && usage.output_tokens === 0) return null
   return `${tokens.format(usage.input_tokens)} input, ${tokens.format(usage.output_tokens)} output tokens`
 }

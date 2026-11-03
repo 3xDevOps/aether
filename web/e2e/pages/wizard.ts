@@ -8,9 +8,9 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
 /** The step labels the wizard's header lists, in order. */
-export const stepNames = ['Connect', 'Repository', 'Agent', 'First session'] as const
+const stepNames = ['Connect', 'Repository', 'Agent', 'First session'] as const
 
-export type StepName = (typeof stepNames)[number]
+type StepName = (typeof stepNames)[number]
 
 /**
  * One step. `section` is the step's own <section aria-label>, so a locator
@@ -36,7 +36,7 @@ class Step {
   }
 }
 
-export class ConnectStep extends Step {
+class ConnectStep extends Step {
   constructor(page: Page) {
     super(page, 'Connect')
   }
@@ -62,7 +62,7 @@ export class ConnectStep extends Step {
   }
 }
 
-export class GitIdentity {
+class GitIdentity {
   constructor(private readonly scope: Locator) {}
 
   get form(): Locator {
@@ -77,7 +77,7 @@ export class GitIdentity {
   }
 }
 
-export class RepositoryStep extends Step {
+class RepositoryStep extends Step {
   constructor(page: Page) {
     super(page, 'Repository')
   }
@@ -133,7 +133,7 @@ export class RepositoryStep extends Step {
   }
 }
 
-export class AgentStep extends Step {
+class AgentStep extends Step {
   constructor(page: Page) {
     super(page, 'Agent')
   }
@@ -189,7 +189,7 @@ export class AgentStep extends Step {
 
 
 /** The Agent config files section: the prompt for an agent on the member's own computer. */
-export class ConfigurationPrompt {
+class ConfigurationPrompt {
   constructor(private readonly page: Page) {}
 
   get section(): Locator {
@@ -212,7 +212,7 @@ export class ConfigurationPrompt {
   }
 }
 
-export class FirstRunStep extends Step {
+class FirstRunStep extends Step {
   constructor(page: Page) {
     super(page, 'First session')
   }

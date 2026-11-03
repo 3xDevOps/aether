@@ -49,8 +49,8 @@ const inputChunk = 8 * 1024
  */
 export const standardGeometry = { cols: 80, rows: 24 }
 
-export type TerminalEpoch = string
-export type TerminalSequence = string
+type TerminalEpoch = string
+type TerminalSequence = string
 
 /** One indivisible terminal incarnation and byte high-water mark. */
 export interface TerminalPosition {
@@ -300,7 +300,7 @@ export interface Attachment {
  * replay-end completion covers the final chunk and every reply the replay
  * provoked.
  */
-export type ReplayMode = 'full' | 'delta'
+type ReplayMode = 'full' | 'delta'
 
 export function replayGate(
   write: (chunk: Uint8Array, done?: () => void) => void,

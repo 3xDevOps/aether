@@ -255,7 +255,7 @@ test('an update notifies once per key, across a sidecar respawn', () => {
   shown[0].handlers.click()
   assert.equal(clicks, 1)
 
-  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
+  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {}, () => {})
   notify.showUpdate(update, () => {})
   assert.equal(shown.length, 1)
   notify.showUpdate({ ...update, key: 'server:v1.2.0' }, () => {})

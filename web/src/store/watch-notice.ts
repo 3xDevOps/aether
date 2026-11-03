@@ -6,7 +6,7 @@ import type { RootStore } from '@/store'
 import { liveWindowMs, serverOffset } from '@/store/assistant-notice'
 import { readWatch } from '@/store/watches'
 
-export function openLink(store: RootStore, link: string): void {
+function openLink(store: RootStore, link: string): void {
   const target = linkTarget(link)
   if ('href' in target) window.open(target.href, '_blank', 'noopener,noreferrer')
   else store.getState().navigate(target.route.name, target.route.params)

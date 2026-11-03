@@ -32,7 +32,7 @@ function checkSummary(checks: RunPRCheck[]): string {
   ].filter(Boolean).join(' · ')
 }
 
-export interface Comment {
+interface Comment {
   key: string
   author: string
   lines?: string

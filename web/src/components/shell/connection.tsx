@@ -56,7 +56,7 @@ function layerOf(kind: UnreachableKind, link: Pick<LinkStatus, 'edge_url'> | nul
 }
 
 /** What failed, on which server, and the command that comes next. */
-export function unreachableSentence(
+function unreachableSentence(
   kind: UnreachableKind,
   link: Pick<LinkStatus, 'addr' | 'edge_url' | 'server_id'> | null,
   approvalCode: string | null,

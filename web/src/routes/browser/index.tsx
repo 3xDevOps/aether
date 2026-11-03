@@ -50,7 +50,7 @@ type Confirmation =
   | { action: 'reset'; target: DevBrowserResetParams }
 
 /** Present on a frame wide enough to show the Browser beside another view. */
-export interface BrowserSplit {
+interface BrowserSplit {
   beside: boolean
   /** The view it sits beside. */
   view: string

@@ -39,7 +39,7 @@ export const sessionColumn = 'mx-auto w-full max-w-[736px] px-4'
 /** Whether a block with no choice of the viewer's is open. */
 export type OpenPolicy = (row: StepsRow) => boolean
 
-export const openWhileCurrent: OpenPolicy = (row) => row.current
+const openWhileCurrent: OpenPolicy = (row) => row.current
 
 const foldOver = 40
 const foldHead = 5
@@ -306,7 +306,7 @@ export const TimelineRow = memo(function TimelineRow({ item, ctx }: { item: Flat
 const rowEnter: Entrance = { motion: { duration: '--duration-360', easing: '--ease-enter' }, rise: 4 }
 
 /** Rows new since the last list, by key and their place in the burst, and when they were found. */
-export interface Arrivals {
+interface Arrivals {
   at: number
   keys: Map<string, number>
 }

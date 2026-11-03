@@ -95,7 +95,7 @@ function CallSection({ call }: { call: SessionToolCall }) {
   )
 }
 
-export interface WholeItem {
+interface WholeItem {
   loading: boolean
   cut: boolean
   error?: string

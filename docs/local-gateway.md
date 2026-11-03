@@ -858,7 +858,7 @@ retention, so a closed interactive session is unavailable to `run.relaunch` imme
 ```json
 {"gateway":"local","methods":["*","run.repos"],"ws":["events","attach","acp","assistant","terminal","dev/browser"],
  "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.join","edge.link",
-          "edge.login","edge.logout","edge.servers","edge.status","env.agents","forward.start",
+          "edge.login","edge.logout","edge.servers","edge.status","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
           "link.reset","link.status","link.switch","pull","pull.switch","repo.fast-forward",
           "repo.push","sync.start","sync.status","sync.stop",
@@ -1863,7 +1863,6 @@ authority.
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
 | `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one; the unit gets the linked `--key`) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
-| `env.agents` | `{}` | `{"agents":[{"name":"claude","installed":bool},...],"searched":["/usr/local/bin",...],"warning":"...","repo_path":"..."}` - the setup-capable agents in order, with whether each executable is on this machine's `PATH`. The verb first widens the gateway's `PATH` from your login shell (`$SHELL -l -i`, bounded to 5 seconds), so agents installed through a shell profile or since the gateway started are found; `searched` is the resulting `PATH` as a list of folders (always present, may be empty); `warning` is present only when the login shell could not be asked, carrying that error verbatim (the standard folders `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, and `~/.bun/bin` were still checked); `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
 | `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}`; idempotent for the same target and port |
 | `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
 | `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
@@ -2157,8 +2156,8 @@ the server snapshot from loading.
   and lost. Both carry git's own words.
 - A gateway started with `AETHER_PACKAGED` set, as the Android app does with
   `Android app`, is part of an app that installs its own updates and has no git
-  checkout, service manager or local agents. It leaves out `daemon.install`,
-  `daemon.status`, `env.agents`, `git.identity`, `link.repo`, `pull`,
+  checkout or service manager. It leaves out `daemon.install`,
+  `daemon.status`, `git.identity`, `link.repo`, `pull`,
   `pull.switch`, `repo.fast-forward`, `repo.push`, `sync.start`,
   `sync.status` and `sync.stop` from `local`, and `forward.start`,
   `forward.status` and `forward.stop` too: a forward listens on `127.0.0.1`,

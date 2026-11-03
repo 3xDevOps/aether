@@ -15,7 +15,7 @@ import { descendantRuns } from '@/store/selectors'
 const liveStatuses = new Set(['queued', 'provisioning', 'running', 'needs-attention'])
 
 /** Older history pages the view reads on its own before it leaves a Load earlier button. */
-export const autoPages = 5
+const autoPages = 5
 
 function childStatus(status: RunRecord['status']): SpanStatus {
   if (liveStatuses.has(status)) return 'running'

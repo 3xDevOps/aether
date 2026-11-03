@@ -29,7 +29,7 @@ function fraction(count: InsightsSuccessCount, unit: string): string {
   return count.finished === 0 ? `No ${unit}s finished` : `${count.succeeded} of ${plural(count.finished, unit)} merged a pull request`
 }
 
-export function Tiles({ result, agentNames }: { result: InsightsResult; agentNames: Record<string, string> }) {
+function Tiles({ result, agentNames }: { result: InsightsResult; agentNames: Record<string, string> }) {
   const { success, outcomes, cost } = result
   const rate = percent(success.runs.succeeded, success.runs.finished)
   const top = cost.by_agent[0]

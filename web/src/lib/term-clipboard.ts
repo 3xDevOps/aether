@@ -43,7 +43,7 @@ function isImageType(type: string): boolean {
   return IMAGE_TYPES[type.toLowerCase()] === true
 }
 
-export function imageFiles(data: DataTransfer | null): File[] {
+function imageFiles(data: DataTransfer | null): File[] {
   return clipboardFiles(data, isImageType)
 }
 

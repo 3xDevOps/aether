@@ -61,7 +61,6 @@ export interface CollaborationSlice {
   setEvidenceLoading: (runID: string, loading: boolean) => void
   setEvidenceError: (runID: string, error?: string) => void
   setEvidencePage: (runID: string, packets: EvidencePacket[], nextBefore?: string, append?: boolean) => void
-  upsertEvidencePacket: (packet: EvidencePacket) => void
   selectEvidence: (runID: string, packetID?: string) => void
 }
 
@@ -333,15 +332,6 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
         },
       }
     }),
-  upsertEvidencePacket: (packet) =>
-    set((state) => ({
-      evidencePackets: {
-        ...state.evidencePackets,
-        [packet.run_id]: byCreated(
-          mergeByID(state.evidencePackets[packet.run_id] ?? [], [packet]),
-        ),
-      },
-    })),
   selectEvidence: (runID, packetID) =>
     set((state) => ({
       selectedEvidence: { ...state.selectedEvidence, [runID]: packetID },

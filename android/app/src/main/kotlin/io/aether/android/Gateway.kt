@@ -13,7 +13,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /** What `aether gui --json` prints once it is serving. */
-data class Handshake(val url: String, val addr: String)
+data class Handshake(val url: String)
 
 // The CLI prints exactly {"url":"http://127.0.0.1:PORT/?token=TOKEN","addr":"127.0.0.1:PORT"}
 // with json.Marshal. org.json is a stub in the unit tests' android.jar, and a
@@ -28,7 +28,7 @@ private val HANDSHAKE_ADDR = Regex("^127\\.0\\.0\\.1:(\\d{1,5})$")
  * The handshake in [line], or null when it is any other line. The gateway
  * may print a stray warning first, so a line that is not the handshake is
  * skipped, not an error. The URL must be the tokened loopback one on the
- * port [Handshake.addr] names: the WebView is locked to its origin, so
+ * port the line's addr names: the WebView is locked to its origin, so
  * nothing else may become that origin.
  */
 fun parseHandshake(line: String): Handshake? {
@@ -36,7 +36,7 @@ fun parseHandshake(line: String): Handshake? {
     val urlPort = HANDSHAKE_URL.matchEntire(url)?.groupValues?.get(1) ?: return null
     val addrPort = HANDSHAKE_ADDR.matchEntire(addr)?.groupValues?.get(1) ?: return null
     if (urlPort != addrPort || urlPort.toInt() > 65535) return null
-    return Handshake(url, addr)
+    return Handshake(url)
 }
 
 /**

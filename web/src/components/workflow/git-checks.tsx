@@ -13,7 +13,7 @@ const pillTone: Record<PillState, Tone> = { failing: 'failed', running: 'working
 const pill = 'inline-flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-seam px-2 text-ui-sm'
 
 /** The run and pull request a failed check is asked about. */
-export interface CheckTarget {
+interface CheckTarget {
   runId: string
   workspaceId: string
 }

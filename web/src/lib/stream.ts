@@ -6,7 +6,7 @@ import type { Event, SubscribeRequest } from '@/lib/types'
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline'
 
-export interface StreamHandlers {
+interface StreamHandlers {
   onEvent: (ev: Event) => void
   /** `live` fires when the server acknowledges the subscription, not when
    * the socket opens. */
@@ -43,7 +43,7 @@ export function backoff(attempt: number): number {
  * return says nothing about the network, while `online` says the network
  * this machine had is gone and a new one is up - which is what leaves a
  * socket half open and still reading as connected. */
-export type WakeKind = 'visible' | 'online'
+type WakeKind = 'visible' | 'online'
 
 /**
  * Calls back when the tab comes to the foreground or the network returns.

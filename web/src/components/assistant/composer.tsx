@@ -17,7 +17,7 @@ import { assistantShareView, draftConflict, draftViewContext, flushViewSync, uns
 /** How long Stop waits on assistant.cancel before it gives the button back. */
 export const stopTimeout = 10_000
 /** How long Send waits on assistant.prompt, which may first start the assistant's agent; a retry reuses the key. */
-export const promptTimeout = 60_000
+const promptTimeout = 60_000
 
 function timedOut(err: unknown, method: string, ms: number): string {
   return err instanceof DOMException && err.name === 'TimeoutError' ? `${method} got no answer within ${ms / 1000} seconds` : message(err)

@@ -7,7 +7,7 @@ import { onPullRequestPoll } from '@/routes/diff/publish-pr'
 import { useStore } from '@/store'
 import { coalesce } from '@/store/coalesce'
 
-export interface TrackedLog {
+interface TrackedLog {
   log?: RunGitLogResult
   /** The last read's failure, kept beside the last good log it could not replace. */
   error?: string
@@ -36,7 +36,7 @@ useStore.subscribe((state, previous) => {
   }
 })
 
-export const logLimit = 50
+const logLimit = 50
 
 export function refreshGitLog(runID: string, client: Api = api): void {
   useGitLogs.setState((all) => ({ [runID]: { ...all[runID], reading: true } }))

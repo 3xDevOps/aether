@@ -5,7 +5,7 @@ import type { Template } from '@/lib/types'
 // RE2's \s is ASCII whitespace only, so it is spelled out.
 const placeholder = /\{\{[\t\n\f\r ]*([a-zA-Z][a-zA-Z0-9_-]*)[\t\n\f\r ]*\}\}/g
 
-export type Segment = { text: string } | { name: string; first: boolean }
+type Segment = { text: string } | { name: string; first: boolean }
 
 /** The task split into literal text and placeholders; `first` marks each name's first occurrence. */
 export function segments(task: string): Segment[] {

@@ -97,7 +97,7 @@ function NestedAgent({ runID, id }: { runID: string; id: string }) {
   return <AgentEntry dot={<AgentDot state={state} />} label={agentLabel(agent)} state={agentStateWord(state)} onOpen={() => openAgent(runID, id)} />
 }
 
-export const SubagentCard = memo(function SubagentCard({ runID, id }: { runID: string; id: string }) {
+const SubagentCard = memo(function SubagentCard({ runID, id }: { runID: string; id: string }) {
   const agent = useAgent(runID, id)
   const open = useStore((s) => s.route.params.agent === id)
   if (!agent) return null

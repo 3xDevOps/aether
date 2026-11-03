@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import type { TakeoverInteraction } from '@/routes/terminal/use-takeover'
 import './control-button.css'
 
-export interface ControlButtonProps {
+interface ControlButtonProps {
   ownsControl: boolean
   unavailable: boolean
   onTakeControl: () => void

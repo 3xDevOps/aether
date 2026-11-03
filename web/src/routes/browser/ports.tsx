@@ -18,7 +18,7 @@ const pollEvery = 3000
 
 const nothingListening = 'Nothing in this session is listening on a port yet. Start a server in the Terminal, or ask the agent to, and it appears here.'
 
-export interface Ports {
+interface Ports {
   /** Null until a read answers, and again after one fails. */
   list: DevPort[] | null
   error: string

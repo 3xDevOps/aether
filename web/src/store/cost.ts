@@ -102,13 +102,11 @@ function readBudget(store: RootStore, client: Api, workspaceID: string, delay: n
 /** Worst first: a warning anywhere outranks every workspace that is fine. */
 const severity: BudgetState[] = ['exceeded', 'warn', 'ok']
 
-export interface CostTotals {
+interface CostTotals {
   costUSD: number
   state: BudgetState
   /** Some spend is unmetered, so the total is a floor, not a measurement. */
   advisory: boolean
-  /** Workspaces carrying a budget, worst state first. */
-  budgeted: BudgetReport[]
 }
 
 export function costTotals(budgets: Record<string, BudgetReport>): CostTotals {
@@ -121,8 +119,5 @@ export function costTotals(budgets: Record<string, BudgetReport>): CostTotals {
       'ok',
     ),
     advisory: reports.some((r) => r.advisory || r.spend.unmetered_runs > 0),
-    budgeted: reports
-      .filter((r) => r.budget)
-      .sort((a, b) => severity.indexOf(a.state) - severity.indexOf(b.state)),
   }
 }

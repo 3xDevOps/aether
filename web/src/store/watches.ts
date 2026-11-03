@@ -70,7 +70,7 @@ function land(store: RootStore, viewer: string | null, at: number, watchID: stri
   if (kept && (fields || fresh)) s.putWatch(kept, fresh ? notices : undefined)
 }
 
-export const listsWatches = (s: RootState) => s.info !== null && capability(s.capabilities).hasMethod('watch.list')
+const listsWatches = (s: RootState) => s.info !== null && capability(s.capabilities).hasMethod('watch.list')
 
 /** A read for another viewer, or a viewer change while it waits, clears the slice; a watch changed since the read was sent keeps its newer state. */
 export async function loadWatches(store: RootStore, client: Api): Promise<void> {

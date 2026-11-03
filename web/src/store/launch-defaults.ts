@@ -103,7 +103,7 @@ export function saveLaunchDefaults(change: (current: SavedLaunchDefaults) => Sav
 }
 
 /** `agent`'s mode and model replaced, and `agent` preselected when `preferred`; an empty model forgets the saved one and undefined keeps it. */
-export function withAgentChoice(defaults: SavedLaunchDefaults, agent: string, mode: LaunchMode, model?: string, preferred = true): SavedLaunchDefaults {
+function withAgentChoice(defaults: SavedLaunchDefaults, agent: string, mode: LaunchMode, model?: string, preferred = true): SavedLaunchDefaults {
   const kept = model ?? defaults.agents?.[agent]?.model
   return {
     ...defaults,

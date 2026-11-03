@@ -10,9 +10,9 @@ import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/dif
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
-export type PublishAction = 'status' | 'review' | 'commit' | 'push' | 'discover' | 'create'
+type PublishAction = 'status' | 'review' | 'commit' | 'push' | 'discover' | 'create'
 
-export interface UntrackedPreview {
+interface UntrackedPreview {
   path: string
   file?: FileRead
   error?: string

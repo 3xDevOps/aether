@@ -8,13 +8,13 @@ import type { SliceCreator } from '@/store/slice'
 export const maxRecent = 8
 export const maxAttachments = 6
 export const maxViewContextBytes = 4096
-export const maxViewPathBytes = 512
-export const maxViewCheckBytes = 128
+const maxViewPathBytes = 512
+const maxViewCheckBytes = 128
 /** Navigation sends at most one view context per second. */
 export const viewSyncDelay = 1000
 export const shareRetryDelay = 3000
 /** How long a send waits for the view context to reach the server. */
-export const viewFlushTimeout = 10_000
+const viewFlushTimeout = 10_000
 const maxRetryDelay = 60_000
 
 /** The server refused the call for good (unavailable, invalid params): retrying cannot help. */
@@ -155,7 +155,7 @@ export function entityKey(entry: ViewEntry): string {
  * the member is still on it. `moved` is the page the member moved to since,
  * until they choose between the two.
  */
-export function draftPage(s: RootState): { page: PageContext; moved?: ViewEntry } {
+function draftPage(s: RootState): { page: PageContext; moved?: ViewEntry } {
   const pin = s.assistantPin
   const current = pageContext(s)
   if (!pin || sameEntity(pin.page.route, current.route)) return { page: current }
@@ -170,7 +170,7 @@ export function draftConflict(s: RootState): ViewEntry | undefined {
 const unprintable = /[\p{Cc}\p{Cf}]/u
 
 /** The attachment without its label, and without a check name the server would drop. */
-export function sendableAttachment({ label: _label, check, ...attachment }: AttachedTarget): ViewAttachment {
+function sendableAttachment({ label: _label, check, ...attachment }: AttachedTarget): ViewAttachment {
   return check === undefined || bytes(check) > maxViewCheckBytes || unprintable.test(check) ? attachment : { ...attachment, check: check.trim() }
 }
 

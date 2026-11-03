@@ -30,7 +30,7 @@ export const actionTone: Record<ActionState, Tone> = {
   unfinished: 'interrupted',
 }
 
-export const actionStateWord: Record<ActionState, string> = {
+const actionStateWord: Record<ActionState, string> = {
   approval: 'Waiting for your approval',
   running: 'Running',
   done: 'Done',
@@ -125,7 +125,7 @@ export function useBackground(action: AssistantAction): boolean {
   })
 }
 
-export function retryDraft(action: AssistantAction, names: ActionNames): void {
+function retryDraft(action: AssistantAction, names: ActionNames): void {
   const retry = `Retry: ${actionSummary({ ...action, state: 'failed' }, names)}`
   const typed = useStore.getState().assistantDraft.trimEnd()
   useStore.getState().setAssistantDraft(typed ? `${typed}\n\n${retry}` : retry)

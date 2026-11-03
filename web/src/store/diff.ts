@@ -62,7 +62,7 @@ export interface Checkpoint {
   snapshotError?: string
 }
 
-export function checkpointOf(snapshot: DiffSnapshot): Checkpoint {
+function checkpointOf(snapshot: DiffSnapshot): Checkpoint {
   const { additions, deletions } = diffTotals(snapshot.files)!
   return {
     time: snapshot.time,

@@ -1,7 +1,7 @@
 import type { Tone } from '@/components/ui/status-dot'
 import { isReread } from '@/lib/events'
 import type { SessionItem, SessionRequest, SessionToolCall } from '@/lib/session-types'
-import { liveStateOf, outcomeState, stateLabel, stateTone } from '@/lib/status'
+import { liveStateOf, outcomeState, stateTone } from '@/lib/status'
 import type { Event, RunStatus, RunStatusPayload } from '@/lib/types'
 import { isLaunch, quietDuration, stopText, toolLabel, toolStatus, wakeText, type Turn } from '@/store/session-rows'
 import { agentLabel, agentState, agentType, settles, type AgentIndex, type Subagent } from '@/store/subagents'
@@ -21,7 +21,6 @@ export interface LaneSegment {
   /** Null while it lasts. */
   to: number | null
   tone: Tone
-  label: string
 }
 
 export interface Span {
@@ -340,21 +339,20 @@ function deriveTurn({ turn, agents, live, last }: TurnInput): Span | null {
   })
 }
 
-function laneTone(to: RunStatus, state: string | undefined): { tone: Tone; label: string } {
-  if (to === 'queued' || to === 'provisioning') return { tone: 'working', label: to === 'queued' ? 'Queued' : 'Starting' }
-  const presentation = outcomeState(to) ?? liveStateOf(to as 'running' | 'needs-attention', state)
-  return { tone: stateTone[presentation], label: stateLabel[presentation] }
+function laneTone(to: RunStatus, state: string | undefined): Tone {
+  if (to === 'queued' || to === 'provisioning') return 'working'
+  return stateTone[outcomeState(to) ?? liveStateOf(to as 'running' | 'needs-attention', state)]
 }
 
 function lane(sources: TraceSources, start: number): LaneSegment[] | undefined {
   if (!sources.statusEvents) return undefined
   // A capped read can hold only rereads; the oldest still marks where loaded history starts.
   const changes = sources.statusEvents.filter((event, i) => i === 0 || !isReread(event)).map((event) => ({ at: Date.parse(event.time), ...(event.payload as RunStatusPayload) }))
-  if (changes.length === 0) return [{ from: start, to: sources.end, ...laneTone(sources.runStatus, sources.runState) }]
+  if (changes.length === 0) return [{ from: start, to: sources.end, tone: laneTone(sources.runStatus, sources.runState) }]
   return changes.map((change, i) => ({
     from: Math.max(change.at, start),
     to: changes[i + 1]?.at ?? sources.end,
-    ...laneTone(change.to, change.state),
+    tone: laneTone(change.to, change.state),
   }))
 }
 
@@ -432,7 +430,7 @@ export function startsOpen(span: Span, last: boolean): boolean {
   }
 }
 
-export function needsAttention(span: Span): boolean {
+function needsAttention(span: Span): boolean {
   return span.status === 'failed' || span.status === 'waiting'
 }
 

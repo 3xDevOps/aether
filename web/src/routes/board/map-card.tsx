@@ -18,7 +18,7 @@ import type { MapCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { diffTotals } from '@/store/diff'
 
-export interface FoldProps {
+interface FoldProps {
   unitKey: string
   childRuns: number
   hidden: number

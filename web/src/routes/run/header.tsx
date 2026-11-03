@@ -220,7 +220,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
  * phone with a pull request beside it for instance. It keeps the shown view's
  * tab in sight as the view or the room for it changes, and fades its right
  * edge while more tabs lie past it. */
-export function ViewSwitch({ view, views }: { view: RunView; views: RunView[] }) {
+function ViewSwitch({ view, views }: { view: RunView; views: RunView[] }) {
   const strip = useRef<HTMLDivElement>(null)
   const [more, setMore] = useState(false)
   const measure = () => {

@@ -10,7 +10,7 @@ export const assistantSessionID = 'assistant'
 
 export const minAssistantWidth = 320
 export const maxAssistantWidth = 640
-export const defaultAssistantWidth = 400
+const defaultAssistantWidth = 400
 
 export function onPhone(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(mobileScreen).matches

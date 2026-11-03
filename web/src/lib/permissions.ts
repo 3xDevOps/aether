@@ -17,7 +17,7 @@ export interface Actor {
 }
 
 /** The run being acted on, and the policy its workspace sets. */
-export interface Target {
+interface Target {
   /** The owning member; absent when the action targets no run. */
   owner?: string
   /** Restricts steer and kill to the run's owner and admins. */
