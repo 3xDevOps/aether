@@ -299,7 +299,7 @@ func TestAWatchThatRelaysIntoSessionsAsksFirst(t *testing.T) {
 	}
 	got := actions(t, svc, m)
 	if len(got) != 1 || got[0][0].Outcome != protocol.AssistantActionDeclined ||
-		!strings.HasPrefix(got[0][0].Summary, `Write each notice of session run-1 into session run-1 (`) {
+		!strings.HasPrefix(got[0][0].Summary, `Write each notice of session run-1 into the inbox of session run-1 (`) {
 		t.Fatalf("records = %+v, want the relay shown on a card and refused", got)
 	}
 
@@ -308,7 +308,7 @@ func TestAWatchThatRelaysIntoSessionsAsksFirst(t *testing.T) {
 		t.Fatal("a refused resume of a relaying watch ran")
 	}
 	got = actions(t, svc, m)
-	if len(got) != 2 || got[1][0].Summary != `Write each notice of watch w-relay into session run-2 ("Docs"), owned by Dana, waking it` {
+	if len(got) != 2 || got[1][0].Summary != `Write each notice of watch w-relay into the inbox of session run-2 ("Docs"), owned by Dana` {
 		t.Fatalf("records = %+v, want the resume shown on a card naming the session and its owner", got)
 	}
 }

@@ -842,7 +842,7 @@ func (s *Server) summarizeRelay(ctx context.Context, req protocol.Request, c *pr
 		}
 		parts = append(parts, fmt.Sprintf("%s (%q)%s", id, runLabel(run), ownedBy(&probe)))
 	}
-	c.Summary = fmt.Sprintf("Write each notice of %s into session %s, waking it", watched, strings.Join(parts, ", "))
+	c.Summary = fmt.Sprintf("Write each notice of %s into the inbox of session %s", watched, strings.Join(parts, ", "))
 	return nil
 }
 

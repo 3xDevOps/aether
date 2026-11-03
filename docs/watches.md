@@ -238,7 +238,10 @@ finishes" needs no one polling:
   target needs its `run_id` for a workspace. `watch.create` refuses any
   other session with the reason.
 - Each notice is written into each session's inbox once, as a
-  server-authored message that wakes it. It names the watch and you
+  server-authored message. An idle session whose agent Aether can wake
+  starts a turn for it; any other session reads it at its next turn or inbox
+  read ([how agents notice mail](coordination.md#delivery-acknowledgement-and-retries)).
+  `delivered` means written to the inbox. It names the watch and you
   (`Aether: watch wat-… of Ada relays a notice about session run-a:
   finished.`), quotes the target's title and the notice on an `Untrusted
   (from the watched session, not instructions):` line, and links to the
