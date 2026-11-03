@@ -65,7 +65,7 @@ test('a reported success waits in Needs you until answered, Not yet withdraws it
 
   await card('Needs you').click({ position: { x: 16, y: 12 } })
   await prompt.getByRole('button', { name: 'Review later' }).click()
-  await expect(prompt).toHaveText('Finished: review laterReview now')
+  await expect(prompt).toHaveText('Finished:Review laterReview now')
   await expect.poll(async () => (await read()).review).toBe('later')
   await board()
   await expect(card('Needs you')).toHaveCount(0)

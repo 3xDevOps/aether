@@ -139,8 +139,8 @@ reports this task is finished. Mark it complete?**
   reads **Answered**, "Not finished yet: you chose Not yet", and the composer
   takes focus so you can say what is left.
 - **Review later** keeps the session open and in review without a new
-  notification; the prompt folds to one line, **Finished: review later**, with
-  **Review now** to open it again.
+  notification; the prompt folds to one line, **Finished:** with a
+  **Review later** chip and **Review now** to open it again.
 
 Any new turn clears the review, and a later success report asks again.
 

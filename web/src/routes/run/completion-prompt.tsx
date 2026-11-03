@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
@@ -41,7 +42,8 @@ function Ask({ run, complete, notYet, later, focusComposer, className }: {
     return (
       <div className={className}>
         <div role="region" aria-label="Completion" className="flex items-center gap-2 text-ui-sm text-muted">
-          <span>Finished: review later</span>
+          <span>Finished:</span>
+          <Badge tone="review">Review later</Badge>
           <Button size="sm" variant="link" onClick={() => setReviewing(true)}>Review now</Button>
         </div>
       </div>
@@ -56,7 +58,7 @@ function Ask({ run, complete, notYet, later, focusComposer, className }: {
         title="Your agent reports this task is finished. Mark it complete?"
         actions={
           <>
-            <Button size="sm" onClick={() => void perform(complete)}>Mark complete</Button>
+            <Button size="sm" variant="secondary" onClick={() => void perform(complete)}>Mark complete</Button>
             <Button
               size="sm"
               variant="secondary"

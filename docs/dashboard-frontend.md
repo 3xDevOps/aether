@@ -1965,7 +1965,8 @@ callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
 finished. Mark it complete?", the summary of the session's latest success
 report when its agent messages are loaded, **Mark complete**, **Not yet** and
-**Review later**. No button takes focus on its own. Each is a run command
+**Review later**. **Mark complete** is a secondary button, and no button
+takes focus on its own. Each is a run command
 (`src/lib/commands.ts`) that follows [Actions](#actions): **Mark complete**
 (`complete`) sends `run.review {action: "complete"}` and predicts `review`
 `accepted` and, for a live session, status `completed`; **Not yet**
@@ -1973,8 +1974,8 @@ report when its agent messages are loaded, **Mark complete**, **Not yet** and
 whose placeholder then reads "Say what is left to do"; **Review later**
 (`review-later`) sends `action: "later"` and predicts `later`. A refusal puts
 the callout back and toasts the server's error. While `review` is `later` the
-callout folds to one line, "Finished: review later", whose **Review now**
-unfolds it. After Not yet the session reads Answered, "Not finished yet: you
+callout folds to one line, "Finished:" and a **Review later** chip, whose
+**Review now** unfolds it. After Not yet the session reads Answered, "Not finished yet: you
 chose Not yet" (`notFinishedYet` in `src/lib/status.ts`), and the callout
 stays hidden until a new success report sets `ready` again. The session's
 actions menu and the palette offer the same commands, except that a session
