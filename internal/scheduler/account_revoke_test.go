@@ -23,11 +23,14 @@ func (e *shareEnv) launchOnGrace(t *testing.T) *domain.Run {
 	return run
 }
 
+// revoke revokes Grace's share with Ada on a scheduler that has finished
+// recovering, which these tests never Start.
 func (e *shareEnv) revoke(t *testing.T) {
 	t.Helper()
 	if _, err := e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
+	e.sched.recoveryReadyOnce.Do(func() { close(e.sched.recoveryReady) })
 	e.sched.RevokeAccount(e.owner.ID, e.member.ID)
 }
 

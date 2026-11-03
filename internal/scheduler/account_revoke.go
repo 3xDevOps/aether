@@ -70,6 +70,13 @@ func (m accountMove) continuation(from, to string) string {
 // it.
 func (s *Scheduler) RevokeAccount(owner, grantee domain.MemberID) {
 	s.goMove(func() {
+		// As for a usage move: recovery's reopen of a run must not land on
+		// the container a move replaced.
+		select {
+		case <-s.recoveryReady:
+		case <-s.superCtx.Done():
+			return
+		}
 		s.leaveRevokedAccounts(s.superCtx, func(run *domain.Run) bool {
 			return run.AccountMember() == owner && (run.MemberID == grantee || run.HomeMember() == grantee)
 		})

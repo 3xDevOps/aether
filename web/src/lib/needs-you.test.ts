@@ -234,6 +234,13 @@ describe('needs you conditions', () => {
     expect(needsYou(broken, stateContext())?.id).toBe('needs-input')
   })
 
+  it("shows why a session on a revoked account stopped", () => {
+    const reason = "account share revoked: Alice revoked access to their account; the session is on Bob's account and its conversation could not be restored: resume failed"
+    const parked = record({ status: 'needs-attention', state: 'needs-you', reason })
+    expect(needsYou(parked, stateContext())?.id).toBe('needs-input')
+    expect(presentRun(parked, stateContext()).reason).not.toBe('Open the session to see its request')
+  })
+
   it("labels a disconnected agent with the server's reason", () => {
     const parked = record({ status: 'needs-attention', state: 'disconnected', reason: "enhanced session ended: the agent's ACP server exited with code 1" })
     expect(presentRun(parked, stateContext())).toMatchObject({ state: 'disconnected', reason: "Agent disconnected: the agent's ACP server exited with code 1" })

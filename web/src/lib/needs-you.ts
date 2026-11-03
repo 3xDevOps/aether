@@ -154,11 +154,13 @@ function queuedMessages(run: RunRecord, ctx: StateContext): RoomMessage[] {
 }
 
 const blockedPrefix = 'blocked: '
-// Mirrors usageLimitReason in internal/scheduler/usage_fallback.go.
+// Mirrors usageLimitReason in internal/scheduler/usage_fallback.go and
+// revokedReason in internal/scheduler/account_revoke.go.
 const usageLimitPrefix = 'Usage limit reached on '
+const revokedPrefix = 'account share revoked: '
 
 const asks = (run: RunRecord) => run.reason?.startsWith(needsInputPrefix) === true
-const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true
+const leftAccount = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true || run.reason?.startsWith(revokedPrefix) === true
 // Mirrors acpInterruptedReason and acpStoppedReason in internal/scheduler/acp_turn.go.
 const turnCutShort = (run: RunRecord) => run.reason === 'turn interrupted' || run.reason?.startsWith('turn ended: ') === true
 // Mirrors waitBrokenReasonPrefix in internal/scheduler/wait.go.
@@ -258,7 +260,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run) => {
       if (turnCutShort(run)) return `${plainReason(run.reason!)} · reply to continue`
       if (waitBroken(run)) return `Wait broken: ${run.reason!.slice(waitBrokenPrefix.length)} · reply to continue`
-      return asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the session to see its request'
+      return asks(run) || leftAccount(run) ? plainReason(run.reason!) : 'Open the session to see its request'
     },
     // A Background run takes no input.
     action: (run) =>
