@@ -462,18 +462,43 @@ func TestConnectorReadTools(t *testing.T) {
 
 	text, out = run(t, cs, "aether_needs_attention", nil)
 	item := out["items"].([]any)[0].(map[string]any)
-	if text != "1 items need you, oldest first." || item["answer_id"] != "req-1" || item["reason"] != "The agent asks a question" ||
+	if text != "1 items need you, pending requests first, then oldest first." || item["answer_id"] != "req-1" || item["reason"] != "The agent asks a question" ||
 		item["untrusted"].(map[string]any)["text"] != "Which database?" || len(item["untrusted"].(map[string]any)["options"].([]any)) != 1 ||
 		strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_needs_attention = %q %v", text, out)
 	}
 	many := make([]protocol.AttentionItem, 45)
 	for i := range many {
-		many[i] = protocol.AttentionItem{Kind: protocol.AttentionKindFailed, RunID: fmt.Sprintf("run-%d", i)}
+		many[i] = protocol.AttentionItem{Kind: protocol.AttentionKindReady, RunID: fmt.Sprintf("run-%d", i)}
 	}
+	sudo := &protocol.AttentionRequest{ID: "sudo-1", Kind: "permission", Title: "Run as root in /tmp: kill 1", Options: []protocol.AttentionOption{
+		{ID: "allow-once", Label: "Allow once", Kind: "allow_once"}, {ID: "deny-once", Label: "Deny", Kind: "reject_once"}}}
+	for i, kind := range map[int]string{3: protocol.AttentionKindRoomQuestion, 10: protocol.AttentionKindQuestion, 20: protocol.AttentionKindQueuedMessage,
+		40: protocol.AttentionKindFailed, 44: protocol.AttentionKindPermission} {
+		many[i].Kind = kind
+	}
+	many[44].Request = sudo
 	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many})
-	if text, out = run(t, cs, "aether_needs_attention", nil); text != "30 of 45 items that need you, oldest first." || len(out["items"].([]any)) != 30 || out["total"] != float64(45) {
+	text, out = run(t, cs, "aether_needs_attention", nil)
+	items := out["items"].([]any)
+	if text != "30 of 45 items that need you, pending requests first, then oldest first." || len(items) != 30 || out["total"] != float64(45) {
 		t.Fatalf("aether_needs_attention past the cap = %q", text)
+	}
+	want := []string{"run-3", "run-10", "run-20", "run-44"}
+	for i := 0; len(want) < 30; i++ {
+		if !slices.Contains([]int{3, 10, 20, 44}, i) {
+			want = append(want, fmt.Sprintf("run-%d", i))
+		}
+	}
+	var got []string
+	for _, it := range items {
+		got = append(got, it.(map[string]any)["run_id"].(string))
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("aether_needs_attention past the cap lists %v, want the pending requests oldest first, then the rest oldest first: %v", got, want)
+	}
+	if sudoRow := items[3].(map[string]any); sudoRow["answer_id"] != "sudo-1" || sudoRow["answer_with"] != "aether_decide_approval" {
+		t.Fatalf("the sudo request = %v, want it answered with aether_decide_approval", sudoRow)
 	}
 
 	f.answers[protocol.MethodInsightsGet] = func(raw json.RawMessage) (any, error) {
