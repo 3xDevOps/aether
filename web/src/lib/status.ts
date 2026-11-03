@@ -187,7 +187,7 @@ export function waitLine(wait: RunWait | undefined, state: PresentationState, no
 const staleWait = /^No update for ([^\s:]+)(?:: (.*))?$/s
 
 /**
- * A state's words: what the run waits on when the reason names it ("Waiting for 2 child runs",
+ * A state's words: what the run waits on when the reason names it ("Waiting for 2 subsessions",
  * "Waiting for Ada") and no checked wait says more, else the state's label, and the detail after
  * it. Given `since`, a CI wait's detail starts with how long it has run, for a surface that prints
  * no age of its own, unless it went stale.
