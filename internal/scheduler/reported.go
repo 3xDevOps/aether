@@ -107,25 +107,23 @@ func retentionValid(mode domain.LaunchMode, status domain.RunStatus, reason stri
 // releasedReason is the reason a retained run keeps once its container is
 // gone, and whether the row needs it.
 func releasedReason(status domain.RunStatus, reason, closed string) (string, bool) {
-	base, unavailable := withoutEvidenceUnavailable(reason)
-	released, ok := releasedBaseReason(status, base, closed)
-	if ok && unavailable {
-		released = withEvidenceUnavailable(released)
-	}
-	return released, ok
-}
-
-func releasedBaseReason(status domain.RunStatus, reason, closed string) (string, bool) {
+	reason, unavailable := withoutEvidenceUnavailable(reason)
+	var released string
 	switch {
 	case status == domain.RunCompleted && reason == reportedSuccessRetainedReason:
-		return reportedSuccessReason, true
+		released = reportedSuccessReason
 	case status == domain.RunFailed && reason == reportedFailureRetainedReason:
-		return reportedFailureReason, true
+		released = reportedFailureReason
 	case status == domain.RunMerged || status == domain.RunAbandoned ||
 		(status == domain.RunCompleted && reason == retainedCloseReason):
-		return closed, true
+		released = closed
+	default:
+		return "", false
 	}
-	return "", false
+	if unavailable {
+		released = withEvidenceUnavailable(released)
+	}
+	return released, true
 }
 
 // relabelLocked rewrites a terminal run's reason without changing its status.
