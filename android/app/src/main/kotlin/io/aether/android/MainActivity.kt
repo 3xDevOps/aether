@@ -159,6 +159,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.enableEdgeToEdge(window)
         setContentView(R.layout.activity_main)
         web = findViewById(R.id.web)
+        web.setBackgroundColor(getColor(R.color.page_background))
         connection = findViewById(R.id.connection)
         connection.setOnClickListener { openSetup() }
         gatewayError = findViewById(R.id.gateway_error)

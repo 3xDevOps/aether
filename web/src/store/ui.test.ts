@@ -51,9 +51,9 @@ describe('terminal zoom', () => {
   })
 
   it('leaves the other stored preferences alone', () => {
-    const hydrated = rehydrate({ theme: 'dark', sidebarWidth: 320, terminalFontSize: 20 })
+    const hydrated = rehydrate({ theme: 'light', sidebarWidth: 320, terminalFontSize: 20 })
 
-    expect(hydrated.theme).toBe('dark')
+    expect(hydrated.theme).toBe('light')
     expect(hydrated.sidebarWidth).toBe(320)
     expect(hydrated.terminalFontSize).toBe(20)
   })
@@ -63,15 +63,22 @@ describe('terminal zoom', () => {
   })
 
   it('drops the per-account agent memory from a version 5 payload', () => {
-    const hydrated = rehydrate({ lastHarnessByAccount: { mem_1: 'claude' }, theme: 'dark' }, 5)
+    const hydrated = rehydrate({ lastHarnessByAccount: { mem_1: 'claude' }, theme: 'light' }, 5)
     expect(hydrated).not.toHaveProperty('lastHarnessByAccount')
-    expect(hydrated.theme).toBe('dark')
+    expect(hydrated.theme).toBe('light')
   })
 
   it('drops the run dock height from a version 7 payload', () => {
-    const hydrated = rehydrate({ runDockHeight: 240, theme: 'dark' }, 7)
+    const hydrated = rehydrate({ runDockHeight: 240, theme: 'light' }, 7)
     expect(hydrated).not.toHaveProperty('runDockHeight')
-    expect(hydrated.theme).toBe('dark')
+    expect(hydrated.theme).toBe('light')
+  })
+
+  it('turns a theme stored before the dark default into dark, and keeps chosen ones', () => {
+    expect(createRootStore().getState().theme).toBe('dark')
+    expect(rehydrate({ theme: 'system' }, 11).theme).toBe('dark')
+    expect(rehydrate({ theme: 'light' }, 11).theme).toBe('light')
+    expect(rehydrate({ theme: 'system' }, 12).theme).toBe('system')
   })
 })
 

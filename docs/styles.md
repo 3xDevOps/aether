@@ -67,8 +67,12 @@ pair it with `font-*` classes.
 ## Semantic palette
 
 `web/src/index.css` is authoritative: light values sit on `:root`, dark ones
-on `.dark`. The theme preference is `system`, `light` or `dark`; `system`
-follows `prefers-color-scheme` live.
+on `.dark`. The theme preference is `dark` (the default), `light` or `system`;
+`system` follows `prefers-color-scheme` live. A theme stored before the dark
+default as `system`, which is how a never-chosen theme was saved, becomes
+`dark`; a stored `light` or `dark` is kept. An inline script in
+`web/src/app/layout.tsx` applies the stored theme before the first paint, so a
+light device never flashes light.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
