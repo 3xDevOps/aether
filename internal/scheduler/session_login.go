@@ -241,6 +241,7 @@ func (s *Scheduler) sweepSessionLogins(ctx context.Context) {
 // access token expires.
 func (s *Scheduler) refreshOwnerLogin(ctx context.Context, account domain.MemberID, agent string) {
 	issuer := s.cfg.AssistantIssuer.withDefaults()
+	refreshed := false
 	err := s.cfg.Homes.RefreshLogin(account, assistantSignInRel[agent], sessionLoginLocks[agent], func(old []byte) ([]byte, error) {
 		if !loginDue(agent, old, time.Now()) {
 			return nil, nil
@@ -252,10 +253,14 @@ func (s *Scheduler) refreshOwnerLogin(ctx context.Context, account domain.Member
 		} else {
 			_, rotated, err = issuer.refreshCodex(ctx, old)
 		}
+		refreshed = rotated != nil
 		return rotated, err
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		slog.Warn("scheduler: refresh the account's login for session logins", "account", account, "agent", agent, "error", err)
+	case refreshed:
+		slog.Info("scheduler: refreshed the account's login for session logins", "account", account, "agent", agent)
 	}
 }
 

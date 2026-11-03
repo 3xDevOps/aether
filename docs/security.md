@@ -307,8 +307,9 @@ revoke or overwrite your login. The server:
 
 - refreshes your login when its access token is within 15 minutes of expiry
   and a recipient session is live, under the lock your own CLIs refresh
-  under (`~/.claude/.oauth_refresh.lock`, `~/.codex/auth.lock`), and writes
-  the result back in place in your home;
+  under (`~/.claude/.oauth_refresh.lock`, `~/.codex/auth.lock`), writes
+  the result back in place in your home, and logs
+  `scheduler: refreshed the account's login for session logins`;
 - rewrites every recipient's copy within 30 seconds of your login changing;
 - writes a signed-out copy (`{}`) while your login is not a Claude Code or
   Codex ChatGPT sign-in, for example signed out or a Codex API key, and
