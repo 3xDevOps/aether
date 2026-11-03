@@ -88,7 +88,7 @@ describe('CompletionPrompt', () => {
     render(<Prompt />)
     fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
     await waitFor(() => expect(banner()).toBeNull())
-    expect(api.runCloseCheck).toHaveBeenCalledWith(['run_1'])
+    expect(api.runCloseCheck).toHaveBeenCalledWith(['run_1'], 'completed')
     expect(useStore.getState().runs.run_1).toMatchObject({ review: 'accepted', status: 'completed' })
     await waitFor(() => expect(api.runReview).toHaveBeenCalledWith('run_1', 'complete'))
   })

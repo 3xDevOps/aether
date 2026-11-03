@@ -102,13 +102,16 @@ interface WaitObserved {
 
 export type CloseWarningKind = 'protected' | 'pull_request' | 'unmerged_work' | 'messages' | 'awaited' | 'subsessions' | 'cleanup_pending'
 
-/** One thing closing a run would affect, from `run.close_check`. */
+export type CloseOutcome = 'merged' | 'abandoned' | 'completed'
+
+/** One thing closing a run would affect, from `run.close_check`; `subsession` names the subsession closing with it that the warning is about. */
 export interface CloseWarning {
   kind: CloseWarningKind
   detail: string
   url?: string
   count?: number
   run_ids?: string[]
+  subsession?: string
 }
 
 /** A run's close warnings, or the error reading them. */

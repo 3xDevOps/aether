@@ -14,29 +14,29 @@ import { Button } from '@/components/ui/button'
 import { readCloseCheck } from '@/lib/close-check'
 import { useCommandRunner } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
-import type { CloseWarning, Run, RunCloseCheck } from '@/lib/types'
+import type { CloseOutcome, CloseWarning, Run, RunCloseCheck } from '@/lib/types'
 import { useStore } from '@/store'
 
-/** Reads what closing the run would affect; undefined until the server answers, and a failed read is the check's error. */
-export function useCloseCheck(runID: string | null): RunCloseCheck | undefined {
+/** Undefined until the server answers. */
+export function useCloseCheck(runID: string | null, outcome?: CloseOutcome): RunCloseCheck | undefined {
   const [check, setCheck] = useState<RunCloseCheck>()
   useEffect(() => {
     setCheck(undefined)
     if (!runID) return
     let live = true
-    void readCloseCheck(runID).then((read) => {
+    void readCloseCheck(runID, outcome).then((read) => {
       if (live) setCheck(read)
     })
     return () => {
       live = false
     }
-  }, [runID])
+  }, [runID, outcome])
   return check
 }
 
 /** onLeave closes whatever dialog shows the warnings before a session link navigates away. */
 export function CloseWarnings({ check, run, onLeave }: { check: RunCloseCheck; run: Run; onLeave: () => void }) {
-  const listed = check.warnings.filter((warning) => warning.kind !== 'cleanup_pending')
+  const listed = check.warnings.filter((warning) => warning.kind !== 'cleanup_pending' || !retentionShows(run, warning))
   return (
     <div className="flex flex-col gap-2 text-ui-sm">
       {check.error && <p role="alert" className="break-words text-state-failed">Could not check what closing affects: {check.error.message}</p>}
@@ -48,6 +48,11 @@ export function CloseWarnings({ check, run, onLeave }: { check: RunCloseCheck; r
       <RunRetention run={run} />
     </div>
   )
+}
+
+/** RunRetention already says what a cleanup warning would, unless the check read a state the cached run does not have. */
+function retentionShows(run: Run, warning: CloseWarning): boolean {
+  return run.cleanup_error ? warning.detail === `Cleanup failed: ${run.cleanup_error}` : Boolean(run.cleanup_pending) && !warning.detail.startsWith('Cleanup failed')
 }
 
 function explain(warning: CloseWarning, onLeave: () => void): ReactNode {
@@ -64,7 +69,9 @@ function explain(warning: CloseWarning, onLeave: () => void): ReactNode {
     case 'messages':
       return `${warning.detail}. Another session may expect it to answer.`
     case 'awaited':
-      return <>Waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
+      return warning.subsession
+        ? <>Subsession <Runs ids={[warning.subsession]} onLeave={onLeave} />: waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
+        : <>Waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
     case 'subsessions':
       return <>Closes with it: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />.</>
     default:
@@ -92,12 +99,15 @@ function Runs({ ids, onLeave }: { ids: string[]; onLeave: () => void }) {
   ))
 }
 
-/** Holds a verb that closes a run with close warnings until the owner chooses Close anyway. */
 export function CloseConfirmation() {
   const pending = useStore((s) => s.closeConfirmation)
   const run = useStore((s) => (pending ? s.runs[pending.check.run_id] : undefined))
   const dismiss = useStore((s) => s.dismissCloseConfirmation)
   const perform = useCommandRunner()
+  const gone = Boolean(pending && !run)
+  useEffect(() => {
+    if (gone) dismiss()
+  }, [gone, dismiss])
   if (!pending || !run) return null
   return (
     <AlertDialog open onOpenChange={(open) => { if (!open) dismiss() }}>

@@ -104,6 +104,7 @@ import type {
   FileRead,
   FilesTreeResult,
   Permission,
+  CloseOutcome,
   Run,
   RunCloseCheck,
   RunPatch,
@@ -542,8 +543,8 @@ export const api = {
   runChildren: (runID: string) => call<RunChildrenResult>('run.children', { run_id: runID }),
   runChildrenAllow: (runID: string, children: RunChildrenSetting) =>
     call<{ children: RunChildrenSetting }>('run.children.allow', { run_id: runID, children }),
-  runCloseCheck: (runIDs: string[]) =>
-    call<{ runs: RunCloseCheck[] }>('run.close_check', { run_ids: runIDs }).then((r) => r.runs),
+  runCloseCheck: (runIDs: string[], outcome?: CloseOutcome) =>
+    call<{ runs: RunCloseCheck[] }>('run.close_check', { run_ids: runIDs, ...(outcome ? { outcome } : {}) }).then((r) => r.runs),
   runWaitCancel: (runID: string, waitID: string) => call<{ wait: WaitCondition }>('run.wait.cancel', { run_id: runID, wait_id: waitID }),
   /** Without limits it reads them; an admin's limits change them. */
   workspaceChildLimits: (workspaceID: string, limits: Partial<ChildLimits> = {}) =>

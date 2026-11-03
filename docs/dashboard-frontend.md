@@ -2216,10 +2216,12 @@ shows the outcome at once. The dialog reads `run.close_check` when it opens
 and lists the warnings with `CloseWarnings` (`src/components/close-warnings.tsx`),
 which links a pull request and names awaited sessions and subsessions; with
 any, the buttons read **Close anyway as merged** and **Close anyway as
-abandoned**, and Cancel holds the focus. A command with `closes` (Mark
-complete) is checked by the runner itself before it runs: with warnings, or a
-check that failed, the runner opens `CloseConfirmation` instead, and **Close
-anyway** runs the command. **Open in Standard** lists the same warnings in its
+abandoned**, and Cancel holds the focus; closing as merged ignores
+`unmerged_work`. A command with `closes` (Mark complete, outcome `completed`)
+is checked by the runner itself before it runs, once at a time per session
+(`closeChecking`): with warnings, or a check that failed, the runner opens
+`CloseConfirmation` instead, and **Close anyway** runs the command. More locks
+while that check and the close run. **Open in Standard** lists the same warnings in its
 confirmation. Palette confirmations
 capture the authenticated identity with the session and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to

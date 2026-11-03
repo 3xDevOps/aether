@@ -34,7 +34,6 @@ export function CloseDialog() {
   const late = usePastDeadline(closing !== null)
   const [error, setError] = useState<string | null>(null)
   const check = useCloseCheck(runID)
-  const warned = closeWarned(check)
   const cancel = useRef<HTMLButtonElement>(null)
 
   const finish = async (outcome: Outcome) => {
@@ -63,7 +62,7 @@ export function CloseDialog() {
   const label = (outcome: Outcome, plain: string) => {
     if (closing === outcome) return pending
     if (!check) return 'Checking…'
-    return warned ? `Close anyway as ${outcome}` : plain
+    return closeWarned(check, outcome) ? `Close anyway as ${outcome}` : plain
   }
 
   return (

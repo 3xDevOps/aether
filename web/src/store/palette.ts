@@ -17,6 +17,8 @@ export interface PaletteSlice {
   paletteWatchTarget: WatchTarget | null
   /** A verb that closes a run with close warnings, held until the owner confirms. */
   closeConfirmation: { check: RunCloseCheck; command: Command } | null
+  /** Runs whose close check is in flight, so a second press does not check again. */
+  closeChecking: Record<string, true>
   togglePalette: (open?: boolean) => void
   openPaletteDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
@@ -24,6 +26,7 @@ export interface PaletteSlice {
   closePaletteDialog: () => void
   openCloseConfirmation: (confirmation: { check: RunCloseCheck; command: Command }) => void
   dismissCloseConfirmation: () => void
+  setCloseChecking: (runID: string, checking: boolean) => void
 }
 
 export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
@@ -33,6 +36,7 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
   paletteForwardTarget: null,
   paletteWatchTarget: null,
   closeConfirmation: null,
+  closeChecking: {},
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
   openPaletteDialog: (dialog, runID) =>
     set({
@@ -67,4 +71,11 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
     }),
   openCloseConfirmation: (confirmation) => set({ paletteOpen: false, closeConfirmation: confirmation }),
   dismissCloseConfirmation: () => set({ closeConfirmation: null }),
+  setCloseChecking: (runID, checking) =>
+    set((s) => {
+      const closeChecking = { ...s.closeChecking }
+      if (checking) closeChecking[runID] = true
+      else delete closeChecking[runID]
+      return { closeChecking }
+    }),
 })

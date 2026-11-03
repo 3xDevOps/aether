@@ -144,21 +144,24 @@ Any new turn clears the review, and a later success report asks again.
 Closing a session that others still depend on asks first. **Close session…**,
 **Mark complete**, **Open in Standard** and `aether close` read
 `run.close_check` ([local-gateway.md](local-gateway.md#independent-execution-and-input-state))
-and list what the close affects: protection, an open pull request, commits no
-merged pull request holds, recent or unread mail from other sessions, sessions
-waiting for this one to finish, subsessions that close with it, and pending
-cleanup. With any of these the confirm button reads **Close anyway** and Cancel
-holds the focus. A check that fails shows its error and still lets you close.
+and list what the close affects: protection, an open pull request, commits that
+may not be merged, mail from other sessions, sessions waiting for this one to
+finish, subsessions that close with it and what closing each of those affects,
+and pending cleanup. With any of these the confirm button reads **Close
+anyway** and Cancel holds the focus. A check that fails shows its error and
+still lets you close. Closing as merged skips the unmerged-commits warning:
+you are saying the work is merged.
 
-`aether close` asks `Close anyway? [y/N]` on a terminal. Without one it prints
-the warnings and refuses. `--force` closes anyway, and also when the check
-itself fails, such as on a server older than the CLI:
+`aether close` prints the warnings to stderr and asks `Close anyway? [y/N]` on
+a terminal; `--force` skips the question. Without a terminal it prints them
+and closes, so scripts keep working. A check that fails, such as on a server
+older than the CLI, prints its error and the close goes ahead:
 
 ```
 Before closing run-d6ay38tj8j:
   pull_request: Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z
     https://github.com/acme/api/pull/7
-Error: no terminal to ask on; to close anyway: aether close run-d6ay38tj8j --outcome merged --force
+Close anyway? [y/N]:
 ```
 
 ### Needs you

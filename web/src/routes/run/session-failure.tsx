@@ -56,7 +56,7 @@ function sessionFailure(session: AcpSession | undefined): SessionFailure | null 
 function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: boolean; nav: RunNavigation }) {
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
-  const check = useCloseCheck(confirm ? run.id : null)
+  const check = useCloseCheck(confirm ? run.id : null, 'abandoned')
   const act = async () => {
     setBusy(true)
     try {
@@ -116,7 +116,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
           <AlertDialogFooter>
             <AlertDialogCancel>Keep this session</AlertDialogCancel>
             <AlertDialogAction disabled={!check} onClick={() => void act()}>
-              {closeWarned(check) ? 'Close anyway and start Standard' : 'Start a Standard session'}
+              {closeWarned(check, 'abandoned') ? 'Close anyway and start Standard' : 'Start a Standard session'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

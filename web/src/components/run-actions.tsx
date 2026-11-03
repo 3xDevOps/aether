@@ -51,7 +51,7 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
 
   const start = (command: Command) => {
     if (inFlight.current || command.disabled) return
-    if (command.predict) {
+    if (command.predict && !command.closes) {
       void perform(command)
       return
     }

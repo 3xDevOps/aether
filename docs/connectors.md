@@ -510,9 +510,11 @@ says to call again without `cursor`.
 `aether_mark_reviewed` completes only a session whose agent reported success and
 awaits your review; to end any other session, use `aether_stop_session` under
 `control`. Both read `run.close_check` before they close: a close with
-warnings fails with `closing session <id> has warnings: <kind>: <detail>; ...`
-until the call repeats with `acknowledge: true`, so the assistant shows you
-what each close affects first
+warnings fails with `closing session <id> has warnings (<kinds>), listed under
+untrusted.warnings; ...` until the call repeats with `acknowledge: true`, so
+the assistant shows you what each close affects first. The warnings sit under
+`untrusted` because they quote session titles agents wrote. The dashboard
+assistant's close card lists the same warnings
 ([failure-handling.md](failure-handling.md#before-a-close)). A message to your own session that no one
 controls in the dashboard, or to a session you control, reaches the agent at once. Any other message waits
 about 45 seconds for the member in control to approve it. `aether_decide_approval` allows

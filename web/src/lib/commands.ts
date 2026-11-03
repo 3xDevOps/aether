@@ -37,7 +37,7 @@ import { copyText } from '@/lib/clipboard'
 import { errorSentence, message } from '@/lib/format'
 import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
-import type { LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
+import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
 import { closeWarned, readCloseCheck } from '@/lib/close-check'
 import { sameIdentity, useStore } from '@/store'
@@ -78,8 +78,8 @@ export interface Command {
   predict?: () => Prediction
   /** The server answers only once the change is done, which can outlast the deadline, so the prediction waits for that answer. */
   slow?: boolean
-  /** The run this verb closes: the runner reads `run.close_check` first and asks before a close that affects others. */
-  closes?: string
+  /** The close this verb makes: the runner reads `run.close_check` first and asks before a close with warnings. */
+  closes?: { runID: string; outcome: CloseOutcome }
   perform: (deps: CommandDeps) => Promise<unknown> | void
 }
 
@@ -388,7 +388,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
           : { review: 'accepted' },
       }),
       slow: live,
-      closes: id,
+      closes: { runID: id, outcome: 'completed' },
       perform: (d) => d.api.runReview(id, 'complete'),
     })
     if (run.review === 'ready') {
@@ -1004,6 +1004,7 @@ export function useCommandRunner(
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
   const openCloseConfirmation = useStore((s) => s.openCloseConfirmation)
+  const setCloseChecking = useStore((s) => s.setCloseChecking)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
   const setTheme = useStore((s) => s.setTheme)
@@ -1013,10 +1014,13 @@ export function useCommandRunner(
     async (command: Command) => {
       onDone?.()
       if (command.closes) {
+        const { runID, outcome } = command.closes
+        if (useStore.getState().closeChecking[runID]) return
         const same = sameIdentity()
-        const check = await readCloseCheck(command.closes)
+        setCloseChecking(runID, true)
+        const check = await readCloseCheck(runID, outcome).finally(() => setCloseChecking(runID, false))
         if (!same()) return
-        if (closeWarned(check)) {
+        if (closeWarned(check, outcome)) {
           openCloseConfirmation({ check, command: { ...command, closes: undefined } })
           return
         }
@@ -1061,6 +1065,7 @@ export function useCommandRunner(
       onDone,
       onTemplates,
       openCloseConfirmation,
+      setCloseChecking,
       openDialog,
       openForwardDialog,
       recordPull,
