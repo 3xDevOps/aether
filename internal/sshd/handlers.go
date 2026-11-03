@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -176,6 +177,16 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Children != "" && p.Children != domain.ChildrenOn && p.Children != domain.ChildrenOff {
 		return nil, invalidParams(`children must be "on", "off" or empty`)
 	}
+	permission, err := domain.ParsePermission(p.Permission)
+	if err != nil {
+		return nil, invalidParams(protocol.MethodRunLaunch + ": " + err.Error())
+	}
+	// An omitted tier and "default" are one launch to its idempotency key;
+	// servers before this fingerprinted "default" as given.
+	explicitDefault := p.Permission == string(domain.PermissionDefault)
+	if permission == domain.PermissionDefault {
+		p.Permission = ""
+	}
 	if p.Limits != nil {
 		if err := scheduler.ValidateRunBudgets(p.Limits.CPUs, p.Limits.MemoryBytes, p.Limits.Pids); err != nil {
 			return nil, invalidParams(err.Error())
@@ -183,6 +194,12 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
+	var earlier any
+	if explicitDefault {
+		given := p
+		given.Permission = string(domain.PermissionDefault)
+		earlier = given
+	}
 	// Cancelling a launch mid-provisioning fails the run it is creating, so
 	// it outlives the caller's channel; a server shutdown still stops it.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -190,7 +207,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	defer context.AfterFunc(s.authCtx(), cancel)()
 	var skipped []protocol.SkippedAccount
 	var childrenErr *protocol.Error
-	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, earlier, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
 		return s.launchRun(ctx, member, p, mode, policy, func(id domain.RunID) {
 			if created != nil {
 				created(id)
@@ -250,10 +267,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	if p.Limits != nil {
 		limits = domain.RunLimits{CPUs: p.Limits.CPUs, MemoryBytes: p.Limits.MemoryBytes, Pids: p.Limits.Pids}
 	}
-	permission, err := domain.ParsePermission(p.Permission)
-	if err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: protocol.MethodRunLaunch + ": " + err.Error()}
-	}
+	permission := cmp.Or(domain.Permission(p.Permission), domain.PermissionDefault)
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		Limits:     limits,
 		CachedBase: p.CachedBase, Model: p.Model, Effort: p.Effort, Permission: permission, RequestedAccount: requested, Fallback: policy,

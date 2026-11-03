@@ -27,7 +27,9 @@ type launchKeyLock struct {
 // idempotentLaunch runs launch once per (member, key): a retry, including
 // one racing the first, gets the run the first started, replayed. The
 // fingerprint ties the key to method and params, so a key reused for a
-// different launch is refused rather than answered with an unrelated run.
+// different launch is refused rather than answered with an unrelated run;
+// a receipt fingerprinted over earlier, the same launch as an earlier
+// server spelled its params, is the same launch.
 // The receipt is reserved before launch and bound to the run as soon as its
 // row is durable, through the created callback launch passes on as
 // domain.LaunchOptions.Created; a launch that fails after that is replayed
@@ -35,7 +37,8 @@ type launchKeyLock struct {
 // during the run's provisioning returns the run at once. A reservation with
 // no run is a launch that failed or stopped before creating one, and a
 // retry launches again. An empty key launches every time.
-func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, key, method string, params any, launch func(created func(domain.RunID)) (*domain.Run, *protocol.Error)) (*domain.Run, bool, *protocol.Error) {
+func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, key, method string, params, earlier any,
+	launch func(created func(domain.RunID)) (*domain.Run, *protocol.Error)) (*domain.Run, bool, *protocol.Error) {
 	if key == "" {
 		run, perr := launch(nil)
 		return run, false, perr
@@ -47,11 +50,19 @@ func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, k
 	if err != nil {
 		return nil, false, rpcError(err)
 	}
+	same := func(recorded string) bool { return recorded == fingerprint }
+	if earlier != nil {
+		earlierFingerprint, ferr := launchFingerprint(method, earlier)
+		if ferr != nil {
+			return nil, false, rpcError(ferr)
+		}
+		same = func(recorded string) bool { return recorded == fingerprint || recorded == earlierFingerprint }
+	}
 	unlock := sync.OnceFunc(s.lockLaunchKey(launchKey{member, key}))
 	defer unlock()
 	prior, recorded, err := s.cfg.Store.LaunchReceipt(ctx, member, key)
 	switch {
-	case err == nil && recorded != fingerprint:
+	case err == nil && !same(recorded):
 		return nil, false, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("%s: idempotency_key %q was used for a launch with other params; use a new key for a new launch", method, key)}
 	case err == nil && prior != "":
 		run, getErr := s.cfg.Store.GetRun(ctx, prior)

@@ -193,3 +193,47 @@ func TestRunLaunchOutlivesItsCaller(t *testing.T) {
 		t.Fatalf("launch whose caller went away = %v, want the session", perr)
 	}
 }
+
+// A launch naming Default replays a key whether the receipt was recorded
+// with the tier omitted or, as servers before did, with "default".
+func TestRunLaunchReplaysDefaultTierEitherWay(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.runs.admitInto = e.store
+	launch := func(key, permission string) (protocol.RunLaunchResult, *protocol.Error) {
+		t.Helper()
+		raw, perr := callJSON(t, e, e.member.ID, protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: string(e.ws.ID), Task: "build it", Harness: "claude",
+			Permission: permission, IdempotencyKey: key})
+		var result protocol.RunLaunchResult
+		if perr == nil {
+			if err := json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return result, perr
+	}
+
+	first, perr := launch("k-omitted", "")
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if again, perr := launch("k-omitted", "default"); perr != nil || !again.Replayed || again.Run.ID != first.Run.ID {
+		t.Fatalf("a Default retry of a launch that omitted its tier = %+v, %v", again, perr)
+	}
+
+	earlier, err := launchFingerprint(protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: string(e.ws.ID), Task: "build it", Harness: "claude", Permission: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.ReserveLaunchReceipt(t.Context(), e.member.ID, "k-earlier", earlier); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CompleteLaunchReceipt(t.Context(), e.member.ID, "k-earlier", domain.RunID(first.Run.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if again, perr := launch("k-earlier", "default"); perr != nil || !again.Replayed || again.Run.ID != first.Run.ID {
+		t.Fatalf("a Default retry of an earlier server's receipt = %+v, %v", again, perr)
+	}
+	if _, perr := launch("k-earlier", "root"); perr == nil || perr.Code != protocol.CodeConflict {
+		t.Fatalf("a root retry of a Default receipt = %v, want CodeConflict", perr)
+	}
+}

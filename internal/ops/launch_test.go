@@ -1,11 +1,13 @@
 package ops
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -196,6 +198,7 @@ func TestConnectorLaunchTemplate(t *testing.T) {
 		want string
 	}{
 		{map[string]any{"workspace_id": "ws-1", "template": "triage", "account_member_id": "mem-ada", "model": "opus"}, "account_member_id, model cannot be given"},
+		{map[string]any{"workspace_id": "ws-1", "template": "triage", "permission": "root"}, "so permission cannot be given"},
 		{map[string]any{"workspace_id": "ws-1", "params": map[string]string{"issue": "42"}, "task": "t", "harness": "claude"}, "pass template too"},
 		{map[string]any{"workspace_id": "ws-1", "template_version": "v1", "task": "t", "harness": "claude"}, "pass template too"},
 		{map[string]any{"workspace_id": "ws-1", "task": "t"}, "harness is required: you have no saved agent"},
@@ -225,12 +228,12 @@ func TestLaunchReason(t *testing.T) {
 }
 
 // A keyless launch is a duplicate only of a recent run with the same
-// account, fallback policy and extra repositories; an omitted account is
-// the caller's own.
+// account, fallback policy, extra repositories and permission tier; an
+// omitted account is the caller's own and an omitted tier the default.
 func TestKeylessLaunchComparesAccountOptions(t *testing.T) {
 	recentRun := testRun
 	recentRun.CreatedAt = time.Now().UTC().Format(time.RFC3339)
-	recentRun.AccountMemberID = "mem-ada"
+	recentRun.AccountMemberID, recentRun.Permission = "mem-ada", "default"
 	recentRun.Repos = []protocol.RunRepo{{WorkspaceID: "ws-1", Primary: true}, {WorkspaceID: "ws-2"}}
 	base := map[string]any{"workspace_id": "ws-1", "task": recentRun.Task, "harness": "claude", "account_member_id": "mem-ada", "extra_workspace_ids": []string{"ws-2"}}
 	for name, c := range map[string]struct {
@@ -242,6 +245,8 @@ func TestKeylessLaunchComparesAccountOptions(t *testing.T) {
 		"no fallback":    {map[string]any{"no_fallback": true}, false},
 		"other repos":    {map[string]any{"extra_workspace_ids": nil}, false},
 		"fallback order": {map[string]any{"fallback_account_member_ids": []string{"mem-me"}}, false},
+		"default tier":   {map[string]any{"permission": "default"}, true},
+		"root tier":      {map[string]any{"permission": "root"}, false},
 	} {
 		f := newFake(t)
 		f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{recentRun}})
@@ -258,6 +263,43 @@ func TestKeylessLaunchComparesAccountOptions(t *testing.T) {
 		if dup := out["duplicate"] == true; dup != c.duplicate || dup == (len(called(f, protocol.MethodRunLaunch)) == 1) {
 			t.Errorf("%s: duplicate %v after %d launches, want %v", name, out["duplicate"], len(called(f, protocol.MethodRunLaunch)), c.duplicate)
 		}
+	}
+}
+
+// A keyless launch that omits its tier and one that names Default are the
+// same launch while the first is still in flight.
+func TestKeylessLaunchInFlightTreatsOmittedTierAsDefault(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{Member: protocol.Member{ID: "mem-tier"}})
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	cs := callSession(t, func(ctx context.Context, method string, params, out any) error {
+		if CallScope(ctx) == ScopeRead {
+			return f.call(ctx, method, params, out)
+		}
+		p := params.(protocol.RunLaunchParams)
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			close(started)
+			<-release
+		}
+		*out.(*protocol.RunLaunchResult) = protocol.RunLaunchResult{Run: protocol.Run{ID: "run-" + p.IdempotencyKey, Status: "queued"}}
+		return nil
+	}, ScopeWrite)
+	args := map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t"}
+	firstDone := make(chan map[string]any, 1)
+	go func() {
+		_, out := run(t, cs, "aether_launch_session", maps.Clone(args))
+		firstDone <- out
+	}()
+	<-started
+	args["permission"] = "default"
+	_, second := run(t, cs, "aether_launch_session", args)
+	close(release)
+	first := <-firstDone
+	if second["duplicate"] != true || second["run_id"] != first["run_id"] {
+		t.Fatalf("a Default launch while the same launch without a tier is in flight = %v, first %v", second, first)
 	}
 }
 

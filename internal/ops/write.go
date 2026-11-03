@@ -41,6 +41,7 @@ type connectorLaunchInput struct {
 	Mode            string `json:"mode,omitempty" jsonschema:"default acp if installed"`
 	Model           string `json:"model,omitempty"`
 	Children        string `json:"children,omitempty" jsonschema:"may the agent start subsessions; default your setting"`
+	Permission      string `json:"permission,omitempty" jsonschema:"default your saved tier"`
 	SavedDefaults   string `json:"saved_defaults,omitempty" jsonschema:"ignore sends only the given fields"`
 	accountChoice
 	// Reason is the assistant's, for the member's confirmation card; the
@@ -90,7 +91,8 @@ var writeOps = []Op{
 	opOf("aether_launch_session", "Launch session", ScopeWrite, false, nextWorkspaces,
 		"Use this when starting an agent on a task or saved template, one call per task; then poll aether_get_session."+
 			idempotencyRule+"without one, a repeat within 60s, or of a template while it starts, returns the first session.", launchRun).
-		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
+		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").
+		enum("permission", string(domain.PermissionRoot), string(domain.PermissionDefault), string(domain.PermissionIsolated)).enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodAgentList, protocol.MethodRunList,
 		protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_message_session", "Message session", ScopeWrite, false, nextRuns,
@@ -246,7 +248,8 @@ func starting(tool, key string, replayErr error) (string, any, error) {
 
 // recentLaunch is the member's run in the workspace, created within
 // duplicateWindow and not stopped, with the same task, agent, mode, model,
-// account, fallback policy, extra repositories and child-run setting. An omitted mode or
+// account, fallback policy, extra repositories, child-run setting and
+// permission tier. An omitted mode or
 // model matches any; an omitted account is self, the member's own.
 func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self string, now time.Time) (protocol.Run, bool, error) {
 	params := struct {
@@ -267,6 +270,7 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self 
 		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model) &&
 			cmp.Or(in.AccountMemberID, self) == cmp.Or(r.RequestedAccountMemberID, r.AccountMemberID) &&
 			slices.Equal(in.FallbackAccountMemberIDs, r.FallbackAccountMemberIDs) && in.NoFallback == r.NoFallback && in.Children == r.Children &&
+			cmp.Or(in.Permission, string(domain.PermissionDefault)) == cmp.Or(r.Permission, string(domain.PermissionDefault)) &&
 			sameRepos(in.ExtraWorkspaceIDs, extras) && !domain.RunStatus(r.Status).Final() && recent(r.CreatedAt, now) {
 			return r, true, nil
 		}
@@ -295,7 +299,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	if err != nil {
 		return "", nil, err
 	}
-	fill, err := fillSaved(saved, launchSlots{harness: &in.Harness, mode: &in.Mode, model: &in.Model, account: &in.accountChoice},
+	fill, err := fillSaved(saved, launchSlots{harness: &in.Harness, mode: &in.Mode, model: &in.Model, permission: &in.Permission, account: &in.accountChoice},
 		agentLister(ctx, c.read, book), book)
 	if err != nil {
 		return "", nil, err
@@ -303,12 +307,14 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	l := links(info.DashboardURL)
 	params := protocol.RunLaunchParams{WorkspaceID: in.WorkspaceID, Task: in.Task, Harness: in.Harness, Mode: in.Mode, Model: in.Model,
 		AccountMemberID: in.AccountMemberID, FallbackAccountMemberIDs: in.FallbackAccountMemberIDs, NoFallback: in.NoFallback,
-		ExtraWorkspaceIDs: in.ExtraWorkspaceIDs, Children: in.Children, IdempotencyKey: in.IdempotencyKey}
+		ExtraWorkspaceIDs: in.ExtraWorkspaceIDs, Children: in.Children, Permission: in.Permission, IdempotencyKey: in.IdempotencyKey}
 	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Run
 		var found bool
-		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodRunLaunch, params, func() (ok bool, err error) {
+		fingerprint := params
+		fingerprint.Permission = cmp.Or(params.Permission, string(domain.PermissionDefault))
+		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodRunLaunch, fingerprint, func() (ok bool, err error) {
 			prior, ok, err = recentLaunch(ctx, c.read, in, book.self(), time.Now())
 			return ok, err
 		})

@@ -91,7 +91,13 @@ type launcher struct {
 }
 
 func (l launcher) Launch(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
-	run := &domain.Run{WorkspaceID: ws, MemberID: member, AccountMemberID: account, Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued}
+	return l.LaunchWithOptions(ctx, ws, member, account, task, harness, mode, domain.LaunchOptions{})
+}
+
+func (l launcher) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode,
+	opts domain.LaunchOptions) (*domain.Run, error) {
+	run := &domain.Run{WorkspaceID: ws, MemberID: member, AccountMemberID: account, Task: task, Harness: harness, Mode: mode, Permission: opts.Permission,
+		Status: domain.RunQueued}
 	return run, l.db.CreateRun(ctx, run)
 }
 

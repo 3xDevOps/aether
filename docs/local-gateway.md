@@ -1007,7 +1007,8 @@ not replay `run.input.respond`.
 `run.launch` and `template.launch` take an optional `idempotency_key`
 (at most 256 bytes). A retry by the same member with the same key and
 params returns the session the first launch started, with `"replayed":
-true`, and launches nothing; one with other params is `-32003`, and one
+true`, and launches nothing; one with other params is `-32003` (an
+omitted `permission` and `"default"` are the same), and one
 whose session was deleted is `-32000`. One key names one launch across both
 methods. The key is reserved before the launch and records the session as
 soon as its row exists, so a launch that fails after that replays as the

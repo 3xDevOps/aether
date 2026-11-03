@@ -117,7 +117,8 @@ type launchReceipt struct {
 	Repos            []repoRef                 `json:"repos,omitempty"`
 	// Children is a run's own child-run setting, on or off; absent follows
 	// its owner's.
-	Children string `json:"children,omitempty"`
+	Children   string `json:"children,omitempty"`
+	Permission string `json:"permission,omitempty"`
 	// DefaultsApplied are the input fields the member's saved launch
 	// defaults filled, DefaultsSkipped the saved ones it did not use, and
 	// DefaultsUnchecked the ones it used that nothing could check.
@@ -133,7 +134,7 @@ func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {
 	run := choiceOf(r.Harness, r.Mode, r.Model, r.AccountMemberID, book)
 	out := &launchReceipt{Kind: "run", ID: r.ID, WorkspaceID: r.WorkspaceID, choice: &run,
 		RequestedAccount: book.ref(r.RequestedAccountMemberID), Fallback: policyOf(r.FallbackAccountMemberIDs, r.NoFallback), Children: r.Children,
-		Via: r.Via, URL: l.run(r.ID)}
+		Permission: r.Permission, Via: r.Via, URL: l.run(r.ID)}
 	for _, repo := range r.Repos {
 		out.Repos = append(out.Repos, repoRef{WorkspaceID: repo.WorkspaceID, Name: repo.Name, Primary: repo.Primary})
 	}
@@ -375,7 +376,7 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 	var named []string
 	for field, set := range map[string]bool{"task": in.Task != "", "harness": in.Harness != "", "mode": in.Mode != "", "model": in.Model != "",
 		"account_member_id": in.AccountMemberID != "", "fallback_account_member_ids": len(in.FallbackAccountMemberIDs) > 0,
-		"no_fallback": in.NoFallback, "extra_workspace_ids": len(in.ExtraWorkspaceIDs) > 0, "children": in.Children != ""} {
+		"no_fallback": in.NoFallback, "extra_workspace_ids": len(in.ExtraWorkspaceIDs) > 0, "children": in.Children != "", "permission": in.Permission != ""} {
 		if set {
 			named = append(named, field)
 		}

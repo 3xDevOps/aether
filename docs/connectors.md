@@ -384,17 +384,19 @@ text again on purpose, pass a new `idempotency_key`.
   choices.
 
 `aether_launch_session` takes `account_member_id`, `fallback_account_member_ids` (an
-order), `no_fallback`, `extra_workspace_ids` and `children` (`on` or `off`:
+order), `no_fallback`, `extra_workspace_ids`, `children` (`on` or `off`:
 whether its agent may start [subsessions](teams.md#subsessions); without it, your
-setting decides), as `aether session` does. The server
+setting decides) and `permission` (`root`, `default` or `isolated`: the
+session's [permission tier](security.md#permission-tiers)), as `aether session`
+does. Any other `permission` fails with the tool's schema error, such as
+`validating /properties/permission: enum: admin does not equal any of: [ root default isolated]`. The server
 checks the account before anything starts: a launch with an agent
 or fallback account not shared with you fails with the server's error. A launch or template launch the server does not understand fails with
 `unknown param "<name>"` instead of starting without it.
 
 A launch fills each field you leave out from your saved launch choices: what
-you pass wins, then what you saved, then the server's own defaults. The saved
-permission tier is the exception: these launches always run at Default
-([permission tiers](security.md#permission-tiers)). `harness`
+you pass wins, then what you saved, then the server's own defaults, which for
+`permission` is Default. `harness`
 may be left out when you saved an agent that can launch on the launch's
 account; the saved agent's mode and model apply to whichever agent the launch uses. A saved mode the agent
 cannot start in on the launch's account, or a saved fallback member
@@ -424,7 +426,7 @@ Each launch's result and `aether_get_session` has a
 (`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's own
 session), `requested_account` when usage fallback moved the session, `fallback`
 (`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, the session's
-own `children` setting, `via`, and `url`. A new launch's receipt adds
+own `children` setting, its `permission` tier, `via`, and `url`. A new launch's receipt adds
 `defaults_applied`, the input fields your saved choices filled,
 `defaults_skipped`, each saved choice it did not use with `field` and `reason`,
 and `defaults_unchecked`, each saved agent, mode or model it used without

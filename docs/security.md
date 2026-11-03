@@ -99,9 +99,11 @@ for each other member who messaged or typed into the session.
 
 Every session has a permission tier. Pick it under **Permission** at the top of
 the launch form, which remembers your last choice, or with
-`aether session --permission root|default|isolated`. Everything else launches at
-Default: the CLI without the flag, the assistant, connectors and
-Slack. A subsession gets its parent's tier.
+`aether session --permission root|default|isolated`. The assistant and
+connectors launch at the tier they pass as `permission`, or else at your saved
+tier, as the launch form preselects it. Everything else launches at Default:
+the CLI without the flag and Slack. A subsession gets its parent's tier. Any
+member who may launch a session may pick any tier.
 
 | | Root access | Default | Isolated |
 | --- | --- | --- | --- |

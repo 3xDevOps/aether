@@ -588,6 +588,9 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	if p.Children != "" {
 		summary += ", subsessions " + p.Children
 	}
+	if p.Permission != "" {
+		summary += ", permission " + p.Permission
+	}
 	c.Summary = fmt.Sprintf("%s: \"%s\"", summary, firstLine(p.Task))
 	return nil
 }
@@ -644,7 +647,7 @@ const maxReason = 200
 // savedApplied are the launch fields ops may say saved defaults filled, and
 // savedSkippable those it may say it skipped or could not check.
 var (
-	savedApplied   = []string{"harness", "mode", "model", "account_member_id", "fallback", "workers.account_member_id"}
+	savedApplied   = []string{"harness", "mode", "model", "account_member_id", "fallback", "permission", "workers.account_member_id"}
 	savedSkippable = []string{"harness", "mode", "model", "fallback_account_member_ids"}
 )
 
