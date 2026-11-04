@@ -1,7 +1,8 @@
 // The terminal on a phone, against a real server: an Enhanced session's
-// Terminal tab opens a shell, the grid fits the screen's width, nothing
-// raises the keyboard until the terminal is tapped, and the key row's sticky
-// Ctrl reaches the shell as a control character.
+// Terminal tab offers a shell rather than an empty agent terminal, the grid
+// fits the screen's width, nothing raises the keyboard until the terminal is
+// tapped, and the key row's sticky Ctrl reaches the shell as a control
+// character.
 
 import type { Page, TestInfo } from '@playwright/test'
 
@@ -31,7 +32,7 @@ async function shoot(page: Page, testInfo: TestInfo, name: string) {
   await testInfo.attach(name, { body: await page.screenshot(), contentType: 'image/png' })
 }
 
-test('an Enhanced session opens a shell that fits a phone and takes a sticky Ctrl', async ({ page, aether }, testInfo) => {
+test('an Enhanced session offers a shell that fits a phone and takes a sticky Ctrl', async ({ page, aether }, testInfo) => {
   // Aether is dark first, and the dashboard's default theme follows the system.
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.setViewportSize({ width: 360, height: 780 })
@@ -51,7 +52,8 @@ test('an Enhanced session opens a shell that fits a phone and takes a sticky Ctr
   await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
   await page.getByRole('tab', { name: 'Terminal', exact: true }).tap()
 
-  // No "No agent terminal": the tab opens a shell in the session's container.
+  // Viewing the tab starts nothing; the empty state's button opens a shell.
+  await page.getByRole('button', { name: 'Open shell', exact: true }).tap()
   await expect(rows(page)).toContainText(/[$#]/, { timeout: 30_000 })
   await expect(page.getByText('No agent terminal')).toBeHidden()
   expect(await keyboardFocused(page)).toBe(false)

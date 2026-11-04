@@ -21,13 +21,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { type TerminalImageController, useTerminalImage } from '@/components/terminal-image'
-import { TerminalKeys, textSizeSteps } from '@/components/terminal-keys'
+import { TerminalKeys, useTextSizeStepper } from '@/components/terminal-keys'
 import { ControlMatrix, type ControlAppearance } from '@/components/control-matrix'
-import { useTerminalFit } from '@/components/terminal-fit'
+import { type TerminalFit, useTerminalFit } from '@/components/terminal-fit'
 import { useTerminalPan } from '@/components/terminal-pan'
 import { coarsePointer, phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { copyScreen, copySelection } from '@/lib/term-clipboard'
-import { defaultTerminalFontSize } from '@/lib/term-font'
+import { defaultTerminalFontSize, maxTerminalFontSize, minTerminalFontSize } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 
@@ -50,24 +50,22 @@ function TerminalTools({
   controller,
   image,
   phone,
-  fontSize,
+  fit,
   readingSurface,
   onCaptures,
 }: {
   controller: XtermController
   image: TerminalImageController
   phone: boolean
-  /** The size the terminal is drawn at: fitted on a phone, else the chosen one. */
-  fontSize: number
+  fit: TerminalFit
   readingSurface?: React.RefObject<TerminalReadSurface | null>
   onCaptures?: (returnTo: HTMLElement | null) => void
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const terminal = controller.terminal
+  const fontSize = useStore((state) => state.terminalFontSize)
   const setFontSize = useStore((state) => state.setTerminalFontSize)
-  const { smaller, larger } = textSizeSteps(fontSize)
-  const fitWidth = useStore((state) => state.terminalFitWidth)
-  const fitTerminalWidth = useStore((state) => state.fitTerminalWidth)
+  const stepper = useTextSizeStepper(fit)
 
   return (
     <Menu>
@@ -90,28 +88,41 @@ function TerminalTools({
           <span className="ml-auto text-ui-sm text-muted">Ctrl+Shift+F</span>
         </MenuItem>
         <MenuSeparator />
-        <MenuLabel>Text size {phone && fitWidth ? 'fitted to width' : `${fontSize}px`}</MenuLabel>
-        <MenuItem disabled={!terminal || smaller >= fontSize} onSelect={(event) => { stay(event); setFontSize(smaller) }}>
-          <Minus />
-          Smaller text
-          {!phone && <span className="ml-auto text-ui-sm text-muted">Ctrl+-</span>}
-        </MenuItem>
-        <MenuItem disabled={!terminal || larger <= fontSize} onSelect={(event) => { stay(event); setFontSize(larger) }}>
-          <Plus />
-          Larger text
-          {!phone && <span className="ml-auto text-ui-sm text-muted">Ctrl+=</span>}
-        </MenuItem>
         {phone ? (
-          <MenuItem disabled={!terminal || fitWidth} onSelect={(event) => { stay(event); fitTerminalWidth() }}>
-            <RotateCcw />
-            Fit to width
-          </MenuItem>
+          <>
+            <MenuLabel>Text size {stepper.size}{stepper.fitWidth && ', fitted to width'}</MenuLabel>
+            <MenuItem disabled={!terminal || !stepper.canSmaller} onSelect={(event) => { stay(event); stepper.smaller() }}>
+              <Minus />
+              Smaller text
+            </MenuItem>
+            <MenuItem disabled={!terminal || !stepper.canLarger} onSelect={(event) => { stay(event); stepper.larger() }}>
+              <Plus />
+              Larger text
+            </MenuItem>
+            <MenuItem disabled={!terminal || stepper.fitWidth} onSelect={(event) => { stay(event); stepper.fit() }}>
+              <RotateCcw />
+              Fit to width
+            </MenuItem>
+          </>
         ) : (
-          <MenuItem disabled={!terminal || fontSize === defaultTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(defaultTerminalFontSize) }}>
-            <RotateCcw />
-            Reset text size
-            <span className="ml-auto text-ui-sm text-muted">Ctrl+0</span>
-          </MenuItem>
+          <>
+            <MenuLabel>Text size {fontSize}px</MenuLabel>
+            <MenuItem disabled={!terminal || fontSize <= minTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize - 1) }}>
+              <Minus />
+              Smaller text
+              <span className="ml-auto text-ui-sm text-muted">Ctrl+-</span>
+            </MenuItem>
+            <MenuItem disabled={!terminal || fontSize >= maxTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize + 1) }}>
+              <Plus />
+              Larger text
+              <span className="ml-auto text-ui-sm text-muted">Ctrl+=</span>
+            </MenuItem>
+            <MenuItem disabled={!terminal || fontSize === defaultTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(defaultTerminalFontSize) }}>
+              <RotateCcw />
+              Reset text size
+              <span className="ml-auto text-ui-sm text-muted">Ctrl+0</span>
+            </MenuItem>
+          </>
         )}
         <MenuSeparator />
         <MenuItem
@@ -301,7 +312,7 @@ export function TerminalPane({
   const coarse = useMediaQuery(coarsePointer)
   const phone = useMediaQuery(phoneScreen)
   useTerminalPan(controller.terminal, phone && !replaying && !readingSurface)
-  const fontSize = useTerminalFit(controller.terminal, phone)
+  const fit = useTerminalFit(controller.terminal, phone)
   // A modifier left armed after losing write access would turn the next
   // typed character into a control code nobody pressed.
   const clearModifiers = controller.clearModifiers
@@ -364,7 +375,7 @@ export function TerminalPane({
           ) : (
             <>
               {tabs}
-              <TerminalTools controller={controller} image={image} phone={phone} fontSize={fontSize} readingSurface={readingSurface} onCaptures={onCaptures} />
+              <TerminalTools controller={controller} image={image} phone={phone} fit={fit} readingSurface={readingSurface} onCaptures={onCaptures} />
             </>
           )}
         </div>
@@ -392,7 +403,7 @@ export function TerminalPane({
       />
         {surface}
       </div>
-      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} fontSize={fontSize} />}
+      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} fit={fit} />}
       {children}
       {replaying && !readingSurface && (
         <div

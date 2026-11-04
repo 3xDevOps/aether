@@ -72,10 +72,10 @@ export const defaultTerminalFontSize = 12
 /**
  * How small fitting a grid to a phone's width may draw it. A phone packs two
  * to three device pixels into each CSS pixel, so text below the zoom range
- * stays legible there, and 80 columns fit a 360px screen only near 7px.
- * Narrower than this, the grid pans instead.
+ * stays legible there, and 80 columns fit a 360px screen at 7px. A wider
+ * grid pans instead.
  */
-export const minFitTerminalFontSize = 6
+export const minFitTerminalFontSize = 7
 
 /** Snaps any candidate zoom level into the supported range. */
 export function clampTerminalFontSize(px: number): number {

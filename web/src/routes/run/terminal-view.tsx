@@ -66,13 +66,14 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
 
 /**
  * On a phone an Enhanced session has no agent terminal to land on, so the
- * Terminal tab shows a running shell, or opens one, the first time it is
- * viewed. Closing that shell leaves the empty state; nothing reopens it.
+ * first time its Terminal tab is viewed it shows a shell that is already
+ * running. It never starts one: viewing a tab must not start a process or
+ * take a lease.
  */
-function useShellOnPhone(shells: RunShells, wanted: boolean) {
+function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
   const mobile = useIsMobile()
   const asked = useRef(false)
-  const { runID, visible, canOpen, atLimit, open, show, setError } = shells
+  const { runID, visible, canOpen, show, setError } = shells
   useEffect(() => {
     if (!mobile || !wanted || !visible || !canOpen || asked.current) return
     asked.current = true
@@ -89,9 +90,8 @@ function useShellOnPhone(shells: RunShells, wanted: boolean) {
       useStore.getState().syncShellTerminals(runID, terminals)
       const running = terminals.find((terminal) => !shellEnded(terminal))
       if (running) show(running.terminal_id)
-      else if (!atLimit) await open()
     })()
-  }, [atLimit, canOpen, mobile, open, runID, setError, show, visible, wanted])
+  }, [canOpen, mobile, runID, setError, show, visible, wanted])
 }
 
 export function TerminalView({ run, agent, shells, onCaptures }: {
@@ -105,7 +105,8 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
   const tabbed = shells.canOpen && shells.dock.tabs.length > 0
   const { controller, session, takeover } = agent
   const { state, replaying, controlMetadata } = session
-  useShellOnPhone(shells, !agent.hasAgentTerminal && !shellShown)
+  useRunningShellOnPhone(shells, !agent.hasAgentTerminal && !shellShown)
+  const mobile = useIsMobile()
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -166,7 +167,12 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
           <div role="toolbar" aria-label="Terminal toolbar" className="flex h-8 shrink-0 items-center gap-1 border-b border-seam bg-chrome px-1 coarse:h-11">
             {tabs}
           </div>
-          <EmptyState title="No agent terminal">
+          <EmptyState
+            title="No agent terminal"
+            action={mobile && shells.canOpen && (
+              <Button disabled={!shells.canAdd} onClick={() => void shells.open()}>Open shell</Button>
+            )}
+          >
             An Enhanced session talks to its agent in the Chat view. Open a shell to work in the session’s container.
           </EmptyState>
         </div>

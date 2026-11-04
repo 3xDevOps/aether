@@ -76,7 +76,7 @@ describe('the terminal key bar', () => {
     const terminal = new Terminal()
     const sent: string[] = []
     terminal.onData((data) => sent.push(data))
-    render(<TerminalKeys fontSize={12} controller={controller({ terminal })} />)
+    render(<TerminalKeys fit={{ size: 12, fitted: 12 }} controller={controller({ terminal })} />)
 
     for (const key of ['Esc', 'Tab', 'Up', 'Down', 'Left', 'Right', 'Enter']) {
       fireEvent.click(screen.getByRole('button', { name: key }))
@@ -84,6 +84,7 @@ describe('the terminal key bar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More keys' }))
     fireEvent.click(screen.getByRole('button', { name: 'PgUp' }))
     fireEvent.click(screen.getByRole('button', { name: 'More keys' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Function keys' }))
     fireEvent.click(screen.getByRole('button', { name: 'F5' }))
 
     expect(sent).toEqual(['\x1b', '\t', '\x1b[A', '\x1b[B', '\x1b[D', '\x1b[C', '\r', '\x1b[5~', '\x1b[15~'])
@@ -92,17 +93,18 @@ describe('the terminal key bar', () => {
 
   it('shows a modifier as pressed once or locked, and asks the host to step it', () => {
     const tapModifier = vi.fn()
-    const view = render(<TerminalKeys fontSize={12} controller={controller({ tapModifier })} />)
+    const view = render(<TerminalKeys fit={{ size: 12, fitted: 12 }} controller={controller({ tapModifier })} />)
     fireEvent.click(screen.getByRole('button', { name: 'Alt' }))
     expect(tapModifier).toHaveBeenCalledWith('alt')
 
-    view.rerender(<TerminalKeys fontSize={12} controller={controller({ tapModifier, modifiers: { ctrl: 'locked', alt: 'once' } })} />)
+    view.rerender(<TerminalKeys fit={{ size: 12, fitted: 12 }} controller={controller({ tapModifier, modifiers: { ctrl: 'locked', alt: 'once' } })} />)
     expect(screen.getByRole('button', { name: 'Alt' }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByRole('button', { name: 'Ctrl locked' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Ctrl' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Ctrl' }).getAttribute('aria-description')).toBe('locked')
   })
 
   it('keeps the keyboard up by refusing the focus a tap would take', () => {
-    render(<TerminalKeys fontSize={12} controller={controller()} />)
+    render(<TerminalKeys fit={{ size: 12, fitted: 12 }} controller={controller()} />)
     const press = fireEvent.pointerDown(screen.getByRole('button', { name: 'Esc' }))
     // fireEvent returns false when a handler called preventDefault.
     expect(press).toBe(false)

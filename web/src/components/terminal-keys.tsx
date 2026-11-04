@@ -2,9 +2,10 @@
 // so the replay gate, `disableStdin` and the sticky modifiers apply to a tap
 // as to a keystroke.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type * as React from 'react'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft, Ellipsis, Keyboard } from '@/components/icons'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft, Ellipsis, Keyboard, Lock } from '@/components/icons'
+import type { TerminalFit } from '@/components/terminal-fit'
 import type { ModifierKey } from '@/components/terminal-modifiers'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
@@ -33,18 +34,32 @@ const moreKeys: Key[] = [
   { label: 'PgUp', bytes: '\x1b[5~' },
   { label: 'PgDn', bytes: '\x1b[6~' },
   { label: 'Del', bytes: '\x1b[3~' },
+]
+
+const functionKeys: Key[] = [
   ...['P', 'Q', 'R', 'S'].map((final, index) => ({ label: `F${index + 1}`, bytes: `\x1bO${final}` })),
   ...[15, 17, 18, 19, 20, 21, 23, 24].map((code, index) => ({ label: `F${index + 5}`, bytes: `\x1b[${code}~` })),
 ]
 
 /**
- * One whole pixel either way from the drawn size, which a phone's fit can
- * leave between two pixels, kept inside the zoom range.
+ * A phone's text size steps a whole pixel from the drawn size. Fitting is
+ * the smallest size worth drawing, so a step down to it or below the zoom
+ * range returns to fitting instead.
  */
-export function textSizeSteps(drawn: number) {
+export function useTextSizeStepper({ size, fitted }: TerminalFit) {
+  const fitWidth = useStore((state) => state.terminalFitWidth)
+  const setFontSize = useStore((state) => state.setTerminalFontSize)
+  const fit = useStore((state) => state.fitTerminalWidth)
+  const smaller = Math.ceil(size) - 1
+  const larger = Math.min(maxTerminalFontSize, Math.floor(size) + 1)
   return {
-    smaller: Math.max(minTerminalFontSize, Math.ceil(drawn) - 1),
-    larger: Math.min(maxTerminalFontSize, Math.floor(drawn) + 1),
+    size: `${Number(size.toFixed(1))} px`,
+    fitWidth,
+    fit,
+    canSmaller: !fitWidth,
+    smaller: () => (smaller < minTerminalFontSize || smaller <= fitted ? fit() : setFontSize(smaller)),
+    canLarger: larger > size,
+    larger: () => setFontSize(Math.max(minTerminalFontSize, larger)),
   }
 }
 
@@ -54,6 +69,7 @@ const keepFocus = (event: React.PointerEvent) => event.preventDefault()
 function KeyButton({
   label,
   pressed,
+  description,
   disabled,
   className,
   onPress,
@@ -61,6 +77,7 @@ function KeyButton({
 }: {
   label: string
   pressed?: boolean
+  description?: string
   disabled?: boolean
   className?: string
   onPress: () => void
@@ -73,6 +90,7 @@ function KeyButton({
       variant={pressed ? 'primary' : 'secondary'}
       aria-label={label}
       aria-pressed={pressed}
+      aria-description={description}
       disabled={disabled}
       className={cn('h-11 min-w-0 px-0 font-code text-ui coarse:h-11', className)}
       onPointerDown={keepFocus}
@@ -83,45 +101,72 @@ function KeyButton({
   )
 }
 
+function useKeyboardOpen(textarea: HTMLTextAreaElement | undefined) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!textarea) return
+    const update = () => setOpen(document.activeElement === textarea)
+    update()
+    textarea.addEventListener('focus', update)
+    textarea.addEventListener('blur', update)
+    return () => {
+      textarea.removeEventListener('focus', update)
+      textarea.removeEventListener('blur', update)
+    }
+  }, [textarea])
+  return open
+}
+
 export function TerminalKeys({
   controller,
-  fontSize,
+  fit,
   className,
 }: {
   controller: XtermController
-  /** The size the terminal is drawn at, for the sheet's A- and A+. */
-  fontSize: number
+  fit: TerminalFit
   className?: string
 }) {
   const { terminal, modifiers, tapModifier, focusTerminal } = controller
   const [more, setMore] = useState(false)
-  const setFontSize = useStore((state) => state.setTerminalFontSize)
-  const fitWidth = useStore((state) => state.terminalFitWidth)
-  const fitTerminalWidth = useStore((state) => state.fitTerminalWidth)
-  const { smaller, larger } = textSizeSteps(fontSize)
+  const [functions, setFunctions] = useState(false)
+  const stepper = useTextSizeStepper(fit)
+  const keyboardOpen = useKeyboardOpen(terminal?.textarea)
   // On a phone focusTerminal does nothing, so a key taps through without
   // raising the soft keyboard; a tablet keeps typing where the key left it.
   const send = (bytes: string) => {
     terminal?.input(bytes)
     focusTerminal()
   }
+  const sheetKey = (key: Key) => (
+    <KeyButton
+      key={key.label}
+      label={key.label}
+      onPress={() => {
+        setMore(false)
+        send(key.bytes)
+      }}
+    >
+      {key.name ?? key.label}
+    </KeyButton>
+  )
   const modifier = (key: ModifierKey, label: string) => (
     <KeyButton
-      label={modifiers[key] === 'locked' ? `${label} locked` : label}
+      label={label}
       pressed={modifiers[key] !== 'off'}
-      className={cn('flex-1', modifiers[key] === 'locked' && 'underline decoration-2 underline-offset-4')}
+      description={modifiers[key] === 'locked' ? 'locked' : undefined}
+      className="relative flex-1"
       onPress={() => tapModifier(key)}
     >
       {label}
+      {modifiers[key] === 'locked' && <Lock aria-hidden className="absolute top-1 right-1 size-2.5" />}
     </KeyButton>
   )
-  const keyboardOpen = terminal?.textarea !== undefined && terminal.textarea === document.activeElement
   return (
     <div
       role="toolbar"
       aria-label="Terminal keys"
       className={cn(
-        'flex shrink-0 items-center gap-0.5 border-t border-seam bg-chrome px-1 py-1 pb-[calc(0.25rem+var(--keyboard-inset,0px))]',
+        'flex shrink-0 items-center gap-1 border-t border-seam bg-chrome px-1 py-1 pb-[calc(0.25rem+var(--keyboard-inset,0px))]',
         className,
       )}
     >
@@ -149,30 +194,20 @@ export function TerminalKeys({
           side="top"
           align="end"
           aria-label="More keys"
-          className="grid w-[min(360px,calc(100vw-16px))] grid-cols-6 gap-1 p-2"
+          className="grid w-[min(360px,calc(100vw-16px))] grid-cols-7 gap-1 p-2"
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
-          <KeyButton label="Smaller text" className="col-span-2" disabled={smaller >= fontSize} onPress={() => setFontSize(smaller)}>A−</KeyButton>
-          <KeyButton label="Larger text" className="col-span-2" disabled={larger <= fontSize} onPress={() => setFontSize(larger)}>A+</KeyButton>
-          <KeyButton label="Fit to width" className="col-span-2" disabled={fitWidth} onPress={fitTerminalWidth}>Fit</KeyButton>
-          {moreKeys.map((key) => (
-            <KeyButton
-              key={key.label}
-              label={key.label}
-              onPress={() => {
-                setMore(false)
-                send(key.bytes)
-              }}
-            >
-              {key.name ?? key.label}
-            </KeyButton>
-          ))}
+          {moreKeys.map(sheetKey)}
+          {functions && functionKeys.map(sheetKey)}
+          <KeyButton label="Function keys" pressed={functions} className="col-span-3" onPress={() => setFunctions(!functions)}>
+            F1–F12
+          </KeyButton>
           <Button
             type="button"
             size="sm"
             variant="secondary"
-            className="col-span-6 h-11 coarse:h-11"
+            className="col-span-4 h-11 coarse:h-11"
             onPointerDown={keepFocus}
             onClick={() => {
               setMore(false)
@@ -183,6 +218,11 @@ export function TerminalKeys({
             <Keyboard />
             {keyboardOpen ? 'Hide keyboard' : 'Show keyboard'}
           </Button>
+          <KeyButton label="Smaller text" className="col-span-2" disabled={!stepper.canSmaller} onPress={stepper.smaller}>A−</KeyButton>
+          <KeyButton label={`Text size ${stepper.size}, ${stepper.fitWidth ? 'fitted to width' : 'fit to width'}`} className="col-span-3 font-sans" disabled={stepper.fitWidth} onPress={stepper.fit}>
+            {stepper.size} · {stepper.fitWidth ? 'fitted' : 'Fit'}
+          </KeyButton>
+          <KeyButton label="Larger text" className="col-span-2" disabled={!stepper.canLarger} onPress={stepper.larger}>A+</KeyButton>
         </PopoverContent>
       </Popover>
     </div>

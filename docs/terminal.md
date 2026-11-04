@@ -337,13 +337,14 @@ These work in every terminal Aether draws, when it has focus:
 | `Ctrl+0` | Default 12 px font |
 
 On a touch screen, a key row below the terminal has **Ctrl**, **Alt**,
-**Esc**, **Tab**, the arrows, **Enter** and **More keys**, which opens the
-rest: `|`, `~`, `/`, `\`, `-`, `_`, `` ` ``, `^`, **^C**, **Home**,
-**End**, **PgUp**, **PgDn**, **Del**, **F1** to **F12**, **Show
-keyboard**, and **A−**, **A+** and **Fit** for the text size. **Ctrl** and **Alt** are sticky: tap once and they apply to the
-next key, so **Ctrl** then `d` sends `Ctrl+D`; tap twice quickly to lock
-one on until you tap it again. They also modify the arrows, **Home**/**End**,
-paging and function keys.
+**Esc**, **Tab**, the arrows, **Enter** and **More keys**. **More keys**
+opens the rest: `|`, `~`, `/`, `\`, `-`, `_`, `` ` ``, `^`, **^C**,
+**Home**, **End**, **PgUp**, **PgDn**, **Del**, **F1–F12** (which shows the
+function keys), **Show keyboard**, and the text size: **A−**, the current
+size with **Fit**, and **A+**. **Ctrl** and **Alt** are sticky: tap once and
+they apply to the next key, so **Ctrl** then `d` sends `Ctrl+D`; tap twice
+quickly to lock one on (it shows a lock) until you tap it again. They also
+modify the arrows, **Home**/**End**, paging and function keys.
 
 On a phone:
 
@@ -353,13 +354,15 @@ On a phone:
 - **Text fits the screen's width.** A phone shows the session at the size
   the other viewers gave it, so instead of panning across 80 or more
   columns it draws the text smaller until the whole width fits, down to
-  6 px. **A−** and **A+** in **More keys**, **Tools → Smaller text** or
-  **Larger text**, or a two-finger pinch choose a size of your own; pinch
-  back in, or choose **Fit** or **Tools → Fit to width**, to fit again. The choice is kept on that device. Swipe to reach the parts of
-  a grid wider than the screen at the size you chose.
-- **An Enhanced session's Terminal tab opens a shell** in the session's
-  container, or shows one that is already running, instead of an empty
-  agent terminal.
+  7 px. **A+**, **Tools → Larger text** or a two-finger pinch choose a
+  larger size, kept on that device; **A−** steps back down, and from the
+  smallest size, **Fit**, **Tools → Fit to width** or pinching back in fit
+  again. Swipe to reach the parts of a grid wider than the screen at the
+  size you chose.
+- **An Enhanced session's Terminal tab** shows a shell that is already
+  running in the session's container. If none is, it says "No agent
+  terminal" and offers **Open shell**; viewing the tab starts nothing.
+- To copy, choose **Tools → Copy screen**.
 - A phone opens every session as a read-only mirror, so tap **Take control**
   before the keyboard can send input.
 

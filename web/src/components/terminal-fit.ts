@@ -3,6 +3,13 @@ import type { Terminal } from '@xterm/xterm'
 import { clampTerminalFontSize, maxTerminalFontSize, minFitTerminalFontSize, minTerminalFontSize } from '@/lib/term-font'
 import { useStore } from '@/store'
 
+export interface TerminalFit {
+  /** The size the terminal is drawn at. */
+  size: number
+  /** The size fitting to the width draws it at, or the chosen size if smaller. */
+  fitted: number
+}
+
 /** Fitted sizes snap to this step, so a resize settles on one size instead of hunting. */
 const fitStep = 0.25
 
@@ -11,12 +18,13 @@ const fitStep = 0.25
  * into the pane, and lets two fingers choose a size. A phone follows the
  * PTY rather than sizing it (see docs/dashboard-frontend.md), so the grid
  * is as wide as the widest writer made it and only the text size can bring
- * it inside the screen. Returns the size the terminal is drawn at.
+ * it inside the screen.
  */
-export function useTerminalFit(terminal: Terminal | null, enabled: boolean): number {
+export function useTerminalFit(terminal: Terminal | null, enabled: boolean): TerminalFit {
   const fitWidth = useStore((state) => state.terminalFitWidth)
   const chosen = useStore((state) => state.terminalFontSize)
   const [drawn, setDrawn] = useState(chosen)
+  const [fitted, setFitted] = useState(chosen)
 
   useLayoutEffect(() => {
     const host = terminal?.element?.parentElement
@@ -49,9 +57,11 @@ export function useTerminalFit(terminal: Terminal | null, enabled: boolean): num
       const proportional = Math.floor((current * width) / drawnWidth / fitStep) * fitStep
       if (!grow && proportional >= current) return
       widthFit = Math.max(minFitTerminalFontSize, proportional)
+      setFitted(widthFit)
       if (fitWidth) apply(Math.min(chosen, widthFit))
       for (let step = 0; fitWidth && step < 8 && gridWidth() > width && (terminal.options.fontSize ?? 0) > minFitTerminalFontSize; step++) {
         widthFit = (terminal.options.fontSize ?? current) - fitStep
+        setFitted(widthFit)
         apply(widthFit)
       }
     }
@@ -111,5 +121,5 @@ export function useTerminalFit(terminal: Terminal | null, enabled: boolean): num
     }
   }, [chosen, enabled, fitWidth, terminal])
 
-  return drawn
+  return { size: drawn, fitted: Math.min(chosen, fitted) }
 }
