@@ -44,7 +44,8 @@ export function useSharedPresence(run: RunRecord, agent: AgentTerminal): boolean
   const presenceError = useStore((s) => s.roomStatusError[run.id])
   const session = useStore((s) => s.acpSessions[run.id])
   if (presenceError || session?.controlError || session?.takeoverError || session?.streamError) return true
-  if (!agent.localControl && status?.controller) return true
+  // Only the owner takes free control implicitly; anyone else needs the strip's button.
+  if (!agent.localControl && (status?.controller || run.member_id !== self.id)) return true
   return status?.watchers.some((id) => id !== self.id) ?? false
 }
 

@@ -4,7 +4,7 @@
 
 import { desktopBridge } from '@/components/shell/window-bar'
 import { ApiError, type Api } from '@/lib/api'
-import { routeFromQuery } from '@/lib/url-state'
+import { historyDepth, routeFromQuery } from '@/lib/url-state'
 import { runRoute } from '@/routes/run/views'
 import type { RootStore } from '@/store'
 import { capability } from '@/store/hooks'
@@ -113,7 +113,7 @@ export function watchPush(store: RootStore, client: Api): () => void {
       if (url.origin !== window.location.origin) return
       // Kept in the address bar, so query keys the route does not carry,
       // such as the watch to show, still reach the page.
-      window.history.pushState(null, '', url)
+      window.history.pushState({ depth: historyDepth() + 1 }, '', url)
       const route = routeFromQuery(url.searchParams)
       store.getState().navigate(route.name, route.params)
       return

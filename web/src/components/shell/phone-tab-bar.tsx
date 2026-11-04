@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import type * as React from 'react'
 import { assistantLabel, assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { Bell, Ellipsis, List, Plus, Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { canLaunch, launchBlocked } from '@/lib/commands'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { useKeyboardUp } from '@/lib/keyboard-inset'
 import { cn, focusRingInset } from '@/lib/utils'
 import { useAskingCount, useAttentionSupported } from '@/routes/needs-you/attention'
 import { useStore } from '@/store'
@@ -54,41 +55,6 @@ function Tab({ label, icon, active, badge, dot, className, ...props }: Omit<Reac
 // A terminal's own input is left out: hiding the bar would resize the PTY on every focus change.
 const typingTarget = 'input:is(:not([type]), [type=text], [type=search], [type=email], [type=url], [type=tel], [type=password], [type=number]), textarea:not(.xterm-helper-textarea), [contenteditable=true]'
 
-// Android's Back and iOS's Done close the keyboard without a blur, so focus alone does not say it is up.
-const keyboardHeight = 150
-
-/** A text field has focus and the visible viewport is a keyboard shorter than the tallest it has been at this width. */
-function useKeyboardUp(): boolean {
-  const [up, setUp] = useState(false)
-  useEffect(() => {
-    const viewport = window.visualViewport
-    let full = { width: window.innerWidth, height: window.innerHeight }
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const update = () => {
-      if (window.innerWidth !== full.width) full = { width: window.innerWidth, height: window.innerHeight }
-      full.height = Math.max(full.height, window.innerHeight)
-      const visible = viewport?.height ?? window.innerHeight
-      setUp(full.height - visible > keyboardHeight && document.activeElement?.matches(typingTarget) === true)
-    }
-    // focusout lands on the body before the next focusin, so the check waits for both.
-    const later = () => {
-      clearTimeout(timer)
-      timer = setTimeout(update)
-    }
-    document.addEventListener('focusin', later)
-    document.addEventListener('focusout', later)
-    viewport?.addEventListener('resize', update)
-    window.addEventListener('resize', update)
-    return () => {
-      clearTimeout(timer)
-      document.removeEventListener('focusin', later)
-      document.removeEventListener('focusout', later)
-      viewport?.removeEventListener('resize', update)
-      window.removeEventListener('resize', update)
-    }
-  }, [])
-  return up
-}
 
 /** The phone's navigation, below 768px. Needs you is home; More holds what the desktop sidebar and header carry. */
 export function PhoneTabBar() {
@@ -115,7 +81,7 @@ export function PhoneTabBar() {
   }
   const page = !assistantOpen && !moreOpen
   // A mouse and a hardware keyboard leave the screen alone, so only touch hides the bar.
-  const hidden = useKeyboardUp() && coarse
+  const hidden = useKeyboardUp(typingTarget) && coarse
   const bar = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     const element = bar.current

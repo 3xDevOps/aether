@@ -72,16 +72,22 @@ test('a link to a view wins on a phone, and Back returns to Needs you', async ({
   await aether.installACPMock(alice, await memberID(alice))
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
-    workspace_id: workspaces[0].id, harness: 'mock', mode: 'acp', task: 'ask permission',
+    workspace_id: workspaces[0].id, harness: 'mock', mode: 'acp', task: 'demo',
   })
   const views = page.getByRole('tablist', { name: 'Session views' })
 
   await page.goto(`${alice.url}&run=${run.id}&view=changes`)
   await expect(views.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true')
 
+  // The first prompt carries the run's instructions, so the mock asks only for a prompt sent later.
+  await views.getByRole('tab', { name: 'Chat' }).tap()
+  await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong').first()).toBeVisible({ timeout: 180_000 })
+  await page.getByRole('combobox', { name: 'Message the agent' }).fill('ask permission')
+  await page.getByRole('button', { name: 'Send', exact: true }).tap()
+
   await page.goto(alice.url)
   const card = page.getByRole('list', { name: 'Needs you' }).getByRole('group').filter({ hasText: 'Permission requested' })
-  await card.getByRole('button', { name: 'ask permission' }).tap({ timeout: 180_000 })
+  await card.getByRole('button', { name: 'Review' }).tap({ timeout: 60_000 })
   await expect(views.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true')
   await page.getByRole('button', { name: 'Back' }).tap()
   await expect(page.getByRole('list', { name: 'Needs you' })).toBeVisible()

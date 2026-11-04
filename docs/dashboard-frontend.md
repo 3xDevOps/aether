@@ -597,10 +597,11 @@ and the tab bar hides, so `main` pads the top and bottom safe areas itself.
 The header (`routes/run/phone-header.tsx`) is one 48px row: **Back**, the
 title with its protection lock, a state line (status dot, state, agent and
 mode), the header's primary action when there is one, and **More**. Under it
-the tabs **Chat**, **Terminal** and **Changes** fill a 44px row, with the
-pull request at its right end; a Standard session orders them **Terminal**,
-**Chat**, **Changes**. **Changes** carries the muted `+N −M` of the latest
-snapshot, unless it was truncated. **More** opens with a **Views** group
+the tabs **Chat**, **Terminal** and **Changes** fill a 44px row; a Standard
+session orders them **Terminal**, **Chat**, **Changes**. **Changes** carries
+the muted `+N −M` of the latest snapshot, unless it was truncated, and drops
+it below 400px while a fourth tab shows. The pull request, which would crowd
+the tabs, sits in a 44px row of its own under them on the Changes tab only. **More** opens with a **Views** group
 (Trace, Files, Browser, **Session details**, **Workflow**, **Search…**,
 **Assistant**), then the session's commands, Captures and Raw events; a view
 opened from there joins the tabs while it shows. Close, Stop and Delete in **More**
@@ -610,18 +611,20 @@ Without a `view` in the address a phone lands on `defaultView`, never on the
 view this tab last showed: Chat for an Enhanced session, Terminal for a
 Standard one. A link that names a view still opens it. A tab switch replaces
 the history entry instead of pushing one, so **Back** leaves the session. It
-steps back in the tab's history when the dashboard pushed the entry below
-(`historyDepth` in `src/lib/url-state.ts`) and opens Sessions when the
-session was opened by a link.
+steps back past every entry pushed since the session opened, a subagent's
+included, when the dashboard pushed the entry below (`historyDepth` in
+`src/lib/url-state.ts`, which a notification's entry counts too), and opens
+Sessions when the session was opened by a link.
 
 While the keyboard is up (the composer has focus, or the terminal's input on
-a touch screen), the header shrinks to one 44px row with the title, the
+a touch screen while the visible viewport is a keyboard shorter,
+`useKeyboardUp` in `src/lib/keyboard-inset.ts`), the header shrinks to one 44px row with the title, the
 status dot and, from 400px wide, the state's name, and the tabs, the wait line, the lineage line and the
 [multiplayer strip](#multiplayer-controls) leave. On a phone the strip shows
 only while someone else watches, another member or another of your tabs
-holds control, or control, presence or the stream failed
-(`useSharedPresence`); alone, sending a message takes control implicitly and
-Details lists the people. A hidden tab bar removes `--phone-tabs-height`, so
+holds control, the session is not yours, or control, presence or the stream
+failed (`useSharedPresence`). Only the owner takes free control implicitly
+by sending; Details lists the people. A hidden tab bar removes `--phone-tabs-height`, so
 toasts fall back to the bottom safe area. The Chat
 composer is the desktop `ComposerBox`, padded by `--keyboard-inset`
 (`src/lib/keyboard-inset.ts`) so it sits above an iOS keyboard as well.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAssistantAvailable } from '@/components/assistant/button'
@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { useKeyboardUp } from '@/lib/keyboard-inset'
+import { cn } from '@/lib/utils'
 import { runLabel, stateName, toneOf } from '@/lib/status'
 import { historyDepth } from '@/lib/url-state'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -31,29 +33,15 @@ const viewIcon: Record<OverflowView, React.ComponentType<{ className?: string }>
   browser: Globe,
 }
 
-const inTabs = (item: RunView): boolean => (tabViews as readonly RunView[]).includes(item)
-
-/** The terminal's own input has focus on a touch screen, so the soft keyboard is up. */
+/** The terminal's own input has focus on a touch screen with the keyboard up. */
 export function useTerminalTyping(): boolean {
   const coarse = useMediaQuery(coarsePointer)
-  const [typing, setTyping] = useState(false)
-  useEffect(() => {
-    if (!coarse) return
-    // focusout lands on the body before the next focusin, so the check waits for both.
-    const update = () => setTimeout(() => setTyping(document.activeElement?.matches('.xterm-helper-textarea') === true))
-    document.addEventListener('focusin', update)
-    document.addEventListener('focusout', update)
-    return () => {
-      document.removeEventListener('focusin', update)
-      document.removeEventListener('focusout', update)
-      setTyping(false)
-    }
-  }, [coarse])
-  return typing
+  return useKeyboardUp('.xterm-helper-textarea') && coarse
 }
 
-function leave() {
-  if (historyDepth() > 0) window.history.back()
+/** Steps back past every entry this session pushed, such as a subagent's, to the page it was opened from. */
+function leave(entered: number) {
+  if (entered > 0) window.history.go(entered - 1 - historyDepth())
   else useStore.getState().navigate('sessions')
 }
 
@@ -72,13 +60,14 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   pullRequest: React.ReactNode
 }) {
   const shown = useRunPresentation(run)
+  const [entered] = useState(historyDepth)
   const assistant = useAssistantAvailable()
   const totals = useStore(useShallow((s) => {
     const snapshot = s.diffs[run.id]?.snapshots[0] ?? s.diffs[run.id]?.persisted
     return snapshot?.truncated ? undefined : diffTotals(snapshot?.files)
   }))
-  const order = defaultView(run) === 'terminal' ? standardTabs : tabViews
-  const tabs = [...order.filter((item) => views.includes(item)), ...(inTabs(view) ? [] : [view])]
+  const order: readonly RunView[] = defaultView(run) === 'terminal' ? standardTabs : tabViews
+  const tabs = [...order.filter((item) => views.includes(item)), ...(order.includes(view) ? [] : [view])]
   const elsewhere: ExtraItem[] = views
     .filter((item): item is OverflowView => !tabs.includes(item))
     .map((item) => ({ id: `view-${item}`, label: runViewLabel[item], Icon: viewIcon[item], onSelect: () => nav.go(item) }))
@@ -93,7 +82,7 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   return (
     <>
       <header data-slot="pane-header" className={keyboard ? 'flex h-11 shrink-0 items-center gap-1 border-b border-seam px-1' : 'flex h-12 shrink-0 items-center gap-1 px-1'}>
-        <Button variant="ghost" size="icon" label="Back" onClick={leave}>
+        <Button variant="ghost" size="icon" label="Back" onClick={() => leave(entered)}>
           <ChevronLeft />
         </Button>
         <div className={keyboard ? 'flex min-w-0 flex-1 items-center gap-2' : 'flex min-w-0 flex-1 flex-col'}>
@@ -119,13 +108,15 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
               <TabsTrigger key={item} value={item} className="min-w-0 flex-1 justify-center px-2">
                 {runViewLabel[item]}
                 {item === 'changes' && totals && (totals.additions > 0 || totals.deletions > 0) && (
-                  <span aria-hidden className="text-ui-sm font-normal text-muted tabular-nums">+{totals.additions} −{totals.deletions}</span>
+                  <span aria-hidden className={cn('text-ui-sm font-normal text-muted tabular-nums', tabs.length > 3 && 'max-[399px]:hidden')}>+{totals.additions} −{totals.deletions}</span>
                 )}
               </TabsTrigger>
             ))}
           </TabsList>
-          {pullRequest}
         </div>
+      )}
+      {!keyboard && view === 'changes' && pullRequest && (
+        <div className="flex h-11 shrink-0 items-center border-b border-seam px-2">{pullRequest}</div>
       )}
       <ConnectionLine className="border-b border-seam px-4 py-1" />
     </>
