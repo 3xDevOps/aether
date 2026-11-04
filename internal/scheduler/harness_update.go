@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -86,6 +87,31 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 	member := domain.MemberID(filepath.Base(home.HostPath))
 	name := "harness-update-" + string(member) + "-" + profile.Name
 	mounts := []runtime.Mount{home}
+	// Every running session shares the member's login through its pin, and
+	// a CLI that refreshes it spends the one refresh token they all hold:
+	// replacing the file by rename strands their pins on the old one, and
+	// a write the pin refuses keeps the new token only in that process.
+	// The update needs no sign-in, so it sees none.
+	noLogin := filepath.Join(s.cfg.StateDir, "updater-no-login")
+	f, err := os.OpenFile(noLogin, os.O_CREATE|os.O_RDONLY, 0o644)
+	if err == nil {
+		err = f.Close()
+	}
+	if err != nil {
+		s.mu.Lock()
+		state.running = nil
+		close(update.done)
+		s.mu.Unlock()
+		slog.Warn("scheduler: hide the login from the updater", "member", filepath.Base(home.HostPath), "error", err)
+		return
+	}
+	for _, p := range harness.Profiles() {
+		for _, rel := range p.PinnedLogins {
+			if info, statErr := os.Lstat(filepath.Join(home.HostPath, rel)); statErr == nil && info.Mode().IsRegular() {
+				mounts = append(mounts, runtime.Mount{HostPath: noLogin, ContainerPath: path.Join(plan.Home, rel), ReadOnly: true})
+			}
+		}
+	}
 	env := maps.Clone(plan.Env)
 	if s.cfg.Homes != nil {
 		// Provisioning holds this member's cache lock. Publish the key
