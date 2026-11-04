@@ -9,9 +9,9 @@ import { useCapability } from '@/store/hooks'
 import type { TextSize, Theme } from '@/store/ui'
 
 const themes: { value: Theme; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'system', label: 'System' },
 ]
 
 const textSizes: { value: TextSize; label: string }[] = [
