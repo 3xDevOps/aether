@@ -81,7 +81,7 @@ export function PhoneLaunchSheet({
                 </Select>
               )}
               {workspace && (
-                <span title={workspace.base_branch} aria-label={`from base branch ${workspace.base_branch}`} className="inline-flex min-w-0 items-center gap-1 text-ui-sm text-muted">
+                <span title={workspace.base_branch} className="inline-flex min-w-0 items-center gap-1 text-ui-sm text-muted">
                   <GitBranch aria-hidden className="size-3.5 shrink-0" />
                   from <code className="min-w-0 truncate font-code">{workspace.base_branch}</code>
                 </span>
@@ -111,7 +111,7 @@ export function PhoneLaunchSheet({
           </Collapsible>
           {notes}
         </form>
-        <div className="max-h-32 overflow-y-auto empty:hidden">{failure}</div>
+        {failure && <div className="max-h-[40dvh] overflow-y-auto">{failure}</div>}
         {launch}
       </DialogContent>
     </Dialog>
