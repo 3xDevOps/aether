@@ -9,11 +9,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Workspace } from '@/lib/types'
+import type { useReturnFocus } from '@/lib/hooks'
 import { cn } from '@/lib/utils'
 
 const chip = 'h-11 w-auto max-w-full min-w-0 shrink rounded-full px-3 text-ui-sm'
 
-/** The launch form below 768px: task first, then repo, branch and agent as chips, Launch, and the rest folded under More options. */
 export function PhoneLaunchSheet({
   open,
   onClose,
@@ -33,6 +33,8 @@ export function PhoneLaunchSheet({
   failure,
   launch,
   disabled,
+  onSetUp,
+  returnFocus,
 }: {
   open: boolean
   onClose: () => void
@@ -56,12 +58,14 @@ export function PhoneLaunchSheet({
   launch: ReactNode
   /** A launch is in flight. */
   disabled: boolean
+  onSetUp: () => void
+  returnFocus: ReturnType<typeof useReturnFocus>
 }) {
   const { agents, harness, mode } = choice
   const offered = (agents ?? []).filter(launchable)
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent variant="bottom" className="grid-rows-[auto_minmax(0,1fr)_auto_auto] gap-3 overflow-hidden">
+      <DialogContent {...returnFocus} variant="bottom" className="grid-rows-[auto_minmax(0,1fr)_auto_auto] gap-3 overflow-hidden">
         <div className="flex flex-col gap-0.5 pr-10">
           <DialogTitle>New session</DialogTitle>
           <DialogDescription className="sr-only">Starts an agent in its own container on the workspace&apos;s base branch.</DialogDescription>
@@ -110,7 +114,10 @@ export function PhoneLaunchSheet({
               <span className="font-medium">More options</span>
               {harness && <span className="min-w-0 truncate text-muted">· {modeLabel(mode)}</span>}
             </CollapsibleTrigger>
-            <CollapsibleContent className="flex flex-col gap-4 pt-2">{options}</CollapsibleContent>
+            <CollapsibleContent className="flex flex-col gap-4 pt-2">
+              {options}
+              {!choice.noAgents && <Button type="button" variant="link" size="sm" className="self-start" disabled={disabled} onClick={onSetUp}>Install more agents...</Button>}
+            </CollapsibleContent>
           </Collapsible>
           {notes}
         </form>

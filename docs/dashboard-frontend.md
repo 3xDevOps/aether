@@ -2383,7 +2383,8 @@ first, focused, with one-word help; then the **Repository** chip, the base
 branch as muted text ("from main"; sessions always start from it) and the
 **Agent** chip; then **Launch** pinned under the form. Permission, Mode, Model,
 Effort, Resource limits, Subsessions, extra repositories and the account sit
-under **More options**, whose caption names the mode. The repository starts
+under **More options**, whose caption names the mode, with **Install more
+agents...** at its end. Closing the sheet returns focus to what opened it. The repository starts
 on the workspace of your newest session that you started yourself (not a
 subsession or a connector launch) in a workspace that still exists, read once
 when the sheet opens; without one, the active workspace. The agent is your

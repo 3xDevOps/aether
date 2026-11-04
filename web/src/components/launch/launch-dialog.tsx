@@ -259,6 +259,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         notes={notes}
         failure={failure}
         disabled={launching}
+        onSetUp={setUp}
+        returnFocus={returnFocus}
         launch={<Button type="submit" form="launch-form" className="w-full" disabled={launchDisabled}>{launchLabel}</Button>}
       />
     )
