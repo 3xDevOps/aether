@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { DictationButton, useDictation } from '@/components/dictation/dictation-button'
 import { AgentPicker, customAgent, launchable } from '@/components/launch/agent-picker'
@@ -135,7 +135,6 @@ export function RunFields({
   autoFocus?: boolean
 }) {
   const { agents, agent, harness, mode, noAgents } = choice
-  const taskBox = useRef<HTMLTextAreaElement>(null)
   return (
     <>
       <FormField
@@ -144,7 +143,7 @@ export function RunFields({
           ? 'Required. A Background session starts with this task and takes no input.'
           : 'Optional. Leave it blank to open the agent with no prompt.'}
       >
-        <TaskBox textarea={taskBox} autoFocus={autoFocus} required={mode === 'headless'} value={task} onTask={onTask} />
+        <TaskBox autoFocus={autoFocus} required={mode === 'headless'} value={task} onTask={onTask} />
       </FormField>
       {agents === null ? (
         <p className="text-ui-sm text-muted">Loading agents…</p>
@@ -168,7 +167,8 @@ export function RunFields({
 }
 
 /** Takes the id and descriptions FormField gives its child, so the label still names the textarea under the mic. */
-function TaskBox({ textarea, onTask, ...props }: React.ComponentProps<'textarea'> & { textarea: RefObject<HTMLTextAreaElement | null>; value: string; onTask: (task: string) => void }) {
+function TaskBox({ onTask, ...props }: React.ComponentProps<'textarea'> & { value: string; onTask: (task: string) => void }) {
+  const textarea = useRef<HTMLTextAreaElement>(null)
   const dictation = useDictation()
   return (
     <div className="relative">
