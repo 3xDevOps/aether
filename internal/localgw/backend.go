@@ -408,11 +408,12 @@ var noReplay = map[string]bool{
 	protocol.MethodTerminalFile:  true,
 	protocol.MethodEnvSave:       true,
 
-	protocol.MethodAssistantStart:   true,
-	protocol.MethodAssistantPrompt:  true,
-	protocol.MethodAssistantAnswer:  true,
-	protocol.MethodAssistantConfirm: true,
-	protocol.MethodAssistantReset:   true,
+	protocol.MethodAssistantStart:      true,
+	protocol.MethodAssistantPrompt:     true,
+	protocol.MethodAssistantAnswer:     true,
+	protocol.MethodAssistantConfirm:    true,
+	protocol.MethodAssistantReset:      true,
+	protocol.MethodAssistantRuleRevoke: true,
 
 	protocol.MethodPushUnsubscribe:   true,
 	protocol.MethodPushTest:          true,
