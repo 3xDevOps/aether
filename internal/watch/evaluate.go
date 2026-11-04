@@ -266,8 +266,9 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	}
 	var finished string
 	key, body, ok := runFinish(run, fired)
-	if ok && held && followed(w) && reportedOutcome(key) {
-		ok = false
+	if ok && held && followed(w) && reportedOutcome(run, key) {
+		// Not done until the parent lets the outcome through.
+		ok, r.final = false, false
 	}
 	if ok {
 		finished = body
@@ -342,9 +343,10 @@ func followed(w *store.Watch) bool {
 }
 
 // reportedOutcome is whether a runFinish key is an outcome a parent can
-// hold: a reported success or a failure.
-func reportedOutcome(key string) bool {
-	return strings.HasPrefix(key, "reported|") || key == "failed"
+// hold: a success awaiting review or a failure nobody has seen, the ones
+// store.ListHoldingChildren finds again when the parent changes.
+func reportedOutcome(run *domain.Run, key string) bool {
+	return strings.HasPrefix(key, "reported|") && run.AwaitsReview(false, false) || key == "failed" && run.OutcomeUnseen
 }
 
 // outcomeHeld reports whether run's outcome is its parent's to read

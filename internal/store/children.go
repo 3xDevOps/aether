@@ -172,6 +172,30 @@ func (d *DB) GetChild(ctx context.Context, run domain.RunID) (*domain.ChildReser
 	return c, nil
 }
 
+// ListHoldingChildren returns parent's attached children whose outcome a
+// parent can hold (domain.OutcomeHeldIn): unseen, or awaiting review.
+func (d *DB) ListHoldingChildren(ctx context.Context, parent domain.RunID) ([]domain.RunID, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT rc.run_id FROM run_children rc JOIN runs r ON r.id = rc.run_id
+		WHERE rc.parent_run_id = ? AND rc.detached = 0 AND (r.outcome_unseen = 1 OR r.review IN ('ready', 'later'))
+		ORDER BY rc.run_id`, parent)
+	if err != nil {
+		return nil, fmt.Errorf("store: list holding subsessions: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var out []domain.RunID
+	for rows.Next() {
+		var id domain.RunID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: list holding subsessions: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list holding subsessions: %w", err)
+	}
+	return out, nil
+}
+
 func (d *DB) ListChildren(ctx context.Context, run domain.RunID) ([]*domain.ChildReservation, error) {
 	return d.listChildren(ctx, "list subsessions",
 		`SELECT `+childCols+` FROM run_children rc WHERE rc.parent_run_id = ? ORDER BY rc.created_at, rc.run_id`, run)

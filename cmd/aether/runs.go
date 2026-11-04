@@ -145,8 +145,15 @@ func runViewOf(c *protocol.Client, r protocol.Run, items []protocol.AttentionIte
 		return runView{}, err
 	}
 	held, err := outcomeHeld(r, func(id string) (*protocol.Run, error) {
-		parent, getErr := getRun(c, id)
-		return &parent, getErr
+		var res protocol.RunResult
+		var perr *protocol.Error
+		switch callErr := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: id}, &res); {
+		case errors.As(callErr, &perr) && perr.Code == protocol.CodeNotFound:
+			return nil, nil
+		case callErr != nil:
+			return nil, callErr
+		}
+		return &res.Run, nil
 	})
 	if err != nil {
 		return runView{}, err

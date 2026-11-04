@@ -449,32 +449,53 @@ func TestAFollowWaitsForAHeldSubsessionOutcome(t *testing.T) {
 	_ = h.svc.Close()
 	h.start()
 	parent := h.run(h.ada, "Lead the migration")
-	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 subsession")
-	reserved, _, err := h.db.ReserveChild(h.ctx, &domain.ChildReservation{
-		ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: h.ws.ID,
-		OwnerID: h.ada.ID, AccountID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP, Task: "Port the schema",
-		IdempotencyKey: "child", RequestHash: "child",
-	})
-	if err != nil {
-		t.Fatal(err)
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 2 subsessions")
+	child := func(task string) *domain.Run {
+		t.Helper()
+		reserved, _, err := h.db.ReserveChild(h.ctx, &domain.ChildReservation{
+			ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: h.ws.ID,
+			OwnerID: h.ada.ID, AccountID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP, Task: task,
+			IdempotencyKey: task, RequestHash: task,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := &domain.Run{ID: reserved.RunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: task, Harness: "claude",
+			Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+		if err = h.db.CreateRunWithID(h.ctx, run); err != nil {
+			t.Fatal(err)
+		}
+		return run
 	}
-	child := &domain.Run{ID: reserved.RunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "Port the schema", Harness: "claude",
-		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
-	if err = h.db.CreateRunWithID(h.ctx, child); err != nil {
-		t.Fatal(err)
-	}
-	asked := h.watch(h.ada, runTarget(child))
-	followed := h.follow(h.ada, child)
+	done, broke := child("Port the schema"), child("Port the triggers")
+	asked := h.watch(h.ada, runTarget(done))
+	followed := h.follow(h.ada, done)
 	if followed.ID == asked.Watch.ID {
 		t.Fatalf("the follow took over the asked-for watch %s", asked.Watch.ID)
 	}
-	h.status(child, domain.RunNeedsAttention, domain.ActivityFinished, "agent reported success")
+	failedFollow := h.follow(h.ada, broke)
+	if _, err := h.db.FinishRunReported(h.ctx, done.ID, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.db.SetRunReview(h.ctx, done.ID, domain.ReviewReady); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(done.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
+	if _, err := h.db.FinishRunReported(h.ctx, broke.ID, domain.RunFailed, "agent failed", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(broke.ID, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunFailed, OutcomeUnseen: true})
 	h.eventually("the asked-for watch's finish", func() bool { return len(h.notices(asked.Watch.ID)) == 1 })
 	h.settle()
-	if got := h.notices(followed.ID); len(got) != 0 {
+	if got := append(h.notices(followed.ID), h.notices(failedFollow.ID)...); len(got) != 0 {
 		t.Fatalf("follow notices under a working parent = %q, want none", bodies(got))
+	}
+	if state := h.watchState(failedFollow.ID).State; state != protocol.WatchActive {
+		t.Fatalf("the follow of a held failure is %s, want active until the parent lets it through", state)
 	}
 
 	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
-	h.eventually("the follow's finish once the parent stops", func() bool { return len(h.notices(followed.ID)) == 1 })
+	h.eventually("the follows' finishes once the parent stops", func() bool {
+		return len(h.notices(followed.ID)) == 1 && len(h.notices(failedFollow.ID)) == 1
+	})
 }

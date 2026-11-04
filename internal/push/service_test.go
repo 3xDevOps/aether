@@ -954,8 +954,8 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 }
 
 // A subsession's failure is its parent agent's while the parent works: it
-// is announced when the parent stops and withdrawn when the parent works
-// again, though only the parent's state changed.
+// is announced when the parent stops, withdrawn when the parent works
+// again, and not announced twice, though only the parent's state changed.
 func TestASubsessionOutcomeFollowsItsParent(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -986,4 +986,9 @@ func TestASubsessionOutcomeFollowsItsParent(t *testing.T) {
 
 	h.status(parent, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 	phone.expect(t, notification{Title: "Port the schema", Body: clearedBody, Run: string(child.ID), Clear: true})
+
+	// The parent stopping again lets the same failure through; it was
+	// announced once already, so it is not pushed again.
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
+	phone.expectNone(t, testQuiet)
 }

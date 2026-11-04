@@ -25,7 +25,8 @@ const announced = new Map()
 const seqs = new Map()
 // The run.get read in flight per run; a newer event supersedes it.
 const reading = new Map()
-// The subsessions read per parent run, read again when the parent changes.
+// The subsessions read per parent run that hold an outcome, read again when
+// the parent changes.
 const children = new Map()
 // When each run's need, or under `<run> done` its finish, last ended, on
 // the `ends` count; a watch notice read from before then is stale.
@@ -271,7 +272,13 @@ function read(runId) {
   const token = {}
   reading.set(runId, token)
   void Promise.all([readRun(runId), memberID().catch(() => null)]).then(async ([run, self]) => {
-    if (run && run.parent_run_id) children.set(run.parent_run_id, new Set([...(children.get(run.parent_run_id) || []), runId]))
+    if (run && run.parent_run_id) {
+      const below = new Set(children.get(run.parent_run_id) || [])
+      if (holdable(run)) below.add(runId)
+      else below.delete(runId)
+      if (below.size > 0) children.set(run.parent_run_id, below)
+      else children.delete(run.parent_run_id)
+    }
     const held = run ? await outcomeHeld(run) : false
     if (reading.get(runId) !== token) return
     reading.delete(runId)
@@ -401,6 +408,9 @@ function awaitsReview(run, held) {
 
 const activeStates = new Set(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'])
 const maxHeldDepth = 8
+
+// holdable is store.ListHoldingChildren's test: an outcome a parent can hold.
+const holdable = (run) => run.outcome_unseen === true || run.review === 'ready' || run.review === 'later'
 
 const hasOutcome = (run) => run.state === 'finished' || run.state === 'failed' || run.status === 'completed' || run.status === 'failed'
 

@@ -49,7 +49,7 @@ var (
 // Store is the persistence the service reads and writes.
 type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
-	ListChildren(ctx context.Context, run domain.RunID) ([]*domain.ChildReservation, error)
+	ListHoldingChildren(ctx context.Context, parent domain.RunID) ([]domain.RunID, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	store.PushStore
@@ -126,6 +126,10 @@ type Service struct {
 	// watched holds, for every run with a watcher, the signal that has it
 	// read the run again.
 	watched map[domain.RunID]chan struct{}
+	// heldAnnounced keeps, for a run whose watcher ended because a parent
+	// took its outcome back, the needs it had announced, so the outcome
+	// surfacing again is not pushed twice.
+	heldAnnounced map[domain.RunID]map[string]bool
 	// notices holds, for every admin with a workspace's budget notice
 	// to send, what hands its watcher the state to announce.
 	notices map[budgetKey]chan budgetDue
@@ -166,17 +170,18 @@ func New(cfg Config) (*Service, error) {
 		cfg.Quiet = DefaultQuiet
 	}
 	return &Service{
-		store:   cfg.Store,
-		bus:     cfg.Bus,
-		runs:    cfg.Runs,
-		budgets: cfg.Budgets,
-		key:     key,
-		client:  cfg.Client,
-		quiet:   cfg.Quiet,
-		sink:    noSink{},
-		active:  map[domain.MemberID]time.Time{},
-		watched: map[domain.RunID]chan struct{}{},
-		notices: map[budgetKey]chan budgetDue{},
+		store:         cfg.Store,
+		bus:           cfg.Bus,
+		runs:          cfg.Runs,
+		budgets:       cfg.Budgets,
+		key:           key,
+		client:        cfg.Client,
+		quiet:         cfg.Quiet,
+		sink:          noSink{},
+		active:        map[domain.MemberID]time.Time{},
+		watched:       map[domain.RunID]chan struct{}{},
+		heldAnnounced: map[domain.RunID]map[string]bool{},
+		notices:       map[budgetKey]chan budgetDue{},
 	}, nil
 }
 
@@ -253,25 +258,23 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	}
 }
 
-// subsessionsChanged has the attached subsessions below parent read again,
-// a level at a time to the depth domain.OutcomeHeldIn walks: whether their
-// outcomes are held follows the parent's standing.
+// subsessionsChanged has the attached subsessions below parent that hold an
+// outcome read again, a level at a time to the depth domain.OutcomeHeldIn
+// walks: whether their outcomes are held follows the parent's standing.
 func (s *Service) subsessionsChanged(ctx context.Context, parent domain.RunID) {
 	level := []domain.RunID{parent}
 	for depth := 0; depth < domain.MaxHeldDepth && len(level) > 0; depth++ {
 		var next []domain.RunID
 		for _, id := range level {
-			children, err := s.store.ListChildren(ctx, id)
+			children, err := s.store.ListHoldingChildren(ctx, id)
 			if err != nil {
 				slog.Warn("push: list subsessions to read again", "run", id, "error", err)
 				continue
 			}
-			for _, c := range children {
-				if !c.Detached {
-					s.changed(ctx, c.RunID)
-					next = append(next, c.RunID)
-				}
+			for _, child := range children {
+				s.changed(ctx, child)
 			}
+			next = append(next, children...)
 		}
 		level = next
 	}
@@ -300,7 +303,13 @@ func (s *Service) changed(ctx context.Context, id domain.RunID) {
 // overtakes another, and each is decided from the run as it stands when it
 // is sent.
 func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct{}) {
-	announced := map[string]bool{}
+	s.mu.Lock()
+	announced := s.heldAnnounced[id]
+	delete(s.heldAnnounced, id)
+	s.mu.Unlock()
+	if announced == nil {
+		announced = map[string]bool{}
+	}
 	// offered is every need a device was sent, as {need, endpoint}, so one
 	// that was interrupted goes on with the devices still without it. Each
 	// maps to the member whose device may show it, empty when the push
@@ -310,13 +319,20 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 	// back after another is shown again.
 	var shown string
 	for {
-		run, n, err := s.read(ctx, id)
+		run, n, held, err := s.read(ctx, id)
 		var wake <-chan time.Time
 		switch {
 		case err != nil:
 			slog.Warn("push: read session; trying again later", "run", id, "in", retry, "error", err)
 			wake = time.After(retry)
 		case n == nil:
+			// A need some device took counts as announced when only the
+			// parent's hold took it back.
+			if held {
+				for device := range offered {
+					announced[device[0]] = true
+				}
+			}
 			// Devices and the sink are cleared independently, each tried
 			// again while it fails.
 			devicesErr := s.withdraw(ctx, run, id, offered, "")
@@ -328,10 +344,12 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			}
 			if devicesErr != nil || err != nil {
 				wake = time.After(retry)
-			} else if s.unwatch(id, signal) {
+			} else if s.unwatch(id, signal, held, announced) {
 				return
 			}
-			clear(announced)
+			if !held {
+				clear(announced)
+			}
 			// A device still to be told keeps its entry for the next try.
 			for device, member := range offered {
 				if member == "" {
@@ -458,14 +476,19 @@ func (s *Service) startedAt() time.Time {
 	return s.started
 }
 
-// unwatch ends a run's watcher unless an event is waiting for it.
-func (s *Service) unwatch(id domain.RunID, signal chan struct{}) bool {
+// unwatch ends a run's watcher unless an event is waiting for it, keeping
+// what it announced when a parent holds the run's outcome. Under one lock,
+// so a watcher started right after finds it.
+func (s *Service) unwatch(id domain.RunID, signal chan struct{}, held bool, announced map[string]bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(signal) > 0 {
 		return false
 	}
 	delete(s.watched, id)
+	if held && len(announced) > 0 {
+		s.heldAnnounced[id] = announced
+	}
 	return true
 }
 
@@ -502,17 +525,17 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 // read is the run as it stands and what it needs, if anything, in the
 // dashboard's order: its own requests, then its status. The need is keyed to the member it waits on: a run handed to
 // another member is theirs to hear about.
-func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need, error) {
+func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need, bool, error) {
 	run, err := s.store.GetRun(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil, nil
+		return nil, nil, false, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	held, err := s.held(ctx, run)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	n := needOf(run, s.runs.PendingInputs(id), s.runs.Paused(id), held)
 	if n != nil {
@@ -521,7 +544,7 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 	if n != nil {
 		n.key = string(n.member) + "|" + n.key
 	}
-	return run, n, nil
+	return run, n, held, nil
 }
 
 // held reports whether the run's outcome is its parent's to read
