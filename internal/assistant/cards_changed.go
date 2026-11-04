@@ -29,10 +29,7 @@ func (s *Service) PendingCards(ctx context.Context, member domain.MemberID) ([]p
 		}
 		card := push.Card{ID: c.ID, Summary: c.Summary, CreatedAt: c.CreatedAt}
 		if s.privateCard(ctx, member, c.AssistantConfirmation) {
-			card.Summary, card.Private = privateSummaries[c.Method], true
-			if card.Summary == "" {
-				card.Summary = "An action that uses a saved preference"
-			}
+			card.Summary, card.Private = privateSummary(c.Method), true
 		}
 		out = append(out, card)
 	}
@@ -44,6 +41,35 @@ func (s *Service) PendingCards(ctx context.Context, member domain.MemberID) ([]p
 var privateSummaries = map[string]string{
 	protocol.MethodAssistantRemember: "Save a preference",
 	protocol.MethodAssistantForget:   "Forget a saved preference",
+}
+
+func privateSummary(method string) string {
+	if summary, ok := privateSummaries[method]; ok {
+		return summary
+	}
+	return "An action that uses a saved preference"
+}
+
+// CardOutcome is what became of the member's card id, with its summary as
+// a push may show it. Which door decided it is not recorded.
+func (s *Service) CardOutcome(ctx context.Context, member domain.MemberID, id string) (string, error) {
+	c, err := s.Card(ctx, member, id)
+	if err != nil {
+		return "", err
+	}
+	summary := c.Summary
+	if s.privateCard(ctx, member, c.AssistantConfirmation) {
+		summary = privateSummary(c.Method)
+	}
+	switch c.State {
+	case protocol.AssistantCardApproved, protocol.AssistantCardRunning, protocol.AssistantCardSucceeded, protocol.AssistantCardFailed:
+		return "Approved: " + summary, nil
+	case protocol.AssistantCardDeclined:
+		return "Declined: " + summary, nil
+	case protocol.AssistantCardExpired:
+		return "Expired: " + summary, nil
+	}
+	return "Withdrawn: " + summary, nil
 }
 
 // privateCard reports whether c saves, forgets or sends a saved preference.

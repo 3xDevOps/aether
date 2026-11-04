@@ -29,6 +29,9 @@ type burst struct {
 	needs      map[string]bool
 	// summarized is set once a summary replaced the first push.
 	summarized bool
+	// cards is set once an assistant card joined, so the summary opens
+	// the assistant panel.
+	cards bool
 }
 
 // summary is a burst's notification as it is sent.
@@ -43,7 +46,7 @@ type summary struct {
 // when the push goes out as it is: it starts a burst, or the burst holds
 // no other item. A summary alerts only when it brings the burst its first
 // need; otherwise it replaces the notification quietly.
-func (s *Service) join(member domain.MemberID, key, tag, topic, title, body string, need bool) (*summary, error) {
+func (s *Service) join(member domain.MemberID, key, tag, topic, title, body string, need, card bool) (*summary, error) {
 	line := clip(plain(title), digestTitleRunes)
 	if body = plain(body); body != "" {
 		line += ": " + clip(body, digestBodyRunes)
@@ -69,6 +72,7 @@ func (s *Service) join(member domain.MemberID, key, tag, topic, title, body stri
 		b.keys = append(b.keys, key)
 	}
 	b.lines[key], b.needs[key] = line, need
+	b.cards = b.cards || card
 	// A summary that shrank to one item stays a summary: the item's own
 	// notification was never sent.
 	if len(b.keys) == 1 && !b.summarized {
@@ -138,7 +142,10 @@ func (b *burst) summary(quiet, ended bool) (*summary, error) {
 	}
 	n := notification{Body: clearedBody, Clear: true}
 	if needs > 0 || !ended {
-		title := fmt.Sprintf("%d need you", len(lines))
+		title := fmt.Sprintf("%d things need you", len(lines))
+		if len(lines) == 1 {
+			title = "1 thing needs you"
+		}
 		if needs < len(lines) {
 			title = fmt.Sprintf("%d notifications", len(lines))
 		}
@@ -149,7 +156,11 @@ func (b *burst) summary(quiet, ended bool) (*summary, error) {
 		}
 		n = notification{Title: title, Body: body, Quiet: quiet}
 	}
-	payload, err := json.Marshal(message{notification: n, URL: "/", Tag: b.tag})
+	link := "/"
+	if b.cards {
+		link = CardLink
+	}
+	payload, err := json.Marshal(message{notification: n, URL: link, Tag: b.tag})
 	if err != nil {
 		return nil, fmt.Errorf("push: encode a summary: %w", err)
 	}

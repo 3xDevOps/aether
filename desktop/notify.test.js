@@ -575,44 +575,48 @@ async function cardsChanged(member = 'me') {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
 }
 
-test('an assistant card shows Approve and Decline, which decide it once through the gateway', async () => {
+test('an assistant card offers Review, which opens it, and Decline, which decides it once through the gateway', async () => {
   cards = [{ id: 'c1', state: 'pending', summary: 'Launch claude in api: "Write the docs"' }, { id: 'c2', state: 'running', summary: 'Already approved' }]
   await cardsChanged()
   assert.equal(shown.length, 1)
   assert.equal(shown[0].options.body, 'Launch claude in api: "Write the docs"')
-  assert.deepEqual(shown[0].options.actions.map((a) => a.text), ['Approve', 'Decline'])
+  assert.deepEqual(shown[0].options.actions.map((a) => a.text), ['Review…', 'Decline'])
   shown[0].handlers.click()
-  assert.deepEqual(linked, ['/?assistant=1'])
+  shown[0].handlers.action({}, 0)
+  assert.deepEqual(linked, ['/?assistant=1&card=c1', '/?assistant=1&card=c1'])
+  assert.equal(decided.length, 0, 'nothing approves from the notification')
 
   await cardsChanged()
   assert.equal(shown.length, 1, 'a card already shown is not shown again')
 
-  shown[0].handlers.action({}, 0)
+  shown[0].handlers.action({}, 1)
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(decided, [{ confirmation_id: 'c1', approve: true }])
+  assert.deepEqual(decided, [{ confirmation_id: 'c1', approve: false }])
   assert.ok(shown[0].closed)
-  assert.equal(shown[1].options.body, 'Approved')
+  assert.equal(shown[1].options.body, 'Declined here: Launch claude in api: "Write the docs"')
 
-  // A replayed action on a card decided elsewhere shows the server's refusal.
+  // A replayed action on a card decided elsewhere shows the server's refusal, and stays.
   shown[0].handlers.action({}, 1)
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
   assert.equal(decided.length, 2)
   assert.equal(shown[2].options.body, 'Not decided: assistant: no such pending confirmation: c1')
+  assert.equal(shown[2].options.timeoutType, 'never')
 })
 
 test('a preference card or one too long to show whole opens the card instead of deciding', async () => {
   cards = [
     { id: 'c4', state: 'pending', method: 'assistant.forget', private: true, summary: 'Forget "I prefer tabs"' },
-    { id: 'c5', state: 'pending', method: 'run.launch', summary: 'x'.repeat(241) },
+    { id: 'c5', state: 'pending', method: 'run.launch', summary: 'word '.repeat(60) },
     { id: 'c7', state: 'pending', method: 'run.launch', private: true, summary: 'Launch claude in api: "always use tabs"' },
   ]
   await cardsChanged()
   assert.equal(shown.length, 3)
-  assert.equal(shown[0].options.body, 'Forget a saved preference')
+  assert.equal(shown[0].options.body, 'Forget a saved preference. Open to review.')
   assert.equal(shown[0].options.actions, undefined)
   assert.equal(shown[1].options.actions, undefined)
   assert.equal(shown[1].handlers.action, undefined)
-  assert.equal(shown[2].options.body, 'An action that uses a saved preference')
+  assert.ok(shown[1].options.body.endsWith('… Open to read the rest.'))
+  assert.equal(shown[2].options.body, 'An action that uses a saved preference. Open to review.')
   assert.equal(shown[2].options.actions, undefined)
 })
 

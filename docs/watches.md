@@ -338,20 +338,25 @@ queued without making the digest due.
 An [assistant approval card](assistant.md#approve-an-action) is pushed when it is
 raised, titled `Assistant asks for approval`, with the card's summary. It
 waits while you use a dashboard, as other pushes do. A card that saves,
-forgets or sends a saved preference shows only what kind of action it is.
+forgets or sends a saved preference shows only what kind of action it is,
+followed by `Open to review.`; a summary too long for one push is cut at a
+word and ends `… Open to read the rest.`
 
-In a browser on Android or a computer, the notification carries **Approve**
-and **Decline**. **Approve** opens the dashboard with the assistant panel,
-where you approve the card with one tap, because an action also runs from a
-locked phone. **Decline** declines it from the notification, which then reads
-`Declined` or `Not decided: <the server's error>`. The desktop app on macOS
-shows the same buttons and both decide at once. A card too long to show whole,
-or a private one, has no buttons. A tap, the only choice on iOS, opens the
-card, where **Always** options are. When the card is decided, expires or is
-withdrawn on any device, its notification is replaced quietly with `Decided`,
-also after a server restart; a device that decided it keeps its own outcome.
-One in a digest is dropped from it. See [security.md](security.md#the-assistant)
-for why a push cannot decide a card on its own.
+No notification approves a card: you approve it on the card itself, which
+shows every parameter the call sends. In a browser on Android or a computer,
+and in the desktop app on macOS, the notification carries **Review…**, which
+opens the dashboard on that card in the assistant panel, outlined and
+focused, and **Decline**, which declines it from that device. The
+notification then reads `Declined here: <summary>`, or `Not decided: <the
+server's error>`, which stays until you dismiss it. A private or long card
+has no buttons. A tap, the only choice on iOS, opens the card. If the card
+was decided before you open it, the panel says how it ended. When a card is
+decided, expires or is withdrawn on any device, its notification is replaced
+quietly, titled `Assistant card`, with `Approved:`, `Declined:`,
+`Expired:` or `Withdrawn:` and its summary, also after a server restart; a
+device that declined it keeps its own line. One in a digest is dropped from
+it. See [security.md](security.md#the-assistant) for why a notification
+cannot approve.
 
 Seen anywhere, cleared everywhere: a session's push is replaced quietly once
 the session no longer needs you, including when you open its result on any
@@ -359,8 +364,8 @@ device, and a digest drops what was answered, opened or decided before it is
 sent.
 
 Within 2 minutes after a push, further pushes join it: each replaces that
-notification with a summary, `3 need you` and one line per item, that opens
-the dashboard. It alerts only when it brings the first need; otherwise it
+notification with a summary, `3 things need you` and one line per item, that
+opens the dashboard, or the assistant panel when a card is among them. It alerts only when it brings the first need; otherwise it
 replaces the notification quietly. A session counts once, whether its own
 push or a watch's notice about it joined. When a session in the summary stops
 needing you, its line goes and the summary is sent again quietly; once none

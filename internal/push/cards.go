@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -16,8 +18,9 @@ import (
 const (
 	cardSource = "card"
 	cardTitle  = "Assistant asks for approval"
-	// cardDecided replaces a card's push once it is decided anywhere.
-	cardDecided = "Decided"
+	// cardDecidedTitle heads the quiet replacement of a card's push once
+	// it is decided anywhere.
+	cardDecidedTitle = "Assistant card"
 	// CardLink opens the dashboard with the assistant panel, where the
 	// card and its Always options are.
 	CardLink = "/?assistant=1"
@@ -34,8 +37,31 @@ type Card struct {
 }
 
 // Cards is what the assistant knows about a member's approval cards.
+// CardOutcome is one line on what became of a card no longer pending, its
+// summary as a push may show it included.
 type Cards interface {
 	PendingCards(ctx context.Context, member domain.MemberID) ([]Card, error)
+	CardOutcome(ctx context.Context, member domain.MemberID, id string) (string, error)
+}
+
+// cardLink opens the dashboard on the card with id, in the assistant panel.
+func cardLink(id string) string { return CardLink + "&card=" + url.QueryEscape(id) }
+
+// cardBody is what a card's push says: its summary, cut at a word to fit
+// one push with a pointer to the rest, and what a private one needs.
+func cardBody(c Card) string {
+	if c.Private {
+		return c.Summary + ". Open to review."
+	}
+	if utf8.RuneCountInString(c.Summary) <= maxBodyRunes {
+		return c.Summary
+	}
+	const rest = "… Open to read the rest."
+	cut := []rune(c.Summary)[:maxBodyRunes-utf8.RuneCountInString(rest)]
+	if i := strings.LastIndex(string(cut), " "); i > 0 {
+		return strings.TrimRight(string(cut)[:i], " ,;:") + rest
+	}
+	return string(cut) + rest
 }
 
 // cardPushes is, per member, the cards announced: true for one pushed to
@@ -107,9 +133,14 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		if slices.ContainsFunc(pending, func(c Card) bool { return c.ID == id }) {
 			continue
 		}
-		s.unjoin(ctx, cardTopic(id))
+		s.unjoin(ctx, cardTopic(id), "")
 		if pushed {
-			results, err := s.Deliver(ctx, member, Message{Title: cardTitle, Body: cardDecided, URL: CardLink, Topic: cardTopic(id), Clear: true})
+			outcome, err := s.cards.CardOutcome(ctx, member, id)
+			if err != nil {
+				slog.Warn("push: read a decided card", "member", member, "card", id, "error", err)
+				outcome = "No longer waits for you"
+			}
+			results, err := s.Deliver(ctx, member, Message{Title: cardDecidedTitle, Body: outcome, URL: cardLink(id), Topic: cardTopic(id), Clear: true})
 			if failed(results, err) {
 				slog.Warn("push: withdraw a decided card's notification", "member", member, "card", id, "error", errors.Join(err, deviceErrors(results)))
 			}
@@ -155,9 +186,9 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 
 // announceCard pushes card c, or queues it for the digest quiet hours
 // send, and reports whether it has a notification of its own: one joined
-// to a burst's summary has none to withdraw. The push offers Approve and
-// Decline only when it shows the whole card; a private or long one opens
-// the card instead.
+// to a burst's summary has none to withdraw. The push offers Review and
+// Decline only when it shows the whole summary; a private or long one
+// opens the card instead. Approving is always done on the card itself.
 func (s *Service) announceCard(ctx context.Context, member domain.MemberID, c Card) (bool, error) {
 	prefs, err := s.store.GetNotifyPrefs(ctx, member)
 	if err != nil {
@@ -166,10 +197,10 @@ func (s *Service) announceCard(ctx context.Context, member domain.MemberID, c Ca
 	if route := RouteOf(prefs, KindCard, s.now()); route != RouteNow {
 		return false, s.Queue(ctx, &store.DigestItem{
 			MemberID: member, Source: cardSource, Key: c.ID, Kind: KindCard, Title: cardTitle, Body: c.Summary,
-			URL: CardLink, Overnight: route == RouteOvernight, CreatedAt: s.now(),
+			URL: cardLink(c.ID), Overnight: route == RouteOvernight, CreatedAt: s.now(),
 		})
 	}
-	m := Message{Title: cardTitle, Body: c.Summary, URL: CardLink, Topic: cardTopic(c.ID), Urgent: true}
+	m := Message{Title: cardTitle, Body: cardBody(c), URL: cardLink(c.ID), Topic: cardTopic(c.ID), Urgent: true}
 	if !c.Private && utf8.RuneCountInString(c.Summary) <= maxBodyRunes {
 		m.Card = c.ID
 	}

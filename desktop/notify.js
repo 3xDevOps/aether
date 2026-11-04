@@ -279,12 +279,11 @@ function queueCards() {
   cardsSync = cardsSync.then(syncCards, syncCards)
 }
 
-// syncCards shows each pending card with Approve and Decline, and closes
-// one no longer pending. Approve and Decline call assistant.confirm through
-// this app's own gateway, as the card in the window would; macOS shows the
-// buttons, elsewhere a click opens the card. A card the server marks
-// private (it saves, forgets or sends a saved preference), or one too long
-// to show whole, shows no buttons; a private one shows only what it is.
+// syncCards shows each pending card with Review, which opens it, and
+// Decline, and closes one no longer pending; macOS shows the buttons,
+// elsewhere a click opens the card. A card the server marks private (it
+// saves, forgets or sends a saved preference), or one too long to show
+// whole, shows no buttons.
 async function syncCards() {
   if (!Notification.isSupported()) return
   let status
@@ -302,32 +301,53 @@ async function syncCards() {
   }
   for (const card of pending) {
     if (cardsShown.has(card.id)) continue
-    const preference = card.private ? preferenceCards[card.method] || 'An action that uses a saved preference' : ''
     const summary = card.summary || ''
-    const whole = !preference && [...summary].length <= 240
+    const whole = !card.private && [...summary].length <= 240
+    const link = cardLinkOf(card.id)
     const notification = new Notification({
       title: cardTitle,
-      body: preference || clip(summary, 240),
-      ...(whole ? { actions: [{ type: 'button', text: 'Approve' }, { type: 'button', text: 'Decline' }] } : {}),
+      body: cardBody(card),
+      ...(whole ? { actions: [{ type: 'button', text: 'Review…' }, { type: 'button', text: 'Decline' }] } : {}),
     })
-    notification.on('click', () => openLink(cardLink))
-    if (whole) notification.on('action', (_event, index) => void decideCard(card, index === 0))
+    notification.on('click', () => openLink(link))
+    if (whole) notification.on('action', (_event, index) => (index === 0 ? openLink(link) : void decline(card)))
     cardsShown.set(card.id, notification)
     notification.show()
   }
 }
 
-async function decideCard(card, approve) {
-  let body = approve ? 'Approved' : 'Declined'
+// cardBody is what a card's notification says: a private one only what
+// kind of action it is, a long one cut at a word with a pointer to the rest.
+function cardBody(card) {
+  if (card.private) return `${preferenceCards[card.method] || 'An action that uses a saved preference'}. Open to review.`
+  const summary = card.summary || ''
+  if ([...summary].length <= 240) return summary
+  const rest = '… Open to read the rest.'
+  const cut = [...summary].slice(0, 240 - rest.length).join('')
+  const space = cut.lastIndexOf(' ')
+  return (space > 0 ? cut.slice(0, space).replace(/[ ,;:]+$/, '') : cut) + rest
+}
+
+function cardLinkOf(id) {
+  return `${cardLink}&card=${encodeURIComponent(id)}`
+}
+
+// decline declines card through this app's gateway. Approving is done on
+// the card itself, which shows every parameter the call sends.
+async function decline(card) {
+  let body = `Declined here: ${card.private ? preferenceCards[card.method] || 'An action that uses a saved preference' : card.summary}`
+  let failed = false
   try {
-    await gatewayCall('assistant.confirm', { confirmation_id: card.id, approve })
+    await gatewayCall('assistant.confirm', { confirmation_id: card.id, approve: false })
   } catch (err) {
     body = `Not decided: ${err.message}`
+    failed = true
   }
   cardsShown.get(card.id)?.close()
   cardsShown.delete(card.id)
-  const notification = new Notification({ title: cardTitle, body, silent: true })
-  notification.on('click', () => openLink(cardLink))
+  // An error stays until it is read.
+  const notification = new Notification({ title: 'Assistant card', body: clip(body, 240), silent: true, ...(failed ? { timeoutType: 'never' } : {}) })
+  notification.on('click', () => openLink(cardLinkOf(card.id)))
   notification.show()
 }
 

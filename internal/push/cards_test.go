@@ -24,6 +24,10 @@ func (f *fakeCards) PendingCards(_ context.Context, member domain.MemberID) ([]C
 	return f.pending[member], nil
 }
 
+func (f *fakeCards) CardOutcome(_ context.Context, _ domain.MemberID, id string) (string, error) {
+	return "Declined: card " + id, nil
+}
+
 func (f *fakeCards) set(member domain.MemberID, cards ...Card) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -64,22 +68,22 @@ func TestACardIsPushedWithItsIDAndWithdrawnWhenDecidedAnywhere(t *testing.T) {
 
 	cards.set(h.ada.ID)
 	h.cardsChanged(h.ada)
-	phone.expect(t, notification{Title: cardTitle, Body: cardDecided, Clear: true})
+	phone.expect(t, notification{Title: cardDecidedTitle, Body: "Declined: card c1", Clear: true})
 }
 
 func TestACardPushOffersActionsOnlyWhenItShowsTheWholeCard(t *testing.T) {
 	t.Parallel()
 	h, cards := newCardHarness(t)
 	phone := h.subscribe(h.ada)
-	long := strings.Repeat("x", maxBodyRunes+1)
+	long := strings.Repeat("word ", maxBodyRunes/5+1)
 	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Forget a saved preference", Private: true, CreatedAt: h.clock.now()})
 	h.cardsChanged(h.ada)
-	phone.expect(t, notification{Title: cardTitle, Body: "Forget a saved preference"})
+	phone.expect(t, notification{Title: cardTitle, Body: "Forget a saved preference. Open to review."})
 	h.clock.advance(burstWindow)
 	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Forget a saved preference", Private: true, CreatedAt: h.clock.now()},
 		Card{ID: "c2", Summary: long, CreatedAt: h.clock.now()})
 	h.cardsChanged(h.ada)
-	phone.expect(t, notification{Title: cardTitle, Body: strings.Repeat("x", maxBodyRunes) + "…"})
+	phone.expect(t, notification{Title: cardTitle, Body: strings.TrimSpace(strings.Repeat("word ", (maxBodyRunes-24)/5)) + "… Open to read the rest."})
 }
 
 func TestACardWaitsWhileItsMemberUsesADashboard(t *testing.T) {
@@ -120,7 +124,7 @@ func TestARestartWithdrawsTheCardsDecidedWhileItWasDown(t *testing.T) {
 	}
 	cards.set(h.ada.ID)
 	h.start()
-	phone.expect(t, notification{Title: cardTitle, Body: cardDecided, Clear: true})
+	phone.expect(t, notification{Title: cardDecidedTitle, Body: "Declined: card c1", Clear: true})
 	deadline = time.Now().Add(10 * time.Second)
 	for pushed, _ := h.db.PushedCards(h.ctx); len(pushed) != 0; pushed, _ = h.db.PushedCards(h.ctx) {
 		if time.Now().After(deadline) {

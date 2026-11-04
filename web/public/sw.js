@@ -50,11 +50,11 @@ async function display(message) {
     tag: message.tag || message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
     ...(message.quiet ? { silent: true } : { renotify: true }),
     icon: '/icons/icon-192.png',
-    // An assistant card's push carries only its id. Approve opens the
-    // card, since an action runs on a locked phone; Decline is decided from
-    // here with this device's own sign-in. Safari shows no actions, so a tap
-    // opens the card.
-    ...(message.card ? { actions: [{ action: 'approve', title: 'Approve' }, { action: 'decline', title: 'Decline' }] } : {}),
+    // An assistant card's push carries only its id. Review opens the card,
+    // the one place it is approved, since an action runs on a locked
+    // phone; Decline is decided from here with this device's own sign-in.
+    // Safari shows no actions, so a tap opens the card.
+    ...(message.card ? { actions: [{ action: 'review', title: 'Review…' }, { action: 'decline', title: 'Decline' }] } : {}),
     data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url, card: message.card },
   })
 }
@@ -62,7 +62,8 @@ async function display(message) {
 // decline declines card through assistant.confirm, and puts the outcome,
 // or the server's own error, in place of the notification.
 async function decline(notification, card) {
-  let body = 'Declined'
+  let body = `Declined here: ${notification.body}`
+  let failed = false
   try {
     const res = await fetch('/api/v1/assistant.confirm', {
       method: 'POST',
@@ -73,14 +74,18 @@ async function decline(notification, card) {
     if (!res.ok) {
       const refusal = await res.json().catch(() => null)
       body = `Not decided: ${refusal?.error?.message || `HTTP ${res.status}`}`
+      failed = true
     }
   } catch (err) {
     body = `Not decided: ${err instanceof Error ? err.message : String(err)}`
+    failed = true
   }
-  await self.registration.showNotification(notification.title || 'Aether', {
+  await self.registration.showNotification('Assistant card', {
     body,
     tag: notification.tag,
     silent: true,
+    // An error stays until it is read.
+    requireInteraction: failed,
     icon: '/icons/icon-192.png',
     data: { url: notification.data?.url, decided: true },
   })

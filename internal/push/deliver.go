@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -76,7 +77,7 @@ func (s *Service) Push(ctx context.Context, member domain.MemberID, m Message, n
 	if need && m.Run != "" {
 		key = string(m.Run)
 	}
-	sum, err := s.join(member, key, m.Topic, topicOf(m.Topic), m.Title, m.Body, need)
+	sum, err := s.join(member, key, m.Topic, topicOf(m.Topic), m.Title, m.Body, need, strings.HasPrefix(m.Topic, "card:"))
 	if err != nil {
 		return nil, false, err
 	}

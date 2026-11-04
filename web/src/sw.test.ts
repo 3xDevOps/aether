@@ -77,7 +77,7 @@ describe('service worker', () => {
     expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ renotify: true }))
   })
 
-  it('offers Approve, which opens the card, and Decline, which decides it with this device’s sign-in', async () => {
+  it('offers Review, which opens the card, and Decline, which decides it with this device’s sign-in', async () => {
     const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
     const { self, dispatch } = worker()
@@ -86,13 +86,13 @@ describe('service worker', () => {
     })
     expect(self.registration.showNotification).toHaveBeenCalledWith('Assistant asks for approval', expect.objectContaining({
       tag: 'card:c1',
-      actions: [{ action: 'approve', title: 'Approve' }, { action: 'decline', title: 'Decline' }],
+      actions: [{ action: 'review', title: 'Review…' }, { action: 'decline', title: 'Decline' }],
       data: expect.objectContaining({ card: 'c1' }),
     }))
-    const notification = { title: 'Assistant asks for approval', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1' }, close: vi.fn() }
+    const notification = { title: 'Assistant asks for approval', body: 'Launch claude in api', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1' }, close: vi.fn() }
 
-    // A locked phone runs actions, so Approve only opens the card.
-    await dispatch('notificationclick', { notification, action: 'approve' })
+    // A locked phone runs actions, so none approves: Review opens the card.
+    await dispatch('notificationclick', { notification, action: 'review' })
     expect(fetch).not.toHaveBeenCalled()
     expect(self.clients.openWindow).toHaveBeenCalledWith('/?assistant=1')
 
@@ -101,7 +101,7 @@ describe('service worker', () => {
     expect(fetch).toHaveBeenCalledWith('/api/v1/assistant.confirm', expect.objectContaining({
       method: 'POST', credentials: 'same-origin', body: JSON.stringify({ confirmation_id: 'c1', approve: false }),
     }))
-    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant asks for approval', expect.objectContaining({ tag: 'card:c1', body: 'Declined', silent: true }))
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant card', expect.objectContaining({ tag: 'card:c1', body: 'Declined here: Launch claude in api', silent: true, requireInteraction: false }))
     vi.unstubAllGlobals()
   })
 
@@ -118,8 +118,9 @@ describe('service worker', () => {
     const { self, dispatch } = worker()
     const notification = { title: 'Assistant asks for approval', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1' }, close: vi.fn() }
     await dispatch('notificationclick', { notification, action: 'decline' })
-    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant asks for approval', expect.objectContaining({
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant card', expect.objectContaining({
       body: 'Not decided: assistant: no such pending confirmation: c1',
+      requireInteraction: true,
     }))
     vi.unstubAllGlobals()
   })

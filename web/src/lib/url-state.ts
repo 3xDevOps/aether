@@ -11,7 +11,7 @@ const pageIDs: Record<string, string> = {
   templates: 'template',
 }
 
-const keys = ['run', 'view', 'agent', 'repo', 'page', 'id', 'watch', 'entry', 'assistant']
+const keys = ['run', 'view', 'agent', 'repo', 'page', 'id', 'watch', 'entry', 'assistant', 'card']
 
 const boardRoute: Route = { name: 'board', params: {} }
 

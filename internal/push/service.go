@@ -558,7 +558,7 @@ func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
 		}
 		slog.Warn("push: queue a notification for the digest; pushing at once", "run", run.ID, "error", err)
 	}
-	sum, err := s.join(n.member, string(run.ID), string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed)
+	sum, err := s.join(n.member, string(run.ID), string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed, false)
 	if err != nil || sum == nil {
 		return false
 	}

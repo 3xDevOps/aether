@@ -91,6 +91,8 @@ export function settlePromptKey(key: string) {
 
 export interface AssistantSlice {
   assistantOpen: boolean
+  /** The card a tapped notification named, to bring into view in the panel. */
+  assistantCard: string | null
   assistantWidth: number
   assistantStatus: AssistantStatus | null
   assistantStatusError: string | null
@@ -126,6 +128,7 @@ export interface AssistantSlice {
   preferenceUndos: number
   notePreferenceUndo: () => void
   setAssistantOpen: (open: boolean) => void
+  setAssistantCard: (card: string | null) => void
   setAssistantWidth: (width: number) => void
   setAssistantStatus: (status: AssistantStatus) => void
   setAssistantStatusError: (error: string | null) => void
@@ -150,11 +153,13 @@ export interface AssistantSlice {
   resetAssistant: () => void
 }
 
-/** A notification of an assistant card opens the dashboard at ?assistant=1. */
+/** A notification of an assistant card opens the dashboard at ?assistant=1&card=<id>. */
 export const openedForACard = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('assistant')
+const notifiedCard = () => (typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('card'))
 
 export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => ({
   assistantOpen: openedForACard(),
+  assistantCard: notifiedCard(),
   assistantWidth: defaultAssistantWidth,
   assistantStatus: null,
   assistantStatusError: null,
@@ -178,6 +183,7 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   preferenceUndos: 0,
   notePreferenceUndo: () => set((s) => ({ preferenceUndos: s.preferenceUndos + 1 })),
   setAssistantOpen: (assistantOpen) => set(assistantOpen ? { assistantOpen, assistantNotices: 0 } : { assistantOpen }),
+  setAssistantCard: (assistantCard) => set({ assistantCard }),
   setAssistantWidth: (width) => set({ assistantWidth: clampAssistantWidth(width) }),
   setAssistantStatus: (assistantStatus) =>
     set({ assistantStatus, assistantStatusError: null, assistantConfirmations: assistantStatus.confirmations ?? [] }),
