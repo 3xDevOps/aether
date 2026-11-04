@@ -7,4 +7,10 @@
     <style name="Theme.Aether" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
     </style>
+
+    <!-- The dashboard's activity starts on the page's dark ground, so a cold
+         start does not show a light window before the WebView paints. -->
+    <style name="Theme.Aether.Page">
+        <item name="android:windowBackground">@color/page_background</item>
+    </style>
 </resources>

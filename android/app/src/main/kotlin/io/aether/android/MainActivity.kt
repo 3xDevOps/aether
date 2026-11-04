@@ -157,6 +157,10 @@ class MainActivity : ComponentActivity() {
                     return
                 }
         WindowCompat.enableEdgeToEdge(window)
+        WindowCompat.getInsetsController(window, window.decorView).run {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
         setContentView(R.layout.activity_main)
         web = findViewById(R.id.web)
         web.setBackgroundColor(getColor(R.color.page_background))

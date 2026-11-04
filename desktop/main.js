@@ -429,9 +429,9 @@ function main() {
       ...(process.platform === 'darwin'
         ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 16 } }
         : { frame: false }),
-      // Matches the dashboard's --background token, so a frameless window
-      // does not flash white before the SPA paints.
-      backgroundColor: '#050a0e',
+      // The dashboard's default dark --canvas, so a frameless window does not
+      // flash another colour before the SPA paints.
+      backgroundColor: '#141516',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,

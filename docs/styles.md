@@ -72,7 +72,9 @@ on `.dark`. The theme preference is `dark` (the default), `light` or `system`;
 default as `system`, which is how a never-chosen theme was saved, becomes
 `dark`; a stored `light` or `dark` is kept. An inline script in
 `web/src/app/layout.tsx` applies the stored theme before the first paint, so a
-light device never flashes light.
+light device never flashes light. The desktop window and the Android
+WebView, with its launch window and light status bar icons, start on the
+dark `--canvas` for the same reason.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
