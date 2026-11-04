@@ -1,6 +1,12 @@
 package sshd
 
 import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -83,6 +89,56 @@ func TestTimedTakeoverRefusesPendingInitialAck(t *testing.T) {
 	requester.send(t, takeoverCommand("start", 2, 0))
 	expectTakeover(t, requester, "holding")
 	expectTakeover(t, holder, "holding")
+}
+
+func TestTimedTakeoverSeesHolderReadyWhileItsAckIsInFlight(t *testing.T) {
+	e := controlAttachEnv(t)
+	e.srv.cfg.PTY = &interactiveTestPTY{fakePTY: e.pty}
+	requester, _ := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "requester", ReadOnly: true})
+	server, client := net.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan struct{})
+	st := &sessionState{resize: make(chan [2]uint, 16)}
+	st.setPTY(80, 24)
+	go func() {
+		defer close(served)
+		e.srv.serveAttach(ctx, e.member.ID, st, &pipeConn{Conn: server})
+	}()
+	t.Cleanup(func() { cancel(); _ = client.Close(); <-served })
+	header, err := json.Marshal(protocol.AttachRequest{RunID: string(e.run.ID), ControlSessionID: "holder", Framed: true, Interactive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Write(append(header, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// net.Pipe writes are unbuffered: after one byte the server is still
+	// inside the ack write, exactly where a holder's client has seen its ack.
+	first := make([]byte, 1)
+	if _, err := io.ReadFull(client, first); err != nil {
+		t.Fatalf("holder ack: %v", err)
+	}
+	requester.send(t, takeoverCommand("start", 1, 0))
+	expectTakeover(t, requester, "holding")
+	r := bufio.NewReader(io.MultiReader(bytes.NewReader(first), client))
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	if !ack.OK || !ack.HasControl {
+		t.Fatalf("holder ack = %+v", ack)
+	}
+	term := protocol.TerminalReader{Reader: r}
+	buf := make([]byte, 64<<10)
+	for term.Control == nil {
+		if _, _, err := term.Read(buf); err != nil {
+			t.Fatalf("holder record: %v", err)
+		}
+	}
+	if term.Control.Type != protocol.DashAttachTakeover || term.Control.TakeoverState == nil || term.Control.TakeoverState.Phase != "holding" {
+		t.Fatalf("holder record after ack = %+v", term.Control)
+	}
 }
 
 func TestTimedTakeoverHolderDisconnectBeforeGrant(t *testing.T) {
