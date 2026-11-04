@@ -24,6 +24,11 @@ function vendorURL(agent: string, raw: string): boolean {
   }
 }
 
+/** The last line the sign-in printed, without escapes. */
+export function lastLine(output: string): string {
+  return output.replace(escapes, '').split(/\r?\n|\r/).map((line) => line.trim()).filter(Boolean).at(-1) ?? ''
+}
+
 export function readSignInPrompt(output: string, agent: string): SignInPrompt {
   const text = output.replace(escapes, '')
   // A link's target survives the CLI wrapping its text. A URL is whole only

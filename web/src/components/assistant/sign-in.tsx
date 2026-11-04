@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { useXterm } from '@/components/xterm-host'
 import type { Api } from '@/lib/api'
 import type { AssistantAgent } from '@/lib/assistant-types'
-import { readSignInPrompt, type SignInPrompt } from '@/lib/sign-in-prompt'
+import { lastLine, readSignInPrompt, type SignInPrompt } from '@/lib/sign-in-prompt'
 import { type Attachment, connectAttach } from '@/routes/terminal/attach'
 
 const vendor: Record<string, string> = { claude: 'Claude', codex: 'Codex' }
@@ -29,6 +29,9 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
   // A reattach replays a rendered screen, where a wrapped URL without its
   // link target cannot be read whole.
   const [replayed, setReplayed] = useState(false)
+  const [said, setSaid] = useState('')
+  const [sent, setSent] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const codeText = useRef<HTMLElement>(null)
   const controller = useXterm({
     onData: (data) => attachment.current?.send(data),
@@ -45,6 +48,7 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
         output.current.push(chunk)
         text += decoder.decode(chunk, { stream: true })
         setPrompt(readSignInPrompt(text, agent.name))
+        setSaid(lastLine(text))
         live.current?.write(chunk)
       },
       onAttached: () => {
@@ -54,6 +58,7 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
         text = ''
         live.current?.reset()
         setReplayed(false)
+        setSaid('')
         setRefused(undefined)
         // A size measured before the attach was accepted was dropped.
         if (live.current) attached.resize(live.current.cols, live.current.rows)
@@ -81,7 +86,7 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
       attached.close()
       attachment.current = null
     }
-  }, [agent.name, client, geometry])
+  }, [agent.name, client, geometry, attempt])
   useEffect(() => {
     if (!terminal) return
     for (const chunk of output.current) terminal.write(chunk)
@@ -102,13 +107,24 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
     setCode('')
     // Whether the code worked, the sign-in says only in its output.
     setShown(true)
+    setSent(true)
+  }
+  const retry = () => {
+    setRefused(undefined)
+    setEnded(false)
+    setSent(false)
+    setAttempt((n) => n + 1)
   }
   return (
     <section aria-label={`Sign in to ${agent.display_name}`} className="flex flex-col gap-3">
       <p className="text-ui">
         Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own container and is kept there, apart from your sessions, which cannot read or change it.
       </p>
-      {refused && <Callout tone="failed" role="alert" title="The sign-in could not start">{refused}</Callout>}
+      {refused && (
+        <Callout tone="failed" role="alert" title="The sign-in could not start" actions={<Button size="sm" variant="secondary" onClick={retry}>Try again</Button>}>
+          <code className="font-code break-words">{refused}</code>
+        </Callout>
+      )}
       {!settled && (url ? (
         <div className="flex flex-col items-start gap-3">
           <a className={buttonVariants({ size: 'sm' })} href={url} target="_blank" rel="noopener noreferrer">Open {name} sign-in</a>
@@ -124,23 +140,26 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
                 Paste the code
                 <Input value={code} autoComplete="off" spellCheck={false} onChange={(event) => setCode(event.target.value)} />
               </label>
-              <Button size="sm" type="submit" disabled={!code.trim()}>Send code</Button>
+              <Button variant="secondary" type="submit" disabled={!code.trim()}>Send code</Button>
             </form>
           )}
+          {sent && <p className="text-ui-sm text-muted">Code sent. The terminal below shows whether {name} accepted it.</p>}
         </div>
       ) : (
         <p role="status" className="text-ui-sm text-muted">{prompt.url ? 'Open the link the sign-in printed in the terminal below.' : 'Starting the sign-in…'}</p>
       ))}
-      {(shown || settled || (prompt.url && !url)) && (
+      <div className="flex gap-2">
+        <Button size="sm" variant={ended ? 'primary' : 'secondary'} onClick={onDone}>{ended ? 'Done' : 'Close'}</Button>
+        {!settled && <Button size="sm" variant="ghost" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide terminal' : 'Show terminal'}</Button>}
+      </div>
+      {/* The terminal draws on a canvas, so what the sign-in said last is also read out. */}
+      {sent && <p className="sr-only" aria-live="polite">{said}</p>}
+      {(shown || ended || (prompt.url && !url) || (refused !== undefined && said !== '')) && (
         // The fit addon sizes the terminal from this box, so its height must not follow the terminal's.
         <div className="h-[min(32rem,70dvh)] min-h-64">
           <TerminalPane controller={controller} />
         </div>
       )}
-      <div className="flex gap-2">
-        <Button size="sm" variant={ended ? 'primary' : 'secondary'} onClick={onDone}>{ended ? 'Done' : 'Close'}</Button>
-        {!settled && <Button size="sm" variant="ghost" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide terminal' : 'Show terminal'}</Button>}
-      </div>
     </section>
   )
 }

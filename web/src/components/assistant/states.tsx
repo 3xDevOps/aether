@@ -73,7 +73,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         <div>
-          <Button size="sm" variant="ghost" onClick={() => setSigning('')}><ArrowLeft />Back</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSigning('')}><ArrowLeft />Choose another agent</Button>
         </div>
         <AssistantSignIn
           key={signingIn.name}
