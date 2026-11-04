@@ -56,6 +56,10 @@ flowchart LR
   ([environments.md](environments.md#docker-inside-sessions)).
 - Optional: Tailscale. Without it the server needs only outbound HTTPS to the
   edge ([networking.md](networking.md)).
+- Optional: dictation, which transcribes speech on the server in a Docker
+  container, needs 690 MB of disk plus a 100 MB image, and 2 GiB of available
+  memory while it runs; install it with `sudo aether-server dictation install`
+  ([dictation.md](dictation.md)).
 
 ## The install script
 
@@ -607,6 +611,7 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 | `mirrors/`, `profiles/` | Source mirror settings and deploy keys, and agent profile snapshots. |
 | `server-update/` | Update state, and the database copy taken before an update that changes its schema. |
 | `home-caches/`, `scratch/` | Package caches and each container's `/tmp`. Rebuildable; no backup needed. |
+| `dictation/` | The speech-to-text engine and model `aether-server dictation install` downloaded. Reinstallable; no backup needed. |
 
 The other directories hold internal server state. To recover a server, back
 up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,

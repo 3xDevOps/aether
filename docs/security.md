@@ -33,6 +33,7 @@ credentials out of the report.
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the session. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the session can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Dashboard gateways](#the-dashboard-gateways) | `aether gui` listens on loopback with a per-process token. The server's dashboard is tailnet-only HTTPS with per-request identity. | Any process on the server host that connects to the host's own tailnet address is served as the node's owner. |
+| [Dictation](#dictation) | The speech-to-text engine runs in a container with no network, no capabilities and a memory cap, reachable only through a `0600` Unix socket. Only approved members call it, never connectors, one clip at a time. Audio stays in memory. | The engine and model are third-party binaries, checked only against pinned SHA-256 sums. |
 | [Push notifications](#push-notifications) | The server posts only to public HTTPS endpoints, and the payload is encrypted to your browser. | A notice shows run text (title and reason) on your device. |
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
 | [SSH into a session and port forwarding](#ssh-into-a-session) | Same admission as a session shell. Forwards reach only the session's own loopback. | Sessions are not recorded. Attaching an editor lets the session's agent reach your computer through the editor. |
@@ -546,6 +547,24 @@ so of what it commits and publishes, unless the repository ignores it. Files
 lists ignored files too, and anyone who can view the session can read any file in
 its checkout, a `.env` included. Keep a value viewers must not see as a
 workspace secret and out of files.
+
+### Dictation
+
+`sudo aether-server dictation install` downloads sherpa-onnx's prebuilt engine
+and an ONNX model from the sherpa-onnx GitHub releases and accepts only files
+matching the SHA-256 sums pinned in `aether-server`, and pulls the engine's
+image by digest ([dictation.md](dictation.md#install)). The engine has no
+authentication and listens on every interface, so its container has no
+network: nothing reaches it, sessions included, but the server through
+`<data-dir>/dictation/sock/engine.sock`, mode `0600` in a `0700` directory. The
+container runs as uid 65534 with a read-only root, every capability dropped,
+`no-new-privileges`, the engine and model mounted read-only, at most 4 CPUs,
+2.5 GiB of memory and 256 processes, and the engine at nice 10
+([dictation.md](dictation.md#the-engine-container)). `dictation.transcribe`
+takes any approved member's clip; pending members, connectors and the assistant
+are refused, and the server queues at most four clips behind the one it
+transcribes, one per member, so dictation takes no more than one engine's CPU
+from sessions.
 
 ## Agent configuration and Files
 

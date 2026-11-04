@@ -511,6 +511,18 @@ records each as deleted in the same file before it commits. Merging two members 
 remains, even past the 200 limit; new saves are then refused until enough
 are forgotten.
 
+## Dictation
+
+With [dictation](dictation.md) installed, the dashboard sends each clip you
+record to your server, never to the publisher or another service. The clip
+lives only in the server's memory while it is transcribed: the server does not
+write it to disk, log it, put it in audit entries or error messages, or keep
+it after the request, and the speech-to-text engine runs on the server with
+its log file set to `/dev/null`. Docker keeps the engine's own output, which
+holds no audio or text. The server does not keep the transcript
+either; it returns to your browser, which puts it in the box you were typing
+in. Nothing is stored that you would need to delete.
+
 ## Permissions
 
 `INTERNET` lets the app reach your server, or in Edge mode the edge.

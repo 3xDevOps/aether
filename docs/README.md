@@ -81,18 +81,20 @@ Daily use:
     pull requests.
 14. [Watches](watches.md): when you want to be told that a session needs
     you or finished, after you close the dashboard.
+15. [Dictation](dictation.md): when you want to speak tasks and messages
+    instead of typing them, transcribed on your server.
 
 Reference:
 
-15. [Install](install.md): every platform, the desktop and Android apps,
+16. [Install](install.md): every platform, the desktop and Android apps,
     upgrades and removal.
-16. [Security](security.md): what the container boundary protects and what it
+17. [Security](security.md): what the container boundary protects and what it
     does not.
-17. [Troubleshooting](failure-handling.md): reboots, full disks, stalled sessions
+18. [Troubleshooting](failure-handling.md): reboots, full disks, stalled sessions
     and dropped connections, and the server settings that tune them.
-18. [Privacy](privacy.md): what the Android app, the dashboard and the
+19. [Privacy](privacy.md): what the Android app, the dashboard and the
     project's edge store and send.
-19. [Notices](notices.md): the licence and what the release artifacts bundle.
+20. [Notices](notices.md): the licence and what the release artifacts bundle.
 
 ## Extend Aether
 

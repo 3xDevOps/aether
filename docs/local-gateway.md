@@ -343,6 +343,8 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. `terminal.file` has 96 MiB for a decoded 64 MiB file.
+`dictation.transcribe` has 6 MiB for a 120 s clip in base64
+([dictation.md](dictation.md)).
 File and configuration exceptions are listed below.
 
 ### Chat image previews

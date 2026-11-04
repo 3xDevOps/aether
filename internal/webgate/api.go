@@ -28,6 +28,8 @@ const (
 	// JSON escaping can expand a supported 64 MiB editor document sixfold;
 	// leave room for the remaining request fields while bounding memory.
 	maxEditorWriteRequestBody = 6*(64<<20) + MaxRequestBody
+	// 120 s of 16 kHz PCM16 WAV is 5 MiB in base64, plus hints.
+	maxDictationRequestBody = 6 << 20
 )
 
 func requestBodyLimit(method string) int64 {
@@ -38,6 +40,8 @@ func requestBodyLimit(method string) int64 {
 		return maxConfigImportRequestBody
 	case protocol.MethodFilesWrite, protocol.MethodConfigWrite, protocol.MethodHomeWrite:
 		return maxEditorWriteRequestBody
+	case protocol.MethodDictationTranscribe:
+		return maxDictationRequestBody
 	default:
 		return MaxRequestBody
 	}

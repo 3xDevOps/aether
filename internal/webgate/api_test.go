@@ -98,6 +98,29 @@ func TestTerminalUploadAPIsHaveDedicatedBodyLimits(t *testing.T) {
 	}
 }
 
+// The longest clip dictation takes, 120 s of 16 kHz PCM16 in base64, fits
+// its body limit; a larger body never reaches the server.
+func TestDictationAPIFitsTheLongestClip(t *testing.T) {
+	backend := &stubBackend{}
+	g, err := New(Config{Authorize: admitAll(backend)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.Close() }()
+
+	longest := `{"audio_base64":"` + strings.Repeat("A", 4*(44+3840000+2)/3) + `","hints":["aether"]}`
+	if rec := post(g, "/api/v1/"+protocol.MethodDictationTranscribe, longest); rec.Code != http.StatusOK {
+		t.Fatalf("120 s clip = %d: %s", rec.Code, rec.Body)
+	}
+	over := `{"audio_base64":"` + strings.Repeat("A", maxDictationRequestBody) + `"}`
+	if rec := post(g, "/api/v1/"+protocol.MethodDictationTranscribe, over); rec.Code != http.StatusBadRequest {
+		t.Fatalf("body over the dictation cap = %d, want 400", rec.Code)
+	}
+	if len(backend.calls) != 1 {
+		t.Fatalf("calls = %+v, want only the 120 s clip", backend.calls)
+	}
+}
+
 func TestFileWriteAPIAcceptsLargeEditorBodies(t *testing.T) {
 	backend := &stubBackend{}
 	g, err := New(Config{Authorize: admitAll(backend)})
