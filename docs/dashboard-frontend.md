@@ -1513,7 +1513,8 @@ nothing that needs you, no pending request, no reported wait, no live
 subsessions or held background tasks, not paused, and no open parent. The
 batched `run.close_check` then says how long each has been idle
 (`idle_since`) and whether it closes as merged (`merged_pull_request`, else
-abandoned); one changed within 24 hours is not included. Each row leads with
+abandoned); one changed within 24 hours, or on an older server that does not
+report `idle_since`, is not included. Each row leads with
 its outcome, then why ("Closes as merged · idle 3d, replied"). One with a
 close warning, a failed check, or an older server that cannot tell its
 outcome starts unchecked and says "Check to close anyway", or "Closing
@@ -1524,9 +1525,13 @@ the Idle header stays at the top of the scrolling body. Every other live session
 collapsed, with what keeps it. The title and primary button say what happens
 ("Archive 5 sessions, closing 2 first?", **Close 2, archive 5**), Cancel
 holds the focus with its ring drawn, and **Check again** rebuilds the whole
-plan. On desktop the Idle list scrolls in a bounded box that fades at the
+plan, as does the retry shown when an idle session's check failed. With idle
+sessions offered but none checked the title reads "Choose idle sessions to
+close and archive"; "Nothing to archive" means nothing was offered. On desktop the Idle list scrolls in a bounded box that fades at the
 bottom while more is below; on a phone the sheet scrolls instead. Each checked session is
-closed, then archived, unless it changed since the plan saw it; a skipped or
+closed, then archived, unless it changed since the plan saw it (its status,
+review, state, pause or pending requests); one deleted meanwhile is dropped
+without an error, and a skipped or
 failed close leaves it live and unarchived, and the toast names each session
 that failed with its error.
 Freeing removes a retained container and keeps the session and its history.

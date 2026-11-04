@@ -1,5 +1,4 @@
-import { closeState } from '@/lib/close-check'
-import { idleArchivePlan, idleRows } from '@/lib/idle-archive'
+import { archiveState, idleArchivePlan, idleRows } from '@/lib/idle-archive'
 import type { Run, RunCloseCheck } from '@/lib/types'
 import { toRecord, type RunRecord } from '@/store/runs'
 import { alice, run, stateContext, workspace } from '@/test/fixtures'
@@ -25,7 +24,7 @@ describe('idle archive plan', () => {
     const replied = live('replied', { state: 'answered' })
     const got = plan([replied, live('ended', { state: 'waiting', cause: 'turn-end' })])
     expect(reasons(got.done)).toEqual({ replied: 'replied', ended: 'turn ended without a report' })
-    expect(got.done[0]!.asked).toBe(closeState(replied))
+    expect(got.done[0]!.asked).toBe(archiveState(replied, undefined))
     expect(got.excluded).toEqual([])
   })
 
@@ -93,5 +92,12 @@ describe('idle rows', () => {
     const rows = idleRows([recent], new Map([['recent-failed', { run_id: 'recent-failed', warnings: [], error: { code: 0, message: 'timed out' } }]]), now)
     expect(rows.idle).toEqual([])
     expect(reasons(rows.recent)).toEqual({ 'recent-failed': 'active 1h ago' })
+  })
+
+  it('keeps a session out when an older server cannot say how long it has been idle', () => {
+    const old = { run: live('no-idle-since', { state: 'answered' }), reason: 'replied', asked: 'f' }
+    const rows = idleRows([old], new Map([['no-idle-since', { run_id: 'no-idle-since', warnings: [], merged_pull_request: false }]]), now)
+    expect(rows.idle).toEqual([])
+    expect(reasons(rows.recent)).toEqual({ 'no-idle-since': 'this server cannot tell how long it has been idle' })
   })
 })

@@ -42,6 +42,7 @@ import { allowed } from '@/lib/permissions'
 import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
 import { closeBusyText, closeChangedText, closeState, closeWarned, readCloseCheck } from '@/lib/close-check'
+import { archiveState } from '@/lib/idle-archive'
 import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
@@ -210,7 +211,7 @@ const bulkRunConcurrency = 6
 /**
  * Each call's `run.archived` event moves the run in every dashboard, so only settled calls are counted here.
  * A live run in `closes` is closed with its outcome first, unless it changed since the member chose it
- * (`asked`, from closeState); a skipped or failed close leaves it live and unarchived.
+ * (`asked`, from archiveState); a skipped or failed close leaves it live and unarchived.
  */
 export async function runClearDone(
   eligible: RunRecord[],
@@ -227,7 +228,11 @@ export async function runClearDone(
       try {
         const close = closes.get(eligible[i].id)
         if (close) {
-          if (closeState(useStore.getState().runs[eligible[i].id]) !== close.asked) {
+          const s = useStore.getState()
+          const current = s.runs[eligible[i].id]
+          // Deleted since it was chosen: nothing is left to close or archive.
+          if (!current) continue
+          if (archiveState(current, s.pausedRuns[current.id]) !== close.asked) {
             errors[i] = `${runLabel(eligible[i])}: ${closeChangedText}`
             continue
           }

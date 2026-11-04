@@ -48,11 +48,16 @@ export function idleArchivePlan(
     if (run.archived_at || (run.status !== 'running' && run.status !== 'needs-attention')) continue
     if (!allowed('kill', self, { owner: run.member_id, protected: run.protected, steerOthers: workspace?.steer_others })) continue
     const held = holds(run, ctx)
-    const asked = closeState(run)
+    const asked = archiveState(run, ctx.pausedRuns[run.id])
     if (held) plan.excluded.push({ run, reason: held, asked })
     else plan.done.push({ run, reason: run.state === 'answered' ? 'replied' : 'turn ended without a report', asked })
   }
   return plan
+}
+
+/** What a close from bulk archive was chosen against: a pause or a new request since counts as a change too. */
+export function archiveState(run: RunRecord, paused: boolean | undefined): string {
+  return `${closeState(run)}|${paused ? 'paused' : ''}|${run.pending_inputs?.length ?? 0}`
 }
 
 /** Splits the done sessions by how long their check says they have been idle. */
@@ -60,6 +65,10 @@ export function idleRows(done: IdleCandidate[], checks: Map<string, RunCloseChec
   const out: { idle: IdleRow[]; recent: IdleCandidate[] } = { idle: [], recent: [] }
   for (const candidate of done) {
     const check = checks.get(candidate.run.id) ?? { run_id: candidate.run.id, warnings: [], error: { code: 0, message: 'the server did not answer for this session' } }
+    if (!check.error && check.idle_since === undefined) {
+      out.recent.push({ ...candidate, reason: 'this server cannot tell how long it has been idle' })
+      continue
+    }
     const idleFor = Math.max(0, now - Date.parse(check.idle_since ?? candidate.run.stateChangedAt))
     if (idleFor <= idleArchiveAfterMs) {
       out.recent.push({ ...candidate, reason: `active ${compactSpan(idleFor)} ago` })

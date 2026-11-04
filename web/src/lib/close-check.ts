@@ -65,5 +65,4 @@ export async function readArchiveHolds(runIDs: string[]): Promise<Map<string, Ru
   return held
 }
 
-
 export const closeChangedText = 'The session changed while its close was being checked, so it was not closed'

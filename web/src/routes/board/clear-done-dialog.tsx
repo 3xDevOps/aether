@@ -187,18 +187,16 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
   const checked = rows.filter((row) => selected.has(row.run.id)).length
   // Select all takes only rows with nothing to warn about; a warned row needs its own click.
   const clean = rows.filter((row) => row.clean)
-  const allClean = clean.length > 0 && clean.every((row) => selected.has(row.run.id))
+  const all = checked === rows.length
   const toggle = (id: string) => {
     const next = new Set(selected)
     if (!next.delete(id)) next.add(id)
     onSelect(next)
   }
+  // From a full check it clears every row; from a dash or nothing it adds the clean rows.
   const selectClean = () => {
-    const next = new Set(selected)
-    for (const row of clean) {
-      if (allClean) next.delete(row.run.id)
-      else next.add(row.run.id)
-    }
+    const next = new Set(all ? [] : selected)
+    if (!all) for (const row of clean) next.add(row.run.id)
     onSelect(next)
   }
   return (
@@ -207,8 +205,8 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
       <div className="sticky top-0 z-10 -mx-1 flex items-center gap-2.5 bg-raised px-1 py-1">
         <Checkbox
           aria-label="Select all idle sessions without warnings"
-          checked={checked === rows.length ? true : checked === 0 ? false : 'indeterminate'}
-          disabled={running || clean.length === 0}
+          checked={all ? true : checked === 0 ? false : 'indeterminate'}
+          disabled={running || (clean.length === 0 && !all)}
           onCheckedChange={selectClean}
         />
         <SectionLabel as="h3" className="flex items-center gap-1.5" title="Live sessions whose agent replied or ended its turn over a day ago, with nothing left to do">
