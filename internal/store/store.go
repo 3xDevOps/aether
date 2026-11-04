@@ -214,6 +214,7 @@ type Store interface {
 	LaunchReceiptStore
 	LaunchDefaultsStore
 	RunLimitStore
+	CloseCheckStore
 
 	Close() error
 }

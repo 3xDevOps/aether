@@ -38,8 +38,9 @@ import { copyText } from '@/lib/clipboard'
 import { errorSentence, message } from '@/lib/format'
 import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
-import type { LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
+import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
+import { closeBusyText, closeChangedText, closeState, closeWarned, readCloseCheck } from '@/lib/close-check'
 import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
@@ -78,6 +79,8 @@ export interface Command {
   predict?: () => Prediction
   /** The server answers only once the change is done, which can outlast the deadline, so the prediction waits for that answer. */
   slow?: boolean
+  /** The close this verb makes: the runner reads `run.close_check` first and asks before a close with warnings. */
+  closes?: { runID: string; outcome: CloseOutcome }
   perform: (deps: CommandDeps) => Promise<unknown> | void
 }
 
@@ -402,6 +405,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
             : { review: 'accepted' },
         }),
         slow: live,
+        closes: { runID: id, outcome: 'completed' },
         perform: (d) => d.api.runReview(id, 'complete'),
       })
     }
@@ -1037,6 +1041,8 @@ export function useCommandRunner(
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
+  const openCloseConfirmation = useStore((s) => s.openCloseConfirmation)
+  const setCloseChecking = useStore((s) => s.setCloseChecking)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
   const setTheme = useStore((s) => s.setTheme)
@@ -1045,6 +1051,27 @@ export function useCommandRunner(
   return useCallback(
     async (command: Command) => {
       onDone?.()
+      if (command.closes) {
+        const { runID, outcome } = command.closes
+        if (useStore.getState().closeChecking[runID]) return
+        const same = sameIdentity()
+        const asked = closeState(useStore.getState().runs[runID])
+        setCloseChecking(runID, true)
+        const check = await readCloseCheck(runID, outcome).finally(() => setCloseChecking(runID, false))
+        if (!same()) return
+        if (closeState(useStore.getState().runs[runID]) !== asked) {
+          toast.info(closeChangedText)
+          return
+        }
+        if (closeWarned(check, outcome)) {
+          if (useStore.getState().closeConfirmation) {
+            toast.info(closeBusyText)
+            return
+          }
+          openCloseConfirmation({ check, asked, outcome, command: { ...command, closes: undefined } })
+          return
+        }
+      }
       const deps: CommandDeps = {
         api,
         navigate,
@@ -1084,6 +1111,8 @@ export function useCommandRunner(
       navigate,
       onDone,
       onTemplates,
+      openCloseConfirmation,
+      setCloseChecking,
       openDialog,
       openForwardDialog,
       recordPull,

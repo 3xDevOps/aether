@@ -450,7 +450,10 @@ failing check has **Send to agent**. Review and merge on GitHub as usual.
 `aether publish <session-id>` is the CLI form of **Publish…**.
 
 When you are done, close the session: **Close session…** in its **More** menu, or
-`aether close <session-id> --outcome merged` (or `abandoned`). Closing commits the
+`aether close <session-id> --outcome merged` (or `abandoned`). Both first list
+what the close affects, such as an open pull request or a session waiting on
+this one, and ask ([failure-handling.md](failure-handling.md#before-a-close)).
+Closing commits the
 agent's latest work to the session's branch and keeps the container 7 days
 (`--run-container-ttl`). Until then the **Relaunch** button where the message
 box sat, **Relaunch** in the **More** menu, or `aether reopen <session-id>` brings

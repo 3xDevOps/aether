@@ -11,10 +11,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { AskAssistantButton } from '@/components/assistant/ask'
+import { CloseWarnings, useCloseCheck, warningScroll } from '@/components/close-warnings'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
+import { closeWarned } from '@/lib/close-check'
 import { errorSentence } from '@/lib/format'
+import { focusRingShown } from '@/lib/utils'
 import type { AuthMethod, SessionItem } from '@/lib/session-types'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunShells } from '@/routes/run/shells'
@@ -54,6 +57,7 @@ function sessionFailure(session: AcpSession | undefined): SessionFailure | null 
 function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: boolean; nav: RunNavigation }) {
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
+  const check = useCloseCheck(confirm ? run.id : null, 'abandoned')
   const act = async () => {
     setBusy(true)
     try {
@@ -109,9 +113,12 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
               This agent cannot move a running conversation between modes. Aether starts a new Standard session with the same task and closes this one without merging. The conversation so far stays in this session’s history.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {check ? <CloseWarnings check={check} run={run} onLeave={() => setConfirm(false)} className={warningScroll} /> : <p className="text-ui-sm text-muted">Checking what closing affects…</p>}
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep this session</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void act()}>Start a Standard session</AlertDialogAction>
+            <AlertDialogCancel className={focusRingShown}>Keep this session</AlertDialogCancel>
+            <AlertDialogAction disabled={!check} onClick={() => void act()}>
+              {closeWarned(check, 'abandoned') ? 'Close anyway and start Standard' : 'Start a Standard session'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

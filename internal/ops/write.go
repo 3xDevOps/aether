@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,8 +70,9 @@ type answerInput struct {
 }
 
 type reviewInput struct {
-	RunID  string `json:"run_id"`
-	Action string `json:"action"`
+	RunID       string `json:"run_id"`
+	Action      string `json:"action"`
+	Acknowledge bool   `json:"acknowledge,omitempty"`
 }
 
 type decideInput struct {
@@ -81,11 +83,14 @@ type decideInput struct {
 }
 
 type stopInput struct {
-	RunID   string `json:"run_id"`
-	Outcome string `json:"outcome,omitempty"`
+	RunID       string `json:"run_id"`
+	Outcome     string `json:"outcome,omitempty"`
+	Acknowledge bool   `json:"acknowledge,omitempty"`
 }
 
 const idempotencyRule = " Reuse idempotency_key on a retry; "
+
+const closeRule = " A stop or close with warnings is refused with them; show them to the user, then retry with acknowledge true."
 
 var writeOps = []Op{
 	opOf("aether_launch_session", "Launch session", ScopeWrite, false, nextWorkspaces,
@@ -110,9 +115,9 @@ var writeOps = []Op{
 		"Use this when the user wants a paused session to continue.", pauseRun(protocol.MethodRunResume, "Resumed")).hints(false, true).
 		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunResume, protocol.MethodRunGet),
 	opOf("aether_mark_reviewed", "Mark session reviewed", ScopeWrite, true, nextRuns,
-		"Use this when the user has checked a session's reported success: complete accepts it and closes the session, later puts it off, not-yet says the work is not finished.", markReviewed).
+		"Use this when the user has checked a session's reported success: complete accepts it and closes the session, later puts it off, not-yet says the work is not finished."+closeRule, markReviewed).
 		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater, protocol.RunReviewNotYet).hints(true, false).
-		calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodRunReview),
+		calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodRunCloseCheck, protocol.MethodRunReview),
 }
 
 var controlOps = []Op{
@@ -121,9 +126,9 @@ var controlOps = []Op{
 		enum("decision", "allow", "deny").hints(true, true).
 		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodServerInfo, protocol.MethodRunInputRespond),
 	opOf("aether_stop_session", "Stop or close session", ScopeControl, true, nextRuns,
-		"Use this when the user wants a session stopped now, or with outcome closed as merged or abandoned.", stopRun).
+		"Use this when the user wants a session stopped now, or with outcome closed as merged or abandoned."+closeRule, stopRun).
 		enum("outcome", "merged", "abandoned").hints(true, false).
-		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunKill, protocol.MethodRunClose, protocol.MethodRunGet),
+		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunKill, protocol.MethodRunCloseCheck, protocol.MethodRunClose, protocol.MethodRunGet),
 }
 
 func launched(r protocol.Run, l links, book accountBook) map[string]any {
@@ -646,8 +651,40 @@ func markReviewed(ctx context.Context, c calls, in reviewInput) (string, any, er
 			return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
 				"session %s has no reported success awaiting review (review %q); to end it, aether_stop_session, which needs the control scope", r.ID, r.Review)}
 		}
+		if err := closeWarned(ctx, c.read, in.RunID, string(domain.RunCompleted), in.Acknowledge); err != nil {
+			return "", nil, err
+		}
 	}
 	return runAction(ctx, c, protocol.MethodRunReview, in.RunID, "Marked reviewed ("+in.Action+")", protocol.RunReviewParams{RunID: in.RunID, Action: in.Action})
+}
+
+// closeWarned refuses to close run while it has close warnings the caller
+// did not acknowledge, naming each one.
+func closeWarned(ctx context.Context, read Call, id, outcome string, acknowledged bool) error {
+	if acknowledged {
+		return nil
+	}
+	var res protocol.RunCloseCheckResult
+	if err := read(ctx, protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{id}, Outcome: outcome}, &res); err != nil {
+		return err
+	}
+	if len(res.Runs) != 1 {
+		return fmt.Errorf("run.close_check answered for %d sessions, want 1", len(res.Runs))
+	}
+	if res.Runs[0].Error != nil {
+		return res.Runs[0].Error
+	}
+	warnings := res.Runs[0].Warnings
+	if len(warnings) == 0 {
+		return nil
+	}
+	kinds := make([]string, len(warnings))
+	for i, w := range warnings {
+		kinds[i] = w.Kind
+	}
+	return &untrustedError{untrusted: map[string]any{"warnings": warnings}, err: &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+		"closing session %s has warnings (%s), listed under untrusted.warnings; show them to the user, then retry with acknowledge true to close anyway",
+		id, strings.Join(slices.Compact(kinds), ", "))}}
 }
 
 // decidable refuses a request the connector showed cut, since deciding it
@@ -714,7 +751,12 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
 }
 
+// stopRun checks a stop like a close: a kill also ends the run abandoned,
+// settling its subsessions and waking its waiters.
 func stopRun(ctx context.Context, c calls, in stopInput) (string, any, error) {
+	if err := closeWarned(ctx, c.read, in.RunID, cmp.Or(in.Outcome, string(domain.RunAbandoned)), in.Acknowledge); err != nil {
+		return "", nil, err
+	}
 	if in.Outcome == "" {
 		return runAction(ctx, c, protocol.MethodRunKill, in.RunID, "Stopped", protocol.RunIDParams{RunID: in.RunID})
 	}
