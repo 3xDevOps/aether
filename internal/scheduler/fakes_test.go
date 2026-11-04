@@ -107,7 +107,9 @@ type fakeContainer struct {
 	atts  []*fakeAttachment
 	stdin bytes.Buffer
 	exit  *runtime.ExitStatus
-	done  chan struct{}
+	// prevExit is the exit of the process a restart replaced.
+	prevExit runtime.ExitStatus
+	done     chan struct{}
 }
 
 func (c *fakeContainer) output(s string) {
@@ -204,6 +206,7 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 	switch c.state {
 	case "created":
 	case "stopped":
+		c.prevExit = *c.exit
 		c.exit, c.done = nil, make(chan struct{})
 	default:
 		return fmt.Errorf("fake runtime: start from state %q", c.state)
@@ -392,12 +395,20 @@ func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStat
 	if err != nil {
 		return runtime.ExitStatus{}, err
 	}
+	// A restart replaces done and clears exit, so the wait keeps the ones of
+	// the process it waits for.
+	c.mu.Lock()
+	done := c.done
+	c.mu.Unlock()
 	select {
 	case <-ctx.Done():
 		return runtime.ExitStatus{}, ctx.Err()
-	case <-c.done:
+	case <-done:
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		if done != c.done {
+			return c.prevExit, nil
+		}
 		return *c.exit, nil
 	}
 }
