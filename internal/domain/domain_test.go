@@ -252,3 +252,29 @@ func TestNormalizeOrigin(t *testing.T) {
 		}
 	}
 }
+
+func TestASubsessionOutcomeIsForItsParentOnly(t *testing.T) {
+	t.Parallel()
+	success := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityFinished, Review: ReviewReady}
+	failed := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityFailed, OutcomeUnseen: true}
+	asks := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityNeedsYou}
+	completed := &Run{ParentRunID: "run-parent", Status: RunCompleted, Review: ReviewReady}
+	for name, r := range map[string]*Run{"success": success, "failure": failed, "completed": completed} {
+		if !r.OutcomeHeld() || r.NeedsAttention(false) || r.AwaitsReview(false) {
+			t.Errorf("a subsession's %s is held = %v, needs attention = %v, awaits review = %v; want held only", name, r.OutcomeHeld(), r.NeedsAttention(false), r.AwaitsReview(false))
+		}
+	}
+	if !asks.NeedsAttention(false) {
+		t.Error("a subsession that asks a person needs them")
+	}
+	detached := *failed
+	detached.Detached = true
+	if detached.OutcomeHeld() || !detached.NeedsAttention(false) {
+		t.Error("a detached subsession is a session of its own")
+	}
+	top := *success
+	top.ParentRunID = ""
+	if !top.AwaitsReview(false) {
+		t.Error("a top-level success awaits review")
+	}
+}

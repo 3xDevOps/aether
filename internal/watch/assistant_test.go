@@ -279,6 +279,8 @@ func TestOwnersRunNotificationCoversOnlyWhatItPushes(t *testing.T) {
 		{"a success put off for later", own(func(r *domain.Run) { r.Review = domain.ReviewLater }), reported, false},
 		{"a failure nobody has seen", own(func(r *domain.Run) { r.OutcomeUnseen = true }), failed, true},
 		{"a failure already seen", own(nil), failed, false},
+		{"a subsession success", own(func(r *domain.Run) { r.ParentRunID = "run-parent" }), reported, false},
+		{"a subsession failure", own(func(r *domain.Run) { r.OutcomeUnseen, r.ParentRunID = true, "run-parent" }), failed, false},
 		{"closed as merged", own(nil), Notice{Condition: protocol.WatchFinished, Key: "merged"}, false},
 		{"closed as abandoned", own(nil), Notice{Condition: protocol.WatchFinished, Key: "abandoned"}, false},
 		{"stopped", own(nil), Notice{Condition: protocol.WatchFinished, Key: "interrupted"}, false},
@@ -433,5 +435,64 @@ func TestAssistantNoticeWithoutItsToastIsDeliveredWithTheReason(t *testing.T) {
 	h.settle()
 	if got := talk.written(); len(got) != 1 {
 		t.Fatalf("written = %d notices, want the one, not retried", len(got))
+	}
+}
+
+// A subsession's outcome is for its parent agent only: the assistant's own
+// follow of the subsession never announces it, whatever the parent does,
+// while a watch someone asked for on that subsession hears of it at once.
+func TestAFollowNeverAnnouncesASubsessionOutcome(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.assistant = &conversation{}
+	_ = h.svc.Close()
+	h.start()
+	parent := h.run(h.ada, "Lead the migration")
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 2 subsessions")
+	child := func(task string) *domain.Run {
+		t.Helper()
+		reserved, _, err := h.db.ReserveChild(h.ctx, &domain.ChildReservation{
+			ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: h.ws.ID,
+			OwnerID: h.ada.ID, AccountID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP, Task: task,
+			IdempotencyKey: task, RequestHash: task,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := &domain.Run{ID: reserved.RunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: task, Harness: "claude",
+			Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+		if err = h.db.CreateRunWithID(h.ctx, run); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	done, broke := child("Port the schema"), child("Port the triggers")
+	asked := h.watch(h.ada, runTarget(done))
+	followed := h.follow(h.ada, done)
+	if followed.ID == asked.Watch.ID {
+		t.Fatalf("the follow took over the asked-for watch %s", asked.Watch.ID)
+	}
+	failedFollow := h.follow(h.ada, broke)
+	if _, err := h.db.FinishRunReported(h.ctx, done.ID, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.db.SetRunReview(h.ctx, done.ID, domain.ReviewReady); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(done.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
+	if _, err := h.db.FinishRunReported(h.ctx, broke.ID, domain.RunFailed, "agent failed", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(broke.ID, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunFailed, OutcomeUnseen: true})
+	h.eventually("the asked-for watch's finish", func() bool { return len(h.notices(asked.Watch.ID)) == 1 })
+	h.settle()
+	if got := append(h.notices(followed.ID), h.notices(failedFollow.ID)...); len(got) != 0 {
+		t.Fatalf("follow notices under a working parent = %q, want none", bodies(got))
+	}
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
+	h.publish(done.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
+	h.settle()
+	if got := append(h.notices(followed.ID), h.notices(failedFollow.ID)...); len(got) != 0 {
+		t.Fatalf("follow notices once the parent stopped = %q, want none", bodies(got))
 	}
 }

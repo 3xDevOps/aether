@@ -42,6 +42,9 @@ type Assistant interface {
 // written into their owner's assistant conversation. Call it before Start.
 func (s *Service) UseAssistant(a Assistant) { s.assistant = a }
 
+// followKeyPrefix starts the idempotency key of every watch Follow makes.
+const followKeyPrefix = "assistant:"
+
 // Follow watches run for member on the assistant's behalf, on the run's
 // default conditions: one assistant watch per member and run, returned as
 // it stands, paused or not, when there is one, and renewed if it expired.
@@ -66,7 +69,7 @@ func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain
 	}); i >= 0 {
 		return s.result(ctx, watches[i])
 	}
-	key := "assistant:" + string(run)
+	key := followKeyPrefix + string(run)
 	for {
 		res, err := s.create(ctx, member, protocol.WatchCreateParams{
 			Target:         protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: string(run)},
@@ -87,7 +90,7 @@ func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain
 			if r.Status.Final() {
 				return res, nil
 			}
-			key = "assistant:" + string(run) + "|" + res.Watch.ID
+			key = followKeyPrefix + string(run) + "|" + res.Watch.ID
 			continue
 		}
 		return res, nil
@@ -148,7 +151,7 @@ func (s *Service) baseline(ctx context.Context, w *store.Watch) error {
 // pushed what push.needOf finds: every need of it, a reported success
 // while it waits for review and a failure nobody has seen, so only its
 // other ends are news to their devices. A success the owner already put
-// off or accepted is not pushed by the run. Push, started before the watch
+// off or accepted, or a subsession's outcome, is not pushed by the run. Push, started before the watch
 // service, does not announce a standing entered before it started, which
 // a watch evaluated on recovery then pushes itself.
 func ownerPushed(w *store.Watch, run *domain.Run, n Notice, started time.Time) bool {
@@ -165,7 +168,7 @@ func ownerPushed(w *store.Watch, run *domain.Run, n Notice, started time.Time) b
 	case protocol.WatchNeedsYou:
 		return true
 	case protocol.WatchFinished:
-		return strings.HasPrefix(n.Key, "reported|") && run.Review == domain.ReviewReady || n.Key == "failed" && run.OutcomeUnseen
+		return !run.OutcomeHeld() && (strings.HasPrefix(n.Key, "reported|") && run.Review == domain.ReviewReady || n.Key == "failed" && run.OutcomeUnseen)
 	}
 	return false
 }

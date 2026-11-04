@@ -18,6 +18,9 @@ const watchShown = new Map()
 // Watch finished notices per run, closed once the member sees the outcome or
 // puts it off.
 const finishedShown = new Map()
+// The session's own success notices per run, also closed when the run leaves
+// its finished standing; a watch's stay until the watch's own rules end them.
+const ownFinished = new Map()
 // The need key last announced per run. It outlives a reconnect, so a need
 // already announced stays quiet when its run's next event arrives.
 const announced = new Map()
@@ -214,6 +217,12 @@ function closeFinished(runId) {
   ended.set(`${runId} done`, ++ends)
   for (const notification of finishedShown.get(runId) || []) notification.close()
   finishedShown.delete(runId)
+  closeOwnFinished(runId)
+}
+
+function closeOwnFinished(runId) {
+  for (const notification of ownFinished.get(runId) || []) notification.close()
+  ownFinished.delete(runId)
 }
 
 // Without the socket nothing tells us when these notices' needs and
@@ -221,9 +230,10 @@ function closeFinished(runId) {
 function closeShown() {
   cleared = ++ends
   for (const list of watchShown.values()) for (const { notification } of list) notification.close()
-  for (const list of finishedShown.values()) for (const notification of list) notification.close()
+  for (const list of [...finishedShown.values(), ...ownFinished.values()]) for (const notification of list) notification.close()
   watchShown.clear()
   finishedShown.clear()
+  ownFinished.clear()
 }
 
 async function readWatch(watchId) {
@@ -247,7 +257,7 @@ function onStatus(runId, p) {
   const seen = { status: p.to, reason: p.reason || '', state: p.state || '', outcome_unseen: p.outcome_unseen === true, review: p.review || '' }
   // The event does not carry paused, so a need it shows is checked on run.get.
   if (!bodyOf(seen)) {
-    resolve(runId)
+    leave(runId, seen)
     return
   }
   const token = {}
@@ -261,10 +271,20 @@ function onStatus(runId, p) {
     if (!run || !self) return
     if (run.member_id !== self) {
       resolve(runId)
+      closeOwnFinished(runId)
       return
     }
     announce(runId, run)
   })
+}
+
+// leave ends what runId was announced for. A live run that announces
+// nothing has also left its finished standing, as when a follow-up restarts
+// it, so its own success notice closes; a watch's finished notice and an
+// ended run's finish stay until seen.
+function leave(runId, run) {
+  resolve(runId)
+  if (isLive(run)) closeOwnFinished(runId)
 }
 
 function onOutcomeSeen(runId) {
@@ -302,7 +322,7 @@ async function readRun(runId) {
 function announce(runId, run) {
   const body = run.paused ? '' : bodyOf(run)
   if (!body) {
-    resolve(runId)
+    leave(runId, run)
     return
   }
   const key = needKey(run)
@@ -314,6 +334,8 @@ function announce(runId, run) {
     entry = undefined
   }
   if (attention && !entry) {
+    // A need replaces the session's own success notice; a watch's stays.
+    closeOwnFinished(runId)
     entry = { key, run, notification: null }
     standing.set(runId, entry)
     updateBadge()
@@ -321,16 +343,18 @@ function announce(runId, run) {
   if (announced.get(runId) === key) return
   announced.set(runId, key)
   // A success ready for review is the watch's finished notice too; a live failure is its needs_you notice.
-  if (attention && recentlyShown(run.review === 'ready' ? `${runId} done` : runId)) return
+  const finished = !attention && awaitsReview(run)
+  if ((attention || finished) && recentlyShown(finished ? `${runId} done` : runId)) return
   if (!Notification.isSupported()) return
   const notification = new Notification({
     title: titleOf(run),
     body,
-    ...(attention && run.review !== 'ready' ? {} : { silent: true, urgency: 'low' }),
+    ...(attention ? {} : { silent: true, urgency: 'low' }),
   })
   notification.on('click', () => openRun(runId))
   notification.show()
   if (entry) entry.notification = notification
+  if (finished) ownFinished.set(runId, [...(ownFinished.get(runId) || []), notification])
 }
 
 // resolve ends runId's need and closes its watch notices shown before `before`.
@@ -350,19 +374,27 @@ function resolve(runId, before = Infinity) {
   updateBadge()
 }
 
-// needsAttention and needKey are domain.Run.NeedsAttention and NeedKey in
-// internal/domain/domain.go; titleOf and statusBody are RunTitle and
+// needsAttention, awaitsReview, outcomeHeld and needKey are
+// domain.Run.NeedsAttention, AwaitsReview with review ready, OutcomeHeld and
+// NeedKey in internal/domain/domain.go; titleOf and statusBody are RunTitle and
 // statusBody of internal/push/need.go. A desktop notification fires and
 // reads like the one a phone gets for the same run.
 
+const isLive = (run) => run.status === 'running' || run.status === 'needs-attention'
+
 function needsAttention(run) {
-  const live = run.status === 'running' || run.status === 'needs-attention'
-  if (run.paused) return false
-  if (run.review === 'ready' && (live || run.status === 'completed')) return true
-  if (!live) return false
+  if (run.paused || !isLive(run)) return false
   if (run.state === 'needs-you' || run.state === 'disconnected') return true
-  return run.state === 'failed' && run.outcome_unseen === true
+  return !outcomeHeld(run) && run.state === 'failed' && run.outcome_unseen === true
 }
+
+function awaitsReview(run) {
+  if (run.paused || outcomeHeld(run) || run.review !== 'ready') return false
+  return run.status === 'completed' || (isLive(run) && run.state === 'finished')
+}
+
+// A subsession's outcome is for its parent agent only; a detached one is a session of its own.
+const outcomeHeld = (run) => Boolean(run.parent_run_id) && run.detached !== true
 
 function needKey(run) {
   const key = [run.status, run.state || '', run.reason || '', run.status_changed_at || '']
@@ -395,7 +427,8 @@ const disconnects = [
 function statusBody(run) {
   const reason = run.reason || ''
   if (!needsAttention(run)) {
-    if (!run.outcome_unseen || run.status !== 'failed') return ''
+    if (awaitsReview(run)) return 'Finished: review the result'
+    if (outcomeHeld(run) || !run.outcome_unseen || run.status !== 'failed') return ''
     return 'Failed, review the result'
   }
   if (run.state === 'needs-you') {
@@ -411,7 +444,6 @@ function statusBody(run) {
     const match = disconnects.find(([prefix]) => reason.startsWith(prefix))
     return match ? match[1] + reason.slice(match[0].length) : 'Agent disconnected'
   }
-  if (run.review === 'ready') return 'Agent reported success, review the result'
   if (reason.startsWith('enhanced turn failed: ')) return 'Turn failed: ' + reason.slice('enhanced turn failed: '.length)
   return reason === 'agent reported failure' ? 'Agent reported failure, review the result' : 'Agent failed'
 }

@@ -4,6 +4,7 @@ import {
   isPaused,
   memberName,
   needsYou,
+  outcomeHeld,
   waitingOn,
   type NeedsYouCondition,
   type StateContext,
@@ -26,7 +27,8 @@ type Outcome = 'completed' | 'merged' | 'closed' | 'interrupted'
  * A live run's state, a finished run's outcome, or Paused. `stalled` is the wire's `waiting` parked by a
  * stall whose reason names the turn's phase: the turn may still be in flight, so it did not end.
  */
-export type PresentationState = LiveState | Outcome | 'paused' | 'stalled'
+/** `reported` is a subsession's success, which is for its parent agent only (outcomeHeld). */
+export type PresentationState = LiveState | Outcome | 'paused' | 'stalled' | 'reported'
 
 export type RunGroup = 'needs-you' | 'working' | 'review' | 'finished'
 
@@ -55,7 +57,7 @@ export function possiblyStalled(run: Pick<RunRecord, 'status' | 'reason'>): bool
 const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'answered', 'needs-you', 'failed', 'disconnected'])
 
 /**
- * A live run's state from its wire status and activity. A reported success reads Ready for review.
+ * A live run's state from its wire status and activity. A reported success reads Finished: review.
  * A parked run with no known state, or the `idle` older servers wrote, ended its turn without a
  * report; a running one this dashboard cannot read is shown as Running.
  */
@@ -165,6 +167,7 @@ function presentation(run: RunRecord, ctx: StateContext): RunPresentation {
     return { state: condition.state, reason: condition.reason(run, ctx), next: stateNext[condition.state], needsYou: condition }
   }
   if (awaitsCompletion(run) && !isPaused(run, ctx)) {
+    if (outcomeHeld(run)) return { state: 'reported', reason: stateLabel.reported }
     const reason = run.reason && !isTerminal(run.status) ? plainReason(run.reason) : stateReasons.ready
     return { state: 'ready', reason, next: stateNext.ready }
   }
@@ -271,7 +274,7 @@ export function groupOf({ state, needsYou }: Pick<RunPresentation, 'state' | 'ne
   return finishedStates.has(state) ? 'finished' : 'working'
 }
 
-const finishedStates = new Set<PresentationState>(['completed', 'merged', 'closed', 'interrupted', 'failed'])
+const finishedStates = new Set<PresentationState>(['completed', 'reported', 'merged', 'closed', 'interrupted', 'failed'])
 
 /** A run that ended without its work done, which counts and sorts as failed. */
 export function endedBadly(state: PresentationState): boolean {
@@ -309,10 +312,11 @@ export const stateLabel: Record<PresentationState, string> = {
   waiting: 'Waiting',
   answered: 'Answered',
   'needs-you': 'Needs you',
-  ready: 'Ready for review',
+  ready: 'Finished: review',
   failed: 'Failed',
   disconnected: 'Disconnected',
   completed: 'Completed',
+  reported: 'Finished: reported to its parent',
   merged: 'Merged',
   closed: 'Closed',
   interrupted: 'Interrupted',
@@ -335,6 +339,7 @@ export const stateTone: Record<PresentationState, Tone> = {
   failed: 'failed',
   disconnected: 'disconnected',
   completed: 'done',
+  reported: 'held',
   merged: 'done',
   closed: 'closed',
   interrupted: 'interrupted',
@@ -346,6 +351,6 @@ export const stateTone: Record<PresentationState, Tone> = {
 export const groupLabel: Record<RunGroup, string> = {
   'needs-you': 'Needs you',
   working: 'Working',
-  review: 'Ready for review',
+  review: 'Finished: review',
   finished: 'Finished',
 }

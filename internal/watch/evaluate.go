@@ -258,7 +258,11 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 		}
 	}
 	var finished string
-	if key, body, ok := runFinish(run, fired); ok {
+	key, body, ok := runFinish(run, fired)
+	if ok && run.OutcomeHeld() && followed(w) && (strings.HasPrefix(key, "reported|") || key == "failed") {
+		ok = false
+	}
+	if ok {
 		finished = body
 		if slices.Contains(w.Conditions, protocol.WatchFinished) {
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: key, Title: r.title, Body: body, Link: link})
@@ -320,6 +324,14 @@ func (s *Service) runNeeds(run *domain.Run) []need {
 		return out
 	}
 	return []need{{key: "status:" + run.NeedKey(), body: push.AttentionBody(run)}}
+}
+
+// followed is whether Follow made w for the assistant, rather than a person
+// or an assistant asking for that session. Its finished notice skips a
+// subsession's outcome, which is for the parent agent only
+// (domain.Run.OutcomeHeld); an asked-for one does not.
+func followed(w *store.Watch) bool {
+	return w.Source == protocol.WatchSourceAssistant && strings.HasPrefix(w.IdempotencyKey, followKeyPrefix)
 }
 
 func (s *Service) requestLine(run *domain.Run, input *domain.RunInputRequest, label string) string {

@@ -63,7 +63,7 @@ describe('run workflow', () => {
     expect(tree.children.map((child) => [child.id, child.state])).toEqual([['agent:x1', 'unknown']])
   })
 
-  it('follows the run through working, waiting for agents, needs you, ready for review and completed', () => {
+  it('follows the run through working, waiting for agents, needs you, finished awaiting review and completed', () => {
     const seen = [
       facts({ status: 'running', state: 'working' }),
       facts({ status: 'running', state: 'waiting-agents' }),

@@ -1765,9 +1765,9 @@ The axis counts back from now ("−20m") up to an hour wide; wider windows
 show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
 dragging the track pans; the history page loads as the window reaches it.
 
-**Sections.** By status, sections follow Board: Needs you (oldest wait first),
-Working and Ready for review (newest start first), then Finished (failed
-first, then latest end). Finished starts folded into one summary lane ("37
+**Sections.** By status, sections follow the sidebar: Needs you (oldest wait
+first), Finished: review and Working (newest start first), then Finished
+(failed first, then latest end). Finished starts folded into one summary lane ("37
 finished · 3 failed") whose strip shows each moment's outcome. By owner, there
 is one section per owner, yours first. A section header counts the sessions that
 ended before the window and offers the next wider window. When no session reaches
@@ -1785,13 +1785,15 @@ outline covers Starting (queued and provisioning); then each span takes the
 state `run.status` history gives it. History knows only the server's
 needs-attention, so a past span reads **Needed attention**; the span since
 the last change shows the viewer's own state (`presentRun`), which alone
-knows Needs you, Paused and Ready for review. Once a session ends, its working
+knows Needs you, Paused and Finished: review. Once a session ends, its working
 spans take its outcome's colour, so only live work reads Working. Time
 before the history read is a dotted outline that says "History not loaded";
 if the read fails, bars fall back to the current state and a **Session history**
 callout shows the server's error with **Retry**. A working bar has a 2px end
 cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
-tag. Finished bars add "took 18m" after their end when there is room.
+tag. A session awaiting review never gets that tag; its label carries a
+review-tone **Finished: review** chip instead of the Needs you chip. Finished
+bars add "took 18m" after their end when there is room.
 
 **Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
 pair within 24px) draws as marks, not links: a dot on the sender's bar and a
@@ -1864,7 +1866,7 @@ on a card. Focusing a lane draws its mail as links and
 chips, and its popover lists every message, so nothing depends on hover. The axis is a separate tab stop,
 **Timeline window**: Left and Right pan by a tenth, `+` and `-` zoom, `0` or
 Home return to now. A polite status line announces sessions that turn Needs you,
-Failed, Ready for review or Completed, gathered for 1.5s and at most three at
+Failed, Finished: review or Completed, gathered for 1.5s and at most three at
 a time (the Workflow panel's announcer, `src/lib/use-announcement.ts`).
 
 **Data.** `useLaneHistory` holds `laneHistory` in `src/store/lanes.ts` while
@@ -1980,16 +1982,23 @@ running".
 | Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action. Also a live `finished` session a member answered **Not yet** (no `review`, with a `review_changed_at`), read "Not finished yet" | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Ready for review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
+| Finished: review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Finished: review, never Needs you |
 | Completed / Merged | check | `completed`, `merged` | Finished |
+| Finished: reported to its parent | check in `icon-faint` | an attached subsession's reported success, which is for its parent agent only ([failure-handling.md](failure-handling.md#needs-you)) | Finished, beneath its parent |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
 | Interrupted | ring with an exclamation mark | `interrupted` | Finished |
 | Disconnected | broken ring, neutral | `disconnected`: the agent session or process ended while the session is open | Needs you for its owner |
 | Paused | bars | a live session paused by a member | Working |
 
-The sidebar and session list show Ready for review as its own quiet group
-between Working and Finished; the board lists it at the head of Finished.
+The sidebar and session list show Finished: review as its own
+quiet group, with its own count, directly below Needs you; the sidebar shows
+three of its rows and a **N more** button for the rest. The board lists it at
+the head of Finished; the list layout, which folds Finished, shows it as a
+group of its own above Working. Lanes sections count a session and its
+subsessions as one, as the sidebar does. A finished session asks nothing of anyone, so it
+never adds to the Needs you count, a workspace badge or the desktop badge. In
+the session view its primary action is **Review**, which opens Changes.
 
 Live actions (stop, pause, message, Stop waiting) still gate on the wire
 `status` (`running`, `needs-attention`), not on the state.
@@ -2018,10 +2027,15 @@ The Needs you group, its counts and badges follow the session-state attention
 rule push notifications, watches and `aether sessions --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live session (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
-`disconnected`, or `failed` while `outcome_unseen`, and a reported success,
-live or `completed`, whose `review` is `ready`. Waiting, every Waiting for
-state, Working, a `review` of `later` or `accepted`, and a finished session
-never count. The sidebar's Needs you count, the workspace badges and the
+`disconnected`, or `failed` while `outcome_unseen`. Waiting, every Waiting
+for state, Working, a reported success awaiting review (`review` `ready` or
+`later`) and a finished session never count. An attached subsession's
+success or failure is for its parent agent only (`outcomeHeld` in
+`src/lib/needs-you.ts`, [failure-handling.md](failure-handling.md#needs-you)),
+so it never counts either: the family stays in its parent's group and counts
+the subsession as done or failed. Its run commands offer no **Mark
+complete**, **Not yet** or **Review later**, and its session view shows no
+completion prompt. The sidebar's Needs you count, the workspace badges and the
 list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused session
 too.
 Needs you means the viewer can resolve it.
@@ -2045,7 +2059,6 @@ they come from the room, which the session's `state` does not cover, so push and
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the session to see its request, with **Open** |
-| `review` `ready` on a live `finished` or a `completed` run (labelled Ready for review) | owner | Your agent reports this task is finished |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
@@ -2140,16 +2153,16 @@ An answer is not ordered against the event stream, so one that a newer
 `run.status` event for the session overtook is dropped and the session is asked about
 again.
 
-A reported success presents **Ready for review** whether or not the flag is
+A reported success presents **Finished: review** whether or not the flag is
 set; a reported failure stays a **Failed** row in Needs you until its owner
-opens the session, the next turn or Close. A session that has ended is in Needs you
-only while its `review` is `ready`; any other keeps its unopened marker in
+opens the session, the next turn or Close. A session that has ended is never in
+Needs you; it keeps its unopened marker in Finished: review or
 Finished.
 
 **Completion review** is the owner's answer to a reported success, held by
 the server as the session's `review` (`""`, `ready`, `later`, `accepted`) and
 `review_changed_at`. A success report sets `ready`; opening the session does not
-change it, so the session stays in Needs you. While the open session is `ready`,
+change it, so the session stays in Finished: review. While the open session is `ready`,
 `CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
 callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
@@ -4899,7 +4912,7 @@ completed subtree folds, focus moves to its nearest remaining ancestor; in a
 virtualized tree the focused row stays mounted while scrolled away. Each
 `treeitem` carries `aria-level`, `aria-posinset`, `aria-setsize` and, on a
 parent, `aria-expanded`. One polite status region announces rows that come
-to need you, fail, become ready for review or complete: transitions are
+to need you, fail, finish awaiting review or complete: transitions are
 gathered for 1.5 seconds from the first, then up to three are read, Needs
 you and Failed first. Only Working dots pulse, and rows added after the first
 render enter with `animate-entrance` (a fade and a 4px rise over 360ms); with
@@ -6607,7 +6620,7 @@ cannot read, because Safari drops a subscription whose push shows nothing.
 A message with `clear` set means the session's need, or the watch's, ended: for
 the same reason it is not simply closed but replaced, under the same tag and keeping the shown
 title, by a `silent` notification with the server's body,
-`No longer needs you`. The server sends it only to the devices whose push
+`No longer needs you`, or `No longer awaiting review` for a finished session's. The server sends it only to the devices whose push
 service took the need, when the need ends or the session changes hands,
 under the session's Web Push topic, so a need still queued at the push service
 is never shown, and tries again a minute later for a device it could not
@@ -7495,7 +7508,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   the state mark says what state. `StatusDot`
   (`src/components/ui/status-dot.tsx`) is the only session-state mark: one shape
   and colour per state (filled circle Working, clock Waiting for, dashed ring
-  Waiting, amber ring Needs you, filled accent check Ready for review, check
+  Waiting, amber ring Needs you, filled accent check Finished: review, check
   Completed, ring with a bar Closed, cross Failed, ring with an exclamation
   mark Interrupted, broken ring Disconnected, bars Paused), named by the state
   word where it stands alone.

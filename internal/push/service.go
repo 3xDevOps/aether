@@ -146,8 +146,12 @@ type notification struct {
 	Notice bool `json:"notice,omitempty"`
 }
 
-// clearedBody is what a device shows in place of a need that ended.
-const clearedBody = "No longer needs you"
+// clearedBody is what a device shows in place of a need that ended, and
+// clearedFinishedBody in place of a finished session's notice.
+const (
+	clearedBody         = "No longer needs you"
+	clearedFinishedBody = "No longer awaiting review"
+)
 
 // New loads the server's VAPID key, creating it on first use; call Start to
 // begin consuming events.
@@ -366,9 +370,13 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 // deleted.
 func (s *Service) withdraw(ctx context.Context, run *domain.Run, id domain.RunID, offered map[[2]string]domain.MemberID, keep domain.MemberID) error {
 	devices := map[domain.MemberID]map[string]bool{}
+	body := clearedFinishedBody
 	for device, member := range offered {
 		if member == "" || member == keep {
 			continue
+		}
+		if !strings.HasPrefix(device[0], string(member)+"|finished:") {
+			body = clearedBody
 		}
 		if devices[member] == nil {
 			devices[member] = map[string]bool{}
@@ -378,7 +386,7 @@ func (s *Service) withdraw(ctx context.Context, run *domain.Run, id domain.RunID
 	if len(devices) == 0 {
 		return nil
 	}
-	message := notification{Body: clearedBody, Run: string(id), Clear: true}
+	message := notification{Body: body, Run: string(id), Clear: true}
 	if run != nil {
 		message.Title = RunTitle(run)
 	}
