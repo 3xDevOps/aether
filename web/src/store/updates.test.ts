@@ -9,7 +9,9 @@ import {
   readServerStatus,
   SERVER_UPDATE_TIMEOUT_MS,
   serverTarget,
+  serverTooOld,
 } from '@/store/updates'
+import type { UpdateStatus } from '@/lib/types'
 import { fakeApi, serverInfo, serverUpdateStatus, updateStatus } from '@/test/fixtures'
 
 function store() {
@@ -215,6 +217,28 @@ describe('checkClient', () => {
     expect(s.getState().clientCheckError).toBe('check for releases: api.github.com: 403 rate limit exceeded')
     expect(clientTarget(s.getState()).state).toBe('available')
   })
+
+  it('takes the server version a later check confirmed over the one server.info read', async () => {
+    const s = store()
+    s.setState({ info: { ...serverInfo, server_version: 'v0.8.5' } })
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => ({ ...updateStatus(), cli: { ...updateStatus().cli, version: 'v0.9.0' }, server_version: 'v0.9.0' })),
+    })
+    await checkClient(s, client)
+    expect(s.getState().info?.server_version).toBe('v0.9.0')
+    expect(serverTooOld(s.getState().update, s.getState().info?.server_version)).toBeNull()
+  })
+
+  it('keeps a server version a hydration read while the check was out', async () => {
+    const s = store()
+    let answer: (status: UpdateStatus) => void = () => {}
+    const client = fakeApi({ localUpdateCheck: vi.fn(() => new Promise<UpdateStatus>((resolve) => { answer = resolve })) })
+    const check = checkClient(s, client)
+    s.setState({ info: { ...serverInfo, server_version: 'v0.9.0' } })
+    answer({ ...updateStatus(), server_version: 'v0.8.5' })
+    await check
+    expect(s.getState().info?.server_version).toBe('v0.9.0')
+  })
 })
 
 describe('applyClientUpdate', () => {
@@ -315,5 +339,20 @@ describe('readServerStatus', () => {
     await older
     expect(s.getState().serverUpdate?.phase).toBe('applied')
     expect(s.getState().serverChecking).toBe(false)
+  })
+})
+
+describe('serverTooOld', () => {
+  const status = (client: string, server: string) =>
+    ({ cli: { version: client }, server_version: server }) as UpdateStatus
+
+  it('names a client newer than its server and ignores prereleases of the same release', () => {
+    expect(serverTooOld(status('v0.9.0', 'v0.8.5'))).toEqual({ client: 'v0.9.0', server: 'v0.8.5' })
+    expect(serverTooOld(status('v0.8.5-3-gabcdef1', 'v0.8.5'))).toBeNull()
+    expect(serverTooOld(status('v0.9.0-beta.1', 'v0.9.0'))).toBeNull()
+    expect(serverTooOld(status('v0.9.0-beta.1', 'v0.8.5'))).not.toBeNull()
+    expect(serverTooOld(status('v0.8.5', 'v0.9.0'))).toBeNull()
+    expect(serverTooOld(status('dev', 'v0.8.5'))).toBeNull()
+    expect(serverTooOld(status('v0.9.0', ''))).toBeNull()
   })
 })

@@ -5,6 +5,7 @@ import { CenterView, focusView } from '@/components/shell/center-view'
 import { ConnectionAnnouncer } from '@/components/shell/connection'
 import { useNavShortcuts } from '@/components/shell/nav-shortcuts'
 import { Sidebar } from '@/components/shell/sidebar'
+import { StaleBanner } from '@/components/shell/stale-banner'
 import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
 import { UpdateCenter } from '@/components/update-banner'
@@ -30,6 +31,7 @@ export function AppShell() {
         Skip to content
       </a>
       <TopBar />
+      <StaleBanner />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <main
