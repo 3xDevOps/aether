@@ -86,8 +86,8 @@ checkout to the container user and an unprivileged process can only hand
 files to itself.
 
 `make test-integration` and `make test-agents` run with `-race`. A non-empty
-`INTEGRATION_NORACE` turns it off, as a CI pull request does; pushes to main and
-the merge queue race everything.
+`INTEGRATION_NORACE` turns it off. CI runs the Docker suites in the merge
+queue and on `main` only, with `-race`.
 
 CI splits the suite into three jobs. To repeat one that failed:
 
@@ -97,10 +97,9 @@ CI splits the suite into three jobs. To repeat one that failed:
 | `integration (server-flows, smoke)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Chaos\|Coordination)'`, then the same with `'^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'`, then the [smoke tests](#real-agent-smoke-tests) |
 | `integration (scheduler, rest, agents)` | `INTEGRATION_SKIP="./internal/harness ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'`, then [`make test-agents`](#real-agents-against-a-mock-model) |
 
-A ready pull request runs the Docker suites on amd64 only. A push to main and a
-merge-queue entry also run the `arm64` job: the standard-image and
-browser-image builds, the smoke tests, `make browser-smoke` and the browser
-runtime tests on a native arm64 runner.
+The merge queue and `main` run the Docker suites on amd64 and also run the
+`arm64` job: the standard-image and browser-image builds, the smoke tests,
+`make browser-smoke` and the browser runtime tests on a native arm64 runner.
 
 CI sets `GOFLAGS=-v`, so each test's duration is in the job log.
 
@@ -739,16 +738,14 @@ the server". Nothing Aether builds or installs is excluded.
 ## How CI runs the suites
 
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
-every merge queue entry and every push to `main`. A draft pull request runs
-`changes`, `audit`, `lint` and `build-and-test` only; marking it ready for
-review (`gh pr ready <n>`) starts a run with the Linux jobs the path
-classifiers below select. `arm64`, `edge-image`, `windows`, `windows-install`,
-`desktop-windows`, `windows-defender` and `android` run only in the merge
-queue and on pushes to `main`, so a failure there removes the pull request
-from the queue. `CI gate` is the one required check: it passes when every other
-job passed or was skipped by its own rule, and fails when any failed or was
-cancelled, and on every run started while the pull request was a draft, rerun
-included. A new job must be added to its `needs` list to gate `main`.
+every merge queue entry and every push to `main`. A pull request, draft or
+ready, runs `changes`, `audit`, `lint`, `build-and-test` and `dashboard`. The
+merge queue and `main` run every job, so the full suite runs once per change,
+on the merge result, before `main` moves; a failure there removes the pull
+request from the queue. `CI gate` is the one required check: it passes when
+every other job passed or was skipped by its own rule, and fails when any
+failed or was cancelled. A new job must be added to its `needs` list to gate
+`main`.
 
 `main` takes changes through a merge queue. `gh pr merge <n> --squash` adds a
 ready pull request whose `CI gate` passed; the queue batches up to five
@@ -775,34 +772,18 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 
 | Mode | Jobs | True for |
 | --- | --- | --- |
-| `go` | `lint`, `build-and-test`, `integration`, `integration-server-rest`, `integration-server-flows` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
-| `web` | `dashboard`, `dashboard-e2e` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
+| `go` | `lint`, `build-and-test` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
+| `web` | `dashboard` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
 
-A dashboard-only pull request therefore skips the Go jobs, and a change
-elsewhere in `internal/` skips the dashboard jobs, which rely on the Go
-integration suites for server behavior. The e2e suite runs the real
-server, so add the package to the `web` list in the script when a change
-there breaks the UI. A new top-level path counts as both. The pull request
-run is cancelled by a newer push (`cancel-in-progress` for `pull_request`
-only); `main` pushes and merge queue runs, whose concurrency groups are
-unique per commit, always run to completion.
-`scripts/ci-classify-platform.sh` gates two more jobs by what each builds:
+The classifier runs from the pull request's base revision, so a pull request
+cannot change its own classification, and a renamed file counts by its old
+path as well as its new one. A failed classification runs both. A skipped job
+reports as skipped, not failed. A newer push cancels a pull request's run
+(`cancel-in-progress` for `pull_request` only); `main` pushes and merge queue
+runs, whose concurrency groups are unique per commit, always run to
+completion.
 
-| Mode | Jobs | True for |
-| --- | --- | --- |
-| `client` | `desktop` | The packages `cmd/aether` imports, `web/`, `desktop/`, packaging and install scripts, `go.mod`, `Makefile` |
-| `release` | `release-build` | `Makefile`, `go.mod`, `packaging/`, `cmd/aether/` |
-
-A server-only change therefore skips both. `build-and-test` covers the Linux
-build, and `release.yml` repeats `release-build`, the Defender scan and
-`android` for each tag. All classifiers run from the pull request's base
-revision, so a pull request cannot change its own classification, and a
-renamed file counts by its old path as well as its new one. A failed
-classification on a ready pull request runs every Linux job. A skipped job
-reports as skipped, not failed. `ci-classify-platform-test.sh` fails when
-`cmd/aether` starts importing a package the `client` mode does not list.
-
-To run the edge image jobs on a branch before it reaches the merge queue, with write access to the repository:
+To run the edge image jobs on a pull request branch, with write access to the repository:
 
 ```sh
 gh workflow run edge-image.yml --ref <branch>

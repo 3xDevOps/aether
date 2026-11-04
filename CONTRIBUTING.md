@@ -180,10 +180,9 @@ Docker and git) for server work that touches containers, git or storage, and
 [docs/testing.md](docs/testing.md#which-suite-to-run) maps each kind of
 change (Go, dashboard, scripts, desktop, Android, edge) to its suite.
 
-CI runs on every pull request. A draft runs only the fast jobs, one that
-changes only `docs/` or root-level `*.md` files runs the public audit and
-nothing else, and the Windows, Android, arm64 and edge image jobs run only in
-the merge queue and on `main`
+CI on a pull request runs only the fast jobs, and one that changes only
+`docs/` or root-level `*.md` files runs the public audit and nothing else. The
+merge queue and `main` run the full suite
 ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
 Aether run, unset the session's `AETHER_*` variables before testing, or some
 tests fail

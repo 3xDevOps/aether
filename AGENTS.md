@@ -153,16 +153,15 @@ feat(cli)!: drop the aether dash command
 
 Many sessions share the same CI runners.
 
-- Keep a pull request as a draft while you iterate. A draft runs only
-  `changes`, `audit`, `lint` and `build-and-test`, and its `CI gate` fails
-  on purpose; read those four jobs instead.
+- Keep a pull request as a draft while you iterate. Pull request CI runs
+  only `changes`, `audit`, `lint`, `build-and-test` and `dashboard`; the
+  merge queue runs the full suite.
 - Push milestones freely; Greptile reviews them. Do not wait on CI or rerun
   it between pushes.
 - Run the checks for what you changed locally first; see
   [docs/testing.md](docs/testing.md).
-- Mark the pull request ready (`gh pr ready <n>`) only when it is done.
-  That runs the Linux suite, and the merge gate applies. The Windows,
-  Android, arm64 and edge jobs run only in the merge queue.
+- Mark the pull request ready (`gh pr ready <n>`) only when it is done;
+  then the merge gate applies.
 - The merge gate: an adversarial review by a separate Opus session;
   Greptile findings that are real are fixed and the rest resolved with a
   reason; `CI gate` green on the current head. Then
