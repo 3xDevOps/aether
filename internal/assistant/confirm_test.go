@@ -126,9 +126,55 @@ func TestConfirmationOutlivesItsCallUntilAReset(t *testing.T) {
 	}
 }
 
+func TestConnectorTurnPassesOnlyWhatItsScopesCover(t *testing.T) {
+	st := newMemStore()
+	st.settings["m1"] = store.AssistantSettings{AutoApprove: true}
+	svc := New(Config{Dir: t.TempDir(), Store: st, ConnectorScopes: func(method string) []string {
+		return map[string][]string{protocol.MethodRunLaunch: {"write"}, protocol.MethodRunKill: {"control"}}[method]
+	}})
+	t.Cleanup(func() { _ = svc.Close() })
+	m := svc.member("m1")
+	m.origin = ConnectorOrigin("ChatGPT", "con-1", "grant-1", []string{"read", "write"})
+	if err := svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodRunLaunch, Summary: "Launch claude"}); err != nil {
+		t.Fatalf("launch in a connector turn with write = %v, want auto-approved", err)
+	}
+	for _, method := range []string{protocol.MethodRunKill, protocol.MethodEnvSave} {
+		err := svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: method, Summary: method})
+		if pe := (*protocol.Error)(nil); !errors.As(err, &pe) || !strings.HasPrefix(pe.Message, "Waiting for approval as card ") {
+			t.Fatalf("%s in a connector turn without its scope = %v, want a parked card", method, err)
+		}
+	}
+	if n := pendingCount(t, svc, m); n != 2 {
+		t.Fatalf("%d cards, want the stop and the save", n)
+	}
+}
+
+func TestConnectorTurnPassesNoRuleItsScopesDoNotCover(t *testing.T) {
+	st := newMemStore()
+	svc := New(Config{Dir: t.TempDir(), Store: st, Caller: func(domain.MemberID) tools.Caller { return &actionServer{} },
+		ConnectorScopes: func(method string) []string {
+			return map[string][]string{protocol.MethodRunKill: {"control"}}[method]
+		}})
+	t.Cleanup(func() { _ = svc.Close() })
+	m := svc.member("m1")
+	if _, err := st.AddAssistantRule(t.Context(), "m1", store.AssistantRuleKey{Method: protocol.MethodRunKill, WorkspaceID: "ws-1"}, "w", "s"); err != nil {
+		t.Fatal(err)
+	}
+	kill := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session run-1", Params: json.RawMessage(`{"run_id":"run-1"}`)}
+	m.origin = ConnectorOrigin("ChatGPT", "con-1", "grant-1", []string{"read", "write"})
+	err := svc.approver(m)(t.Context(), kill)
+	if pe := (*protocol.Error)(nil); !errors.As(err, &pe) || !strings.HasPrefix(pe.Message, "Waiting for approval as card ") {
+		t.Fatalf("stop in a write-only connector turn with a matching rule = %v, want a parked card", err)
+	}
+	m.origin = Door(protocol.AssistantDoorDashboard)
+	if err := svc.approver(m)(t.Context(), kill); err != nil {
+		t.Fatalf("the same stop from the dashboard = %v, want it passed by the rule", err)
+	}
+}
+
 func TestConnectorTurnCardParks(t *testing.T) {
 	svc, m := newCardService(t)
-	m.origin = ConnectorOrigin("ChatGPT", "con-1", "grant-1")
+	m.origin = ConnectorOrigin("ChatGPT", "con-1", "grant-1", nil)
 	err := wait(t, askCard(svc, m, t.Context()))
 	c := pendingCards(t, svc, m)[0]
 	var pe *protocol.Error
@@ -593,11 +639,11 @@ func TestAnotherConnectorsEqualCallGetsItsOwnCard(t *testing.T) {
 		}
 		return pe.Message
 	}
-	first := park(ConnectorOrigin("ChatGPT", "con-1", "grant-1"))
-	if again := park(ConnectorOrigin("ChatGPT", "con-1", "grant-1")); again != first {
+	first := park(ConnectorOrigin("ChatGPT", "con-1", "grant-1", nil))
+	if again := park(ConnectorOrigin("ChatGPT", "con-1", "grant-1", nil)); again != first {
 		t.Fatalf("the same grant's repeated call = %q, want its card %q", again, first)
 	}
-	if other := park(ConnectorOrigin("Claude", "con-2", "grant-2")); other == first {
+	if other := park(ConnectorOrigin("Claude", "con-2", "grant-2", nil)); other == first {
 		t.Fatalf("another grant's equal call got the first grant's card: %q", other)
 	}
 	if n := pendingCount(t, svc, m); n != 2 {

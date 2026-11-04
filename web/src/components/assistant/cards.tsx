@@ -12,7 +12,7 @@ import { RequestCard, RequestTimeBar } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { RequestRows, RequestSection } from '@/components/ui/request-section'
 import { api } from '@/lib/api'
-import type { AssistantConfirmation } from '@/lib/assistant-types'
+import type { AssistantConfirmation, AssistantQueueEntry } from '@/lib/assistant-types'
 import { message } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useSecondsUntil } from '@/lib/hooks'
@@ -76,6 +76,52 @@ export function cardsHeading(confirmations: AssistantConfirmation[]): string {
   const running = confirmations.length - waiting
   const parts = [waiting && `${waiting} ${waiting === 1 ? 'waits' : 'wait'} for you`, running && `${running} running`].filter(Boolean)
   return `${confirmations.length} ${confirmations.length === 1 ? 'card' : 'cards'}: ${parts.join(', ')}`
+}
+
+/**
+ * A prompt that waits behind the running turn, numbered by when it runs, or
+ * one that never reached the transcript, with why, Retry and Dismiss. After
+ * a removal, focus moves to `next`, the entry that follows or else the one before.
+ */
+export function QueuedPrompt({ entry, position, next }: { entry: AssistantQueueEntry; position?: number; next?: string }) {
+  const { busy, error, run } = useAction()
+  const origin = originLabel(entry.origin) || 'from dashboard'
+  const queued = entry.state === 'queued'
+  // Retrying needs an agent to send to; setup is where to get one.
+  const noAgent = useStore((s) => s.assistantStatus?.state === 'setup')
+  const remove = (key: string, then?: () => void) => void run(key, async () => {
+    await api.assistantQueueRemove(entry.id)
+    then?.()
+    if (next) document.querySelector<HTMLElement>(`[data-queued="${next}"] button`)?.focus()
+  })
+  const action = 'h-7 coarse:h-11 coarse:min-w-11'
+  return (
+    <div role="group" data-queued={entry.id} aria-label={`${queued ? 'Queued' : 'Not sent'}: ${entry.text}`} className="ml-6 flex min-w-0 flex-col gap-1 rounded-control border border-dashed border-seam px-3 py-2 text-ui-sm">
+      <p className="min-w-0 break-words whitespace-pre-wrap">{position !== undefined && <span className="mr-1.5 text-muted tabular-nums">{position}.</span>}{entry.text}</p>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 text-ui-xs text-muted">
+        {!queued && <span className="text-state-failed">{entry.state === 'interrupted' ? 'Interrupted' : 'Not sent'}</span>}
+        <span>{origin}</span>
+        <span className="ml-auto flex gap-1">
+          {!queued && (
+            <Button size="sm" variant="secondary" className={action} disabled={busy !== null || noAgent} hint={noAgent ? 'Sign in for the assistant first' : undefined} aria-label={`Retry: ${entry.text}`}
+              onClick={() => remove('retry', () => useStore.getState().setAssistantDraft(entry.text))}>
+              {busy === 'retry' ? 'Retrying…' : 'Retry'}
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" className={action} disabled={busy !== null} aria-label={`${queued ? 'Remove' : 'Dismiss'}: ${entry.text}`} onClick={() => remove('remove')}>
+            {busy === 'remove' ? (queued ? 'Removing…' : 'Dismissing…') : queued ? 'Remove' : 'Dismiss'}
+          </Button>
+        </span>
+      </div>
+      {!queued && entry.error && <p className="text-ui-xs break-words text-state-failed">{entry.error}</p>}
+      {error && <p role="alert" className="text-ui-xs text-state-failed">{error}</p>}
+    </div>
+  )
+}
+
+/** The heading over the prompts that wait for the running turn. */
+export function queuedHeading(count: number): string {
+  return `${count} queued, ${count === 1 ? 'runs' : 'run'} after this turn`
 }
 
 export function ConfirmationCard({ confirmation }: { confirmation: AssistantConfirmation }) {

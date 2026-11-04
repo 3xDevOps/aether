@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -69,6 +70,9 @@ type Config struct {
 	// Preferences are the members' private preferences the assistant reads
 	// and saves.
 	Preferences *preference.Service
+	// ConnectorScopes names the connector scopes, any one of which lets a
+	// connector call method; none for a method no connector may call.
+	ConnectorScopes func(method string) []string
 }
 
 // Host is the scheduler's side of the assistant: its container and the
@@ -150,6 +154,13 @@ type member struct {
 	viewSource string
 	// origin is the origin of the prompt of the turn running or last run.
 	origin Origin
+	// running is the queue entry whose turn runs; once sent, sentOn is the
+	// session it went to and sentAfter the turn before it.
+	running   string
+	sentOn    *session
+	sentAfter int64
+	// queue serializes sending queued prompts.
+	queue sync.Mutex
 
 	wmu      sync.Mutex
 	watchers map[chan struct{}]struct{}
@@ -308,8 +319,12 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	if err != nil {
 		return protocol.AssistantStatus{}, err
 	}
+	queue, err := s.queueOf(ctx, id, row.Generation)
+	if err != nil {
+		return protocol.AssistantStatus{}, err
+	}
 	status := protocol.AssistantStatus{
-		Agents: agents, Error: failure, Confirmations: cards,
+		Agents: agents, Error: failure, Confirmations: cards, Queue: queue,
 		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
 		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary, ApprovalChosen: settings.ApprovalChosen,
 	}
@@ -526,6 +541,8 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 	att := exec.Attachment()
 	stderr := &tail{max: stderrTail}
 	go func() { _, _ = io.Copy(stderr, att.Stderr()) }()
+	// The callback runs before Start returns; it learns its session then.
+	var own atomic.Pointer[acphost.Session]
 	acpSess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath: s.logPath(m.id),
 		Cwd:     scheduler.AssistantCwd,
@@ -534,13 +551,9 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 		}}},
 		SessionID: resume,
 		Logger:    slog.Default().With("assistant", m.id),
-		OnState: func(st acphost.TurnState) {
-			if !st.Working && st.Tasks == 0 {
-				m.confirms.release(st.Turn)
-			}
-			m.notify()
-		},
+		OnState:   s.onState(m, own.Load),
 	})
+	own.Store(acpSess)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("assistant: open the %s session%s: %w", agent, stderr.suffix(), err), stopExec(exec))
 	}
@@ -635,12 +648,16 @@ func (s *Service) watch(m *member, live *session) {
 		slog.Warn("assistant: the adapter may still run; the next start stops it", "member", m.id, "error", err)
 	}
 	m.mu.Lock()
-	if m.sess == live {
+	ended := m.sess == live
+	if ended {
 		m.sess = nil
 		m.signalLocked()
 	}
 	m.mu.Unlock()
 	close(live.ended)
+	if ended {
+		s.spawn(func() { s.sessionEnded(m, live) })
+	}
 }
 
 func (s *Service) stop(ctx context.Context, m *member) error {
@@ -691,6 +708,9 @@ func resolve(agents []protocol.AssistantAgent, requested, stored string) (string
 func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	m.reset.Lock()
 	defer m.reset.Unlock()
+	if err := s.dropQueue(ctx, m); err != nil {
+		return err
+	}
 	if err := s.stop(ctx, m); err != nil {
 		return err
 	}
@@ -781,46 +801,17 @@ func (s *Service) Reset(ctx context.Context, id domain.MemberID) (protocol.Assis
 }
 
 type attempt struct {
-	done chan struct{}
-	err  error
-}
-
-// Prompt sends text from origin to the assistant, starting it first when
-// needed, unless a turn is running. A key that is in flight or was accepted,
-// even before a restart, is not sent again: a duplicate waits for the first
-// attempt and returns its result.
-func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string, view *protocol.AssistantViewContext, origin Origin) error {
-	m := s.member(id)
-	a, first := m.begin(key)
-	if !first {
-		select {
-		case <-a.done:
-			return a.err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	conv := m.conversation()
-	if err := m.waitForNotes(ctx, conv); err != nil {
-		m.finish(key, a, err)
-		return err
-	}
-	m.share.RLock()
-	dispatched, err := s.send(ctx, m, conv, text, key, view, origin)
-	m.share.RUnlock()
-	if err != nil && !dispatched {
-		m.finish(key, a, err)
-		return err
-	}
-	m.finish(key, a, nil)
-	return err
+	done  chan struct{}
+	entry Entry
+	err   error
 }
 
 // send dispatches text under m.op, so a reset cannot fall between the key
 // check, the dispatch and saving the key under the generation it ran in.
 // dispatched is true once the agent may have the prompt; its key then stays
 // reserved even if the caller left or saving it failed.
-func (s *Service) send(ctx context.Context, m *member, conv context.Context, text, key string, view *protocol.AssistantViewContext, origin Origin) (dispatched bool, err error) {
+func (s *Service) send(ctx context.Context, m *member, conv context.Context, generation int64, text, key string, view *protocol.AssistantViewContext,
+	origin Origin) (dispatched bool, err error) {
 	m.op.Lock()
 	defer m.op.Unlock()
 	if conv.Err() != nil {
@@ -830,12 +821,15 @@ func (s *Service) send(ctx context.Context, m *member, conv context.Context, tex
 	if err != nil {
 		return false, err
 	}
+	if row.Generation != generation {
+		return false, errQueueReset
+	}
 	seen, err := s.cfg.Store.HasAssistantPromptKey(ctx, m.id, row.Generation, key)
 	if err != nil {
 		return false, fmt.Errorf("assistant: %w", err)
 	}
 	if seen {
-		return true, nil
+		return true, errAlreadySent
 	}
 	if view, err = s.sharedView(ctx, m, view); err != nil {
 		return false, err
@@ -885,10 +879,11 @@ func (s *Service) send(ctx context.Context, m *member, conv context.Context, tex
 			restore()
 			settle()
 			m.mu.Lock()
-			m.origin = previous
+			m.origin, m.sentOn = previous, nil
 			m.mu.Unlock()
 		}
 	}()
+	m.sending(live)
 	started, err := promptLive(ctx, live, text, view, notes, refused)
 	if errors.Is(err, acphost.ErrPromptUnsent) {
 		// The adapter died after ensure saw it alive and before the prompt
@@ -901,6 +896,7 @@ func (s *Service) send(ctx context.Context, m *member, conv context.Context, tex
 		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
 			return false, err
 		}
+		m.sending(live)
 		started, err = promptLive(ctx, live, text, view, notes, refused)
 	}
 	switch {
@@ -961,10 +957,10 @@ func (m *member) begin(key string) (*attempt, bool) {
 
 // finish records a's result. A failed key is forgotten, so the caller can
 // retry it. A reset in between has already dropped a.
-func (m *member) finish(key string, a *attempt, err error) {
+func (m *member) finish(key string, a *attempt, entry Entry, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	a.err = err
+	a.entry, a.err = entry, err
 	close(a.done)
 	if m.attempts[key] != a {
 		return
@@ -979,13 +975,15 @@ func (m *member) finish(key string, a *attempt, err error) {
 	}
 }
 
-func (m *member) turnOrigin() Origin {
+// turn is the origin of the turn running or last run, and its queue entry
+// while it runs.
+func (m *member) turn() (Origin, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.origin.Door == "" {
-		return Door(protocol.AssistantDoorDashboard)
+		return Door(protocol.AssistantDoorDashboard), m.running
 	}
-	return m.origin
+	return m.origin, m.running
 }
 
 func (s *Service) liveSession(id domain.MemberID) (*acphost.Session, error) {

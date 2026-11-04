@@ -55,9 +55,16 @@ func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
 func (s *Service) approver(m *member) func(context.Context, protocol.AssistantConfirmation) error {
 	return func(ctx context.Context, c protocol.AssistantConfirmation) error {
 		conv := m.conversation()
-		passed, err := s.approveByRule(ctx, conv, m, &c)
-		if !passed && err == nil {
-			passed, err = s.autoApprove(ctx, conv, m, c)
+		origin, entry := m.turn()
+		var passed bool
+		var err error
+		// In a connector turn, nothing its grant's scopes do not cover
+		// passes without a card: neither a rule nor auto-approval.
+		if origin.Covers(c.Method, s.cfg.ConnectorScopes) {
+			passed, err = s.approveByRule(ctx, conv, m, &c)
+			if !passed && err == nil {
+				passed, err = s.autoApprove(ctx, conv, m, c)
+			}
 		}
 		if passed {
 			return nil
@@ -65,10 +72,17 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 		var answer chan error
 		var generation int64
 		if err == nil {
-			origin := m.turnOrigin()
-			if answer, generation, err = s.raise(ctx, m, &c, origin); err == nil && answer == nil {
-				return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(parkedText, c.ID)}
+			answer, generation, err = s.raise(ctx, m, &c, origin)
+		}
+		if err == nil && entry != "" {
+			// A card its turn's entry does not list cannot be found from it,
+			// so it does not stay open.
+			if err = s.cfg.Store.AddAssistantQueueCard(context.WithoutCancel(ctx), m.id, entry, c.ID); err != nil {
+				err = errors.Join(fmt.Errorf("record the card on its queued prompt: %w", err), s.withdraw(context.WithoutCancel(ctx), m, c.ID))
 			}
+		}
+		if err == nil && answer == nil {
+			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(parkedText, c.ID)}
 		}
 		if err != nil {
 			a := newAction(c)

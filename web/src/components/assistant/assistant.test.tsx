@@ -401,6 +401,64 @@ describe('the conversation', () => {
   })
 })
 
+describe('queue', () => {
+  const at = '2026-11-03T12:00:00Z'
+
+  it('queues a prompt sent during a turn, shows where queued ones came from, and removes one in a click', async () => {
+    vi.mocked(api.assistantPrompt).mockResolvedValue({})
+    vi.mocked(api.assistantQueueRemove).mockResolvedValue({})
+    const aside = await openPanel()
+    const session = assistantSocket().open({ state: state({ turn_in_flight: true }) }, [item('turn_start', 1), say(1, 'user', 'Install Rust')])
+    const box = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.type(box, 'then the docs')
+    expect(within(aside).getByRole('button', { name: 'Stop' })).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: /^Queue/ }))
+    expect(api.assistantPrompt).toHaveBeenCalledWith('then the docs', expect.any(String), expect.anything(), undefined, expect.any(AbortSignal))
+    session.send({ status: status({ state: 'running', queue: [
+      { id: 'turn-1', state: 'running', text: 'Install Rust', origin: { door: 'dashboard' }, created_at: at },
+      { id: 'turn-2', state: 'queued', text: 'then the docs', origin: { door: 'phone' }, created_at: at },
+      { id: 'turn-3', state: 'failed', text: 'and lint', origin: { door: 'connector', client: 'ChatGPT', connector_id: 'con_1' }, error: 'assistant: no agent is ready', created_at: at },
+    ] }) })
+    const queued = await within(aside).findByRole('group', { name: 'Queued: then the docs' })
+    expect(within(queued).getByText('from phone')).toBeDefined()
+    expect(within(aside).getByText('1 queued, runs after this turn')).toBeDefined()
+    const failed = within(aside).getByRole('group', { name: 'Not sent: and lint' })
+    expect(within(failed).getByText('from ChatGPT (connector)')).toBeDefined()
+    expect(within(failed).getByText('assistant: no agent is ready')).toBeDefined()
+    expect(within(failed).getByRole('button', { name: 'Dismiss: and lint' })).toBeDefined()
+    await userEvent.click(within(queued).getByRole('button', { name: 'Remove: then the docs' }))
+    expect(api.assistantQueueRemove).toHaveBeenCalledWith('turn-2')
+    await waitFor(() => expect(document.activeElement).toBe(within(failed).getByRole('button', { name: 'Retry: and lint' })))
+    await userEvent.click(within(failed).getByRole('button', { name: 'Retry: and lint' }))
+    await waitFor(() => expect(useStore.getState().assistantDraft).toBe('and lint'))
+  })
+
+  it('shows a prompt queued before the conversation has any message', async () => {
+    const aside = await openPanel()
+    const session = acpOpen()
+    session.send({ status: status({ state: 'starting', queue: [{ id: 'turn-1', state: 'queued', text: 'first question', origin: { door: 'desktop' }, created_at: at }] }) })
+    const queued = await within(aside).findByRole('group', { name: 'Queued: first question' })
+    expect(within(queued).getByText('from desktop')).toBeDefined()
+  })
+
+  it('shows a prompt that could not start while the assistant needs setup', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', queue: [{ id: 'turn-1', state: 'failed', text: 'deploy status?', origin: { door: 'phone' }, error: 'assistant: no agent is ready', created_at: at, updated_at: at }] }) })
+    const failed = await within(aside).findByRole('group', { name: 'Not sent: deploy status?' })
+    expect(within(failed).getByText('assistant: no agent is ready')).toBeDefined()
+  })
+
+  it('names the door a past prompt came through', async () => {
+    const aside = await openPanel()
+    const session = acpOpen([say(1, 'user', 'What is running?', 'u1'), say(1, 'assistant', 'Two sessions.', 'a1')])
+    session.send({ status: status({ queue: [
+      { id: 'turn-1', state: 'done', text: 'What is running?', origin: { door: 'connector', client: 'ChatGPT', connector_id: 'con_1' }, message_id: 'u1', created_at: at },
+    ] }) })
+    expect(await within(aside).findByText(/via ChatGPT/)).toBeDefined()
+  })
+})
+
 describe('confirmations', () => {
   it('says what a launch starts and on whose account, and renders a message readably', async () => {
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
@@ -496,7 +554,7 @@ describe('confirmations', () => {
     expect(within(aside).getByText('2 cards: 1 waits for you, 1 running')).toBeDefined()
     expect(within(running).queryByRole('button')).toBeNull()
     const parked = within(aside).getByRole('group', { name: 'Approve this action? Save your environment' })
-    expect(within(parked).getByText('via ChatGPT')).toBeDefined()
+    expect(within(parked).getByText('from ChatGPT (connector)')).toBeDefined()
     expect(within(parked).getByRole('button', { name: 'Approve' })).toBeDefined()
   })
 

@@ -304,9 +304,14 @@ restart and while the assistant itself needs sign-in, and any of them can
 decide it (`assistant.confirm`); the first decision wins, and a second gets
 `assistant: no such pending confirmation`.
 
-- The call waits for the card for 10 minutes; approving it in that time
-  hands the result to the assistant. **Stop**, the turn ending or the tool
-  call hanging up stops the wait but leaves the card open until it expires.
+- A card from a turn you started in Aether keeps the call waiting for 10
+  minutes; approving it in that time hands the result to the assistant.
+  **Stop**, the turn ending or the tool call hanging up stops the wait but
+  leaves the card open until it expires.
+- A card from a connector turn (ChatGPT, Claude) does not wait: the call
+  returns `Waiting for approval as card <id>; ...` at once and the card stays
+  open for 24 hours. In a connector turn, a call the connector's scopes do not
+  cover always shows a card, even with auto-approval on.
 - The same call asked again while its card is open shares that card.
 - Approving a card whose call no longer waits makes the server run it with
   the stored parameters, as you. It first builds the card again; when it
@@ -318,8 +323,9 @@ decide it (`assistant.confirm`); the first decision wins, and a second gets
   is not run again.
 - **New conversation** withdraws every open card.
 
-An approved card reads **Approved, running…** until its outcome is in the
-conversation.
+The card's chip names a turn that did not come from the dashboard, such as
+**via ChatGPT**. An approved card reads **Approved, running…** until its
+outcome is in the conversation.
 
 Every action is recorded in the transcript. The approval is written before the
 action runs; if it cannot be written, the action does not run. The outcome
@@ -516,7 +522,36 @@ answer within 10 seconds, Stop shows `assistant.cancel got no answer within 10
 seconds` and can be pressed again. A message the server does not accept within
 60 seconds shows `assistant.prompt got no answer within 60 seconds` and stays
 in the box; **Send** retries it under the same idempotency key, so it runs at
-most once. While a turn runs you cannot send another prompt.
+most once.
+
+### The queue
+
+A message sent while a turn runs is queued: the button reads **Queue**, and
+the message shows at the end of the conversation, numbered under **N queued,
+run after this turn**, until its turn starts. Queued messages run in that
+order, each when the turn before it ends.
+**Stop** cancels only the running turn; the next queued message then runs.
+**Remove** takes a queued message off before it runs. At most 5 wait; a sixth
+fails with `assistant: 5 prompts are already queued; wait or remove one`.
+
+The queue is stored on the server, so it survives a reload and a restart. A
+turn the server lost to a restart is marked `Interrupted` with `the server
+restarted while this turn ran; it was not sent again`, and is not rerun; the
+waiting messages then run. A queued message that could not start shows
+**Not sent** with the server's error, above the queued ones; **Retry** puts
+its text back in the message box, once an agent is ready, and **Dismiss**
+removes it. Each queued message names the door it came from. **New conversation** deletes the
+queue with the conversation: waiting messages, and the stored text and
+replies of earlier ones.
+
+Every message records where it came from. A chip on each of the last 50
+names any door other than the dashboard: **from phone** for the Android app,
+**from desktop** for the desktop app, **from ChatGPT (connector)** for a
+connector. The server stamps the origin from
+the connection that carried the message; the Aether app only names which of
+its own clients it is, which labels the message and decides nothing. A
+connector origin is set only by the connector's own route, never by a request
+field.
 
 There is one conversation per member. It survives page reloads and server
 restarts. If the agent stops, the next prompt starts it again. **New
@@ -619,7 +654,8 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
 | `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
-| `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
+| `assistant: 5 prompts are already queued; wait or remove one` | Five messages already wait. **Remove** one, or wait for the running turn |
+| `the server restarted while this turn ran; it was not sent again` | The turn may have done part of its work. Check, then send it again |
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
 | `the member did not answer before the card expired` | The card timed out. Ask again |
 | `The card changed after you approved it, so nothing was run.` followed by `You approved: ...` and `It now reads: ...` | The target changed while the card waited. Read the new text and ask again |
