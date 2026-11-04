@@ -25,15 +25,17 @@ export function ClearDoneDialog() {
   const removeRun = useStore((s) => s.removeRun)
   const [plan] = useState(() => clearDonePlan(finishedRuns(...scope()), cap, self))
   const [held, setHeld] = useState<Map<string, RunCloseCheck>>()
+  const [reads, setReads] = useState(0)
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
     let live = true
+    setHeld(undefined)
     void readArchiveHolds(plan.eligible.filter((run) => run.status === 'completed').map((run) => run.id)).then((next) => live && setHeld(next))
     return () => {
       live = false
     }
-  }, [plan])
+  }, [plan, reads])
 
   const confirm = async () => {
     if (!held) return
@@ -48,6 +50,7 @@ export function ClearDoneDialog() {
       plan={plan}
       held={held}
       running={running}
+      onRecheck={() => setReads((n) => n + 1)}
       onConfirm={() => void confirm()}
       onCancel={close}
     />

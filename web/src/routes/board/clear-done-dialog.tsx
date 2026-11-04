@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { CloseWarningLines } from '@/components/close-warnings'
 import { RunRetention } from '@/components/run-retention'
 import { Button } from '@/components/ui/button'
+import { CountBadge } from '@/components/ui/count-badge'
 import {
   Dialog,
   DialogContent,
@@ -9,10 +11,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { InsetList } from '@/components/ui/inset-list'
+import { SectionLabel } from '@/components/ui/section-label'
 import { Spinner } from '@/components/ui/spinner'
 import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
 import type { RunCloseCheck } from '@/lib/types'
 import { runLabel } from '@/lib/status'
+
+const shownNames = 5
 
 export function ClearDoneConfirm({
   plan,
@@ -20,33 +26,38 @@ export function ClearDoneConfirm({
   running,
   onConfirm,
   onCancel,
+  onRecheck,
 }: {
   plan: ClearDonePlan
-  /** Completed sessions kept back and why; undefined while they are being checked. */
+  /** Completed sessions kept back and what they hold; undefined while they are being checked. */
   held: Map<string, RunCloseCheck> | undefined
   running: boolean
   onConfirm: () => void
   onCancel: () => void
+  onRecheck: () => void
 }) {
+  const [allNames, setAllNames] = useState(false)
   const archived = plan.eligible.filter((run) => !held?.has(run.id))
   const kept = plan.eligible.filter((run) => held?.has(run.id))
   const n = archived.length
   const checking = held === undefined
+  const failed = kept.some((run) => held?.get(run.id)?.error)
+  const names = allNames ? archived : archived.slice(0, shownNames)
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
-      <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
+      <DialogContent className="max-w-[min(480px,calc(100%-2rem))]">
         <DialogHeader>
           <DialogTitle>
             {checking
               ? 'Checking finished sessions…'
               : n === 0
-                ? 'No finished sessions to archive'
+                ? 'Nothing to archive'
                 : `Archive ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>
-            {n === 0 && !checking
+            {n === 0 && !checking && kept.length === 0
               ? 'Archive acts on completed, merged, abandoned, failed and interrupted sessions you may act on.'
-              : 'Hides them from Finished. History stays; restore any time. Archiving does not free their retained containers.'}
+              : 'Hides them from Finished; restore any time from Archived at the foot of Finished. Archiving does not free their retained containers.'}
           </DialogDescription>
         </DialogHeader>
         {plan.notAllowed > 0 && (
@@ -61,25 +72,39 @@ export function ClearDoneConfirm({
           </p>
         )}
         {!checking && n > 0 && (
-          <ul aria-label="Sessions to archive" className="max-h-40 space-y-1 overflow-y-auto text-ui">
-            {archived.map((run) => (
-              <li key={run.id} className="truncate">{runLabel(run)}</li>
-            ))}
-          </ul>
+          <section className="flex flex-col gap-1.5">
+            <SectionLabel as="h3" className="flex items-center gap-1.5">Archiving <CountBadge>{n}</CountBadge></SectionLabel>
+            <InsetList tabIndex={0} aria-label="Sessions to archive" className="max-h-48 overflow-y-auto">
+              {names.map((run) => (
+                <li key={run.id} className="truncate px-3 py-1.5 text-ui">{runLabel(run)}</li>
+              ))}
+            </InsetList>
+            {n > shownNames && (
+              <Button variant="quiet" size="sm" className="self-start text-ui-sm" aria-expanded={allNames} onClick={() => setAllNames(!allNames)}>
+                {allNames ? 'Show fewer' : `${n - shownNames} more`}
+              </Button>
+            )}
+          </section>
         )}
         {kept.length > 0 && (
-          <section aria-label="Sessions kept">
-            <h3 className="text-ui font-medium">
-              Kept: {kept.length} completed {kept.length === 1 ? 'session still holds' : 'sessions still hold'} work
-            </h3>
-            <ul className="mt-1 max-h-40 space-y-1.5 overflow-y-auto text-ui">
+          <section className="flex flex-col gap-1.5 border-t border-seam pt-4">
+            <SectionLabel as="h3" className="flex items-center gap-1.5">
+              Kept <CountBadge>{kept.length}</CountBadge>
+              <span className="font-normal">completed, still holding work</span>
+            </SectionLabel>
+            <InsetList tabIndex={0} aria-label="Sessions kept" className="max-h-56 overflow-y-auto">
               {kept.map((run) => (
-                <li key={run.id} className="flex flex-col gap-1">
-                  <span className="block truncate">{runLabel(run)}</span>
+                <li key={run.id} className="flex min-w-0 flex-col gap-1 px-3 py-2">
+                  <span className="truncate text-ui text-muted">{runLabel(run)}</span>
                   <CloseWarningLines check={held!.get(run.id)!} run={run} onLeave={onCancel} />
                 </li>
               ))}
-            </ul>
+            </InsetList>
+            {failed && (
+              <Button variant="quiet" size="sm" className="self-start text-ui-sm" disabled={running} onClick={onRecheck}>
+                Check again
+              </Button>
+            )}
           </section>
         )}
         <DialogFooter>

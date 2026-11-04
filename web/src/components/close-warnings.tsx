@@ -82,13 +82,19 @@ export function CloseWarningLines({ check, run, onLeave }: { check: RunCloseChec
   if (check.error) return <p className="break-words text-state-failed">Could not check: {check.error.message}</p>
   return (
     <ul className="flex flex-col gap-1.5 text-ui-sm text-muted">
-      <Lines warnings={check.warnings.filter((warning) => !warning.subsession).sort(byRisk)} run={run} onLeave={onLeave} all={check.warnings} />
+      <Lines warnings={check.warnings.filter((warning) => !warning.subsession).sort(byRisk)} run={run} onLeave={onLeave} all={check.warnings} subsessionsLead="Has running subsessions:" />
     </ul>
   )
 }
 
 /** Several pull requests of one session read as one line of numbers. */
-function Lines({ warnings, run, onLeave, all }: { warnings: CloseWarning[]; run: Run | undefined; onLeave: () => void; all: CloseWarning[] }) {
+function Lines({ warnings, run, onLeave, all, subsessionsLead = 'Closes with it:' }: {
+  warnings: CloseWarning[]
+  run: Run | undefined
+  onLeave: () => void
+  all: CloseWarning[]
+  subsessionsLead?: string
+}) {
   const prs = warnings.filter((warning) => warning.kind === 'pull_request' && warning.number && warning.url)
   return warnings.map((warning) => {
     if (prs.includes(warning)) {
@@ -97,7 +103,7 @@ function Lines({ warnings, run, onLeave, all }: { warnings: CloseWarning[]; run:
     return (
       <Line key={warning.kind + (warning.url ?? '')} warning={warning}>
         {warning.kind === 'subsessions'
-          ? <Subsessions ids={warning.run_ids ?? []} warnings={all} onLeave={onLeave} />
+          ? <Subsessions lead={subsessionsLead} ids={warning.run_ids ?? []} warnings={all} onLeave={onLeave} />
           : <Explain warning={warning} run={run} onLeave={onLeave} />}
       </Line>
     )
@@ -134,11 +140,11 @@ function Line({ warning, children }: { warning: CloseWarning; children: ReactNod
   )
 }
 
-function Subsessions({ ids, warnings, onLeave }: { ids: string[]; warnings: CloseWarning[]; onLeave: () => void }) {
+function Subsessions({ lead, ids, warnings, onLeave }: { lead: string; ids: string[]; warnings: CloseWarning[]; onLeave: () => void }) {
   const runs = useStore((s) => s.runs)
   return (
     <>
-      Closes with it:
+      {lead}
       <ul className="mt-1 flex flex-col gap-1">
         {ids.map((id) => {
           const own = warnings.filter((warning) => warning.subsession === id).sort(byRisk)

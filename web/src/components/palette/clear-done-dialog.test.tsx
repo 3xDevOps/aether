@@ -76,10 +76,23 @@ describe('archive confirmation dialog', () => {
     expect(archiveMocks.runArchive.mock.calls.map(([id]) => id).sort()).toEqual(['run_a', 'run_b', 'run_c'])
   })
 
+  it('keeps completed sessions it could not check, and checks again on request', async () => {
+    useStore.setState({ runs: { run_c: toRecord(run({ id: 'run_c', status: 'completed', finished_at: '2026-08-14T10:05:00Z' })) } })
+    archiveMocks.runCloseCheck.mockRejectedValueOnce(new Error('gateway unreachable'))
+    render(<ClearDoneDialog />)
+
+    expect(await screen.findByText(/gateway unreachable/)).toBeDefined()
+    expect(screen.getByText('Nothing to archive')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive 1' }))
+    await waitFor(() => expect(archiveMocks.runArchive).toHaveBeenCalledWith('run_c', true))
+  })
+
   it('says so when no finished run qualifies', async () => {
     useStore.setState({ runs: {} })
     render(<ClearDoneDialog />)
-    expect(await screen.findByText('No finished sessions to archive')).toBeDefined()
+    expect(await screen.findByText('Nothing to archive')).toBeDefined()
     expect(screen.queryByRole('button', { name: /Archive/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(useStore.getState().paletteDialog).toBeNull()
