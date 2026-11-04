@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -117,15 +118,20 @@ private fun notify(manager: NotificationManagerCompat, tag: String, builder: Not
     }
 }
 
+// Extras do not tell PendingIntents apart, and two tags can share a hash, so
+// the full tag goes in the data each one is matched by.
+private fun pushIdentity(tag: String): Uri = Uri.fromParts("aether-push", tag, null)
+
 private fun openIntent(context: Context, tag: String, path: String): PendingIntent {
     val intent =
         Intent(context, MainActivity::class.java)
             .setAction(ACTION_OPEN)
+            .setData(pushIdentity(tag))
             .putExtra(EXTRA_PATH, path)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     return PendingIntent.getActivity(
         context,
-        tag.hashCode(),
+        0,
         intent,
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
@@ -135,12 +141,13 @@ private fun declineIntent(context: Context, notice: PushNotice): PendingIntent {
     val intent =
         Intent(context, DeclineReceiver::class.java)
             .setAction(ACTION_DECLINE)
+            .setData(pushIdentity(notice.tag))
             .putExtra(EXTRA_CARD, notice.card)
             .putExtra(EXTRA_TAG, notice.tag)
             .putExtra(EXTRA_TITLE, notice.title)
     return PendingIntent.getBroadcast(
         context,
-        notice.tag.hashCode(),
+        0,
         intent,
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )

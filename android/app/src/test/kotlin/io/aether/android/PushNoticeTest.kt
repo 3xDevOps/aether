@@ -97,10 +97,19 @@ class PushNoticeTest {
 
     @Test
     fun switchIsOnOnlyWhenEveryPartHolds() {
-        val synced = StoredPush("https://ntfy.sh/upX?up=1", "k", "a", synced = true, error = null)
-        fun state(stored: StoredPush = synced, pending: Boolean = false, registered: Boolean = true, any: Boolean = true, allowed: Boolean = true) =
-            pushStateOf(stored, pending, registered, any, allowed)
+        val server = "https://h.ts.net/"
+        val synced = StoredPush("https://ntfy.sh/upX?up=1", "k", "a", synced = true, error = null, server = server)
+        fun state(
+            stored: StoredPush = synced,
+            current: String? = server,
+            pending: Boolean = false,
+            registered: Boolean = true,
+            any: Boolean = true,
+            allowed: Boolean = true,
+        ) = pushStateOf(stored, current, pending, registered, any, allowed)
         assertEquals(PushState(PushKind.ON, synced.endpoint), state())
+        // Another server was chosen under Connection: it does not have the endpoint yet.
+        assertEquals(PushKind.OFF, state(current = "edge").kind)
         assertEquals(PushKind.PENDING, state(pending = true).kind)
         assertEquals(PushKind.BLOCKED, state(allowed = false).kind)
         // The distributor was uninstalled under the registration.

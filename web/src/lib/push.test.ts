@@ -220,8 +220,9 @@ describe('in the Android app', () => {
     expect(api.pushTest).toHaveBeenCalledWith(endpoint)
     expect(sent).toEqual(['enable', 'state'])
 
-    app({ enable: [{ kind: 'pending' }, { kind: 'off', error: 'The server did not take this phone\'s push endpoint: HTTP 503' }] })
-    await expect(enablePush(api)).rejects.toThrow('HTTP 503')
+    const refused = 'The server did not take this phone\'s push endpoint: HTTP 503'
+    app({ enable: [{ kind: 'pending' }, { kind: 'off', error: refused }] })
+    expect(await enablePush(api)).toEqual({ kind: 'off', error: refused })
     expect(api.pushSubscribe).not.toHaveBeenCalled()
   })
 })

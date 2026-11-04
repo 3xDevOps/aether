@@ -19,6 +19,7 @@ private const val PUSH_P256DH = "push_p256dh"
 private const val PUSH_AUTH = "push_auth"
 private const val PUSH_SYNCED = "push_synced"
 private const val PUSH_ERROR = "push_error"
+private const val PUSH_SERVER = "push_server"
 
 /** How the shell reaches a server. */
 enum class ConnectionMode(val stored: String) {
@@ -107,8 +108,9 @@ fun Context.storeUpdate(update: StoredUpdate) {
 /**
  * This phone's UnifiedPush registration: the distributor's endpoint and the
  * Web Push public keys the server encrypts to, which are not secret (the
- * private key stays in the connector's own store). [synced] is whether the
- * server has them; [error] is why the last attempt failed, in its own words.
+ * private key stays in the connector's own store). [synced] is whether
+ * [server], the connection from [pushServer], has them; [error] is why the
+ * last attempt failed, in its own words.
  */
 data class StoredPush(
     val endpoint: String?,
@@ -116,6 +118,7 @@ data class StoredPush(
     val auth: String?,
     val synced: Boolean,
     val error: String?,
+    val server: String? = null,
 )
 
 fun Context.storedPush(): StoredPush {
@@ -126,6 +129,7 @@ fun Context.storedPush(): StoredPush {
         auth = prefs.getString(PUSH_AUTH, null),
         synced = prefs.getBoolean(PUSH_SYNCED, false),
         error = prefs.getString(PUSH_ERROR, null),
+        server = prefs.getString(PUSH_SERVER, null),
     )
 }
 
@@ -137,7 +141,19 @@ fun Context.storePush(push: StoredPush) {
         .putString(PUSH_AUTH, push.auth)
         .putBoolean(PUSH_SYNCED, push.synced)
         .putString(PUSH_ERROR, push.error)
+        .putString(PUSH_SERVER, push.server)
         .commit()
 }
+
+/**
+ * The connection a push registration was handed to: the tailnet dashboard's
+ * address, or Aether Edge. Choosing another under Connection subscribes again.
+ */
+fun Context.pushServer(): String? =
+    when (connectionMode()) {
+        ConnectionMode.TAILSCALE -> storedDashboardUrl()
+        ConnectionMode.EDGE -> "edge"
+        null -> null
+    }
 
 private fun Context.prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)

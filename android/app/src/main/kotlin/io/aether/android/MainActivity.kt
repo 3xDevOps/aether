@@ -288,7 +288,8 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         updates?.destroy()
         gate?.destroy()
-        push.destroy()
+        // A first launch with nothing set up finishes before the bridge exists.
+        if (::push.isInitialized) push.destroy()
         stopGateway()
         super.onDestroy()
     }
@@ -791,6 +792,9 @@ class MainActivity : ComponentActivity() {
                 onReady = { url ->
                     gatewayUrl = url
                     LiveGateway.url = url
+                    // The CLI moves to an ephemeral port when the stored one
+                    // is taken, so the bridge follows the address it printed.
+                    push.install(web, url)
                     // An endpoint the distributor handed over while no
                     // gateway ran reaches the server now.
                     PushRegistration.sync(this)

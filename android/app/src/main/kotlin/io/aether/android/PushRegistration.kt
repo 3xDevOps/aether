@@ -4,13 +4,10 @@ import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
 import org.unifiedpush.android.connector.INSTANCE_DEFAULT
 import org.unifiedpush.android.connector.UnifiedPush
-
-private const val TAG = "aether"
 
 /** What the dashboard's push switch shows for this phone. */
 enum class PushKind(val wire: String) {
@@ -32,11 +29,12 @@ data class PushState(val kind: PushKind, val endpoint: String? = null, val error
 
 /**
  * The switch's state from what is stored and installed. On means all of it
- * holds: a distributor still holds the registration, the server has its
- * endpoint, and Android lets the app notify.
+ * holds: a distributor still holds the registration, [server], the current
+ * connection, has its endpoint, and Android lets the app notify.
  */
 fun pushStateOf(
     stored: StoredPush,
+    server: String?,
     pending: Boolean,
     registered: Boolean,
     anyDistributor: Boolean,
@@ -45,7 +43,8 @@ fun pushStateOf(
     when {
         pending -> PushState(PushKind.PENDING)
         stored.endpoint != null && registered && !allowed -> PushState(PushKind.BLOCKED)
-        stored.endpoint != null && registered && stored.synced -> PushState(PushKind.ON, stored.endpoint)
+        stored.endpoint != null && registered && stored.synced && stored.server == server ->
+            PushState(PushKind.ON, stored.endpoint)
         !anyDistributor -> PushState(PushKind.NO_DISTRIBUTOR, error = stored.error)
         else -> PushState(PushKind.OFF, error = stored.error)
     }
@@ -61,12 +60,16 @@ object PushRegistration {
 
     @Volatile private var pending = false
 
+    /** Which enable is current, so an earlier one's timeout cannot fail it. */
+    private var attempt = 0
+
     /** Told, on the main thread, whenever [state] may have changed. */
     @Volatile var onChange: (() -> Unit)? = null
 
     fun state(context: Context): PushState =
         pushStateOf(
             context.storedPush(),
+            context.pushServer(),
             pending,
             registered = UnifiedPush.getAckDistributor(context) != null,
             anyDistributor = UnifiedPush.getDistributors(context).isNotEmpty(),
@@ -87,7 +90,10 @@ object PushRegistration {
         pending = true
         context.storePush(context.storedPush().copy(error = null))
         changed()
-        main.postDelayed({ if (pending) fail(context, "The push distributor did not answer within a minute.") }, 60_000)
+        val mine = ++attempt
+        main.postDelayed({
+            if (pending && attempt == mine) fail(context, "The push distributor did not answer within a minute.")
+        }, 60_000)
         Thread {
                 val vapid =
                     try {
@@ -124,15 +130,16 @@ object PushRegistration {
         pending = true
         changed()
         Thread {
-                if (endpoint != null) {
+                val error =
                     try {
-                        context.callServer("push.unsubscribe", JSONObject().put("endpoint", endpoint))
+                        endpoint?.let { context.callServer("push.unsubscribe", JSONObject().put("endpoint", it)) }
+                        null
                     } catch (e: Exception) {
-                        Log.w(TAG, "push: the server was not told to forget this phone: ${e.message}")
+                        "Turned off on this phone, but the server was not told: ${e.message}. " +
+                            "It stops sending once the distributor reports the address gone."
                     }
-                }
                 UnifiedPush.unregister(context, INSTANCE_DEFAULT)
-                context.storePush(StoredPush(null, null, null, synced = false, error = null))
+                context.storePush(StoredPush(null, null, null, synced = false, error = error))
                 pending = false
                 changed()
             }
@@ -141,7 +148,7 @@ object PushRegistration {
 
     /** The distributor gave a new endpoint: the server is told, now if it can be reached. */
     fun endpointChanged(context: Context, endpoint: String, p256dh: String, auth: String) {
-        context.storePush(StoredPush(endpoint, p256dh, auth, synced = false, error = null))
+        context.storePush(StoredPush(endpoint, p256dh, auth, synced = false, error = null, server = null))
         sync(context)
     }
 
@@ -152,7 +159,9 @@ object PushRegistration {
      */
     fun sync(context: Context) {
         val stored = context.storedPush()
-        if (stored.endpoint == null || stored.p256dh == null || stored.auth == null || stored.synced) return
+        val server = context.pushServer()
+        if (stored.endpoint == null || stored.p256dh == null || stored.auth == null) return
+        if (stored.synced && stored.server == server) return
         Thread {
                 val keys = JSONObject().put("p256dh", stored.p256dh).put("auth", stored.auth)
                 val error =
@@ -164,7 +173,9 @@ object PushRegistration {
                     }
                 // A newer endpoint may have arrived meanwhile; only this one is settled.
                 val now = context.storedPush()
-                if (now.endpoint == stored.endpoint) context.storePush(now.copy(synced = error == null, error = error))
+                if (now.endpoint == stored.endpoint) {
+                    context.storePush(now.copy(synced = error == null, error = error, server = server))
+                }
                 pending = false
                 changed()
             }
@@ -188,7 +199,7 @@ object PushRegistration {
                 try {
                     context.callServer("push.unsubscribe", JSONObject().put("endpoint", endpoint))
                 } catch (e: Exception) {
-                    Log.w(TAG, "push: the server was not told to forget this phone: ${e.message}")
+                    fail(context, "The push distributor dropped Aether, and the server was not told: ${e.message}")
                 }
             }
             .start()

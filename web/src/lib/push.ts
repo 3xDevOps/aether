@@ -3,15 +3,16 @@
 // internal/push; the worker that shows them is public/sw.js.
 
 import { desktopBridge } from '@/components/shell/window-bar'
-import { androidPush, androidShell, type AndroidPushState } from '@/lib/android-push'
+import { androidPush, androidShell, watchAndroidPush, type AndroidPushState } from '@/lib/android-push'
 import { ApiError, type Api } from '@/lib/api'
 import { pushedEntry, routeFromQuery } from '@/lib/url-state'
 import { runRoute } from '@/routes/run/views'
 import type { RootStore } from '@/store'
 import { capability } from '@/store/hooks'
 
+/** error is why the Android app's last attempt failed, in its own words. */
 export type PushState =
-  | { kind: 'on' | 'off' | 'blocked' }
+  | { kind: 'on' | 'off' | 'blocked'; error?: string }
   | { kind: 'unsupported'; why: 'desktop' | 'gateway' | 'home-screen' | 'browser' | 'distributor' }
 
 const worker = '/sw.js'
@@ -42,7 +43,12 @@ async function subscription(): Promise<PushSubscription | null> {
 function fromAndroid(state: AndroidPushState): PushState {
   if (state.kind === 'no-distributor') return { kind: 'unsupported', why: 'distributor' }
   if (state.kind === 'on' || state.kind === 'blocked') return { kind: state.kind }
-  return { kind: 'off' }
+  return state.error ? { kind: 'off', error: state.error } : { kind: 'off' }
+}
+
+/** The Android app's state whenever it changes; nothing elsewhere. */
+export function watchAndroidPushState(listener: (state: PushState) => void): () => void {
+  return watchAndroidPush((state) => listener(fromAndroid(state)))
 }
 
 /**
@@ -75,11 +81,7 @@ function sameKey(held: ArrayBuffer | null, key: Uint8Array): boolean {
 }
 
 export async function enablePush(client: Api): Promise<PushState> {
-  if (androidShell()) {
-    const state = await androidPush('enable')
-    if (state.kind === 'off' && state.error) throw new Error(state.error)
-    return fromAndroid(state)
-  }
+  if (androidShell()) return fromAndroid(await androidPush('enable'))
   // Safari grants the prompt only straight from the tap, before any other await.
   const permission = await Notification.requestPermission()
   if (permission === 'denied') return { kind: 'blocked' }

@@ -26,6 +26,22 @@ export function androidShell(): boolean {
 // Enabling can wait on Android's permission prompt and a distributor picker.
 const settleMs = 90_000
 
+/**
+ * Calls listener with every settled state the app sends, such as the one it
+ * sends on returning to the front after notifications were allowed in
+ * Android's settings.
+ */
+export function watchAndroidPush(listener: (state: AndroidPushState) => void): () => void {
+  const app = bridge()
+  if (!app) return () => {}
+  const listen = (event: MessageEvent<string>) => {
+    const state = JSON.parse(event.data) as AndroidPushState
+    if (state.kind !== 'pending') listener(state)
+  }
+  app.addEventListener('message', listen)
+  return () => app.removeEventListener('message', listen)
+}
+
 /** Sends op and resolves with the first settled state the app sends back. */
 export function androidPush(op: 'state' | 'enable' | 'disable'): Promise<AndroidPushState> {
   const app = bridge()

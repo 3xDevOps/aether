@@ -10,7 +10,7 @@ import { Radio, RadioGroup } from '@/components/ui/radio'
 import type { NotifyLevel, NotifyPrefs, NotifyPrefsSetParams, SlackLinkResult, SlackStatusResult } from '@/lib/types'
 import { errorSentence } from '@/lib/format'
 import { androidShell } from '@/lib/android-push'
-import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
+import { disablePush, enablePush, readPush, testPush, watchAndroidPushState, type PushState } from '@/lib/push'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 
@@ -182,6 +182,8 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
     }
   }, [client, gateway])
 
+  useEffect(() => watchAndroidPushState(setState), [])
+
   const act = (work: Promise<PushState>, done = false) => {
     setBusy(true)
     setSent(false)
@@ -207,6 +209,7 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
 
   const on = state?.kind === 'on'
   const install = state?.kind === 'unsupported' && state.why === 'home-screen'
+  const failure = error ?? (state?.kind === 'off' ? state.error : undefined)
   return (
     <SettingsSection title="Push notifications" id="push" scope="This device">
       <SettingRow
@@ -233,7 +236,7 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
             {sent && <p role="status" className="text-ui-sm text-muted">Sent. It should appear on this device in a few seconds.</p>}
           </div>
         )}
-        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {failure && <Callout tone="failed" role="alert">{failure}</Callout>}
       </SettingRow>
     </SettingsSection>
   )
