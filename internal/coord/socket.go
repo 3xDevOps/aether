@@ -234,6 +234,7 @@ func (s *Service) Release(run domain.RunID) error {
 	delete(s.requestBuckets, run)
 	delete(s.hookBuckets, run)
 	delete(s.lifecycleBuckets, run)
+	delete(s.turnBuckets, run)
 	delete(s.reportLocks, run)
 	delete(s.enhancedWoken, run)
 	delete(s.enhancedOpens, run)
@@ -464,9 +465,10 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 		if valid {
 			method = req.Method
 		}
-		if !s.transportAllowed(run, method) {
+		budget := transportBudget(method, req.Params)
+		if !s.transportAllowed(run, budget) {
 			var ok bool
-			resp, ok = rateLimitedResponse(resp, method)
+			resp, ok = rateLimitedResponse(resp, budget)
 			if !ok {
 				return
 			}
@@ -681,12 +683,12 @@ func (s *Service) refuseIsolated(ctx context.Context, run domain.RunID, method s
 	return nil
 }
 
-func rateLimitedResponse(resp protocol.Response, method string) (protocol.Response, bool) {
+func rateLimitedResponse(resp protocol.Response, budget string) (protocol.Response, bool) {
 	if len(resp.ID) == 0 || bytes.Equal(bytes.TrimSpace(resp.ID), []byte("null")) {
 		return protocol.Response{}, false
 	}
 	resp.Result = nil
-	resp.Error = transportRateError(method)
+	resp.Error = transportRateError(budget)
 	return resp, true
 }
 

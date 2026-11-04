@@ -1,9 +1,13 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
+import type { AssistantAccount } from '@/lib/assistant-types'
 import { AssistantSection, autoApproveLabel, autoApproveWarning } from '@/routes/settings/assistant'
 import { useStore } from '@/store'
 import { alice, fakeApi, serverInfo } from '@/test/fixtures'
+
+/** The account check's whole line, which mixes plain text and code. */
+const line = (text: string) => (_: string, element: Element | null) => element?.getAttribute('role') === 'status' && element.textContent === text
 
 function show(methods = ['*'], over: Parameters<typeof fakeApi>[0] = {}) {
   useStore.setState({
@@ -92,6 +96,51 @@ describe('assistant settings', () => {
     await waitFor(() => expect(client.assistantLoginSocket).toHaveBeenCalledWith('claude'))
     await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('region', { name: 'Sign in to Claude Code' })).toBeNull()
+  })
+
+  it('says whether each signed-in agent uses the same account as your sessions', async () => {
+    const accounts: Record<string, AssistantAccount[]> = {
+      claude: [{ agent: 'claude', state: 'same', email: 'alice@example.test' }, { agent: 'claude', state: 'expired' }],
+      codex: [{ agent: 'codex', state: 'other', environment: 'ChatGPT account acct-other' }, { agent: 'codex', state: 'error', error: 'your environment has no ~/.codex/auth.json' }],
+    }
+    const signedIn = { state: 'idle' as const, agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }, { name: 'codex', display_name: 'Codex', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }
+    const client = show(['*'], { assistantAccount: vi.fn(async (agent: string) => accounts[agent].shift()!) })
+    act(() => useStore.getState().setAssistantStatus(signedIn))
+    expect(await screen.findByText(line('Same Claude account as your sessions (alice@example.test).'))).toBeDefined()
+    expect(await screen.findByText(line('Different Codex account: the assistant does not use the account your sessions use. Your sessions: ChatGPT account acct-other.'))).toBeDefined()
+
+    cleanup()
+    show(['*'], { assistantAccount: client.assistantAccount })
+    act(() => useStore.getState().setAssistantStatus(signedIn))
+    expect(await screen.findByText(line("Can't compare: your environment's Claude token has expired. Start a session to refresh it."))).toBeDefined()
+    expect(await screen.findByText(line("Can't compare with your sessions' Codex account: your environment has no ~/.codex/auth.json"))).toBeDefined()
+  })
+
+  it('reads the account again once the first start records it', async () => {
+    const accounts: AssistantAccount[] = [{ agent: 'claude', state: 'unrecorded' }, { agent: 'claude', state: 'same' }]
+    const signedIn = { state: 'idle' as const, agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }
+    const client = show(['*'], { assistantAccount: vi.fn(async () => accounts.shift()!) })
+    act(() => useStore.getState().setAssistantStatus(signedIn))
+    await waitFor(() => expect(client.assistantAccount).toHaveBeenCalledTimes(1))
+    act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'running' }))
+    expect(await screen.findByText(line('Same Claude account as your sessions.'))).toBeDefined()
+    act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'idle' }))
+    act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'running' }))
+    expect(client.assistantAccount).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not ask a server without the account check', async () => {
+    const client = show(['assistant.status', 'assistant.settings', 'run.launch'])
+    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }))
+    expect(await screen.findByText('Signed in for the assistant.')).toBeDefined()
+    expect(client.assistantAccount).not.toHaveBeenCalled()
+  })
+
+  it('shows nothing when a gateway that lists every method reaches a server without the check', async () => {
+    const client = show(['*'], { assistantAccount: vi.fn(async () => { throw new ApiError(404, 'assistant.account: method not found: assistant.account', -32601) }) })
+    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }))
+    await waitFor(() => expect(client.assistantAccount).toHaveBeenCalled())
+    expect(screen.queryByText(/Can't compare/)).toBeNull()
   })
 
   it('lists what auto-approval covers', () => {

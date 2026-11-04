@@ -159,6 +159,7 @@ const pairs: [fg: string, bg: string, min: number][] = [
   ['on-done', 'state-done', 4.5],
   ...[...states, 'diff-add', 'diff-del'].map((fg): [string, string, number] => [fg, 'canvas', 4.5]),
   ['control-border', 'canvas', 3],
+  ...['canvas', 'chrome', 'raised', 'hover', 'hover-chrome', 'selection'].map((bg): [string, string, number] => ['focus-ring', bg, 3]),
   ['icon-faint', 'canvas', 3],
   ...['claude', 'codex', 'pi', 'omp', 'opencode', 'copilot', 'gemini', 'cursor', 'antigravity'].map((agent): [string, string, number] => [`agent-${agent}`, 'canvas', 3]),
 ]
