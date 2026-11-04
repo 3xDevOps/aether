@@ -406,7 +406,8 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         Icon: Undo2,
         value: 'continue unfinished',
         done: 'Marked not finished',
-        predict: () => ({ runID: id, record: { review: '' } }),
+        // The status too, so a refusal because someone closed the session meanwhile shows its error.
+        predict: () => ({ runID: id, record: { review: '', status: run.status } }),
         perform: async (d) => {
           const same = sameIdentity()
           await d.api.runReview(id, 'not-yet')

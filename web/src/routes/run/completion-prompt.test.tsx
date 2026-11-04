@@ -151,6 +151,15 @@ describe('CompletionPrompt', () => {
     expect(useStore.getState().route).toEqual(route)
   })
 
+  it('shows the refusal when someone closed the session before Not yet arrived', async () => {
+    seed()
+    vi.mocked(api.runReview).mockRejectedValueOnce(new ApiError(400, 'session run_1 is abandoned', -32002))
+    vi.mocked(api.runGet).mockResolvedValueOnce(reported({ status: 'abandoned', review: '', status_seq: 6 }))
+    render(<Prompt />)
+    fireEvent.click(screen.getByRole('button', { name: 'Not yet' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('session run_1 is abandoned')))
+  })
+
   it('folds to one line on Review later, and Review now asks again', async () => {
     seed()
     render(<Prompt />)
