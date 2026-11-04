@@ -365,6 +365,7 @@ login shell stay up.
 | The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Chat view. |
 | The agent's process exits | The turn in flight shows **Turn interrupted**; **Disconnected**, `enhanced session ended: the agent's ACP server exited with code <n>`, with `; stderr: <tail>` when it printed any. | **Retry Enhanced**. |
 | The agent drops its conversation but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent conversation lost** while Aether restores the conversation. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
+| The agent refuses a turn with `Authentication required` | **Agent signed out** while Aether restarts the agent in its container. Refused again within 5 minutes: `enhanced turn failed: ... Authentication required ...: start a new session`. | Send the refused message again. After a second refusal, start a new session: its container mounts the current login. |
 | The server restarts mid-turn | The turn keeps running in the adopted conversation; a message queued behind it is sent again unless the agent already had it. | Nothing. |
 | The server restarts and cannot reattach to the agent's keeper, or the session's container predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |
@@ -447,6 +448,17 @@ the same container and checkout; it restarts no process that had stopped. When
 retention ends, a closed session's reason reads `retained container expired` or
 `retained container unavailable`; when low disk space removes the container
 early it reads `retained container reclaimed for disk space`.
+
+Aether captures evidence before it removes a container or checkout, and
+retries a failed capture every `--poll-interval`. If the checkout is already
+gone, no retry can capture it: cleanup finishes without an evidence packet and
+the reason gains `evidence unavailable: session checkout missing`.
+
+A member's containers share one uid:gid mapping, so a launch under another
+mapping is refused while one of them is live. A closed session whose cleanup
+is still retrying counts only while its container exists: Aether asks Docker
+before refusing, and the refusal names it as `session <id> (cleanup pending)`
+and includes any Docker error.
 
 ## Tuning
 

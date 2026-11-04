@@ -46,6 +46,10 @@ func (f *actionServer) Call(_ context.Context, method string, params json.RawMes
 		return json.RawMessage(`{"workspace":{"id":"ws-1","name":"api"}}`), nil
 	case protocol.MethodRunLaunch:
 		return json.RawMessage(`{"run":{"id":"run-new","workspace_id":"ws-1"}}`), nil
+	case protocol.MethodWatchGet:
+		if strings.Contains(string(params), "w-relay") {
+			return json.RawMessage(`{"watch":{"id":"w-relay","relay_to":["run-2"]}}`), nil
+		}
 	case protocol.MethodRunKill:
 		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "session run-1 is not live: it finished at 12:04"}
 	}
@@ -61,12 +65,19 @@ func (f *actionServer) ran(method string) bool {
 // serveTools serves m's tool socket as a live session does.
 func serveTools(t *testing.T, svc *Service, m *member) (string, *actionServer) {
 	t.Helper()
+	fake := &actionServer{}
+	return serveCaller(t, svc, m, fake), fake
+}
+
+// serveCaller serves m's tool socket with fake as the server it calls.
+func serveCaller(t *testing.T, svc *Service, m *member, fake tools.Caller) string {
+	t.Helper()
 	sock := filepath.Join(t.TempDir(), "a.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := &actionServer{}
+	svc.cfg.Caller = func(domain.MemberID) tools.Caller { return fake }
 	srv := &tools.Server{Caller: actionCaller{Caller: fake, s: svc, m: m}, Confirm: svc.approver(m), Member: string(m.id)}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -77,7 +88,7 @@ func serveTools(t *testing.T, svc *Service, m *member) (string, *actionServer) {
 			t.Errorf("Serve: %v", err)
 		}
 	})
-	return sock, fake
+	return sock
 }
 
 // actions reads the action records in m's transcript, grouped by action in
@@ -283,6 +294,29 @@ func TestReversibleCallIsRecordedWithoutApproval(t *testing.T) {
 	}
 	if w := got[1][0].Target.Watch; w == nil || *w != create.Target || got[2][0].Target.WatchID != "w-1" {
 		t.Fatalf("targets = %+v and %+v, want the created watch's target and the paused watch's id", got[1][0].Target, got[2][0].Target)
+	}
+}
+
+func TestAWatchThatRelaysIntoSessionsAsksFirst(t *testing.T) {
+	svc, m, _ := newActionService(t)
+	sock, _ := serveTools(t, svc, m)
+	create := protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"}, RelayTo: []string{"run-1"}}
+	if err := callTool(t, sock, m, protocol.MethodWatchCreate, create, true, false); err == nil {
+		t.Fatal("a refused relay watch was created")
+	}
+	got := actions(t, svc, m)
+	if len(got) != 1 || got[0][0].Outcome != protocol.AssistantActionDeclined ||
+		!strings.HasPrefix(got[0][0].Summary, `Write each notice of session run-1 into the inbox of session run-1 (`) {
+		t.Fatalf("records = %+v, want the relay shown on a card and refused", got)
+	}
+
+	// Resuming a watch that relays starts writing into its sessions again.
+	if err := callTool(t, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-relay", Paused: new(false)}, true, false); err == nil {
+		t.Fatal("a refused resume of a relaying watch ran")
+	}
+	got = actions(t, svc, m)
+	if len(got) != 2 || got[1][0].Summary != `Write each notice of watch w-relay into the inbox of session run-2 ("Docs"), owned by Dana` {
+		t.Fatalf("records = %+v, want the resume shown on a card naming the session and its owner", got)
 	}
 }
 

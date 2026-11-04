@@ -46,8 +46,10 @@ const (
 type Store interface {
 	store.WatchStore
 	store.WatchAssistantStore
+	store.WatchRelayStore
 	store.RunWaitStore
 	GetCoordStateReport(ctx context.Context, run domain.RunID, key string) (*store.CoordStateReport, error)
+	GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, key string) (*store.RunMessage, error)
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
@@ -478,6 +480,7 @@ func (s *Service) housekeep(ctx context.Context) {
 	s.deliverDue(ctx)
 	s.deliverAssistant(ctx)
 	s.deliverWaits(ctx)
+	s.deliverRelays(ctx)
 	if err := s.store.PurgeRegisteredRunWaits(ctx, now.Add(-registeredRetention)); err != nil && ctx.Err() == nil {
 		slog.Warn("watch: purge waits of reports never applied", "error", err)
 	}

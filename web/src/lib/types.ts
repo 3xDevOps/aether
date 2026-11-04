@@ -2141,7 +2141,7 @@ export interface WatchObserved {
   review_state?: string
 }
 
-export type WatchDeliveryChannel = 'push' | 'in_app' | 'assistant'
+export type WatchDeliveryChannel = 'push' | 'in_app' | 'assistant' | 'relay'
 
 /** pending: not sent yet, with why in detail. cleared: dropped unsent because its need was resolved first or its watch stayed paused. withdrawn: delivered, then replaced on the devices because its need ended. */
 export type WatchDeliveryStatus = 'pending' | 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'withdrawn' | 'skipped'
@@ -2151,6 +2151,8 @@ export interface WatchDelivery {
   status: WatchDeliveryStatus
   detail?: string
   at: string
+  /** The session a relay row writes to. */
+  run_id?: string
 }
 
 export interface WatchNotification {
@@ -2183,6 +2185,8 @@ export interface Watch {
   observed: WatchObserved
   last_notification?: WatchNotification
   link: string
+  /** Sessions each notice is written into. */
+  relay_to?: string[]
 }
 
 export interface WatchCreateParams {

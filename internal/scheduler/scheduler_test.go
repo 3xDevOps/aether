@@ -1246,7 +1246,7 @@ func TestReserveRunUserConflict(t *testing.T) {
 	e.sched.mu.Unlock()
 
 	entry := &supervised{runID: "run-new", memberID: e.member.ID}
-	err := e.sched.reserveRunUser(entry, "2000:2000", true)
+	err := e.sched.reserveRunUser(context.Background(), entry, "2000:2000", true)
 	if err == nil {
 		t.Fatal("conflicting uid accepted for the shared member home")
 	}
@@ -1260,7 +1260,7 @@ func TestReserveRunUserConflict(t *testing.T) {
 	}
 
 	same := &supervised{runID: "run-same", memberID: e.member.ID}
-	if err := e.sched.reserveRunUser(same, "1000:1000", true); err != nil {
+	if err := e.sched.reserveRunUser(context.Background(), same, "1000:1000", true); err != nil {
 		t.Fatalf("same mapping rejected: %v", err)
 	}
 	if same.runUser != "1000:1000" {
@@ -1268,17 +1268,17 @@ func TestReserveRunUserConflict(t *testing.T) {
 	}
 
 	otherMember := &supervised{runID: "run-other-member", memberID: "other-member"}
-	if err := e.sched.reserveRunUser(otherMember, "2000:2000", true); err != nil {
+	if err := e.sched.reserveRunUser(context.Background(), otherMember, "2000:2000", true); err != nil {
 		t.Fatalf("different member rejected: %v", err)
 	}
 
 	root := &supervised{runID: "run-root", memberID: e.member.ID}
-	if err := e.sched.reserveRunUser(root, "", true); err != nil {
+	if err := e.sched.reserveRunUser(context.Background(), root, "", true); err != nil {
 		t.Fatalf("root run rejected: %v", err)
 	}
 
 	noHome := &supervised{runID: "run-nohome", memberID: e.member.ID}
-	if err := e.sched.reserveRunUser(noHome, "2000:2000", false); err != nil {
+	if err := e.sched.reserveRunUser(context.Background(), noHome, "2000:2000", false); err != nil {
 		t.Fatalf("run without credential mounts rejected: %v", err)
 	}
 }
@@ -1287,16 +1287,16 @@ func TestPendingTerminalReservationBlocksConflictingRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	pending := &terminalSupervision{member: e.member.ID}
-	if err := e.sched.reserveTerminalUser(pending, "1000:1000"); err != nil {
+	if err := e.sched.reserveTerminalUser(context.Background(), pending, "1000:1000"); err != nil {
 		t.Fatalf("reserve terminal user: %v", err)
 	}
 
 	conflicting := &supervised{runID: "run-conflict", memberID: e.member.ID}
-	if err := e.sched.reserveRunUser(conflicting, "2000:2000", true); err == nil {
+	if err := e.sched.reserveRunUser(context.Background(), conflicting, "2000:2000", true); err == nil {
 		t.Fatal("conflicting session user accepted while terminal reservation was pending")
 	}
 	e.sched.releaseTerminalReservation(pending)
-	if err := e.sched.reserveRunUser(conflicting, "2000:2000", true); err != nil {
+	if err := e.sched.reserveRunUser(context.Background(), conflicting, "2000:2000", true); err != nil {
 		t.Fatalf("session user after terminal release: %v", err)
 	}
 }

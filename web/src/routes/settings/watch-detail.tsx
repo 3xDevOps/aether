@@ -60,6 +60,13 @@ function Observed({ watch }: { watch: Watch }) {
   if (o.head_sha) rows.push(['Head commit', <Code key="sha">{o.head_sha.slice(0, 12)}</Code>])
   if (o.checks) rows.push(['Checks', `${o.checks.passed} passed, ${o.checks.failed} failed, ${o.checks.cancelled ?? 0} cancelled, ${o.checks.pending} pending`])
   if (o.review_state) rows.push(['Review', o.review_state])
+  if (watch.relay_to?.length) {
+    rows.push(['Relays to', (
+      <span key="relay" className="flex flex-wrap gap-x-2">
+        {watch.relay_to.map((run) => <LinkTo key={run} link={`/?run=${encodeURIComponent(run)}`}>{run}</LinkTo>)}
+      </span>
+    )])
+  }
   rows.push(['Created', <RelativeTime key="created" at={watch.created_at} />])
   if (watch.state === 'done') rows.push(['Done', <RelativeTime key="done" at={watch.updated_at} />])
   else rows.push([watch.state === 'expired' ? 'Ended' : 'Ends', <RelativeTime key="expires" at={watch.expires_at} />])
@@ -98,7 +105,7 @@ function Notices({ notices }: { notices: WatchNotification[] | undefined }) {
               {notice.body && <p className="break-words text-ui-sm text-muted">{notice.body}</p>}
               <ul aria-label="Delivery" className="flex min-w-0 flex-col gap-0.5">
                 {notice.deliveries.map((delivery) => (
-                  <li key={`${delivery.channel}-${delivery.at}`} className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
+                  <li key={`${delivery.channel}-${delivery.run_id ?? ''}-${delivery.at}`} className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
                     <StatusDot tone={deliveryTone(delivery)} />
                     <span className="min-w-0 break-words">{deliveryText(delivery)}</span>
                   </li>

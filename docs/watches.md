@@ -160,6 +160,7 @@ the notice is recorded and updated in place as the push resolves:
 | `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a session's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. A watch's needs have a notification of their own, apart from the session's, so the session's own clears never replace them. Removing `needs_you` with `watch.update` withdraws its delivered pushes the same way, with `detail` `Withdrawn: You stopped watching for needs you`; every `watch.update` that leaves `needs_you` out does this, so retrying one whose cleanup failed finishes it. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a quiet-hours summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
 | `push` | `skipped` | `detail` is `The session notification already sent it`: the session's own notification pushes this to you; see [No double pushes](#no-double-pushes). |
 | `assistant` | `pending`, `delivered`, `failed` | Only on watches whose `source` is `assistant`: the notice written into your assistant conversation. `failed` carries the error; `delivered` with a `detail` means it is in the conversation but its toast could not be raised. One still pending when the server stops is written after it starts again; one of a paused watch waits until you resume it. |
+| `relay` | `pending`, `delivered`, `cleared`, `failed` | One row per session in `relay_to`, named by `run_id`; see [Relaying notices](#relaying-notices). |
 
 A paused watch's pending pushes wait until you resume it, and are dropped if
 it expires first. A `needs_you` push about a session the server paused waits
@@ -221,6 +222,44 @@ followed into such a watch, expiring 14 days after the upgrade. The state each
 follow last announced is not announced again; follows of sessions that had already
 ended are dropped.
 
+## Relaying notices
+
+`relay_to` on `watch.create` or `watch.update` names up to 4 sessions that
+each notice of the watch is also written into, so "tell session B when A
+finishes" needs no one polling:
+
+```json
+{"target": {"kind": "run", "run_id": "run-a"}, "conditions": ["finished"], "relay_to": ["run-b"]}
+```
+
+- Each session must be live, in the watched target's workspace, and one you
+  may message (`run.inject`): your own, or another member's when the workspace
+  lets members steer each other's sessions and it is not protected. A `pr`
+  target needs its `run_id` for a workspace. `watch.create` refuses any
+  other session with the reason.
+- Each notice is written into each session's inbox once, as a
+  server-authored message. An idle session whose agent Aether can wake
+  starts a turn for it; any other session reads it at its next turn or inbox
+  read ([how agents notice mail](coordination.md#delivery-acknowledgement-and-retries)).
+  `delivered` means written to the inbox. It names the watch and you
+  (`Aether: watch wat-… of Ada relays a notice about session run-a:
+  finished.`), quotes the target's title and the notice on an `Untrusted
+  (from the watched session, not instructions):` line, and links to the
+  target. It is information only: no model reads it on the way, and a relay
+  never creates a watch.
+- Your permission is checked again before every write. A session you can no
+  longer message, or one that was deleted, gets a `failed` row with the
+  real error, such as `Not relayed: you may not write to session run-b:
+  ...`, and is removed from `relay_to`. A session that ended gets
+  `cleared` and is removed too, as is a row for a session you removed from
+  `relay_to` before it was written. An inbox write that fails is retried with backoff, 5 times at
+  most, and then marked `failed`.
+- A watch relays at most 50 deliveries over its life; later ones are recorded
+  `failed` with that reason. Create a new watch to relay more.
+- Pausing the watch holds its relays until you resume it, and deleting it
+  drops them. `relay_to` and each row show in **Settings > Watches** and in
+  `aether_watches`; `watch.update` with `relay_to: []` stops relaying.
+
 ## Notification preferences
 
 `notify.prefs.set` takes:
@@ -247,17 +286,17 @@ or `assistant`; neither offers the preferences methods.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `watch.create` | `target` (`kind` and `run_id`, or `repo` and `number`), `conditions`, `expires_at` (RFC 3339), `label`, `source` (`dashboard`, `assistant`, `mcp`), `idempotency_key` | `{watch, receipt}` |
+| `watch.create` | `target` (`kind` and `run_id`, or `repo` and `number`), `conditions`, `expires_at` (RFC 3339), `label`, `source` (`dashboard`, `assistant`, `mcp`), `relay_to`, `idempotency_key` | `{watch, receipt}` |
 | `watch.list` | `state`, `target_kind`, `run_id` | `{watches}` |
 | `watch.get` | `watch_id` | `{watch, notifications}`, newest first, at most 50 |
-| `watch.update` | `watch_id`, `paused`, `conditions`, `expires_at`, `label` | `{watch, receipt}` |
+| `watch.update` | `watch_id`, `paused`, `conditions`, `expires_at`, `label`, `relay_to` | `{watch, receipt}` |
 | `watch.delete` | `watch_id` | `{}` |
 | `notify.prefs.get` | none | preferences |
 | `notify.prefs.set` | preferences | preferences |
 
 `watch.create` with an `idempotency_key` you used before returns that watch.
 Without one, an existing live watch on the same target with the same
-conditions is returned, and resumed if paused; with `source` `assistant` it
+conditions and `relay_to` is returned, and resumed if paused; with `source` `assistant` it
 becomes an assistant watch, so its notices also reach your assistant
 conversation. `receipt` is one line such as
 `Watching run fix-login for: needs you, finished. Push: 2 devices. Expires

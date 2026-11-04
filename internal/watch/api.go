@@ -205,12 +205,16 @@ func (s *Service) create(ctx context.Context, memberID domain.MemberID, p protoc
 	if err != nil {
 		return protocol.WatchResult{}, err
 	}
+	relay, err := s.relayTargets(ctx, member, ws, p.RelayTo)
+	if err != nil {
+		return protocol.WatchResult{}, err
+	}
 	w := &store.Watch{
 		MemberID: memberID, WorkspaceID: ws, TargetKind: p.Target.Kind, RunID: domain.RunID(p.Target.RunID),
 		Repo: p.Target.Repo, Number: p.Target.Number,
 		TargetTitle: title, Conditions: conditions, Label: lbl, Source: source, State: protocol.WatchActive,
 		Fired: fired, IdempotencyKey: p.IdempotencyKey, CreatedAt: now, UpdatedAt: now, ExpiresAt: expires,
-		NextCheckAt: &now,
+		NextCheckAt: &now, RelayTo: relay,
 	}
 	if p.Target.Kind == protocol.WatchTargetPR || len(prConditionsOf(conditions)) > 0 {
 		prTitle, verr := s.pr.Validate(ctx, memberID, p.Target)
@@ -244,7 +248,7 @@ func (s *Service) create(ctx context.Context, memberID domain.MemberID, p protoc
 
 // insert stores w unless member already has it: the watch with the same
 // idempotency key, or without a key, a live watch on the same target with
-// the same conditions, resumed if it was paused and given w's assistant
+// the same conditions and relay_to, resumed if it was paused and given w's assistant
 // source if w has it. It reports whether w is new, and otherwise replaces
 // *w with the existing watch.
 func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
@@ -262,7 +266,7 @@ func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
 	}
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
-	found, err := s.existing(ctx, w.MemberID, targetOf(w), w.Conditions, w.Source)
+	found, err := s.existing(ctx, w.MemberID, targetOf(w), w.Conditions, w.RelayTo, w.Source)
 	if err != nil {
 		return false, err
 	}
@@ -273,18 +277,18 @@ func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
 	return true, s.store.CreateWatch(ctx, w)
 }
 
-// existing is member's live watch on target with conditions, resumed if it
+// existing is member's live watch on target with conditions and relay, resumed if it
 // was paused, or nil. A request from the assistant makes the watch an
 // assistant watch, since only those write their notices into the assistant
 // conversation; push delivery is unchanged.
-func (s *Service) existing(ctx context.Context, member domain.MemberID, t protocol.WatchTarget, conditions []string, source string) (*store.Watch, error) {
+func (s *Service) existing(ctx context.Context, member domain.MemberID, t protocol.WatchTarget, conditions []string, relay []domain.RunID, source string) (*store.Watch, error) {
 	for range 4 {
 		watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: t.Kind, RunID: domain.RunID(t.RunID)})
 		if err != nil {
 			return nil, err
 		}
 		i := slices.IndexFunc(watches, func(w *store.Watch) bool {
-			return targetOf(w) == t && slices.Equal(w.Conditions, conditions) &&
+			return targetOf(w) == t && slices.Equal(w.Conditions, conditions) && slices.Equal(w.RelayTo, relay) &&
 				w.State != protocol.WatchDone && w.State != protocol.WatchExpired
 		})
 		if i < 0 {
@@ -379,6 +383,13 @@ func (s *Service) receipt(ctx context.Context, w *store.Watch) (string, error) {
 	case protocol.WatchExpired:
 		line = fmt.Sprintf("Expired: %s %s is no longer watched.", kindWords[w.TargetKind], w.TargetTitle)
 	}
+	if len(w.RelayTo) > 0 && w.State != protocol.WatchDone && w.State != protocol.WatchExpired {
+		ids := make([]string, 0, len(w.RelayTo))
+		for _, run := range w.RelayTo {
+			ids = append(ids, string(run))
+		}
+		line += " Relays each notice to " + strings.Join(ids, ", ") + "."
+	}
 	prefs, err := s.store.GetNotifyPrefs(ctx, w.MemberID)
 	if err != nil {
 		return "", err
@@ -429,6 +440,9 @@ func (s *Service) toProto(ctx context.Context, w *store.Watch) (protocol.Watch, 
 		Source: w.Source, CreatedAt: stamp(&w.CreatedAt), UpdatedAt: stamp(&w.UpdatedAt), ExpiresAt: stamp(&w.ExpiresAt),
 		LastCheckAt: stamp(w.LastCheckAt), NextCheckAt: stamp(w.NextCheckAt), Link: WatchLink(w.ID),
 	}
+	for _, run := range w.RelayTo {
+		out.RelayTo = append(out.RelayTo, string(run))
+	}
 	if err := json.Unmarshal(w.Observed, &out.Observed); err != nil {
 		return protocol.Watch{}, fmt.Errorf("watch %s observed: %w", w.ID, err)
 	}
@@ -449,7 +463,7 @@ func notificationProto(n *store.WatchNotification) protocol.WatchNotification {
 		CreatedAt: stamp(&n.CreatedAt), Deliveries: make([]protocol.WatchDelivery, 0, len(n.Deliveries)),
 	}
 	for _, d := range n.Deliveries {
-		out.Deliveries = append(out.Deliveries, protocol.WatchDelivery{Channel: d.Channel, Status: d.Status, Detail: d.Detail, At: stamp(&d.At)})
+		out.Deliveries = append(out.Deliveries, protocol.WatchDelivery{Channel: d.Channel, Status: d.Status, Detail: d.Detail, At: stamp(&d.At), RunID: string(d.RunID)})
 	}
 	return out
 }
@@ -538,6 +552,15 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 		}
 		if p.Label != nil {
 			if w.Label, err = label(*p.Label); err != nil {
+				return protocol.WatchResult{}, err
+			}
+		}
+		if p.RelayTo != nil {
+			m, merr := s.store.GetMember(ctx, member)
+			if merr != nil {
+				return protocol.WatchResult{}, merr
+			}
+			if w.RelayTo, err = s.relayTargets(ctx, m, w.WorkspaceID, *p.RelayTo); err != nil {
 				return protocol.WatchResult{}, err
 			}
 		}

@@ -265,7 +265,7 @@ The connector has these tools and no others:
 | `aether_pause_session`, `aether_resume_session`, `aether_mark_reviewed` | Pause or resume a session; accept a reported success, which closes the session, put it off, or say the work is not finished | `write` |
 | `aether_session_lifecycle` | Relaunch a stopped session, protect or unprotect it, archive or restore it | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
-| `aether_watch`, `aether_unwatch` | Watch a session (`run_id`) or pull request (`pr`: `owner/name#7` or its GitHub URL) for `conditions`, or with `watch_id` change its conditions or `expires_at`, or pause or resume it; delete a watch and its notices | `write` |
+| `aether_watch`, `aether_unwatch` | Watch a session (`run_id`) or pull request (`pr`: `owner/name#7` or its GitHub URL) for `conditions`, optionally relaying each notice into up to 4 sessions (`relay_to`), or with `watch_id` change its conditions, `relay_to` or `expires_at`, or pause or resume it; delete a watch and its notices | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
 | `aether_stop_session` | Stop a session, or with `outcome` close it as merged or abandoned | `control` |
 | `aether_switch_session_mode` | Switch a live session to Standard or Enhanced, discarding the turn in progress | `control` |
@@ -537,9 +537,12 @@ A condition the target does not take, or `deployed`, fails with the server's
 error, which names the conditions to use
 ([watches.md](watches.md#targets-and-conditions)). `expires_at` is an RFC 3339
 time at most 90 days ahead; without it a watch expires after 14 days.
+`relay_to` lists session ids each notice is written into, as
+[Relaying notices](watches.md#relaying-notices) describes; `[]` with
+`watch_id` stops relaying.
 `aether_watch` takes no idempotency key: creating a watch the server already
-has live, the same target and conditions, returns that watch and resumes it if
-paused. Its result holds the watch's `state` and the server's one-line
+has live, the same target, conditions and `relay_to`, returns that watch and
+resumes it if paused. Its result holds the watch's `state` and the server's one-line
 `receipt` under `untrusted`, since it carries the target's title; only
 `active` means it is watching. Its links open the watch in **Settings →
 Watches**. `aether_watches` lists the newest 50 watches and says how many

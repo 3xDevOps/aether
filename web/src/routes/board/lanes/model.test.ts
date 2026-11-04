@@ -2,6 +2,7 @@ import type { StateContext } from '@/lib/needs-you'
 import type { Event, Run } from '@/lib/types'
 import { agoLabel, tickStep, ticks, widerWindow, windowSpan } from '@/routes/board/lanes/axis'
 import { laneEdges, mailOf, type LaneEdge } from '@/routes/board/lanes/edges'
+import { addLiveMail, liveMailCap, liveShapes, type Arrival } from '@/routes/board/lanes/live-mail'
 import { bundleWords, conversationWords, conversationsByLane, mailMarks } from '@/routes/board/lanes/mail'
 import { buildLanes, layoutLanes, fineMetrics, type LanesInput, type FamilyLane, type RunLane } from '@/routes/board/lanes/model'
 import { runSegments, segmentTone, statusChanges, strongest } from '@/routes/board/lanes/segments'
@@ -318,5 +319,35 @@ describe('mail', () => {
     expect(talks.get('a')!.map((c) => [c.lane, c.run, c.sent, c.unacked])).toEqual([['fold', 'run-y', 2, 1], ['fold', 'run-x', 1, 0]])
     expect(talks.get('fold')!.map((c) => [c.run, c.received])).toEqual([['run-a', 3]])
     expect(bundleWords(folded, (c) => c.run, '11:58')).toBe('3 messages from run-a to run-x, run-y · 11:58 · 1 not acknowledged')
+  })
+})
+
+describe('live mail', () => {
+  const arrival = (from: string, to: string, i: number): Arrival => ({ from: { lane: from, run: from }, to: { lane: to, run: to }, t: now - 1000 + i, at: i })
+
+  it('merges a burst on one pair into one arrow and keeps only the newest pairs past the cap', () => {
+    const burst = [arrival('a', 'b', 0), arrival('a', 'b', 1), arrival('c', 'd', 2), arrival('e', 'f', 3), arrival('g', 'h', 4), arrival('a', 'b', 5)]
+    const live = addLiveMail([], burst)
+    expect(live).toHaveLength(liveMailCap)
+    expect(live.map((arrow) => [arrow.pair, arrow.count])).toEqual([['e>f', 1], ['g>h', 1], ['a>b', 1]])
+    expect(new Set(live.map((arrow) => arrow.slot)).size).toBe(liveMailCap)
+  })
+
+  it('points at the scrolled-away end and stubs mail with a session outside the view', () => {
+    const g = { window: { start: now - 60 * min, end: now }, width: 600, labelWidth: 240, compact: false, metrics: fineMetrics }
+    const anchors = new Map([['a', { top: 0, height: 36, half: 12 }], ['b', { top: 720, height: 36, half: 12 }]])
+    const drawn = new Map([['a', 'a'], ['b', 'b']])
+    const [down, out] = liveShapes(addLiveMail([], [arrival('a', 'b', 0), { ...arrival('a', '', 1), to: { lane: '', run: 'elsewhere' } }]), drawn, anchors, g, { top: 0, bottom: 400 }, now)
+    expect(down.offscreen).toEqual({ end: 'to', edge: 'bottom' })
+    expect(down.y2).toBeGreaterThan(down.y1)
+    expect([down.x, down.bow]).toEqual([g.width - 28, 56])
+    expect([out.stub, out.offscreen]).toEqual(['out', undefined])
+    expect([out.x, out.bow]).toEqual([g.width - 28 - 16, 0])
+    const [adjacent] = liveShapes(addLiveMail([], [arrival('a', 'b', 0)]), drawn, new Map([['a', { top: 0, height: 36, half: 12 }], ['b', { top: 36, height: 36, half: 12 }]]), g, { top: 0, bottom: 400 }, now)
+    expect(adjacent.bow).toBe(0)
+    const [up, stub] = liveShapes(addLiveMail([], [arrival('b', 'a', 0), { ...arrival('', 'a', 1), from: { lane: '', run: 'elsewhere' } }]), drawn, anchors, g, { top: 600, bottom: 1000 }, now)
+    expect(up.offscreen).toEqual({ end: 'to', edge: 'top' })
+    expect([stub.stub, stub.offscreen]).toEqual(['in', { end: 'to', edge: 'top' }])
+    expect(liveShapes(addLiveMail([], [arrival('a', 'b', 0)]), drawn, anchors, { ...g, window: { start: now - 120 * min, end: now - 60 * min } }, { top: 0, bottom: 400 }, now)).toEqual([])
   })
 })

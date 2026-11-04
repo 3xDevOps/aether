@@ -80,7 +80,7 @@ func (d *DB) loadWatchDeliveries(ctx context.Context, notes []*WatchNotification
 		args = append(args, n.ID)
 	}
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT notification_id, channel, status, detail, at FROM watch_deliveries
+		`SELECT notification_id, channel, status, detail, at, run_id FROM watch_deliveries
 		 WHERE notification_id IN (?`+strings.Repeat(", ?", len(args)-1)+`) ORDER BY id`, args...)
 	if err != nil {
 		return fmt.Errorf("store: list watch deliveries: %w", err)
@@ -92,7 +92,7 @@ func (d *DB) loadWatchDeliveries(ctx context.Context, notes []*WatchNotification
 			del WatchDelivery
 			at  int64
 		)
-		if err := rows.Scan(&id, &del.Channel, &del.Status, &del.Detail, &at); err != nil {
+		if err := rows.Scan(&id, &del.Channel, &del.Status, &del.Detail, &at, &del.RunID); err != nil {
 			return fmt.Errorf("store: list watch deliveries: %w", err)
 		}
 		del.At = decodeTime(at)

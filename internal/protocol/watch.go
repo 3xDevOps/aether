@@ -11,6 +11,8 @@ const (
 	MethodNotifyPrefsGet  = "notify.prefs.get"
 	MethodNotifyPrefsSet  = "notify.prefs.set"
 	WatchNotificationsMax = 50
+	// WatchRelayMax bounds a watch's relay_to.
+	WatchRelayMax = 4
 )
 
 const (
@@ -49,6 +51,9 @@ const (
 	// WatchChannelAssistant writes the notices of a watch the assistant
 	// created into the owner's assistant conversation.
 	WatchChannelAssistant = "assistant"
+	// WatchChannelRelay writes a notice into a session the watch relays
+	// to; each row names that session.
+	WatchChannelRelay = "relay"
 
 	// WatchStatusPending is a push still to be sent: being sent, waiting
 	// for the member to leave a dashboard, or waiting for a retry.
@@ -125,6 +130,7 @@ type Watch struct {
 	Observed         WatchObserved      `json:"observed"`
 	LastNotification *WatchNotification `json:"last_notification,omitempty"`
 	Link             string             `json:"link"`
+	RelayTo          []string           `json:"relay_to,omitempty"`
 }
 
 type WatchDelivery struct {
@@ -132,6 +138,8 @@ type WatchDelivery struct {
 	Status  string `json:"status"`
 	Detail  string `json:"detail,omitempty"`
 	At      string `json:"at"`
+	// RunID is the session a relay row writes to.
+	RunID string `json:"run_id,omitempty"`
 }
 
 type WatchNotification struct {
@@ -152,6 +160,9 @@ type WatchCreateParams struct {
 	Label          string      `json:"label,omitempty"`
 	Source         string      `json:"source,omitempty"`
 	IdempotencyKey string      `json:"idempotency_key,omitempty"`
+	// RelayTo names up to WatchRelayMax sessions each notice is written
+	// into.
+	RelayTo []string `json:"relay_to,omitempty"`
 }
 
 // WatchResult carries the watch and one human line saying what it watches
@@ -188,6 +199,9 @@ type WatchUpdateParams struct {
 	Conditions []string `json:"conditions,omitempty"`
 	ExpiresAt  string   `json:"expires_at,omitempty"`
 	Label      *string  `json:"label,omitempty"`
+	// RelayTo replaces the sessions notices are relayed to; an empty list
+	// stops relaying.
+	RelayTo *[]string `json:"relay_to,omitempty"`
 }
 
 type QuietHours struct {

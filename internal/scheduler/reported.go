@@ -31,7 +31,24 @@ const (
 	needsInputReasonPrefix        = domain.NeedsInputReasonPrefix
 	exitedCompletedReason         = "agent exited; results committed"
 	exitedFailedReasonPrefix      = "agent exited "
+	evidenceUnavailableReason     = "evidence unavailable: session checkout missing"
 )
+
+// withoutEvidenceUnavailable strips the evidence-unavailable note so the
+// retention reasons below still match exactly.
+func withoutEvidenceUnavailable(reason string) (string, bool) {
+	if reason == evidenceUnavailableReason {
+		return "", true
+	}
+	return strings.CutSuffix(reason, "; "+evidenceUnavailableReason)
+}
+
+func withEvidenceUnavailable(reason string) string {
+	if reason == "" {
+		return evidenceUnavailableReason
+	}
+	return reason + "; " + evidenceUnavailableReason
+}
 
 // closeSpec is what ending a run through closeRun records.
 type closeSpec struct {
@@ -69,6 +86,7 @@ func reportedClose(outcome domain.RunStatus) closeSpec {
 // retainedReason reports whether a terminal row promises a retained,
 // relaunchable container.
 func retainedReason(status domain.RunStatus, reason string) bool {
+	reason, _ = withoutEvidenceUnavailable(reason)
 	switch status {
 	case domain.RunMerged, domain.RunAbandoned:
 		return reason == retainedCloseReason
@@ -89,16 +107,23 @@ func retentionValid(mode domain.LaunchMode, status domain.RunStatus, reason stri
 // releasedReason is the reason a retained run keeps once its container is
 // gone, and whether the row needs it.
 func releasedReason(status domain.RunStatus, reason, closed string) (string, bool) {
+	reason, unavailable := withoutEvidenceUnavailable(reason)
+	var released string
 	switch {
 	case status == domain.RunCompleted && reason == reportedSuccessRetainedReason:
-		return reportedSuccessReason, true
+		released = reportedSuccessReason
 	case status == domain.RunFailed && reason == reportedFailureRetainedReason:
-		return reportedFailureReason, true
+		released = reportedFailureReason
 	case status == domain.RunMerged || status == domain.RunAbandoned ||
 		(status == domain.RunCompleted && reason == retainedCloseReason):
-		return closed, true
+		released = closed
+	default:
+		return "", false
 	}
-	return "", false
+	if unavailable {
+		released = withEvidenceUnavailable(released)
+	}
+	return released, true
 }
 
 // relabelLocked rewrites a terminal run's reason without changing its status.
@@ -351,8 +376,9 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	if !r.Status.Terminal() {
 		return fmt.Errorf("scheduler: finish reported session %s: the session is %s and has no live container yet", run, r.Status)
 	}
-	exited := (r.Status == domain.RunCompleted && r.Reason == exitedCompletedReason) ||
-		(r.Status == domain.RunFailed && strings.HasPrefix(r.Reason, exitedFailedReasonPrefix))
+	base, unavailable := withoutEvidenceUnavailable(r.Reason)
+	exited := (r.Status == domain.RunCompleted && base == exitedCompletedReason) ||
+		(r.Status == domain.RunFailed && strings.HasPrefix(base, exitedFailedReasonPrefix))
 	if !exited {
 		return nil
 	}
@@ -368,7 +394,11 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 			return nil
 		}
 	}
-	reason := publicRunStatusReason(reportedClose(outcome).reason)
+	reason := reportedClose(outcome).reason
+	if unavailable {
+		reason = withEvidenceUnavailable(reason)
+	}
+	reason = publicRunStatusReason(reason)
 	stamp, writeErr := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, "", nil, nil)
 	if writeErr != nil {
 		return fmt.Errorf("scheduler: finish reported session %s over its exit: %w", run, writeErr)

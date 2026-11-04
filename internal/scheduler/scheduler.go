@@ -237,8 +237,11 @@ type Scheduler struct {
 	assistantLoginLocks   map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
-	titleMu               sync.Mutex
-	titleUpdates          map[domain.RunID]*pendingRunTitle
+	// evidenceUnavailable holds active runs whose capture found the checkout
+	// gone, for the reason they are interrupted with. Guarded by mu.
+	evidenceUnavailable map[domain.RunID]struct{}
+	titleMu             sync.Mutex
+	titleUpdates        map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
 	// waits is nil when runs register no wait conditions.
@@ -292,6 +295,14 @@ type credentialUserReservation struct {
 // always wins: a reservation that only mounts a login from home never blocks
 // a container whose home it is, while the owner's live containers and other
 // runs on the same login block a run on that login with another mapping.
+// holder names the reservation's owner in a conflict; the caller holds s.mu.
+func (r *credentialUserReservation) holder() string {
+	if r.run != nil && r.run.destroyPending {
+		return "session " + string(r.run.runID) + " (cleanup pending)"
+	}
+	return r.owner
+}
+
 func (r *credentialUserReservation) blocks(home, login domain.MemberID, user string) bool {
 	if r.user == user {
 		return false
@@ -465,6 +476,10 @@ type supervised struct {
 	relaunchedAt time.Time
 	// sessionLostAt is when the agent last lost the run's Enhanced session.
 	sessionLostAt time.Time
+	// authLostAt is when the agent last refused a turn for want of a sign-in,
+	// and authRefused that refusal until the restarted session shows it.
+	authLostAt  time.Time
+	authRefused error
 	// usageLimit is the agent's usage-limit message its headless output
 	// carried, and accountSwap the move to another account in progress.
 	usageLimit  string
