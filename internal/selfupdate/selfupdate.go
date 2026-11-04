@@ -181,8 +181,8 @@ func swapAside(tmp, dst string) (string, error) {
 	return old, err
 }
 
-// swapOnce is one attempt of swapAside. again reports a failure undone with
-// dst restored, which is safe to try again.
+// swapOnce is one attempt of swapAside. again reports a failure that left
+// dst in place, which is safe to try again.
 func swapOnce(tmp, dst string) (old string, again bool, err error) {
 	old = oldPath(dst)
 	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -190,7 +190,7 @@ func swapOnce(tmp, dst string) (old string, again bool, err error) {
 	}
 	if err := os.Rename(dst, old); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			return "", false, err
+			return "", true, err
 		}
 		err := os.Rename(tmp, dst)
 		return "", err != nil && !errors.Is(err, fs.ErrNotExist), err
