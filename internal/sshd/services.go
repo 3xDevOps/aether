@@ -64,4 +64,6 @@ type Services struct {
 	Watches WatchService
 	// Preferences keeps each member's private assistant preferences.
 	Preferences PreferenceService
+	// Dictation transcribes recorded clips.
+	Dictation DictationService
 }

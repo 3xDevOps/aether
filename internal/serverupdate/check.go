@@ -129,7 +129,7 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	if s.checkRuns.Load() != asked {
 		return s.check
 	}
-	defer s.checkRuns.Add(1)
+	s.checkRuns.Add(1)
 	m, err := s.releases().Latest(ctx)
 	now := s.cfg.Now().UTC()
 	st := s.check

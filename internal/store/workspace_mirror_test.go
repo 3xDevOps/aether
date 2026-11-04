@@ -311,7 +311,7 @@ func TestWorkspaceMirrorMigrationFromV24(t *testing.T) {
 }
 
 func TestGitHubMirrorBindingPersistenceAndRebind(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "aether.db")
+	path := templateDBPath(t)
 	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)

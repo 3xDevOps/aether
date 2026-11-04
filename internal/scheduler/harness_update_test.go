@@ -127,6 +127,29 @@ func newUpdateEnv(t *testing.T, mutate func(*Config)) (*testEnv, *updateRuntime,
 		}
 	})
 	e.rt = rt.fakeRuntime
+	// The updater goroutine outlives the timeline note a test waits for and
+	// then releases the member's cache; a test that ends first races that
+	// write against removing its temporary directories.
+	t.Cleanup(func() {
+		rt.mu.Lock()
+		if rt.release != nil {
+			close(rt.release)
+			rt.release = nil
+		}
+		rt.mu.Unlock()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			info, err := e.cfg.Homes.ReadCache(e.member.ID, "terminal")
+			if err != nil || !slices.ContainsFunc(info.Owners, func(o string) bool { return strings.HasPrefix(o, "harness-update-") }) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("an updater still holds the member's cache: %v", info.Owners)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
 	return e, rt, clock
 }
 

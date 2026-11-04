@@ -23,14 +23,11 @@ while :; do sleep 1; done`
 
 async function openDock(page: Page, url: string): Promise<Locator> {
   await page.goto(url)
-  const tabs = page.getByRole('navigation', { name: 'Main navigation' })
-  const desktop = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
-  await expect(tabs.or(desktop)).toBeVisible()
-  if (await tabs.isVisible()) {
-    await tabs.getByRole('button', { name: 'Sessions' }).click()
+  if (page.viewportSize()!.width < 768) {
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).click()
     await page.getByRole('main').getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   } else {
-    await desktop.getByRole('button', { name: /development terminal acceptance/ }).click()
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   }
   await showShell(page, /agent-tui/)
   const dock = page.locator('[data-slot=shell-terminal]')

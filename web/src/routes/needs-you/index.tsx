@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { toast } from 'sonner'
 import { DecisionButtons } from '@/components/decision-buttons'
 import { SysboxNudge } from '@/components/sysbox-nudge'
@@ -25,8 +26,11 @@ import { useDelayed } from '@/lib/hooks'
 import { redirectRoute } from '@/lib/url-state'
 import { memberName } from '@/lib/member-name'
 import { needsYouConditions } from '@/lib/needs-you'
+import { groupOf, presentRun } from '@/lib/status'
 import type { AttentionItem, RoomPostResult, RunInputRespondResult } from '@/lib/types'
 import { targetRoute } from '@/routes/board/card-action'
+import { runRoute } from '@/routes/run/views'
+import { ProposalsReadError } from '@/routes/members/sign-ins'
 import { asking, finished, refreshAttention, useAccountNeeds, useAttention, useAttentionFeed, useAttentionSupported } from '@/routes/needs-you/attention'
 import { DeviceCard } from '@/routes/board/device-card'
 import { MergeProposalCard } from '@/routes/board/merge-card'
@@ -34,6 +38,7 @@ import { registerRoute } from '@/routes/registry'
 import { choicePlan } from '@/routes/run/request-options'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
 import { useStore } from '@/store'
+import { stateContextOf } from '@/store/selectors'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 const tones: Partial<Record<AttentionItem['kind'], Tone>> = { failed: 'failed', disconnected: 'disconnected', ready: 'review' }
@@ -51,14 +56,18 @@ function settle(result: RunInputRespondResult) {
   void refreshAttention()
 }
 
-/** Whether the server took the reply; one not sent or uncertain keeps its draft for a retry. */
-function settleMessage(result: RoomPostResult): boolean {
-  const label = `Reply ${deliveryLabel(result).toLowerCase()}`
-  const unconfirmed = result.receipt === 'not_sent' || result.receipt === 'uncertain' || ['not_sent', 'uncertain', 'denied'].includes(result.message.state)
-  if (unconfirmed) toast.error(label)
-  else toast.success(label)
+/**
+ * Whether the server took the reply. A refused one keeps its draft under a fresh key so a resend
+ * tries again; an uncertain one keeps its key so a resend cannot deliver it twice.
+ */
+function settleMessage(result: RoomPostResult): { outcome: 'taken' | 'refused' | 'uncertain'; label: string } {
+  const reason = result.message.failure?.message
+  const label = `Reply ${deliveryLabel(result).toLowerCase()}${reason ? `: ${reason}` : ''}`
   void refreshAttention()
-  return !unconfirmed
+  if (result.receipt === 'uncertain' || result.message.state === 'uncertain') return { outcome: 'uncertain', label }
+  if (result.receipt === 'not_sent' || result.message.state === 'not_sent' || result.message.state === 'denied') return { outcome: 'refused', label }
+  toast.success(label)
+  return { outcome: 'taken', label }
 }
 
 /** Approve and Deny answer this request by id, so a tap that lands after it changed decides nothing else. */
@@ -78,7 +87,12 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
   const [answered, setAnswered] = useState(false)
   const { allow, deny } = decisionOptions(item)!
   const request = item.request!
-  const open = useOpen(item)
+  const navigate = useStore((s) => s.navigate)
+  // The permission's preview is in the session view, whatever tab the session last showed.
+  const review = () => {
+    const route = runRoute(item.run_id, 'session')
+    navigate(route.name, route.params)
+  }
   const decide = async (approve: boolean) => {
     onError(undefined)
     try {
@@ -94,7 +108,7 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
     return (
       <div className="grid grid-cols-2 gap-2">
         <RequestAction label="Deny" onClick={() => void decide(false)} />
-        <RequestAction label="Review" variant="primary" onClick={open} />
+        <RequestAction label="Review" variant="primary" onClick={review} />
       </div>
     )
   }
@@ -177,13 +191,13 @@ function Reply({ item, onError }: { item: AttentionItem; onError: (error?: strin
     setSending(true)
     onError(undefined)
     try {
-      const taken = settleMessage(item.message
+      const { outcome, label } = settleMessage(item.message
         ? await api.runRoomPost({ workspace_id: item.workspace_id, run_id: item.run_id, kind: 'reply', body: text, correlation_id: item.message.id, idempotency_key: key })
         : await api.runInject(item.run_id, text, key))
-      if (taken) {
-        setSent(null)
-        setBody((current) => (current.trim() === text ? '' : current))
-      }
+      // On the card, not a toast: the keyboard stays up over a toast while the field keeps focus.
+      if (outcome !== 'taken') onError(label)
+      if (outcome !== 'uncertain') setSent(null)
+      if (outcome === 'taken') setBody((current) => (current.trim() === text ? '' : current))
     } catch (err) {
       onError(`Send failed: ${message(err)}`)
     } finally {
@@ -245,7 +259,9 @@ function AttentionCard({ item }: { item: AttentionItem }) {
   const action = run && condition?.action(run)
   const viewer = useStore((s) => s.info?.member.id)
   // run.input.respond refuses while another member holds control: the request is theirs.
-  const holder = run?.controller_member_id && run.controller_member_id !== viewer ? run.controller_member_id : undefined
+  // A sudo request is answered by the owner or an admin whoever holds control.
+  const sudo = item.request?.id.startsWith('sudo-') === true
+  const holder = !sudo && run?.controller_member_id && run.controller_member_id !== viewer ? run.controller_member_id : undefined
   const holderName = useStore((s) => (holder ? memberName(s, holder) : undefined))
   const answers = item.kind === 'permission' || item.kind === 'question'
   const Inline = holder && answers ? undefined : inline(item, action?.kind === 'reply')
@@ -302,6 +318,36 @@ function FinishedRow({ item }: { item: AttentionItem }) {
   )
 }
 
+/** While the page shows a saved snapshot, the sessions it says need you; answering waits for the server. */
+function SavedNeeds() {
+  const runs = useStore(useShallow((s) => {
+    const ctx = stateContextOf(s, Date.now())
+    return Object.values(s.runs).filter((run) => groupOf(presentRun(run, ctx)) === 'needs-you')
+  }))
+  const navigate = useStore((s) => s.navigate)
+  if (runs.length === 0) return null
+  return (
+    <section aria-label="Saved: needs you" className="mb-3">
+      <p className="mb-2 text-ui-sm text-muted">Saved before the connection dropped. Reconnect to answer.</p>
+      <ul>
+        {runs.map((run) => (
+          <li key={run.id}>
+            <ListRow
+              leading={<StatusDot tone="needs-you" />}
+              onClick={() => {
+                const route = runRoute(run.id)
+                navigate(route.name, route.params)
+              }}
+            >
+              {run.title || run.task}
+            </ListRow>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 /** A phone's shell keeps the list in step; a wider window reached by link does it here. */
 function Feed() {
   useAttentionFeed()
@@ -324,14 +370,19 @@ function NeedsYou() {
   const asks = items ? asking(items) : []
   const done = items ? finished(items) : []
   const { devices, merges } = useAccountNeeds()
-  const loading = useDelayed(items === null && !error)
+  const mergeError = useStore((s) => s.mergeProposalsError)
+  const stale = useStore((s) => s.staleSince !== null)
+  // While saved data shows, the banner's own error already says the server is unreachable.
+  const bannerError = useStore((s) => s.staleSince !== null && s.hydrationError !== null)
+  const loading = useDelayed(items === null && !error && !stale)
   return (
     <div className="flex h-full min-w-0 flex-col">
       {!mobile && <Feed />}
       <ViewHeader title="Needs you" />
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-[calc(1.5rem+var(--keyboard-inset,0px))]">
         <div className="mb-3 empty:hidden"><SysboxNudge /></div>
-        {error && (
+        {stale && items === null && <SavedNeeds />}
+        {error && !bannerError && (
           <Callout
             tone="failed"
             role="alert"
@@ -342,6 +393,7 @@ function NeedsYou() {
             {error}
           </Callout>
         )}
+        {mergeError && <div className="mb-3"><ProposalsReadError /></div>}
         {(merges.length > 0 || devices.length > 0) && (
           <ul aria-label="Approvals" className="mb-3 flex flex-col gap-3">
             {merges.map((proposal) => <li key={proposal.id}><MergeProposalCard proposal={proposal} /></li>)}
@@ -354,7 +406,7 @@ function NeedsYou() {
             <Skeleton className="h-32 rounded-panel" />
           </div>
         )}
-        {items && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions, devices and sign-in merges show up here.</EmptyState>}
+        {items && !mergeError && !stale && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions, devices and sign-in merges show up here.</EmptyState>}
         {asks.length > 0 && (
           <ul aria-label="Needs you" className="flex flex-col gap-3">
             {asks.map((item) => <AttentionCard key={item.run_id} item={item} />)}

@@ -199,6 +199,7 @@
   --control-light: #367f77;
   --control-dots: 100%;
   --accent-text: #306f69;
+  --focus-ring: #367f77;
   --on-accent: #ffffff;
   --selection: #dfebe9;
 
@@ -264,6 +265,7 @@
   --control-light: #4cc2b3;
   --control-dots: 70%;
   --accent-text: #5fb3a8;
+  --focus-ring: #5fb3a8;
   --on-accent: #ffffff;
   --selection: #17413d;
 
@@ -399,6 +401,7 @@
   /* `accent` is a fill for backgrounds and borders but the link colour for
      text. Tailwind reads the property namespace before `--color-*`. */
   --color-accent: var(--accent-fill);
+  --color-focus: var(--focus-ring);
   --color-accent-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
   --text-color-accent: var(--accent-text);
   --text-color-muted: var(--text-muted);

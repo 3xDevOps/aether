@@ -145,6 +145,71 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	}
 }
 
+// TestNotYetWithdrawsTheReportedSuccess: not-yet takes a ready or put-off
+// success out of review and leaves the run live and needing nobody; with no
+// success awaiting review it is refused, and a new success report asks again.
+func TestNotYetWithdrawsTheReportedSuccess(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, func(cfg *Config) { cfg.StallThreshold = time.Hour })
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	sub := e.subscribe(t)
+	if _, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewNotYet, false); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("not-yet with no reported success = %v, want ErrInvalidTransition", err)
+	}
+
+	reportSuccess := func(id string) {
+		t.Helper()
+		if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
+			t.Fatal(err)
+		}
+		e.waitStoreStatus(t, run.ID, domain.RunRunning)
+		if err := e.sched.FinishReported(ctx, run.ID, id, domain.RunCompleted, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "success ready for review", func() bool {
+			row, err := e.db.GetRun(ctx, run.ID)
+			return err == nil && row.Activity == domain.ActivityFinished && row.Review == domain.ReviewReady
+		})
+	}
+	notYet := func(from domain.RunReview) {
+		t.Helper()
+		row, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewNotYet, false)
+		if err != nil {
+			t.Fatalf("not-yet from %q = %v", from, err)
+		}
+		if p := nextReview(t, sub, run.ID); p.Review != "" {
+			t.Fatalf("not-yet event from %q = %+v, want no review", from, p)
+		}
+		if row.Review != "" || !row.Status.Live() || row.Activity != domain.ActivityFinished || row.NeedsAttention(false) {
+			t.Fatalf("after not-yet from %q = %s %s review %q, want live, finished, no review and no need", from, row.Status, row.Activity, row.Review)
+		}
+	}
+
+	reportSuccess("report-1")
+	notYet(domain.ReviewReady)
+	for _, action := range []string{protocol.RunReviewNotYet, protocol.RunReviewLater} {
+		if _, err := e.sched.Review(ctx, run.ID, e.member.ID, action, false); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("%s after not-yet = %v, want ErrInvalidTransition", action, err)
+		}
+	}
+
+	reportSuccess("report-2")
+	if _, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater, false); err != nil {
+		t.Fatal(err)
+	}
+	if p := nextReview(t, sub, run.ID); p.Review != domain.ReviewLater {
+		t.Fatalf("later event = %+v, want later", p)
+	}
+	notYet(domain.ReviewLater)
+
+	reportSuccess("report-3")
+}
+
 // TestReviewOfABackgroundSuccess: a Background run its success finished asks
 // for review; complete records the acceptance and leaves it completed.
 func TestReviewOfABackgroundSuccess(t *testing.T) {
@@ -163,6 +228,12 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if row.Review != domain.ReviewReady || !row.NeedsAttention(false) {
 		t.Fatalf("background success = review %q, want ready and needing its owner", row.Review)
+	}
+	if _, err = e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewNotYet, false); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("not-yet on a completed session = %v, want ErrInvalidTransition", err)
+	}
+	if row, err = e.db.GetRun(ctx, run.ID); err != nil || row.Review != domain.ReviewReady {
+		t.Fatalf("completed session after a refused not-yet = review %q, %v; want still ready", row.Review, err)
 	}
 	// A reportedOnly complete that reaches the close after a concurrent one
 	// completed the run is not refused: its acceptance is setReview's.

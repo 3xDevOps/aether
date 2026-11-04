@@ -95,6 +95,12 @@ func (s RunStatus) Final() bool {
 	return false
 }
 
+// Archivable reports whether a run in this status may be hidden from the
+// board: a Final disposition, or completed, which its owner accepted as done.
+func (s RunStatus) Archivable() bool {
+	return s.Final() || s == RunCompleted
+}
+
 func (s RunStatus) Valid() bool {
 	return slices.Contains(AllRunStatuses, s)
 }
@@ -794,7 +800,7 @@ type Run struct {
 	// owner and admins, regardless of the workspace's SteerOthers setting.
 	Protected bool
 	// ArchivedAt is when this run was hidden from the board; nil means it
-	// is not archived. Only a Final run can be archived. Archiving does
+	// is not archived. Only an Archivable run can be archived. Archiving does
 	// not schedule deletion.
 	ArchivedAt *time.Time
 	// OutcomeUnseen is true while a run an agent's report finished

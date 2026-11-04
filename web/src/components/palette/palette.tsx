@@ -19,7 +19,7 @@ import {
 import { runLabel, stateLabel, stateTone } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import { useStore } from '@/store'
-import { useCapability, useListedRuns, useSelf } from '@/store/hooks'
+import { useCapability, useListedRuns, useSelf, useStale } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 // Browsing shows the most urgent runs; a search reaches every run.
@@ -62,6 +62,7 @@ export function PaletteBody({
   const navigate = useStore((s) => s.navigate)
   const pausedRuns = useStore((s) => s.pausedRuns)
   const predicting = useStore((s) => s.predicting)
+  const stale = useStale()
   const cap = useCapability()
   const self = useSelf()
   const [search, setSearch] = useState('')
@@ -127,6 +128,7 @@ export function PaletteBody({
     run: focused,
     paused: pausedRuns[focused.id],
     predicting: Boolean(predicting[focused.id]),
+    stale,
     cap,
     members,
     self,

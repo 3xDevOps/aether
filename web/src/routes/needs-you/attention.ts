@@ -21,6 +21,8 @@ export const useAttention = create<Attention>(() => ({ items: null }))
 
 useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) useAttention.setState({ items: null, error: undefined, unsupported: false })
+  // A reconnect may reach an upgraded server, so it asks for the list again.
+  else if (state.connection !== previous.connection && state.connection === 'live') useAttention.setState({ unsupported: false })
 })
 
 const rank = (item: AttentionItem) => {
@@ -99,6 +101,9 @@ export function byAttention(groups: SidebarGroup[], items: AttentionItem[] | nul
   ]
 }
 
+/** A stalled read must not hold every later refresh behind it. */
+const readTimeoutMs = 15_000
+
 let fetches = 0
 let inFlight: Promise<void> | null = null
 let again = false
@@ -108,7 +113,10 @@ async function read() {
   const same = sameIdentity()
   const current = () => attempt === fetches && same()
   try {
-    const { items } = await api.attentionList()
+    const { items } = await Promise.race([
+      api.attentionList(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`attention.list: no answer in ${readTimeoutMs / 1000}s`)), readTimeoutMs)),
+    ])
     if (current()) useAttention.setState({ items, error: undefined })
   } catch (err) {
     if (!current()) return

@@ -34,7 +34,7 @@ export function Board() {
   const view = useStore((s) => s.boardViews[s.activeWorkspace] ?? 'board')
   const setView = useStore((s) => s.setBoardView)
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => s.hydrationError)
+  const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
   const { agents, error: agentsError } = useAgentList()
   const [showArchived, setShowArchived] = useState(false)
@@ -240,7 +240,7 @@ function FinishedMenu() {
         </Button>
       </MenuTrigger>
       <MenuContent align="end">
-        {canArchive && <MenuItem onSelect={() => openDialog('clear-done')}>Archive closed sessions…</MenuItem>}
+        {canArchive && <MenuItem onSelect={() => openDialog('clear-done')}>Archive finished sessions…</MenuItem>}
         {canFree && <MenuItem onSelect={() => openDialog('release-finished')}>Free retained containers…</MenuItem>}
       </MenuContent>
     </Menu>

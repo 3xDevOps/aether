@@ -106,6 +106,35 @@ Aether checks only that the sign-in file exists, not that it still works. When
 the sign-in expires or you want another account, use **Settings > Assistant >
 Sign-in > Sign in again**.
 
+### Same account as your sessions
+
+Once the first start has recorded the assistant's account, the panel's empty
+conversation and **Settings > Assistant > Sign-in** compare it with the login
+your sessions use: `~/.claude/.credentials.json` and `~/.codex/auth.json` in
+your environment's home (`assistant.account`). For Claude Code the server sends
+that file's access token to the profile endpoint the start uses and compares
+the account and organization; for Codex it reads the ChatGPT account from the
+file's token claims, with no network call. The line reads one of:
+
+- `Same Claude account as your sessions`, with the email when the profile
+  names one.
+- `Your sessions use another Claude account (account <uuid>, organization <uuid>, <email>)`,
+  or for Codex `(ChatGPT account <id>)` or `(an API key)`. Codex compares the
+  ChatGPT account only; the API key a ChatGPT login holds is its own.
+- `Can't compare: your environment's Claude token is expired. Start a session to refresh it`.
+  Codex has no such case, because its claims are read without the vendor.
+- `Can't compare with your sessions' <vendor> account: <error>`, for example
+  `your environment has no ~/.codex/auth.json`, or the profile endpoint's
+  answer.
+
+The check only reads the file. It never refreshes, writes, or locks it, and the
+refresh token stays where it is. The result is information only: it gates no
+start, and the assistant's own recorded account stays the one every start
+checks. Your sessions can rewrite the environment's login, so a match says only
+what the file holds now. A session on a
+[shared account](security.md#account-sharing) uses the owner's login instead of
+yours; the check reads yours.
+
 The first conversation uses the first ready agent, Claude Code before Codex. A
 conversation keeps its agent, because another agent cannot continue it. If that
 agent stops being ready, a prompt fails with, for example, `Claude Code is not

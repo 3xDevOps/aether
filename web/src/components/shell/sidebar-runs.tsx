@@ -6,6 +6,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { ChevronRight, Network } from '@/components/icons'
 import { CountBadge } from '@/components/ui/count-badge'
+import { ProtectedMark } from '@/components/protected-mark'
 import { ListRow } from '@/components/ui/list-row'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -80,7 +81,7 @@ export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) =>
   const listed = useSidebarGroups()
   const groups = regroup ? regroup(listed) : listed
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => s.hydrationError)
+  const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const loading = useDelayed(!hydrated && error === null && groups.length === 0)
@@ -340,6 +341,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
   ].filter(Boolean).join(' · ')
   const indicators = (
     <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
+      {run.protected && <ProtectedMark />}
       <RelativeTime at={since} compact title={undefined} />
       {childRuns && (
         <span className="flex items-center gap-0.5" title={counts}>

@@ -175,9 +175,10 @@ manifest cannot say: the status bar style, which needs
 the unprefixed `mobile-web-app-capable`. `web/public/icons/apple-touch-icon.png`
 stays because Safari prefers it over the manifest icons.
 
-A manifest carries one `theme_color` where the layout's viewport export carries
-one per colour scheme, so both read `web/src/app/theme-color.ts` and the
-manifest takes the dark value. `background_color` is the separate
+The manifest's `theme_color` and the layout's viewport `themeColor` both read
+`web/src/app/theme-color.ts` and take the dark value, the default theme;
+`ThemeEffect` switches the page's `theme-color` meta to the light value when
+the member picks light. `background_color` is the separate
 `iconBackground` from that module, `#0a0a0a`: an installed app's splash centres
 an icon on it, and any other value would leave the icon's tile showing as a
 square. That hex is deliberately darker than the dashboard's own dark
@@ -541,7 +542,10 @@ the dashboard's copy of the rule. It reads it again within 250ms of any change
 to a session's status, state, review, outcome flag, pause, requests, room
 messages and their decisions, or controller, after a reconnect, and each time
 the page opens. One read runs at a time; a change during it asks for one more.
-A different member or server clears the list. The badge counts the same list's
+A different member or server clears the list. While the page shows a saved
+snapshot and the list has not been read, Needs you lists the saved sessions the
+dashboard's own rule puts in Needs you, to open but not answer. A failed read
+shows its own error unless the saved-state banner already shows one. The badge counts the same list's
 requests, plus the devices waiting for approval and the merge proposals to the
 viewer, as the sidebar's Needs you does; their board cards (`DeviceCard`,
 `MergeProposalCard`) sit above the session cards. Cards are ranked by kind in
@@ -631,7 +635,11 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
   double click cancels once and an agent that ignores it can be stopped
   again; the call aborts after 10 seconds with `assistant.cancel got no
-  answer within 10 seconds`). An empty conversation offers four example prompts that fill the
+  answer within 10 seconds`). An empty conversation leads with
+  `AssistantAccountCheck` (`assistant.account`, shown when the server lists
+  it), the [same-account line](assistant.md#same-account-as-your-sessions),
+  which **Settings > Assistant > Sign-in** also shows under each ready agent,
+  and offers four example prompts that fill the
   composer, led by the page's own: a failed session offers **Fix this**, one that
   needs you or waits **Why is this stuck?**, one with an open pull request
   (`useOpenPullRequest`) **Review and merge when checks pass**; the board
@@ -1036,9 +1044,9 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   is what every `dvh` in the app - dialogs, the palette, selects, menus - is
   already sized against, so they all shorten when the
   keyboard opens. Nothing in the shell uses `vh`.
-- `themeColor` per `prefers-color-scheme` - the browser reads it before the
-  SPA has applied the member's stored theme, so it follows the OS scheme
-  rather than the app setting.
+- `themeColor` is the dark value, the default theme, so browser chrome matches
+  the page before the SPA mounts; `ThemeEffect` then follows the member's
+  stored theme.
 
 A layout that only changes size belongs in CSS. Layouts that mount different
 elements for a finger than for a mouse, or for a narrow window, ask
@@ -1241,6 +1249,49 @@ Removal also repairs the selection and open route before any refresh awaits.
   there is no token check: WhoIs identifies the source address on every
   request, while a tagged node is denied and an unavailable identity service
   reports its own `403` or `503` refusal.
+- **The last snapshot paints before the network answers.** After a
+  successful hydration, ten seconds after later changes and when the page is
+  hidden, `saveSnapshot` (`src/lib/snapshot-cache.ts`) writes the
+  workspaces, sessions, members, server info and capabilities to
+  `localStorage` (`aether.snapshot.v1:<origin>`; contents and deletion in
+  [privacy.md](privacy.md#what-the-app-stores-on-the-phone)). `connect`
+  calls `paintSnapshot` first, on a cold start only (a reconnect to another
+  server never repaints the last one): it fills the store, sets `hydrated` and
+  `staleSince` (the save time), and seeds `identityKey` so hydration treats a
+  different member or server as an identity change and drops the cache.
+  `hydrate` still counts a painted store as a first load (workspace
+  selection, onboarding redirect) and clears `staleSince` when it succeeds.
+  While `staleSince` is set, or a refresh failed, `StaleBanner` shows one
+  line under the top bar: *Saved state from 3 minutes ago*, then the
+  hydration error verbatim (or *reconnecting*; tap it to read it all), and
+  **Retry**, which fires
+  the `online` wake below. While it shows (a saved snapshot, or any failed refresh), the
+  toast, the empty-board "Cannot reach the server" cards and (below 768px)
+  the header connection line stay out, and the banner is the one place the
+  failure is written. On a saved snapshot, every `RequestAction` (Approve,
+  Deny, Reply, permission choices) is disabled, and `RequestActions` writes
+  *Reconnect to act* beside the row: a disabled button shows no tooltip on
+  touch. `runCommands` and `handoffCommands` get `stale` too and disable
+  every gateway verb and the Send and Close dialogs, so **Mark complete**,
+  the **More** menu (which says *Reconnect to act* at its top) and the
+  palette cannot act on a session the agent may have moved on from. Each
+  saved session keeps its current paused state from `pausedRuns` and its
+  confirmed change time as `status_changed_at`; an estimated time is left
+  out and estimated again on paint. Any access refusal (a 401 or 403, or a
+  `refused`, `signed-out`, `not-member`, `device-revoked` or
+  `device-pending` hop, from a load, the stream or the connect probe)
+  calls `refuseSnapshot`: it deletes the saved entry and blocks every save
+  until a hydration succeeds. On a painted snapshot it also shows the
+  connection error instead. A rejected link token does the same and shows
+  the expired-link page as before.
+- **Resuming from the pocket also reconnects without an event.**
+  `connectEvents` runs a 5 s watchdog; a tick more than 15 s late while the
+  tab is visible means the page was frozen, and it replaces the socket like
+  `online`. `pageshow` (back/forward cache) counts as a foreground return, and
+  a `navigator.connection` change of `type` counts as `online` after it has
+  been quiet for 1 s, so a burst of interface events reconnects once. Speed
+  estimates (`effectiveType`, `rtt`, `downlink`) never count, and a browser
+  that reports no `type` never reconnects on a connection change.
 - **The sockets reopen on a foreground or network return.** Both
   `connectEvents` and `connectAttach` subscribe to `visibilitychange`
   (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
@@ -1534,7 +1585,7 @@ server drops the reply.
 **Finished footer.** **Archived (n)** swaps Finished for archived sessions in
 scope (Mine applies); **Back to Finished** returns. Archived sessions have no
 automatic deletion countdown. **More finished-run actions** (`…`, in the Finished
-heading, only when it has an item) holds **Archive closed sessions…** and, for
+heading, only when it has an item) holds **Archive finished sessions…** and, for
 admins, **Free retained containers…**. Both open the
 store-hosted confirmations (`src/components/palette/clear-done-dialog.tsx`,
 drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
@@ -1542,9 +1593,15 @@ when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
 `src/lib/commands.ts`, over the whole active workspace whoever owns the session.
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
 continue past failures and report the first real error; archive counts
-`CodeNotFound` as done. Archiving hides a session whose status is final
-(`isArchivable`) from every group without deleting its history; freeing removes
-a retained container and keeps the session and its history.
+`CodeNotFound` as done. Archiving hides a session whose status is final or
+`completed` (`isTerminal`) from every group without deleting its history.
+Before the archive confirmation offers its count, it reads `run.close_check` for
+the plan's completed sessions, 50 at a time, and keeps back, with the server's
+reasons, each one that still has live subsessions, a pull request not merged,
+sessions waiting on it or pending cleanup; the server refuses those too, and a
+completed session whose result still awaits review, which the single Archive
+command does not offer.
+Freeing removes a retained container and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet
 requirement, with one sentence and one button:
@@ -1900,9 +1957,9 @@ running".
 | Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked session with no `state`: the turn ended without a verified reason. Asks nothing | Working |
 | Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
 | Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
-| Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
+| Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action. Also a live `finished` session a member answered **Not yet** (no `review`, with a `review_changed_at`), read "Not finished yet" | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Ready for review | filled accent circle with a check | `finished` (a reported success on a live session), or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
+| Ready for review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
 | Completed / Merged | check | `completed`, `merged` | Finished |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
@@ -1932,7 +1989,8 @@ a `run.review` event under the same `status_seq` rule.
 ([failure-handling.md](failure-handling.md#review)). `run.review` with
 `action` `complete` closes a live session as `completed` (or records it on a
 `completed` run) and sets `review` to `accepted`; `later` sets it to `later`
-and leaves the session where it is. Both return `{"run": Run}` and need the same
+and leaves the session where it is; `not-yet` clears it on a live session. All
+return `{"run": Run}` and need the same
 permission as `run.close`.
 
 The Needs you group, its counts and badges follow the session-state attention
@@ -2074,17 +2132,31 @@ change it, so the session stays in Needs you. While the open session is `ready`,
 `CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
 callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
-finished. Mark it complete?", the summary of the session's latest success
-report when its agent messages are loaded, **Mark complete** and **Not
-yet**. Both are run commands
-(`src/lib/commands.ts`) that follow [Actions](#actions): **Mark complete**
-sends `run.review {action: "complete"}` and predicts `review` `accepted`
-and, for a live session, status `completed`; **Not yet** sends `action:
-"later"` and predicts `later`. A refusal puts the callout back and toasts the
-server's error. After Not yet the callout stays hidden until a new success
-report sets `ready` again, and **Mark complete** stays in the session's actions
-menu and the palette for any session that reads Ready for review. Both need the
-gateway's `run.review` method and the kill permission.
+finished. Mark complete?", the summary of the session's latest success
+report (three lines, with **Show more** when it overflows them as laid out;
+opened, it scrolls within 30% of the viewport), **Mark complete**,
+**Not yet** and **Review later** (Not yet only on a live session), and "Closes
+the session.", which also describes **Mark complete** to assistive technology.
+**Mark complete** is a secondary button, and no button takes focus on its own. Each is a run command
+(`src/lib/commands.ts`) that follows [Actions](#actions): **Mark complete**
+(`complete`) sends `run.review {action: "complete"}` and predicts `review`
+`accepted` and, for a live session, status `completed`; **Not yet**
+(`not-yet`) sends `action: "not-yet"` and predicts `""`; once the server
+accepts it, the command opens the Chat view with the composer focused, from
+the callout, the actions menu or the palette alike, and the composer's
+placeholder reads "Say what is left to do". **Review later**
+(`review-later`) sends `action: "later"` and predicts `later`. A refusal puts
+the callout back and toasts the server's error. While `review` is `later` the
+callout folds to one line, "Finished, kept for later ·" and **Review now**,
+which unfolds it. After Not yet the session reads Answered, "Not finished
+yet" (`notFinishedYet` in `src/lib/status.ts`), its Chat view records
+"*name* said the task is not finished yet" from the `run.review` event, and the callout
+stays hidden until a new success report sets `ready` again. The session's
+actions menu and the palette offer the same commands, except that until
+someone opens the result (`finish_unopened`, which any member opening the
+session clears) they offer **Review the result**, which opens its Chat view,
+in place of **Mark complete**. All need the gateway's `run.review`
+method and the kill permission.
 An interactive session still accepts messages and terminal input; the reason
 line says it remains open for follow-up. Its next working turn returns it
 to Working. Archive eligibility and input gates use the wire status, not
@@ -2195,7 +2267,7 @@ reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommand
 all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
 group), **Ask Aether** (opens the assistant; offered when the server
 serves `assistant.status`), **New session…**, **Launch from a template…**,
-**Archive closed sessions…**, **Free retained containers…** and the three theme
+**Archive finished sessions…**, **Free retained containers…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
 reports gateway success or its real refusal in both the session's More menu and
@@ -2273,9 +2345,9 @@ the server's events with an RPC response.
   it is bound to, and a port nothing listens on is forwarded with a note that
   its link works once something does. The Environment page's **Forward port**
   opens the same dialog for the environment, whose ports no method lists.
-- **Archive / Restore** are gated on `isArchivable(status)`
-  (`src/store/runs.ts`; `merged`, `abandoned`, `failed`, `interrupted`, never
-  `completed`) plus the kill permission and the `run.archive` capability;
+- **Archive / Restore** are gated on `isTerminal(status)`
+  (`src/store/runs.ts`; `completed`, `merged`, `abandoned`, `failed`,
+  `interrupted`) plus the kill permission and the `run.archive` capability;
   neither confirms, since archiving is reversible. The palette resolves its
   focused session from the session map by `route.params.runId` rather than the session
   list, so an archived session's own page still offers Restore.
@@ -2304,7 +2376,22 @@ A command with a `confirm` field - Kill, Delete and Free container - opens
 the session-naming confirmation (`run-command-confirmation.tsx`) from More or the
 palette, with Cancel initially focused. **Close session…** opens its own dialog,
 which asks whether the work was merged or abandoned; a choice closes it and
-shows the outcome at once. Palette confirmations
+shows the outcome at once. The dialog reads `run.close_check` when it opens
+and lists the warnings with `CloseWarnings` (`src/components/close-warnings.tsx`),
+which orders them by risk (pull requests, read as one line of numbers when
+there are several, and unmerged work, then mail, waiting sessions,
+subsessions with their own warnings nested under each, cleanup,
+protection). The buttons read **Close as abandoned** and **Close as
+merged**; with any warning abandoning is `danger` and merging `secondary`,
+without one merging is the primary. On a phone they stack in reading order,
+Cancel first. Cancel holds the focus with the ring drawn (`focusRingShown`); closing as merged ignores
+`unmerged_work`. A command with `closes` (Mark complete, outcome `completed`)
+is checked by the runner itself before it runs, once at a time per session
+(`closeChecking`): with warnings, or a check that failed, the runner opens
+`CloseConfirmation` instead, and **Close anyway** runs the command. More locks
+while that check and the close run. A check that has not answered within 15
+seconds counts as failed, so no close waits on it forever. **Open in Standard** lists the same warnings in its
+confirmation. Palette confirmations
 capture the authenticated identity with the session and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to
 another account. More locks while an unpredicted verb is in flight and shows
@@ -2815,8 +2902,8 @@ progress, takeover loss and reduced-motion behavior.
 The Chat view (`session-view.tsx`) is the session's conversation: what was said
 to the agent, what it did and asked, and the session's notes. It is a `virtua`
 list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
-session the rows come from the session's `run.agent`, `workspace.timeline` and
-`run.status` events (read with `workspace.timeline` filtered by session and type,
+session the rows come from the session's `run.agent`, `workspace.timeline`,
+`run.status` and `run.review` events (read with `workspace.timeline` filtered by session and type,
 then kept live by sync), room messages, the session record and its pending inputs:
 `user` (a message to the agent with its delivery word), `note` (the Notes
 thread's row, without the thread's own arrival motion), `steps` (consecutive
@@ -6097,7 +6184,7 @@ Assistant, Linked server, Sync daemon, Docker inside sessions, Remote access).
 
 Categories:
 
-- **General**: **Theme** (System, Light, Dark; the palette and the footer
+- **General**: **Theme** (Dark, the default, Light, System; the palette and the footer
   menu offer the same), **Text size** (Default, Large, Larger; it scales the
   interface type tokens through `data-text-size` on the root element and
   leaves terminal zoom alone), **Single-key shortcuts** (see
@@ -6924,6 +7011,22 @@ that runs a newer release than a client refuses that client
   is refused everything except `server.info` and `server.update_status`.
   The hydration retry and the event stream stop for good, since every
   retry would be refused the same way.
+
+  The reverse direction is `ServerTooOldBanner`: when the server release
+  is older than this client's (release cores compared, so a source build of
+  the same release does not count), `App` floats *This server is older than
+  this app*, the versions and `aether server update` over the mounted
+  shell. The check can answer while a form is half filled, so the warning
+  never replaces the shell or takes focus. The server version is whichever
+  was read last: `server.info` on a hydration, or the live server half of
+  a later `update.check`, which writes it back into `info` unless a
+  hydration replaced `info` while the check was out. The server
+  refuses nothing in this direction, so **Continue anyway** dismisses it for
+  that pair of versions (`aether.server-too-old-continued` in `localStorage`),
+  so a reload or a killed WebView does not bring it back until either
+  version changes. It is only reachable where
+  `update.check` is: the local gateway, which includes the Android app. The
+  server gateway serves a dashboard built into the server itself.
 
   The gate cannot be dismissed. It is a region labelled by its heading,
   which takes focus when the gate appears. It shows the server's own

@@ -13,6 +13,7 @@ import { api } from '@/lib/api'
 import { useHeightGlide } from '@/lib/flip'
 import { message } from '@/lib/format'
 import { useKeybindings } from '@/lib/keybindings'
+import { useStale } from '@/store/hooks'
 import type { Motion } from '@/lib/motion'
 import type { SessionItem, SessionRequest, SessionToolCall } from '@/lib/session-types'
 import { cn } from '@/lib/utils'
@@ -103,7 +104,8 @@ function Choices({ request, call, answering, canAnswer, incomplete, values, focu
   const late = usePastDeadline(answering.busy !== null)
   const plan = choicePlan(request, call)
   const choices = plan.kind === 'pills' ? [plan.once, plan.always, plan.deny, ...plan.extras].filter((c) => c !== undefined) : plan.choices
-  const blocked = (choice: Choice) => !canAnswer || answering.busy !== null || (incomplete && choice.option.id === 'accept')
+  const stale = useStale()
+  const blocked = (choice: Choice) => stale || !canAnswer || answering.busy !== null || (incomplete && choice.option.id === 'accept')
   const pick = (choice: Choice | undefined) => {
     if (!choice || blocked(choice)) return
     answering.answer(choice.option.id, choice.option.id === 'accept' && request.kind === 'question' ? values : undefined)

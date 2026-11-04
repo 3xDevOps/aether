@@ -70,7 +70,7 @@ export type RunActivity =
   | 'failed'
   | 'disconnected'
 
-/** `ready` awaits the owner's Mark complete; `later` is their Not yet. */
+/** `ready` awaits the owner's Mark complete; `later` is their Review later. Not yet clears it to `''`. */
 export type RunReview = '' | 'ready' | 'later' | 'accepted'
 
 export interface RunInputRequest {
@@ -137,6 +137,30 @@ interface WaitObserved {
   merged_at?: string
   checks?: WaitChecks
   run_status?: string
+}
+
+export type CloseWarningKind = 'protected' | 'pull_request' | 'unmerged_work' | 'messages' | 'awaited' | 'subsessions' | 'cleanup_pending'
+
+export type CloseOutcome = 'merged' | 'abandoned' | 'completed'
+
+/** One thing closing a run would affect, from `run.close_check`; `subsession` names the subsession closing with it that the warning is about. */
+export interface CloseWarning {
+  kind: CloseWarningKind
+  detail: string
+  url?: string
+  count?: number
+  run_ids?: string[]
+  subsession?: string
+  /** On a pull_request warning: its number and when Aether last observed it. */
+  number?: number
+  observed_at?: string
+}
+
+/** A run's close warnings, or the error reading them. */
+export interface RunCloseCheck {
+  run_id: string
+  warnings: CloseWarning[]
+  error?: { code: number; message: string }
 }
 
 /** One condition a run registered with `report --outcome waiting --until`. */
