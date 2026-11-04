@@ -1,6 +1,6 @@
 // Launching from a phone against a real server: + New opens a bottom sheet
-// whose repository and agent default to your last session's, and a shared
-// prompt opens it filled in without launching.
+// on your last session's repository, not the active one, with your saved
+// agent, and a shared prompt fills it in without launching.
 
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
@@ -8,7 +8,7 @@ import { expect, test } from './mobile'
 
 const idleAgent = 'sleep 600'
 
-test('+ New launches a task on the last session\'s repository and agent', async ({ page, aether }) => {
+test('+ New launches on the last session\'s repository with the saved agent', async ({ page, aether }) => {
   test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
   await page.setViewportSize({ width: 360, height: 760 })
   const alice = await aether.member('alice')
@@ -20,19 +20,24 @@ test('+ New launches a task on the last session\'s repository and agent', async 
   aether.installAgent(id, 'claude', idleAgent)
   aether.installAgent(id, 'codex', idleAgent)
   await alice.api.rpc('run.launch', { workspace_id: docs.id, harness: 'codex', task: 'an earlier session' })
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string; name: string }[] }>('workspace.list')
+  await alice.api.local('workspace.selection', { workspace_id: workspaces.find((w) => w.name === 'shop')!.id })
+  const { revision } = await alice.api.rpc<{ revision: number }>('launch.defaults.get')
+  await alice.api.rpc('launch.defaults.set', { defaults: { agent: 'claude' }, revision })
 
   await page.goto(alice.url)
   const tabs = page.getByRole('navigation', { name: 'Main navigation' })
   await tabs.getByRole('button', { name: 'New session' }).tap()
   const sheet = page.getByRole('dialog', { name: 'New session' })
   await expect(sheet.getByRole('combobox', { name: 'Repository' })).toHaveText('docs')
-  await expect(sheet.getByRole('combobox', { name: 'Agent' })).toHaveText('Codex')
+  await expect(sheet.getByRole('combobox', { name: 'Agent' })).toHaveText('Claude Code')
+  await expect(sheet.getByText('Repository from your last session.')).toBeVisible()
   await sheet.getByLabel('Task').fill('write the changelog')
   await sheet.getByRole('button', { name: 'Launch', exact: true }).tap()
   await expect(sheet).toBeHidden()
 
   const { runs } = await alice.api.rpc<{ runs: { task: string; workspace_id: string; harness: string }[] }>('run.list', {})
-  expect(runs.find((run) => run.task === 'write the changelog')).toMatchObject({ workspace_id: docs.id, harness: 'codex' })
+  expect(runs.find((run) => run.task === 'write the changelog')).toMatchObject({ workspace_id: docs.id, harness: 'claude' })
 
 })
 
@@ -40,6 +45,7 @@ test('a shared prompt fills + New without launching and leaves the address', asy
   await page.setViewportSize({ width: 360, height: 760 })
   const alice = await aether.member('alice')
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('shop'))
+  aether.installAgent(await memberID(alice), 'claude')
   const url = new URL(alice.url)
   url.searchParams.set('new', '1')
   url.searchParams.set('prompt', 'hi')
@@ -48,6 +54,9 @@ test('a shared prompt fills + New without launching and leaves the address', asy
   const sheet = page.getByRole('dialog', { name: 'New session' })
   await expect(sheet.getByLabel('Task')).toHaveValue('hi')
   await expect(sheet.getByRole('status').filter({ hasText: 'Shared from another app' })).toContainText('2 characters, 1 line')
+  // Launch could start a session now; none starts until it is tapped.
+  await expect(sheet.getByRole('button', { name: 'Launch', exact: true })).toBeEnabled()
+  await page.waitForTimeout(2000)
   await expect.poll(() => new URL(page.url()).searchParams.has('prompt')).toBe(false)
   expect(new URL(page.url()).searchParams.has('new')).toBe(false)
   const { runs } = await alice.api.rpc<{ runs: unknown[] | null }>('run.list', {})

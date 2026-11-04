@@ -32,6 +32,7 @@ export function PhoneLaunchSheet({
   notes,
   failure,
   launch,
+  disabled,
 }: {
   open: boolean
   onClose: () => void
@@ -53,6 +54,8 @@ export function PhoneLaunchSheet({
   /** Stays above Launch, outside the scrolling form, so the keyboard cannot hide it. */
   failure: ReactNode
   launch: ReactNode
+  /** A launch is in flight. */
+  disabled: boolean
 }) {
   const { agents, harness, mode } = choice
   const offered = (agents ?? []).filter(launchable)
@@ -64,7 +67,7 @@ export function PhoneLaunchSheet({
           <DialogDescription className="sr-only">Starts an agent in its own container on the workspace&apos;s base branch.</DialogDescription>
         </div>
         <form id="launch-form" className="-mx-1 flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto px-1 py-1 [&>*]:shrink-0" onSubmit={(event) => { event.preventDefault(); onSubmit() }}>
-          <TaskField mode={mode} task={task} onTask={onTask} autoFocus shared={shared} brief />
+          <TaskField mode={mode} task={task} onTask={onTask} autoFocus shared={shared} brief disabled={disabled} />
           {workspaces.length === 0 && (
             <Callout tone="neutral" title="No workspace to launch in yet." actions={<Button type="button" size="sm" onClick={onAddWorkspace}>Add a workspace</Button>}>
               A session runs on a workspace&apos;s repository.
@@ -73,7 +76,7 @@ export function PhoneLaunchSheet({
           <div className="flex min-w-0 flex-col gap-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {workspaces.length > 0 && (
-                <Select value={workspace?.id ?? ''} onValueChange={onWorkspace}>
+                <Select value={workspace?.id ?? ''} onValueChange={onWorkspace} disabled={disabled}>
                   <SelectTrigger aria-label="Repository" className={chip}><SelectValue placeholder="Repository" /></SelectTrigger>
                   <SelectContent>
                     {workspaces.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
@@ -89,7 +92,7 @@ export function PhoneLaunchSheet({
               {agents === null ? (
                 <span className={cn(chip, 'inline-flex items-center text-muted')}>Loading agents…</span>
               ) : (
-                <Select value={harness} onValueChange={onAgent}>
+                <Select value={harness} onValueChange={onAgent} disabled={disabled}>
                   <SelectTrigger aria-label="Agent" className={chip}><SelectValue placeholder="Agent" /></SelectTrigger>
                   <SelectContent>
                     {offered.map((agent) => <SelectItem key={agent.name} value={agent.name}>{agentLabel(agent, agent.name)}</SelectItem>)}

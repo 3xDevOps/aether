@@ -15,7 +15,7 @@ const sharedLimit = 8000
  */
 export function useSharedPrompt() {
   const hydrated = useStore((s) => s.hydrated)
-  const free = useStore((s) => s.paletteDialog === null || s.paletteDialog === 'launch')
+  const free = useStore((s) => s.paletteDialog === null)
   const role = useSelfRole()
   const cap = useCapability()
   const ready = hydrated && role !== null && free

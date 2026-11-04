@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { SlideOut } from '@/components/ui/slide-out'
 import { api } from '@/lib/api'
-import { useIsMobile } from '@/lib/breakpoints'
+import { mobileScreen, useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
 import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
 import type { Member, Permission, Run } from '@/lib/types'
@@ -33,12 +33,9 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const returnFocus = useReturnFocus()
   const phone = useIsMobile()
   const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(null)
-  // Read once at open: a session started meanwhile must not move the chips under the member's thumb.
-  const [last] = useState(() => lastSession(useStore.getState()))
-  const lastWorkspace = last?.workspace_id ?? ''
+  const [last] = useState(() => (window.matchMedia(mobileScreen).matches ? lastSession(useStore.getState()) : undefined))
   const activeWorkspace = useStore((s) => s.activeWorkspace)
-  // A phone has no sidebar showing the active workspace, so it starts where your last session ran.
-  const workspaceID = pickedWorkspace ?? ((phone && lastWorkspace) || activeWorkspace)
+  const workspaceID = pickedWorkspace ?? (last?.workspace_id || activeWorkspace)
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
@@ -80,13 +77,10 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const [permission, setPermission] = useState<Permission>('default')
   // A saved choice read after the member picked a tier must not replace it.
   const permissionPicked = useRef(false)
-  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick, fallback: phone ? last?.harness : undefined })
+  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick, fallback: last?.harness })
   const { agents, agentError, harness, mode, model, effort, noAgents } = choice
-  const [shared, setShared] = useState(() => useStore.getState().paletteLaunchTask)
+  const [shared] = useState(() => useStore.getState().paletteLaunchTask)
   const [task, setTask] = useState(shared)
-  const shares = useStore((s) => s.paletteLaunchShares)
-  const draft = useRef({ task, shared, shares })
-  draft.current = { ...draft.current, task, shared }
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
@@ -100,20 +94,6 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   useEffect(() => {
     if (error) errorCallout.current?.scrollIntoView({ block: 'nearest' })
   }, [error])
-
-  // A share while the form is open fills it only if nothing was typed over the last share.
-  useEffect(() => {
-    const { task: typed, shared: last, shares: seen } = draft.current
-    if (shares === seen) return
-    draft.current.shares = shares
-    const next = useStore.getState().paletteLaunchTask
-    if (typed.trim() === '' || typed === last) {
-      setTask(next)
-      setShared(next)
-    } else {
-      toast.error('Shared text not added: New session already has a task you typed. Clear it and share again.')
-    }
-  }, [shares])
 
   useEffect(() => {
     shown.current = open
@@ -278,6 +258,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         }
         notes={notes}
         failure={failure}
+        disabled={launching}
         launch={<Button type="submit" form="launch-form" className="w-full" disabled={launchDisabled}>{launchLabel}</Button>}
       />
     )

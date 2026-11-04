@@ -160,7 +160,7 @@ export function RunFields({
 }
 
 /** `shared` marks text another app handed over, which shows whole until edited. */
-export function TaskField({ mode, task, onTask, autoFocus = false, shared = false, brief = false }: {
+export function TaskField({ mode, task, onTask, autoFocus = false, shared = false, brief = false, disabled = false }: {
   mode: LaunchMode
   task: string
   onTask: (task: string) => void
@@ -168,8 +168,10 @@ export function TaskField({ mode, task, onTask, autoFocus = false, shared = fals
   shared?: boolean
   /** One-word help, for a phone. */
   brief?: boolean
+  disabled?: boolean
 }) {
   const headless = mode === 'headless'
+  const characters = [...task].length
   const lines = task.split('\n').length
   const help = brief
     ? (headless ? 'Required in Background mode.' : 'Optional.')
@@ -178,11 +180,11 @@ export function TaskField({ mode, task, onTask, autoFocus = false, shared = fals
     <>
       {shared && (
         <Callout tone="needs-you" role="status" title="Shared from another app: review it before launching">
-          {task.length} {task.length === 1 ? 'character' : 'characters'}, {lines} {lines === 1 ? 'line' : 'lines'}. Nothing runs until you choose Launch.
+          {characters} {characters === 1 ? 'character' : 'characters'}, {lines} {lines === 1 ? 'line' : 'lines'}. Nothing runs until you choose Launch.
         </Callout>
       )}
       <FormField label="Task" help={help}>
-        <Textarea className={cn('[field-sizing:content]', !shared && 'max-h-48')} autoFocus={autoFocus} required={headless} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
+        <Textarea className={cn('[field-sizing:content]', !shared && 'max-h-48')} autoFocus={autoFocus} readOnly={disabled} required={headless} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
       </FormField>
     </>
   )

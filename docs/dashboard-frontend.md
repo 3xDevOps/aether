@@ -2407,9 +2407,8 @@ dropped. Once the dashboard has hydrated and no other form is open,
 keeping the first 8000 characters and saying so in a toast when it cut any.
 Above the task a callout says "Shared from another app: review it before
 launching" with the character and line count, and the task field grows to
-show all of it; both go back to normal once the text is edited. A share that
-arrives while New session is open replaces the task only if it is empty or
-still the last shared text; otherwise a toast says the text was not added. A
+show all of it; both go back to normal once the text is edited. Only the
+address read at load carries a share, so each one meets a fresh form. A
 member who cannot launch gets a toast with the reason: the gateway has no
 `run.launch`, or the role cannot launch. On desktop the panel opens the same
 way.
