@@ -66,7 +66,7 @@ export function ClearDoneConfirm({
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
       <DialogContent
-        className="max-w-[min(520px,calc(100%-2rem))]"
+        className="max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto]"
         onOpenAutoFocus={(event) => {
           event.preventDefault()
           cancel.current?.focus()
@@ -89,68 +89,71 @@ export function ClearDoneConfirm({
             {closing > 0 && ' Checked idle sessions are closed with the outcome shown — their agents stop — then archived.'}
           </DialogDescription>
         </DialogHeader>
-        {plan.notAllowed > 0 && (
-          <p className="text-ui leading-5 text-muted">
-            {plan.notAllowed} {plan.notAllowed === 1 ? 'session stays' : 'sessions stay'}: you may not act on{' '}
-            {plan.notAllowed === 1 ? 'it' : 'them'}.
-          </p>
-        )}
-        {checking && (
-          <p className="flex items-center gap-2 text-ui text-muted">
-            <Spinner className="size-3" /> Checking sessions for open pull requests, waiting sessions, subsessions and cleanup
-          </p>
-        )}
-        <div className="flex min-w-0 flex-col divide-y divide-seam [&>section]:py-4 [&>section:first-child]:pt-0 [&>section:last-child]:pb-0">
-          {!checking && archived.length > 0 && (
-            <section className="flex flex-col gap-1.5">
-              <SectionLabel as="h3" className="flex items-center gap-1.5">Archiving <CountBadge>{archived.length}</CountBadge></SectionLabel>
-              <InsetList tabIndex={0} aria-label="Sessions to archive" className="max-h-48 overflow-y-auto">
-                {names.map((run) => (
-                  <li key={run.id} className="flex min-w-0 shrink-0 items-baseline gap-2 px-3 py-1.5">
-                    <span className="min-w-0 truncate text-ui">{runLabel(run)}</span>
-                    <span className="ml-auto shrink-0 text-ui-sm text-muted">{finishedReason(run)} · {compactAge(run.finished_at ?? run.stateChangedAt)}</span>
-                  </li>
-                ))}
-              </InsetList>
-              {archived.length > shownNames && (
-                <Button variant="quiet" size="sm" className="self-start text-ui-sm" aria-expanded={allNames} onClick={() => setAllNames(!allNames)}>
-                  {allNames ? 'Show fewer' : `Show ${archived.length - shownNames} more`}
-                </Button>
-              )}
-            </section>
-          )}
-          {!checking && rows.length > 0 && (
-            <IdleSection rows={rows} selected={selected} running={running} onSelect={onSelect} onLeave={onCancel} />
-          )}
-          {kept.length > 0 && (
-            <section className="flex flex-col gap-1.5">
-              <SectionLabel as="h3" className="flex items-center gap-1.5">
-                Kept <CountBadge>{kept.length}</CountBadge>
-                <span className="font-normal">— completed, still holding work</span>
-              </SectionLabel>
-              <InsetList tabIndex={0} aria-label="Sessions kept" className="max-h-56 overflow-y-auto">
-                {kept.map((run) => (
-                  <li key={run.id} className="flex min-w-0 shrink-0 flex-col gap-1 px-3 py-2">
-                    <span className="truncate text-ui text-muted">{runLabel(run)}</span>
-                    <CloseWarningLines check={held!.get(run.id)!} run={run} onLeave={onCancel} />
-                  </li>
-                ))}
-              </InsetList>
-            </section>
-          )}
-          {!checking && excluded.length > 0 && <NotIncluded excluded={excluded} />}
-        </div>
-        {unchecked.length > 0 && (
-          <div role="alert" className="flex flex-col items-start gap-1 text-ui-sm text-state-failed">
-            <p className="break-words">
-              Could not check {unchecked.length} completed {unchecked.length === 1 ? 'session' : 'sessions'}, so{' '}
-              {unchecked.length === 1 ? 'it stays' : 'they stay'}: {held!.get(unchecked[0].id)!.error!.message}
+        {/* Only the body scrolls, so the buttons stay in view on a phone sheet. */}
+        <div className="-mx-1 flex min-h-0 flex-col gap-3 overflow-y-auto px-1">
+          {plan.notAllowed > 0 && (
+            <p className="text-ui leading-5 text-muted">
+              {plan.notAllowed} {plan.notAllowed === 1 ? 'session stays' : 'sessions stay'}: you may not act on{' '}
+              {plan.notAllowed === 1 ? 'it' : 'them'}.
             </p>
-            <Button variant="quiet" size="sm" className="text-ui-sm" disabled={running} onClick={onRecheck}>
-              Check again
-            </Button>
+          )}
+          {checking && (
+            <p className="flex items-center gap-2 text-ui text-muted">
+              <Spinner className="size-3" /> Checking sessions for open pull requests, waiting sessions, subsessions and cleanup
+            </p>
+          )}
+          <div className="flex min-w-0 flex-col divide-y divide-seam [&>section]:py-4 [&>section:first-child]:pt-0 [&>section:last-child]:pb-0">
+            {!checking && archived.length > 0 && (
+              <section className="flex flex-col gap-1.5">
+                <SectionLabel as="h3" className="flex items-center gap-1.5">Archiving <CountBadge>{archived.length}</CountBadge></SectionLabel>
+                <InsetList tabIndex={0} aria-label="Sessions to archive" className="max-h-48 overflow-y-auto">
+                  {names.map((run) => (
+                    <li key={run.id} className="flex min-w-0 shrink-0 items-baseline gap-2 px-3 py-1.5">
+                      <span className="min-w-0 truncate text-ui">{runLabel(run)}</span>
+                      <span className="ml-auto shrink-0 text-ui-sm text-muted">{finishedReason(run)} · {compactAge(run.finished_at ?? run.stateChangedAt)}</span>
+                    </li>
+                  ))}
+                </InsetList>
+                {archived.length > shownNames && (
+                  <Button variant="quiet" size="sm" className="self-start text-ui-sm" aria-expanded={allNames} onClick={() => setAllNames(!allNames)}>
+                    {allNames ? 'Show fewer' : `Show ${archived.length - shownNames} more`}
+                  </Button>
+                )}
+              </section>
+            )}
+            {!checking && rows.length > 0 && (
+              <IdleSection rows={rows} selected={selected} running={running} onSelect={onSelect} onLeave={onCancel} />
+            )}
+            {kept.length > 0 && (
+              <section className="flex flex-col gap-1.5">
+                <SectionLabel as="h3" className="flex items-center gap-1.5">
+                  Kept <CountBadge>{kept.length}</CountBadge>
+                  <span className="font-normal">— completed, still holding work</span>
+                </SectionLabel>
+                <InsetList tabIndex={0} aria-label="Sessions kept" className="max-h-56 overflow-y-auto">
+                  {kept.map((run) => (
+                    <li key={run.id} className="flex min-w-0 shrink-0 flex-col gap-1 px-3 py-2">
+                      <span className="truncate text-ui text-muted">{runLabel(run)}</span>
+                      <CloseWarningLines check={held!.get(run.id)!} run={run} onLeave={onCancel} />
+                    </li>
+                  ))}
+                </InsetList>
+              </section>
+            )}
+            {!checking && excluded.length > 0 && <NotIncluded excluded={excluded} />}
           </div>
-        )}
+          {unchecked.length > 0 && (
+            <div role="alert" className="flex flex-col items-start gap-1 text-ui-sm text-state-failed">
+              <p className="break-words">
+                Could not check {unchecked.length} completed {unchecked.length === 1 ? 'session' : 'sessions'}, so{' '}
+                {unchecked.length === 1 ? 'it stays' : 'they stay'}: {held!.get(unchecked[0].id)!.error!.message}
+              </p>
+              <Button variant="quiet" size="sm" className="text-ui-sm" disabled={running} onClick={onRecheck}>
+                Check again
+              </Button>
+            </div>
+          )}
+        </div>
         <DialogFooter>
           <Button ref={cancel} variant="secondary" className={focusRingShown} disabled={running} onClick={onCancel}>
             {n === 0 && !checking ? 'Close' : 'Cancel'}
