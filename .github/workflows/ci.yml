@@ -110,6 +110,38 @@ jobs:
             echo "$mode=$out" >> "$GITHUB_OUTPUT"
           done
 
+  # The merge queue discards a group when an entry ahead of it leaves or the
+  # queue is reordered, but GitHub does not stop that group's run, which keeps
+  # holding runners. Each new queue run cancels the runs whose queue branch is
+  # gone. Runs are listed before branches, so a group created in between is
+  # never mistaken for a discarded one. ci-gate does not need this job: it
+  # checks no code.
+  reap-queue-runs:
+    if: ${{ github.event_name == 'merge_group' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Cancel runs of discarded merge groups
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(for status in queued in_progress; do
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?event=merge_group&status=$status&per_page=100" \
+              --jq '.workflow_runs[] | "\(.id) \(.head_branch)"'
+          done)
+          live=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/gh-readonly-queue/" \
+            --jq '.[].ref | ltrimstr("refs/heads/")')
+          printf '%s\n' "$runs" | while read -r id branch; do
+            [ -n "$id" ] || continue
+            printf '%s\n' "$live" | grep -qxF "$branch" && continue
+            echo "Cancelling run $id of discarded group $branch"
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" ||
+              echo "::warning::Could not cancel run $id; it may have finished"
+          done
+
   # Runs on every pull request, including a docs-only one. This is the
   # docs-only gate.
   audit:
