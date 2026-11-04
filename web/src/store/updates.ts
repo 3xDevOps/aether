@@ -108,6 +108,7 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
   const id = ++c.issued
   c.pending += 1
   if (refresh) store.setState({ clientChecking: true })
+  const asked = store.getState().info
   try {
     const status = await client.localUpdateCheck(refresh)
     if (id === c.issued) {
@@ -116,9 +117,10 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
       const next = status.cli_error && previous ? { ...status, cli: previous.cli } : status
       store.getState().setUpdate(next)
       // The gateway reads server.info live for this answer, while a reconnect
-      // that replays events never re-reads it: this is the latest version.
+      // that replays events never re-reads it. A hydration that landed while
+      // the check was out read later than the gateway did, so it stands.
       const info = store.getState().info
-      if (info && next.server_version && next.server_version !== info.server_version) {
+      if (info && info === asked && next.server_version && next.server_version !== info.server_version) {
         store.getState().setInfo({ ...info, server_version: next.server_version })
       }
       store.setState({ clientCheckError: status.cli_error || null })

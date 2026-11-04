@@ -228,6 +228,17 @@ describe('checkClient', () => {
     expect(s.getState().info?.server_version).toBe('v0.9.0')
     expect(serverTooOld(s.getState().update, s.getState().info?.server_version)).toBeNull()
   })
+
+  it('keeps a server version a hydration read while the check was out', async () => {
+    const s = store()
+    let answer: (status: UpdateStatus) => void = () => {}
+    const client = fakeApi({ localUpdateCheck: vi.fn(() => new Promise<UpdateStatus>((resolve) => { answer = resolve })) })
+    const check = checkClient(s, client)
+    s.setState({ info: { ...serverInfo, server_version: 'v0.9.0' } })
+    answer({ ...updateStatus(), server_version: 'v0.8.5' })
+    await check
+    expect(s.getState().info?.server_version).toBe('v0.9.0')
+  })
 })
 
 describe('applyClientUpdate', () => {

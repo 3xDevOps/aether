@@ -6848,7 +6848,8 @@ that runs a newer release than a client refuses that client
   shell. The check can answer while a form is half filled, so the warning
   never replaces the shell or takes focus. The server version is whichever
   was read last: `server.info` on a hydration, or the live server half of
-  a later `update.check`, which writes it back into `info`. The server
+  a later `update.check`, which writes it back into `info` unless a
+  hydration replaced `info` while the check was out. The server
   refuses nothing in this direction, so **Continue anyway** dismisses it for
   that pair of versions (`aether.server-too-old-continued` in `localStorage`),
   so a reload or a killed WebView does not bring it back until either
