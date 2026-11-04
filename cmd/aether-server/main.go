@@ -97,6 +97,8 @@ func main() {
 		exitOn(deviceCmd(args))
 	case "slack":
 		exitOn(slackCmd(args))
+	case "dictation":
+		exitOn(dictationCmd(args))
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", cmd)
 		usage(os.Stderr)
@@ -128,6 +130,16 @@ approve a member's edge device by the code it shows, or review and revoke device
 
 example:
   sudo aether-server device approve <code>
+`,
+	"dictation": `usage: aether-server dictation install [--gpu] [--config <file>]
+       aether-server dictation status [--config <file>]
+       aether-server dictation remove [--config <file>]
+
+download the pinned speech-to-text engine and model into <data-dir>/dictation,
+report what is installed, or delete it (docs/dictation.md)
+
+example:
+  sudo aether-server dictation install
 `,
 	"edge": `usage: aether-server edge status [--config <file>]
        aether-server edge claim-code [--admin <member-id>] [--config <file>]
@@ -186,6 +198,7 @@ commands:
   edge     status | claim-code | trust | leave
   device   approve <code> | review: approve or revoke members' edge devices
   slack    setup | remove: store or remove the Slack bot's tokens (docs/slack.md)
+  dictation install [--gpu] | status | remove: speech-to-text for the dashboard (docs/dictation.md)
   version  print the version
 
 serve and install options, which are also the config file keys:
