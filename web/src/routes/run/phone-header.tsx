@@ -45,7 +45,7 @@ function leave(entered: number) {
   else useStore.getState().navigate('sessions')
 }
 
-export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, primary, detailsOpen, onDetails, onWorkflow, extra, pullRequest }: {
+export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, primary, detailsOpen, onDetails, onWorkflow, extra }: {
   run: RunRecord
   view: RunView
   views: RunView[]
@@ -57,11 +57,12 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   onDetails: (opener: HTMLElement | null) => void
   onWorkflow?: (opener: HTMLElement | null) => void
   extra: ExtraItem[]
-  pullRequest: React.ReactNode
 }) {
   const shown = useRunPresentation(run)
   const [entered] = useState(historyDepth)
   const assistant = useAssistantAvailable()
+  // Chat shows an open request's own card, whose answer is the screen's one filled button.
+  const asking = useStore((s) => (s.acpSessions[run.id]?.pending.length ?? 0) > 0)
   const totals = useStore(useShallow((s) => {
     const snapshot = s.diffs[run.id]?.snapshots[0] ?? s.diffs[run.id]?.persisted
     return snapshot?.truncated ? undefined : diffTotals(snapshot?.files)
@@ -98,7 +99,7 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
             </span>
           </p>
         </div>
-        {primary && !keyboard && <Button size="sm" onClick={primary.act}>{primary.label}</Button>}
+        {primary && !keyboard && <Button size="sm" variant={asking && view === 'session' ? 'secondary' : 'primary'} onClick={primary.act}>{primary.label}</Button>}
         <RunActions run={run} compact views={[...elsewhere, ...panels]} extra={extra} />
       </header>
       {!keyboard && (
@@ -114,9 +115,6 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
             ))}
           </TabsList>
         </div>
-      )}
-      {!keyboard && view === 'changes' && pullRequest && (
-        <div className="flex h-11 shrink-0 items-center border-b border-seam px-2">{pullRequest}</div>
       )}
       <ConnectionLine className="border-b border-seam px-4 py-1" />
     </>

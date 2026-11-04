@@ -191,7 +191,7 @@ function UserRow({ row, ctx, name }: { row: Extract<SessionRow, { kind: 'user' }
       attachments={row.images?.length || row.files?.length ? <MessageAttachments runID={ctx.runID} images={row.images} files={row.files} /> : undefined}
       meta={
         <>
-          {author && <span aria-hidden>·</span>}
+          {author && <span aria-hidden className="-ml-1">·</span>}
           {row.delivery && (
             <>
               <span className={cn('shrink-0', (row.delivery === 'Not sent' || row.delivery === 'Denied') && 'text-state-failed')}>

@@ -600,8 +600,8 @@ mode), the header's primary action when there is one, and **More**. Under it
 the tabs **Chat**, **Terminal** and **Changes** fill a 44px row; a Standard
 session orders them **Terminal**, **Chat**, **Changes**. **Changes** carries
 the muted `+N −M` of the latest snapshot, unless it was truncated, and drops
-it below 400px while a fourth tab shows. The pull request, which would crowd
-the tabs, sits in a 44px row of its own under them on the Changes tab only. **More** opens with a **Views** group
+it below 400px while a fourth tab shows. A phone header carries no pull
+request: the Changes tab's git card shows it. **More** opens with a **Views** group
 (Trace, Files, Browser, **Session details**, **Workflow**, **Search…**,
 **Assistant**), then the session's commands, Captures and Raw events; a view
 opened from there joins the tabs while it shows. Close, Stop and Delete in **More**
@@ -629,7 +629,8 @@ toasts fall back to the bottom safe area. The Chat
 composer is the desktop `ComposerBox`, padded by `--keyboard-inset`
 (`src/lib/keyboard-inset.ts`) so it sits above an iOS keyboard as well.
 While a request is open, the request card holds the one filled button: its
-answers fill the card's width, and the composer's **Interrupt** is outlined.
+answers fill the card's width, and on Chat the header's action and the
+composer's **Interrupt** are outlined.
 
 ### Assistant panel
 

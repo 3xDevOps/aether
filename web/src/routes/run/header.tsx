@@ -325,7 +325,6 @@ export function RunHeader({
           onDetails={onDetails}
           onWorkflow={onWorkflow}
           extra={extra}
-          pullRequest={pullRequest.status}
         />
         {!composing && <WaitLine run={run} />}
         {!composing && <RunLineage run={run} />}
