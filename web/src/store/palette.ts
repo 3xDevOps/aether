@@ -16,6 +16,8 @@ export interface PaletteSlice {
   paletteWatchTarget: WatchTarget | null
   /** The task the launch form opens with: text shared to Aether. */
   paletteLaunchTask: string
+  /** Counts shares, so a launch form already open sees the next one. */
+  paletteLaunchShares: number
   togglePalette: (open?: boolean) => void
   openPaletteDialog: (dialog: PaletteDialog, runID?: string) => void
   openLaunchWithTask: (task: string) => void
@@ -31,6 +33,7 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
   paletteForwardTarget: null,
   paletteWatchTarget: null,
   paletteLaunchTask: '',
+  paletteLaunchShares: 0,
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
   openPaletteDialog: (dialog, runID) =>
     set({
@@ -42,14 +45,15 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
       paletteLaunchTask: '',
     }),
   openLaunchWithTask: (task) =>
-    set({
+    set((s) => ({
       paletteOpen: false,
       paletteDialog: 'launch',
       paletteRunID: null,
       paletteForwardTarget: null,
       paletteWatchTarget: null,
       paletteLaunchTask: task,
-    }),
+      paletteLaunchShares: s.paletteLaunchShares + 1,
+    })),
   openForwardDialog: (target) =>
     set({
       paletteOpen: false,

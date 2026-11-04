@@ -33,7 +33,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const returnFocus = useReturnFocus()
   const phone = useIsMobile()
   const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(null)
-  const lastWorkspace = useStore(lastSessionWorkspace)
+  const last = useStore(lastSession)
+  const lastWorkspace = last?.workspace_id ?? ''
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   // A phone has no sidebar showing the active workspace, so it starts where your last session ran.
   const workspaceID = pickedWorkspace ?? ((phone && lastWorkspace) || activeWorkspace)
@@ -78,9 +79,13 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const [permission, setPermission] = useState<Permission>('default')
   // A saved choice read after the member picked a tier must not replace it.
   const permissionPicked = useRef(false)
-  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick })
+  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick, preferred: phone ? last?.harness : undefined })
   const { agents, agentError, harness, mode, model, effort, noAgents } = choice
-  const [task, setTask] = useState(() => useStore.getState().paletteLaunchTask)
+  const [shared, setShared] = useState(() => useStore.getState().paletteLaunchTask)
+  const [task, setTask] = useState(shared)
+  const shares = useStore((s) => s.paletteLaunchShares)
+  const draft = useRef({ task, shared, shares })
+  draft.current = { ...draft.current, task, shared }
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
@@ -94,6 +99,20 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   useEffect(() => {
     if (error) errorCallout.current?.scrollIntoView({ block: 'nearest' })
   }, [error])
+
+  // A share while the form is open fills it only if nothing was typed over the last share.
+  useEffect(() => {
+    const { task: typed, shared: last, shares: seen } = draft.current
+    if (shares === seen) return
+    draft.current.shares = shares
+    const next = useStore.getState().paletteLaunchTask
+    if (typed.trim() === '' || typed === last) {
+      setTask(next)
+      setShared(next)
+    } else {
+      toast.error('Shared text not added: New session already has a task you typed. Clear it and share again.')
+    }
+  }, [shares])
 
   useEffect(() => {
     shown.current = open
@@ -238,11 +257,14 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         onSubmit={() => void submit()}
         task={task}
         onTask={setTask}
+        shared={shared !== '' && task === shared}
         choice={choice}
         onAgent={(name) => { setError(null); choice.choose(name) }}
         workspaces={allWorkspaces}
         workspace={workspace}
         onWorkspace={(id) => { setError(null); setPickedWorkspace(id) }}
+        lastSession={!last || pickedWorkspace !== null || workspaceID !== last.workspace_id ? 'none' : harness === last.harness ? 'repository and agent' : 'repository'}
+        onAddWorkspace={() => { close(); navigate('workspaces') }}
         options={
           <>
             {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
@@ -279,7 +301,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           onSubmit={(event) => { event.preventDefault(); void submit() }}
         >
           {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
-          <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
+          <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus shared={shared !== '' && task === shared} />
           {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
           {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
           {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
@@ -305,11 +327,12 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   )
 }
 
-function lastSessionWorkspace(s: RootState): string {
+/** Your newest session in a workspace that still exists. */
+function lastSession(s: RootState): Run | undefined {
   const me = s.info?.member.id
   let last: Run | undefined
   for (const run of Object.values(s.runs)) {
     if (run.member_id === me && s.workspaces[run.workspace_id] && (!last || run.created_at > last.created_at)) last = run
   }
-  return last?.workspace_id ?? ''
+  return last
 }

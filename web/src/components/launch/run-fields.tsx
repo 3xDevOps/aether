@@ -4,11 +4,13 @@ import { EffortPicker } from '@/components/launch/effort-picker'
 import { ModeControl } from '@/components/launch/mode-control'
 import { ModelPicker } from '@/components/launch/model-picker'
 import { initialMode, modeRefusal, refusals } from '@/components/launch/modes'
+import { Callout } from '@/components/ui/callout'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { AgentInfo, LaunchDefaultsResult, LaunchMode } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { type LaunchDefaultsRead, rememberedChoice } from '@/store/launch-defaults'
 
@@ -122,6 +124,7 @@ export function RunFields({
   onChoice,
   disabled = false,
   autoFocus = false,
+  shared = false,
 }: {
   choice: ReturnType<typeof useAgentChoice>
   task: string
@@ -130,11 +133,12 @@ export function RunFields({
   onChoice?: () => void
   disabled?: boolean
   autoFocus?: boolean
+  shared?: boolean
 }) {
   const { agents, harness, mode, noAgents } = choice
   return (
     <>
-      <TaskField mode={mode} task={task} onTask={onTask} autoFocus={autoFocus} />
+      <TaskField mode={mode} task={task} onTask={onTask} autoFocus={autoFocus} shared={shared} />
       {agents === null ? (
         <p className="text-ui-sm text-muted">Loading agents…</p>
       ) : (
@@ -152,21 +156,32 @@ export function RunFields({
   )
 }
 
-export function TaskField({ mode, task, onTask, autoFocus = false }: {
+/** `shared` marks text another app handed over, which shows whole until edited. */
+export function TaskField({ mode, task, onTask, autoFocus = false, shared = false, brief = false }: {
   mode: LaunchMode
   task: string
   onTask: (task: string) => void
   autoFocus?: boolean
+  shared?: boolean
+  /** One-word help, for a phone. */
+  brief?: boolean
 }) {
+  const headless = mode === 'headless'
+  const lines = task.split('\n').length
+  const help = brief
+    ? (headless ? 'Required in Background mode.' : 'Optional.')
+    : (headless ? 'Required. A Background session starts with this task and takes no input.' : 'Optional. Leave it blank to open the agent with no prompt.')
   return (
-    <FormField
-      label="Task"
-      help={mode === 'headless'
-        ? 'Required. A Background session starts with this task and takes no input.'
-        : 'Optional. Leave it blank to open the agent with no prompt.'}
-    >
-      <Textarea className="max-h-48 [field-sizing:content]" autoFocus={autoFocus} required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
-    </FormField>
+    <>
+      {shared && (
+        <Callout tone="needs-you" role="status" title="Shared from another app: review it before launching">
+          {task.length} {task.length === 1 ? 'character' : 'characters'}, {lines} {lines === 1 ? 'line' : 'lines'}. Nothing runs until you choose Launch.
+        </Callout>
+      )}
+      <FormField label="Task" help={help}>
+        <Textarea className={cn('[field-sizing:content]', !shared && 'max-h-48')} autoFocus={autoFocus} required={headless} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
+      </FormField>
+    </>
   )
 }
 

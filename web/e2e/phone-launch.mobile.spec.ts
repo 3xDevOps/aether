@@ -47,6 +47,7 @@ test('a shared prompt fills + New without launching and leaves the address', asy
 
   const sheet = page.getByRole('dialog', { name: 'New session' })
   await expect(sheet.getByLabel('Task')).toHaveValue('hi')
+  await expect(sheet.getByRole('status').filter({ hasText: 'Shared from another app' })).toContainText('2 characters, 1 line')
   await expect.poll(() => new URL(page.url()).searchParams.has('prompt')).toBe(false)
   expect(new URL(page.url()).searchParams.has('new')).toBe(false)
   const { runs } = await alice.api.rpc<{ runs: unknown[] | null }>('run.list', {})
