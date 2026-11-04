@@ -231,7 +231,7 @@ and mode, the account, the fallback when that account's usage runs out, the
 task, and how you hear back. Its title names the
 [permission tier](security.md#permission-tiers) when the launch sets one, from
 your request or your saved choices, as in `Launch claude (acp) in api,
-permission root`. A template launch's card shows the whole task its
+permission root`, and the model and effort when the launch sets them. A template launch's card shows the whole task its
 parameters fill in. When the assistant gives a one-line reason for a launch,
 the card shows it as a **Reason** row above the rest. The assistant fills what you did not say from
 your [saved launch choices](teams.md#saved-launch-choices): **From your saved
@@ -270,6 +270,7 @@ follows when the call returns:
 | --- | --- |
 | `Approved: <summary>` | You approved the card |
 | `Auto-approved: <summary>` | [Auto-approval](#auto-approval) passed it |
+| `Auto-approved by rule <id>: <summary>` | One of your [approval rules](#approval-rules) passed it |
 | `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer in 10 minutes, or the turn ended first. Nothing ran |
 | `Done: <summary>` | It succeeded, with the session it launched |
 | `Failed: <summary>` | The server refused it, or the approval could not be read or counted, with the exact error. In the second case nothing ran |
@@ -279,6 +280,58 @@ Each record carries the target's session and workspace id, and the owner when th
 session is another member's; the [protocol reference](local-gateway.md) gives the
 fields. Resetting the conversation drops the records of actions still in
 flight instead of writing them into the new one.
+
+## Approval rules
+
+A card that could become a rule also offers **Always approve** with the
+server's wording of exactly what the rule covers:
+
+```text
+Launch claude (acp) in api, no fallback: "Fix the flaky login test"
+  Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback
+```
+
+Clicking it approves the card and saves the rule. A later card with the same
+key passes without asking and is recorded as `Auto-approved by rule <id>:
+<summary>`. A card of any other kind still asks. Rules are checked before
+[auto-approval](#auto-approval), are read on every call, and never expire.
+
+| Card | The rule's key |
+| --- | --- |
+| `run.launch` | workspace, agent, account (yours or one named teammate's), mode, model, effort, permission tier, and whether fallback is off |
+| `run.inject`, `run.kill` | workspace, your own sessions only |
+| `env.save` | your environment |
+
+The key is built by the server from the card's parameters, never from the
+task, the message or the assistant's reason, which a rule does not limit.
+An empty mode, model or effort is part of the key: the rule covers only
+launches that leave it to the agent's default.
+
+These cards never offer a rule, and a rule never passes them:
+
+- Messaging or stopping another member's session.
+- A launch with automatic [usage fallback](teams.md#usage-fallback) while
+  any account is shared with you, or with a fallback order, extra
+  repositories, a subsession setting or resource limits.
+- A card whose text holds one of your saved [preferences](#preferences).
+- Everything auto-approval does not cover: template launches, merges,
+  closes, handoffs, memory notes and pins, forgetting a preference, saving
+  launch choices, and answering a session's question.
+
+Only you create rules, by clicking **Always approve** on a card in the
+Aether app. The assistant, its tool socket and connectors cannot create,
+list or revoke them.
+
+List and revoke them with `assistant.rules` and `assistant.rules.revoke`
+([protocol reference](local-gateway.md)). Each rule shows its wording, the
+card it came from, when it was created and last used, and how many cards it
+passed. A revoke applies to the next card. A rule whose workspace was
+removed, or whose teammate's account is no longer shared with you, stops
+passing cards and is listed as `Inactive: <reason>`. Merging two members
+keeps the survivor's rules and does not move the absorbed member's.
+
+After you approve three cards of one kind in a row, the next card of that
+kind highlights **Always approve**.
 
 ## See what it did
 
@@ -340,8 +393,10 @@ not covered   the assistant's own shell and file tools, which never ask
 > call the assistant's tools and gets the same pass. See
 > [security.md](security.md#the-assistant).
 
-After you approve three cards in a row that auto-approval would have passed, the
-panel offers **Skip approval cards for the assistant?** when it is idle.
+After you approve three cards in a row that auto-approval would have passed,
+not all of one kind, the panel offers **Skip approval cards for the
+assistant?** when it is idle. Three of one kind highlight that kind's
+[rule](#approval-rules) instead.
 **Turn on auto-approval** turns it on. **Not now** asks again in 7 days, then 30,
 then never. **Don't suggest again** stops it.
 

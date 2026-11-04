@@ -63,6 +63,69 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 	}
 }
 
+// reauthDue reports whether an auth refusal should restart the agent, and
+// whether a restart within acpLostAgain already failed to fix it. A run whose
+// agent reported an outcome waits for a turn end, which the restored
+// session's idle state would fake, so it is not restarted.
+func (d *acpDriver) reauthDue(entry *supervised) (due, tried bool) {
+	d.s.mu.Lock()
+	defer d.s.mu.Unlock()
+	if time.Since(entry.authLostAt) < acpLostAgain {
+		return false, true
+	}
+	if entry.reported != "" || (entry.idleReason != "" && !entry.idleShown) {
+		return false, false
+	}
+	entry.authLostAt = time.Now()
+	return true, false
+}
+
+// reauth restarts an agent that refused a turn for want of a sign-in, so it
+// reads the account's login again, restores its session and shows the
+// refusal. The refused prompt is not sent again: its sender already has the
+// refusal, and mail is offered again on its own.
+func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState) {
+	defer d.lockOp(entry.runID)()
+	d.mu.Lock()
+	sess := lost.session
+	current := d.runs[entry.runID] == lost && !lost.stopping && sess != nil
+	d.mu.Unlock()
+	if !current {
+		d.s.mu.Lock()
+		entry.authLostAt = time.Time{}
+		d.s.mu.Unlock()
+		return
+	}
+	if sess.State().TurnInFlight {
+		// A newer turn started after the refusal, so the agent is not
+		// stopped under it; a refusal of that turn may restart it.
+		d.s.mu.Lock()
+		entry.authLostAt = time.Time{}
+		d.s.mu.Unlock()
+		return
+	}
+	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again."); err != nil {
+		slog.Warn("scheduler: record the sign-in notice", "run", entry.runID, "error", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)
+	defer cancel()
+	// The restored session's idle state must not hide the refusal: nothing
+	// sends a refused task again.
+	d.record(entry, func() {
+		entry.agentKeeper = nil
+		entry.authRefused = fmt.Errorf("%w; Aether restarted the agent so it reads the account's login again: send the message again", st.Failed)
+	})
+	if err := d.open(ctx, entry, openRestore); err != nil {
+		d.s.mu.Lock()
+		entry.authRefused = nil
+		d.s.mu.Unlock()
+		if acphost.AuthRequired(err) {
+			err = fmt.Errorf("%w; the restarted agent still finds no sign-in, so this container's copy of the login is stale or unreadable: start a new session", err)
+		}
+		d.fail(entry, err)
+	}
+}
+
 func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	<-r.session.Done()
 	d.mu.Lock()

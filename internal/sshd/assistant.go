@@ -26,6 +26,9 @@ type AssistantService interface {
 	Cancel(ctx context.Context, member domain.MemberID) error
 	Answer(member domain.MemberID, requestID, optionID string, values map[string]any) error
 	Confirm(member domain.MemberID, confirmationID string, approve bool) error
+	ApproveAlways(ctx context.Context, member domain.MemberID, confirmationID string) (protocol.AssistantRule, error)
+	Rules(ctx context.Context, member domain.MemberID) ([]protocol.AssistantRule, error)
+	RevokeRule(ctx context.Context, member domain.MemberID, ruleID string) error
 	Reset(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	History(member domain.MemberID, beforeSeq int64, limit int) (acphost.HistoryPage, error)
 	Item(member domain.MemberID, seq int64) (acphost.Item, error)
@@ -52,6 +55,8 @@ func init() {
 	registerMethod(protocol.MethodAssistantItem, (*Server).assistantItem)
 	registerMethod(protocol.MethodAssistantSettings, (*Server).assistantSettings)
 	registerMethod(protocol.MethodAssistantView, (*Server).assistantView)
+	registerMethod(protocol.MethodAssistantRules, (*Server).assistantRules)
+	registerMethod(protocol.MethodAssistantRuleRevoke, (*Server).assistantRuleRevoke)
 }
 
 var errAssistantUnavailable = &protocol.Error{Code: protocol.CodeUnavailable, Message: "the assistant is not configured on this server"}
@@ -159,7 +164,7 @@ func (s *Server) assistantAnswer(_ context.Context, member domain.MemberID, raw 
 	return struct{}{}, nil
 }
 
-func (s *Server) assistantConfirm(_ context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+func (s *Server) assistantConfirm(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	svc := s.cfg.Services.Assistant
 	if svc == nil {
 		return nil, errAssistantUnavailable
@@ -171,7 +176,67 @@ func (s *Server) assistantConfirm(_ context.Context, member domain.MemberID, raw
 	if p.ConfirmationID == "" {
 		return nil, invalidParams("confirmation_id is required")
 	}
-	if err := svc.Confirm(member, p.ConfirmationID, p.Approve); err != nil {
+	if !p.Always {
+		if err := svc.Confirm(member, p.ConfirmationID, p.Approve); err != nil {
+			return nil, assistantError(err)
+		}
+		return protocol.AssistantConfirmResult{}, nil
+	}
+	if !p.Approve {
+		return nil, invalidParams("always needs approve: a declined card saves no rule")
+	}
+	if perr := memberOnly(ctx, protocol.MethodAssistantConfirm+" with always"); perr != nil {
+		return nil, perr
+	}
+	rule, err := svc.ApproveAlways(ctx, member, p.ConfirmationID)
+	if err != nil {
+		return nil, assistantError(err)
+	}
+	return protocol.AssistantConfirmResult{Rule: &rule}, nil
+}
+
+// memberOnly refuses what changes how the assistant is gated to the
+// assistant's own calls and to connectors: only the member, from an Aether
+// device, may.
+func memberOnly(ctx context.Context, what string) *protocol.Error {
+	id, _ := ctx.Value(connIdentityKey{}).(connIdentity)
+	if fromAssistant(ctx) || id.connector != "" {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: what + ": only you can change the assistant's approval rules, from the Aether app or the aether CLI"}
+	}
+	return nil
+}
+
+func (s *Server) assistantRules(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	if perr := memberOnly(ctx, protocol.MethodAssistantRules); perr != nil {
+		return nil, perr
+	}
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil, errAssistantUnavailable
+	}
+	rules, err := svc.Rules(ctx, member)
+	if err != nil {
+		return nil, assistantError(err)
+	}
+	return protocol.AssistantRulesResult{Rules: append([]protocol.AssistantRule{}, rules...)}, nil
+}
+
+func (s *Server) assistantRuleRevoke(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	if perr := memberOnly(ctx, protocol.MethodAssistantRuleRevoke); perr != nil {
+		return nil, perr
+	}
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil, errAssistantUnavailable
+	}
+	p, perr := decodeParams[protocol.AssistantRuleRevokeParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.ID == "" {
+		return nil, invalidParams("id is required")
+	}
+	if err := svc.RevokeRule(ctx, member, p.ID); err != nil {
 		return nil, assistantError(err)
 	}
 	return struct{}{}, nil
@@ -299,8 +364,10 @@ func assistantError(err error) *protocol.Error {
 	switch {
 	case errors.As(err, &notReady):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
-	case errors.Is(err, assistant.ErrNoConfirmation):
+	case errors.Is(err, assistant.ErrNoConfirmation), errors.Is(err, assistant.ErrNoSuchRule):
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: err.Error()}
+	case errors.Is(err, assistant.ErrNoRule):
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	case errors.Is(err, assistant.ErrTurnRunning):
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	case errors.Is(err, assistant.ErrNotRunning), errors.Is(err, assistant.ErrNoAgent), errors.Is(err, assistant.ErrClosed), errors.Is(err, assistant.ErrRemoving):
