@@ -55,6 +55,8 @@ describe('Mark complete with close warnings', () => {
     expect(dialog.textContent).toContain('Protected. You can still close it as its owner.')
     expect(dialog.textContent!.indexOf('Commits on')).toBeLessThan(dialog.textContent!.indexOf('Protected.'))
     expect(screen.getByRole('button', { name: 'Cancel' }).className).toContain('focus:outline-accent')
+    expect([...screen.getByRole('button', { name: 'Cancel' }).parentElement!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Cancel', 'Close anyway'])
+    expect(screen.getByRole('button', { name: 'Cancel' }).parentElement!.className).not.toContain('flex-col-reverse')
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
     expect(api.runReview).not.toHaveBeenCalled()
     expect(useStore.getState().runs.run_1.review).toBe('ready')

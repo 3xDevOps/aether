@@ -221,7 +221,7 @@ export function CloseConfirmation() {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <CloseWarnings check={pending.check} run={run} onLeave={dismiss} className={warningScroll} />
-        <AlertDialogFooter>
+        <AlertDialogFooter className="flex-col sm:flex-row">
           {/* Radix AlertDialog focuses Cancel when the confirmation opens. */}
           <AlertDialogCancel className={focusRingShown}>Cancel</AlertDialogCancel>
           <AlertDialogAction
