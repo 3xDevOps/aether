@@ -544,8 +544,8 @@ messages and their decisions, or controller, after a reconnect, and each time
 the page opens. One read runs at a time; a change during it asks for one more.
 A different member or server clears the list. While the page shows a saved
 snapshot and the list has not been read, Needs you lists the saved sessions the
-dashboard's own rule puts in Needs you, to open but not answer, and the
-saved-state banner alone carries the failed read's error. The badge counts the same list's
+dashboard's own rule puts in Needs you, to open but not answer. A failed read
+shows its own error unless the saved-state banner already shows one. The badge counts the same list's
 requests, plus the devices waiting for approval and the merge proposals to the
 viewer, as the sidebar's Needs you does; their board cards (`DeviceCard`,
 `MergeProposalCard`) sit above the session cards. Cards are ranked by kind in

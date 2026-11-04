@@ -371,8 +371,9 @@ function NeedsYou() {
   const done = items ? finished(items) : []
   const { devices, merges } = useAccountNeeds()
   const mergeError = useStore((s) => s.mergeProposalsError)
-  // The saved-state banner carries a failed read's error while the page shows saved data.
   const stale = useStore((s) => s.staleSince !== null)
+  // While saved data shows, the banner's own error already says the server is unreachable.
+  const bannerError = useStore((s) => s.staleSince !== null && s.hydrationError !== null)
   const loading = useDelayed(items === null && !error && !stale)
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -381,7 +382,7 @@ function NeedsYou() {
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-[calc(1.5rem+var(--keyboard-inset,0px))]">
         <div className="mb-3 empty:hidden"><SysboxNudge /></div>
         {stale && items === null && <SavedNeeds />}
-        {error && !stale && (
+        {error && !bannerError && (
           <Callout
             tone="failed"
             role="alert"
