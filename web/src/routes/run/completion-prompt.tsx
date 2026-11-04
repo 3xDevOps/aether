@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
 import { runCommands, useCommandRunner, type Command } from '@/lib/commands'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useSelf, useStale } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { TimelinePayload } from '@/store/sessions'
 
-/** Asks the owner to accept a reported success; Not yet hides it until the agent reports success again. */
+/** Asks the owner to accept a reported success; Review later folds it to one line, Not yet withdraws it until the agent reports success again. */
 export function CompletionPrompt({ run, className }: { run: RunRecord; className?: string }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
   const predicting = useStore((s) => Boolean(s.predicting[run.id]))
@@ -17,35 +18,83 @@ export function CompletionPrompt({ run, className }: { run: RunRecord; className
   const cap = useCapability()
   const self = useSelf()
   const stale = useStale()
-  if (run.review !== 'ready' || run.member_id !== self.id) return null
-  const commands = runCommands({ run, paused, cap, members, self, steerOthers, predicting, stale })
+  if ((run.review !== 'ready' && run.review !== 'later') || run.member_id !== self.id) return null
+  // The prompt shows with the session, so what the agent left is open.
+  const commands = runCommands({ run: { ...run, finish_unopened: false }, paused, cap, members, self, steerOthers, predicting, stale })
   const complete = commands.find((command) => command.id === 'complete')
-  const later = commands.find((command) => command.id === 'not-yet')
-  if (!complete || !later) return null
-  return <Ask run={run} complete={complete} later={later} stale={stale} className={className} />
+  const notYet = commands.find((command) => command.id === 'not-yet')
+  if (!complete) return null
+  const later = commands.find((command) => command.id === 'review-later')
+  return <Ask run={run} complete={complete} notYet={notYet} later={later} stale={stale} className={className} />
 }
 
-function Ask({ run, complete, later, stale, className }: { run: RunRecord; complete: Command; later: Command; stale: boolean; className?: string }) {
+function Ask({ run, complete, notYet, later, stale, className }: {
+  run: RunRecord
+  complete: Command
+  notYet?: Command
+  later?: Command
+  stale: boolean
+  className?: string
+}) {
   const perform = useCommandRunner()
   const summary = useReportedSummary(run)
+  const [reviewing, setReviewing] = useState(false)
+  const closes = useId()
+  if (run.review === 'later' && !reviewing) {
+    return (
+      <div className={className}>
+        <div role="region" aria-label="Completion" className="flex items-center gap-1 text-ui-sm text-muted">
+          <span>Finished, kept for later ·</span>
+          <Button size="sm" variant="link" onClick={() => setReviewing(true)}>Review now</Button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={className}>
       <Callout
         tone="review"
+        className="border border-seam"
         role="region"
         aria-label="Completion"
-        title="Your agent reports this task is finished. Mark it complete?"
+        title={<span className="text-text">Your agent reports this task is finished. <span className="whitespace-nowrap">Mark complete?</span></span>}
         actions={
           <>
             {stale && <span className="self-center text-ui-sm text-muted">Reconnect to act</span>}
-            <Button size="sm" disabled={complete.disabled} onClick={() => void perform(complete)}>Mark complete</Button>
-            <Button size="sm" variant="ghost" disabled={later.disabled} onClick={() => void perform(later)}>Not yet</Button>
+            <span className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" aria-describedby={closes} disabled={complete.disabled} onClick={() => void perform(complete)}>Mark complete</Button>
+              <span id={closes} className="text-ui-sm text-muted">Closes the session.</span>
+            </span>
+            {notYet && <Button size="sm" variant="secondary" disabled={notYet.disabled} onClick={() => void perform(notYet)}>Not yet</Button>}
+            <Button size="sm" variant="ghost" disabled={later?.disabled} onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
           </>
         }
       >
-        {summary && <p className="max-h-32 overflow-y-auto text-ui-sm text-muted">{summary}</p>}
+        {summary && <Summary text={summary} />}
       </Callout>
     </div>
+  )
+}
+
+/** Three lines until opened; opened, it scrolls within a bound so the actions stay on screen. */
+function Summary({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [clipped, setClipped] = useState(false)
+  useLayoutEffect(() => {
+    const p = ref.current
+    if (!p || expanded) return
+    const measure = () => setClipped(p.scrollHeight > p.clientHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(p)
+    return () => observer.disconnect()
+  }, [text, expanded])
+  return (
+    <>
+      <p ref={ref} className={cn('text-ui-sm whitespace-pre-wrap text-muted', expanded ? 'max-h-[30vh] overflow-y-auto' : 'line-clamp-3')}>{text}</p>
+      {(clipped || expanded) && <Button variant="link" size="sm" onClick={() => setExpanded((open) => !open)}>{expanded ? 'Show less' : 'Show more'}</Button>}
+    </>
   )
 }
 

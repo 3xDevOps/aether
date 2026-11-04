@@ -30,6 +30,7 @@ import {
   Square,
   Sun,
   Trash2,
+  Undo2,
   UserPlus,
 } from '@/components/icons'
 import { api, ApiError, codeInvalidState, codeNotFound, type Api } from '@/lib/api'
@@ -371,34 +372,62 @@ export function runCommands(ctx: RunCommandContext): Command[] {
 
   if (cap.hasMethod('run.review') && mayKill && completable(run)) {
     const live = !finished
-    list.push({
-      id: 'complete',
-      label: 'Mark complete',
-      Icon: Check,
-      value: 'done accept',
-      done: 'Marked complete',
-      predict: () => ({
-        runID: id,
-        record: live
-          ? {
-              review: 'accepted',
-              status: 'completed',
-              state: '',
-              stateChangedAt: new Date().toISOString(),
-              stateChangedAtEstimated: true,
-              stateChangedAtPredicted: true,
-            }
-          : { review: 'accepted' },
-      }),
-      slow: live,
-      perform: (d) => d.api.runReview(id, 'complete'),
-    })
-    if (run.review === 'ready') {
+    // Mark complete is a close, so it waits until a member has opened what the agent left.
+    if (run.finish_unopened) {
+      list.push({
+        id: 'review',
+        label: 'Review the result',
+        Icon: Eye,
+        value: 'finished open complete',
+        perform: (d) => d.navigate('run', { runId: id, view: 'session' }),
+      })
+    } else {
+      list.push({
+        id: 'complete',
+        label: 'Mark complete',
+        Icon: Check,
+        value: 'done accept',
+        done: 'Marked complete',
+        predict: () => ({
+          runID: id,
+          record: live
+            ? {
+                review: 'accepted',
+                status: 'completed',
+                state: '',
+                stateChangedAt: new Date().toISOString(),
+                stateChangedAtEstimated: true,
+                stateChangedAtPredicted: true,
+              }
+            : { review: 'accepted' },
+        }),
+        slow: live,
+        perform: (d) => d.api.runReview(id, 'complete'),
+      })
+    }
+    if (live && awaitsCompletion(run)) {
       list.push({
         id: 'not-yet',
-        label: 'Not yet: keep the session open',
+        label: 'Not yet: the work is not finished',
+        Icon: Undo2,
+        value: 'continue unfinished',
+        done: 'Marked not finished',
+        // The status too, so a refusal because someone closed the session meanwhile shows its error.
+        predict: () => ({ runID: id, record: { review: '', status: run.status } }),
+        perform: async (d) => {
+          const same = sameIdentity()
+          await d.api.runReview(id, 'not-yet')
+          if (same()) d.navigate('run', { runId: id, view: 'session', focus: 'composer' })
+        },
+      })
+    }
+    if (run.review === 'ready') {
+      list.push({
+        id: 'review-later',
+        label: 'Review later',
         Icon: Hourglass,
-        done: 'Kept open',
+        value: 'snooze defer',
+        done: 'Review put off',
         predict: () => ({ runID: id, record: { review: 'later' } }),
         perform: (d) => d.api.runReview(id, 'later'),
       })
@@ -603,7 +632,7 @@ export function closeCommand(runID: string, outcome: 'merged' | 'abandoned'): Co
 
 /** A run whose agent reported success and that its owner has not marked complete. */
 function completable(run: RunRecord): boolean {
-  return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review !== 'accepted')
+  return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review === undefined && !run.review_changed_at)
 }
 
 /** Older agent-report finishes can still have a retained interactive runtime. */
@@ -708,11 +737,11 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   }
   list.push(
     {
-      id: 'theme-system',
-      label: 'Use system theme',
-      Icon: Monitor,
+      id: 'theme-dark',
+      label: 'Use dark theme',
+      Icon: Moon,
       value: 'appearance mode',
-      perform: (d) => d.setTheme('system'),
+      perform: (d) => d.setTheme('dark'),
     },
     {
       id: 'theme-light',
@@ -722,11 +751,11 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.setTheme('light'),
     },
     {
-      id: 'theme-dark',
-      label: 'Use dark theme',
-      Icon: Moon,
+      id: 'theme-system',
+      label: 'Use system theme',
+      Icon: Monitor,
       value: 'appearance mode',
-      perform: (d) => d.setTheme('dark'),
+      perform: (d) => d.setTheme('system'),
     },
   )
   return list
