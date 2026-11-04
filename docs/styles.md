@@ -89,7 +89,8 @@ the system theme over the native error and update panels.
 | `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
 | `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
 | `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |
-| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, focus ring, control outline |
+| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, control outline |
+| `--focus-ring` | `outline-focus` | `#367f77` | `#5fb3a8` | Keyboard focus ring; 3:1 on every surface and on the selected row in both themes |
 | `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
 | `--on-accent` | `text-on-accent` | `#ffffff` | `#ffffff` | Text on `bg-accent` |
 | `--selection` | `bg-selection` | `#dfebe9` | `#17413d` | Selected rows |

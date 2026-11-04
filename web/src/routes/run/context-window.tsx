@@ -85,7 +85,7 @@ function LegendRow({ segment, warn, focus, onFocus }: {
       onBlur={() => { touched.current = false; onFocus(null) }}
       onPointerEnter={(event) => interactive(event) && onFocus(segment.key)}
       onPointerLeave={(event) => interactive(event) && onFocus(null)}
-      className={cn('-mx-2 flex h-8 items-center gap-2 rounded-control px-2 coarse:h-11 outline-none focus-visible:outline-2 focus-visible:outline-accent', focus === segment.key && 'bg-hover-chrome')}
+      className={cn('-mx-2 flex h-8 items-center gap-2 rounded-control px-2 coarse:h-11 outline-none focus-visible:outline-2 focus-visible:outline-focus', focus === segment.key && 'bg-hover-chrome')}
     >
       <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-xs', cellTone(segment.key, warn))} />
       <span className={cn('min-w-0 flex-1 truncate text-ui', focus && focus !== segment.key ? 'text-muted' : 'text-text')}>{segment.label}</span>

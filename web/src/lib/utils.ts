@@ -44,10 +44,10 @@ export function cn(...inputs: ClassValue[]) {
 /** An outline, not a ring: forced-colors mode discards box shadows, and ring
  * classes already mean "selected" on some controls. */
 export const focusRing =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus focus-visible:transition-none'
 
 export const focusRingInset =
-  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
+  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus focus-visible:transition-none'
 
 /** A disclosure marker that turns as its body opens. */
 export const chevronTurn = 'transition-transform duration-200 ease-standard motion-reduce:transition-none'
