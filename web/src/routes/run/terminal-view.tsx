@@ -17,6 +17,7 @@ import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { shellEnded } from '@/store/terminal'
+import type { DevTerminal } from '@/lib/development-types'
 import type { RunRecord } from '@/store/runs'
 
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
@@ -71,8 +72,6 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   )
 }
 
-const emptyList: object = []
-
 /**
  * On a phone an Enhanced session has no agent terminal to land on, so the
  * first time its Terminal tab is viewed it shows a running shell a person
@@ -83,7 +82,7 @@ function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
   const mobile = useIsMobile()
   const asked = useRef(false)
   const [failed, setFailed] = useState(false)
-  const [waiting, setWaiting] = useState<object | null>(null)
+  const [waiting, setWaiting] = useState<{ from: DevTerminal[] | undefined } | null>(null)
   const { runID, visible, canOpen, refresh, show, setError } = shells
   const terminals = useStore((state) => state.shellDocks[runID]?.terminals)
   const showRunning = useCallback(() => {
@@ -112,11 +111,11 @@ function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
       showRunning()
       // A newer poll syncs the list instead; the effect below picks it up.
       const after = useStore.getState().shellDocks[runID]?.terminals
-      if (after === before) setWaiting(after ?? emptyList)
+      if (after === before) setWaiting({ from: after })
     })()
   }, [canOpen, failed, mobile, refresh, runID, setError, showRunning, visible, wanted])
   useEffect(() => {
-    if (!waiting || terminals === waiting) return
+    if (!waiting || terminals === waiting.from) return
     setWaiting(null)
     showRunning()
   }, [waiting, terminals, showRunning])
