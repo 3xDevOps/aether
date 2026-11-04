@@ -2389,8 +2389,10 @@ can launch, its agent, and a line under the chips says which of the two still
 match it. Without such a session the repository is the active workspace and
 the agent is preselected as on desktop. A repository chosen here affects only
 this launch. With no workspace at all the sheet says so and offers **Add a
-workspace**, which opens Manage workspaces. So a quick task is three steps:
-**New**, type, Launch.
+workspace**, which opens Manage workspaces. A refusal shows between the
+form and Launch, outside the scrolling form, so the keyboard cannot hide it;
+past 40% of the screen it scrolls. So a quick task is three steps: **New**,
+type, Launch.
 
 **Share to Aether.** The Android app's share target opens
 `/?new=1&prompt=<encodeURIComponent(text)>`, or the gateway URL with
