@@ -33,7 +33,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const returnFocus = useReturnFocus()
   const phone = useIsMobile()
   const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(null)
-  const last = useStore(lastSession)
+  // Read once at open: a session started meanwhile must not move the chips under the member's thumb.
+  const [last] = useState(() => lastSession(useStore.getState()))
   const lastWorkspace = last?.workspace_id ?? ''
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   // A phone has no sidebar showing the active workspace, so it starts where your last session ran.
@@ -79,7 +80,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const [permission, setPermission] = useState<Permission>('default')
   // A saved choice read after the member picked a tier must not replace it.
   const permissionPicked = useRef(false)
-  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick, preferred: phone ? last?.harness : undefined })
+  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick, fallback: phone ? last?.harness : undefined })
   const { agents, agentError, harness, mode, model, effort, noAgents } = choice
   const [shared, setShared] = useState(() => useStore.getState().paletteLaunchTask)
   const [task, setTask] = useState(shared)
@@ -328,12 +329,13 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   )
 }
 
-/** Your newest session in a workspace that still exists. */
+/** Your newest session you started yourself, in a workspace that still exists; subsessions and connector launches do not count. */
 function lastSession(s: RootState): Run | undefined {
   const me = s.info?.member.id
   let last: Run | undefined
   for (const run of Object.values(s.runs)) {
-    if (run.member_id === me && s.workspaces[run.workspace_id] && (!last || run.created_at > last.created_at)) last = run
+    if (run.member_id !== me || run.parent_run_id || run.via || !s.workspaces[run.workspace_id]) continue
+    if (!last || run.created_at > last.created_at) last = run
   }
   return last
 }

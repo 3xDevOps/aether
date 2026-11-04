@@ -14,13 +14,14 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { type LaunchDefaultsRead, rememberedChoice } from '@/store/launch-defaults'
 
-function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, preferred?: string): string {
+function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, preferred?: string, fallback?: string): string {
   const { launchDefaults, runs } = useStore.getState()
   const ok = list.filter(launchable)
-  if (preferred && ok.some((agent) => agent.name === preferred)) return preferred
-  const last = saved
-    ? ok.find((agent) => agent.name === saved.defaults.agent)
-    : ok.filter((agent) => launchDefaults[agent.name]).sort((a, b) => launchDefaults[b.name].at - launchDefaults[a.name].at)[0]
+  const can = (name?: string): name is string => !!name && ok.some((agent) => agent.name === name)
+  if (can(preferred)) return preferred
+  if (saved && can(saved.defaults.agent)) return saved.defaults.agent
+  if (can(fallback)) return fallback
+  const last = saved ? undefined : ok.filter((agent) => launchDefaults[agent.name]).sort((a, b) => launchDefaults[b.name].at - launchDefaults[a.name].at)[0]
   if (last) return last.name
   const recent = Object.values(runs)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -29,16 +30,18 @@ function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, prefer
 }
 
 /** The agent, mode, model and effort a launch uses, reloaded for each account; `preferred`
- * wins the first pick when that agent can launch, with `preferredModel` and `preferredEffort`.
+ * wins the first pick when that agent can launch, with `preferredModel` and `preferredEffort`;
+ * `fallback` comes right after the saved agent.
  * The first pick waits for `saved`, the server's saved choices, or uses this
  * browser's when the server keeps none or cannot be read. */
-export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, preferredEffort, hold = false, pick = 0, client = api }: {
+export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, preferredEffort, fallback, hold = false, pick = 0, client = api }: {
   account: string
   ownAccountID: string
   saved: LaunchDefaultsRead
   preferred?: string
   preferredModel?: string
   preferredEffort?: string
+  fallback?: string
   /** Holds the first pick while the caller may still switch `account`. */
   hold?: boolean
   /** A change picks again from the saved choices, replacing the current agent. */
@@ -54,7 +57,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   const [effort, setEffort] = useState('')
   const [attempt, setAttempt] = useState(0)
   const savedReady = saved.fresh
-  const choice = useRef({ harness, mode, preferred, preferredModel, preferredEffort, saved: saved.result, pick })
+  const choice = useRef({ harness, mode, preferred, preferredModel, preferredEffort, fallback, saved: saved.result, pick })
   choice.current = { ...choice.current, harness, mode, saved: saved.result }
 
   const choose = useCallback((name: string, list: AgentInfo[]) => {
@@ -87,7 +90,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
     current.pick = pick
     const keep = !repick && (current.harness === customAgent || agents.some((item) => item.name === current.harness && launchable(item)))
     if (!keep) {
-      const name = preselect(agents, current.saved, current.preferred)
+      const name = preselect(agents, current.saved, current.preferred, current.fallback)
       choose(name, agents)
       if (name === current.preferred && current.preferredModel !== undefined) setModel(current.preferredModel)
       if (name === current.preferred && current.preferredEffort !== undefined) setEffort(current.preferredEffort)

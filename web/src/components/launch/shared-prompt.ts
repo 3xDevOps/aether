@@ -1,14 +1,17 @@
 import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { canLaunch } from '@/lib/commands'
+import { takeSharedPrompt } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { useCapability, useSelfRole } from '@/store/hooks'
 
+/** The most a share may carry; the Android share target sends no more. */
+const sharedLimit = 8000
+
 /**
- * Share to Aether opens `?new=1&prompt=<text>`. The launch form opens with
- * that task and waits for Launch; the two parameters leave the address so a
- * reload does not open it again. Another open form is finished first, so
- * the share never replaces its draft.
+ * Opens New session with the text shared at load (`takeSharedPrompt`) once
+ * the dashboard has hydrated and no other form is open, so the share never
+ * replaces another form's draft. The form waits for Launch.
  */
 export function useSharedPrompt() {
   const hydrated = useStore((s) => s.hydrated)
@@ -18,14 +21,15 @@ export function useSharedPrompt() {
   const ready = hydrated && role !== null && free
   useEffect(() => {
     if (!ready) return
-    const url = new URL(window.location.href)
-    if (url.searchParams.get('new') !== '1') return
-    const prompt = url.searchParams.get('prompt') ?? ''
-    url.searchParams.delete('new')
-    url.searchParams.delete('prompt')
-    window.history.replaceState(window.history.state, '', url.toString())
-    if (canLaunch({ cap, role })) useStore.getState().openLaunchWithTask(prompt)
-    else if (!cap.hasMethod('run.launch')) toast.error('Shared text not opened: this gateway does not offer run.launch, so it cannot start sessions.')
-    else toast.error(`Shared text not opened: a ${role} cannot launch sessions.`)
+    const text = takeSharedPrompt()
+    if (text === null) return
+    if (!canLaunch({ cap, role })) {
+      toast.error(cap.hasMethod('run.launch')
+        ? `Shared text not opened: a ${role} cannot launch sessions.`
+        : 'Shared text not opened: this gateway does not offer run.launch, so it cannot start sessions.')
+      return
+    }
+    if (text.length > sharedLimit) toast.warning(`Shared text cut to its first ${sharedLimit} characters, of ${text.length}.`)
+    useStore.getState().openLaunchWithTask(text.slice(0, sharedLimit))
   }, [ready, cap, role])
 }

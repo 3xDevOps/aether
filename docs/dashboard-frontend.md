@@ -2383,32 +2383,36 @@ first, focused, with one-word help; then the **Repository** chip, the base
 branch as muted text ("from main"; sessions always start from it) and the
 **Agent** chip; then **Launch** pinned under the form. Permission, Mode, Model,
 Effort, Resource limits, Subsessions, extra repositories and the account sit
-under **More options**, whose caption names the mode. The sheet starts from
-your newest session in a workspace that still exists: its repository and, if it
-can launch, its agent, and a line under the chips says which of the two still
-match it. Without such a session the repository is the active workspace and
-the agent is preselected as on desktop. A repository chosen here affects only
+under **More options**, whose caption names the mode. The repository starts
+on the workspace of your newest session that you started yourself (not a
+subsession or a connector launch) in a workspace that still exists, read once
+when the sheet opens; without one, the active workspace. The agent is your
+saved agent; with none saved, that session's agent if it can launch; then as
+on desktop. A line under the chips says which of the two match that session. A repository chosen here affects only
 this launch. With no workspace at all the sheet says so and offers **Add a
 workspace**, which opens Manage workspaces. A refusal shows between the
 form and Launch, outside the scrolling form, so the keyboard cannot hide it;
 past 40% of the screen it scrolls. So a quick task is three steps: **New**,
 type, Launch.
 
-**Share to Aether.** The Android app's share target opens
-`/?new=1&prompt=<encodeURIComponent(text)>`, or the gateway URL with
-`&new=1&prompt=...` through an edge, with at most 8000 characters. Any app can
-open that address, so the text only fills the form. Once the dashboard has
-hydrated and no other form is open, `useSharedPrompt`
-(`components/launch/shared-prompt.ts`) removes `new` and `prompt` from the
-address with `history.replaceState`, so a reload does not reopen the form, and
-opens New session with the text as the task. Above the task a callout says
-"Shared from another app: review it before launching" with the character and
-line count, and the task field grows to show all of it; both go back to normal
-once the text is edited. A share that arrives while New session is open
-replaces the task only if it is empty or still the last shared text; otherwise
-a toast says the text was not added. A member who cannot launch gets a toast
-with the reason: the gateway has no `run.launch`, or the role cannot launch.
-On desktop the panel opens the same way.
+**Share to Aether.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
+the gateway URL with `&new=1&prompt=...` through an edge, opens New session
+with the text as its task. It is the entry point for sharing from another
+app, so the text only fills the form. At load, before any route is written to
+history, `initialRoute` (`src/lib/url-state.ts`) takes `new` and `prompt` off
+the address with `history.replaceState` and keeps the text in memory, so
+neither Back nor a reload brings it back; a `prompt` without `new=1` is
+dropped. Once the dashboard has hydrated and no other form is open,
+`useSharedPrompt` (`components/launch/shared-prompt.ts`) opens the form,
+keeping the first 8000 characters and saying so in a toast when it cut any.
+Above the task a callout says "Shared from another app: review it before
+launching" with the character and line count, and the task field grows to
+show all of it; both go back to normal once the text is edited. A share that
+arrives while New session is open replaces the task only if it is empty or
+still the last shared text; otherwise a toast says the text was not added. A
+member who cannot launch gets a toast with the reason: the gateway has no
+`run.launch`, or the role cannot launch. On desktop the panel opens the same
+way.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
 "Native messages, approvals and progress", see

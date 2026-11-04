@@ -344,9 +344,8 @@ inside the session ([permission tiers](security.md#permission-tiers)). Enter the
 **Task**, pick the **Agent** and the **Mode**, and click **Launch**.
 **Background** mode runs the task once with no interaction. On a phone, tap
 **New**, type the task and tap **Launch**: the repository and agent start on
-your last session's, and Permission and Mode are under **More options**.
-Sharing text or a link to Aether from another Android app opens the same
-form with it as the task; nothing launches until you tap **Launch**. From the CLI:
+your last session's unless you saved a default agent, and Permission and Mode
+are under **More options**. From the CLI:
 
 ```sh
 aether session "add a health check endpoint" --workspace myproject --agent claude
