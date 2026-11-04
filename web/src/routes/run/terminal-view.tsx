@@ -16,6 +16,7 @@ import { TerminalHistory } from '@/routes/terminal/history'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+import { shellEnded } from '@/store/terminal'
 import type { RunRecord } from '@/store/runs'
 
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
@@ -88,8 +89,10 @@ function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
   const showRunning = useCallback(() => {
     const dock = useStore.getState().shellDocks[runID]
     if (!dock || dock.shellShown) return
-    const running = dock.terminals.find((terminal) =>
-      dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && terminal.process.state === 'running')
+    const mine = dock.terminals.filter((terminal) =>
+      dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && !shellEnded(terminal))
+    // A shell reads unavailable until it reattaches after a reload, so a running one only wins a tie.
+    const running = mine.find((terminal) => terminal.process.state === 'running') ?? mine[0]
     if (running) show(running.terminal_id)
   }, [runID, show])
   useEffect(() => {
