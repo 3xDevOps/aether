@@ -77,6 +77,7 @@ function Question({ item, onError }: { item: AttentionItem; onError: (error?: st
   const [busy, setBusy] = useState<string | null>(null)
   const late = usePastDeadline(busy !== null)
   const request = item.request!
+  // Only a permission with a tool call is drawn as pills.
   const plan = choicePlan({
     id: request.id,
     kind: 'question',
@@ -84,8 +85,7 @@ function Question({ item, onError }: { item: AttentionItem; onError: (error?: st
     options: request.options?.map((o) => ({ id: o.id, name: o.label, kind: o.kind })),
     schema: request.schema,
     status: 'pending',
-  }, undefined)
-  if (plan.kind !== 'buttons') return null
+  }, undefined) as Extract<ReturnType<typeof choicePlan>, { kind: 'buttons' }>
   const answer = async (optionID: string) => {
     setBusy(optionID)
     onError(undefined)
