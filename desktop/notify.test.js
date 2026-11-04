@@ -546,3 +546,13 @@ test("a disconnect after a success closes the session's own success notice", asy
   assert.equal(shown.length, 2)
   assert.equal(badge, 1)
 })
+
+test("a handoff closes the former owner's success notice", async () => {
+  const run = { ...lead('r30'), acp: true }
+  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' })
+  assert.equal(shown.length, 1)
+  run.member_id = 'someone-else'
+  await status(run, { state: 'disconnected', reason: 'enhanced session ended: exit code 1' })
+  assert.ok(shown[0].closed)
+  assert.equal(shown.length, 1)
+})

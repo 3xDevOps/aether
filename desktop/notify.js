@@ -271,6 +271,7 @@ function onStatus(runId, p) {
     if (!run || !self) return
     if (run.member_id !== self) {
       resolve(runId)
+      closeOwnFinished(runId)
       return
     }
     announce(runId, run)
