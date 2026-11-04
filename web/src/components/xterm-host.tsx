@@ -645,9 +645,17 @@ export function useXterm({
       host.addEventListener('wheel', noteViewportInteraction, { passive: true })
       host.addEventListener('touchmove', noteViewportInteraction, { passive: true })
       host.addEventListener('pointerdown', noteScrollbarInteraction)
+      // xterm hands a paste to onData like a keystroke, synchronously inside
+      // its own paste listener; a one-character paste must not take a modifier.
+      let pasting = false
+      const notePaste = () => {
+        pasting = true
+        queueMicrotask(() => { pasting = false })
+      }
+      host.addEventListener('paste', notePaste, true)
       const input = created.onData((data) => {
         const { ctrl, alt } = modifiersRef.current
-        const modified = ctrl === 'off' && alt === 'off'
+        const modified = pasting || (ctrl === 'off' && alt === 'off')
           ? null
           : applyModifiers(data, ctrl !== 'off', alt !== 'off')
         // A key the modifiers do not cover keeps them for the next key rather
@@ -668,6 +676,7 @@ export function useXterm({
         host.removeEventListener('wheel', noteViewportInteraction)
         host.removeEventListener('touchmove', noteViewportInteraction)
         host.removeEventListener('pointerdown', noteScrollbarInteraction)
+        host.removeEventListener('paste', notePaste, true)
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()

@@ -11,6 +11,9 @@ describe('sticky modifiers', () => {
   it('send what a keyboard sends for the key under them', () => {
     expect(applyModifiers('c', true, false)).toBe('\x03')
     expect(applyModifiers(' ', true, false)).toBe('\x00')
+    expect(applyModifiers('`', true, false)).toBe('\x00')
+    expect(applyModifiers('?', true, false)).toBe('\x7f')
+    expect(applyModifiers('\x7f', true, false)).toBe('\x08')
     expect(applyModifiers('b', false, true)).toBe('\x1bb')
     expect(applyModifiers('x', true, true)).toBe('\x1b\x18')
     expect(applyModifiers('\x1b[D', true, false)).toBe('\x1b[1;5D')

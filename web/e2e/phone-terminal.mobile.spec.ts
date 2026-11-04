@@ -105,4 +105,13 @@ test('an Enhanced session offers a shell that fits a phone and takes a sticky Ct
   await expect.poll(() => sideways(page)).toEqual({ pane: 0, page: 0 })
   await shoot(page, testInfo, '430 keyboard')
   await restoreWide()
+
+  // Back later, the tab shows the shell that is still running rather than
+  // offering another.
+  await page.reload()
+  await expect(page.getByRole('log', { name: 'Chat' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).tap()
+  await expect(rows(page)).toContainText('after-42', { timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'Open shell', exact: true })).toBeHidden()
+  expect(await keyboardFocused(page)).toBe(false)
 })

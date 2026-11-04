@@ -4,7 +4,6 @@ import { connectionLabel } from '@/components/shell/connection'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { isRetainedRun } from '@/lib/commands'
 import { message } from '@/lib/format'
@@ -67,34 +66,35 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
 
 /**
  * On a phone an Enhanced session has no agent terminal to land on, so the
- * first time its Terminal tab is viewed it shows a shell that is already
- * running. It never starts one: viewing a tab must not start a process or
- * take a lease.
+ * first time its Terminal tab is viewed it shows a running shell a person
+ * started and has not hidden. It never starts one: viewing a tab must not
+ * start a process or take a lease.
  */
 function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
   const mobile = useIsMobile()
   const asked = useRef(false)
   const [failed, setFailed] = useState(false)
-  const { runID, visible, canOpen, show, setError } = shells
+  const { runID, visible, canOpen, refresh, show, setError } = shells
   useEffect(() => {
     if (!mobile || !wanted || !visible || !canOpen || asked.current || failed) return
     asked.current = true
     void (async () => {
-      // Decided from a list this request read itself: the poll may not have
-      // listed the session's shells yet, and may supersede a refresh.
-      let terminals
+      // refresh() drops a list that an Open shell overtook, so the shell it
+      // started is never synced away.
       try {
-        terminals = (await api.devTerminalList({ run_id: runID })).terminals
+        await refresh()
       } catch (cause) {
         setError(message(cause))
         setFailed(true)
         return
       }
-      useStore.getState().syncShellTerminals(runID, terminals)
-      const running = terminals.find((terminal) => !shellEnded(terminal))
+      const dock = useStore.getState().shellDocks[runID]
+      if (!dock || dock.shellShown) return
+      const running = dock.terminals.find((terminal) =>
+        dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && !shellEnded(terminal))
       if (running) show(running.terminal_id)
     })()
-  }, [canOpen, failed, mobile, runID, setError, show, visible, wanted])
+  }, [canOpen, failed, mobile, refresh, runID, setError, show, visible, wanted])
   return failed ? () => {
     asked.current = false
     setError(null)

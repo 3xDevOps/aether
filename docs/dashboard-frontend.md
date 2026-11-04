@@ -3255,14 +3255,22 @@ removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
 session with no agent terminal, such as an Enhanced session, shows "No agent
 terminal" and the shell controls. Under 768px (`useIsMobile`), the first time
-the Terminal view shows for such a session `useRunningShellOnPhone` reads the
-shell list itself with `dev.terminal.list` and shows a running shell; a
-failed read shows its error with **Retry**. It never starts one, because viewing a tab must
-not start a process or take a lease: the empty state carries a primary
-**Open shell** (`shells.open`) instead, with a spinner while it starts and
-the shell-limit reason under it when four are running. On that view the Enhanced session's
+the Terminal view shows for such a session `useRunningShellOnPhone` reads
+the shell list with `shells.refresh()`, whose revision counter drops a list
+that an **Open shell** overtook. It then shows a running shell a member
+started (`started_by: 'member'`) and has not hidden; the agent's own shells
+stay behind the tab menu. A failed read shows its error with **Retry**. It
+never starts a shell, because viewing a tab must not start a process or take
+a lease: the empty state carries a primary **Open shell** (`shells.open`)
+instead, with a spinner while it starts and the shell-limit reason under it
+when four are running. On that view the Enhanced session's
 `MultiplayerControls` strip, which is about the Chat lease, is hidden; the
-shell's toolbar shows the shell's own control. The frame renders one `TakeoverDialog`
+shell's toolbar shows the shell's own control. These three follow the phone
+layout's breakpoint (`useIsMobile`, under 768px, any pointer), because they
+are layout. Fitting, read-first focus and the size stepper follow
+`phoneScreen` (a coarse pointer under 640px) instead: the same query that
+makes a terminal follow the PTY, which fitting needs, and the screens where
+focus raises a soft keyboard. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
@@ -3315,10 +3323,10 @@ open a shell in it" in place of the terminal.
 `TerminalTools` in `src/components/terminal-pane.tsx` is the **Tools** menu
 (named "Terminal tools"): **Find** (**Find in recorded output** while
 reading history), the text size with **Smaller text**, **Larger text** and
-**Reset text size**, each stepping a whole pixel from the drawn size
-(`textSizeSteps`); on `phoneScreen` **Fit to width** replaces the reset and
-the trigger is icon-only, so the toolbar fits 360px, **Copy selection**, **Copy screen**, **Paste**,
-**Upload image…** and, on a session, **Captures…**. It is one menu at every
+**Reset text size**, **Copy selection**, **Copy screen**, **Paste**,
+**Upload image…** and, on a session, **Captures…**. On `phoneScreen` the
+trigger is icon-only so the toolbar fits 360px, and the size items follow
+`useTextSizeStepper` (below), with **Fit to width** in place of the reset. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
 The rest of this section is the terminal machinery the session terminal, its
@@ -3514,10 +3522,11 @@ not stored: the store keeps `terminalFitWidth` (persisted, default on) beside
 **A−**, the drawn size with **Fit**, **A+** - and the phone's Tools menu: a
 step is one whole pixel from the drawn size, and a step down to the fitted
 size or below the 8px zoom minimum returns to fitting, so **A−** is disabled
-while fitted. A two-finger pinch on the host
-scales the drawn size live in 0.5px steps and on release stores it, or
-returns to fitting when it ends at or below the size fitting would draw or
-below 8px.
+while fitted. Only a phone shows the stepper; a tablet keeps the Tools
+items. A two-finger pinch on the host draws the size live in 0.5px steps;
+on release it returns to fitting when it ends at or below the size fitting
+would draw or below 8px, and otherwise stores the size rounded to a whole
+pixel.
 
 **Read first.** On `phoneScreen` `focusTerminal()` does nothing, so no
 effect - a new shell, a tab change, a closed find bar - raises the soft
@@ -3547,12 +3556,17 @@ Ctrl and Alt are sticky modifiers held in the host (`modifiers`,
 `tapModifier`, `clearModifiers` on `XtermController`), because a soft
 keyboard sends characters and never a modifier. `terminal-modifiers.ts` has
 the rules: a tap arms a modifier for one key, a second tap within 400ms locks
-it, the next tap releases it. A locked modifier keeps its accessible name
-and `aria-pressed`, adds a lock glyph and `aria-description="locked"`. `applyModifiers` rewrites a single character
-into its control code and/or an ESC prefix for Alt, and the cursor,
-Home/End, paging and function-key sequences into xterm's `1;<n>` modifier
-parameter form. A key it does not cover, such as a paste, passes unmodified
-and keeps the modifiers armed rather than spending them on the wrong byte.
+it, the next tap releases it. A locked modifier stays `aria-pressed`, shows a
+lock glyph and adds a visually hidden ", locked" to its name. `applyModifiers`
+rewrites a single character into its control code (xterm's: Ctrl+Space and
+Ctrl+` are NUL, Ctrl+? is DEL, Ctrl+Backspace is ^H) and/or an ESC prefix for
+Alt, and the cursor, Home/End, paging and function-key sequences into
+xterm's `1;<n>` modifier parameter form. A key it does not cover passes
+unmodified and keeps the modifiers armed rather than spending them on the
+wrong byte, and a paste (flagged from the DOM `paste` event, since xterm
+hands it to `onData` like a key) never takes them. The row's arrows, Home
+and End send SS3 (`ESC O`) while the program has asked for application
+cursor keys (`terminal.modes.applicationCursorKeysMode`).
 Losing write access clears them.
 
 In a session's normal buffer, a downward finger drag pans the live grid to its

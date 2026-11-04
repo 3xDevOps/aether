@@ -69,15 +69,13 @@ const keepFocus = (event: React.PointerEvent) => event.preventDefault()
 function KeyButton({
   label,
   pressed,
-  description,
   disabled,
   className,
   onPress,
   children,
 }: {
-  label: string
+  label?: string
   pressed?: boolean
-  description?: string
   disabled?: boolean
   className?: string
   onPress: () => void
@@ -90,7 +88,6 @@ function KeyButton({
       variant={pressed ? 'primary' : 'secondary'}
       aria-label={label}
       aria-pressed={pressed}
-      aria-description={description}
       disabled={disabled}
       className={cn('h-11 min-w-0 px-0 font-code text-ui coarse:h-11', className)}
       onPointerDown={keepFocus}
@@ -98,6 +95,30 @@ function KeyButton({
     >
       {children}
     </Button>
+  )
+}
+
+function SizeStepper({ fit }: { fit: TerminalFit }) {
+  const stepper = useTextSizeStepper(fit)
+  return (
+    <>
+      <KeyButton label="Smaller text" className="col-span-2" disabled={!stepper.canSmaller} onPress={stepper.smaller}>A−</KeyButton>
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        aria-label={`Text size ${stepper.size}, ${stepper.fitWidth ? 'fitted to width' : 'fit to width'}`}
+        aria-disabled={stepper.fitWidth}
+        className="col-span-3 h-11 min-w-0 px-0 text-ui coarse:h-11 aria-disabled:cursor-default aria-disabled:opacity-100"
+        onPointerDown={keepFocus}
+        onClick={() => {
+          if (!stepper.fitWidth) stepper.fit()
+        }}
+      >
+        {stepper.size} · {stepper.fitWidth ? 'fitted' : 'Fit'}
+      </Button>
+      <KeyButton label="Larger text" className="col-span-2" disabled={!stepper.canLarger} onPress={stepper.larger}>A+</KeyButton>
+    </>
   )
 }
 
@@ -139,18 +160,21 @@ export function TerminalKeys({
   className,
 }: {
   controller: XtermController
-  fit: TerminalFit
+  /** A phone's fit, which the sheet's size stepper steps from. */
+  fit?: TerminalFit
   className?: string
 }) {
   const { terminal, modifiers, tapModifier, focusTerminal } = controller
   const [more, setMore] = useState(false)
   const [functions, setFunctions] = useState(false)
-  const stepper = useTextSizeStepper(fit)
   const keyboardOpen = useKeyboardOpen(terminal?.textarea)
   // On a phone focusTerminal does nothing, so a key taps through without
   // raising the soft keyboard; a tablet keeps typing where the key left it.
   const send = (bytes: string) => {
-    terminal?.input(bytes)
+    // A full-screen program that asked for application cursor keys (DECCKM)
+    // reads the arrows, Home and End as SS3, as a keyboard sends them.
+    const cursor = terminal?.modes.applicationCursorKeysMode ? bytes.replace(/^\x1b\[([A-DHF])$/, '\x1bO$1') : bytes
+    terminal?.input(cursor)
     focusTerminal()
   }
   const sheetKey = (key: Key) => (
@@ -164,13 +188,12 @@ export function TerminalKeys({
   )
   const modifier = (key: ModifierKey, label: string) => (
     <KeyButton
-      label={label}
       pressed={modifiers[key] !== 'off'}
-      description={modifiers[key] === 'locked' ? 'locked' : undefined}
       className="relative flex-1"
       onPress={() => tapModifier(key)}
     >
       {label}
+      {modifiers[key] === 'locked' && <span className="sr-only">, locked</span>}
       {modifiers[key] === 'locked' && <Lock aria-hidden className="absolute top-1 right-1 size-2.5" />}
     </KeyButton>
   )
@@ -208,7 +231,10 @@ export function TerminalKeys({
           align="end"
           aria-label="More keys"
           className="grid w-[min(360px,calc(100vw-16px))] grid-cols-7 gap-1 p-2"
-          onOpenAutoFocus={(event) => event.preventDefault()}
+          onOpenAutoFocus={(event) => {
+            // Moving focus off a focused textarea would drop the keyboard.
+            if (terminal?.textarea && document.activeElement === terminal.textarea) event.preventDefault()
+          }}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
           {moreKeys.map(sheetKey)}
@@ -231,22 +257,7 @@ export function TerminalKeys({
             <Keyboard />
             {keyboardOpen ? 'Hide keyboard' : 'Show keyboard'}
           </Button>
-          <KeyButton label="Smaller text" className="col-span-2" disabled={!stepper.canSmaller} onPress={stepper.smaller}>A−</KeyButton>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            aria-label={`Text size ${stepper.size}, ${stepper.fitWidth ? 'fitted to width' : 'fit to width'}`}
-            aria-disabled={stepper.fitWidth}
-            className="col-span-3 h-11 min-w-0 px-0 text-ui coarse:h-11 aria-disabled:cursor-default aria-disabled:opacity-100"
-            onPointerDown={keepFocus}
-            onClick={() => {
-              if (!stepper.fitWidth) stepper.fit()
-            }}
-          >
-            {stepper.size} · {stepper.fitWidth ? 'fitted' : 'Fit'}
-          </Button>
-          <KeyButton label="Larger text" className="col-span-2" disabled={!stepper.canLarger} onPress={stepper.larger}>A+</KeyButton>
+          {fit && <SizeStepper fit={fit} />}
         </PopoverContent>
       </Popover>
     </div>

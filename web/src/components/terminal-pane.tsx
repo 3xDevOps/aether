@@ -403,7 +403,7 @@ export function TerminalPane({
       />
         {surface}
       </div>
-      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} fit={fit} />}
+      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} fit={phone ? fit : undefined} />}
       {children}
       {replaying && !readingSurface && (
         <div

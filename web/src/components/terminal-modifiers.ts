@@ -20,7 +20,7 @@ export function tapModifier(state: ModifierState, sinceLastTap: number): Modifie
 
 /**
  * The control code one character carries under Ctrl, or null when it has
- * none. A terminal maps `@` through `_`, the ASCII letters, and space. Case
+ * none. A terminal maps `@` through `_` and the ASCII letters. Case
  * folding is done by hand rather than with `toUpperCase`, which is locale
  * text rather than ASCII: it turns the German sharp s into two letters and
  * the dotless i into an I, and either would send a control code nobody
@@ -28,7 +28,11 @@ export function tapModifier(state: ModifierState, sinceLastTap: number): Modifie
  */
 function controlCode(data: string): string | null {
   const code = data.charCodeAt(0)
-  if (code === 0x20) return '\x00'
+  // As xterm sends them: Ctrl+Space and Ctrl+` are NUL, Ctrl+? is DEL, and
+  // Ctrl+Backspace (a soft keyboard's DEL) is ^H.
+  if (code === 0x20 || code === 0x60) return '\x00'
+  if (code === 0x3f) return '\x7f'
+  if (code === 0x7f) return '\x08'
   const upper = code >= 0x61 && code <= 0x7a ? code - 0x20 : code
   if (upper < 0x40 || upper > 0x5f) return null
   return String.fromCharCode(upper & 0x1f)
