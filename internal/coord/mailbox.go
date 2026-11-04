@@ -2,6 +2,7 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
@@ -174,27 +176,71 @@ func rpcError(method string, err error) *protocol.Error {
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
-func (s *Service) transportAllowed(run domain.RunID, method string) bool {
-	buckets := s.requestBuckets
+
+// transportBudget names the per-run allowance a request spends. A report
+// that decides the run's state gets its own: a native harness reports every
+// tool use against the lifecycle budget, so a busy turn would otherwise
+// spend the allowance its own end, its questions or its held background
+// tasks need.
+func transportBudget(method string, params json.RawMessage) string {
 	switch method {
 	case protocol.MethodCoordHookStatus:
-		buckets = s.hookBuckets
+		return "hook"
 	case protocol.MethodRunReport:
+		if turnStateReport(params) {
+			return "turn state"
+		}
+		return "lifecycle"
+	}
+	return "transport"
+}
+
+// turnStateReport reports whether a run.report starts or ends the agent's
+// turn, opens, closes or clears a question, or keeps the run waiting on
+// background tasks. A replace is a full snapshot that pi and omp attach to
+// every heartbeat, so it counts as a tool report. Whether a stop ended the
+// turn or failed it is the scheduler's to judge.
+func turnStateReport(params json.RawMessage) bool {
+	var p struct {
+		State        string `json:"state"`
+		Reason       string `json:"reason"`
+		TurnStart    bool   `json:"turn_start"`
+		InputUpdates []struct {
+			Operation string `json:"operation"`
+		} `json:"input_updates"`
+	}
+	if json.Unmarshal(params, &p) != nil {
+		return false
+	}
+	if p.State == string(agentstatus.Idle) || p.TurnStart ||
+		(p.State == string(agentstatus.Working) && strings.HasPrefix(p.Reason, agentstatus.ReasonBackground)) {
+		return true
+	}
+	for _, u := range p.InputUpdates {
+		if u.Operation != "replace" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) transportAllowed(run domain.RunID, budget string) bool {
+	buckets := s.requestBuckets
+	switch budget {
+	case "hook":
+		buckets = s.hookBuckets
+	case "lifecycle":
 		buckets = s.lifecycleBuckets
+	case "turn state":
+		buckets = s.turnBuckets
 	}
 	return s.spend(buckets, run, requestBurst, requestRefill)
 }
 
-func transportRateError(method string) *protocol.Error {
-	budget := "transport"
-	code := protocol.CodeConflict
-	switch method {
-	case protocol.MethodCoordHookStatus:
-		budget = "hook"
-		code = protocol.CodeUnavailable
-	case protocol.MethodRunReport:
-		budget = "lifecycle"
-		code = protocol.CodeUnavailable
+func transportRateError(budget string) *protocol.Error {
+	code := protocol.CodeUnavailable
+	if budget == "transport" {
+		code = protocol.CodeConflict
 	}
 	return &protocol.Error{
 		Code: code,

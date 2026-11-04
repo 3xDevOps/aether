@@ -285,10 +285,12 @@ func (m *Manager) RemoveCacheOwner(member domain.MemberID, pool, key string) err
 		return fmt.Errorf("memberhome: invalid cache owner key")
 	}
 	return m.updateCacheMetadata(member, pool, false, func(meta *cacheMetadata) error {
-		if i := slices.Index(meta.Owners, key); i >= 0 {
-			meta.Owners = slices.Delete(meta.Owners, i, i+1)
-			meta.LastUsed = time.Now().UTC()
+		i := slices.Index(meta.Owners, key)
+		if i < 0 {
+			return errCacheUnchanged
 		}
+		meta.Owners = slices.Delete(meta.Owners, i, i+1)
+		meta.LastUsed = time.Now().UTC()
 		return nil
 	})
 }
@@ -439,11 +441,18 @@ func (m *Manager) updateCacheMetadata(member domain.MemberID, pool string, creat
 	if err != nil {
 		return err
 	}
-	if err := update(&meta); err != nil {
+	err = update(&meta)
+	if errors.Is(err, errCacheUnchanged) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
 	return saveCacheMetadata(root, meta)
 }
+
+// errCacheUnchanged tells updateCacheMetadata to write nothing.
+var errCacheUnchanged = errors.New("memberhome: cache metadata unchanged")
 
 func (m *Manager) cachePath(member domain.MemberID, pool string) string {
 	return filepath.Join(m.cacheRoot, string(member), pool, "data")

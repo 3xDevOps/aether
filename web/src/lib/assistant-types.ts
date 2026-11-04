@@ -13,6 +13,18 @@ export interface AssistantAgent {
   reason?: string
 }
 
+export type AssistantAccountState = 'unrecorded' | 'same' | 'other' | 'expired' | 'error'
+
+/** How an agent's assistant sign-in compares with the login in the member's environment. Information only. */
+export interface AssistantAccount {
+  agent: string
+  state: AssistantAccountState
+  /** The environment's account, when `state` is `other`. */
+  environment?: string
+  email?: string
+  error?: string
+}
+
 export interface AssistantConfirmation {
   id: string
   method: string
