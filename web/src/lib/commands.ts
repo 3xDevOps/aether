@@ -39,7 +39,7 @@ import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
 import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
-import { closeChangedText, closeState, closeWarned, readCloseCheck } from '@/lib/close-check'
+import { closeBusyText, closeChangedText, closeState, closeWarned, readCloseCheck } from '@/lib/close-check'
 import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
@@ -1026,6 +1026,10 @@ export function useCommandRunner(
           return
         }
         if (closeWarned(check, outcome)) {
+          if (useStore.getState().closeConfirmation) {
+            toast.info(closeBusyText)
+            return
+          }
           openCloseConfirmation({ check, asked, outcome, command: { ...command, closes: undefined } })
           return
         }

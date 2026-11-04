@@ -69,7 +69,9 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
       paletteForwardTarget: null,
       paletteWatchTarget: null,
     }),
-  openCloseConfirmation: (confirmation) => set({ paletteOpen: false, closeConfirmation: confirmation }),
+  // A later check's answer never replaces the confirmation on screen, whose
+  // Close anyway would then run another session's close.
+  openCloseConfirmation: (confirmation) => set((s) => (s.closeConfirmation ? {} : { paletteOpen: false, closeConfirmation: confirmation })),
   dismissCloseConfirmation: () => set({ closeConfirmation: null }),
   setCloseChecking: (runID, checking) =>
     set((s) => {

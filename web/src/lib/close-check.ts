@@ -30,4 +30,6 @@ export function closeState(run: Pick<Run, 'status_seq' | 'status' | 'review' | '
   return run ? `${run.status_seq}|${run.status}|${run.review ?? ''}|${run.state ?? ''}` : ''
 }
 
+export const closeBusyText = 'Another close is waiting for your answer, so this session was not closed'
+
 export const closeChangedText = 'The session changed while its close was being checked, so it was not closed'

@@ -132,6 +132,16 @@ describe('Mark complete with close warnings', () => {
     }
   })
 
+  it('keeps the open confirmation when another session\'s check answers later', async () => {
+    render(<><MarkComplete /><CloseConfirmation /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
+    await screen.findByRole('alertdialog')
+    const shown = useStore.getState().closeConfirmation
+    act(() => useStore.getState().openCloseConfirmation({ check: { run_id: 'run_2', warnings: [] }, asked: '', outcome: 'completed',
+      command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } }))
+    expect(useStore.getState().closeConfirmation).toBe(shown)
+  })
+
   it('drops the confirmation when its run is gone', async () => {
     render(<CloseConfirmation />)
     act(() => useStore.setState({ runs: {}, closeConfirmation: { check: { run_id: 'run_1', warnings: [{ kind: 'protected', detail: 'Protected' }] }, asked: '', outcome: 'completed', command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } } }))
