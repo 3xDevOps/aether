@@ -1161,8 +1161,12 @@ Removal also repairs the selection and open route before any refresh awaits.
   selection, onboarding redirect) and clears `staleSince` when it succeeds.
   While `staleSince` is set, or a refresh failed, `StaleBanner` shows one
   line under the top bar: *Saved state from 3 minutes ago*, then the
-  hydration error verbatim (or *reconnecting*), and **Retry**, which fires
-  the `online` wake below. A rejected link token clears the cache and shows
+  hydration error verbatim (or *reconnecting*; tap it to read it all), and
+  **Retry**, which fires
+  the `online` wake below. While it shows, the main view is dimmed, the
+  toast, the empty-board "Cannot reach the server" cards and (below 768px)
+  the header connection line stay out, and the banner is the one place the
+  failure is written. A rejected link token clears the cache and shows
   the expired-link page as before.
 - **Resuming from the pocket also reconnects without an event.**
   `connectEvents` runs a 5 s watchdog; a tick more than 15 s late while the
@@ -6820,7 +6824,9 @@ that runs a newer release than a client refuses that client
   source build of the same release does not count), `App` shows *This server
   is older than this app*, the versions and `aether server update`. The server
   refuses nothing in this direction, so **Continue anyway** dismisses it for
-  that pair of versions until reload. It is only reachable where
+  that pair of versions (`aether.server-too-old-continued` in `localStorage`),
+  so a reload or a killed WebView does not bring it back until either
+  version changes. It is only reachable where
   `update.check` is: the local gateway, which includes the Android app. The
   server gateway serves a dashboard built into the server itself.
 

@@ -15,7 +15,7 @@ export function BoardMap({ agentNames }: { agentNames: Record<string, string> })
   const mineOnly = useStore((s) => s.mineOnly)
   const setMineOnly = useStore((s) => s.setMineOnly)
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => s.hydrationError)
+  const error = useStore((s) => (s.staleSince === null ? s.hydrationError : null))
   const dead = useStore((s) => s.streamDead)
   const scope = allWorkspaces ? '' : workspace
   const { cards, archivedCards } = useMapRuns(scope)

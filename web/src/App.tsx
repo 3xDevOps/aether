@@ -22,6 +22,16 @@ const toastOffset = {
   right: 'calc(8px + env(safe-area-inset-right))',
 }
 
+const continueKey = 'aether.server-too-old-continued'
+
+function storedContinue(): string | null {
+  try {
+    return window.localStorage.getItem(continueKey)
+  } catch {
+    return null
+  }
+}
+
 export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
@@ -39,7 +49,7 @@ export function App() {
   // every other screen because the server refuses everything else.
   const gated = useStore((s) => s.updateRequired !== null || s.update?.client_update_required === true)
   const tooOld = useStore(useShallow((s) => serverTooOld(s.update) ?? { client: '', server: '' }))
-  const [continued, setContinued] = useState<string | null>(null)
+  const [continued, setContinued] = useState(() => storedContinue())
   const [handed, setHanded] = useState(handedLink)
   useEffect(() => onHandedLink(setHanded), [])
   useEffect(() => onHandedLinkForgotten(() => setHanded(null)), [])
@@ -129,7 +139,15 @@ export function App() {
             <ServerTooOldGate
               client={tooOld.client}
               server={tooOld.server}
-              onContinue={() => setContinued(`${tooOld.client}/${tooOld.server}`)}
+              onContinue={() => {
+                const pair = `${tooOld.client}/${tooOld.server}`
+                try {
+                  window.localStorage.setItem(continueKey, pair)
+                } catch {
+                  // Storage that cannot be written only brings the screen back next load.
+                }
+                setContinued(pair)
+              }}
             />
           ) : blocked ? (
             <ConnectionError

@@ -144,9 +144,11 @@ export function useConnectionWord(): string {
 
 export function ConnectionLine({ className }: { className?: string }) {
   const problem = useConnectionProblem()
+  const stale = useStore((s) => s.staleSince !== null)
   if (!problem) return null
   return (
-    <div className={cn('min-w-0', className)}>
+    // The saved-state banner carries the failure on a phone.
+    <div className={cn('min-w-0', stale && 'max-md:hidden', className)}>
       <StateLine tone="failed">{problem}</StateLine>
     </div>
   )

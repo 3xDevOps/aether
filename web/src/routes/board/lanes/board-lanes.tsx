@@ -92,7 +92,7 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
   const mineOnly = useStore((s) => s.mineOnly)
   const setMineOnly = useStore((s) => s.setMineOnly)
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => s.hydrationError)
+  const error = useStore((s) => (s.staleSince === null ? s.hydrationError : null))
   const dead = useStore((s) => s.streamDead)
   const prefs = useStore(useShallow((s) => ({ window: s.laneWindow, group: s.laneGroup, hidden: s.laneHidden })))
   const { setLaneWindow, setLaneGroup, setLaneHidden } = useStore.getState()

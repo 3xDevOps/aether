@@ -16,6 +16,7 @@ import { useStore } from '@/store'
 export function AppShell() {
   useNavShortcuts()
   useTeamRefresh()
+  const stale = useStore((s) => s.staleSince !== null)
   const profileOpen = useStore((s) => s.profileOpen)
   const setProfileOpen = useStore((s) => s.setProfileOpen)
   return (
@@ -37,7 +38,7 @@ export function AppShell() {
         <main
           id="main"
           tabIndex={-1}
-          className="min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] outline-none"
+          className={`min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] outline-none ${stale ? 'opacity-75' : ''}`}
         >
           <CenterView />
         </main>

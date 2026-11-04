@@ -37,11 +37,28 @@ test('a returning phone paints the saved state, shows the real error and reconne
 
   // Back from the pocket: the page reloads with no network at all.
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('aether.snapshot.v1:')))).toBe(true)
+  // Sessions the server listed before the phone lost its network.
+  await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('aether.snapshot.v1:')) as string
+    const saved = JSON.parse(localStorage.getItem(key) as string)
+    const now = new Date().toISOString()
+    saved.runs = [
+      {
+        id: 'run-needs', workspace_id: saved.workspaces[0].id, member_id: saved.info.member.id,
+        task: 'Fix the flaky reconnect test', title: 'Fix the flaky reconnect test', harness: 'claude', mode: 'enhanced',
+        status: 'running', state: 'needs-you', status_seq: 1, branch: 'aether/run-needs',
+        created_at: now, started_at: now, finished_at: null,
+      },
+    ]
+    localStorage.setItem(key, JSON.stringify(saved))
+  })
   const before = sockets.length
   offline = true
   await page.reload()
   await expect(page.getByText(/^Saved state from /)).toBeVisible()
-  await expect(page.getByText('Insights')).toBeVisible()
+  await expect(page.getByText('Fix the flaky reconnect test')).toBeVisible()
+  await expect(page.getByText('Cannot reach the server')).toHaveCount(0)
+  await expect(page.getByText(/^Could not reach the server/)).toHaveCount(0)
   await expect(page.getByText(refusal).first()).toBeVisible()
 
   offline = false

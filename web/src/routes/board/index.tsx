@@ -34,7 +34,7 @@ export function Board() {
   const view = useStore((s) => s.boardViews[s.activeWorkspace] ?? 'board')
   const setView = useStore((s) => s.setBoardView)
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => s.hydrationError)
+  const error = useStore((s) => (s.staleSince === null ? s.hydrationError : null))
   const dead = useStore((s) => s.streamDead)
   const { agents, error: agentsError } = useAgentList()
   const [showArchived, setShowArchived] = useState(false)
