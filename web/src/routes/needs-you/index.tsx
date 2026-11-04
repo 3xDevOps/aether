@@ -332,19 +332,19 @@ function NeedsYou() {
             {error}
           </Callout>
         )}
+        {(merges.length > 0 || devices.length > 0) && (
+          <ul aria-label="Approvals" className="mb-3 flex flex-col gap-3">
+            {merges.map((proposal) => <li key={proposal.id}><MergeProposalCard proposal={proposal} /></li>)}
+            {devices.map((need) => <li key={need.device.id}><DeviceCard need={need} /></li>)}
+          </ul>
+        )}
         {loading && (
           <div aria-label="Loading" className="flex flex-col gap-3">
             <Skeleton className="h-32 rounded-panel" />
             <Skeleton className="h-32 rounded-panel" />
           </div>
         )}
-        {(merges.length > 0 || devices.length > 0) && (
-          <div className="mb-3 flex flex-col gap-3">
-            {merges.map((proposal) => <MergeProposalCard key={proposal.id} proposal={proposal} />)}
-            {devices.map((need) => <DeviceCard key={need.device.id} need={need} />)}
-          </div>
-        )}
-        {items && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions show up here.</EmptyState>}
+        {items && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions, devices and sign-in merges show up here.</EmptyState>}
         {asks.length > 0 && (
           <ul aria-label="Needs you" className="flex flex-col gap-3">
             {asks.map((item) => <AttentionCard key={item.run_id} item={item} />)}
