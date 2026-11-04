@@ -48,6 +48,9 @@ func (s *Server) runCloseCheck(ctx context.Context, member domain.MemberID, para
 		seen[id] = true
 		check := protocol.RunCloseCheck{RunID: id, Warnings: []protocol.CloseWarning{}}
 		warnings, perr := s.closeWarnings(ctx, actor, domain.RunID(id), outcome)
+		if perr == nil {
+			check.MergedPullRequest, perr = s.mergedPullRequest(ctx, domain.RunID(id))
+		}
 		if perr != nil {
 			check.Error = perr
 		} else {
@@ -166,6 +169,14 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 			Detail: "Commits on " + run.Branch + " may not be merged: no merged pull request includes its last commit"})
 	}
 	return out, nil
+}
+
+func (s *Server) mergedPullRequest(ctx context.Context, id domain.RunID) (bool, *protocol.Error) {
+	prs, err := s.cfg.Store.RunPullRequests(ctx, id)
+	if err != nil {
+		return false, rpcError(err)
+	}
+	return slices.ContainsFunc(prs, func(pr *store.RunPullRequest) bool { return pr.RepoWorkspace == "" && pr.State == "merged" }), nil
 }
 
 var protectedWarning = protocol.CloseWarning{Kind: protocol.CloseWarningProtected,
