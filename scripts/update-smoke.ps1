@@ -287,6 +287,17 @@ function Wait-Relaunch([string]$Desktop, [int]$OldId, [int]$TimeoutSec = 240) {
     throw "The updated desktop app was not started within ${TimeoutSec}s."
 }
 
+# Wait-Exited reports whether process Id has exited within TimeoutSec. A process
+# the desktop stops on quit can outlive the window it belonged to by a moment.
+function Wait-Exited([int]$Id, [int]$TimeoutSec = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    do {
+        if ((Get-Process -Id $Id -ErrorAction SilentlyContinue) -eq $null) { return $true }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $false
+}
+
 function Get-LastError {
     $files = @(Get-ChildItem -Recurse -Force -LiteralPath $env:LOCALAPPDATA -Filter last-error.txt -ErrorAction SilentlyContinue)
     return ($files | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n"
@@ -558,7 +569,7 @@ exit 1
     $relaunched = Wait-Relaunch $desktop $appId
     Write-Host "ok: a new desktop process (pid $($relaunched.Id)) was started from the app directory"
     Assert ((Get-Process -Id $appId -ErrorAction SilentlyContinue) -eq $null) 'the old desktop process exited'
-    Assert ((Get-Process -Id $sidecarId -ErrorAction SilentlyContinue) -eq $null) 'the old sidecar exited'
+    Assert (Wait-Exited $sidecarId) 'the old sidecar exited'
     Assert ((Get-Content -Raw -LiteralPath (Join-Path $appDir 'new-release-marker.txt')).Trim() -eq $NewVersion) 'the app directory holds the new release'
     Assert ((Get-Hash $installed) -eq $newHash) 'the CLI the app runs is the new build'
     Assert (-not (Get-LastError)) 'no desktop build error was recorded'
@@ -599,7 +610,7 @@ exit 1
     $probe = Invoke-App 'probe' $port
     Assert ($probe.Code -eq 0) 'the old sidecar still serves the dashboard from aether.exe.old'
     Stop-App $app
-    Assert ((Get-Process -Id $sidecarId -ErrorAction SilentlyContinue) -eq $null) 'the old sidecar exited with the app'
+    Assert (Wait-Exited $sidecarId) 'the old sidecar exited with the app'
     $rebuild = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $newZip + '"')) 600
     Assert ($rebuild.Code -eq 0 -and (Test-Path -LiteralPath (Join-Path $appDir 'new-release-marker.txt'))) 'the rebuild the message names installs the new app once the app is closed'
     $app = Start-App $desktop $desktop $electron (Get-FreePort)
