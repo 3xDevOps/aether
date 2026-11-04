@@ -195,21 +195,33 @@ func transportBudget(method string, params json.RawMessage) string {
 	return "transport"
 }
 
-// turnStateReport reports whether a run.report ends the agent's turn,
-// opens or closes a question, or keeps the run waiting on background
-// tasks. Whether a stop ended the turn or failed it is the scheduler's to
-// judge.
+// turnStateReport reports whether a run.report starts or ends the agent's
+// turn, opens, closes or clears a question, or keeps the run waiting on
+// background tasks. A replace is a full snapshot that pi and omp attach to
+// every heartbeat, so it counts as a tool report. Whether a stop ended the
+// turn or failed it is the scheduler's to judge.
 func turnStateReport(params json.RawMessage) bool {
 	var p struct {
-		State        string            `json:"state"`
-		Reason       string            `json:"reason"`
-		InputUpdates []json.RawMessage `json:"input_updates"`
+		State        string `json:"state"`
+		Reason       string `json:"reason"`
+		TurnStart    bool   `json:"turn_start"`
+		InputUpdates []struct {
+			Operation string `json:"operation"`
+		} `json:"input_updates"`
 	}
 	if json.Unmarshal(params, &p) != nil {
 		return false
 	}
-	return p.State == string(agentstatus.Idle) || len(p.InputUpdates) > 0 ||
-		(p.State == string(agentstatus.Working) && strings.HasPrefix(p.Reason, agentstatus.ReasonBackground))
+	if p.State == string(agentstatus.Idle) || p.TurnStart ||
+		(p.State == string(agentstatus.Working) && strings.HasPrefix(p.Reason, agentstatus.ReasonBackground)) {
+		return true
+	}
+	for _, u := range p.InputUpdates {
+		if u.Operation != "replace" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) transportAllowed(run domain.RunID, budget string) bool {
