@@ -121,7 +121,11 @@ export function PhoneTabBar() {
     const element = bar.current
     if (!element) return
     const root = document.documentElement
-    const observer = new ResizeObserver(() => root.style.setProperty('--phone-tabs-height', `${element.offsetHeight}px`))
+    const observer = new ResizeObserver(() => {
+      // A hidden bar leaves the toasts to the bottom safe area.
+      if (element.offsetHeight > 0) root.style.setProperty('--phone-tabs-height', `${element.offsetHeight}px`)
+      else root.style.removeProperty('--phone-tabs-height')
+    })
     observer.observe(element)
     return () => {
       observer.disconnect()

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type * as React from 'react'
-import { ChartGantt, ChevronLeft, FolderTree, Globe, Lock, Network, PanelRight } from '@/components/icons'
+import { useAssistantAvailable } from '@/components/assistant/button'
+import { ChartGantt, ChevronLeft, FolderTree, Globe, Lock, Network, PanelRight, Search, Sparkles } from '@/components/icons'
 import { RunActions, type ExtraItem } from '@/components/run-actions'
 import { ConnectionLine } from '@/components/shell/connection'
 import { Button } from '@/components/ui/button'
@@ -47,14 +48,11 @@ export function useTerminalTyping(): boolean {
   return typing
 }
 
-/** Back leaves the session for the page it was opened from, or the session list when it was opened by a link. */
 function leave() {
   if (historyDepth() > 0) window.history.back()
   else useStore.getState().navigate('sessions')
 }
 
-/** A phone's session header: one row with back, title, state and actions, then the Chat / Terminal / Changes tabs.
- * With the keyboard up the tabs go and the row shrinks, so the transcript or terminal keeps the room. */
 export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, primary, detailsOpen, onDetails, onWorkflow, extra, pullRequest }: {
   run: RunRecord
   view: RunView
@@ -70,6 +68,7 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   pullRequest: React.ReactNode
 }) {
   const shown = useRunPresentation(run)
+  const assistant = useAssistantAvailable()
   const tabs = views.filter((item) => inTabs(item) || item === view)
   const elsewhere: ExtraItem[] = views
     .filter((item): item is OverflowView => !tabs.includes(item))
@@ -77,6 +76,8 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   const panels: ExtraItem[] = [
     { id: 'details', label: detailsOpen ? 'Hide details' : 'Session details', Icon: PanelRight, onSelect: onDetails },
     ...(onWorkflow ? [{ id: 'workflow', label: 'Workflow', Icon: Network, onSelect: onWorkflow }] : []),
+    { id: 'search', label: 'Search…', Icon: Search, onSelect: () => useStore.getState().togglePalette(true) },
+    ...(assistant ? [{ id: 'assistant', label: 'Assistant', Icon: Sparkles, onSelect: () => useStore.getState().setAssistantOpen(true) }] : []),
   ]
   const state = run.switching ? `Switching to ${modeLabel[run.switching] ?? run.switching}…` : stateName(shown)
 

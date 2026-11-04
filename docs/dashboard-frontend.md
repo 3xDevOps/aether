@@ -599,8 +599,8 @@ title with its protection lock, a state line (status dot, state, agent and
 mode), the header's primary action when there is one, and **More**. Under it
 the tabs **Chat**, **Terminal** and **Changes** fill a 44px row, with the
 pull request at its right end. Trace, Files and Browser, **Session details**,
-**Workflow**, Captures and Raw events are items in **More**; a view opened
-from there joins the tabs while it shows. Close, Stop and Delete in **More**
+**Workflow**, **Search…**, **Assistant**, Captures and Raw events are items
+in **More**; a view opened from there joins the tabs while it shows. Close, Stop and Delete in **More**
 are the same commands, with the same confirmations, as on desktop.
 
 Without a `view` in the address a phone lands on `defaultView`, never on the
@@ -615,9 +615,11 @@ While the keyboard is up (the composer has focus, or the terminal's input on
 a touch screen), the header shrinks to one 44px row with the title and the
 status dot, and the tabs, the wait line, the lineage line and the
 [multiplayer strip](#multiplayer-controls) leave. On a phone the strip shows
-only while someone else watches or controls the session, or control,
-presence or the stream failed (`useSharedPresence`); alone, sending a
-message takes control implicitly and Details lists the people. The Chat
+only while someone else watches, another member or another of your tabs
+holds control, or control, presence or the stream failed
+(`useSharedPresence`); alone, sending a message takes control implicitly and
+Details lists the people. A hidden tab bar removes `--phone-tabs-height`, so
+toasts fall back to the bottom safe area. The Chat
 composer is the desktop `ComposerBox`, padded by `--keyboard-inset`
 (`src/lib/keyboard-inset.ts`) so it sits above an iOS keyboard as well.
 

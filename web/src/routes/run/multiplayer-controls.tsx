@@ -37,14 +37,14 @@ export function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string
   return stale ? `${who} (last known)` : who
 }
 
-/** Someone else watches or controls the session, or control or presence failed: what a phone keeps the strip for. */
+/** Someone else watches, another member or tab holds control, or control or presence failed: what a phone keeps the strip for. */
 export function useSharedPresence(run: RunRecord, agent: AgentTerminal): boolean {
   const self = useSelf()
   const status = useStore((s) => s.roomStatus[run.id])
   const presenceError = useStore((s) => s.roomStatusError[run.id])
   const session = useStore((s) => s.acpSessions[run.id])
   if (presenceError || session?.controlError || session?.takeoverError || session?.streamError) return true
-  if (!agent.localControl && status?.controller && status.controller.member_id !== self.id) return true
+  if (!agent.localControl && status?.controller) return true
   return status?.watchers.some((id) => id !== self.id) ?? false
 }
 

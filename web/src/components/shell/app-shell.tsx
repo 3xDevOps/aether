@@ -23,7 +23,6 @@ export function AppShell() {
   const profileOpen = useStore((s) => s.profileOpen)
   const setProfileOpen = useStore((s) => s.setProfileOpen)
   const mobile = useIsMobile()
-  // A phone opens a session full screen, over the top bar and the tab bar.
   const stacked = useStore((s) => mobile && s.route.name === 'run')
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas text-ui text-text">
