@@ -459,6 +459,7 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 	t.Parallel()
 	const threshold = 300 * time.Millisecond
+	const held = 3 * threshold
 	for _, tc := range []struct {
 		name, reason string
 		stalls       bool
@@ -476,6 +477,7 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 			})
 			e.startStalls(t)
 			run, c := e.launchReporting(t)
+			reported := time.Now()
 			if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, Reason: tc.reason}); err != nil {
 				t.Fatalf("report working: %v", err)
 			}
@@ -487,12 +489,21 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 				waitFor(t, "the session to stall", stalled)
 				return
 			}
-			time.Sleep(2 * threshold)
-			r, err := e.db.GetRun(t.Context(), run.ID)
-			if err != nil || r.Status != domain.RunRunning || stalled() {
-				t.Fatalf("run = %+v, %v; want running past the stall threshold", r, err)
+			// The store stamps a stall after the detector decided it, so on
+			// a slow host the stamp is late, never early.
+			stalledAfter := func(quiet time.Time, what string) {
+				t.Helper()
+				waitFor(t, what, stalled)
+				r, err := e.db.GetRun(t.Context(), run.ID)
+				if err != nil {
+					t.Fatalf("GetRun: %v", err)
+				}
+				if r.StatusChangedAt.Sub(quiet) < held {
+					t.Fatalf("stalled %s after the last activity, want at least %s while its tasks still run",
+						r.StatusChangedAt.Sub(quiet), held)
+				}
 			}
-			waitFor(t, "the session to stall after the stretched limit", stalled)
+			stalledAfter(reported, "the session to stall after the stretched limit")
 
 			stop := pump(t, c)
 			waitFor(t, "activity to resume the session with its tasks", func() bool {
@@ -500,10 +511,7 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 				return err == nil && r.Status == domain.RunRunning && r.Reason == tc.reason
 			})
 			stop()
-			time.Sleep(2 * threshold)
-			if stalled() {
-				t.Fatal("the resumed session stalled at the plain threshold while its tasks still run")
-			}
+			stalledAfter(e.sched.driver(false).LastActivity(run.ID), "the resumed session to stall after the stretched limit")
 		})
 	}
 }
