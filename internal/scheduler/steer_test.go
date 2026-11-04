@@ -896,11 +896,14 @@ func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
+	// The completion event is published after the row changes, so a
+	// subscription opened once the row reads completed can still receive it.
+	sub := e.subscribe(t)
 	c.exitNow(0)
+	waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); !row.FinishUnopened {
 		t.Fatal("an exit nobody asked for left the finish opened")
 	}
-	sub := e.subscribe(t)
 
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
 		t.Fatalf("CloseRun completed to abandoned: %v", err)

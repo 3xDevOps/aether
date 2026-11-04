@@ -273,6 +273,8 @@ func callBound(method string) time.Duration {
 		return transferTimeout
 	case protocol.MethodTerminalExec:
 		return protocol.TerminalExecTimeout + callTimeout
+	case protocol.MethodDictationTranscribe:
+		return protocol.DictationTimeout + callTimeout
 	}
 	return callTimeout
 }
@@ -360,6 +362,8 @@ var noReplay = map[string]bool{
 	protocol.MethodTemplateDelete:  true,
 	protocol.MethodScheduleDelete:  true,
 
+	protocol.MethodDictationTranscribe: true,
+
 	protocol.MethodPreferenceAdd:    true,
 	protocol.MethodPreferenceUpdate: true,
 	protocol.MethodPreferenceDelete: true,
@@ -408,11 +412,12 @@ var noReplay = map[string]bool{
 	protocol.MethodTerminalFile:  true,
 	protocol.MethodEnvSave:       true,
 
-	protocol.MethodAssistantStart:   true,
-	protocol.MethodAssistantPrompt:  true,
-	protocol.MethodAssistantAnswer:  true,
-	protocol.MethodAssistantConfirm: true,
-	protocol.MethodAssistantReset:   true,
+	protocol.MethodAssistantStart:      true,
+	protocol.MethodAssistantPrompt:     true,
+	protocol.MethodAssistantAnswer:     true,
+	protocol.MethodAssistantConfirm:    true,
+	protocol.MethodAssistantReset:      true,
+	protocol.MethodAssistantRuleRevoke: true,
 
 	protocol.MethodPushUnsubscribe:   true,
 	protocol.MethodPushTest:          true,

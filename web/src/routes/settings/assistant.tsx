@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
+import { AssistantAccountCheck } from '@/components/assistant/account-check'
 import { useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantSignIn } from '@/components/assistant/sign-in'
 import { Confirm } from '@/components/confirm'
@@ -135,6 +136,7 @@ function SignInSection({ client }: { client: Api }) {
             <Button size="sm" variant="secondary" onClick={() => setSigning(agent.name)}>{agent.ready ? 'Sign in again' : 'Sign in'}</Button>
           )}
         >
+          {agent.ready && signing !== agent.name && <AssistantAccountCheck agent={agent.name} client={client} />}
           {signing === agent.name && (
             <AssistantSignIn
               agent={agent}

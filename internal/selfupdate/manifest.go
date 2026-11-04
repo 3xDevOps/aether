@@ -331,8 +331,8 @@ func Transient(err error) bool {
 	return errors.As(err, &netErr)
 }
 
-// retryDelays are the waits between download attempts; their count plus
-// one is the number of attempts.
+// retryDelays are the waits between attempts at a download or a rollback;
+// their count plus one is the number of attempts.
 var retryDelays = []time.Duration{time.Second, 4 * time.Second}
 
 // retry runs try until it succeeds, reports an error not worth retrying,
@@ -429,6 +429,13 @@ func download(ctx context.Context, url string, f *os.File, want Asset, progress 
 		}
 		return false, nil
 	})
+}
+
+// DownloadPinned streams url into f the way a release asset is fetched:
+// https redirects only, transient failures retried, and the bytes checked
+// against want before it returns.
+func DownloadPinned(ctx context.Context, url string, f *os.File, want Asset, progress io.Writer) error {
+	return download(ctx, url, f, want, progress)
 }
 
 // errInsecureRedirect refuses a redirect that leaves https.

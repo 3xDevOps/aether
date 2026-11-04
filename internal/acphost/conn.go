@@ -381,6 +381,13 @@ func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, S
 	}, err
 }
 
+// AuthRequired reports a request the agent refused with ACP's
+// auth_required error: it found no usable sign-in.
+func AuthRequired(err error) bool {
+	var re *acp.RequestError
+	return errors.As(err, &re) && re.Code == acp.NewAuthRequired(nil).Code
+}
+
 // SessionLost reports whether err, as returned for a failed session/prompt,
 // says the agent no longer has the session. Claude's adapter drops a session
 // whose Claude Code process died but keeps running, and answers every later

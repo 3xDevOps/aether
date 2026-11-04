@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -179,6 +180,7 @@ class MainActivity : ComponentActivity() {
             UpdateGate(this, findViewById(R.id.update_gate), onConnection = ::openSetup) { shown ->
                 web.visibility = if (shown) View.INVISIBLE else View.VISIBLE
                 syncBackCallback()
+                syncBarIcons()
                 // A refused dashboard keeps calling, and every 426 would ask
                 // update.check again, so it goes blank until the gate clears.
                 if (shown) {
@@ -210,6 +212,7 @@ class MainActivity : ComponentActivity() {
             }
 
         applyInsets()
+        syncBarIcons()
         configureWebView()
 
         platformBackgroundsUs =
@@ -274,6 +277,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connect(intent: Intent?) {
         gatewayError.visibility = View.GONE
+        syncBarIcons()
         // The WebView a renderer crash left behind is empty, so the
         // dashboard loads again even at an unchanged address.
         val reload = rendererLost
@@ -359,7 +363,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // The dashboard paints dark under the system bars; the native panels follow the system theme.
+    private fun syncBarIcons() {
+        val panel = gatewayError.visibility == View.VISIBLE || gate?.isShown == true
+        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, window.decorView).run {
+            isAppearanceLightStatusBars = panel && !night
+            isAppearanceLightNavigationBars = panel && !night
+        }
+    }
+
     private fun configureWebView() {
+        web.setBackgroundColor(getColor(R.color.page_background))
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -748,6 +763,7 @@ class MainActivity : ComponentActivity() {
         stopGateway()
         gatewayUrl = null
         gatewayError.visibility = View.GONE
+        syncBarIcons()
         gateway =
             Gateway(
                 this,
@@ -786,6 +802,7 @@ class MainActivity : ComponentActivity() {
         findViewById<TextView>(R.id.gateway_error_title).text = title
         findViewById<TextView>(R.id.gateway_error_text).text = message
         gatewayError.visibility = View.VISIBLE
+        syncBarIcons()
     }
 
     private fun stopGateway() {

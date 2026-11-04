@@ -43,6 +43,10 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 	s.mu.Lock()
 	dashboardURL, dashboardErr := s.tailnetDashboardURL, s.tailnetDashboardErr
 	s.mu.Unlock()
+	features := []string{protocol.FeatureMultiRepo, protocol.FeaturePermission}
+	if s.dictationInstalled() {
+		features = append(features, protocol.FeatureDictation)
+	}
 	return protocol.ServerInfoResult{
 		ServerVersion:         s.cfg.release,
 		ProtocolVersion:       protocol.Version,
@@ -53,7 +57,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
-		Features:              []string{protocol.FeatureMultiRepo, protocol.FeaturePermission},
+		Features:              features,
 	}, nil
 }
 
@@ -541,8 +545,10 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	if p.RunID == "" {
 		return nil, invalidParams("run_id is required")
 	}
-	if p.Action != protocol.RunReviewComplete && p.Action != protocol.RunReviewLater {
-		return nil, invalidParams(`action must be "complete" or "later"`)
+	switch p.Action {
+	case protocol.RunReviewComplete, protocol.RunReviewLater, protocol.RunReviewNotYet:
+	default:
+		return nil, invalidParams(`action must be "complete", "later" or "not-yet"`)
 	}
 	reportedOnly := p.Action == protocol.RunReviewComplete && connectorReviewReportedOnly(ctx)
 	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action, reportedOnly)

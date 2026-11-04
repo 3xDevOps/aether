@@ -3,9 +3,8 @@
 #
 # usage: ci-classify-areas.sh web|go
 # stdin: newline-separated repo paths. Prints true or false.
-# web covers the dashboard checks and the browser end-to-end suite: the
-# dashboard source and everything that builds or serves it. go covers the
-# Go unit, lint, integration, agent, browser and smoke jobs: everything
+# web covers the dashboard checks: the dashboard source and everything that
+# builds or serves it. go covers the Go unit and lint jobs: everything
 # except the dashboard source (web/ other than web/embed.go) and docs-only
 # changes. false only when at least one path is present and every path is
 # in the unrelated set for the mode. Empty input prints true. Blank lines

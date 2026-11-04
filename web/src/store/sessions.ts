@@ -29,7 +29,7 @@ import { indexItems, localItem, noAgents, replaceAgentItem, trimAgents, type Age
 
 export type { SessionRow }
 
-const sessionEventTypes = ['run.agent', 'workspace.timeline', 'run.status']
+const sessionEventTypes = ['run.agent', 'workspace.timeline', 'run.status', 'run.review']
 
 const residentEvents = 2000
 const pageSize = 1000
@@ -425,6 +425,12 @@ export interface TimelinePayload {
   summary?: string
 }
 
+/** Only Not yet leaves a row: complete closes the session, which says so, and later changes nothing. */
+function reviewRow(event: Event, name: (id: string) => string): SessionRow | null {
+  if ((event.payload as { review?: string } | undefined)?.review !== '') return null
+  return { kind: 'event', id: event.id, at: event.time, text: `${event.actor_id ? name(event.actor_id) : 'The owner'} said the task is not finished yet` }
+}
+
 function timelineRow(event: Event, name: (id: string) => string): SessionRow | null {
   const p = (event.payload ?? {}) as TimelinePayload
   const who = event.actor_id ? name(event.actor_id) : 'The agent'
@@ -514,7 +520,7 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
       }
       return
     }
-    const row = event.type === 'run.status' ? statusRow(event) : timelineRow(event, memberName)
+    const row = event.type === 'run.status' ? statusRow(event) : event.type === 'run.review' ? reviewRow(event, memberName) : timelineRow(event, memberName)
     if (!row || steers.some((steer) => sameSteer(row, steer))) return
     if (row.kind === 'finished') finished = true
     items.push({ at: event.time, order, row })

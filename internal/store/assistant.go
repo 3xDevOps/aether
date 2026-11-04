@@ -48,6 +48,10 @@ type AssistantSettings struct {
 	// PreferencesEnabled lets the assistant read and save the member's
 	// preferences.
 	PreferencesEnabled bool
+	// RuleStreak counts the cards of rule key RuleStreakKey approved by
+	// hand in a row.
+	RuleStreakKey string
+	RuleStreak    int
 }
 
 // AssistantStore persists each member's assistant session. Removing a member
@@ -75,6 +79,10 @@ type AssistantStore interface {
 	// zero value but for ShareView and PreferencesEnabled, which are on.
 	AssistantSettings(ctx context.Context, member domain.MemberID) (AssistantSettings, error)
 	PutAssistantSettings(ctx context.Context, member domain.MemberID, settings AssistantSettings) error
+	AssistantRules(ctx context.Context, member domain.MemberID) ([]AssistantRule, error)
+	AddAssistantRule(ctx context.Context, member domain.MemberID, key AssistantRuleKey, wording, summary string) (AssistantRule, error)
+	DeleteAssistantRule(ctx context.Context, member domain.MemberID, id string) error
+	UseAssistantRule(ctx context.Context, member domain.MemberID, id string) error
 }
 
 func (d *DB) GetAssistantSession(ctx context.Context, member domain.MemberID) (*AssistantSession, error) {
@@ -198,9 +206,10 @@ func (d *DB) AssistantSettings(ctx context.Context, member domain.MemberID) (Ass
 	var settings AssistantSettings
 	var until int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled
+		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled, rule_streak_key, rule_streak
 		 FROM assistant_settings WHERE member_id = ?`, member).
-		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest, &settings.ShareView, &settings.PreferencesEnabled)
+		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest, &settings.ShareView, &settings.PreferencesEnabled,
+			&settings.RuleStreakKey, &settings.RuleStreak)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AssistantSettings{ShareView: true, PreferencesEnabled: true}, nil
 	}
@@ -219,13 +228,16 @@ func (d *DB) PutAssistantSettings(ctx context.Context, member domain.MemberID, s
 		until = settings.SnoozedUntil.Unix()
 	}
 	_, err := d.db.ExecContext(ctx,
-		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled,
+		   rule_streak_key, rule_streak, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
 		 ON CONFLICT(member_id) DO UPDATE SET auto_approve = excluded.auto_approve,
 		   manual_approvals = excluded.manual_approvals, suggest_snoozes = excluded.suggest_snoozes,
 		   suggest_after = excluded.suggest_after, suggest_off = excluded.suggest_off,
-		   share_view = excluded.share_view, preferences_enabled = excluded.preferences_enabled, updated_at = excluded.updated_at`,
-		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest, settings.ShareView, settings.PreferencesEnabled)
+		   share_view = excluded.share_view, preferences_enabled = excluded.preferences_enabled,
+		   rule_streak_key = excluded.rule_streak_key, rule_streak = excluded.rule_streak, updated_at = excluded.updated_at`,
+		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest, settings.ShareView, settings.PreferencesEnabled,
+		settings.RuleStreakKey, settings.RuleStreak)
 	if err != nil {
 		return fmt.Errorf("store: put assistant settings: %w", mapConstraint(err, ErrNotFound))
 	}
