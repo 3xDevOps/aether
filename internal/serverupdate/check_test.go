@@ -145,3 +145,48 @@ func TestStartChecksInTheBackground(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// gatedFeed takes each Latest's answer when it is asked, then holds it
+// until the test releases it.
+type gatedFeed struct {
+	fakeFeed
+	entered chan struct{}
+	gate    chan struct{}
+}
+
+func (f *gatedFeed) Latest(ctx context.Context) (selfupdate.Manifest, error) {
+	m, err := f.fakeFeed.Latest(ctx)
+	f.entered <- struct{}{}
+	<-f.gate
+	return m, err
+}
+
+// A check asked for while an older one is in flight asks the feed again
+// once that one ends, rather than taking an answer from before it asked.
+func TestReleaseCheckQueuedBehindAnOlderCheckAsksAgain(t *testing.T) {
+	feed := &gatedFeed{entered: make(chan struct{}, 2), gate: make(chan struct{})}
+	feed.set(selfupdate.Manifest{}, errors.New("503 Service Unavailable"))
+	svc := newCheckService(t, t.TempDir(), feed, time.Now)
+
+	older := make(chan checkState, 1)
+	go func() { older <- svc.runCheck(t.Context()) }()
+	<-feed.entered
+	newer := make(chan checkState, 1)
+	go func() { newer <- svc.runCheck(t.Context()) }()
+	// Let the newer caller queue behind the older check.
+	time.Sleep(100 * time.Millisecond)
+	feed.set(selfupdate.Manifest{Version: "v9.9.9"}, nil)
+	feed.gate <- struct{}{}
+	if st := <-older; st.Error == "" {
+		t.Fatalf("older check = %+v, want the feed's error", st)
+	}
+	select {
+	case <-feed.entered:
+	case st := <-newer:
+		t.Fatalf("newer check took the older answer %+v without asking the feed", st)
+	}
+	feed.gate <- struct{}{}
+	if st := <-newer; st.Error != "" || st.LatestVersion != "v9.9.9" {
+		t.Fatalf("newer check = %+v, want v9.9.9", st)
+	}
+}

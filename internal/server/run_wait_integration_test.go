@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -128,6 +130,30 @@ func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 	for _, run := range []domain.RunID{waiter, satisfied} {
 		if err := env.srv.sched.Kill(ctx, run, ada.ID); err != nil {
 			t.Fatalf("kill %s: %v", run, err)
+		}
+	}
+	for _, run := range []domain.RunID{ended, target, waiter, satisfied} {
+		waitDestroyed(ctx, t, env.srv, run)
+	}
+}
+
+// waitDestroyed waits until run's container is gone. Kill returns once the
+// container stops; the run's finalization destroys it afterwards, and a
+// shutdown before then leaves it for the next boot's recovery.
+func waitDestroyed(ctx context.Context, t *testing.T, srv *Server, run domain.RunID) {
+	t.Helper()
+	for {
+		_, err := srv.rt.FindByCreationKey(ctx, string(run))
+		if errors.Is(err, runtime.ErrNotFound) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("find the container of %s: %v", run, err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("the container of %s was never destroyed", run)
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
