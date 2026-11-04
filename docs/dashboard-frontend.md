@@ -1163,10 +1163,11 @@ Removal also repairs the selection and open route before any refresh awaits.
   line under the top bar: *Saved state from 3 minutes ago*, then the
   hydration error verbatim (or *reconnecting*; tap it to read it all), and
   **Retry**, which fires
-  the `online` wake below. While it shows, the main view is dimmed, session Approve and Deny are disabled (*Reconnect to act*), the
+  the `online` wake below. While it shows (a saved snapshot, or any failed refresh), the
   toast, the empty-board "Cannot reach the server" cards and (below 768px)
   the header connection line stay out, and the banner is the one place the
-  failure is written. A rejected link token clears the cache and shows
+  failure is written. On a saved snapshot, session Approve and Deny are
+  disabled beside the words *Reconnect to act*. A rejected link token clears the cache and shows
   the expired-link page as before.
 - **Resuming from the pocket also reconnects without an event.**
   `connectEvents` runs a 5 s watchdog; a tick more than 15 s late while the

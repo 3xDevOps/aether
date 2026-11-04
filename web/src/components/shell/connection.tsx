@@ -144,7 +144,7 @@ export function useConnectionWord(): string {
 
 export function ConnectionLine({ className }: { className?: string }) {
   const problem = useConnectionProblem()
-  const stale = useStore((s) => s.staleSince !== null)
+  const stale = useStore((s) => s.staleSince !== null || s.hydrationError !== null)
   if (!problem) return null
   return (
     // The saved-state banner carries the failure on a phone.

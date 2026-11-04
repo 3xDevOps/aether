@@ -18,6 +18,7 @@ export function DecisionButtons({ decide }: { decide: (approve: boolean) => Prom
     : late ? stillWaiting : approve ? 'Approving…' : 'Denying…'
   return (
     <>
+      {stale && <span className="self-center text-ui-sm text-muted">Reconnect to act</span>}
       <RequestAction label={label(false)} variant="danger" disabled={pending !== null || stale} title={stale ? 'Reconnect to act' : undefined} onClick={() => press(false)} />
       <RequestAction label={label(true)} variant="confirm" disabled={pending !== null || stale} title={stale ? 'Reconnect to act' : undefined} onClick={() => press(true)} />
     </>

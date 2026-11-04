@@ -79,7 +79,7 @@ function useRovingRows(region: React.RefObject<HTMLElement | null>) {
 export function SidebarRuns() {
   const groups = useSidebarGroups()
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => (s.staleSince === null ? s.hydrationError : null))
+  const error = useStore((s) => (s.staleSince === null && !s.hydrated ? s.hydrationError : null))
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const loading = useDelayed(!hydrated && error === null && groups.length === 0)

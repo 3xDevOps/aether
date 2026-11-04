@@ -25,14 +25,15 @@ export function StaleBanner() {
     <div className="flex min-w-0 items-start gap-2 border-b border-seam bg-chrome px-3 py-1 text-ui-sm text-muted">
       <div className="min-w-0 flex-1 py-1.5">
         {saved && <p className="text-text">{saved}</p>}
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          className={cn('block w-full min-w-0 text-left', open ? 'whitespace-pre-wrap break-words' : 'truncate')}
+          className="h-auto min-h-6 w-full min-w-0 justify-start px-0 py-1 text-left font-normal coarse:h-auto coarse:min-h-11 coarse:px-0"
         >
-          <span role="status">{state}</span>
-        </button>
+          <span role="status" className={cn('block w-full min-w-0 text-left', open ? 'whitespace-pre-wrap break-words' : 'truncate')}>{state}</span>
+        </Button>
       </div>
       <Button size="sm" variant="secondary" className="shrink-0" onClick={() => window.dispatchEvent(new Event('online'))}>
         Retry
