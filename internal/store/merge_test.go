@@ -49,6 +49,8 @@ var memberRefs = map[string]bool{
 	"watches.wait_ended_by":                    false,
 	"member_preferences.member_id":             true,
 	"assistant_settings.member_id":             false,
+	"assistant_rules.member_id":                false,
+	"assistant_rules.account_member_id":        false,
 	"launch_defaults.member_id":                false,
 	"launch_defaults.account_member_id":        true,
 	"events.actor_id":                          false,

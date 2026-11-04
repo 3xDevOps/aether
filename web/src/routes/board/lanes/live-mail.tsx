@@ -15,10 +15,12 @@ import { useStore } from '@/store'
 export const liveMailMs = 4500
 /** Arrows on screen at once; a newer pair replaces the oldest. */
 export const liveMailCap = 3
-const slotPx = 8
-const nowGap = 14
-const chipRoom = 160
+const slotPx = 16
+const nowGap = 28
 const stubPx = 22
+const bowMax = 56
+/** Shorter spans, such as adjacent lanes, stay straight: the 6px head is longer than their arc, so it would point sideways. */
+const bowFrom = 24
 const announceDelay = 1500
 /** Older mail is a reconnect replaying the log, not mail arriving now; the margin covers clock skew. */
 const replayMs = 60_000
@@ -155,6 +157,8 @@ export interface LiveShape {
   y2: number
   /** Mail with a session outside this view draws a stub from the drawn end, labelled with the other session. */
   stub?: 'out' | 'in'
+  /** How far left of `x` the arc bows, away from the now line and the bars' end caps. */
+  bow: number
   offscreen?: { end: 'from' | 'to'; edge: 'top' | 'bottom' }
 }
 
@@ -179,7 +183,7 @@ export function liveShapes(live: LiveArrow[], drawn: Map<string, string>, anchor
       const toEdge = out(y2)
       const fromEdge = out(y1)
       const offscreen = toEdge ? { end: 'to' as const, edge: toEdge } : fromEdge ? { end: 'from' as const, edge: fromEdge } : undefined
-      return [{ arrow, x, y1, y2, offscreen }]
+      return [{ arrow, x, y1, y2, bow: bowOf(x, y2 - y1), offscreen }]
     }
     // Over the top edge, as the marks of outside mail are, unless the lane is the first row.
     const e = (a ?? b)!
@@ -188,8 +192,15 @@ export function liveShapes(live: LiveArrow[], drawn: Map<string, string>, anchor
     const far = edge + (up ? -stubPx : stubPx)
     const away: 'top' | 'bottom' | undefined = edge < view.top ? 'top' : edge > view.bottom ? 'bottom' : undefined
     const offscreen = away && { end: a ? 'from' as const : 'to' as const, edge: away }
-    return [a ? { arrow, x, y1: edge, y2: far, stub: 'out', offscreen } : { arrow, x, y1: far, y2: edge, stub: 'in', offscreen }]
+    const bow = bowOf(x, stubPx)
+    return [a ? { arrow, x, y1: edge, y2: far, stub: 'out', bow, offscreen } : { arrow, x, y1: far, y2: edge, stub: 'in', bow, offscreen }]
   })
+}
+
+/** In proportion to the span, so every arc has the same shape and its head the same angle. */
+function bowOf(x: number, dy: number): number {
+  if (Math.abs(dy) < bowFrom) return 0
+  return Math.max(0, Math.min(bowMax, Math.abs(dy) * 0.3, x - 6))
 }
 
 /** A button that mounts after its arrow starts at the arrow's age, fixed at mount: a delay changed mid-run would move the fade. */
@@ -243,12 +254,21 @@ export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf,
   return (
     <>
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
-      {liveShapes(live, drawn, anchors, g, view, now).map(({ arrow, x, y1, y2, stub, offscreen }) => {
-        const dir = Math.sign(y2 - y1) || 1
+      {liveShapes(live, drawn, anchors, g, view, now).map(({ arrow, x, y1, y2, stub, bow, offscreen }) => {
         const top = Math.min(y1, y2) - 6
         const height = Math.abs(y2 - y1) + 12
+        const width = bow + 16
         const from = y1 - top
         const to = y2 - top
+        const cx = bow + 8
+        // Control points a third of the way down keep y linear in t, so the travelling dot's two linear-time axes stay on the curve.
+        const c = bow / 0.75
+        const third = (to - from) / 3
+        const len = Math.hypot(c, third) || 1
+        const ux = c / len
+        const uy = third / len
+        const shaft = `M${cx} ${from}C${cx - c} ${from + third} ${cx - c} ${to - third} ${cx - ux * 5} ${to - uy * 5}`
+        const base = (side: number) => `${cx - ux * 6 - side * uy * 3.5},${to - uy * 6 + side * ux * 3.5}`
         const key = `${arrow.pair}@${arrow.at}`
         const fade = !still && 'motion-safe:animate-mail-live'
         const other = stub === 'out' ? arrow.to : stub === 'in' ? arrow.from : undefined
@@ -257,14 +277,14 @@ export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf,
           const row = pinned[offscreen.edge]++
           const end = offscreen.end === 'to' ? arrow.to : arrow.from
           const Icon = offscreen.edge === 'top' ? ArrowUp : ArrowDown
-          // Too close to the window's start for the button to fit on the arrow's left.
-          const right = x < chipRoom
+          // On whichever side of the arc has more room, so a narrow track keeps the name readable.
+          const right = g.width - x > x - bow
           chip = (
             <LiveChip
               key={`${key}:chip`}
               at={arrow.at}
               className={cn(fade, !right && '-translate-x-full')}
-              style={{ left: g.labelWidth + x + (right ? 10 : -10), top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
+              style={{ left: g.labelWidth + x + (right ? 10 : -bow - 6), top: offscreen.edge === 'top' ? view.top + 4 + row * 28 : view.bottom - 28 - row * 28 }}
               onClick={() => onJump(end.lane)}
             >
               <Icon aria-hidden className="size-3 shrink-0 text-series-5" />
@@ -290,30 +310,32 @@ export function LiveMail({ mail, drawn, anchors, g, view, now, reserved, nameOf,
             aria-hidden
             data-mail-live={arrow.pair}
             className={cn(fade, 'pointer-events-none absolute text-series-5')}
-            style={{ left: g.labelWidth + x - 8, top, width: 16, height }}
+            style={{ left: g.labelWidth + x - cx, top, width, height }}
           >
-            <svg className="absolute inset-0 overflow-visible" width={16} height={height}>
-              <path d={`M8 ${from}V${to - dir * 5}`} stroke="var(--canvas)" strokeWidth={4} strokeLinecap="round" />
-              <path d={`M8 ${from}V${to - dir * 5}`} stroke="currentColor" strokeWidth={2} strokeDasharray="4 3" strokeLinecap="round" />
-              {stub !== 'in' && <circle cx={8} cy={from} r={2.5} fill="currentColor" stroke="var(--canvas)" strokeWidth={1} />}
-              <polygon points={`8,${to} 4.5,${to - dir * 6} 11.5,${to - dir * 6}`} fill="currentColor" stroke="var(--canvas)" strokeWidth={1} strokeLinejoin="round" />
+            <svg className="absolute inset-0 overflow-visible" width={width} height={height}>
+              <path d={shaft} fill="none" stroke="var(--canvas)" strokeWidth={4} strokeLinecap="round" />
+              <path d={shaft} fill="none" stroke="currentColor" strokeWidth={2} strokeDasharray="4 3" strokeLinecap="round" />
+              {stub !== 'in' && <circle cx={cx} cy={from} r={2.5} fill="currentColor" stroke="var(--canvas)" strokeWidth={1} />}
+              <polygon points={`${cx},${to} ${base(1)} ${base(-1)}`} fill="currentColor" stroke="var(--canvas)" strokeWidth={1} strokeLinejoin="round" />
             </svg>
             {!still && (
               <>
                 <span
-                  className="absolute left-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full motion-safe:animate-mail-travel bg-current"
-                  style={{ top: from, '--mail-travel': `${to - from}px` } as React.CSSProperties}
-                />
+                  className="absolute size-2 -translate-x-1/2 -translate-y-1/2 motion-safe:animate-mail-travel"
+                  style={{ left: cx, top: from, '--mail-travel': `${to - from}px` } as React.CSSProperties}
+                >
+                  <span className="block size-full rounded-full motion-safe:animate-mail-bow bg-current" style={{ '--mail-bow': `${-bow}px` } as React.CSSProperties} />
+                </span>
                 <span
-                  className="absolute left-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full motion-safe:animate-mail-ping border-2 border-current"
-                  style={{ top: to - dir * 3 }}
+                  className="absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full motion-safe:animate-mail-ping border-2 border-current"
+                  style={{ left: cx - ux * 3, top: to - uy * 3 }}
                 />
               </>
             )}
             {(arrow.count > 1 || other) && (
               <span
                 className="absolute flex h-4 items-center gap-0.5 rounded-chip border border-series-5 bg-raised px-1 text-ui-xs whitespace-nowrap text-text tabular-nums"
-                style={{ right: 12, top: stub ? (stub === 'out' ? to : from) - 8 : (from + to) / 2 - 8 }}
+                style={{ right: bow + 12, top: stub ? (stub === 'out' ? to : from) - 8 : (from + to) / 2 - 8 }}
               >
                 {other && <span className="max-w-40 truncate text-muted">{stub === 'out' ? 'to' : 'from'} {nameOf(other)}</span>}
                 {arrow.count > 1 && `×${arrow.count}`}

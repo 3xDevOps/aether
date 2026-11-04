@@ -5,6 +5,9 @@
          adaptive launcher icon's background layer is the tile color
          scripts/make-icons.py composites onto. -->
     <color name="window_background">#ffffff</color>
+    <!-- The dashboard defaults to dark, so the WebView and its frame hold
+         its dark canvas colour until the page paints, whatever the system theme. -->
+    <color name="page_background">#141516</color>
     <color name="error_text">#b3261e</color>
     <!-- The update notice wears the dashboard's raised surface, seam, text
          and accent tokens, so it reads as part of the page beneath it. -->

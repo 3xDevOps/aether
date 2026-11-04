@@ -186,6 +186,8 @@ func (w termInput) WriteContext(ctx context.Context, p []byte) (int, error) {
 		switch {
 		case done.Error != "":
 			return i, fmt.Errorf("acpkeeper: write to the terminal: %s", done.Error)
+		case done.N < len(chunk) && ctx.Err() != nil:
+			return i, fmt.Errorf("acpkeeper: write to the terminal: %w", ctx.Err())
 		case done.N < len(chunk):
 			return i, fmt.Errorf("acpkeeper: write to the terminal: %w", io.ErrShortWrite)
 		}

@@ -67,8 +67,15 @@ pair it with `font-*` classes.
 ## Semantic palette
 
 `web/src/index.css` is authoritative: light values sit on `:root`, dark ones
-on `.dark`. The theme preference is `system`, `light` or `dark`; `system`
-follows `prefers-color-scheme` live.
+on `.dark`. The theme preference is `dark` (the default), `light` or `system`;
+`system` follows `prefers-color-scheme` live. A theme stored before the dark
+default as `system`, which is how a never-chosen theme was saved, becomes
+`dark`; a stored `light` or `dark` is kept. An inline script in
+`web/src/app/layout.tsx` applies the stored theme before the first paint, so a
+light device never flashes light. The desktop window and the Android
+WebView and its launch window start on the dark `--canvas` for the same
+reason; Android's system bar icons are light over the dashboard and follow
+the system theme over the native error and update panels.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
@@ -82,7 +89,8 @@ follows `prefers-color-scheme` live.
 | `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
 | `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
 | `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |
-| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, focus ring, control outline |
+| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, control outline |
+| `--focus-ring` | `outline-focus` | `#367f77` | `#5fb3a8` | Keyboard focus ring; 3:1 on every surface and on the selected row in both themes |
 | `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
 | `--on-accent` | `text-on-accent` | `#ffffff` | `#ffffff` | Text on `bg-accent` |
 | `--selection` | `bg-selection` | `#dfebe9` | `#17413d` | Selected rows |
@@ -321,7 +329,7 @@ Mail marks and links use the categorical series by meaning:
 | --- | --- | --- | --- |
 | Agent message, at rest | `text-series-5` | sent: 5.5px filled dot with a 1px `--canvas` halo; received: 6px `--canvas` ring, 1.5px stroke; 2px outside the bar edge facing the other lane | a `text-ui-xs` tabular count on a `--canvas` halo when marks merge |
 | Agent message, focused lane | `text-series-5` | solid 1.5px, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a count chip on bundles |
-| Agent message, live | `text-series-5` over a 4px `--canvas` halo; the recipient's track `bg-series-5/10` | dashed `4 3` 2px, round caps | dot at the sender, filled arrowhead at the recipient; a `×n` chip left of the line |
+| Agent message, live | `text-series-5` over a 4px `--canvas` halo; the recipient's track `bg-series-5/10` | dashed `4 3` 2px, round caps, an arc bowing left of the send time | dot at the sender, filled arrowhead along the arc at the recipient; a `×n` chip left of the arc |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
@@ -334,9 +342,10 @@ glyph, left of the age. A mark added after the view opens fades in once with
 `motion-safe:animate-fade-in`; nothing loops. A live arrow draws above the
 bars for `--duration-mail-live` (4.5s, under WCAG 2.2.2's five seconds):
 `animate-mail-live` fades it and the recipient's tint in over 150ms, holds
-them to 2s and fades them out on `--ease-in-out`; `animate-mail-travel` runs an 8px dot from sender to
-recipient once over 500ms, and `animate-mail-ping` grows a ring at the head
-once. Each arrow is its own HTML box and animates only `opacity` and
+them to 2s and fades them out on `--ease-in-out`; `animate-mail-travel`
+(down, linear) and `animate-mail-bow` (sideways, quadratic) run an 8px dot
+along the arc from sender to recipient once over 500ms, and
+`animate-mail-ping` grows a ring at the head once. Each arrow is its own HTML box and animates only `opacity` and
 `transform`, which an SVG child could not keep on the compositor. Under
 reduced motion the arrow and tint show still, without the dot or ring, and
 go when their time ends. Tree focus without hover or a
@@ -529,7 +538,7 @@ in the header on desktop and under the top bar on a phone.
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
 32px rows (44px on a coarse pointer). Theme is in **Settings > General** and the footer menu, with
-explicit **System**, **Light** and **Dark** choices and matching palette
+explicit **Dark**, **Light** and **System** choices and matching palette
 commands.
 
 `focusRing`, `fieldFocus` and `field` in `web/src/lib/utils.ts` are the shared

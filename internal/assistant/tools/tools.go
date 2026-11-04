@@ -620,6 +620,12 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	if mode == "" {
 		mode = "default mode"
 	}
+	if p.Model != "" {
+		mode += ", model " + truncate(p.Model)
+	}
+	if p.Effort != "" {
+		mode += ", effort " + truncate(p.Effort)
+	}
 	summary := fmt.Sprintf("Launch %s (%s) in %s", p.Harness, mode, ws)
 	if p.AccountMemberID != "" && p.AccountMemberID != s.Member {
 		summary += " on " + n.account(p.AccountMemberID)

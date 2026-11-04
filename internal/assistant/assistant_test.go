@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"sync"
@@ -23,10 +24,60 @@ type memStore struct {
 	settings map[domain.MemberID]store.AssistantSettings
 	// settingsReads counts AssistantSettings calls.
 	settingsReads int
+	rules         []store.AssistantRule
 }
 
 func newMemStore() *memStore {
 	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, settings: map[domain.MemberID]store.AssistantSettings{}}
+}
+
+func (m *memStore) AssistantRules(_ context.Context, id domain.MemberID) ([]store.AssistantRule, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.AssistantRule
+	for _, r := range m.rules {
+		if r.MemberID == id {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) AddAssistantRule(_ context.Context, id domain.MemberID, key store.AssistantRuleKey, wording, summary string) (store.AssistantRule, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.rules {
+		if r.MemberID == id && r.Key == key {
+			return r, nil
+		}
+	}
+	r := store.AssistantRule{ID: fmt.Sprintf("rule-%d", len(m.rules)+1), MemberID: id, Key: key, Wording: wording, Summary: summary, CreatedAt: time.Now().UTC()}
+	m.rules = append(m.rules, r)
+	return r, nil
+}
+
+func (m *memStore) DeleteAssistantRule(_ context.Context, id domain.MemberID, rule string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.rules)
+	m.rules = slices.DeleteFunc(m.rules, func(r store.AssistantRule) bool { return r.MemberID == id && r.ID == rule })
+	if len(m.rules) == n {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (m *memStore) UseAssistantRule(_ context.Context, id domain.MemberID, rule string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, r := range m.rules {
+		if r.MemberID == id && r.ID == rule {
+			m.rules[i].Uses++
+			m.rules[i].LastUsedAt = time.Now().UTC()
+			return nil
+		}
+	}
+	return store.ErrNotFound
 }
 
 func (m *memStore) AssistantSettings(_ context.Context, id domain.MemberID) (store.AssistantSettings, error) {

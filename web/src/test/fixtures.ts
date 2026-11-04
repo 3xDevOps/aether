@@ -581,6 +581,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     assistantReset: vi.fn(async () => needsOverride('assistantReset')),
     assistantSettings: vi.fn(async () => ({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true })),
     assistantHistory: vi.fn(async () => needsOverride('assistantHistory')),
+    assistantAccount: vi.fn(async (agent: string) => ({ agent, state: 'unrecorded' as const })),
     runInputAnswer: vi.fn(async () => needsOverride('runInputAnswer')),
     runInputRespond: vi.fn(async () => needsOverride('runInputRespond')),
     runACPCancel: vi.fn(async () => needsOverride('runACPCancel')),

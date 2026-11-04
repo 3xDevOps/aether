@@ -175,9 +175,10 @@ manifest cannot say: the status bar style, which needs
 the unprefixed `mobile-web-app-capable`. `web/public/icons/apple-touch-icon.png`
 stays because Safari prefers it over the manifest icons.
 
-A manifest carries one `theme_color` where the layout's viewport export carries
-one per colour scheme, so both read `web/src/app/theme-color.ts` and the
-manifest takes the dark value. `background_color` is the separate
+The manifest's `theme_color` and the layout's viewport `themeColor` both read
+`web/src/app/theme-color.ts` and take the dark value, the default theme;
+`ThemeEffect` switches the page's `theme-color` meta to the light value when
+the member picks light. `background_color` is the separate
 `iconBackground` from that module, `#0a0a0a`: an installed app's splash centres
 an icon on it, and any other value would leave the icon's tile showing as a
 square. That hex is deliberately darker than the dashboard's own dark
@@ -542,7 +543,11 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
   double click cancels once and an agent that ignores it can be stopped
   again; the call aborts after 10 seconds with `assistant.cancel got no
-  answer within 10 seconds`). An empty conversation offers four example prompts that fill the
+  answer within 10 seconds`). An empty conversation leads with
+  `AssistantAccountCheck` (`assistant.account`, shown when the server lists
+  it), the [same-account line](assistant.md#same-account-as-your-sessions),
+  which **Settings > Assistant > Sign-in** also shows under each ready agent,
+  and offers four example prompts that fill the
   composer, led by the page's own: a failed session offers **Fix this**, one that
   needs you or waits **Why is this stuck?**, one with an open pull request
   (`useOpenPullRequest`) **Review and merge when checks pass**; the board
@@ -945,9 +950,9 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   is what every `dvh` in the app - dialogs, the palette, selects, menus - is
   already sized against, so they all shorten when the
   keyboard opens. Nothing in the shell uses `vh`.
-- `themeColor` per `prefers-color-scheme` - the browser reads it before the
-  SPA has applied the member's stored theme, so it follows the OS scheme
-  rather than the app setting.
+- `themeColor` is the dark value, the default theme, so browser chrome matches
+  the page before the SPA mounts; `ThemeEffect` then follows the member's
+  stored theme.
 
 A layout that only changes size belongs in CSS. Layouts that mount different
 elements for a finger than for a mouse, or for a narrow window, ask
@@ -1638,13 +1643,17 @@ Mail is not parentage: subsessions show as a family, and nothing draws
 dependencies.
 
 Mail that arrives while the view is open (`appendLaneEvent` records it in
-`laneArrivals`; history pages never do) also draws a dashed arrow from
+`laneArrivals`; history pages never do) also draws a dashed arc from
 sender to recipient and tints the recipient's lane; both fade out by 4.5s
 and leave the marks. Mail sent over a minute before it arrives (a reconnect
 replaying the log) and mail outside the time window draw none. More mail
 on the same lane pair restarts its arrow with a count, at most three show at
-once (a new pair replaces the oldest), and arrows at one moment step 8px
-apart, starting 14px left of the window's end so they clear the now line.
+once (a new pair replaces the oldest), and arrows at one moment step 16px
+apart, starting 28px left of the window's end. Both ends sit at the send
+time, and the arc bows left by 0.3 of its height (at most 56px), so it
+stays clear of the now line and the bars' end caps. An arrow under 24px
+tall, such as between adjacent lanes or a stub, stays straight so its head
+points at the recipient.
 An arrow follows a family that folds or opens while it shows. An end scrolled past the rows gets a pinned **to**/**from** button
 that moves to it; mail with a session outside the view draws a short stub
 labelled with that session, with the same button when its lane is scrolled
@@ -5966,7 +5975,7 @@ Assistant, Linked server, Sync daemon, Docker inside sessions, Remote access).
 
 Categories:
 
-- **General**: **Theme** (System, Light, Dark; the palette and the footer
+- **General**: **Theme** (Dark, the default, Light, System; the palette and the footer
   menu offer the same), **Text size** (Default, Large, Larger; it scales the
   interface type tokens through `data-text-size` on the root element and
   leaves terminal zoom alone), **Single-key shortcuts** (see
