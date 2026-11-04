@@ -237,11 +237,16 @@ func TestContainersAreSampledOnlyWhileWatched(t *testing.T) {
 		t.Fatalf("idle sampler read containers %d times", n)
 	}
 
-	s.Read(time.Time{})
-	waitFor(t, "wake sample and the sample after it", func() bool { return src.calls.Load() >= 2 })
-
-	// Reads keep it watched; once they stop, sampling stops after the TTL.
-	waitFor(t, "ticks while watched", func() bool { return src.calls.Load() >= 5 })
+	// Reads keep it watched, as a polling dashboard does; once they stop,
+	// sampling stops after the TTL.
+	watched := func(calls int64) func() bool {
+		return func() bool {
+			s.Read(time.Time{})
+			return src.calls.Load() >= calls
+		}
+	}
+	waitFor(t, "wake sample and the sample after it", watched(2))
+	waitFor(t, "ticks while watched", watched(5))
 	time.Sleep(s.ttl + 2*s.interval)
 	stopped := src.calls.Load()
 	time.Sleep(4 * s.interval)
