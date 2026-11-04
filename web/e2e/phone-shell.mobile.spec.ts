@@ -68,7 +68,13 @@ test('Needs you denies a permission and replies to a question from their cards',
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
   const launch = (params: Record<string, unknown>) =>
     alice.api.rpc<{ run: { id: string } }>('run.launch', { workspace_id: workspaces[0].id, ...params })
-  const asker = await launch({ harness: 'mock', mode: 'acp', task: 'ask permission' })
+  // The mock asks only when a whole prompt is 'ask permission'; a launch's first prompt also carries run instructions.
+  const asker = await launch({ harness: 'mock', mode: 'acp', task: 'demo' })
+  await expect.poll(async () => {
+    const history = await alice.api.rpc<{ frames: unknown[] }>('run.acp.history', { run_id: asker.run.id })
+    return JSON.stringify(history.frames)
+  }, { timeout: 180_000 }).toContain('pong')
+  await alice.api.rpc('run.inject', { run_id: asker.run.id, message: 'ask permission', idempotency_key: `phone-permission-${asker.run.id}` })
   const idle = await launch({ harness: 'claude', task: 'an agent that stops and asks' })
 
   await page.goto(alice.url)
