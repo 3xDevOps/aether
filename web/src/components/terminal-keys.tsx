@@ -59,8 +59,8 @@ export function useTextSizeStepper({ size, fitted }: TerminalFit) {
     size: `${Number(size.toFixed(1))} px`,
     fitWidth: fitting,
     fit,
-    canSmaller: !fitting && smaller >= minTerminalFontSize,
-    smaller: () => (fitted < chosen && smaller <= fitted ? fit() : setFontSize(smaller)),
+    canSmaller: !fitting && (smaller >= minTerminalFontSize || fitted < chosen),
+    smaller: () => (fitted < chosen && (smaller <= fitted || smaller < minTerminalFontSize) ? fit() : setFontSize(smaller)),
     canLarger: larger > size,
     larger: () => setFontSize(Math.max(minTerminalFontSize, larger)),
   }
