@@ -31,3 +31,14 @@ export function useDictationState(box: Box): DictationState {
     () => states.get(box) ?? idle,
   )
 }
+
+/** Whether any box is dictating, for a form that does not hold its box's ref. */
+export function useDictating(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => [...states.values()].some((state) => state.active),
+  )
+}

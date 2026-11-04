@@ -147,6 +147,30 @@ describe('DictationButton', () => {
     expect(submit).not.toHaveBeenCalled()
   })
 
+  it('follows the caret the member left when they edit the box while recording', async () => {
+    vi.mocked(api.dictationTranscribe).mockResolvedValue({ text: 'quickly' })
+    const box = mount()
+    box.setSelectionRange(4, 4)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
+    const stop = await screen.findByRole('button', { name: 'Dictate', pressed: true })
+    fireEvent.change(box, { target: { value: 'please fix the bug' } })
+    box.focus()
+    box.setSelectionRange(18, 18)
+    fireEvent.click(stop)
+    await waitFor(() => expect(box.value).toBe('please fix the bug quickly'))
+  })
+
+  it('leaves an Escape pressed elsewhere to its owner', async () => {
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
+    await screen.findByRole('button', { name: 'Dictate', pressed: true })
+    act(() => {
+      fireEvent.keyDown(document.body, { key: 'Escape' })
+    })
+    expect(track.stop).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Dictate', pressed: true })).toBeTruthy()
+  })
+
   it('drops the recording on Escape', async () => {
     const box = mount()
     fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))

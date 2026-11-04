@@ -3173,7 +3173,9 @@ The button and the composer around it share state through `state.ts`, keyed by
 the box's ref: `useDictationState(textarea)` returns `active` (starting,
 recording or transcribing) and the current `notice`. While `active`, the
 composer's send is disabled and Enter does nothing, so a missed press cannot
-send the old draft mid-recording. `DictationNotice` draws the notice as a strip
+send the old draft mid-recording. The New session dialog and the onboarding
+first run hold **Launch** the same way through `useDictating()`, which is true
+while any box dictates. `DictationNotice` draws the notice as a strip
 above the box: failed tint, alert icon and `role="alert"` for an error, a plain
 `role="status"` strip for "No speech was recognized.", and an **x** that
 dismisses it and returns focus to the box.
@@ -3191,8 +3193,9 @@ between states. A tap starts and a second tap stops. A press held 300 ms or
 more after recording began stops on release (hold to talk); a press that
 outlasted the browser's permission prompt counts as a tap. Enter and Space
 toggle like a tap. A pointer press keeps focus in the box, so a phone keeps its
-keyboard up. Escape, caught in the capture phase while starting, recording or
-transcribing, drops the audio or the request in flight. Recording stops by
+keyboard up. Escape pressed in the box or on the mic while starting, recording
+or transcribing drops the audio or the request in flight; an Escape anywhere
+else goes to its own owner. Recording stops by
 itself at 2:00.
 
 The browser asks for the microphone on the first press, never on load.
@@ -3207,7 +3210,8 @@ the hints. Without `hints`, `dictationHints` sends up to 200 names of at most
 sessions' titles, newest first. Transcription times out after 120 s.
 
 `insertTranscript` puts the text where the caret or selection was when
-recording started, adding a space on either side only where a word would
+recording started; if the text changed meanwhile, at the caret the member left
+in the box, or at the end, adding a space on either side only where a word would
 otherwise touch it, then focuses the box with the caret after the text. It
 never sends: the mic has `type="button"`, so a press inside the New session
 form does not launch. Errors show verbatim, with paths and the install command

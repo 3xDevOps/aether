@@ -58,8 +58,9 @@ export function DictationButton({ textarea, onInsert, hints }: {
   const capture = useRef<Capture | null>(null)
   const request = useRef<AbortController | null>(null)
   const generation = useRef(0)
-  const selection = useRef({ start: 0, end: 0 })
+  const selection = useRef({ value: '', start: 0, end: 0 })
   const press = useRef<{ at: number; started: boolean } | null>(null)
+  const mine = useRef<HTMLSpanElement>(null)
   const latest = useRef({ textarea, onInsert, hints })
   latest.current = { textarea, onInsert, hints }
 
@@ -74,8 +75,8 @@ export function DictationButton({ textarea, onInsert, hints }: {
 
   const start = async () => {
     const box = latest.current.textarea.current
-    const end = box?.value.length ?? 0
-    selection.current = { start: box?.selectionStart ?? end, end: box?.selectionEnd ?? end }
+    const value = box?.value ?? ''
+    selection.current = { value, start: box?.selectionStart ?? value.length, end: box?.selectionEnd ?? value.length }
     const run = ++generation.current
     show({ kind: 'starting' })
     setStatus('Starting microphone')
@@ -112,7 +113,12 @@ export function DictationButton({ textarea, onInsert, hints }: {
       const words = text.trim()
       if (!words) return fail('No speech was recognized.', false)
       const box = latest.current.textarea.current
-      const next = insertTranscript(box?.value ?? '', words, selection.current.start, selection.current.end)
+      const value = box?.value ?? ''
+      // Text edited while recording moves the words: the caret the member left wins, else the end.
+      const at = value === selection.current.value
+        ? selection.current
+        : box && document.activeElement === box ? { start: box.selectionStart, end: box.selectionEnd } : { start: value.length, end: value.length }
+      const next = insertTranscript(value, words, at.start, at.end)
       latest.current.onInsert(next.body)
       show({ kind: 'idle' })
       setStatus('Dictation inserted')
@@ -143,8 +149,10 @@ export function DictationButton({ textarea, onInsert, hints }: {
   const busy = phase.kind === 'starting' || phase.kind === 'recording' || phase.kind === 'transcribing'
   useEffect(() => {
     if (!busy) return
+    // Only an Escape meant for this box: one in a dialog, menu or another composer goes on to its owner.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
+      const target = event.target as Element | null
+      if (event.key !== 'Escape' || (target !== latest.current.textarea.current && target?.closest('[data-dictation]') !== mine.current)) return
       event.preventDefault()
       event.stopPropagation()
       latestActions.current.cancel()
@@ -205,7 +213,7 @@ export function DictationButton({ textarea, onInsert, hints }: {
 
   const pill = 'mr-2 min-w-28 justify-center gap-2 px-3 tabular-nums coarse:min-w-32'
   return (
-    <>
+    <span ref={mine} data-dictation className="inline-flex shrink-0">
       {phase.kind === 'recording' ? (
         <Button type="button" size="pill" variant="danger" aria-label="Dictate" aria-pressed hint={`Stop dictation, Escape cancels. Stops by itself at ${clock(maxSeconds * 1000)}.`} className={cn(pill, 'touch-none select-none')} {...handlers}>
           <Square className="fill-current" aria-hidden />
@@ -232,6 +240,6 @@ export function DictationButton({ textarea, onInsert, hints }: {
         </Button>
       )}
       <span role="status" aria-live="polite" className="sr-only">{status}</span>
-    </>
+    </span>
   )
 }

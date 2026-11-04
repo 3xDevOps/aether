@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
+import { useDictating } from '@/components/dictation/state'
 import { RefusalNotes } from '@/components/launch/agent-picker'
 import { AccountOptions, automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
 import { PermissionControl, permissionFeature } from '@/components/launch/permission-control'
@@ -86,6 +87,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const sharedAccount = account !== '' && account !== ownAccountID
   const accountName = accounts.find((member) => member.id === account)?.display_name ?? account
   const taskMissing = needsTask(mode, task)
+  const dictating = useDictating()
   useEffect(() => {
     if (error) errorCallout.current?.scrollIntoView({ block: 'nearest' })
   }, [error])
@@ -233,7 +235,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         <form
           id="launch-form"
           className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1 py-1 [&>*]:shrink-0"
-          onSubmit={(event) => { event.preventDefault(); void submit() }}
+          onSubmit={(event) => { event.preventDefault(); if (!dictating) void submit() }}
         >
           {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
           <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
@@ -252,7 +254,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           <Button
             type="submit"
             form="launch-form"
-            disabled={launching || !workspaceID || !account || !harness || taskMissing}
+            disabled={launching || !workspaceID || !account || !harness || taskMissing || dictating}
           >
             {launching && <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}
             {late ? stillWaiting : launching ? 'Launching…' : 'Launch'}
