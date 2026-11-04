@@ -588,18 +588,14 @@ describe('phone shell', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Settings' })))
   })
 
-  it('titles a run page "Session" and keeps New session in the tab bar', () => {
+  it('opens a run page full screen, over the top bar and the tab bar', async () => {
     atViewport(390, { pointer: 'coarse' })
     useStore.setState({ route: { name: 'run', params: { runId: 'run_2' } } })
     render(<AppShell />)
 
-    const banner = within(topBanners()[0]!)
-    expect(banner.getByText('Session')).toBeDefined()
-    expect(banner.queryByText('answer the schema question')).toBeNull()
-    expect(banner.queryByRole('button', { name: 'New session' })).toBeNull()
-    const tabs = within(screen.getByRole('navigation', { name: 'Main navigation' }))
-    expect(tabs.getByRole('button', { name: 'New session' })).toBeDefined()
-    expect(tabs.getByRole('button', { name: 'Sessions' }).getAttribute('aria-current')).toBe('page')
+    expect(await screen.findByRole('button', { name: 'Back' })).toBeDefined()
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).toBeNull()
+    expect(topBanners()).toHaveLength(0)
   })
 
   it('counts what asks the viewer on the Needs you tab, never a finished session', async () => {

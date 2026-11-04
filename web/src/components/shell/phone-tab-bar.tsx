@@ -130,7 +130,7 @@ export function PhoneTabBar() {
   }, [])
 
   return (
-    <nav ref={bar} aria-label="Main navigation" hidden={hidden} className="shrink-0 border-t border-seam bg-chrome pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
+    <nav ref={bar} aria-label="Main navigation" hidden={hidden || route === 'run'} className="shrink-0 border-t border-seam bg-chrome pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       <ul className="flex items-stretch px-1">
         {attention && (
           <Tab

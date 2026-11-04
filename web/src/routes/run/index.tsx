@@ -25,7 +25,8 @@ import { RawEventsDialog } from '@/routes/run/raw-events'
 import { CompletionPrompt } from '@/routes/run/completion-prompt'
 import { RunDetails } from '@/routes/run/details'
 import { RunHeader, type RunNavigation } from '@/routes/run/header'
-import { MultiplayerControls } from '@/routes/run/multiplayer-controls'
+import { MultiplayerControls, useSharedPresence } from '@/routes/run/multiplayer-controls'
+import { useTerminalTyping } from '@/routes/run/phone-header'
 import { dockedRequestID } from '@/routes/run/request-dock'
 import { useRunRoom } from '@/routes/run/room'
 import { SessionView } from '@/routes/run/session-view'
@@ -34,7 +35,7 @@ import { WorkflowChip, WorkflowPanel, workflowPanelID } from '@/routes/run/workf
 import { SubagentInspector } from '@/routes/run/subagent-inspector'
 import { TerminalView } from '@/routes/run/terminal-view'
 import { TraceView } from '@/routes/run/trace-view'
-import { defaultView, isRunView, runViewLabel, runViews, type RunView } from '@/routes/run/views'
+import { defaultView, isRunView, runRoute, runViewLabel, runViews, type RunView } from '@/routes/run/views'
 import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -98,7 +99,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const files = hasFiles(run, cap)
   const views = runViews.filter((view) =>
     (view !== 'browser' || (browser && !docked)) && (view !== 'files' || files) && (view !== 'trace' || run.acp === true))
-  const asked = isRunView(params.view) ? params.view : remembered
+  // A phone lands on the session's own view: Chat for Enhanced, Terminal for Standard.
+  const asked = isRunView(params.view) ? params.view : mobile ? undefined : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
   const setShownRunView = useStore((s) => s.setShownRunView)
@@ -111,6 +113,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const switchable = agentEntry?.switchable === true
   const shells = useRunShells(run.id, view === 'terminal')
   const room = useRunRoom(run, agent.roomControl)
+  const shared = useSharedPresence(run, agent)
+  const terminalTyping = useTerminalTyping()
 
   const agentID = defaultView(run) === 'session' ? params.agent : undefined
   const agentOpener = useRef<HTMLElement | null>(null)
@@ -161,7 +165,11 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
     }
   }, [Boolean(agentID)])
 
-  const go = useCallback((next: RunView) => navigate('run', { runId: run.id, view: next }), [navigate, run.id])
+  // A phone's tabs swap the view in place, so back leaves the session instead of stepping through them.
+  const go = useCallback((next: RunView) => {
+    if (mobile) replaceRouteKeepingFocus(runRoute(run.id, next))
+    else navigate('run', { runId: run.id, view: next })
+  }, [mobile, navigate, run.id])
   useEffect(() => {
     if (browserRequest !== undefined && browser && !docked) go('browser')
   }, [browserRequest, browser, docked, go])
@@ -251,7 +259,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           views={views}
           agent={agent}
           nav={nav}
-          composing={mobile && composing}
+          composing={mobile && (composing || terminalTyping)}
           detailsOpen={detailsOpen}
           onDetails={(opener) => {
             returnTo.current = opener
@@ -259,6 +267,10 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           }}
           onCaptures={openCaptures}
           onEvents={openDialog('events')}
+          onWorkflow={(opener) => {
+            returnTo.current = opener
+            setWorkflow(true)
+          }}
           agentName={agentName}
           agentEntry={agentEntry}
           workflow={(
@@ -272,7 +284,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
             />
           )}
         />
-        {run.mode === 'acp' && view !== 'browser' && view !== 'files' && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
+        {run.mode === 'acp' && view !== 'browser' && view !== 'files' && (!mobile || (shared && !composing && !terminalTyping)) && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div ref={frameRef} className="flex min-h-0 flex-1">
           <div className="relative min-h-0 min-w-0 flex-1">
             {visited.has('session') && (

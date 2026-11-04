@@ -590,6 +590,37 @@ Below the cards, **Finished: review the result** lists the `ready` items as
 plain rows. They never count toward the badge and have no Mark complete;
 opening one opens the session.
 
+### Phone session
+
+On a phone a session opens full screen: the `run` route renders no top bar
+and the tab bar hides, so `main` pads the top and bottom safe areas itself.
+The header (`routes/run/phone-header.tsx`) is one 48px row: **Back**, the
+title with its protection lock, a state line (status dot, state, agent and
+mode), the header's primary action when there is one, and **More**. Under it
+the tabs **Chat**, **Terminal** and **Changes** fill a 44px row, with the
+pull request at its right end. Trace, Files and Browser, **Session details**,
+**Workflow**, Captures and Raw events are items in **More**; a view opened
+from there joins the tabs while it shows. Close, Stop and Delete in **More**
+are the same commands, with the same confirmations, as on desktop.
+
+Without a `view` in the address a phone lands on `defaultView`, never on the
+view this tab last showed: Chat for an Enhanced session, Terminal for a
+Standard one. A link that names a view still opens it. A tab switch replaces
+the history entry instead of pushing one, so **Back** leaves the session. It
+steps back in the tab's history when the dashboard pushed the entry below
+(`historyDepth` in `src/lib/url-state.ts`) and opens Sessions when the
+session was opened by a link.
+
+While the keyboard is up (the composer has focus, or the terminal's input on
+a touch screen), the header shrinks to one 44px row with the title and the
+status dot, and the tabs, the wait line, the lineage line and the
+[multiplayer strip](#multiplayer-controls) leave. On a phone the strip shows
+only while someone else watches or controls the session, or control,
+presence or the stream failed (`useSharedPresence`); alone, sending a
+message takes control implicitly and Details lists the people. The Chat
+composer is the desktop `ComposerBox`, padded by `--keyboard-inset`
+(`src/lib/keyboard-inset.ts`) so it sits above an iOS keyboard as well.
+
 ### Assistant panel
 
 The assistant is a persistent conversation with an agent running in the
@@ -2632,7 +2663,8 @@ as `changes`.
 Every way into a session navigates to `run`: board card, sidebar row, session list,
 palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
-showed for the session (`runViewMemory`, not persisted), else `defaultView`:
+showed for the session (`runViewMemory`, not persisted; a phone skips it, see
+[Phone session](#phone-session)), else `defaultView`:
 Session for an Enhanced session or any session that streams a session (`acp: true`),
 Terminal otherwise. Trace follows Chat for a session with `acp: true` only.
 Files is in the list while the session still has its
@@ -2772,8 +2804,7 @@ row is too narrow for every tab, as on a phone whose session has a pull request,
 the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
 sight as the view or the room changes, and the right edge fades while more
 tabs lie past it. The [Workflow panel](#workflow-panel)'s chip follows the
-tabs. On a phone with the composer focused the header keeps only the title
-line.
+tabs. A phone has its own header and tabs; see [Phone session](#phone-session).
 
 A session with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the

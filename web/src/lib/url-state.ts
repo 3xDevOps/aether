@@ -139,8 +139,14 @@ function clearHandedFragment() {
  * ask for: back must not return to the address that was redirected away from.
  */
 export function redirectRoute(store: { setState: (state: { route: Route }) => void }, route: Route) {
-  window.history.replaceState(null, '', hrefFor(window.location.href, route))
+  window.history.replaceState(window.history.state, '', hrefFor(window.location.href, route))
   store.setState({ route })
+}
+
+/** How many entries the dashboard pushed in this tab below the current one, so back stays in the app while it is above 0. */
+export function historyDepth(): number {
+  const depth = (window.history.state as { depth?: unknown } | null)?.depth
+  return typeof depth === 'number' ? depth : 0
 }
 
 interface RouteStore {
@@ -156,8 +162,8 @@ export function bindRouteToUrl(store: RouteStore): () => void {
   const sync = (route: Route, push: boolean) => {
     const next = hrefFor(window.location.href, route)
     if (next === window.location.href) return
-    if (push) window.history.pushState(null, '', next)
-    else window.history.replaceState(null, '', next)
+    if (push) window.history.pushState({ depth: historyDepth() + 1 }, '', next)
+    else window.history.replaceState(window.history.state, '', next)
   }
   sync(store.getState().route, false)
   const stop = store.subscribe((state, previous) => {

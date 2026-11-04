@@ -97,7 +97,7 @@ export function RequestPills({ value, onValueChange, items, disabled }: {
           }}
           className={cn(
             focusRing,
-            'flex h-6.5 min-w-0 flex-1 cursor-pointer items-center justify-center rounded-control bg-hover-chrome px-2 text-ui-sm font-medium text-muted coarse:h-8.5',
+            'flex h-6.5 min-w-0 flex-1 cursor-pointer items-center justify-center rounded-control bg-hover-chrome px-2 text-ui-sm font-medium text-muted coarse:h-11',
             'transition-[color,background-color,box-shadow] duration-hover ease-hover motion-reduce:transition-none',
             'hover:text-text disabled:cursor-not-allowed disabled:opacity-50',
             'data-[state=checked]:bg-raised data-[state=checked]:text-text data-[state=checked]:shadow-button data-[state=checked]:ring-1 data-[state=checked]:ring-seam data-[state=checked]:ring-inset',

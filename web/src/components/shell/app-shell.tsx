@@ -11,6 +11,7 @@ import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
 import { UpdateCenter } from '@/components/update-banner'
 import { useIsMobile } from '@/lib/breakpoints'
+import { cn } from '@/lib/utils'
 import { useAttentionFeed } from '@/routes/needs-you/attention'
 import { ProfileDialog } from '@/routes/members/personal'
 import { useTeamRefresh } from '@/routes/team'
@@ -22,6 +23,8 @@ export function AppShell() {
   const profileOpen = useStore((s) => s.profileOpen)
   const setProfileOpen = useStore((s) => s.setProfileOpen)
   const mobile = useIsMobile()
+  // A phone opens a session full screen, over the top bar and the tab bar.
+  const stacked = useStore((s) => mobile && s.route.name === 'run')
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas text-ui text-text">
       <a
@@ -34,14 +37,14 @@ export function AppShell() {
       >
         Skip to content
       </a>
-      <TopBar />
+      {!stacked && <TopBar />}
       <StaleBanner />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <main
           id="main"
           tabIndex={-1}
-          className="min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] outline-none md:pb-[env(safe-area-inset-bottom)]"
+          className={cn('min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] outline-none md:pb-[env(safe-area-inset-bottom)]', stacked && 'pt-[var(--safe-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]')}
         >
           <CenterView />
         </main>
