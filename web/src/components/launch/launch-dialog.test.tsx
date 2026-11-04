@@ -116,6 +116,15 @@ describe('new run', () => {
     await waitFor(() => expect(document.activeElement).toBe(before))
   })
 
+  it('keeps Launch off with a reason while its workspace no longer exists, and keeps the task', async () => {
+    await open()
+    setTask('keep me')
+    act(() => useStore.setState({ workspaces: {} }))
+    expect(screen.getByRole('alert').textContent).toContain('This workspace no longer exists.')
+    expect(launchButton().disabled).toBe(true)
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep me')
+  })
+
   it('lists only installed agents with their login state, and sends Install more agents to Agents', async () => {
     vi.mocked(api.agentList).mockResolvedValue([
       claude(),

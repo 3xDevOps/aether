@@ -29,7 +29,8 @@ export function useSharedPrompt() {
         : 'Shared text not opened: this gateway does not offer run.launch, so it cannot start sessions.')
       return
     }
-    if (text.length > sharedLimit) toast.warning(`Shared text cut to its first ${sharedLimit} characters, of ${text.length}.`)
-    useStore.getState().openLaunchWithTask(text.slice(0, sharedLimit))
+    const characters = [...text]
+    if (characters.length > sharedLimit) toast.warning(`Shared text cut to its first ${sharedLimit} characters, of ${characters.length}.`)
+    useStore.getState().openLaunchWithTask(characters.slice(0, sharedLimit).join(''))
   }, [ready, cap, role])
 }

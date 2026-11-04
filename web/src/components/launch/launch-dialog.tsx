@@ -191,6 +191,11 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
 
   const notes = (
     <>
+      {workspaceID && !workspace && (
+        <Callout tone="failed" role="alert" title="This workspace no longer exists.">
+          {phone ? 'Choose another repository; your task is kept.' : 'Pick another workspace in the sidebar; your task is kept.'}
+        </Callout>
+      )}
       {agentError && <Callout tone="failed" role="alert">{agentError}</Callout>}
       {noAgents && (
         <Callout
@@ -228,7 +233,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       {late ? stillWaiting : launching ? 'Launching…' : 'Launch'}
     </>
   )
-  const launchDisabled = launching || !workspaceID || !account || !harness || taskMissing
+  const launchDisabled = launching || !workspace || !account || !harness || taskMissing
 
   if (phone) {
     return (

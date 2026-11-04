@@ -46,6 +46,13 @@ it('keeps the first 8000 characters and says it cut the rest', () => {
   expect(toast.warning).toHaveBeenCalledWith('Shared text cut to its first 8000 characters, of 8001.')
 })
 
+it('counts and cuts by character, never splitting an emoji', () => {
+  share(`new=1&prompt=${encodeURIComponent('😀'.repeat(8000))}`)
+  renderHook(() => useSharedPrompt())
+  expect(useStore.getState().paletteLaunchTask).toBe('😀'.repeat(8000))
+  expect(toast.warning).not.toHaveBeenCalled()
+})
+
 it('names the role that cannot launch', () => {
   useStore.setState({ info: { ...serverInfo, member: { ...serverInfo.member, role: 'viewer' } } })
   share('new=1&prompt=hi')

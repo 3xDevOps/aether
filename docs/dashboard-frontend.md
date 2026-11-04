@@ -2477,7 +2477,9 @@ subsession or a connector launch) in a workspace that still exists, read once
 when the sheet opens; without one, the active workspace. The agent is your
 saved agent; with none saved, that session's agent if it can launch; then as
 on desktop. A line under the chips says which of the two match that session. A repository chosen here affects only
-this launch. With no workspace at all the sheet says so and offers **Add a
+this launch. If the chosen workspace is deleted while the form is open,
+Launch turns off and a callout says so; the task is kept. With no workspace
+at all the sheet says so and offers **Add a
 workspace**, which opens Manage workspaces. A refusal shows between the
 form and Launch, outside the scrolling form, so the keyboard cannot hide it;
 past 40% of the screen it scrolls. So a quick task is three steps: **New**,
@@ -2492,7 +2494,7 @@ the address with `history.replaceState` and keeps the text in memory, so
 neither Back nor a reload brings it back; a `prompt` without `new=1` is
 dropped. Once the dashboard has hydrated and no other form is open,
 `useSharedPrompt` (`components/launch/shared-prompt.ts`) opens the form,
-keeping the first 8000 characters and saying so in a toast when it cut any.
+keeping the first 8000 characters (counted by code point, so an emoji is never split) and saying so in a toast when it cut any.
 Above the task a callout says "Shared from another app: review it before
 launching" with the character and line count, and the task field grows to
 show all of it; both go back to normal once the text is edited. Only the
