@@ -530,9 +530,8 @@ because Go's resolver finds no `/etc/resolv.conf` on Android; the app reads
 no other network state. `RECORD_AUDIO` lets the dashboard's mic button record
 for dictation. The app asks for it only the first time the page requests the
 microphone, grants it only to the dashboard's origin, and records only while
-you use the button. The audio goes to your Aether server for transcription and
-is not stored by the app or the server: the server keeps the clip in memory
-only while it transcribes it ([dictation.md](dictation.md)). The androidx library
+you use the button. The app does not store the audio; the server's handling
+is under [Dictation](#dictation). The androidx library
 adds one signature-level permission the app defines for its own receivers,
 which no other app can hold and which grants nothing.
 
