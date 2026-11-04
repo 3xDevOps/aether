@@ -19,7 +19,7 @@ export function accountSentence(account: AssistantAccount, where: 'panel' | 'set
         <>
           <span className="font-medium text-text">Different {name} account:</span> the assistant does not use the account your sessions use.
           {' '}Your sessions: {account.email ? `${account.email}, ` : ''}<code className="font-code">{account.environment}</code>.
-          {where === 'panel' && ' To use theirs, select Sign in again in Settings > Assistant.'}
+          {where === 'panel' && ` To switch, select Sign in again in Settings > Assistant and sign in ${account.email ? `as ${account.email}` : "with your sessions' account"}.`}
         </>
       )
     case 'expired':
@@ -51,7 +51,7 @@ export function AssistantAccountCheck({ agent, client, className, where = 'setti
         setText(accountSentence(account, where))
       },
       // A server behind a gateway that lists every method may not have it.
-      (err: unknown) => live && setText(err instanceof ApiError && err.code === codeMethodNotFound ? null : `Can't compare with your sessions' account: ${errorSentence(err)}`),
+      (err: unknown) => live && setText(err instanceof ApiError && err.code === codeMethodNotFound ? null : <>Can't compare with your sessions' account: <code className="font-code">{errorSentence(err)}</code></>),
     )
     return () => {
       live = false
