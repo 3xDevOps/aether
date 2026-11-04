@@ -137,7 +137,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
         <Transcript session={session} />
       ) : (
         <>
-          {status.agent && <AssistantAccountCheck agent={status.agent} client={api} className="shrink-0 px-4 pt-3" />}
+          {status.agent && <AssistantAccountCheck agent={status.agent} client={api} where="panel" className="shrink-0 px-4 pt-3" />}
           <EmptyConversation autoApprove={status.auto_approve} onPick={(text) => {
             setDraft(text)
             textarea.current?.focus()

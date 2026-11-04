@@ -6,6 +6,9 @@ import { AssistantSection, autoApproveLabel, autoApproveWarning } from '@/routes
 import { useStore } from '@/store'
 import { alice, fakeApi, serverInfo } from '@/test/fixtures'
 
+/** The account check's whole line, which mixes plain text and code. */
+const line = (text: string) => (_: string, element: Element | null) => element?.getAttribute('role') === 'status' && element.textContent === text
+
 function show(methods = ['*'], over: Parameters<typeof fakeApi>[0] = {}) {
   useStore.setState({
     ...useStore.getInitialState(),
@@ -103,14 +106,14 @@ describe('assistant settings', () => {
     const signedIn = { state: 'idle' as const, agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }, { name: 'codex', display_name: 'Codex', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }
     const client = show(['*'], { assistantAccount: vi.fn(async (agent: string) => accounts[agent].shift()!) })
     act(() => useStore.getState().setAssistantStatus(signedIn))
-    expect(await screen.findByText('Same Claude account as your sessions (alice@example.test)')).toBeDefined()
-    expect(await screen.findByText('Your sessions use another Codex account (ChatGPT account acct-other)')).toBeDefined()
+    expect(await screen.findByText(line('Same Claude account as your sessions (alice@example.test).'))).toBeDefined()
+    expect(await screen.findByText(line('Different Codex account: the assistant does not use the account your sessions use. Your sessions: ChatGPT account acct-other.'))).toBeDefined()
 
     cleanup()
     show(['*'], { assistantAccount: client.assistantAccount })
     act(() => useStore.getState().setAssistantStatus(signedIn))
-    expect(await screen.findByText("Can't compare: your environment's Claude token is expired. Start a session to refresh it")).toBeDefined()
-    expect(await screen.findByText("Can't compare with your sessions' Codex account: your environment has no ~/.codex/auth.json")).toBeDefined()
+    expect(await screen.findByText(line("Can't compare: your environment's Claude token has expired. Start a session to refresh it."))).toBeDefined()
+    expect(await screen.findByText(line("Can't compare with your sessions' Codex account: your environment has no ~/.codex/auth.json"))).toBeDefined()
   })
 
   it('reads the account again once the first start records it', async () => {
@@ -120,7 +123,7 @@ describe('assistant settings', () => {
     act(() => useStore.getState().setAssistantStatus(signedIn))
     await waitFor(() => expect(client.assistantAccount).toHaveBeenCalledTimes(1))
     act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'running' }))
-    expect(await screen.findByText('Same Claude account as your sessions')).toBeDefined()
+    expect(await screen.findByText(line('Same Claude account as your sessions.'))).toBeDefined()
     act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'idle' }))
     act(() => useStore.getState().setAssistantStatus({ ...signedIn, state: 'running' }))
     expect(client.assistantAccount).toHaveBeenCalledTimes(2)
