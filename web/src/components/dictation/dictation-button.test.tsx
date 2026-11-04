@@ -80,11 +80,13 @@ describe('DictationButton', () => {
     expect(getUserMedia).not.toHaveBeenCalled()
     box.setSelectionRange(4, 4)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
-    const stop = await screen.findByRole('button', { name: 'Stop dictation' })
-    expect(stop.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
+    const stop = await screen.findByRole('button', { name: 'Dictate', pressed: true })
     expect(screen.getByRole('status').textContent).toMatch(/^Recording/)
     expect(getUserMedia).toHaveBeenCalledTimes(1)
+    const send = screen.getByRole('button', { name: /^Send/ }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    fireEvent.keyDown(box, { key: 'Enter' })
     fireEvent.click(stop)
 
     await waitFor(() => expect(box.value).toBe('fix hello world the bug'))
@@ -105,26 +107,25 @@ describe('DictationButton', () => {
   it('shows nothing while the server lacks the dictation feature', () => {
     useStore.setState({ info: { ...serverInfo, member: alice } })
     mount()
-    expect(screen.queryByRole('button', { name: 'Start dictation' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Dictate' })).toBeNull()
   })
 
   it('shows the server error as it came', async () => {
     const refusal = 'dictation.transcribe: dictation is busy: 3 requests queued; try again'
     vi.mocked(api.dictationTranscribe).mockRejectedValue(new Error(refusal))
     const box = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop dictation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Dictate', pressed: true }))
 
-    expect((await screen.findByRole('dialog')).textContent).toContain(refusal)
-    expect(screen.getByRole('status').textContent).toBe(refusal)
+    expect((await screen.findByRole('alert')).textContent).toBe(refusal)
     expect(box.value).toBe('fix the bug')
   })
 
   it('names a refused microphone by the browser error', async () => {
     getUserMedia.mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'))
     mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
-    expect((await screen.findByRole('dialog')).textContent).toContain('Microphone: NotAllowedError: Permission denied')
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Microphone: NotAllowedError: Permission denied')
   })
 
   it('never submits the form it sits in', async () => {
@@ -140,21 +141,21 @@ describe('DictationButton', () => {
       )
     }
     render(<Form />)
-    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop dictation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Dictate', pressed: true }))
     await waitFor(() => expect((screen.getByRole('textbox', { name: 'Task' }) as HTMLTextAreaElement).value).toBe('add tests'))
     expect(submit).not.toHaveBeenCalled()
   })
 
   it('drops the recording on Escape', async () => {
     const box = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
-    await screen.findByRole('button', { name: 'Stop dictation' })
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
+    await screen.findByRole('button', { name: 'Dictate', pressed: true })
     act(() => {
       fireEvent.keyDown(box, { key: 'Escape' })
     })
     expect(track.stop).toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Start dictation' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Dictate', pressed: false })).toBeTruthy()
     expect(api.dictationTranscribe).not.toHaveBeenCalled()
   })
 })

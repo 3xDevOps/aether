@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { DictationButton, useDictation } from '@/components/dictation/dictation-button'
+import { DictationButton } from '@/components/dictation/dictation-button'
+import { DictationNotice } from '@/components/dictation/dictation-notice'
 import { AgentPicker, customAgent, launchable } from '@/components/launch/agent-picker'
 import { EffortPicker } from '@/components/launch/effort-picker'
 import { ModeControl } from '@/components/launch/mode-control'
@@ -10,7 +11,6 @@ import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { cn } from '@/lib/utils'
 import type { AgentInfo, LaunchDefaultsResult, LaunchMode } from '@/lib/types'
 import { useStore } from '@/store'
 import { type LaunchDefaultsRead, rememberedChoice } from '@/store/launch-defaults'
@@ -166,14 +166,14 @@ export function RunFields({
   )
 }
 
-/** Takes the id and descriptions FormField gives its child, so the label still names the textarea under the mic. */
+/** Takes the id and descriptions FormField gives its child, so the label still names the textarea above the mic. */
 function TaskBox({ onTask, ...props }: React.ComponentProps<'textarea'> & { value: string; onTask: (task: string) => void }) {
   const textarea = useRef<HTMLTextAreaElement>(null)
-  const dictation = useDictation()
   return (
-    <div className="relative">
-      <Textarea ref={textarea} className={cn('max-h-48 [field-sizing:content]', dictation && 'pb-8 coarse:pb-13')} rows={3} placeholder="What should the agent do?" onChange={(event) => onTask(event.target.value)} {...props} />
-      <div className="absolute right-1 bottom-1">
+    <div className="flex flex-col gap-1">
+      <Textarea ref={textarea} className="max-h-48 [field-sizing:content]" rows={3} placeholder="What should the agent do?" onChange={(event) => onTask(event.target.value)} {...props} />
+      <DictationNotice textarea={textarea} />
+      <div className="flex justify-end empty:hidden">
         <DictationButton textarea={textarea} onInsert={onTask} />
       </div>
     </div>

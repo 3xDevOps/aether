@@ -3164,24 +3164,35 @@ agent's auth methods.
 `components/dictation/` turns speech into text in a message box. Its
 `DictationButton` takes `{ textarea, onInsert, hints? }`: the box, a callback
 that stores the new text, and optional hints. It is mounted left of **Send** in
-the session composer and the assistant composer, and in the bottom-right corner
-of the New session **Task** box (`run-fields.tsx`, which pads the box while the
-mic shows). It renders nothing unless `server.info` lists the `dictation`
-feature, which the server sets only once dictation is installed.
+the session composer and the assistant composer, and in a row under the New
+session **Task** box (`run-fields.tsx`). It renders nothing unless
+`server.info` lists the `dictation` feature, which the server sets only once
+dictation is installed.
+
+The button and the composer around it share state through `state.ts`, keyed by
+the box's ref: `useDictationState(textarea)` returns `active` (starting,
+recording or transcribing) and the current `notice`. While `active`, the
+composer's send is disabled and Enter does nothing, so a missed press cannot
+send the old draft mid-recording. `DictationNotice` draws the notice as a strip
+above the box: failed tint, alert icon and `role="alert"` for an error, a plain
+`role="status"` strip for "No speech was recognized.", and an **x** to dismiss.
 
 | State | Button | Live region |
 | --- | --- | --- |
-| Idle | Ghost mic, **Start dictation**, `aria-pressed="false"` | - |
-| Starting | Spinner, "Starting mic…" | Starting microphone |
-| Recording | Red pill: stop square, five-bar level meter, elapsed time; **Stop dictation**, `aria-pressed="true"` | Recording. Press again to stop, Escape to cancel. |
-| Transcribing | Spinner, "Transcribing…" | Transcribing |
-| Notice | Idle mic with a popover holding the message and **Dismiss** | The same message |
+| Idle | Mic in text colour | - |
+| Starting | Neutral pill: spinner, "Starting mic…" | Starting microphone |
+| Recording | Red pill: stop square, seven-bar level meter, elapsed time | Recording. Press again to stop, Escape to cancel. |
+| Transcribing | Neutral pill: spinner, "Transcribing…" | Transcribing |
 
-A tap starts and a second tap stops. A press held 300 ms or more after
-recording began stops on release (hold to talk); a press that outlasted the
-browser's permission prompt counts as a tap. Enter and Space toggle like a tap.
-Escape, caught in the capture phase while starting, recording or transcribing,
-drops the audio or the request in flight. Recording stops by itself at 2:00.
+The button's name is always **Dictate**; `aria-pressed` says whether it is
+recording. The pills share one minimum width, so the button does not jump
+between states. A tap starts and a second tap stops. A press held 300 ms or
+more after recording began stops on release (hold to talk); a press that
+outlasted the browser's permission prompt counts as a tap. Enter and Space
+toggle like a tap. A pointer press keeps focus in the box, so a phone keeps its
+keyboard up. Escape, caught in the capture phase while starting, recording or
+transcribing, drops the audio or the request in flight. Recording stops by
+itself at 2:00.
 
 The browser asks for the microphone on the first press, never on load.
 `capture.ts` opens it with `getUserMedia` at the hardware rate (a 16 kHz
@@ -3198,13 +3209,14 @@ sessions' titles, newest first. Transcription times out after 120 s.
 recording started, adding a space on either side only where a word would
 otherwise touch it, then focuses the box with the caret after the text. It
 never sends: the mic has `type="button"`, so a press inside the New session
-form does not launch. An empty result shows "No speech was recognized." Errors
-show verbatim: the server's message (not installed, busy, too long) or the
-browser's, as `Microphone: <DOMException name>: <message>` (for example
-`NotAllowedError` when access is refused). A page served over plain http to a
-non-loopback host is not a secure context and has no microphone; the notice
-names the origin. The meter keeps reading the level under reduced motion but
-drops its transition. On a coarse pointer the mic and pill are 44px tall.
+form does not launch. Errors show verbatim, with paths and the install command
+in code: the server's message (not installed, busy, too long) or the
+browser's, as `Microphone: <DOMException name>: <message>`. A
+`NotAllowedError` adds how to allow the microphone again. A page served over
+plain http to a non-loopback host is not a secure context and has no
+microphone; the notice names the origin. The meter keeps reading the level
+under reduced motion but drops its transition. On a coarse pointer the mic and
+pills are 44px tall.
 
 ### Trace view
 

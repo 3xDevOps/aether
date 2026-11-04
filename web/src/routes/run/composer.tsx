@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type * as React from 'react'
 import { DictationButton } from '@/components/dictation/dictation-button'
+import { DictationNotice } from '@/components/dictation/dictation-notice'
+import { useDictationState } from '@/components/dictation/state'
 import { ArrowUp, CornerUpRight, ListPlus, Play, RefreshCw, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -130,12 +132,13 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
   const drop = useFileDrop({ onFiles: (files) => void attach.images.upload(files), limit: room.limit })
   const [focused, setFocused] = useState(false)
   const caretPlaced = useRef(false)
+  const dictating = useDictationState(textarea).active
   useEffect(() => {
     if (autoFocus) textarea.current?.focus()
   }, [autoFocus, textarea])
   // The table stands plain keys down inside a field, so the textarea answers
   // Enter itself; this registration keeps Send listed in the shortcuts reference.
-  useKeybindings('composer', focused && !coarse ? {
+  useKeybindings('composer', focused && !coarse && !dictating ? {
     'composer-send': (event) => {
       event.preventDefault()
       onSend()
@@ -149,6 +152,7 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
   } : {})
   return (
     <div className="relative" {...drop.handlers}>
+      <DictationNotice textarea={textarea} className="mb-2" />
       {menu}
       {drop.count !== null && <DropOverlay count={drop.count} refused={drop.refused} blocked={room.blocked} limit={room.limit} />}
       <div className={cn('overflow-hidden rounded-composer border border-seam bg-chrome', focused && 'border-control')}>
@@ -191,7 +195,7 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
           if (event.defaultPrevented || event.nativeEvent.isComposing) return
           if (!coarse && isPress(event.nativeEvent, 'composer-send')) {
             event.preventDefault()
-            onSend()
+            if (!dictating) onSend()
           } else if (event.key === 'Escape' && !value.trim()) {
             event.preventDefault()
             onEscape()
@@ -262,6 +266,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   useTypingSignal(run.id, body)
   const busy = Boolean(draft.busy)
   const late = usePastDeadline(busy)
+  const dictating = useDictationState(textarea).active
   const hintID = useId()
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
@@ -327,7 +332,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
               label={late ? stillWaiting : busy ? 'Sending…' : 'Send'}
               hint={coarse ? undefined : shortcutLabel('composer-send')}
               description={hint}
-              disabled={!body.trim() || busy || !images.ready}
+              disabled={!body.trim() || busy || !images.ready || dictating}
               onClick={send}
               onCancel={late ? () => saveComposerDraft(run.id, { busy: undefined }) : undefined}
               dictation={<DictationButton textarea={textarea} onInsert={(next) => saveComposerDraft(run.id, { body: next })} />}
@@ -374,6 +379,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   useTypingSignal(run.id, body)
   const busy = Boolean(draft.busy)
   const late = usePastDeadline(busy)
+  const dictating = useDictationState(textarea).active
   const setBody = (next: string) => saveComposerDraft(run.id, { body: next })
   const [caret, setCaret] = useState(0)
   const [focused, setFocused] = useState(false)
@@ -524,7 +530,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     )
   }
 
-  const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'stop-waiting' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages))
+  const pillDisabled = busy || dictating || images.uploading || (pill !== 'interrupt' && pill !== 'stop-waiting' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages))
   const hintText = moderated ? (control.waits ? 'Delivers in 45 s unless the controller decides sooner.' : '') : turnRunning || pill === 'stop-waiting' || pill === 'resume' ? pillHint[pill] : ''
   const keyHint = coarse || pill === 'stop-waiting' ? undefined : pill === 'steer' ? `${shortcutLabel('composer-send')}; ${shortcutLabel('composer-queue')} queues` : shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')
 

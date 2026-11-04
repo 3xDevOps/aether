@@ -69,10 +69,14 @@ test('a dictated message lands at the caret of the session composer, unsent', as
   await box.fill('Rewrite the parser then ship it')
   await box.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(18, 18))
 
-  await page.getByRole('button', { name: 'Start dictation' }).click()
-  const stop = page.getByRole('button', { name: 'Stop dictation' })
-  await expect(stop).toHaveAttribute('aria-pressed', 'true')
+  await box.focus()
+  await page.getByRole('button', { name: 'Dictate', pressed: false }).click()
+  const stop = page.getByRole('button', { name: 'Dictate', pressed: true })
+  await expect(stop).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: /^Recording/ })).toBeAttached()
+  // The press leaves focus in the box, so a phone's keyboard stays up, and Enter cannot send mid-recording.
+  await expect(box).toBeFocused()
+  await box.press('Enter')
   // Long enough for the fake device to deliver a few worklet chunks.
   await page.waitForTimeout(1_000)
   await stop.click()

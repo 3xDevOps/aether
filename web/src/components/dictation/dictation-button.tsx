@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type * as React from 'react'
 import { startCapture, type Capture } from '@/components/dictation/capture'
+import { setDictationState, type DictationState } from '@/components/dictation/state'
 import { dictationHints, insertTranscript } from '@/components/dictation/text'
 import { base64, encodeWav, maxSeconds, resample } from '@/components/dictation/wav'
 import { LoaderCircle, Mic, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
@@ -15,7 +16,7 @@ import { useCapability } from '@/store/hooks'
 const dictationFeature = 'dictation'
 
 /** Whether the server has dictation installed and this gateway forwards it. */
-export function useDictation(): boolean {
+function useDictation(): boolean {
   const installed = useStore((s) => s.info?.features?.includes(dictationFeature) ?? false)
   const cap = useCapability()
   return installed && cap.hasMethod('dictation.transcribe')
@@ -25,17 +26,18 @@ export function useDictation(): boolean {
 const holdMs = 300
 const meterMs = 1000 / 15
 const transcribeTimeout = 120_000
-const meterBars = 5
+const meterBars = 7
 
 type Phase =
   | { kind: 'idle' }
   | { kind: 'starting' }
   | { kind: 'recording'; since: number }
   | { kind: 'transcribing' }
-  | { kind: 'notice'; text: string }
 
 function micError(err: unknown): string {
-  return err instanceof DOMException ? `Microphone: ${err.name}: ${err.message}` : message(err)
+  if (!(err instanceof DOMException)) return message(err)
+  const said = `Microphone: ${err.name}: ${err.message}`
+  return err.name === 'NotAllowedError' ? `${said}\nAllow the microphone for this site in your browser's settings, then press the mic again.` : said
 }
 
 function clock(ms: number): string {
@@ -61,9 +63,13 @@ export function DictationButton({ textarea, onInsert, hints }: {
   const latest = useRef({ textarea, onInsert, hints })
   latest.current = { textarea, onInsert, hints }
 
-  const fail = (text: string) => {
-    setPhase({ kind: 'notice', text })
-    setStatus(text)
+  const show = (next: Phase, notice: DictationState['notice'] = null) => {
+    setPhase(next)
+    setDictationState(latest.current.textarea, { active: next.kind !== 'idle', notice })
+  }
+  const fail = (text: string, error = true) => {
+    show({ kind: 'idle' }, { text, error })
+    setStatus('')
   }
 
   const start = async () => {
@@ -71,14 +77,14 @@ export function DictationButton({ textarea, onInsert, hints }: {
     const end = box?.value.length ?? 0
     selection.current = { start: box?.selectionStart ?? end, end: box?.selectionEnd ?? end }
     const run = ++generation.current
-    setPhase({ kind: 'starting' })
+    show({ kind: 'starting' })
     setStatus('Starting microphone')
     try {
       const opened = await startCapture()
       if (run !== generation.current) return opened.cancel()
       capture.current = opened
       setMeter({ elapsed: 0, levels: [] })
-      setPhase({ kind: 'recording', since: performance.now() })
+      show({ kind: 'recording', since: performance.now() })
       setStatus('Recording. Press again to stop, Escape to cancel.')
     } catch (err) {
       if (run === generation.current) fail(micError(err))
@@ -90,7 +96,7 @@ export function DictationButton({ textarea, onInsert, hints }: {
     if (!recording) return
     capture.current = null
     const run = generation.current
-    setPhase({ kind: 'transcribing' })
+    show({ kind: 'transcribing' })
     setStatus('Transcribing')
     const controller = new AbortController()
     request.current = controller
@@ -102,11 +108,11 @@ export function DictationButton({ textarea, onInsert, hints }: {
       const { text } = await api.dictationTranscribe(audio, latest.current.hints ?? dictationHints(useStore.getState()), controller.signal)
       if (run !== generation.current) return
       const words = text.trim()
-      if (!words) return fail('No speech was recognized.')
+      if (!words) return fail('No speech was recognized.', false)
       const box = latest.current.textarea.current
       const next = insertTranscript(box?.value ?? '', words, selection.current.start, selection.current.end)
       latest.current.onInsert(next.body)
-      setPhase({ kind: 'idle' })
+      show({ kind: 'idle' })
       setStatus('Dictation inserted')
       requestAnimationFrame(() => {
         const field = latest.current.textarea.current
@@ -126,7 +132,7 @@ export function DictationButton({ textarea, onInsert, hints }: {
     capture.current?.cancel()
     capture.current = null
     request.current?.abort()
-    setPhase({ kind: 'idle' })
+    show({ kind: 'idle' })
     setStatus('Dictation cancelled')
   }
   const latestActions = useRef({ stop, cancel })
@@ -164,18 +170,19 @@ export function DictationButton({ textarea, onInsert, hints }: {
     generation.current++
     capture.current?.cancel()
     request.current?.abort()
+    setDictationState(latest.current.textarea, { active: false, notice: null })
   }, [])
 
   if (!offered) return null
 
   const toggle = () => {
     if (phase.kind === 'recording') void stop()
-    else if (phase.kind === 'idle' || phase.kind === 'notice') void start()
+    else if (phase.kind === 'idle') void start()
   }
   const handlers = {
     onPointerDown: (event: React.PointerEvent) => {
       if (event.button !== 0) return
-      press.current = { at: performance.now(), started: phase.kind === 'idle' || phase.kind === 'notice' }
+      press.current = { at: performance.now(), started: phase.kind === 'idle' }
       if (press.current.started) void start()
     },
     onPointerUp: () => {
@@ -189,54 +196,40 @@ export function DictationButton({ textarea, onInsert, hints }: {
       press.current = null
       if (!pointer?.started) toggle()
     },
+    // Focus stays in the box, so a phone keeps its keyboard up while recording.
+    onMouseDown: (event: React.MouseEvent) => event.preventDefault(),
     onContextMenu: (event: React.MouseEvent) => event.preventDefault(),
   }
 
-  let button: React.ReactNode
-  if (phase.kind === 'recording') {
-    button = (
-      <Button type="button" size="pill" variant="danger" aria-label="Stop dictation" aria-pressed hint={`Stop dictation, Escape cancels. Stops by itself at ${clock(maxSeconds * 1000)}.`} className="touch-none select-none gap-2 px-2.5 tabular-nums" {...handlers}>
-        <Square className="fill-current" aria-hidden />
-        <span aria-hidden className="flex h-3.5 items-center gap-0.5">
-          {Array.from({ length: meterBars }, (_, i) => (
-            <span
-              key={i}
-              data-slot="dictation-meter"
-              className="h-full w-0.5 rounded-full bg-current transition-transform duration-75 motion-reduce:transition-none"
-              style={{ transform: `scaleY(${0.15 + 0.85 * (meter.levels[i] ?? 0)})` }}
-            />
-          ))}
-        </span>
-        <span aria-hidden>{clock(meter.elapsed)}</span>
-      </Button>
-    )
-  } else if (phase.kind === 'starting' || phase.kind === 'transcribing') {
-    button = (
-      <Button type="button" size="pill" variant="ghost" aria-label={phase.kind === 'starting' ? 'Starting microphone' : 'Transcribing'} aria-disabled hint="Escape cancels" className="gap-1.5 px-2.5 aria-disabled:cursor-default aria-disabled:opacity-100">
-        <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />
-        <span aria-hidden>{phase.kind === 'starting' ? 'Starting mic…' : 'Transcribing…'}</span>
-      </Button>
-    )
-  } else {
-    button = (
-      <Button type="button" size="icon-sm" variant="ghost" label="Start dictation" aria-pressed={false} hint="Dictate: tap to start and stop, or hold to talk" className="touch-none select-none" {...handlers}>
-        <Mic />
-      </Button>
-    )
-  }
-
+  const pill = 'mr-2 min-w-28 justify-center gap-2 px-3 tabular-nums coarse:min-w-32'
   return (
-    <Popover open={phase.kind === 'notice'} onOpenChange={(open) => { if (!open) setPhase({ kind: 'idle' }) }}>
-      <PopoverAnchor asChild>
-        <span className="inline-flex shrink-0">{button}</span>
-      </PopoverAnchor>
-      {phase.kind === 'notice' && (
-        <PopoverContent side="top" align="end" className="flex w-[min(360px,calc(100vw-16px))] items-start gap-2 p-2 pl-3" onOpenAutoFocus={(event) => event.preventDefault()}>
-          <p className="min-w-0 flex-1 py-0.5 text-ui-sm break-words">{phase.text}</p>
-          <Button size="sm" variant="ghost" onClick={() => setPhase({ kind: 'idle' })}>Dismiss</Button>
-        </PopoverContent>
+    <>
+      {phase.kind === 'recording' ? (
+        <Button type="button" size="pill" variant="danger" aria-label="Dictate" aria-pressed hint={`Stop dictation, Escape cancels. Stops by itself at ${clock(maxSeconds * 1000)}.`} className={cn(pill, 'touch-none select-none')} {...handlers}>
+          <Square className="fill-current" aria-hidden />
+          <span aria-hidden className="flex h-4 items-center gap-0.5">
+            {Array.from({ length: meterBars }, (_, i) => (
+              <span
+                key={i}
+                data-slot="dictation-meter"
+                className="h-full w-[3px] rounded-full bg-current transition-transform duration-75 motion-reduce:transition-none"
+                style={{ transform: `scaleY(${0.12 + 0.88 * (meter.levels[i] ?? 0)})` }}
+              />
+            ))}
+          </span>
+          <span aria-hidden>{clock(meter.elapsed)}</span>
+        </Button>
+      ) : phase.kind === 'starting' || phase.kind === 'transcribing' ? (
+        <Button type="button" size="pill" variant="secondary" aria-label="Dictate" aria-pressed={phase.kind === 'starting'} aria-disabled hint="Escape cancels" className={cn(pill, 'aria-disabled:cursor-default aria-disabled:opacity-100')} onMouseDown={handlers.onMouseDown}>
+          <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />
+          <span aria-hidden>{phase.kind === 'starting' ? 'Starting mic…' : 'Transcribing…'}</span>
+        </Button>
+      ) : (
+        <Button type="button" size="icon-sm" variant="ghost" label="Dictate" aria-pressed={false} hint="Dictate: tap to start and stop, or hold to talk" className="touch-none text-text select-none" {...handlers}>
+          <Mic />
+        </Button>
       )}
       <span role="status" aria-live="polite" className="sr-only">{status}</span>
-    </Popover>
+    </>
   )
 }
