@@ -26,7 +26,9 @@ import { redirectRoute } from '@/lib/url-state'
 import { needsYouConditions } from '@/lib/needs-you'
 import type { AttentionItem, RoomPostResult, RunInputRespondResult } from '@/lib/types'
 import { targetRoute } from '@/routes/board/card-action'
-import { asking, finished, refreshAttention, useAttention, useAttentionFeed, useAttentionSupported } from '@/routes/needs-you/attention'
+import { asking, finished, refreshAttention, useAccountNeeds, useAttention, useAttentionFeed, useAttentionSupported } from '@/routes/needs-you/attention'
+import { DeviceCard } from '@/routes/board/device-card'
+import { MergeProposalCard } from '@/routes/board/merge-card'
 import { registerRoute } from '@/routes/registry'
 import { choicePlan } from '@/routes/run/request-options'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
@@ -288,6 +290,7 @@ function NeedsYou() {
   const error = useAttention((s) => s.error)
   const asks = items ? asking(items) : []
   const done = items ? finished(items) : []
+  const { devices, merges } = useAccountNeeds()
   const loading = useDelayed(items === null && !error)
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -312,7 +315,13 @@ function NeedsYou() {
             <Skeleton className="h-32 rounded-panel" />
           </div>
         )}
-        {items && asks.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions show up here.</EmptyState>}
+        {(merges.length > 0 || devices.length > 0) && (
+          <div className="mb-3 flex flex-col gap-3">
+            {merges.map((proposal) => <MergeProposalCard key={proposal.id} proposal={proposal} />)}
+            {devices.map((need) => <DeviceCard key={need.device.id} need={need} />)}
+          </div>
+        )}
+        {items && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions show up here.</EmptyState>}
         {asks.length > 0 && (
           <ul aria-label="Needs you" className="flex flex-col gap-3">
             {asks.map((item) => <AttentionCard key={item.run_id} item={item} />)}

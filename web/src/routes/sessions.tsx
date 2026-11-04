@@ -3,7 +3,7 @@ import { SidebarRuns } from '@/components/shell/sidebar-runs'
 import { ViewHeader } from '@/components/view-header'
 import { useIsMobile } from '@/lib/breakpoints'
 import { redirectRoute } from '@/lib/url-state'
-import { byAttention, useAttention } from '@/routes/needs-you/attention'
+import { byAttention, useAccountNeeds, useAttention } from '@/routes/needs-you/attention'
 import { registerRoute } from '@/routes/registry'
 import { useStore } from '@/store'
 
@@ -11,6 +11,7 @@ import { useStore } from '@/store'
 function Sessions() {
   const mobile = useIsMobile()
   const items = useAttention((s) => s.items)
+  const { devices, merges } = useAccountNeeds()
   useEffect(() => {
     if (!mobile) redirectRoute(useStore, { name: 'board', params: {} })
   }, [mobile])
@@ -18,7 +19,7 @@ function Sessions() {
   return (
     <div className="flex h-full min-w-0 flex-col pt-2">
       <ViewHeader title="Sessions" />
-      <SidebarRuns regroup={(groups) => byAttention(groups, items)} />
+      <SidebarRuns regroup={(groups) => byAttention(groups, items, devices.length + merges.length)} />
     </div>
   )
 }

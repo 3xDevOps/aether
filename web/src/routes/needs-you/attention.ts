@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { create } from 'zustand'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -6,8 +6,8 @@ import { needsYouConditions } from '@/lib/needs-you'
 import { groupLabel } from '@/lib/status'
 import type { AttentionItem } from '@/lib/types'
 import { sameIdentity, useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
-import type { RunTree, SidebarGroup } from '@/store/selectors'
+import { useCapability, useDeviceNeeds } from '@/store/hooks'
+import { byChange, type RunTree, type SidebarGroup } from '@/store/selectors'
 
 interface Attention {
   items: AttentionItem[] | null
@@ -32,8 +32,19 @@ export function finished(items: AttentionItem[]): AttentionItem[] {
   return items.filter((item) => item.kind === 'ready')
 }
 
+/** Devices waiting for approval and merge proposals to the viewer: not sessions, so not in attention.list. */
+export function useAccountNeeds() {
+  const devices = useDeviceNeeds()
+  const proposals = useStore((s) => s.mergeProposals)
+  const viewer = useStore((s) => s.info?.member.id)
+  const merges = useMemo(() => proposals.filter((proposal) => proposal.minted_id === viewer), [proposals, viewer])
+  return { devices, merges }
+}
+
+/** The badge: what asks the viewer in a session, plus devices and merges, as the session list counts them. */
 export function useAskingCount(): number {
-  return useAttention((s) => (s.items ? asking(s.items).length : 0))
+  const { devices, merges } = useAccountNeeds()
+  return useAttention((s) => (s.items ? asking(s.items).length : 0)) + devices.length + merges.length
 }
 
 /** Per workspace, what asks the viewer; null until the list loads. */
@@ -47,8 +58,10 @@ export function askingByWorkspace(items: AttentionItem[] | null): Record<string,
 /**
  * The session list's groups in the server's terms, so a phone shows one Needs you count: requests
  * in the server's order under Needs you, and a session the server lists as finished under review.
+ * A session only this dashboard thinks needs the viewer stays listed, last, but is not counted.
+ * `accountNeeds` (devices and merges) keeps the group and its count, as sidebarGroups does.
  */
-export function byAttention(groups: SidebarGroup[], items: AttentionItem[] | null): SidebarGroup[] {
+export function byAttention(groups: SidebarGroup[], items: AttentionItem[] | null, accountNeeds: number): SidebarGroup[] {
   const needs = groups.find((group) => group.key === 'needs-you')
   if (!items || !needs) return groups
   const asks = asking(items)
@@ -58,9 +71,9 @@ export function byAttention(groups: SidebarGroup[], items: AttentionItem[] | nul
   const moved = needs.runs.filter((tree) => done.has(tree.run.id) && !order.has(tree.run.id) && tree.children.every((row) => !order.has(row.run.id)))
   const kept = needs.runs.filter((tree) => !moved.includes(tree)).sort((a, b) => at(a) - at(b))
   const review = groups.find((group) => group.key === 'review')
-  const reviewRuns = [...moved, ...(review?.runs ?? [])]
+  const reviewRuns = [...moved, ...(review?.runs ?? [])].sort(byChange)
   return [
-    ...(kept.length > 0 ? [{ ...needs, runs: kept, count: asks.length }] : []),
+    ...(kept.length > 0 || accountNeeds > 0 ? [{ ...needs, runs: kept, count: asks.length + accountNeeds }] : []),
     ...(reviewRuns.length > 0 ? [{ key: 'review' as const, label: groupLabel.review, runs: reviewRuns, count: reviewRuns.length }] : []),
     ...groups.filter((group) => group.key !== 'needs-you' && group.key !== 'review'),
   ]

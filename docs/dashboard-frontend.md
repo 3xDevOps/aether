@@ -496,7 +496,7 @@ workspace the header shows the active one's name, muted, after the title.
 | Tab | Opens |
 | --- | --- |
 | **Needs you** | the `needs-you` route, with the count of what asks you as a badge |
-| **Sessions** | the `sessions` route: the sidebar's session list, full width, regrouped by the same `attention.list` (`byAttention`): Needs you has the badge's count and order, and a session the server lists as finished moves to the review group. Current on a session, the board and All workspaces too |
+| **Sessions** | the `sessions` route: the sidebar's session list, full width, regrouped by the same `attention.list` (`byAttention`): Needs you has the badge's count and order, and a session the server lists as finished moves to the review group, newest change first. A session only the dashboard's copy of the rule puts in Needs you stays listed, last, and is not counted. Current on a session, the board and All workspaces too |
 | **New** | the launch dialog; named **New session**, and hidden for a member who cannot launch |
 | **Assistant** | the assistant sheet, with the dot the desktop button shows |
 | **More** | a bottom sheet, a `dialog` named "More"; the tab is named **More pages**, apart from a session's **More** actions |
@@ -531,7 +531,10 @@ open.
 not the dashboard's copy of the rule. It reads it again 250ms after any
 session's status, state, review, outcome flag, requests, room messages or
 controller change, after a reconnect, and each time the page opens. A
-different member or server clears the list. The badge counts the same list. Cards are ranked by kind in the order
+different member or server clears the list. The badge counts the same list's
+requests, plus the devices waiting for approval and the merge proposals to the
+viewer, as the sidebar's Needs you does; their board cards (`DeviceCard`,
+`MergeProposalCard`) sit above the session cards. Cards are ranked by kind in the order
 the server checks them (`needsYouConditions` in `src/lib/needs-you.ts`):
 permission, question, queued message, room question, disconnected, blocked,
 needs input, failed. Within a kind the server's order holds, oldest first.
