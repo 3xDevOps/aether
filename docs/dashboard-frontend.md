@@ -1964,7 +1964,8 @@ change it, so the session stays in Needs you. While the open session is `ready`,
 callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
 finished. Mark complete?", the summary of the session's latest success
-report (three lines, with **Show more** for a longer one), **Mark complete**,
+report (three lines, with **Show more** when it overflows them as laid out;
+opened, it scrolls within 30% of the viewport), **Mark complete**,
 **Not yet** and **Review later** (Not yet only on a live session), and "Closes
 the session.", which also describes **Mark complete** to assistive technology.
 **Mark complete** is a secondary button, and no button takes focus on its own. Each is a run command

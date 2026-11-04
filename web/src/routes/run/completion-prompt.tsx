@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
@@ -37,7 +37,6 @@ function Ask({ run, complete, notYet, later, className }: {
   const perform = useCommandRunner()
   const summary = useReportedSummary(run)
   const [reviewing, setReviewing] = useState(false)
-  const [expanded, setExpanded] = useState(false)
   const closes = useId()
   if (run.review === 'later' && !reviewing) {
     return (
@@ -49,7 +48,6 @@ function Ask({ run, complete, notYet, later, className }: {
       </div>
     )
   }
-  const long = summary !== undefined && (summary.split('\n').length > 3 || summary.length > 280)
   return (
     <div className={className}>
       <Callout
@@ -69,14 +67,31 @@ function Ask({ run, complete, notYet, later, className }: {
           </>
         }
       >
-        {summary && (
-          <>
-            <p className={cn('text-ui-sm whitespace-pre-wrap text-muted', !expanded && 'line-clamp-3')}>{summary}</p>
-            {long && <Button variant="link" size="sm" onClick={() => setExpanded((open) => !open)}>{expanded ? 'Show less' : 'Show more'}</Button>}
-          </>
-        )}
+        {summary && <Summary text={summary} />}
       </Callout>
     </div>
+  )
+}
+
+/** Three lines until opened; opened, it scrolls within a bound so the actions stay on screen. */
+function Summary({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [clipped, setClipped] = useState(false)
+  useLayoutEffect(() => {
+    const p = ref.current
+    if (!p || expanded) return
+    const measure = () => setClipped(p.scrollHeight > p.clientHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(p)
+    return () => observer.disconnect()
+  }, [text, expanded])
+  return (
+    <>
+      <p ref={ref} className={cn('text-ui-sm whitespace-pre-wrap text-muted', expanded ? 'max-h-[30vh] overflow-y-auto' : 'line-clamp-3')}>{text}</p>
+      {(clipped || expanded) && <Button variant="link" size="sm" onClick={() => setExpanded((open) => !open)}>{expanded ? 'Show less' : 'Show more'}</Button>}
+    </>
   )
 }
 

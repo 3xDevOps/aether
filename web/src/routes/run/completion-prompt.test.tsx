@@ -60,6 +60,39 @@ describe('CompletionPrompt', () => {
     expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'Mark complete' }))
   })
 
+  it('offers Show more only when the summary overflows three lines as laid out, and bounds it when opened', async () => {
+    const sizes = (scroll: number) => {
+      Object.defineProperty(HTMLParagraphElement.prototype, 'scrollHeight', { configurable: true, get: () => scroll })
+      Object.defineProperty(HTMLParagraphElement.prototype, 'clientHeight', { configurable: true, get: () => 48 })
+    }
+    const report = (summary: string) => ({
+      events: [{ id: 'ev_1', seq: 1, time: '2026-08-14T10:00:00Z', workspace_id: 'wsp_1', run_id: 'run_1', actor_id: '', type: 'workspace.timeline', payload: { kind: 'report', outcome: 'success', summary } }],
+      next_seq: 2,
+      more: false,
+    })
+    try {
+      sizes(48)
+      seed()
+      vi.mocked(api.workspaceTimeline).mockResolvedValueOnce(report('fits in three lines'))
+      const { unmount } = render(<Prompt />)
+      await waitFor(() => expect(banner()?.textContent).toContain('fits in three lines'))
+      expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
+      unmount()
+
+      sizes(96)
+      seed({ review_changed_at: '2026-08-14T10:11:00Z' })
+      vi.mocked(api.workspaceTimeline).mockResolvedValueOnce(report('short, but wraps past three lines on a phone'))
+      render(<Prompt />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Show more' }))
+      expect(screen.getByText('short, but wraps past three lines on a phone').className).toContain('overflow-y-auto')
+      fireEvent.click(screen.getByRole('button', { name: 'Show less' }))
+      expect(screen.getByText('short, but wraps past three lines on a phone').className).toContain('line-clamp-3')
+    } finally {
+      delete (HTMLParagraphElement.prototype as { scrollHeight?: number }).scrollHeight
+      delete (HTMLParagraphElement.prototype as { clientHeight?: number }).clientHeight
+    }
+  })
+
   it('stays away with no review to answer, for a run not the viewer’s own, and while a verb is pending', () => {
     seed({ review: '' })
     const { rerender } = render(<Prompt />)
