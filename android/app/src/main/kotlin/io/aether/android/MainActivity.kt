@@ -163,7 +163,6 @@ class MainActivity : ComponentActivity() {
         }
         setContentView(R.layout.activity_main)
         web = findViewById(R.id.web)
-        web.setBackgroundColor(getColor(R.color.page_background))
         connection = findViewById(R.id.connection)
         connection.setOnClickListener { openSetup() }
         gatewayError = findViewById(R.id.gateway_error)
@@ -350,6 +349,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun configureWebView() {
+        web.setBackgroundColor(getColor(R.color.page_background))
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
