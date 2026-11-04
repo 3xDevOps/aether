@@ -752,9 +752,13 @@ the payload.
 
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished session from the board
-and keeps its data, restorable any time: only a session in a final disposition
-(`merged`, `abandoned`, `failed`, or `interrupted`) can be archived, and
-archiving any other status returns `-32002` naming the session's real status.
+and keeps its data, restorable any time: only a `completed` session or one in a
+final disposition (`merged`, `abandoned`, `failed`, or `interrupted`) can be
+archived, and archiving any other status returns `-32002` naming the session's
+real status. A `completed` session is also refused with `-32002`, naming what it
+holds, while its result awaits review or `run.close_check` would warn of live
+subsessions, a pull request not merged, sessions waiting on it or pending
+cleanup.
 Archiving an already-archived session is a no-op that leaves its timestamp
 unchanged; calling it with `"archived":false` restores the session. The response
 is a `RunResult` with `run.archived_at` set while archived and absent otherwise.

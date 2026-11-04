@@ -1490,7 +1490,7 @@ server drops the reply.
 **Finished footer.** **Archived (n)** swaps Finished for archived sessions in
 scope (Mine applies); **Back to Finished** returns. Archived sessions have no
 automatic deletion countdown. **More finished-run actions** (`…`, in the Finished
-heading, only when it has an item) holds **Archive closed sessions…** and, for
+heading, only when it has an item) holds **Archive finished sessions…** and, for
 admins, **Free retained containers…**. Both open the
 store-hosted confirmations (`src/components/palette/clear-done-dialog.tsx`,
 drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
@@ -1498,9 +1498,15 @@ when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
 `src/lib/commands.ts`, over the whole active workspace whoever owns the session.
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
 continue past failures and report the first real error; archive counts
-`CodeNotFound` as done. Archiving hides a session whose status is final
-(`isArchivable`) from every group without deleting its history; freeing removes
-a retained container and keeps the session and its history.
+`CodeNotFound` as done. Archiving hides a session whose status is final or
+`completed` (`isTerminal`) from every group without deleting its history.
+Before the archive confirmation offers its count, it reads `run.close_check` for
+the plan's completed sessions, 50 at a time, and keeps back, with the server's
+reasons, each one that still has live subsessions, a pull request not merged,
+sessions waiting on it or pending cleanup; the server refuses those too, and a
+completed session whose result still awaits review, which the single Archive
+command does not offer.
+Freeing removes a retained container and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet
 requirement, with one sentence and one button:
@@ -2166,7 +2172,7 @@ reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommand
 all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
 group), **Ask Aether** (opens the assistant; offered when the server
 serves `assistant.status`), **New session…**, **Launch from a template…**,
-**Archive closed sessions…**, **Free retained containers…** and the three theme
+**Archive finished sessions…**, **Free retained containers…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
 reports gateway success or its real refusal in both the session's More menu and
@@ -2244,9 +2250,9 @@ the server's events with an RPC response.
   it is bound to, and a port nothing listens on is forwarded with a note that
   its link works once something does. The Environment page's **Forward port**
   opens the same dialog for the environment, whose ports no method lists.
-- **Archive / Restore** are gated on `isArchivable(status)`
-  (`src/store/runs.ts`; `merged`, `abandoned`, `failed`, `interrupted`, never
-  `completed`) plus the kill permission and the `run.archive` capability;
+- **Archive / Restore** are gated on `isTerminal(status)`
+  (`src/store/runs.ts`; `completed`, `merged`, `abandoned`, `failed`,
+  `interrupted`) plus the kill permission and the `run.archive` capability;
   neither confirms, since archiving is reversible. The palette resolves its
   focused session from the session map by `route.params.runId` rather than the session
   list, so an archived session's own page still offers Restore.

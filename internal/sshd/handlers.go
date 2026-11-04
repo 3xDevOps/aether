@@ -433,6 +433,11 @@ func (s *Server) runArchive(ctx context.Context, member domain.MemberID, params 
 	if p.RunID == "" {
 		return nil, invalidParams("run_id is required")
 	}
+	if p.Archived {
+		if perr := s.archiveHolds(ctx, member, domain.RunID(p.RunID)); perr != nil {
+			return nil, perr
+		}
+	}
 	run, err := s.cfg.Runs.SetArchived(ctx, domain.RunID(p.RunID), member, p.Archived)
 	if err != nil {
 		return nil, rpcError(err)

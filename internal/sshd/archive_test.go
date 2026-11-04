@@ -7,9 +7,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // createRunWithStatus creates a run owned by e.member directly in status,
@@ -38,7 +40,7 @@ func TestRunArchiveRefusedOnNonFinalStatus(t *testing.T) {
 	admin := controlClient(t, e)
 	r := createRunWithStatus(t, e, domain.RunRunning)
 
-	e.runs.setErr(fmt.Errorf("%w: session is %s; only merged, abandoned, failed or interrupted sessions can be archived",
+	e.runs.setErr(fmt.Errorf("%w: session is %s; only completed, merged, abandoned, failed or interrupted sessions can be archived",
 		errInvalidTransition, domain.RunRunning))
 	err := admin.Call(protocol.MethodRunArchive,
 		protocol.RunArchiveParams{RunID: string(r.ID), Archived: true}, nil)
@@ -137,5 +139,51 @@ func TestRunSeenAuthorization(t *testing.T) {
 	err := owner.Call(protocol.MethodRunSeen, protocol.RunSeenParams{RunID: "run_missing"}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
 		t.Fatalf("run.seen on a missing session = %v, want CodeNotFound", err)
+	}
+}
+
+// A completed session archives once nothing it holds would be lost: an open
+// pull request refuses it, while possibly unmerged commits or protection,
+// which a close only warns about, do not.
+func TestRunArchiveCompletedHoldsOpenWork(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	db := e.store.(*store.DB)
+	admin := controlClient(t, e)
+
+	open := createRunWithStatus(t, e, domain.RunCompleted)
+	if err := db.RecordRunPullRequest(ctx, &store.RunPullRequest{RunID: open.ID, Repository: "acme/api", Number: 7,
+		URL: "https://github.com/acme/api/pull/7", State: "open", ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	err := admin.Call(protocol.MethodRunArchive, protocol.RunArchiveParams{RunID: string(open.ID), Archived: true}, nil)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState || !strings.Contains(pe.Message, "acme/api#7") {
+		t.Fatalf("archive of a completed session with an open pull request = %v, want CodeInvalidState naming it", err)
+	}
+
+	review := createRunWithStatus(t, e, domain.RunCompleted)
+	if _, _, err := db.SetRunReview(ctx, review.ID, domain.ReviewReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.Call(protocol.MethodRunArchive, protocol.RunArchiveParams{RunID: string(review.ID), Archived: true}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState || !strings.Contains(pe.Message, "awaits review") {
+		t.Fatalf("archive of a completed session awaiting review = %v, want CodeInvalidState", err)
+	}
+
+	done := createRunWithStatus(t, e, domain.RunCompleted)
+	done.BaseCommit, done.LastCommit, done.LastCommitAt = "aaaa", "bbbb", time.Now()
+	if err := db.UpdateRun(ctx, done); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetRunProtected(ctx, done.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	var res protocol.RunResult
+	if err := admin.Call(protocol.MethodRunArchive, protocol.RunArchiveParams{RunID: string(done.ID), Archived: true}, &res); err != nil {
+		t.Fatalf("archive of a protected completed session with only unmerged commits: %v", err)
+	}
+	if res.Run.ArchivedAt == nil {
+		t.Fatal("archived completed session missing archived_at")
 	}
 }
