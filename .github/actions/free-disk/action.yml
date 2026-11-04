@@ -1,0 +1,13 @@
+name: Free runner disk
+description: >
+  Delete preinstalled toolchains no Aether job uses, so the Docker image
+  builds and Go caches of a job fit a hosted runner's disk. The Android
+  build uses its own pinned SDK container, not the runner's SDK.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        df -h /
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+        df -h /
