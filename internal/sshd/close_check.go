@@ -77,10 +77,10 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	known := map[domain.RunID]*domain.Run{id: run}
 	var out []protocol.CloseWarning
 	if run.Protected {
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningProtected,
-			Detail: "Protected: only its owner or an admin can steer, message or close it"})
+		out = append(out, protectedWarning)
 	}
 	work, err := s.workWarnings(ctx, run, outcome)
 	if err != nil {
@@ -89,25 +89,23 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	out = append(out, work...)
 	if deps.Messages > 0 {
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages, RunIDs: runIDStrings(deps.Senders),
-			Detail: fmt.Sprintf("%d %s from %s %s unanswered or arrived in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"),
-				s.runLabels(ctx, deps.Senders), plural(deps.Messages, "is", "are"))})
+			Detail: fmt.Sprintf("%d %s from %s %s unread or arrived in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"),
+				s.runLabels(ctx, known, deps.Senders), plural(deps.Messages, "is", "are"))})
 	}
-	out = append(out, s.awaitedWarnings(ctx, deps.Awaiting)...)
+	tree := func(w domain.RunID) bool { return w == id || slices.Contains(deps.Children, w) }
+	out = append(out, s.awaitedWarnings(ctx, known, slices.DeleteFunc(deps.Awaiting, tree))...)
 	if len(deps.Children) > 0 {
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningSubsessions, Count: len(deps.Children), RunIDs: runIDStrings(deps.Children),
-			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), s.runLabels(ctx, deps.Children))})
+			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), s.runLabels(ctx, known, deps.Children))})
 	}
 	// A subsession closes as its parent does, so what closing it would
 	// affect is part of this close.
 	for _, childID := range deps.Children {
-		child, err := s.cfg.Store.GetRun(ctx, childID)
-		if errors.Is(err, store.ErrNotFound) {
+		child := known[childID]
+		if child == nil || child.ID == "" {
 			continue
 		}
-		if err != nil {
-			return nil, rpcError(err)
-		}
-		childDeps, err := s.cfg.Store.CloseDependents(ctx, childID, time.Now().Add(-recentMail))
+		waiters, err := s.cfg.Store.RunWaiters(ctx, childID)
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -115,8 +113,10 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		waiters := slices.DeleteFunc(childDeps.Awaiting, func(w domain.RunID) bool { return w == id || slices.Contains(deps.Children, w) })
-		for _, w := range append(childWork, s.awaitedWarnings(ctx, waiters)...) {
+		if child.Protected {
+			childWork = append(childWork, protectedWarning)
+		}
+		for _, w := range append(childWork, s.awaitedWarnings(ctx, known, slices.DeleteFunc(waiters, tree))...) {
 			w.Subsession = string(childID)
 			out = append(out, w)
 		}
@@ -162,23 +162,35 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 	return out, nil
 }
 
-func (s *Server) awaitedWarnings(ctx context.Context, waiters []domain.RunID) []protocol.CloseWarning {
+var protectedWarning = protocol.CloseWarning{Kind: protocol.CloseWarningProtected,
+	Detail: "Protected: only its owner or an admin can steer, message or close it"}
+
+func (s *Server) awaitedWarnings(ctx context.Context, known map[domain.RunID]*domain.Run, waiters []domain.RunID) []protocol.CloseWarning {
 	if len(waiters) == 0 {
 		return nil
 	}
 	return []protocol.CloseWarning{{Kind: protocol.CloseWarningAwaited, RunIDs: runIDStrings(waiters),
-		Detail: "Waiting for it to finish: " + s.runLabels(ctx, waiters)}}
+		Detail: "Waiting for it to finish: " + s.runLabels(ctx, known, waiters)}}
 }
 
-func (s *Server) runLabels(ctx context.Context, ids []domain.RunID) string {
+// runLabels reads each run once per check: known holds what the check
+// already read, and a nil entry a run with no record yet.
+func (s *Server) runLabels(ctx context.Context, known map[domain.RunID]*domain.Run, ids []domain.RunID) string {
 	labels := make([]string, len(ids))
 	for i, id := range ids {
+		r, read := known[id]
+		if !read {
+			var err error
+			if r, err = s.cfg.Store.GetRun(ctx, id); err != nil && !errors.Is(err, store.ErrNotFound) {
+				r = &domain.Run{}
+			}
+			known[id] = r
+		}
 		labels[i] = string(id)
-		r, err := s.cfg.Store.GetRun(ctx, id)
 		switch {
-		case errors.Is(err, store.ErrNotFound):
+		case r == nil:
 			labels[i] += " (queued)"
-		case err == nil && r.Title != "":
+		case r.Title != "":
 			labels[i] += " (" + r.Title + ")"
 		}
 	}

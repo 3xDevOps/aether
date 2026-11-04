@@ -44,8 +44,13 @@ func runClose(args []string) error {
 
 func closeSession(c *protocol.Client, runID, outcome string, force, interactive bool, in io.Reader, out, errOut io.Writer) error {
 	warnings, err := closeWarnings(c, runID, outcome)
+	ask := len(warnings) > 0
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "Could not check what closing %s affects: %v\n", runID, err)
+		// A server older than the CLI has no check; closing there worked
+		// without one before.
+		var perr *protocol.Error
+		ask = !errors.As(err, &perr) || perr.Code != protocol.CodeMethodNotFound
 	}
 	if len(warnings) > 0 {
 		_, _ = fmt.Fprintf(errOut, "Before closing %s:\n", runID)
@@ -59,11 +64,11 @@ func closeSession(c *protocol.Client, runID, outcome string, force, interactive 
 				_, _ = fmt.Fprintf(errOut, "    %s\n", w.URL)
 			}
 		}
-		if interactive && !force {
-			_, _ = fmt.Fprint(errOut, "Close anyway? [y/N]: ")
-			if !yesAnswer(bufio.NewReader(in)) {
-				return fmt.Errorf("aether close: %s was not closed", runID)
-			}
+	}
+	if ask && interactive && !force {
+		_, _ = fmt.Fprint(errOut, "Close anyway? [y/N]: ")
+		if !yesAnswer(bufio.NewReader(in)) {
+			return fmt.Errorf("aether close: %s was not closed", runID)
 		}
 	}
 	var res protocol.RunResult

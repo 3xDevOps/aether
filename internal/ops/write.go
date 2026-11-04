@@ -90,7 +90,7 @@ type stopInput struct {
 
 const idempotencyRule = " Reuse idempotency_key on a retry; "
 
-const closeRule = " A close with warnings is refused with them; show them to the user, then retry with acknowledge true."
+const closeRule = " A stop or close with warnings is refused with them; show them to the user, then retry with acknowledge true."
 
 var writeOps = []Op{
 	opOf("aether_launch_session", "Launch session", ScopeWrite, false, nextWorkspaces,
@@ -751,12 +751,14 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
 }
 
+// stopRun checks a stop like a close: a kill also ends the run abandoned,
+// settling its subsessions and waking its waiters.
 func stopRun(ctx context.Context, c calls, in stopInput) (string, any, error) {
+	if err := closeWarned(ctx, c.read, in.RunID, cmp.Or(in.Outcome, string(domain.RunAbandoned)), in.Acknowledge); err != nil {
+		return "", nil, err
+	}
 	if in.Outcome == "" {
 		return runAction(ctx, c, protocol.MethodRunKill, in.RunID, "Stopped", protocol.RunIDParams{RunID: in.RunID})
-	}
-	if err := closeWarned(ctx, c.read, in.RunID, in.Outcome, in.Acknowledge); err != nil {
-		return "", nil, err
 	}
 	return runAction(ctx, c, protocol.MethodRunClose, in.RunID, "Closed ("+in.Outcome+")", protocol.RunCloseParams{RunID: in.RunID, Outcome: in.Outcome})
 }

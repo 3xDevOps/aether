@@ -148,6 +148,10 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	helper := child(worker, "helper", domain.RunRunning)
 	pr(helper, 12, "open", nil)
 	await(helper, worker)
+	await(worker, lead)
+	if err := db.SetRunProtected(ctx, helper.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	watcher := newRun("watcher", nil)
 	await(watcher, worker)
 	await(lead, worker)
@@ -174,7 +178,7 @@ func TestRunCloseCheckKinds(t *testing.T) {
 		{shipped, "", nil},
 		{extra, "", []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-extra-merge may not be merged: no merged pull request includes its last commit"}}},
 		{mailed, "", []protocol.CloseWarning{{Kind: "messages", Count: 2, RunIDs: []string{string(quiet.ID)},
-			Detail: "2 messages from " + string(quiet.ID) + " (quiet) are unanswered or arrived in the last 30 minutes"}}},
+			Detail: "2 messages from " + string(quiet.ID) + " (quiet) are unread or arrived in the last 30 minutes"}}},
 		{member, "", nil},
 		{awaited, "", []protocol.CloseWarning{{Kind: "awaited", RunIDs: []string{string(coordinator.ID)},
 			Detail: "Waiting for it to finish: " + string(coordinator.ID) + " (coordinator)"}}},
@@ -189,6 +193,7 @@ func TestRunCloseCheckKinds(t *testing.T) {
 				Detail: "Waiting for it to finish: " + string(watcher.ID) + " (watcher)"},
 			{Kind: "pull_request", Subsession: string(helper.ID), URL: "https://github.com/acme/api/pull/12", Number: 12, ObservedAt: "2026-11-03T18:20:00Z",
 				Detail: "Pull request acme/api#12 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z"},
+			{Kind: "protected", Subsession: string(helper.ID), Detail: "Protected: only its owner or an admin can steer, message or close it"},
 		}},
 		{retained, "", []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup of its container and checkout is still pending"}}},
 		{failedCleanup, "", []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup failed: remove container: device busy"}}},

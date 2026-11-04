@@ -61,9 +61,11 @@ export function CloseWarnings({ check, run, onLeave, className }: { check: RunCl
   const listed = check.warnings
     .filter((warning) => !warning.subsession && (warning.kind !== 'cleanup_pending' || !retentionShows(run, warning)))
     .sort(byRisk)
-  if (!check.error && listed.length === 0 && !run.container_retained_until && !run.cleanup_pending && !run.cleanup_error) return null
+  const working = run.state === 'working'
+  if (!working && !check.error && listed.length === 0 && !run.container_retained_until && !run.cleanup_pending && !run.cleanup_error) return null
   return (
     <div className={cn('flex flex-col gap-2 text-ui-sm', className)}>
+      {working && <p>The agent is still working; closing stops it.</p>}
       {check.error && <p role="alert" className="break-words text-state-failed">Could not check what closing affects: {check.error.message}</p>}
       {listed.length > 0 && (
         <ul aria-label="What closing affects" className="flex flex-col gap-1.5">
@@ -172,7 +174,7 @@ function Explain({ warning, run, onLeave }: { warning: CloseWarning; run: Run | 
       return `${warning.detail}. The branch stays.`
     case 'messages':
       return warning.run_ids?.length
-        ? <>{warning.count} {warning.count === 1 ? 'message' : 'messages'} from <Runs ids={warning.run_ids} onLeave={onLeave} /> {warning.count === 1 ? 'is' : 'are'} unanswered or arrived in the last 30 minutes.</>
+        ? <>{warning.count} {warning.count === 1 ? 'message' : 'messages'} from <Runs ids={warning.run_ids} onLeave={onLeave} /> {warning.count === 1 ? 'is' : 'are'} unread or arrived in the last 30 minutes.</>
         : `${warning.detail}.`
     case 'awaited':
       return <>Waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>

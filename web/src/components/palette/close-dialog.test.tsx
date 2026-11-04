@@ -14,7 +14,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
   const { fakeApi } = await import('@/test/fixtures')
   return { ...actual, api: fakeApi(), ApiError: Error }
 })
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }))
 
 const status = () => useStore.getState().runs.run_1?.status
 
@@ -110,6 +110,17 @@ describe('close dialog', () => {
     expect([...footer.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Cancel', 'Close as abandoned', 'Close as merged'])
     expect(footer.className).toMatch(/(^| )flex-col( |$)/)
     expect(footer.className).not.toContain('flex-col-reverse')
+  })
+
+  it('drops a close when the session changed after the check, and says the agent is still working', async () => {
+    useStore.setState({ runs: { run_1: toRecord(run({ id: 'run_1', status: 'running', state: 'working' })) } })
+    render(<CloseDialog />)
+    const merged = await screen.findByRole('button', { name: 'Close as merged' })
+    expect(screen.getByText('The agent is still working; closing stops it.')).toBeTruthy()
+    act(() => useStore.setState((s) => ({ runs: { run_1: { ...s.runs.run_1!, status_seq: s.runs.run_1!.status_seq + 1, state: 'finished' } } })))
+    fireEvent.click(merged)
+    expect(api.runClose).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('The session changed while its close was being checked, so it was not closed')
   })
 
   it('shows a failed check and still lets the owner close', async () => {

@@ -27,6 +27,8 @@ type CloseDependents struct {
 // CloseCheckStore reads what a close would affect.
 type CloseCheckStore interface {
 	CloseDependents(ctx context.Context, run domain.RunID, recent time.Time) (CloseDependents, error)
+	// RunWaiters lists the live runs with a pending wait on run finishing.
+	RunWaiters(ctx context.Context, run domain.RunID) ([]domain.RunID, error)
 }
 
 func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.Time) (CloseDependents, error) {
@@ -57,10 +59,8 @@ func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.
 	if err = rows.Err(); err != nil {
 		return out, fmt.Errorf("store: close dependents: messages: %w", err)
 	}
-	if out.Awaiting, err = d.runIDs(ctx, `SELECT DISTINCT w.owner_run_id FROM watches w JOIN runs r ON r.id = w.owner_run_id
-		WHERE w.wait_target_run = ?1 AND w.wait_state = 'pending' AND w.owner_run_id <> ?1 AND r.status NOT IN (`+terminalStatuses+`)
-		ORDER BY w.owner_run_id`, run); err != nil {
-		return out, fmt.Errorf("store: close dependents: awaiting: %w", err)
+	if out.Awaiting, err = d.RunWaiters(ctx, run); err != nil {
+		return out, err
 	}
 	if out.Children, err = d.runIDs(ctx, `WITH RECURSIVE tree(run_id, created_at) AS (
 			SELECT ?1, 0
@@ -72,6 +72,16 @@ func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.
 		return out, fmt.Errorf("store: close dependents: subsessions: %w", err)
 	}
 	return out, nil
+}
+
+func (d *DB) RunWaiters(ctx context.Context, run domain.RunID) ([]domain.RunID, error) {
+	ids, err := d.runIDs(ctx, `SELECT DISTINCT w.owner_run_id FROM watches w JOIN runs r ON r.id = w.owner_run_id
+		WHERE w.wait_target_run = ?1 AND w.wait_state = 'pending' AND w.owner_run_id <> ?1 AND r.status NOT IN (`+terminalStatuses+`)
+		ORDER BY w.owner_run_id`, run)
+	if err != nil {
+		return nil, fmt.Errorf("store: session waiters: %w", err)
+	}
+	return ids, nil
 }
 
 func (d *DB) runIDs(ctx context.Context, query string, args ...any) ([]domain.RunID, error) {

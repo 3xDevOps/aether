@@ -954,6 +954,7 @@ func TestConnectorRunActions(t *testing.T) {
 func TestConnectorCloseNeedsAcknowledgment(t *testing.T) {
 	f := newFake(t)
 	f.answers[protocol.MethodRunClose] = returns(struct{}{})
+	f.answers[protocol.MethodRunKill] = returns(struct{}{})
 	f.answers[protocol.MethodRunReview] = returns(struct{}{})
 	ready := testRun
 	ready.Review = "ready"
@@ -967,6 +968,7 @@ func TestConnectorCloseNeedsAcknowledgment(t *testing.T) {
 		method string
 	}{
 		{"aether_stop_session", map[string]any{"run_id": "run-1", "outcome": "abandoned"}, protocol.MethodRunClose},
+		{"aether_stop_session", map[string]any{"run_id": "run-1"}, protocol.MethodRunKill},
 		{"aether_mark_reviewed", map[string]any{"run_id": "run-1", "action": "complete"}, protocol.MethodRunReview},
 	} {
 		f.calls = nil

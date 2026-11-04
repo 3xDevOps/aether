@@ -146,7 +146,7 @@ describe('CloseWarnings', () => {
     ] }} />)
     const items = within(screen.getByRole('list', { name: 'What closing affects' })).getAllByRole('listitem').map((li) => li.textContent)
     expect(items[1]).toMatch(/^Closes with it:Worker.*Pull request acme\/shop#9 was open, not merged, when Aether last checked .*Waiting for it to finish: Watcher/)
-    expect(items[0]).toBe('2 messages from Watcher are unanswered or arrived in the last 30 minutes.')
+    expect(items[0]).toBe('2 messages from Watcher are unread or arrived in the last 30 minutes.')
     expect(items.at(-1)).toBe('Cleanup failed: remove container: device busy. Cleanup keeps retrying after the close; the container may stay until it succeeds.')
     expect(screen.getByRole('time').getAttribute('datetime')).toBe('2026-11-03T18:20:00Z')
   })

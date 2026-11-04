@@ -48,6 +48,21 @@ func TestCloseSessionWarns(t *testing.T) {
 	}
 }
 
+// A check that fails asks on a terminal before closing, except on a
+// server older than the CLI, which has no check.
+func TestCloseSessionCheckFails(t *testing.T) {
+	check := &fakeReply{err: &protocol.Error{Code: protocol.CodeInternal, Message: "store: database is locked"}}
+	closeReply := &fakeReply{result: protocol.RunResult{Run: protocol.Run{ID: "run-1", Status: "abandoned"}}}
+	c := fakeControlMethods(t, map[string]*fakeReply{protocol.MethodRunCloseCheck: check, protocol.MethodRunClose: closeReply})
+	var out, errOut bytes.Buffer
+	if err := closeSession(c, "run-1", "abandoned", false, true, strings.NewReader("n\n"), &out, &errOut); err == nil || err.Error() != "aether close: run-1 was not closed" {
+		t.Fatalf("closeSession = %v, want it to ask and stop", err)
+	}
+	if !strings.Contains(errOut.String(), "store: database is locked") || closeReply.params() != nil {
+		t.Fatalf("stderr %q, closed %v", errOut.String(), closeReply.params() != nil)
+	}
+}
+
 // A server that cannot run the check, such as one older than the CLI,
 // still closes, saying why nothing was checked.
 func TestCloseSessionWithoutCheck(t *testing.T) {

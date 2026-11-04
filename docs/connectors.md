@@ -509,10 +509,13 @@ says to call again without `cursor`.
 
 `aether_mark_reviewed` completes only a session whose agent reported success and
 awaits your review; to end any other session, use `aether_stop_session` under
-`control`. Both read `run.close_check` before they close: a close with
-warnings fails with `closing session <id> has warnings (<kinds>), listed under
-untrusted.warnings; ...` until the call repeats with `acknowledge: true`, so
-the assistant shows you what each close affects first. The warnings sit under
+`control`. Both read `run.close_check` before they act, and so does a stop
+without `outcome`, since a stop also ends the session and settles its
+subsessions: one with warnings fails with `closing session <id> has warnings
+(<kinds>), listed under untrusted.warnings; ...` until the call repeats with
+`acknowledge: true`, so the assistant shows you what each stop or close
+affects first. `acknowledge` is the caller's word that it showed them; the
+server does not tie it to the warnings it returned. The warnings sit under
 `untrusted` because they quote session titles agents wrote. The dashboard
 assistant's close card lists the same warnings
 ([failure-handling.md](failure-handling.md#before-a-close)). A message to your own session that no one

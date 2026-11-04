@@ -1,6 +1,6 @@
 // Recording either outcome also makes the server stop a still-live container.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CloseWarnings, useCloseCheck } from '@/components/close-warnings'
 import { Archive, GitMerge } from '@/components/icons'
@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
-import { closeWarned } from '@/lib/close-check'
+import { closeChangedText, closeState, closeWarned } from '@/lib/close-check'
 import { closeCommand, useCommandRunner } from '@/lib/commands'
 import { errorSentence } from '@/lib/format'
 import { runLabel } from '@/lib/status'
@@ -35,6 +35,10 @@ export function CloseDialog() {
   const late = usePastDeadline(closing !== null)
   const [error, setError] = useState<string | null>(null)
   const check = useCloseCheck(runID)
+  const asked = useRef('')
+  useEffect(() => {
+    if (check && runID) asked.current = closeState(useStore.getState().runs[runID])
+  }, [check, runID])
   const cancel = useRef<HTMLButtonElement>(null)
 
   const finish = async (outcome: Outcome) => {
@@ -42,6 +46,10 @@ export function CloseDialog() {
     // Over another verb's pending prediction it waits for the server instead.
     if (!useStore.getState().predicting[runID]) {
       close()
+      if (closeState(useStore.getState().runs[runID]) !== asked.current) {
+        toast.info(closeChangedText)
+        return
+      }
       void perform(closeCommand(runID, outcome))
       return
     }
