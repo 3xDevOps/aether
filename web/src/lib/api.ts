@@ -491,6 +491,8 @@ export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
   serverEdge: () => call<ServerEdge>('server.edge'),
   serverEdgeClaimCode: () => call<ServerEdgeClaimCode>('server.edge.claimcode'),
+  dictationTranscribe: (audioBase64: string, hints: string[], signal?: AbortSignal) =>
+    call<{ text: string }>('dictation.transcribe', { audio_base64: audioBase64, hints }, signal),
   memberList: () => call<MemberList>('member.list'),
   accountList: () => call<AccountAccess>('account.list'),
   accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>

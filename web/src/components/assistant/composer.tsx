@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type * as React from 'react'
 import { conflictChoiceID, ContextChips } from '@/components/assistant/context-chips'
+import { DictationButton } from '@/components/dictation/dictation-button'
 import { ArrowUp, Square } from '@/components/icons'
 import { TemporaryBanner } from '@/components/assistant/temporary'
 import { Button } from '@/components/ui/button'
@@ -151,6 +152,7 @@ export function AssistantComposer({ textarea, running, dock }: {
           />
         </div>
         <div className="flex items-center justify-end gap-2">
+          <DictationButton textarea={textarea} onInsert={setDraft} />
           {running ? (
             <Button size="sm" variant="danger" disabled={stopping} onClick={() => void stop()}>
               <Square className="fill-current" />

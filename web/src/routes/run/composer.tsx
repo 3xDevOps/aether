@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type * as React from 'react'
+import { DictationButton } from '@/components/dictation/dictation-button'
 import { ArrowUp, CornerUpRight, ListPlus, Play, RefreshCw, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -209,7 +210,7 @@ function ComposerHint({ id, uploading, description }: { id: string; uploading: b
     : <p id={id} className="sr-only">{description}</p>
 }
 
-function SendActions({ pill, label, hint, description, disabled, onClick, onCancel }: {
+function SendActions({ pill, label, hint, description, disabled, onClick, onCancel, dictation }: {
   pill: Pill
   label: string
   hint?: string
@@ -217,12 +218,14 @@ function SendActions({ pill, label, hint, description, disabled, onClick, onCanc
   disabled: boolean
   onClick: () => void
   onCancel?: () => void
+  dictation: React.ReactNode
 }) {
   const look = pillLook[pill]
   const tip = [hint ? `${look.label} (${hint})` : look.label, description].filter(Boolean).join('. ')
   const icon = <look.Icon className={cn((pill === 'interrupt' || pill === 'stop-waiting') && 'fill-current')} />
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1">
+      {dictation}
       {onCancel && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
       <Tooltip content={tip}>
         <span className="inline-flex">
@@ -327,6 +330,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
               disabled={!body.trim() || busy || !images.ready}
               onClick={send}
               onCancel={late ? () => saveComposerDraft(run.id, { busy: undefined }) : undefined}
+              dictation={<DictationButton textarea={textarea} onInsert={(next) => saveComposerDraft(run.id, { body: next })} />}
             />
           </>
         )}
@@ -575,6 +579,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
               disabled={pillDisabled}
               onClick={() => act(pill)}
               onCancel={late && draft.busyPrompt ? () => saveComposerDraft(run.id, { busy: undefined }) : undefined}
+              dictation={<DictationButton textarea={textarea} onInsert={setBody} />}
             />
           </>
         )}
