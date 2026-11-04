@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { readArchiveHolds } from '@/lib/close-check'
+import type { RunCloseCheck } from '@/lib/types'
 import type { StateContext } from '@/lib/needs-you'
 import { clearDonePlan, releaseFinishedPlan, runClearDone, runReleaseFinished } from '@/lib/commands'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
@@ -23,7 +24,7 @@ export function ClearDoneDialog() {
   const close = useStore((s) => s.closePaletteDialog)
   const removeRun = useStore((s) => s.removeRun)
   const [plan] = useState(() => clearDonePlan(finishedRuns(...scope()), cap, self))
-  const [held, setHeld] = useState<Map<string, string[]>>()
+  const [held, setHeld] = useState<Map<string, RunCloseCheck>>()
   const [running, setRunning] = useState(false)
 
   useEffect(() => {

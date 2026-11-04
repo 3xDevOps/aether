@@ -503,14 +503,14 @@ describe('Finished footer', () => {
     seed([merged, run({ ...merged, id: 'run_open', task: 'still open', status: 'completed' })], { self: bob })
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: { ...bob, role: 'admin' } } })
     vi.mocked(api.runCloseCheck).mockResolvedValueOnce([
-      { run_id: 'run_open', warnings: [{ kind: 'pull_request', detail: 'Pull request acme/shop#42 was open, not merged' }] },
+      { run_id: 'run_open', warnings: [{ kind: 'pull_request', detail: 'Pull request acme/shop#42 was open, not merged', url: 'https://github.com/acme/shop/pull/42', number: 42 }] },
     ])
     renderBoard()
 
     await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive finished sessions…' }))
     const dialog = within(await screen.findByRole('dialog'))
-    expect(await dialog.findByText('Pull request acme/shop#42 was open, not merged')).toBeDefined()
+    expect(await dialog.findByRole('link', { name: 'acme/shop#42' })).toBeDefined()
     expect(within(dialog.getByRole('list', { name: 'Sessions to archive' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['landed already'])
     fireEvent.click(dialog.getByRole('button', { name: 'Archive 1' }))
 

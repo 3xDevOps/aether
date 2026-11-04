@@ -77,6 +77,16 @@ export function CloseWarnings({ check, run, onLeave, className }: { check: RunCl
   )
 }
 
+/** Warning lines alone, for a list that shows each session's own warnings, such as the archive confirmation's kept sessions. */
+export function CloseWarningLines({ check, run, onLeave }: { check: RunCloseCheck; run: Run; onLeave: () => void }) {
+  if (check.error) return <p className="break-words text-state-failed">Could not check: {check.error.message}</p>
+  return (
+    <ul className="flex flex-col gap-1.5 text-ui-sm text-muted">
+      <Lines warnings={check.warnings.filter((warning) => !warning.subsession).sort(byRisk)} run={run} onLeave={onLeave} all={check.warnings} />
+    </ul>
+  )
+}
+
 /** Several pull requests of one session read as one line of numbers. */
 function Lines({ warnings, run, onLeave, all }: { warnings: CloseWarning[]; run: Run | undefined; onLeave: () => void; all: CloseWarning[] }) {
   const prs = warnings.filter((warning) => warning.kind === 'pull_request' && warning.number && warning.url)

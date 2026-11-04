@@ -61,7 +61,7 @@ describe('archive confirmation dialog', () => {
       ids.map((id) => ({
         run_id: id,
         warnings: id === 'run_d'
-          ? [{ kind: 'pull_request', detail: 'Pull request acme/shop#42 was open, not merged' }, { kind: 'unmerged_work', detail: 'Commits may not be merged' }]
+          ? [{ kind: 'pull_request', detail: 'Pull request acme/shop#42 was open, not merged', url: 'https://github.com/acme/shop/pull/42', number: 42 }, { kind: 'unmerged_work', detail: 'Commits may not be merged' }]
           : [{ kind: 'protected', detail: 'Protected' }],
       })),
     )
@@ -70,7 +70,7 @@ describe('archive confirmation dialog', () => {
     expect(screen.getByText('Checking finished sessions…')).toBeDefined()
     const archive = await screen.findByRole('button', { name: 'Archive 3' })
     expect(archiveMocks.runCloseCheck).toHaveBeenCalledWith(['run_c', 'run_d'], 'completed')
-    expect(screen.getByText('Pull request acme/shop#42 was open, not merged')).toBeDefined()
+    expect(screen.getByRole('link', { name: 'acme/shop#42' })).toBeDefined()
     fireEvent.click(archive)
     await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
     expect(archiveMocks.runArchive.mock.calls.map(([id]) => id).sort()).toEqual(['run_a', 'run_b', 'run_c'])

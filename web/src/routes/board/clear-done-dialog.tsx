@@ -1,3 +1,4 @@
+import { CloseWarningLines } from '@/components/close-warnings'
 import { RunRetention } from '@/components/run-retention'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
 import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
+import type { RunCloseCheck } from '@/lib/types'
 import { runLabel } from '@/lib/status'
 
 export function ClearDoneConfirm({
@@ -21,7 +23,7 @@ export function ClearDoneConfirm({
 }: {
   plan: ClearDonePlan
   /** Completed sessions kept back and why; undefined while they are being checked. */
-  held: Map<string, string[]> | undefined
+  held: Map<string, RunCloseCheck> | undefined
   running: boolean
   onConfirm: () => void
   onCancel: () => void
@@ -72,9 +74,9 @@ export function ClearDoneConfirm({
             </h3>
             <ul className="mt-1 max-h-40 space-y-1.5 overflow-y-auto text-ui">
               {kept.map((run) => (
-                <li key={run.id}>
+                <li key={run.id} className="flex flex-col gap-1">
                   <span className="block truncate">{runLabel(run)}</span>
-                  <span className="block text-ui-sm text-muted">{held?.get(run.id)?.join(' · ')}</span>
+                  <CloseWarningLines check={held!.get(run.id)!} run={run} onLeave={onCancel} />
                 </li>
               ))}
             </ul>
