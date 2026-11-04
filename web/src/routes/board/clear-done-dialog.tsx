@@ -57,7 +57,7 @@ export function ClearDoneConfirm({
           <DialogDescription>
             {n === 0 && !checking && kept.length === 0 && unchecked.length === 0
               ? 'Archive acts on completed, merged, abandoned, failed and interrupted sessions you may act on.'
-              : 'Hides them from Finished; restore any time from Archived at the foot of Finished. Archiving does not free their retained containers.'}
+              : 'Moves them to Archived at the foot of Finished, where you can restore them. Retained containers stay.'}
           </DialogDescription>
         </DialogHeader>
         {plan.notAllowed > 0 && (
@@ -81,7 +81,7 @@ export function ClearDoneConfirm({
             </InsetList>
             {n > shownNames && (
               <Button variant="quiet" size="sm" className="self-start text-ui-sm" aria-expanded={allNames} onClick={() => setAllNames(!allNames)}>
-                {allNames ? 'Show fewer' : `${n - shownNames} more`}
+                {allNames ? 'Show fewer' : `Show ${n - shownNames} more`}
               </Button>
             )}
           </section>
@@ -90,7 +90,7 @@ export function ClearDoneConfirm({
           <section className="flex flex-col gap-1.5 border-t border-seam pt-4">
             <SectionLabel as="h3" className="flex items-center gap-1.5">
               Kept <CountBadge>{kept.length}</CountBadge>
-              <span className="font-normal">completed, still holding work</span>
+              <span className="font-normal">— completed, still holding work</span>
             </SectionLabel>
             <InsetList tabIndex={0} aria-label="Sessions kept" className="max-h-56 overflow-y-auto">
               {kept.map((run) => (
