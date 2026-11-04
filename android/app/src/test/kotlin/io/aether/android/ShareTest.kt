@@ -25,7 +25,9 @@ class ShareTest {
         val cut = sharePath(long)!!
         // The emoji's pair would straddle the cut, so neither half is kept.
         assertEquals("/?new=1&prompt=" + "a".repeat(MAX_SHARED_CHARS - 1), cut)
-        assertTrue(isDashboardPath(sharePath("line one\nline two")!!))
+        // The URL MainActivity loads, on either dashboard.
+        assertEquals("https://h.ts.net/?new=1&prompt=line%20one%0Aline%20two", dashboardAt("https://h.ts.net/", sharePath("line one\nline two")!!))
+        assertEquals("&new=1&prompt=a", edgeSuffix(sharePath("a")!!))
     }
 
     @Test
