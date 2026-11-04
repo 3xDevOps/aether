@@ -27,12 +27,10 @@ type Service struct {
 	members map[domain.MemberID]bool
 }
 
-// New serves the install in dir with engine.
 func New(dir string, engine Transcriber) *Service {
 	return &Service{dir: dir, engine: engine, slot: make(chan struct{}, 1), members: map[domain.MemberID]bool{}}
 }
 
-// Installed reports whether dir holds a complete install.
 func (s *Service) Installed() bool {
 	_, err := ReadManifest(s.dir)
 	return err == nil
@@ -107,7 +105,6 @@ func (s *Service) admit(ctx context.Context, member domain.MemberID) (func(), er
 	}, nil
 }
 
-// Close stops the engine.
 func (s *Service) Close() error { return s.engine.Close() }
 
 func unavailable(msg string) *protocol.Error {

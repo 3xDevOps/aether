@@ -77,8 +77,11 @@ type sidecar struct {
 	ready     bool
 	output    *tailBuffer
 	timer     *time.Timer
-	inflight  int
-	closed    bool
+	// idleGen tells an idle timer whose callback already fired from the
+	// one armed after the latest request.
+	idleGen  int
+	inflight int
+	closed   bool
 }
 
 // NewEngine runs the install in dir in containers.
@@ -110,6 +113,7 @@ func (s *sidecar) Transcribe(ctx context.Context, pcm []byte) (string, error) {
 	if s.timer != nil {
 		s.timer.Stop()
 	}
+	s.idleGen++
 	id, err := s.running(ctx)
 	if err != nil {
 		s.armIdle()
@@ -140,10 +144,12 @@ func (s *sidecar) armIdle() {
 	if id == "" {
 		return
 	}
+	s.idleGen++
+	gen := s.idleGen
 	s.timer = time.AfterFunc(idleStop, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.inflight == 0 {
+		if gen == s.idleGen && s.inflight == 0 {
 			s.stop(id)
 		}
 	})

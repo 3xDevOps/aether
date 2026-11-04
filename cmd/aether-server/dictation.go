@@ -59,7 +59,7 @@ func dictationCmd(args []string) error {
 		if err := dictation.Remove(dir); err != nil {
 			return err
 		}
-		fmt.Printf("removed %s\n", dir)
+		fmt.Printf("removed the install in %s\n", dir)
 		return nil
 	}
 	return fmt.Errorf("unknown dictation command %q (want install, status or remove)", sub)

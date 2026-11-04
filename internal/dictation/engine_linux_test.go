@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -44,6 +43,7 @@ func TestRealEngineTranscribesFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := New(dir, engine)
+	t.Cleanup(func() { _ = svc.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	start := time.Now()
@@ -63,7 +63,7 @@ func TestRealEngineTranscribesFixture(t *testing.T) {
 	}
 	t.Logf("second clip, engine warm, in %s", time.Since(start).Round(time.Millisecond))
 
-	pid := enginePID(t)
+	pid := enginePID(t, docker, engine.(*sidecar).id)
 	if nice := procStat(t, pid, 16); nice != "10" {
 		t.Errorf("engine runs at nice %s, want 10", nice)
 	}
@@ -85,17 +85,27 @@ func TestRealEngineTranscribesFixture(t *testing.T) {
 	}
 }
 
-func enginePID(t *testing.T) int {
+// enginePID follows the container's init to the wrapper and from it to
+// the engine.
+func enginePID(t *testing.T, docker *containerruntime.Docker, id containerruntime.ID) int {
 	t.Helper()
-	comms, _ := filepath.Glob("/proc/[0-9]*/comm")
-	for _, path := range comms {
-		if b, err := os.ReadFile(path); err == nil && strings.HasPrefix(string(b), "sherpa-onnx-off") {
-			pid, _ := strconv.Atoi(filepath.Base(filepath.Dir(path)))
-			return pid
+	pid, err := docker.InitPID(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pid, err = strconv.Atoi(strings.TrimSpace(string(b))); err != nil {
+			t.Fatalf("children of %d: %q", pid, b)
 		}
 	}
-	t.Fatal("no sherpa-onnx-offline-websocket-server process")
-	return 0
+	if comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); !strings.HasPrefix(string(comm), "sherpa-onnx-off") {
+		t.Fatalf("process %d is %q, not the engine", pid, comm)
+	}
+	return pid
 }
 
 func procStat(t *testing.T, pid, field int) string {

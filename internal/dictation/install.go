@@ -94,7 +94,6 @@ type Manifest struct {
 	Files string `json:"files"`
 }
 
-// Dir is dictation's directory below the server data directory.
 func Dir(dataDir string) string { return filepath.Join(dataDir, "dictation") }
 
 func pick(goarch string, gpu bool) (Manifest, []artifact, error) {
@@ -144,13 +143,18 @@ func Install(ctx context.Context, dir, goarch string, gpu bool, images ImagePull
 	if err != nil {
 		return err
 	}
+	if err = os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := lockInstall(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	have, haveErr := ReadManifest(dir)
 	if haveErr == nil && have.Files != "" && withoutFiles(have) == want {
 		_, _ = fmt.Fprintf(w, "Dictation is already installed in %s (%s, %s).\n", dir, want.Provider, want.Precision)
 		return nil
-	}
-	if err = os.MkdirAll(dir, 0o700); err != nil {
-		return err
 	}
 	staging, err := os.MkdirTemp(dir, "files-")
 	if err != nil {
@@ -276,10 +280,30 @@ func withoutFiles(m Manifest) Manifest {
 }
 
 // Remove deletes an install, manifest first so a partial removal never
-// reads as installed.
+// reads as installed. The directory and its lock stay.
 func Remove(dir string) error {
-	if err := os.Remove(filepath.Join(dir, manifestName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	unlock, err := lockInstall(dir)
+	if err != nil {
 		return err
 	}
-	return os.RemoveAll(dir)
+	defer unlock()
+	if err = os.Remove(filepath.Join(dir, manifestName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Name() == "install.lock" {
+			continue
+		}
+		if err = os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }

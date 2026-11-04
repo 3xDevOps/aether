@@ -69,7 +69,9 @@ choice does nothing. On amd64 without `--gpu`, it suggests `--gpu` when
 `nvidia-smi -L` succeeds.
 
 The server never installs or updates dictation on its own. `remove` deletes
-`install.json` first, then the directory; the image stays in Docker until you
+`install.json` first, then everything in the directory but `install.lock`.
+`install` and `remove` hold that lock while they run, so a second one started
+meanwhile fails at once and names it. The image stays in Docker until you
 remove it.
 
 | File | SHA-256 | Used for |
