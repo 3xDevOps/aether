@@ -12,6 +12,7 @@ import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import type { ConfigOption } from '@/lib/session-types'
+import { notFinishedYet } from '@/lib/status'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { AttachmentChips } from '@/routes/run/composer-attachments'
 import { AttachButton, DropOverlay, dropRoom } from '@/routes/run/composer-dropzone'
@@ -310,7 +311,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
         onFocusChange={onFocusChange}
         onSend={send}
         onEscape={onEscape}
-        placeholder="Message the agent"
+        placeholder={notFinishedYet(run) ? 'Say what is left to do' : 'Message the agent'}
         describedBy={hintID}
         onPaste={images.onPaste}
         images={<AttachmentChips images={images} disabled={busy} />}
@@ -596,7 +597,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           if (hasContent) act(turnRunning ? 'queue' : 'send')
         }}
         onEscape={onEscape}
-        placeholder={turnRunning || waiting ? 'Message the agent while it works' : 'Message the agent, / for commands, @ for files'}
+        placeholder={turnRunning || waiting ? 'Message the agent while it works' : notFinishedYet(run) ? 'Say what is left to do, / for commands, @ for files' : 'Message the agent, / for commands, @ for files'}
         describedBy={hintID}
         combobox={{ expanded: suggestions.length > 0, controls: listID, active: suggestions.length ? `${listID}-${current}` : undefined }}
         menu={<SuggestionList id={listID} items={suggestions} active={current} onPick={pick} />}
