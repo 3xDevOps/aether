@@ -1,8 +1,10 @@
 package io.aether.android
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -12,6 +14,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
+import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -31,6 +34,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -64,6 +68,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var connection: Button
     private lateinit var gatewayError: View
     private lateinit var pickFiles: ActivityResultLauncher<Intent>
+    private lateinit var askMicrophone: ActivityResultLauncher<String>
+
+    /** The page's microphone request waiting on the runtime permission. */
+    private var pendingAudio: PermissionRequest? = null
 
     /**
      * The dashboard the WebView is on, so a changed address reloads it.
@@ -192,6 +200,13 @@ class MainActivity : ComponentActivity() {
                 callback.onReceiveValue(
                     WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data),
                 )
+            }
+
+        askMicrophone =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                val request = pendingAudio ?: return@registerForActivityResult
+                pendingAudio = null
+                if (granted) request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else request.deny()
             }
 
         applyInsets()
@@ -576,6 +591,28 @@ class MainActivity : ComponentActivity() {
                         callback.onReceiveValue(null)
                     }
                     return true
+                }
+
+                // Only the dashboard's microphone, and only when the page asks:
+                // the runtime permission is never requested before that.
+                override fun onPermissionRequest(request: PermissionRequest) {
+                    if (!grantsAudioCapture(loaded, request.origin.toString(), request.resources)) {
+                        request.deny()
+                        return
+                    }
+                    if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) ==
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+                        return
+                    }
+                    pendingAudio?.deny()
+                    pendingAudio = request
+                    askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
+                }
+
+                override fun onPermissionRequestCanceled(request: PermissionRequest) {
+                    if (pendingAudio === request) pendingAudio = null
                 }
 
                 override fun onCreateWindow(

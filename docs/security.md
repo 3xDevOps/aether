@@ -516,7 +516,11 @@ The [Android app](install.md#android-app) is a WebView locked to one HTTPS
 origin. It refuses `http://` addresses and certificate errors, opens other
 sites in the phone's browser, stays out of cloud backup and holds no
 credential. Safe Browsing is off because it only loads your server and the
-phone's browser checks every other link ([privacy.md](privacy.md)).
+phone's browser checks every other link ([privacy.md](privacy.md)). It holds
+the `RECORD_AUDIO` permission and grants the microphone only to the
+dashboard's origin, when you press the dashboard's mic button; every other
+origin and every other WebView permission request is denied. The audio goes to
+your Aether server for transcription and the app does not store it.
 
 ### Push notifications
 
