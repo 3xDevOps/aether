@@ -119,3 +119,15 @@ func TestADigestOfLongNamesStillFitsOnePush(t *testing.T) {
 		t.Fatalf("digest %s lost its counts", payload)
 	}
 }
+
+func TestAWatchNoticeIsCountedAsItsOutcome(t *testing.T) {
+	t.Parallel()
+	for body, want := range map[string]string{
+		"Failed": KindFailed, "Failed: checks failed": KindFailed, "Closed as merged": KindMerged,
+		"Agent reported done": KindDone, "Stopped": KindDone,
+	} {
+		if got := NoticeKind(protocol.WatchFinished, body); got != want {
+			t.Errorf("NoticeKind(finished, %q) = %s, want %s", body, got, want)
+		}
+	}
+}

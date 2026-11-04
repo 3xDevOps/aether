@@ -198,8 +198,11 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 		case staleErr != nil:
 			slog.Warn("push: read a digest item again; it stays queued", "member", member, "source", item.Source, "key", item.Key, "error", staleErr)
 		case reason != "":
+			// One whose drop could not be recorded stays queued to be
+			// dropped again.
 			if err = s.source(item).Dropped(ctx, item, reason); err != nil {
 				errs = append(errs, err)
+				continue
 			}
 			stale = append(stale, item)
 		default:

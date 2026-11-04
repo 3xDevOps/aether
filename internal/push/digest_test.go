@@ -290,3 +290,21 @@ func TestExpiredBurstsWithoutANeedAreForgotten(t *testing.T) {
 		t.Fatalf("member keeps %d bursts, want only the one inside its window", n)
 	}
 }
+
+func TestASummaryClaimsItsFirstPushsNotificationWhileItShowsANeed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	for _, key := range []string{"run-a", "run-b"} {
+		if _, err := h.svc.join(h.ada.ID, key, "wat-1|needs_you", "topic", "Fix it", "Blocked", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !h.svc.Summarizes(h.ada.ID, "wat-1|needs_you") {
+		t.Fatal("a summary of two needs does not claim the first push's notification")
+	}
+	h.svc.unjoin(h.ctx, "run-a")
+	h.svc.unjoin(h.ctx, "run-b")
+	if h.svc.Summarizes(h.ada.ID, "wat-1|needs_you") {
+		t.Fatal("a summary with no need left still claims the notification")
+	}
+}

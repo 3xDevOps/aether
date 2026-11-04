@@ -154,3 +154,13 @@ func (b *burst) summary(quiet, ended bool) (*summary, error) {
 	}
 	return &summary{payload: payload, topic: b.topic, urgency: urgency}, nil
 }
+
+// Summarizes reports whether a burst's summary that still shows a need
+// took over member's notification under topic, the tag of its first push.
+func (s *Service) Summarizes(member domain.MemberID, topic string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.ContainsFunc(s.bursts[member], func(b *burst) bool {
+		return b.summarized && b.tag == topic && slices.ContainsFunc(b.keys, func(k string) bool { return b.needs[k] })
+	})
+}

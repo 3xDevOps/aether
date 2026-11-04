@@ -245,6 +245,14 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false, Level: "batched", DigestAt: "09:00"}); err != nil {
 		t.Fatal(err)
 	}
+	for _, item := range []*DigestItem{
+		{MemberID: b.ID, Source: "run", Key: string(b.ID) + "|finished:x", Kind: "done", Title: "t", RunID: runB.ID, CreatedAt: now},
+		{MemberID: b.ID, Source: "watch", Key: "notice-1", Kind: "done", Title: "t", CreatedAt: now},
+	} {
+		if err := db.AddDigestItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
 	launchRevisions := map[domain.MemberID]int64{}
 	for m, l := range map[domain.MemberID]LaunchDefaults{
 		a.ID: {Agent: "claude", Account: b.ID, FallbackPolicy: "ordered", FallbackOrder: []domain.MemberID{b.ID, c.ID, a.ID}, Source: "member"},
@@ -308,6 +316,10 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	merge, err := db.AcceptMerge(ctx, accept)
 	if err != nil {
 		t.Fatalf("AcceptMerge: %v", err)
+	}
+	digest, err := db.ListDigestItems(ctx, a.ID)
+	if err != nil || len(digest) != 2 || digest[0].Key != string(a.ID)+"|finished:x" || digest[1].Key != "notice-1" {
+		t.Fatalf("survivor's digest = %+v, %v; want the session's item keyed to the survivor and the watch's as it was", digest, err)
 	}
 
 	got, err := db.GetMember(ctx, a.ID)

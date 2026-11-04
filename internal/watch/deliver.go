@@ -159,6 +159,11 @@ func (s *Service) withdraw(ctx context.Context, member domain.MemberID, n *store
 	if len(current) > 0 {
 		return s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, protocol.WatchStatusWithdrawn, "Replaced by a newer need")
 	}
+	// A summary of later pushes took over this notification; the push
+	// service updates it, and a clear would hide the others.
+	if s.push.Summarizes(member, topicOf(n)) {
+		return s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, protocol.WatchStatusWithdrawn, "Replaced by a summary of later pushes")
+	}
 	attempts := n.PushAttempts + 1
 	next := s.now().Add(backoff(attempts))
 	if err := s.store.SetWatchPush(ctx, n.ID, store.WatchPushWithdraw, attempts, &next, nil); err != nil {

@@ -146,7 +146,7 @@ func NoticeKind(condition, body string) string {
 		return KindNeed
 	case protocol.WatchFinished:
 		switch {
-		case strings.HasPrefix(body, "Failed: "):
+		case body == "Failed" || strings.HasPrefix(body, "Failed: "):
 			return KindFailed
 		case body == "Closed as merged":
 			return KindMerged
