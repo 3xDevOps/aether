@@ -77,7 +77,7 @@ export function ClearDoneConfirm({
             {checking
               ? 'Checking sessions…'
               : n === 0
-                ? 'Nothing to archive'
+                ? rows.length > 0 ? 'Choose idle sessions to close and archive' : 'Nothing to archive'
                 : closing > 0
                   ? `Archive ${sessions(n)}, closing ${closing} first?`
                   : `Archive ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
@@ -110,7 +110,9 @@ export function ClearDoneConfirm({
                   {names.map((run) => (
                     <li key={run.id} className="flex min-w-0 shrink-0 items-baseline gap-2 px-3 py-1.5">
                       <span className="min-w-0 truncate text-ui">{runLabel(run)}</span>
-                      <span className="ml-auto shrink-0 text-ui-sm text-muted">{finishedReason(run)} · {compactAge(run.finished_at ?? run.stateChangedAt)}</span>
+                      <span className="ml-auto min-w-0 max-w-[50%] truncate text-ui-sm text-muted" title={finishedReason(run)}>
+                      {finishedReason(run)} · {compactAge(run.finished_at ?? run.stateChangedAt)}
+                    </span>
                     </li>
                   ))}
                 </InsetList>
@@ -154,6 +156,11 @@ export function ClearDoneConfirm({
             </div>
           )}
         </div>
+        {rows.some((row) => row.check.error) && (
+          <Button variant="quiet" size="sm" className="self-start text-ui-sm" disabled={running} onClick={onRecheck}>
+            Check the idle sessions again
+          </Button>
+        )}
         <DialogFooter>
           <Button ref={cancel} variant="secondary" className={focusRingShown} disabled={running} onClick={onCancel}>
             {n === 0 && !checking ? 'Close' : 'Cancel'}

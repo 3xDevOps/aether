@@ -38,6 +38,7 @@ describe('idle archive plan', () => {
       live('held', { state: 'answered', cause: 'tasks-held' }),
       live('asks', { status: 'needs-attention', state: 'needs-you', reason: 'needs input: which suite?' }),
       live('paused', { state: 'answered' }),
+      live('asked-owner', { state: 'answered', member_id: 'mem_bob', unanswered_questions: 1 }),
       parent,
       live('child', { state: 'answered', parent_run_id: 'parent' }),
       live('detached', { state: 'answered', parent_run_id: 'parent', detached: true }),
@@ -50,6 +51,7 @@ describe('idle archive plan', () => {
       held: 'background tasks still running',
       asks: 'needs you',
       paused: 'paused',
+      'asked-owner': 'a question is waiting for its owner',
       child: 'its parent session is still open',
     })
     expect(reasons(got.done)).toEqual({ detached: 'replied' })
@@ -84,5 +86,12 @@ describe('idle rows', () => {
       ['pr', 'idle 2d, replied', 'abandoned', false, false],
       ['legacy', 'idle 5d, replied', 'abandoned', false, true],
     ])
+  })
+
+  it('keeps a recently active session out even when its check failed', () => {
+    const recent = { run: { ...live('recent-failed', { state: 'answered' }), stateChangedAt: ago(60 * 60 * 1000) }, reason: 'replied', asked: 'e' }
+    const rows = idleRows([recent], new Map([['recent-failed', { run_id: 'recent-failed', warnings: [], error: { code: 0, message: 'timed out' } }]]), now)
+    expect(rows.idle).toEqual([])
+    expect(reasons(rows.recent)).toEqual({ 'recent-failed': 'active 1h ago' })
   })
 })

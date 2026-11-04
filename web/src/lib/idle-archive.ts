@@ -61,7 +61,7 @@ export function idleRows(done: IdleCandidate[], checks: Map<string, RunCloseChec
   for (const candidate of done) {
     const check = checks.get(candidate.run.id) ?? { run_id: candidate.run.id, warnings: [], error: { code: 0, message: 'the server did not answer for this session' } }
     const idleFor = Math.max(0, now - Date.parse(check.idle_since ?? candidate.run.stateChangedAt))
-    if (!check.error && idleFor <= idleArchiveAfterMs) {
+    if (idleFor <= idleArchiveAfterMs) {
       out.recent.push({ ...candidate, reason: `active ${compactSpan(idleFor)} ago` })
       continue
     }
@@ -94,6 +94,8 @@ function holds(run: RunRecord, ctx: StateContext): string | undefined {
   const parent = run.parent_run_id && !run.detached ? ctx.runs[run.parent_run_id] : undefined
   if (parent && !isTerminal(parent.status)) return 'its parent session is still open'
   if (needsYou(run, ctx)) return 'needs you'
+  // needsYou asks about the viewer; a question to a teammate who owns the run counts too.
+  if (run.unanswered_questions) return 'a question is waiting for its owner'
   if (ctx.pausedRuns[run.id]) return 'paused'
   if (run.pending_inputs?.length) return 'a request is pending'
   if (unfinishedChildren(ctx.runs, run).length > 0) return 'subsessions still running'
