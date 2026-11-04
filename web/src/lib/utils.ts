@@ -44,13 +44,13 @@ export function cn(...inputs: ClassValue[]) {
 /** An outline, not a ring: forced-colors mode discards box shadows, and ring
  * classes already mean "selected" on some controls. */
 export const focusRing =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus focus-visible:transition-none'
 
 /** For the control a dialog focuses when it opens: the ring shows though the keyboard did not move focus there. */
 export const focusRingShown = 'focus:outline-2 focus:outline-offset-2 focus:outline-accent focus:transition-none'
 
 export const focusRingInset =
-  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
+  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus focus-visible:transition-none'
 
 /** A disclosure marker that turns as its body opens. */
 export const chevronTurn = 'transition-transform duration-200 ease-standard motion-reduce:transition-none'

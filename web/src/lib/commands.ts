@@ -703,11 +703,11 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   }
   list.push(
     {
-      id: 'theme-system',
-      label: 'Use system theme',
-      Icon: Monitor,
+      id: 'theme-dark',
+      label: 'Use dark theme',
+      Icon: Moon,
       value: 'appearance mode',
-      perform: (d) => d.setTheme('system'),
+      perform: (d) => d.setTheme('dark'),
     },
     {
       id: 'theme-light',
@@ -717,11 +717,11 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.setTheme('light'),
     },
     {
-      id: 'theme-dark',
-      label: 'Use dark theme',
-      Icon: Moon,
+      id: 'theme-system',
+      label: 'Use system theme',
+      Icon: Monitor,
       value: 'appearance mode',
-      perform: (d) => d.setTheme('dark'),
+      perform: (d) => d.setTheme('system'),
     },
   )
   return list
