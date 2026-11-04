@@ -50,6 +50,7 @@ export function App() {
   const gated = useStore((s) => s.updateRequired !== null || s.update?.client_update_required === true)
   const tooOld = useStore(useShallow((s) => serverTooOld(s.update) ?? { client: '', server: '' }))
   const [continued, setContinued] = useState(() => storedContinue())
+  const pair = `${tooOld.client}/${tooOld.server}`
   const [handed, setHanded] = useState(handedLink)
   useEffect(() => onHandedLink(setHanded), [])
   useEffect(() => onHandedLinkForgotten(() => setHanded(null)), [])
@@ -128,19 +129,18 @@ export function App() {
       <LaunchSplash />
       <UpdateChecks />
       <div className="flex min-w-0 h-full flex-col">
-        {(blocked || gated || (tooOld.client !== '' && continued !== `${tooOld.client}/${tooOld.server}`)) && desktopBridge() && <TopBar navigation={false} />}
+        {(blocked || gated || (tooOld.client !== '' && continued !== pair)) && desktopBridge() && <TopBar navigation={false} />}
         <div className="min-h-0 min-w-0 flex-1">
           {gated ? (
             <>
               <UpdateGate />
               {toaster}
             </>
-          ) : tooOld.client && continued !== `${tooOld.client}/${tooOld.server}` ? (
+          ) : tooOld.client && continued !== pair ? (
             <ServerTooOldGate
               client={tooOld.client}
               server={tooOld.server}
               onContinue={() => {
-                const pair = `${tooOld.client}/${tooOld.server}`
                 try {
                   window.localStorage.setItem(continueKey, pair)
                 } catch {

@@ -96,6 +96,16 @@ describe('hydrate', () => {
     expect(Object.keys(s.members)).toHaveLength(2)
     expect(s.runs.run_1.status).toBe('running')
   })
+  it('clears a painted snapshot when the server now refuses this member', async () => {
+    const store = createRootStore()
+    store.setState({ hydrated: true, staleSince: Date.now() })
+    window.localStorage.setItem(`aether.snapshot.v1:${window.location.origin}`, '{}')
+    await hydrate(store, fakeApi({ serverInfo: vi.fn(async () => { throw new ApiError(403, 'server.info: not a member') }) }))
+
+    expect(store.getState().hydrated).toBe(false)
+    expect(store.getState().staleSince).toBeNull()
+    expect(window.localStorage.getItem(`aether.snapshot.v1:${window.location.origin}`)).toBeNull()
+  })
   it('hydrates server-computed unanswered question counts with the run snapshot', async () => {
     const store = createRootStore()
     await hydrate(

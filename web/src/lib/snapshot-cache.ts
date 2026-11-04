@@ -1,7 +1,7 @@
 import type { GatewayCapabilities, MemberList, Run, ServerInfo, Workspace } from '@/lib/types'
 import type { RootStore } from '@/store'
 
-// docs/privacy.md#the-dashboards-saved-snapshot says what this holds.
+// docs/privacy.md#what-the-app-stores-on-the-phone says what this holds.
 const keyPrefix = 'aether.snapshot.v1:'
 const maxBytes = 1_000_000
 
@@ -9,7 +9,7 @@ interface Saved {
   savedAt: number
   identity: string
   info: Omit<ServerInfo, 'disk' | 'diskError'>
-  workspaces: Workspace[]
+  workspaces: Omit<Workspace, 'origin'>[]
   runs: Run[]
   members: MemberList
   capabilities: GatewayCapabilities | null
@@ -40,6 +40,12 @@ export function clearSnapshot(): void {
 export function saveSnapshot(store: RootStore): void {
   const s = store.getState()
   if (!s.info || !s.identityKey || !s.hydrated) return
+  // The Edge gateway listens on a fixed loopback port that another app can
+  // squat, and the app turns the WebView's own storage off for that reason.
+  if (s.linkStatus?.edge_url) {
+    clearSnapshot()
+    return
+  }
   const { disk: _disk, diskError: _diskError, ...rest } = s.info
   const { git_name: _n, git_email: _e, ...member } = rest.member
   const info = { ...rest, member }
@@ -51,8 +57,8 @@ export function saveSnapshot(store: RootStore): void {
     savedAt: Date.now(),
     identity: s.identityKey,
     info,
-    workspaces: Object.values(s.workspaces),
-    runs: Object.values(s.runs),
+    workspaces: Object.values(s.workspaces).map(({ origin: _origin, ...workspace }) => workspace),
+    runs: Object.values(s.runs).map(({ toolActivity: _activity, stateChangedAt: _at, stateChangedAtEstimated: _estimated, stateChangedAtPredicted: _predicted, ...run }) => run as Run),
     members,
     capabilities: s.capabilities,
   }
@@ -67,10 +73,11 @@ export function saveSnapshot(store: RootStore): void {
 
 /**
  * Fills an empty store from the last snapshot so the dashboard paints at
- * once. `staleSince` stays set until a live hydration replaces it.
+ * once. `staleSince` stays set until a live hydration replaces it. Only a
+ * cold start paints: a reconnect to another server must not show the last one.
  */
 export function paintSnapshot(store: RootStore): void {
-  if (store.getState().hydrated) return
+  if (store.getState().hydrated || store.getState().identityKey !== null) return
   const saved = read()
   if (!saved || !Array.isArray(saved.runs) || !Array.isArray(saved.workspaces)) return
   const s = store.getState()

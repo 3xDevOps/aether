@@ -327,6 +327,8 @@ describe('serverTooOld', () => {
   it('names a client newer than its server and ignores prereleases of the same release', () => {
     expect(serverTooOld(status('v0.9.0', 'v0.8.5'))).toEqual({ client: 'v0.9.0', server: 'v0.8.5' })
     expect(serverTooOld(status('v0.8.5-3-gabcdef1', 'v0.8.5'))).toBeNull()
+    expect(serverTooOld(status('v0.9.0-beta.1', 'v0.9.0'))).toBeNull()
+    expect(serverTooOld(status('v0.9.0-beta.1', 'v0.8.5'))).not.toBeNull()
     expect(serverTooOld(status('v0.8.5', 'v0.9.0'))).toBeNull()
     expect(serverTooOld(status('dev', 'v0.8.5'))).toBeNull()
     expect(serverTooOld(status('v0.9.0', ''))).toBeNull()

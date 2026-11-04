@@ -16,7 +16,7 @@ import { connectors } from '@/components/shell/sidebar-runs'
 
 export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => (s.staleSince === null && !s.hydrated ? s.hydrationError : null))
+  const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => nestWorkers(runs), [runs])

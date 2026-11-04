@@ -1149,12 +1149,14 @@ Removal also repairs the selection and open route before any refresh awaits.
   there is no token check: WhoIs identifies the source address on every
   request, while a tagged node is denied and an unavailable identity service
   reports its own `403` or `503` refusal.
-- **The last snapshot paints before the network answers.** After every
-  successful hydration `saveSnapshot` (`src/lib/snapshot-cache.ts`) writes the
+- **The last snapshot paints before the network answers.** After a
+  successful hydration, ten seconds after later changes and when the page is
+  hidden, `saveSnapshot` (`src/lib/snapshot-cache.ts`) writes the
   workspaces, sessions, members, server info and capabilities to
   `localStorage` (`aether.snapshot.v1:<origin>`; contents and deletion in
   [privacy.md](privacy.md#what-the-app-stores-on-the-phone)). `connect`
-  calls `paintSnapshot` first: it fills the store, sets `hydrated` and
+  calls `paintSnapshot` first, on a cold start only (a reconnect to another
+  server never repaints the last one): it fills the store, sets `hydrated` and
   `staleSince` (the save time), and seeds `identityKey` so hydration treats a
   different member or server as an identity change and drops the cache.
   `hydrate` still counts a painted store as a first load (workspace
@@ -1166,15 +1168,16 @@ Removal also repairs the selection and open route before any refresh awaits.
   the `online` wake below. While it shows (a saved snapshot, or any failed refresh), the
   toast, the empty-board "Cannot reach the server" cards and (below 768px)
   the header connection line stay out, and the banner is the one place the
-  failure is written. On a saved snapshot, session Approve and Deny are
-  disabled beside the words *Reconnect to act*. A rejected link token clears the cache and shows
+  failure is written. On a saved snapshot, every `RequestAction` (Approve, Deny, Reply, permission choices) is
+  disabled with the hint *Reconnect to act*. A refused member (403) clears
+  the cache and shows the connection error instead. A rejected link token clears the cache and shows
   the expired-link page as before.
 - **Resuming from the pocket also reconnects without an event.**
   `connectEvents` runs a 5 s watchdog; a tick more than 15 s late while the
   tab is visible means the page was frozen, and it replaces the socket like
   `online`. `pageshow` (back/forward cache) counts as a foreground return, and
-  a `navigator.connection` `change` counts as `online` after it has been
-  quiet for 1 s, so a burst of interface events reconnects once.
+  a `navigator.connection` change of `type` (or `effectiveType`) counts as
+  `online` after it has been quiet for 1 s; estimate-only changes do not, so a burst of interface events reconnects once.
 - **The sockets reopen on a foreground or network return.** Both
   `connectEvents` and `connectAttach` subscribe to `visibilitychange`
   (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone

@@ -42,17 +42,27 @@ request ([What an edge stores](#what-an-edge-stores)).
   and they last until you uninstall the app. Both are private to the app.
 - **The last snapshot the dashboard loaded**, in `localStorage` under
   `aether.snapshot.v1:<origin>`, so the next launch paints at once, marked
-  *Saved state from ...*, until the live state arrives. It holds the server
-  info (version, your member and the tailnet host name), the workspace list,
-  every session the server listed (including its task text, title, branch
-  and pending questions), the member list without git names and emails,
-  and the gateway's capability list. It holds no token, key, environment
-  variable, transcript, file or terminal output, and no disk usage. It is
-  replaced after every successful load, deleted when the dashboard sees a
-  different member or server, or a rejected link token, and skipped above
-  1 MB. It is keyed by origin, so two members who share one browser profile
-  and one dashboard address see each other's saved state until the first live
-  load replaces it; sign in with separate browser profiles. It is not sent anywhere. In a browser, *Clear site data* deletes it.
+  *Saved state from ...*, until the live state arrives. It holds:
+  - the server info: version, your member (without git name or email) and
+    the tailnet host name;
+  - the workspace list (name, base branch, id; not the git origin URL);
+  - every session the server listed, as the server sent it: task text,
+    title, branch, status, pending question ids and wait conditions, but not
+    the last tool the agent used;
+  - the member list without git names and emails;
+  - the gateway's capability list.
+
+  It holds no token, key, environment variable, transcript, file or terminal
+  output, and no disk usage. It is rewritten after a load, ten seconds after
+  the last change and when the page is hidden, deleted when the dashboard
+  sees a different member or server, a rejected link token or a refused
+  member, and skipped above 1 MB. In Aether Edge mode it is never saved and
+  any copy is deleted: the app turns the WebView's storage off there because
+  another app could serve script from the gateway's loopback port. It is
+  keyed by origin, so two members who share one browser profile and one
+  dashboard address see each other's saved state until the first live load
+  replaces it; sign in with separate browser profiles. It is not sent
+  anywhere. In a browser, *Clear site data* deletes it.
 
 In Tailscale mode the app stores no account, password, token, cookie or key:
 there is no dashboard sign-in, and the phone's Tailscale login identifies it

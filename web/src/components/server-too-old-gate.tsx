@@ -33,7 +33,7 @@ export function ServerTooOldGate({
         </h1>
         <div className="col-start-2 row-start-3 min-w-0 space-y-3 pt-2">
           <p className="max-w-[68ch] text-ui leading-5 text-muted">
-            Newer screens may fail against it. Ask a server admin to run:
+            Newer screens may fail against it. A server admin updates it with:
           </p>
           <CopyableCommand command="aether server update" />
           <Button size="sm" variant="secondary" onClick={onContinue}>

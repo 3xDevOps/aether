@@ -284,6 +284,13 @@ export async function hydrate(
     return true
   } catch (err) {
     if (signal?.aborted) return false
+    if (err instanceof ApiError && err.status === 403 && store.getState().staleSince !== null) {
+      // Access was withdrawn since the snapshot was saved: show none of it.
+      clearSnapshot()
+      s.setHydrated(false, err.message)
+      noteUnreachable(store, client, err, signal)
+      return false
+    }
     // A failed re-hydration keeps existing data. Once the token is known dead,
     // its recorded recovery hint beats this raw failure.
     if (!store.getState().streamDead) {
@@ -811,6 +818,7 @@ async function probeGateway(
  * time in sequence order. A reconnect with no cursor re-fetches.
  */
 const mergePollMs = 5000
+const saveDebounceMs = 10_000
 
 export function connect(store: RootStore, client: Api = api): () => void {
   const lifecycle = new AbortController()
@@ -826,16 +834,16 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const stopSelection = store.subscribe((state, previous) => {
     // The gateway keys the selection by the server's answer, so an unlinked
     // gateway, hydrated only for onboarding, has nowhere to save it.
-    if (!state.hydrated || state.staleSince !== null || !state.info || !state.capabilities?.local?.includes('workspace.selection')) return
+    // Painting fills the store without the member having chosen anything.
+    if (!state.hydrated || (state.staleSince !== null && !previous.hydrated) || !state.info || !state.capabilities?.local?.includes('workspace.selection')) return
     if (state.activeWorkspace === previous.activeWorkspace && previous.hydrated) return
     const workspace = state.activeWorkspace
     selectionWrite = selectionWrite
       .then(() => client.localWorkspaceSelection(workspace))
       .then(() => {})
       .catch((err: unknown) => {
-        if (!signal.aborted) {
-          store.getState().setHydrated(true, err instanceof Error ? err.message : String(err))
-        }
+        // A toast, not the banner's error: no retry of the connection clears this.
+        if (!signal.aborted) toast.error(errorSentence(err))
       })
   })
 
@@ -857,7 +865,23 @@ export function connect(store: RootStore, client: Api = api): () => void {
 
   const pump = () => {
     chain = chain.then(drain).catch(ignore)
+    chain = chain.then(scheduleSave)
   }
+
+  // A long live session would otherwise save once, at its first load.
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const saveNow = () => {
+    if (!signal.aborted && store.getState().staleSince === null) saveSnapshot(store)
+  }
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(saveNow, saveDebounceMs)
+  }
+  const onHide = () => {
+    if (document.visibilityState === 'hidden') saveNow()
+  }
+  document.addEventListener('visibilitychange', onHide)
+  window.addEventListener('pagehide', saveNow)
 
   const load = async () => {
     if (signal.aborted || hydrating || store.getState().streamDead) return
@@ -990,7 +1014,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
       store.getState().setCapabilities(probe.unlinked.capabilities)
       store.getState().setLinkStatus(probe.unlinked.status)
       store.getState().setConnection('offline')
+      clearSnapshot()
       store.getState().setHydrated(true)
+      store.setState({ staleSince: null })
       store.getState().setUnreachable(null)
       redirectRoute(store, { name: 'onboarding', params: {} })
       return
@@ -1001,6 +1027,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
   return () => {
     lifecycle.abort()
     stopWake()
+    document.removeEventListener('visibilitychange', onHide)
+    window.removeEventListener('pagehide', saveNow)
+    if (saveTimer) clearTimeout(saveTimer)
     clearInterval(mergeTimer)
     stopSelection()
     stopOutcomeSeen()

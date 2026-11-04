@@ -38,8 +38,10 @@ test('a returning phone paints the saved state, shows the real error and reconne
   // Back from the pocket: the page reloads with no network at all.
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('aether.snapshot.v1:')))).toBe(true)
   // Sessions the server listed before the phone lost its network.
-  await page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('aether.snapshot.v1:')) as string
+  // The page rewrites its snapshot as it unloads, so the sessions go in as the next load starts.
+  await page.addInitScript(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('aether.snapshot.v1:'))
+    if (!key) return
     const saved = JSON.parse(localStorage.getItem(key) as string)
     const now = new Date().toISOString()
     saved.runs = [

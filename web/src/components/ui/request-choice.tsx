@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { TextSwap } from '@/components/ui/text-swap'
 import { cn, focusRing } from '@/lib/utils'
+import { useStale } from '@/store/hooks'
 
 export function RequestFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
@@ -34,11 +35,12 @@ function Digit({ digit, onFill }: { digit: number; onFill: boolean }) {
   )
 }
 
-export function RequestAction({ label, digit, variant = 'secondary', className, ...props }: Omit<React.ComponentProps<'button'>, 'children'> & {
+export function RequestAction({ label, digit, variant = 'secondary', className, disabled, ...props }: Omit<React.ComponentProps<'button'>, 'children'> & {
   label: string
   digit?: number
   variant?: 'primary' | 'secondary' | 'danger' | 'confirm' | 'quiet'
 }) {
+  const stale = useStale()
   const filled = variant === 'primary' || variant === 'danger' || variant === 'confirm'
   return (
     <Button
@@ -46,6 +48,8 @@ export function RequestAction({ label, digit, variant = 'secondary', className, 
       variant={variant}
       aria-keyshortcuts={digit ? String(digit) : undefined}
       className={cn('gap-2', className)}
+      disabled={disabled || stale}
+      title={stale ? 'Reconnect to act' : props.title}
       {...props}
     >
       <TextSwap mode="crossfade" layerClassName="whitespace-nowrap">{label}</TextSwap>

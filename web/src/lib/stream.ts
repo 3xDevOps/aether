@@ -48,6 +48,11 @@ type WakeKind = 'visible' | 'online'
 /** A tick this much later than its period means the page was frozen. */
 const suspendGapMs = 15_000
 const watchdogMs = 5_000
+interface NetworkInformation extends EventTarget {
+  type?: string
+  effectiveType?: string
+}
+
 /** Network-change events arrive in bursts as an interface comes up. */
 const networkSettleMs = 1_000
 
@@ -66,21 +71,29 @@ export function onWake(wake: (kind: WakeKind) => void): () => void {
   const online = () => wake('online')
   let settle: ReturnType<typeof setTimeout> | null = null
   const changed = () => {
+    // The estimates (rtt, downlink) fire this constantly; only a new kind of network counts.
+    const now = connection?.type ?? connection?.effectiveType
+    if (now === kind) return
+    kind = now
     if (settle) clearTimeout(settle)
     settle = setTimeout(() => {
       settle = null
       wake('online')
     }, networkSettleMs)
   }
-  const connection = (navigator as Navigator & { connection?: EventTarget }).connection
+  const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection
+  let kind = connection?.type ?? connection?.effectiveType
   document.addEventListener('visibilitychange', visible)
   window.addEventListener('online', online)
-  window.addEventListener('pageshow', visible)
+  const restored = (e: PageTransitionEvent) => {
+    if (e.persisted) visible()
+  }
+  window.addEventListener('pageshow', restored)
   connection?.addEventListener('change', changed)
   return () => {
     document.removeEventListener('visibilitychange', visible)
     window.removeEventListener('online', online)
-    window.removeEventListener('pageshow', visible)
+    window.removeEventListener('pageshow', restored)
     connection?.removeEventListener('change', changed)
     if (settle) clearTimeout(settle)
   }
@@ -93,13 +106,21 @@ export function onWake(wake: (kind: WakeKind) => void): () => void {
  */
 function onFrozen(frozen: () => void): () => void {
   let last = Date.now()
+  // A hidden tab's timers are throttled to a minute apart: that gap is not a freeze.
+  const reset = () => {
+    last = Date.now()
+  }
+  document.addEventListener('visibilitychange', reset)
   const watchdog = setInterval(() => {
     const now = Date.now()
     const gap = now - last
     last = now
     if (gap > suspendGapMs && document.visibilityState === 'visible') frozen()
   }, watchdogMs)
-  return () => clearInterval(watchdog)
+  return () => {
+    clearInterval(watchdog)
+    document.removeEventListener('visibilitychange', reset)
+  }
 }
 
 /** Opens the event stream and keeps it open. Returns a disposer. */

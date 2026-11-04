@@ -30,4 +30,26 @@ describe('snapshot cache', () => {
     paintSnapshot(empty)
     expect(empty.getState().hydrated).toBe(false)
   })
+
+  it('keeps nothing in Edge mode, paints only a cold start, and drops tool activity and git origins', () => {
+    window.localStorage.clear()
+    const live = createRootStore()
+    live.getState().setInfo(serverInfo)
+    live.getState().setIdentityKey('o\u0000h\u0000m1')
+    live.getState().setWorkspaces([{ id: 'w1', name: 'w', base_branch: 'main', created_at: '', origin: 'https://example.test/secret.git' }])
+    live.getState().setHydrated(true)
+    saveSnapshot(live)
+    const raw = window.localStorage.getItem(`aether.snapshot.v1:${window.location.origin}`) ?? ''
+    expect(raw).not.toContain('secret.git')
+    expect(raw).not.toContain('toolActivity')
+
+    const reconnecting = createRootStore()
+    reconnecting.getState().setIdentityKey('another-server')
+    paintSnapshot(reconnecting)
+    expect(reconnecting.getState().hydrated).toBe(false)
+
+    live.setState({ linkStatus: { edge_url: 'https://edge.example.test' } as never })
+    saveSnapshot(live)
+    expect(window.localStorage.getItem(`aether.snapshot.v1:${window.location.origin}`)).toBeNull()
+  })
 })

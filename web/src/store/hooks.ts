@@ -230,3 +230,8 @@ export function useHeaderPrimary(shown: boolean) {
   const hold = useStore((s) => s.holdHeaderPrimary)
   useEffect(() => (shown ? hold() : undefined), [shown, hold])
 }
+
+/** A saved snapshot is on screen: what it shows may be answered already, so nothing may act on it. */
+export function useStale(): boolean {
+  return useStore((s) => s.staleSince !== null)
+}
