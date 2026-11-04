@@ -14,7 +14,7 @@ import { listedRuns, runGroups, runRows, runTrees, type RunRow, type RunTree, ty
 export type BoardCard = RunTree
 
 export interface BoardColumn {
-  key: Exclude<RunGroup, 'review'>
+  key: RunGroup
   label: string
   cards: BoardCard[]
 }

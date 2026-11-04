@@ -9,6 +9,7 @@ import { ViewHeader } from '@/components/view-header'
 import { clearDonePlan, releaseFinishedPlan } from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
+import { groupLabel } from '@/lib/status'
 import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { DeviceCard } from '@/routes/board/device-card'
@@ -68,11 +69,16 @@ export function Board() {
   const layout: BoardView = view === 'map' || view === 'lanes' ? view : fits && view === 'board' ? 'board' : 'list'
   const cardsLaidOut = layout === 'board' || layout === 'list'
   const column = (key: BoardColumn['key']) => columns.find((c) => c.key === key)!
-  const finished = showArchived ? { ...column('finished'), cards: archivedCards } : column('finished')
+  // A list folds Finished, so the sessions awaiting review get a group of their own.
+  const listed = layout === 'list' && !showArchived
+  const review: BoardColumn = { key: 'review', label: groupLabel.review, cards: column('finished').cards.filter((card) => card.group === 'review') }
+  const finished = showArchived
+    ? { ...column('finished'), cards: archivedCards }
+    : listed ? { ...column('finished'), cards: column('finished').cards.filter((card) => card.group !== 'review') } : column('finished')
   const needsYou = column('needs-you').cards.length + devices.length + merges.length
 
   const captureLayout = useCardGlide(area, layout)
-  useMoveGlide(captureLayout, !cardsLaidOut || !hydrated ? [] : [column('needs-you'), column('working'), finished], [activeWorkspace, mineOnly, showArchived, layout].join(' '))
+  useMoveGlide(captureLayout, !cardsLaidOut || !hydrated ? [] : [column('needs-you'), ...(listed ? [review] : []), column('working'), finished], [activeWorkspace, mineOnly, showArchived, layout].join(' '))
   const choose = (value: string) => {
     const next = value as BoardView
     if (cardsLaidOut && (next === 'board' || next === 'list')) captureLayout()
@@ -115,6 +121,7 @@ export function Board() {
     const groups = (
       <>
         <Column column={column('needs-you')} devices={devices} merges={merges} placeholder={placeholder} agentNames={agentNames} listScroll={list} />
+        {listed && review.cards.length > 0 && <Column column={review} placeholder={placeholder} agentNames={agentNames} listScroll={list} />}
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} listScroll={list} />
         <Column
           column={finished}

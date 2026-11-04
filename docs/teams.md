@@ -327,7 +327,7 @@ The dashboard shows each session as **Needs you**, **Finished: review the
 result**, **Working**, **Paused**, **Done** or **Failed**. **Needs you** means
 something blocks the session that you can resolve, such as a permission or
 question or a stalled session of yours. A session whose agent reported success
-is **Finished: review the result**: it blocks nothing, so check its work before
+is **Finished: review**: it blocks nothing, so check its work before
 you close it. Everyone else sees that session as **Working** with
 "Waiting for Alice" ([failure-handling.md](failure-handling.md#needs-you)).
 

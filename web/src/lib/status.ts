@@ -339,6 +339,6 @@ export const stateTone: Record<PresentationState, Tone> = {
 export const groupLabel: Record<RunGroup, string> = {
   'needs-you': 'Needs you',
   working: 'Working',
-  review: 'Finished: review the result',
+  review: 'Finished: review',
   finished: 'Finished',
 }

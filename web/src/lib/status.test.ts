@@ -160,7 +160,7 @@ describe('run presentation', () => {
     expect(teammate.state).toBe('ready')
     expect(groupOf(teammate)).toBe('review')
     expect(stateLabel.ready).toBe('Finished: review')
-    expect(groupLabel.review).toBe('Finished: review the result')
+    expect(groupLabel.review).toBe('Finished: review')
   })
 
   it('labels a live run without a known state honestly, never Working', () => {

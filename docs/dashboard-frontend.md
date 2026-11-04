@@ -1596,7 +1596,7 @@ show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
 dragging the track pans; the history page loads as the window reaches it.
 
 **Sections.** By status, sections follow Board: Needs you (oldest wait first),
-Working and Finished: review the result (newest start first), then Finished
+Working and Finished: review (newest start first), then Finished
 (failed first, then latest end). Finished starts folded into one summary lane ("37
 finished · 3 failed") whose strip shows each moment's outcome. By owner, there
 is one section per owner, yours first. A section header counts the sessions that
@@ -1808,7 +1808,7 @@ running".
 | Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Finished: review | filled accent circle with a check | `finished` (a reported success on a live session), or a `completed` run whose `review` is `ready` or `later` | Finished: review the result, never Needs you |
+| Finished: review | filled accent circle with a check | `finished` (a reported success on a live session), or a `completed` run whose `review` is `ready` or `later` | Finished: review, never Needs you |
 | Completed / Merged | check | `completed`, `merged` | Finished |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
@@ -1816,9 +1816,12 @@ running".
 | Disconnected | broken ring, neutral | `disconnected`: the agent session or process ended while the session is open | Needs you for its owner |
 | Paused | bars | a live session paused by a member | Working |
 
-The sidebar and session list show Finished: review the result as its own
-quiet group, with its own count, directly below Needs you; the board lists it
-at the head of Finished. A finished session asks nothing of anyone, so it
+The sidebar and session list show Finished: review as its own
+quiet group, with its own count, directly below Needs you; the sidebar shows
+three of its rows and a **N more** button for the rest. The board lists it at
+the head of Finished; the list layout, which folds Finished, shows it as a
+group of its own above Working. Lanes sections count a session and its
+subsessions as one, as the sidebar does. A finished session asks nothing of anyone, so it
 never adds to the Needs you count, a workspace badge or the desktop badge. In
 the session view its primary action is **Review**, which opens Changes.
 
@@ -1975,13 +1978,13 @@ again.
 A reported success presents **Finished: review** whether or not the flag is
 set; a reported failure stays a **Failed** row in Needs you until its owner
 opens the session, the next turn or Close. A session that has ended is never in
-Needs you; it keeps its unopened marker in Finished: review the result or
+Needs you; it keeps its unopened marker in Finished: review or
 Finished.
 
 **Completion review** is the owner's answer to a reported success, held by
 the server as the session's `review` (`""`, `ready`, `later`, `accepted`) and
 `review_changed_at`. A success report sets `ready`; opening the session does not
-change it, so the session stays in Finished: review the result. While the open session is `ready`,
+change it, so the session stays in Finished: review. While the open session is `ready`,
 `CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
 callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is

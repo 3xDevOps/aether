@@ -320,7 +320,8 @@ export function buildLanes(input: LanesInput): LanesModel {
     const key = `section:${id}`
     const count = section.units.reduce((n, unit) => n + unit.members.length, 0)
     const sectionOpen = open.get(key) ?? !section.finished
-    lanes.push({ kind: 'section', key, level: 1, label: section.label, count, open: sectionOpen, before: section.before, member: section.member })
+    // Like the sidebar and the board, a session counts with its subsessions as one.
+    lanes.push({ kind: 'section', key, level: 1, label: section.label, count: section.units.length, open: sectionOpen, before: section.before, member: section.member })
     if (!sectionOpen) {
       if (!section.finished || count === 0) continue
       const members = section.units.flatMap((unit) => unit.members)

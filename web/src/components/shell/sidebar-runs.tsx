@@ -168,8 +168,14 @@ export const connectors = cn(
 )
 
 /** `toggled` is true once the viewer has turned this group, so only their own change fades the list in. */
+// Finished: review sits above Working, so it shows a few rows and offers the rest.
+const reviewRows = 3
+
 function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; expanded: boolean; toggled: boolean; onToggle: () => void }) {
   const listID = `sidebar-group-${group.key}`
+  const [all, setAll] = useState(false)
+  const extra = group.key === 'review' ? group.runs.length - reviewRows : 0
+  const runs = extra > 0 && !all ? group.runs.slice(0, reviewRows) : group.runs
   return (
     <div className="pt-2">
       <div className="flex items-center gap-1">
@@ -192,7 +198,7 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
       <ul id={listID} hidden={!expanded} className={cn(toggled && 'animate-fade-in motion-reduce:animate-none')}>
         {expanded && group.key === 'needs-you' && <MergesRow />}
         {expanded && group.key === 'needs-you' && <DevicesRow />}
-        {expanded && group.runs.map((tree) => (
+        {expanded && runs.map((tree) => (
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
@@ -206,6 +212,13 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
             )}
           </li>
         ))}
+        {expanded && extra > 0 && (
+          <li>
+            <Button variant="quiet" size="sm" className="ml-5.5 text-ui-sm" aria-expanded={all} onClick={() => setAll(!all)}>
+              {all ? 'Show less' : `${extra} more`}
+            </Button>
+          </li>
+        )}
       </ul>
     </div>
   )

@@ -191,11 +191,11 @@ describe('the Needs you count', () => {
     expect(listedRuns(workspace.id, input(runs).ctx).filter((row) => row.needsYou).map((row) => row.run.id)).toEqual(['stopped'])
   })
 
-  it('lists finished runs under Finished: review the result, with their own count, below Needs you', () => {
+  it('lists finished runs under Finished: review, with their own count, below Needs you', () => {
     const groups = sidebarGroups(input(runs))
     expect(groups.map((group) => group.key)).toEqual(['needs-you', 'review', 'working', 'finished'])
     const review = groups.find((group) => group.key === 'review')
-    expect(review?.label).toBe('Finished: review the result')
+    expect(review?.label).toBe('Finished: review')
     expect(review?.count).toBe(3)
     expect(ids(review?.runs ?? []).sort()).toEqual(['headless', 'later', 'ready'])
     expect(ids(groups.find((group) => group.key === 'working')?.runs ?? []).sort()).toEqual(['agents', 'tools', 'waiting'])

@@ -151,7 +151,7 @@ notifications and the assistant's notices all use it. The session status
 waiting on agents, CI or a process and a reported success.
 
 A reported success is never a need. While its `review` is `ready` or `later`
-the session shows **Finished: review the result**, its own group with its own
+the session shows in **Finished: review**, its own group with its own
 count below Needs you, and the label `Finished: review` in the dashboard and
 `aether sessions`. `attention.list` still returns it, as kind `ready` with the
 reason `Finished: review the result`, after every item that asks something.
@@ -177,7 +177,7 @@ its parent", and `aether sessions` as `Finished: reported to its parent`.
 | `disconnected` | Yes | Once. |
 | `failed`, result not yet seen by the owner | Yes, while the session is live | Once: `Failed, review the result`. |
 | `failed`, result seen | No | No. |
-| Review ready, live or `completed` | No: Finished: review the result | Once per success, quietly: `Finished: review the result`, at normal urgency, never in the desktop badge. |
+| Review ready, live or `completed` | No: Finished: review | Once per success, quietly: `Finished: review the result`, at normal urgency, never in the desktop badge. |
 | Review put off for later or complete | No | No. |
 | A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |

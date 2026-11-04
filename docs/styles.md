@@ -89,15 +89,17 @@ follows `prefers-color-scheme` live.
 
 `accent` is a fill for backgrounds and borders but the link colour for text;
 `bg-accent-hover` darkens the fill for a hovered primary button. The accent
-marks selection, focus, the one primary button per view and links, nothing
-else. Inside a selected row, secondary text uses `text-text`. A floating
+marks selection, focus, the one primary button per view, links and the
+Finished: review state, nothing else. Inside a selected row, secondary text uses `text-text`. A floating
 surface is `bg-raised`, a 1px seam and `shadow-overlay`; dialogs, the
 palette and sheets take `shadow-dialog` and sit over `bg-scrim`.
 [Geometry](#geometry-and-responsive-behavior) lists every shadow.
 
-The five session states (see
+The session states (see
 [dashboard-frontend.md](dashboard-frontend.md#session-state)), used on dots,
-state lines, badges, callouts and request cards:
+state lines, badges, callouts and request cards. Finished: review, a reported
+success awaiting its owner, takes the accent and a filled check circle; it
+asks nothing, so it is never amber:
 
 | State | Utility | Light | Dark |
 | --- | --- | --- | --- |
@@ -106,6 +108,7 @@ state lines, badges, callouts and request cards:
 | Paused | `state-paused` | `#6e6e6e` | `#8a8a8a` |
 | Done | `state-done` | `#1a7a36` | `#45c26a` |
 | Failed | `state-failed` | `#c8321f` | `#f05c4a` |
+| Finished: review | `text-accent`, `bg-accent-soft` (`review` tone) | `#306f69` | `#5fb3a8` |
 
 Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
 `bg-accent-soft` likewise. `text-on-failed` is the text on a `bg-state-failed`

@@ -115,6 +115,18 @@ describe('run rows', () => {
     expect(runList().getAllByRole('button', { name: /^Needs you · question/ })).toHaveLength(7)
   })
 
+  it('shows three finished sessions awaiting review, names their state, and offers the rest', async () => {
+    const finished = Array.from({ length: 5 }, (_, i) =>
+      run({ id: `run_done_${i}`, task: `finished ${i}`, status: 'needs-attention', state: 'finished', review: 'ready' }))
+    useStore.setState({ runs: Object.fromEntries(finished.map((r) => [r.id, toRecord(r)])) })
+    render(<AppShell />)
+
+    runList().getByRole('heading', { name: /^Finished: review/ })
+    expect(runList().getAllByRole('button', { name: /^Finished: review · finished/ })).toHaveLength(3)
+    await userEvent.click(runList().getByRole('button', { name: '2 more' }))
+    expect(runList().getAllByRole('button', { name: /^Finished: review · finished/ })).toHaveLength(5)
+  })
+
   it('sorts an Enhanced run by what it waits on', () => {
     const enhanced = { mode: 'acp', acp: true } as const
     useStore.setState({
