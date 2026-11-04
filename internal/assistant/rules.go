@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -204,7 +205,7 @@ func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.Assis
 		if owner == "" {
 			return "", fmt.Errorf("account %s is not shared with you", key.AccountMemberID)
 		}
-		account = owner + "'s account"
+		account = tools.AccountOf(owner)
 	}
 	wording := fmt.Sprintf("Always approve launches of %s (%s) in %s on %s, permission %s", agent, strings.Join(how, ", "), ws.Workspace.Name, account, key.Permission)
 	if key.NoFallback {

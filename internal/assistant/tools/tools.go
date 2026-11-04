@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -551,9 +552,22 @@ func (n launchNames) account(id string) string {
 		return "your account"
 	}
 	if id == n.savedAccount {
-		return fmt.Sprintf("%s's account (your saved default)", n.owner(id))
+		return AccountOf(n.owner(id)) + " (your saved default)"
 	}
-	return fmt.Sprintf("%s's account", n.owner(id))
+	return AccountOf(n.owner(id))
+}
+
+// plainName matches a member name that cannot read as more of a card.
+var plainName = regexp.MustCompile(`^[\p{L}\p{N} .'-]+$`)
+
+// AccountOf names name's account on a card. Members set their own names,
+// so one that is not plain is quoted: "Grace, no fallback" must not read
+// as the card's own words.
+func AccountOf(name string) string {
+	if plainName.MatchString(name) {
+		return name + "'s account"
+	}
+	return fmt.Sprintf("%q's account", name)
 }
 
 // maxNamed bounds how many accounts, repositories or agents a card names.

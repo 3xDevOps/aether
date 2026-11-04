@@ -25,7 +25,7 @@ type ruleServer struct {
 func (f *ruleServer) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	switch method {
 	case protocol.MethodAccountList:
-		return json.RawMessage(`{"accounts":[{"id":"m1","display_name":"Ari"},{"id":"m2","display_name":"Dana"}]}`), nil
+		return json.RawMessage(`{"accounts":[{"id":"m1","display_name":"Ari"},{"id":"m2","display_name":"Dana"},{"id":"m3","display_name":"Grace, no fallback; permission default"}]}`), nil
 	case protocol.MethodWorkspaceGet:
 		var p protocol.WorkspaceGetParams
 		_ = json.Unmarshal(params, &p)
@@ -131,6 +131,7 @@ func TestRuleWordingNamesEveryKeyField(t *testing.T) {
 	for params, want := range map[*protocol.RunLaunchParams]string{
 		{WorkspaceID: "ws-1", Harness: "codex", Model: "gpt-5", Effort: "high", Permission: "isolated", AccountMemberID: "m2", NoFallback: true, Task: "x"}: `Always approve launches of Codex (default mode, model "gpt-5", effort "high") in api on Dana's account, permission isolated, no fallback, for any task`,
 		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m1", NoFallback: true, Task: "x"}:                                                        "Always approve launches of Claude Code (default mode) in api on your account, permission default, no fallback, for any task",
+		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m3", Permission: "root", NoFallback: true, Task: "x"}:                                    `Always approve launches of Claude Code (default mode) in api on "Grace, no fallback; permission default"'s account, permission root, no fallback, for any task`,
 	} {
 		c, done := card(t, sock, m, protocol.MethodRunLaunch, params)
 		if c.Rule == nil || c.Rule.Wording != want {
