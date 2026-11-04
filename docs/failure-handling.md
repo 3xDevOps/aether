@@ -147,8 +147,9 @@ Closing a session that others still depend on asks first. **Close session…**,
 and list what the close affects: protection, an open pull request, commits that
 may not be merged, mail from other sessions, sessions waiting for this one to
 finish, subsessions that close with it and what closing each of those affects,
-and pending cleanup. With any of these the confirm button reads **Close
-anyway** and Cancel holds the focus. A check that fails shows its error and
+and pending cleanup. With any of these closing turns into a danger button
+(**Close as abandoned**, or **Close anyway** for Mark complete) and Cancel
+holds the focus. A check that fails shows its error and
 still lets you close. Closing as merged skips the unmerged-commits warning:
 you are saying the work is merged.
 

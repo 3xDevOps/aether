@@ -123,6 +123,16 @@ describe('Mark complete with close warnings', () => {
 })
 
 describe('CloseWarnings', () => {
+  it('reads several pull requests of one session as one line of numbers', () => {
+    render(<CloseWarnings run={useStore.getState().runs.run_1!} onLeave={() => {}} check={{ run_id: 'run_1', warnings: [61, 62, 63].map((n) => ({
+      kind: 'pull_request' as const, detail: `Pull request acme/shop#${n} was open, not merged, when Aether last checked 2026-11-03T18:20:00Z`,
+      url: `https://github.com/acme/shop/pull/${n}`, number: n, observed_at: '2026-11-03T18:20:00Z' })) }} />)
+    const items = within(screen.getByRole('list', { name: 'What closing affects' })).getAllByRole('listitem')
+    expect(items).toHaveLength(1)
+    expect(items[0]!.textContent).toMatch(/^3 pull requests not merged when Aether last checked \(.+\): #61 #62 #63$/)
+    expect(screen.getByRole('link', { name: '#62' }).getAttribute('href')).toBe('https://github.com/acme/shop/pull/62')
+  })
+
   it('nests each subsession\'s own warnings under its name, names mail senders, and shows a cleanup failure the session record does not have', () => {
     useStore.setState({ runs: { ...useStore.getState().runs, run_2: toRecord(run({ id: 'run_2', title: 'Worker' })), run_3: toRecord(run({ id: 'run_3', title: 'Watcher' })) } })
     render(<CloseWarnings run={useStore.getState().runs.run_1!} onLeave={() => {}} check={{ run_id: 'run_1', warnings: [
@@ -133,8 +143,8 @@ describe('CloseWarnings', () => {
       { kind: 'awaited', detail: 'Waiting for it to finish: run_3 (Watcher)', run_ids: ['run_3'], subsession: 'run_2' },
     ] }} />)
     const items = within(screen.getByRole('list', { name: 'What closing affects' })).getAllByRole('listitem').map((li) => li.textContent)
-    expect(items[0]).toMatch(/^Closes with it:Worker.*Pull request acme\/shop#9 was open, not merged, when Aether last checked .*Waiting for it to finish: Watcher/)
-    expect(items.at(-2)).toBe('2 messages from Watcher, unanswered or from the last 30 minutes. They may expect it to answer.')
+    expect(items[1]).toMatch(/^Closes with it:Worker.*Pull request acme\/shop#9 was open, not merged, when Aether last checked .*Waiting for it to finish: Watcher/)
+    expect(items[0]).toBe('2 messages from Watcher, unanswered or from the last 30 minutes. They may expect it to answer.')
     expect(items.at(-1)).toBe('Cleanup failed: remove container: device busy.')
     expect(screen.getByRole('time').getAttribute('datetime')).toBe('2026-11-03T18:20:00Z')
   })

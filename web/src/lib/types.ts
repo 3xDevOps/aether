@@ -112,6 +112,9 @@ export interface CloseWarning {
   count?: number
   run_ids?: string[]
   subsession?: string
+  /** On a pull_request warning: its number and when Aether last observed it. */
+  number?: number
+  observed_at?: string
 }
 
 /** A run's close warnings, or the error reading them. */

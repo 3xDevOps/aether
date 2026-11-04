@@ -32,6 +32,8 @@ type RunCloseCheck struct {
 
 // CloseWarning.Subsession names the subsession a warning is about, when
 // it is one that closes with the checked run; Detail does not repeat it.
+// A pull_request warning also carries the pull request's Number and when
+// Aether last observed it.
 type CloseWarning struct {
 	Kind       string   `json:"kind"`
 	Detail     string   `json:"detail"`
@@ -39,6 +41,8 @@ type CloseWarning struct {
 	Count      int      `json:"count,omitempty"`
 	RunIDs     []string `json:"run_ids,omitempty"`
 	Subsession string   `json:"subsession,omitempty"`
+	Number     int      `json:"number,omitempty"`
+	ObservedAt string   `json:"observed_at,omitempty"`
 }
 
 type RunCloseCheckResult struct {

@@ -167,7 +167,7 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	}{
 		{quiet, "", nil},
 		{protected, "", []protocol.CloseWarning{{Kind: "protected", Detail: "Protected: only its owner or an admin can steer, message or close it"}}},
-		{openPR, "", []protocol.CloseWarning{{Kind: "pull_request", Detail: "Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z", URL: "https://github.com/acme/api/pull/7"}}},
+		{openPR, "", []protocol.CloseWarning{{Kind: "pull_request", Detail: "Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z", URL: "https://github.com/acme/api/pull/7", Number: 7, ObservedAt: "2026-11-03T18:20:00Z"}}},
 		{unmerged, "", []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-unmerged may not be merged: no pull request recorded for it merged after its last commit"}}},
 		{unmerged, "merged", nil},
 		{stale, "", []protocol.CloseWarning{{Kind: "unmerged_work", Detail: "Commits on aether/run-stale-merge may not be merged: no pull request recorded for it merged after its last commit"}}},
@@ -183,11 +183,11 @@ func TestRunCloseCheckKinds(t *testing.T) {
 		{lead, "", []protocol.CloseWarning{
 			{Kind: "subsessions", Count: 3, RunIDs: []string{string(worker.ID), string(queued.RunID), string(helper.ID)},
 				Detail: "3 subsessions close with it: " + string(worker.ID) + " (worker), " + string(queued.RunID) + " (queued), " + string(helper.ID) + " (helper)"},
-			{Kind: "pull_request", Subsession: string(worker.ID), URL: "https://github.com/acme/api/pull/11",
+			{Kind: "pull_request", Subsession: string(worker.ID), URL: "https://github.com/acme/api/pull/11", Number: 11, ObservedAt: "2026-11-03T18:20:00Z",
 				Detail: "Pull request acme/api#11 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z"},
 			{Kind: "awaited", Subsession: string(worker.ID), RunIDs: []string{string(watcher.ID)},
 				Detail: "Waiting for it to finish: " + string(watcher.ID) + " (watcher)"},
-			{Kind: "pull_request", Subsession: string(helper.ID), URL: "https://github.com/acme/api/pull/12",
+			{Kind: "pull_request", Subsession: string(helper.ID), URL: "https://github.com/acme/api/pull/12", Number: 12, ObservedAt: "2026-11-03T18:20:00Z",
 				Detail: "Pull request acme/api#12 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z"},
 		}},
 		{retained, "", []protocol.CloseWarning{{Kind: "cleanup_pending", Detail: "Cleanup of its container and checkout is still pending"}}},

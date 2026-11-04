@@ -39,7 +39,7 @@ export function useCloseCheck(runID: string | null, outcome?: CloseOutcome): Run
   return check
 }
 
-const order: CloseWarningKind[] = ['pull_request', 'unmerged_work', 'awaited', 'subsessions', 'messages', 'cleanup_pending', 'protected']
+const order: CloseWarningKind[] = ['pull_request', 'unmerged_work', 'messages', 'awaited', 'subsessions', 'cleanup_pending', 'protected']
 
 const icons: Record<CloseWarningKind, typeof Lock> = {
   pull_request: GitPullRequest,
@@ -67,17 +67,43 @@ export function CloseWarnings({ check, run, onLeave, className }: { check: RunCl
       {check.error && <p role="alert" className="break-words text-state-failed">Could not check what closing affects: {check.error.message}</p>}
       {listed.length > 0 && (
         <ul aria-label="What closing affects" className="flex flex-col gap-1.5">
-          {listed.map((warning) => (
-            <Line key={warning.kind + (warning.url ?? '')} warning={warning}>
-              {warning.kind === 'subsessions'
-                ? <Subsessions ids={warning.run_ids ?? []} warnings={check.warnings} onLeave={onLeave} />
-                : <Explain warning={warning} run={run} onLeave={onLeave} />}
-            </Line>
-          ))}
+          <Lines warnings={listed} run={run} onLeave={onLeave} all={check.warnings} />
         </ul>
       )}
       <RunRetention run={run} />
     </div>
+  )
+}
+
+/** Several pull requests of one session read as one line of numbers. */
+function Lines({ warnings, run, onLeave, all }: { warnings: CloseWarning[]; run: Run | undefined; onLeave: () => void; all: CloseWarning[] }) {
+  const prs = warnings.filter((warning) => warning.kind === 'pull_request' && warning.number && warning.url)
+  return warnings.map((warning) => {
+    if (prs.length > 1 && prs.includes(warning)) {
+      return warning === prs[0] ? <Line key="pull_requests" warning={warning}><PullRequests prs={prs} /></Line> : null
+    }
+    return (
+      <Line key={warning.kind + (warning.url ?? '')} warning={warning}>
+        {warning.kind === 'subsessions'
+          ? <Subsessions ids={warning.run_ids ?? []} warnings={all} onLeave={onLeave} />
+          : <Explain warning={warning} run={run} onLeave={onLeave} />}
+      </Line>
+    )
+  })
+}
+
+function PullRequests({ prs }: { prs: CloseWarning[] }) {
+  const oldest = prs.map((pr) => pr.observed_at).filter((at) => at !== undefined).sort()[0]
+  return (
+    <>
+      {prs.length} pull requests not merged when Aether last checked{oldest && <> (<RelativeTime at={oldest} />)</>}:{' '}
+      {prs.map((pr, i) => (
+        <span key={pr.url}>
+          {i > 0 && ' '}
+          <a href={pr.url} target="_blank" rel="noreferrer" className="whitespace-nowrap text-accent hover:underline">#{pr.number}</a>
+        </span>
+      ))}
+    </>
   )
 }
 
@@ -101,14 +127,10 @@ function Subsessions({ ids, warnings, onLeave }: { ids: string[]; warnings: Clos
           const own = warnings.filter((warning) => warning.subsession === id).sort(byRisk)
           return (
             <li key={id}>
-              <Runs ids={[id]} onLeave={onLeave} />
+              <span className="font-medium text-text">{runs[id] ? runLabel(runs[id]) : id}</span>
               {own.length > 0 && (
                 <ul className="mt-1 flex flex-col gap-1 pl-3">
-                  {own.map((warning) => (
-                    <Line key={warning.kind + (warning.url ?? '')} warning={warning}>
-                      <Explain warning={warning} run={runs[id]} onLeave={onLeave} />
-                    </Line>
-                  ))}
+                  <Lines warnings={own} run={runs[id]} onLeave={onLeave} all={warnings} />
                 </ul>
               )}
             </li>

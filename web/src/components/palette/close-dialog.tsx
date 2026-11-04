@@ -61,14 +61,11 @@ export function CloseDialog() {
 
   const pending = late ? stillWaiting : 'Closing…'
   const warned = closeWarned(check)
-  // With warnings no close looks like the safe default: the one that loses
-  // work is danger, the other secondary.
-  const risky: Outcome = check?.warnings.some((w) => w.kind === 'pull_request' || w.kind === 'unmerged_work') ? 'abandoned' : 'merged'
-  const variant = (outcome: Outcome) => (warned ? (outcome === risky ? 'danger' : 'secondary') : outcome === 'merged' ? 'primary' : 'secondary')
-  const label = (outcome: Outcome, plain: string) => {
+  const variant = (outcome: Outcome) => (outcome === 'abandoned' ? (warned ? 'danger' : 'secondary') : warned ? 'secondary' : 'primary')
+  const label = (outcome: Outcome) => {
     if (closing === outcome) return pending
     if (!check) return 'Checking…'
-    return warned ? `Close as ${outcome}` : plain
+    return `Close as ${outcome}`
   }
 
   return (
@@ -97,17 +94,17 @@ export function CloseDialog() {
             </p>
           )}
         </div>
-        <DialogFooter className="border-t px-3 py-3 sm:flex-wrap sm:px-4">
+        <DialogFooter className="flex-col border-t px-3 py-3 sm:flex-row sm:flex-wrap sm:px-4">
           <Button ref={cancel} variant="secondary" className={focusRingShown} onClick={close}>
             Cancel
           </Button>
           <Button variant={variant('abandoned')} disabled={closing !== null || !check} onClick={() => void finish('abandoned')}>
             <Archive aria-hidden />
-            {label('abandoned', 'Abandoned')}
+            {label('abandoned')}
           </Button>
           <Button variant={variant('merged')} disabled={closing !== null || !check} onClick={() => void finish('merged')}>
             <GitMerge aria-hidden />
-            {label('merged', 'Merged')}
+            {label('merged')}
           </Button>
         </DialogFooter>
       </DialogContent>
