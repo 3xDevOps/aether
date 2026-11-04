@@ -198,12 +198,18 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
 
 const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const quietDefault = () => ({ start: '22:00', end: '07:00', tz: browserZone() })
+const zones = () => Intl.supportedValuesOf('timeZone')
 
-const levels: { level: NotifyLevel; label: string; help: string }[] = [
-  { level: 'blockers', label: 'Only what blocks me', help: 'Sessions that need you at once; finished, failed, merged and checks in one daily digest.' },
-  { level: 'batched', label: 'Blockers now, the rest batched', help: 'Sessions that need you at once; the rest in a digest every 30 minutes.' },
-  { level: 'all', label: 'Everything as it happens', help: 'Every notification at once.' },
-]
+const later = 'finished, failed, stopped, merged, checks, reviews and closed pull requests'
+
+/** What each level pushes at once and when the rest arrives; at is the saved daily digest time. */
+function levels(at: string): { level: NotifyLevel; label: string; help: string }[] {
+  return [
+    { level: 'blockers', label: 'Blockers now, the rest daily', help: `Needs you at once, except during quiet hours; ${later} in one digest daily at ${at}.` },
+    { level: 'batched', label: 'Blockers now, the rest every half hour', help: `Needs you at once, except during quiet hours; ${later} in a digest on each half hour.` },
+    { level: 'all', label: 'Everything at once', help: 'Every push as it happens, except during quiet hours.' },
+  ]
+}
 
 type Row = 'watch-push' | 'level' | 'quiet-hours'
 
@@ -213,9 +219,9 @@ function destinations(prefs: NotifyPrefs, unavailable: string | null): string {
   const push = !prefs.push
     ? 'Push is off'
     : unavailable
-      ? `No push (${unavailable}), so in-app only`
+      ? `No push (${unavailable})`
       : devices === 0
-        ? 'No push device subscribed, so in-app only'
+        ? 'No push device subscribed'
         : `Push to ${devices} ${devices === 1 ? 'device' : 'devices'}`
   const desktop = desktopBridge() ? 'this desktop app while it is open' : 'the desktop app while it is open'
   return `${push} · ${desktop} · in-app on every dashboard.`
@@ -272,32 +278,53 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
   const held = prefs?.quiet_hours
   const edited = held && (held.start !== quiet.start || held.end !== quiet.end || held.tz !== quiet.tz)
   const level = prefs?.level ?? 'batched'
-  // The daily digest follows this browser's zone, which is saved with it.
-  const digest = { at: digestAt, tz: browserZone() }
-  const digestEdited = prefs?.digest && (prefs.digest.at !== digest.at || prefs.digest.tz !== digest.tz)
+  const savedDigest = prefs?.digest ?? { at: '09:00', tz: '' }
+  const savedZone = savedDigest.tz || 'UTC'
+  const here = browserZone()
   return (
     <SettingsSection title="When to notify" scope="Your account">
       <SettingRow
         id="level"
-        label="How often"
-        help={levels.find((l) => l.level === level)?.help}
+        label={<span id="settings-level-label">How often</span>}
+        help={(
+          <>
+            <Guide page="failure-handling" to="needs-you">Needs you</Guide> is what waits on you: a question, a permission, a blocked or failed session.
+            {prefs?.destinations.push_devices === 0 && ' No device receives pushes yet, so this applies once one does.'}
+          </>
+        )}
       >
-        <RadioGroup aria-label="How often" value={level} disabled={busy || !prefs} onValueChange={(next) => prefs && save({ level: next as NotifyLevel, quiet_hours: prefs.quiet_hours }, 'level')}>
-          {levels.map((l) => (
-            <label key={l.level} className="flex min-h-8 min-w-0 cursor-pointer items-center gap-2 text-ui text-text coarse:min-h-11">
-              <Radio value={l.level} />
-              <span className="min-w-0 break-words">{l.label}</span>
+        <RadioGroup
+          aria-labelledby="settings-level-label"
+          value={level}
+          disabled={busy || !prefs}
+          onValueChange={(next) => prefs && save({ level: next as NotifyLevel, quiet_hours: prefs.quiet_hours }, 'level')}
+        >
+          {levels(savedDigest.at).map((l) => (
+            <label key={l.level} className="flex min-w-0 cursor-pointer items-start gap-2 py-1 coarse:min-h-11">
+              <Radio value={l.level} aria-labelledby={`settings-level-${l.level}-label`} aria-describedby={`settings-level-${l.level}`} className="mt-0.5" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span id={`settings-level-${l.level}-label`} className="text-ui text-text">{l.label}{l.level === 'batched' && <span className="text-muted"> (default)</span>}</span>
+                <span id={`settings-level-${l.level}`} className="text-ui-sm text-muted">{l.help}</span>
+              </span>
             </label>
           ))}
         </RadioGroup>
         {level === 'blockers' && (
           <div className="flex min-w-0 flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-ui-sm text-muted">
-              Daily digest at
+              Daily digest at ({savedZone})
               <Input type="time" required value={digestAt} disabled={busy} className="w-28" onChange={(event) => setDigestAt(event.target.value)} />
             </label>
-            <p className="text-ui-sm text-muted">{digest.tz}</p>
-            {digestEdited && <Button size="sm" variant="secondary" disabled={busy || !digestAt} onClick={() => prefs && save({ digest, quiet_hours: prefs.quiet_hours }, 'level')}>Save</Button>}
+            {digestAt !== savedDigest.at && (
+              <Button size="sm" variant="secondary" disabled={busy || !digestAt} onClick={() => prefs && save({ digest: { at: digestAt, tz: savedDigest.tz }, quiet_hours: prefs.quiet_hours }, 'level')}>
+                Save digest time
+              </Button>
+            )}
+            {here !== savedZone && (
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => prefs && save({ digest: { at: savedDigest.at, tz: here }, quiet_hours: prefs.quiet_hours }, 'level')}>
+                Use this browser’s zone ({here})
+              </Button>
+            )}
           </div>
         )}
         {error?.row === 'level' && <Callout tone="failed" role="alert">{error.text}</Callout>}
@@ -316,7 +343,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
         id="quiet-hours"
         label="Quiet hours"
         labelFor="settings-quiet-hours"
-        help="Pushes wait until quiet hours end, then arrive in one digest that leads with them. In-app notices and the desktop app are not held."
+        help="Every push waits, Needs you included, then arrives in one digest when they end. In-app notices and the desktop app are not held."
         control={(
           <Checkbox
             id="settings-quiet-hours"
@@ -327,7 +354,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
         )}
       >
         {held && (
-          <div className="flex min-w-0 flex-wrap items-end gap-3">
+          <div className="flex min-w-0 flex-wrap items-start gap-3">
             <label className="flex flex-col gap-1 text-ui-sm text-muted">
               From
               <Input type="time" required value={quiet.start} disabled={busy} className="w-28" onChange={(event) => setQuiet({ ...quiet, start: event.target.value })} />
@@ -336,14 +363,33 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
               Until
               <Input type="time" required value={quiet.end} disabled={busy} className="w-28" onChange={(event) => setQuiet({ ...quiet, end: event.target.value })} />
             </label>
-            <label className="flex min-w-0 flex-col gap-1 text-ui-sm text-muted">
-              Time zone
-              <Input value={quiet.tz} disabled={busy} className="w-52 max-w-full" spellCheck={false} onChange={(event) => setQuiet({ ...quiet, tz: event.target.value })} />
-            </label>
-            {edited && <Button size="sm" variant="secondary" disabled={busy || !quiet.start || !quiet.end || !quiet.tz.trim()} onClick={() => prefs && save({ quiet_hours: { ...quiet, tz: quiet.tz.trim() } }, 'quiet-hours')}>Save</Button>}
+            <div className="flex min-w-0 flex-col gap-1 text-ui-sm text-muted">
+              <label className="flex min-w-0 flex-col gap-1">
+                Time zone
+                <Input
+                  value={quiet.tz}
+                  disabled={busy}
+                  className="w-52 max-w-full"
+                  spellCheck={false}
+                  list="settings-quiet-zones"
+                  aria-invalid={error?.row === 'quiet-hours' || undefined}
+                  aria-describedby={error?.row === 'quiet-hours' ? 'settings-quiet-error' : 'settings-quiet-zone-help'}
+                  onChange={(event) => setQuiet({ ...quiet, tz: event.target.value })}
+                />
+              </label>
+              <span id="settings-quiet-zone-help">An IANA zone, such as Europe/Berlin.</span>
+              <datalist id="settings-quiet-zones">
+                {zones().map((zone) => <option key={zone} value={zone} />)}
+              </datalist>
+            </div>
+            {edited && (
+              <div className="basis-full">
+                <Button size="sm" variant="secondary" disabled={busy || !quiet.start || !quiet.end || !quiet.tz.trim()} onClick={() => prefs && save({ quiet_hours: { ...quiet, tz: quiet.tz.trim() } }, 'quiet-hours')}>Save quiet hours</Button>
+              </div>
+            )}
           </div>
         )}
-        {error?.row === 'quiet-hours' && <Callout tone="failed" role="alert">{error.text}</Callout>}
+        {error?.row === 'quiet-hours' && <Callout id="settings-quiet-error" tone="failed" role="alert">{error.text}</Callout>}
       </SettingRow>
     </SettingsSection>
   )

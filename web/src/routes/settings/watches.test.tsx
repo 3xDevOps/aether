@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { WatchDialog } from '@/components/palette/watch-dialog'
-import type { Event, Watch, WatchDelivery, WatchNotification } from '@/lib/types'
+import type { Event, Watch, WatchDelivery, WatchNotification, NotifyPrefs, NotifyPrefsSetParams } from '@/lib/types'
 import { ApiError, codeNotFound, codeUnavailable } from '@/lib/api'
 import { SettingsRoute } from '@/routes/settings'
 import { WatchNotifySection } from '@/routes/settings/notifications'
@@ -459,14 +459,14 @@ describe('watch notification preferences', () => {
     expect(await screen.findByText(/Push is off/)).toBeDefined()
   })
 
-  it('says in-app only with no push device, and quiet hours default to this browser’s time zone', async () => {
+  it('says when no push device is subscribed, and quiet hours default to this browser’s time zone', async () => {
     const user = userEvent.setup()
     const client = fakeApi({
       notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 0 } })),
       notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, level: prefs.level ?? 'batched', digest: prefs.digest ?? { at: '09:00', tz: '' }, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
     })
     render(<WatchNotifySection client={client} />)
-    expect(await screen.findByText(/No push device subscribed, so in-app only/)).toBeDefined()
+    expect(await screen.findByText(/No push device subscribed · the desktop app/)).toBeDefined()
     await user.click(screen.getByRole('checkbox', { name: 'Quiet hours' }))
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
     expect(client.notifyPrefsSet).toHaveBeenCalledWith({ quiet_hours: { start: '22:00', end: '07:00', tz: zone } })
@@ -481,29 +481,36 @@ describe('watch notification preferences', () => {
       pushStatus: vi.fn(async () => { throw new ApiError(503, 'push service not configured', codeUnavailable) }),
     })
     render(<WatchNotifySection client={client} />)
-    expect(await screen.findByText(/No push \(push service not configured\), so in-app only/)).toBeDefined()
+    expect(await screen.findByText(/No push \(push service not configured\) · the desktop app/)).toBeDefined()
     await user.click(screen.getByRole('checkbox', { name: 'Quiet hours' }))
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('unknown time zone')
     expect(alert.closest('#quiet-hours')).not.toBeNull()
   })
 
-  it('saves the level, and the daily digest time in this browser’s zone, keeping quiet hours', async () => {
+  it('describes every level, and saves the level and the digest time in the saved zone, keeping quiet hours', async () => {
     const user = userEvent.setup()
     const quiet = { start: '22:00', end: '07:00', tz: 'Europe/Berlin' }
+    let saved: NotifyPrefs = { push: true, level: 'batched', digest: { at: '09:00', tz: 'Pacific/Auckland' }, quiet_hours: quiet, destinations: { push_devices: 0 } }
     const client = fakeApi({
-      notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, quiet_hours: quiet, destinations: { push_devices: 1 } })),
+      notifyPrefsGet: vi.fn(async () => saved),
+      notifyPrefsSet: vi.fn(async (p: NotifyPrefsSetParams) => (saved = { ...saved, level: p.level ?? saved.level, digest: p.digest ?? saved.digest, quiet_hours: p.quiet_hours })),
     })
     render(<WatchNotifySection client={client} />)
-    expect(await screen.findByText(/the rest in a digest every 30 minutes/)).toBeDefined()
-    await user.click(screen.getByRole('radio', { name: 'Only what blocks me' }))
+    expect(await screen.findByRole('radio', { name: /^Blockers now, the rest every half hour.*\(default\)$/ })).toBeDefined()
+    expect(screen.getByText(/in one digest daily at 09:00/)).toBeDefined()
+    expect(screen.getByText(/in a digest on each half hour/)).toBeDefined()
+    expect(screen.getByText(/No device receives pushes yet, so this applies once one does/)).toBeDefined()
+    await user.click(screen.getByRole('radio', { name: 'Blockers now, the rest daily' }))
     // notify.prefs.set turns quiet hours off when they are left out.
     expect(client.notifyPrefsSet).toHaveBeenCalledWith({ level: 'blockers', quiet_hours: quiet })
-    const time = await screen.findByLabelText('Daily digest at')
+    const time = await screen.findByLabelText('Daily digest at (Pacific/Auckland)')
     await user.clear(time)
     await user.type(time, '08:30')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Save digest time' }))
+    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: 'Pacific/Auckland' }, quiet_hours: quiet })
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    await user.click(screen.getByRole('button', { name: `Use this browser’s zone (${zone})` }))
     expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: zone }, quiet_hours: quiet })
   })
 

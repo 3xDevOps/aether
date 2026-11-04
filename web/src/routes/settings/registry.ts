@@ -28,7 +28,7 @@ export const categories: Category[] = [
   { id: 'general', group: 'You', title: 'General', purpose: 'How this dashboard looks and responds, and who you are on this server.', Icon: Settings },
   { id: 'launch', group: 'You', title: 'Launch', purpose: 'The agent, mode, model, account and fallback your launches start from, on every device.', Icon: Rocket },
   { id: 'connections', group: 'You', title: 'Connections', purpose: 'Services Aether works with on your behalf.', Icon: Cable },
-  { id: 'notifications', group: 'You', title: 'Notifications', purpose: 'Where Aether reaches you when a session needs you.', Icon: Bell },
+  { id: 'notifications', group: 'You', title: 'Notifications', purpose: 'Where and how often Aether pushes to you.', Icon: Bell },
   { id: 'watches', group: 'You', title: 'Watches', purpose: 'Sessions and pull requests the server watches for you, and what it told you.', Icon: Eye },
   { id: 'memory', group: 'You', title: 'Memory', purpose: 'Private preferences the assistant uses.', Icon: Brain },
   { id: 'assistant', group: 'You', title: 'Assistant', purpose: 'What the built-in assistant may do without asking.', Icon: Sparkles },
