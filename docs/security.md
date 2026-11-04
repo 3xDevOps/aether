@@ -29,7 +29,7 @@ credentials out of the report.
 | [Account sharing](#account-sharing) | A recipient's session gets your agent login, not your home. | The recipient's session can copy, overwrite or log out your login. Revoking does not stop running sessions. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Sessions sign through an agent and cannot copy the key. | Any of your sessions can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every session of the workspace reads them, and anyone who can launch or message a session can make it print one. |
-| [Assistant](#the-assistant) | Its own container, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
+| [Assistant](#the-assistant) | Its own container, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click, and an approval rule removes it for one kind of action. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the session. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the session can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Dashboard gateways](#the-dashboard-gateways) | `aether gui` listens on loopback with a per-process token. The server's dashboard is tailnet-only HTTPS with per-request identity. | Any process on the server host that connects to the host's own tailnet address is served as the node's owner. |
@@ -425,10 +425,22 @@ permissions, and it uses the account you signed it in to.
   skips the card for your own sessions. Messaging or stopping another member's session
   always asks. The assistant cannot turn auto-approve on or approve a card
   itself.
+- An [approval rule](assistant.md#approval-rules) skips the card for one
+  kind of action: launches of one agent, mode, model and permission tier in
+  one workspace on one account, messages or stops of your own sessions in one
+  workspace, or saving your environment. The server builds the rule from the
+  card's typed parameters, never from text the assistant or a session wrote,
+  and checks it on every call. Only your click on a card creates one;
+  `assistant.rules` and `assistant.rules.revoke` refuse the assistant's own
+  calls and connectors, and its tool socket serves none of them. A rule does
+  not limit the task or message: a steered assistant can launch any task
+  with the agent a rule covers, or send any message to your own sessions in
+  its workspace. Rules never expire; revoke one you no longer use.
 - Its shell and file tools never ask, inside its own container.
-- Transcripts it reads can carry injected instructions. With auto-approve off,
-  a steered assistant still needs your click. With it on, a steered assistant
-  can launch, message and stop your sessions.
+- Transcripts it reads can carry injected instructions. With auto-approve off
+  and no rules, a steered assistant still needs your click. With it on, a
+  steered assistant can launch, message and stop your sessions; with a rule,
+  it can do what the rule covers.
 
 Every write call the assistant makes, such as a launch, message, pause or stop,
 is recorded in the [audit history](connectors.md#audit-history) as `assistant`.

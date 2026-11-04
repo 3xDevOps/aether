@@ -34,6 +34,9 @@ var (
 type pendingConfirmation struct {
 	protocol.AssistantConfirmation
 	answer chan error
+	// answered is set, under the registry's lock, by the first answer: the
+	// waiting call may already have taken it, emptying the channel.
+	answered bool
 }
 
 // confirmations holds one member's pending confirmations. changed runs after
@@ -92,7 +95,7 @@ func (r *confirmations) decide(id string, approve bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, p := range r.pending {
-		if p.ID != id {
+		if p.ID != id || p.answered {
 			continue
 		}
 		var answer error
@@ -101,6 +104,7 @@ func (r *confirmations) decide(id string, approve bool) error {
 		}
 		select {
 		case p.answer <- answer:
+			p.answered = true
 			return nil
 		default:
 		}
@@ -112,8 +116,12 @@ func (r *confirmations) cancelAll() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, p := range r.pending {
+		if p.answered {
+			continue
+		}
 		select {
 		case p.answer <- errSessionEnded:
+			p.answered = true
 		default:
 		}
 	}
@@ -148,20 +156,25 @@ func autoApprovable(c protocol.AssistantConfirmation) bool {
 }
 
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
-	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView,
+	suggest := !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && st.RuleStreak < suggestAfter && !time.Now().Before(st.SnoozedUntil)
+	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: suggest, SuggestionOff: st.NoSuggest, ShareView: st.ShareView,
 		PreferencesEnabled: st.PreferencesEnabled}
 }
 
-// approver passes a confirmed call at once when the member turned
-// auto-approval on and the call is one it covers, or else when they approve
-// its card. The setting is read from the store on every call, so a change
-// applies to the live session. A passed call is in the transcript before it
+// approver passes a confirmed call at once when one of the member's
+// approval rules covers it, or they turned auto-approval on and the call is
+// one it covers, or else when they approve its card. Rules and the setting
+// are read from the store on every call, so a change applies to the live
+// session. A passed call is in the transcript before it
 // runs; one that cannot be recorded does not run. A call that does not pass
 // is recorded with its outcome, in the conversation it was asked in.
 func (s *Service) approver(m *member) func(context.Context, protocol.AssistantConfirmation) error {
 	return func(ctx context.Context, c protocol.AssistantConfirmation) error {
 		conv := m.conversation()
-		passed, err := s.autoApprove(ctx, conv, m, c)
+		passed, err := s.approveByRule(ctx, conv, m, &c)
+		if !passed && err == nil {
+			passed, err = s.autoApprove(ctx, conv, m, c)
+		}
 		if passed {
 			return nil
 		}
@@ -210,8 +223,9 @@ func refusal(err error) string {
 }
 
 // countApproval counts a card auto-approval would have passed toward the
-// suggestion to turn it on; a decline, timeout or withdrawal of any card
-// starts the count over.
+// suggestion to turn it on, and the cards of one rule key in a row toward
+// highlighting that rule instead; a decline, timeout or withdrawal of any
+// card starts both counts over.
 func (s *Service) countApproval(ctx context.Context, m *member, c protocol.AssistantConfirmation, approved bool) error {
 	if approved && !autoApprovable(c) {
 		return nil
@@ -222,13 +236,34 @@ func (s *Service) countApproval(ctx context.Context, m *member, c protocol.Assis
 	if err != nil {
 		return err
 	}
+	key := ruleStreakKey(c.Rule)
+	// ApproveAlways saves the card's rule and starts the counts over; this
+	// count may run after it, and must not count the card again.
+	var saved bool
+	if approved && key != "" {
+		rules, rerr := s.cfg.Store.AssistantRules(ctx, m.id)
+		if rerr != nil {
+			return rerr
+		}
+		saved = slices.ContainsFunc(rules, func(r store.AssistantRule) bool { return r.Key == store.AssistantRuleKey(c.Rule.Key) })
+	}
 	switch {
+	case saved:
+		st.Approvals, st.RuleStreakKey, st.RuleStreak = 0, "", 0
 	case approved:
 		st.Approvals++
-	case st.Approvals == 0:
+		switch key {
+		case "":
+			st.RuleStreakKey, st.RuleStreak = "", 0
+		case st.RuleStreakKey:
+			st.RuleStreak++
+		default:
+			st.RuleStreakKey, st.RuleStreak = key, 1
+		}
+	case st.Approvals == 0 && st.RuleStreak == 0:
 		return nil
 	default:
-		st.Approvals = 0
+		st.Approvals, st.RuleStreakKey, st.RuleStreak = 0, "", 0
 	}
 	if err = s.cfg.Store.PutAssistantSettings(ctx, m.id, st); err != nil {
 		return err
@@ -369,6 +404,9 @@ func (s *Service) noteAction(ctx, conv context.Context, m *member, a protocol.As
 		severity = "error"
 	case protocol.AssistantActionExpired:
 		severity = "warning"
+	}
+	if a.RuleID != "" {
+		verb += " by rule " + a.RuleID
 	}
 	return s.noteIn(ctx, conv, m, acphost.Notice{Severity: severity, Title: verb + ": " + a.Summary, Description: body, Action: &a})
 }
