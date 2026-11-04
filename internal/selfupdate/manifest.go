@@ -331,8 +331,8 @@ func Transient(err error) bool {
 	return errors.As(err, &netErr)
 }
 
-// retryDelays are the waits between download attempts; their count plus
-// one is the number of attempts.
+// retryDelays are the waits between attempts at a download or a rollback;
+// their count plus one is the number of attempts.
 var retryDelays = []time.Duration{time.Second, 4 * time.Second}
 
 // retry runs try until it succeeds, reports an error not worth retrying,
