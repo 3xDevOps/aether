@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,11 +64,14 @@ type sidecar struct {
 	containers Containers
 	memory     func() (uint64, error)
 
-	mu       sync.Mutex
-	id       containerruntime.ID
-	timer    *time.Timer
-	inflight int
-	closed   bool
+	mu        sync.Mutex
+	id        containerruntime.ID
+	startedAt time.Time
+	ready     bool
+	output    *tailBuffer
+	timer     *time.Timer
+	inflight  int
+	closed    bool
 }
 
 // NewEngine runs the install in dir in containers.
@@ -81,6 +85,8 @@ func NewEngine(dir string, containers Containers) (Transcriber, error) {
 
 func (s *sidecar) socket() string { return filepath.Join(s.dir, "sock", "engine.sock") }
 
+// Transcribe leaves the engine running when only the request ended, such
+// as a client that gave up while the model loaded: the next clip uses it.
 func (s *sidecar) Transcribe(ctx context.Context, pcm []byte) (string, error) {
 	s.mu.Lock()
 	if s.closed {
@@ -92,6 +98,7 @@ func (s *sidecar) Transcribe(ctx context.Context, pcm []byte) (string, error) {
 	}
 	id, err := s.running(ctx)
 	if err != nil {
+		s.armIdle()
 		s.mu.Unlock()
 		return "", err
 	}
@@ -101,29 +108,43 @@ func (s *sidecar) Transcribe(ctx context.Context, pcm []byte) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inflight--
-	if err != nil {
+	switch {
+	case err != nil && ctx.Err() != nil:
+		err = unavailable("dictation request ended: " + ctx.Err().Error())
+	case err != nil:
 		err = s.failure(id, "dictation engine: "+err.Error())
 		s.stop(id)
-		return "", err
 	}
-	if s.id == id {
-		s.timer = time.AfterFunc(idleStop, func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if s.inflight == 0 {
-				s.stop(id)
-			}
-		})
-	}
-	return text, nil
+	s.armIdle()
+	return text, err
 }
 
-// running returns the live engine container, starting one if there is
-// none. Callers hold s.mu.
+// armIdle removes the live engine after idleStop without a request.
+// Callers hold s.mu.
+func (s *sidecar) armIdle() {
+	id := s.id
+	if id == "" {
+		return
+	}
+	s.timer = time.AfterFunc(idleStop, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.inflight == 0 {
+			s.stop(id)
+		}
+	})
+}
+
+// running returns the live engine container once it accepts clips,
+// starting one if there is none. Callers hold s.mu.
 func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
 	if s.id != "" {
-		if st, err := s.containers.DictationState(ctx, s.id); err == nil && st.Running {
+		st, err := s.containers.DictationState(ctx, s.id)
+		switch {
+		case err == nil && st.Running && s.ready:
 			return s.id, nil
+		case err == nil && st.Running:
+			return s.id, s.awaitReady(ctx)
 		}
 		s.stop(s.id)
 	}
@@ -142,6 +163,7 @@ func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
 	if err != nil {
 		return "", unavailable("prepare the dictation engine's socket directory: " + err.Error())
 	}
+	output := &tailBuffer{}
 	entrypoint := []string{wrapperTarget, "dictation", "engine", socketDir + "/engine.sock", strconv.Itoa(enginePort), "--"}
 	id, err := s.containers.StartDictation(ctx, containerruntime.DictationSpec{
 		Image:      m.Image,
@@ -156,16 +178,13 @@ func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
 		CPUs:        float64(threads()),
 		MemoryBytes: memoryLimit,
 		GPU:         m.Provider == "cuda",
+		Output:      output,
 	})
 	if err != nil {
 		return "", unavailable("start the dictation engine: " + err.Error())
 	}
-	s.id = id
-	if err := s.awaitReady(ctx, id); err != nil {
-		s.stop(id)
-		return "", err
-	}
-	return id, nil
+	s.id, s.startedAt, s.ready, s.output = id, time.Now(), false, output
+	return id, s.awaitReady(ctx)
 }
 
 // prepareSocket makes the directory the engine creates its socket in,
@@ -188,14 +207,16 @@ func (s *sidecar) prepareSocket() (string, error) {
 	return fmt.Sprintf("%d:%d", uid, gid), nil
 }
 
-// awaitReady waits for the engine's socket, which appears once the model
-// has loaded.
-func (s *sidecar) awaitReady(ctx context.Context, id containerruntime.ID) error {
-	ctx, cancel := context.WithTimeout(ctx, startTimeout)
-	defer cancel()
+// awaitReady waits for the live engine's socket, which appears once the
+// model has loaded. An engine that exits, or is not ready startTimeout
+// after it started, is removed; a request that ends first leaves it
+// loading for the next. Callers hold s.mu.
+func (s *sidecar) awaitReady(ctx context.Context) error {
+	id := s.id
 	for {
 		if c, err := net.Dial("unix", s.socket()); err == nil {
 			_ = c.Close()
+			s.ready = true
 			return nil
 		}
 		st, err := s.containers.DictationState(ctx, id)
@@ -203,11 +224,17 @@ func (s *sidecar) awaitReady(ctx context.Context, id containerruntime.ID) error 
 			return unavailable("dictation engine: " + err.Error())
 		}
 		if !st.Running {
-			return exited(st)
+			err = s.exited(st)
+			s.stop(id)
+			return err
+		}
+		if time.Since(s.startedAt) > startTimeout {
+			s.stop(id)
+			return unavailable(fmt.Sprintf("the dictation engine did not start within %s", startTimeout))
 		}
 		select {
 		case <-ctx.Done():
-			return unavailable(fmt.Sprintf("the dictation engine did not start within %s: %v", startTimeout, ctx.Err()))
+			return unavailable("dictation request ended while the engine was starting: " + ctx.Err().Error())
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
@@ -219,16 +246,17 @@ func (s *sidecar) failure(id containerruntime.ID, msg string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if st, err := s.containers.DictationState(ctx, id); err == nil && !st.Running {
-		return exited(st)
+		return s.exited(st)
 	}
 	return unavailable(msg)
 }
 
-func exited(st containerruntime.DictationState) error {
+// exited reports how the live engine ended, with its last lines of output.
+func (s *sidecar) exited(st containerruntime.DictationState) error {
 	if st.OOMKilled {
 		return unavailable(fmt.Sprintf("the dictation engine was killed: out of memory (limit %.1f GiB)", gib(memoryLimit)))
 	}
-	return unavailable(fmt.Sprintf("the dictation engine exited with status %d\n%s", st.ExitCode, tail([]byte(st.Output))))
+	return unavailable(fmt.Sprintf("the dictation engine exited with status %d: %s", st.ExitCode, s.output.lastLines(3)))
 }
 
 // stop removes engine id if it is the live one. Callers hold s.mu. A
@@ -237,7 +265,7 @@ func (s *sidecar) stop(id containerruntime.ID) {
 	if s.id != id {
 		return
 	}
-	s.id = ""
+	s.id, s.ready = "", false
 	if s.timer != nil {
 		s.timer.Stop()
 	}
@@ -328,10 +356,25 @@ func talk(ctx context.Context, socket string, pcm []byte) (string, error) {
 
 func gib(b uint64) float64 { return float64(b) / (1 << 30) }
 
-func tail(b []byte) string {
-	b = bytes.TrimSpace(b)
-	if len(b) > outputTail {
-		b = b[len(b)-outputTail:]
+// tailBuffer keeps the last outputTail bytes the engine wrote.
+type tailBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - outputTail; over > 0 {
+		t.buf = append(t.buf[:0], t.buf[over:]...)
 	}
-	return string(b)
+	return len(p), nil
+}
+
+func (t *tailBuffer) lastLines(n int) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	lines := strings.Split(string(bytes.TrimSpace(t.buf)), "\n")
+	return strings.Join(lines[max(len(lines)-n, 0):], "\n")
 }

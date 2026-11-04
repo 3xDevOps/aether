@@ -518,8 +518,7 @@ record to your server, never to the publisher or another service. The clip
 lives only in the server's memory while it is transcribed: the server does not
 write it to disk, log it, put it in audit entries or error messages, or keep
 it after the request, and the speech-to-text engine runs on the server with
-its log file set to `/dev/null`. Docker keeps the engine's own output, which
-holds no audio or text. The server does not keep the transcript
+its log file set to `/dev/null` and no Docker logs. The server does not keep the transcript
 either; it returns to your browser, which puts it in the box you were typing
 in. Nothing is stored that you would need to delete.
 

@@ -9,6 +9,8 @@ const (
 	SampleRate   = 16000
 	MaxSeconds   = 120
 	MaxDataBytes = SampleRate * 2 * MaxSeconds
+	// MaxWAVBytes leaves room for the header and small chunks such as LIST.
+	MaxWAVBytes = MaxDataBytes + 4<<10
 )
 
 const wantFormat = "dictation needs 16000 Hz mono PCM16 WAV"
@@ -16,6 +18,9 @@ const wantFormat = "dictation needs 16000 Hz mono PCM16 WAV"
 // ParseWAV returns the PCM16 samples of a RIFF WAV that is exactly the
 // format the engine takes, as a slice of b.
 func ParseWAV(b []byte) ([]byte, error) {
+	if len(b) > MaxWAVBytes {
+		return nil, fmt.Errorf("audio is %d bytes; dictation takes at most %d s, %d bytes", len(b), MaxSeconds, MaxWAVBytes)
+	}
 	if len(b) < 12 || string(b[0:4]) != "RIFF" || string(b[8:12]) != "WAVE" {
 		return nil, fmt.Errorf("audio is not a RIFF WAVE file; %s", wantFormat)
 	}

@@ -86,7 +86,9 @@ The first clip starts one container, `aether-dictation`, labelled
 `aether.managed=true` and `aether.dictation=true`. It is removed after 10
 minutes without a clip, when the server stops, and when a restarted server
 finds one left over; a clip after the engine died starts a new one. Loading
-the model takes a few seconds, so the first clip after a pause is slower.
+the model takes a few seconds, so the first clip after a pause is slower. A
+request that ends while the model loads, or while its clip is transcribed,
+leaves the engine running for the next clip.
 
 The engine listens on every interface and has no authentication, so its
 container has no network (`--network none`): its port exists only on the
@@ -114,7 +116,7 @@ Limits:
   The HTTP body cap for this method is 6 MiB.
 - The server transcribes one clip at a time. Four more may wait; each member
   has at most one transcribing or waiting. A clip has 3 minutes once its turn
-  comes.
+  comes, and `aether gui` waits 4 minutes for the answer.
 - `hints` holds at most 200 names, each 1 to 80 bytes: the dashboard sends
   workspace, repository and session names. After transcription, a run of one to
   four words is respelled as a hint only when its letters and digits,
@@ -130,7 +132,7 @@ Limits:
 | `-32004` | `dictation is not installed: /var/lib/aether/dictation/install.json is missing; run: sudo aether-server dictation install` | Install it. |
 | `-32004` | `not enough memory for dictation: the engine needs 2.0 GiB available and MemAvailable is 1.3 GiB` | Free memory, for example by closing sessions, and try again. |
 | `-32004` | `start the dictation engine: runtime: ...` | Docker refused the container; the message carries Docker's error. For `--gpu` without the NVIDIA Container Toolkit, Docker reports that it cannot select a device driver with the `gpu` capability. |
-| `-32004` | `the dictation engine exited with status N` | The engine failed; the message ends with the last 4 KiB of its output. A missing CUDA library shows here. |
+| `-32004` | `the dictation engine exited with status N: ...` | The engine failed; the message ends with the last 3 lines of its output. A missing CUDA library shows here. |
 | `-32004` | `the dictation engine was killed: out of memory (limit 2.5 GiB)` | The container hit its memory cap. |
 | `-32004` | `dictation is busy: 4 requests queued; try again` or `dictation is busy: you already have a dictation transcribing or queued` | Wait for the queue. |
 
@@ -139,8 +141,9 @@ Limits:
 The clip exists only in the server's memory while its request runs. The server
 never writes it to disk, logs it, records it in audit entries (which keep only
 ids) or puts it in an error message. The engine runs with
-`--log-file=/dev/null`; Docker keeps the engine's own output, its start-up
-lines and connection notices, which hold no audio or text. The server does not
+`--log-file=/dev/null` and its container with Docker's `none` log driver: the
+server keeps only the engine's last 4 KiB of output in memory, for the error
+it reports if the engine fails. The server does not
 keep the transcript either; it goes back to your browser, and from there
 wherever you put it, such as a task. See [privacy.md](privacy.md#dictation).
 

@@ -1,9 +1,9 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 
@@ -29,15 +29,16 @@ type DictationSpec struct {
 	CPUs        float64
 	MemoryBytes int64
 	GPU         bool
+	// Output receives the engine's stdout and stderr while it runs. Docker
+	// keeps none of it.
+	Output io.Writer
 }
 
-// DictationState is an engine container's state, and the tail of its
-// output once it has exited.
+// DictationState is an engine container's state.
 type DictationState struct {
 	Running   bool
 	ExitCode  int
 	OOMKilled bool
-	Output    string
 }
 
 // PullDictationImage pulls ref unless the daemon already has it.
@@ -87,7 +88,7 @@ func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, er
 		Resources: container.Resources{
 			NanoCPUs: nanoCPUs(spec.CPUs), Memory: spec.MemoryBytes, MemorySwap: spec.MemoryBytes, PidsLimit: &pids,
 		},
-		LogConfig: container.LogConfig{Type: "local", Config: map[string]string{"max-size": "1m", "max-file": "2"}},
+		LogConfig: container.LogConfig{Type: "none"},
 	}
 	if spec.GPU {
 		host.DeviceRequests = []container.DeviceRequest{{Count: -1, Capabilities: [][]string{{"gpu"}}}}
@@ -101,6 +102,15 @@ func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, er
 		return "", fmt.Errorf("runtime: create dictation engine container: %w", err)
 	}
 	id := ID(created.ID)
+	attached, err := d.cli.ContainerAttach(ctx, string(id), client.ContainerAttachOptions{Stream: true, Stdout: true, Stderr: true})
+	if err != nil {
+		_ = d.Destroy(context.WithoutCancel(ctx), id)
+		return "", fmt.Errorf("runtime: attach dictation engine container: %w", err)
+	}
+	go func() {
+		defer attached.Close()
+		_, _ = stdcopy.StdCopy(spec.Output, spec.Output, attached.Reader)
+	}()
 	if _, err := d.cli.ContainerStart(ctx, string(id), client.ContainerStartOptions{}); err != nil {
 		_ = d.Destroy(context.WithoutCancel(ctx), id)
 		return "", fmt.Errorf("runtime: start dictation engine container: %w", err)
@@ -118,21 +128,7 @@ func (d *Docker) DictationState(ctx context.Context, id ID) (DictationState, err
 	if st == nil {
 		return DictationState{}, fmt.Errorf("runtime: dictation engine %s has no state", id)
 	}
-	out := DictationState{Running: st.Running, ExitCode: st.ExitCode, OOMKilled: st.OOMKilled}
-	if out.Running {
-		return out, nil
-	}
-	logs, err := d.cli.ContainerLogs(ctx, string(id), client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Tail: "40"})
-	if err != nil {
-		return out, fmt.Errorf("runtime: read dictation engine output: %w", err)
-	}
-	defer func() { _ = logs.Close() }()
-	var buf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&buf, &buf, logs); err != nil {
-		return out, fmt.Errorf("runtime: read dictation engine output: %w", err)
-	}
-	out.Output = buf.String()
-	return out, nil
+	return DictationState{Running: st.Running, ExitCode: st.ExitCode, OOMKilled: st.OOMKilled}, nil
 }
 
 // RemoveDictation force-removes every engine container, a leftover of an

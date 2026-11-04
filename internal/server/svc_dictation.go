@@ -35,9 +35,6 @@ type dictationService struct {
 
 // Start removes an engine container an earlier server left running.
 func (s dictationService) Start(ctx context.Context) error {
-	if !s.Installed() {
-		return nil
-	}
 	if err := s.containers.RemoveDictation(ctx); err != nil {
 		return fmt.Errorf("remove a dictation engine left by an earlier server: %w", err)
 	}

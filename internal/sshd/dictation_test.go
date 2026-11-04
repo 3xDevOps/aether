@@ -67,17 +67,10 @@ func TestDictationTranscribe(t *testing.T) {
 	svc := dictation.New(dir, engine)
 	e := newTestEnv(t, func(c *Config) { c.Services.Dictation = svc })
 	ctx := context.Background()
-	call := func(member domain.MemberID, wav string, hints []string) (string, *protocol.Error) {
+	call := func(member domain.MemberID, wav string, hints []string) *protocol.Error {
 		params, _ := json.Marshal(protocol.DictationTranscribeParams{AudioBase64: wav, Hints: hints})
-		raw, perr := e.srv.dispatch(ctx, member, protocol.MethodDictationTranscribe, params)
-		if perr != nil {
-			return "", perr
-		}
-		var out protocol.DictationTranscribeResult
-		if jerr := json.Unmarshal(raw, &out); jerr != nil {
-			t.Fatal(jerr)
-		}
-		return out.Text, nil
+		_, perr := e.srv.dispatch(ctx, member, protocol.MethodDictationTranscribe, params)
+		return perr
 	}
 	features := func() []string {
 		t.Helper()
@@ -87,12 +80,12 @@ func TestDictationTranscribe(t *testing.T) {
 		}
 		return info.Features
 	}
-	clip := testWAV(16000, 1, 32000)
+	clip := testWAV(16000, 1, 96000)
 
 	if slices.Contains(features(), protocol.FeatureDictation) {
 		t.Fatal("server.info lists dictation before it is installed")
 	}
-	_, perr := call(e.member.ID, clip, nil)
+	perr := call(e.member.ID, clip, nil)
 	if perr == nil || perr.Code != protocol.CodeUnavailable ||
 		!strings.Contains(perr.Message, filepath.Join(dir, "install.json")) || !strings.Contains(perr.Message, dictation.InstallCommand) {
 		t.Fatalf("not installed = %v; want unavailable naming the manifest and the install command", perr)
@@ -109,7 +102,7 @@ func TestDictationTranscribe(t *testing.T) {
 		t.Fatal("a key no member holds connected")
 	}
 	_, pending := addMember(t, e, "Pat", domain.RoleCollaborator, true)
-	if _, perr := call(pending.ID, clip, nil); perr == nil || perr.Code != protocol.CodeDenied {
+	if perr := call(pending.ID, clip, nil); perr == nil || perr.Code != protocol.CodeDenied {
 		t.Fatalf("pending member = %v, want denied", perr)
 	}
 	connector := e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-test", "ChatGPT",
@@ -131,26 +124,32 @@ func TestDictationTranscribe(t *testing.T) {
 		{"too long", testWAV(16000, 1, dictation.MaxDataBytes+2), nil, "audio is 120.0 s; dictation takes at most 120 s"},
 		{"too many hints", clip, make([]string, 201), "hints has 201 entries; at most 200"},
 		{"empty hint", clip, []string{""}, "hints[0] is 0 bytes"},
+		{"over the base64 cap", strings.Repeat("A", base64.StdEncoding.EncodedLen(dictation.MaxWAVBytes)+4), nil, "a 120 s 16 kHz mono PCM16 WAV is at most"},
 	} {
-		if _, perr := call(e.member.ID, tc.wav, tc.hints); perr == nil || perr.Code != protocol.CodeInvalidParams || !strings.Contains(perr.Message, tc.want) {
+		if perr := call(e.member.ID, tc.wav, tc.hints); perr == nil || perr.Code != protocol.CodeInvalidParams || !strings.Contains(perr.Message, tc.want) {
 			t.Errorf("%s = %v; want invalid params containing %q", tc.name, perr, tc.want)
 		}
 	}
 
-	results := make(chan *protocol.Error, 1)
-	var text string
+	results := make(chan error, 1)
+	var text protocol.DictationTranscribeResult
+	sshClient := controlAs(t, e, e.signer)
 	go func() {
-		var perr *protocol.Error
-		text, perr = call(e.member.ID, clip, []string{"syncd"})
-		results <- perr
+		results <- sshClient.Call(protocol.MethodDictationTranscribe, protocol.DictationTranscribeParams{AudioBase64: clip, Hints: []string{"syncd"}}, &text)
 	}()
 	<-engine.started
-	if _, perr := call(e.member.ID, clip, nil); perr == nil || perr.Code != protocol.CodeUnavailable || !strings.Contains(perr.Message, "you already have a dictation") {
+	e.srv.mu.Lock()
+	held := len(e.srv.controlFrames)
+	e.srv.mu.Unlock()
+	if held != 0 {
+		t.Fatalf("a transcribing clip holds %d of the large control-frame slots", held)
+	}
+	if perr := call(e.member.ID, clip, nil); perr == nil || perr.Code != protocol.CodeUnavailable || !strings.Contains(perr.Message, "you already have a dictation") {
 		t.Fatalf("second request from one member = %v, want unavailable", perr)
 	}
 	close(engine.release)
-	if perr := <-results; perr != nil || text != "open the syncd log" {
-		t.Fatalf("transcript = %q, %v; want the hinted, trimmed text", text, perr)
+	if err := <-results; err != nil || text.Text != "open the syncd log" {
+		t.Fatalf("transcript = %q, %v; want the hinted, trimmed text", text.Text, err)
 	}
 	root := filepath.Dir(t.TempDir())
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {

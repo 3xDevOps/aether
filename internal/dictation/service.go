@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -12,8 +11,7 @@ import (
 
 const (
 	// maxQueued bounds the requests waiting behind the one transcribing.
-	maxQueued         = 4
-	transcribeTimeout = 3 * time.Minute
+	maxQueued = 4
 )
 
 // Service transcribes one clip at a time server-wide so dictation never
@@ -58,7 +56,7 @@ func (s *Service) Transcribe(ctx context.Context, member domain.MemberID, wav []
 		return "", err
 	}
 	defer release()
-	ctx, cancel := context.WithTimeout(ctx, transcribeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, protocol.DictationTimeout)
 	defer cancel()
 	text, err := s.engine.Transcribe(ctx, pcm)
 	if err != nil {

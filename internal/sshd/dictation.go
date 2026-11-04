@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 
+	"github.com/3xDevOps/Aether/internal/dictation"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -34,9 +36,15 @@ func (s *Server) dictationTranscribe(ctx context.Context, member domain.MemberID
 	if perr != nil {
 		return nil, perr
 	}
+	if limit := base64.StdEncoding.EncodedLen(dictation.MaxWAVBytes); len(p.AudioBase64) > limit {
+		return nil, invalidParams(fmt.Sprintf("audio_base64 is %d bytes; a 120 s 16 kHz mono PCM16 WAV is at most %d in base64", len(p.AudioBase64), limit))
+	}
 	wav, err := base64.StdEncoding.DecodeString(p.AudioBase64)
 	if err != nil {
 		return nil, invalidParams("audio_base64 is not standard base64: " + err.Error())
+	}
+	if release, ok := ctx.Value(frameReleaseKey{}).(func()); ok {
+		release()
 	}
 	text, err := svc.Transcribe(ctx, member, wav, p.Hints)
 	if err != nil {
