@@ -157,7 +157,11 @@ func TestSetRunArchived(t *testing.T) {
 	if changed, archErr := db.SetRunArchived(ctx, live.ID, ptrTime(time.Now().UTC())); archErr != nil {
 		t.Fatalf("SetRunArchived on running run: %v", archErr)
 	} else if changed {
-		t.Fatal("SetRunArchived archived a non-Final run")
+		t.Fatal("SetRunArchived archived a running run")
+	}
+	completed := mustCreateRun(t, db, w.ID, m.ID, domain.RunCompleted)
+	if changed, archErr := db.SetRunArchived(ctx, completed.ID, ptrTime(time.Now().UTC())); archErr != nil || !changed {
+		t.Fatalf("SetRunArchived on a completed run = %v, %v; want archived", changed, archErr)
 	}
 	got, err := db.GetRun(ctx, live.ID)
 	if err != nil {

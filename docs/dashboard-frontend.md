@@ -1499,11 +1499,13 @@ when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
 continue past failures and report the first real error; archive counts
 `CodeNotFound` as done. Archiving hides a session whose status is final or
-`completed` (`isArchivable`) from every group without deleting its history.
+`completed` (`isTerminal`) from every group without deleting its history.
 Before the archive confirmation offers its count, it reads `run.close_check` for
 the plan's completed sessions, 50 at a time, and keeps back, with the server's
 reasons, each one that still has live subsessions, a pull request not merged,
-sessions waiting on it or pending cleanup; the server refuses those too.
+sessions waiting on it or pending cleanup; the server refuses those too, and a
+completed session whose result still awaits review, which the single Archive
+command does not offer.
 Freeing removes a retained container and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet
@@ -2248,7 +2250,7 @@ the server's events with an RPC response.
   it is bound to, and a port nothing listens on is forwarded with a note that
   its link works once something does. The Environment page's **Forward port**
   opens the same dialog for the environment, whose ports no method lists.
-- **Archive / Restore** are gated on `isArchivable(status)`
+- **Archive / Restore** are gated on `isTerminal(status)`
   (`src/store/runs.ts`; `completed`, `merged`, `abandoned`, `failed`,
   `interrupted`) plus the kill permission and the `run.archive` capability;
   neither confirms, since archiving is reversible. The palette resolves its

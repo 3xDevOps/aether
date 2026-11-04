@@ -38,10 +38,10 @@ export function ClearDoneConfirm({
 }) {
   const [allNames, setAllNames] = useState(false)
   const archived = plan.eligible.filter((run) => !held?.has(run.id))
-  const kept = plan.eligible.filter((run) => held?.has(run.id))
+  const kept = plan.eligible.filter((run) => held?.has(run.id) && !held.get(run.id)?.error)
+  const unchecked = plan.eligible.filter((run) => held?.get(run.id)?.error)
   const n = archived.length
   const checking = held === undefined
-  const failed = kept.some((run) => held?.get(run.id)?.error)
   const names = allNames ? archived : archived.slice(0, shownNames)
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
@@ -55,7 +55,7 @@ export function ClearDoneConfirm({
                 : `Archive ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>
-            {n === 0 && !checking && kept.length === 0
+            {n === 0 && !checking && kept.length === 0 && unchecked.length === 0
               ? 'Archive acts on completed, merged, abandoned, failed and interrupted sessions you may act on.'
               : 'Hides them from Finished; restore any time from Archived at the foot of Finished. Archiving does not free their retained containers.'}
           </DialogDescription>
@@ -100,12 +100,18 @@ export function ClearDoneConfirm({
                 </li>
               ))}
             </InsetList>
-            {failed && (
-              <Button variant="quiet" size="sm" className="self-start text-ui-sm" disabled={running} onClick={onRecheck}>
-                Check again
-              </Button>
-            )}
           </section>
+        )}
+        {unchecked.length > 0 && (
+          <div role="alert" className="flex flex-col items-start gap-1 text-ui-sm text-state-failed">
+            <p className="break-words">
+              Could not check {unchecked.length} completed {unchecked.length === 1 ? 'session' : 'sessions'}, so{' '}
+              {unchecked.length === 1 ? 'it stays' : 'they stay'}: {held!.get(unchecked[0].id)!.error!.message}
+            </p>
+            <Button variant="quiet" size="sm" className="text-ui-sm" disabled={running} onClick={onRecheck}>
+              Check again
+            </Button>
+          </div>
         )}
         <DialogFooter>
           <Button variant="secondary" disabled={running} onClick={onCancel}>

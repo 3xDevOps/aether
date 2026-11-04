@@ -45,7 +45,7 @@ import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
 import type { PaletteDialog } from '@/store/palette'
-import { isArchivable, isTerminal, toRecord, type PredictionMarker, type RunRecord } from '@/store/runs'
+import { isTerminal, toRecord, type PredictionMarker, type RunRecord } from '@/store/runs'
 import type { Theme } from '@/store/ui'
 
 export interface CommandDeps {
@@ -192,7 +192,7 @@ export function clearDonePlan(
   if (!cap.hasMethod('run.archive')) return plan
   for (const { run, workspace } of candidates) {
     if (run.archived_at) continue
-    if (!isArchivable(run.status)) continue
+    if (!isTerminal(run.status)) continue
     const target = { owner: run.member_id, protected: run.protected, steerOthers: workspace?.steer_others }
     if (!allowed('kill', self, target)) {
       plan.notAllowed++
@@ -507,7 +507,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
-  if (cap.hasMethod('run.archive') && mayKill && isArchivable(run.status)) {
+  if (cap.hasMethod('run.archive') && mayKill && isTerminal(run.status)) {
     if (run.archived_at) {
       list.push({
         id: 'restore',
@@ -518,7 +518,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         predict: () => ({ runID: id, record: { archived_at: undefined } }),
         perform: (d) => d.api.runArchive(id, false),
       })
-    } else {
+    } else if (!awaitsCompletion(run)) {
       list.push({
         id: 'archive',
         label: 'Archive session',

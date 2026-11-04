@@ -8,7 +8,7 @@ import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
 import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
-import { isArchivable, type RunRecord } from '@/store/runs'
+import { isTerminal, type RunRecord } from '@/store/runs'
 import { listedRuns, runGroups, runRows, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
 
 export type BoardCard = RunTree
@@ -33,7 +33,7 @@ function archivedRows(s: RunsInput): RunRow[] {
   for (const run of Object.values(s.ctx.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
     if (s.mineOnly && run.member_id !== s.ctx.viewerID) continue
-    if (!run.archived_at || !isArchivable(run.status)) continue
+    if (!run.archived_at || !isTerminal(run.status)) continue
     const shown = presentRun(run, s.ctx)
     rows.push({
       run,

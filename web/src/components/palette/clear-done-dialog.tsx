@@ -30,8 +30,13 @@ export function ClearDoneDialog() {
 
   useEffect(() => {
     let live = true
+    const completed = plan.eligible.filter((run) => run.status === 'completed')
+    if (completed.length === 0) {
+      setHeld(new Map())
+      return
+    }
     setHeld(undefined)
-    void readArchiveHolds(plan.eligible.filter((run) => run.status === 'completed').map((run) => run.id)).then((next) => live && setHeld(next))
+    void readArchiveHolds(completed.map((run) => run.id)).then((next) => live && setHeld(next))
     return () => {
       live = false
     }

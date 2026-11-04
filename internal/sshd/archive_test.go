@@ -163,6 +163,14 @@ func TestRunArchiveCompletedHoldsOpenWork(t *testing.T) {
 		t.Fatalf("archive of a completed session with an open pull request = %v, want CodeInvalidState naming it", err)
 	}
 
+	review := createRunWithStatus(t, e, domain.RunCompleted)
+	if _, _, err := db.SetRunReview(ctx, review.ID, domain.ReviewReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.Call(protocol.MethodRunArchive, protocol.RunArchiveParams{RunID: string(review.ID), Archived: true}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState || !strings.Contains(pe.Message, "awaits review") {
+		t.Fatalf("archive of a completed session awaiting review = %v, want CodeInvalidState", err)
+	}
+
 	done := createRunWithStatus(t, e, domain.RunCompleted)
 	done.BaseCommit, done.LastCommit, done.LastCommitAt = "aaaa", "bbbb", time.Now()
 	if err := db.UpdateRun(ctx, done); err != nil {

@@ -221,10 +221,12 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// archiveHolds refuses to archive a completed session while it still holds
-// work a close would warn about: live subsessions, a pull request not merged,
+// archiveHolds refuses to archive a completed session whose result still
+// awaits review, which would hide a standing need, or that still holds work a
+// close would warn about: live subsessions, a pull request not merged,
 // sessions waiting on it, or pending cleanup. A Final session was closed past
-// those warnings already.
+// those warnings already. The check runs before SetArchived takes its lock, so
+// work that appears in between is not seen.
 func (s *Server) archiveHolds(ctx context.Context, member domain.MemberID, id domain.RunID) *protocol.Error {
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
@@ -232,6 +234,9 @@ func (s *Server) archiveHolds(ctx context.Context, member domain.MemberID, id do
 	}
 	if run.Status != domain.RunCompleted {
 		return nil
+	}
+	if run.Review == domain.ReviewReady || run.Review == domain.ReviewLater {
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "completed session " + string(id) + " awaits review: mark it complete first"}
 	}
 	actor, err := resolveActor(ctx, s.cfg.Store, member)
 	if err != nil {
