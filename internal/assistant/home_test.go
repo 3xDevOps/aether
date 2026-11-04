@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 )
@@ -34,6 +35,10 @@ func (h *fakeHost) RemoveAssistant(_ context.Context, member domain.MemberID) er
 }
 
 func (*fakeHost) AssistantLoginFound(domain.MemberID, string) (bool, error) { return false, nil }
+
+func (*fakeHost) AssistantAccount(context.Context, domain.MemberID, string) (protocol.AssistantAccount, error) {
+	return protocol.AssistantAccount{}, nil
+}
 
 // TestSignInWaitsOutRemoval refuses a sign-in for a member whose removal
 // has begun, and runs it otherwise.

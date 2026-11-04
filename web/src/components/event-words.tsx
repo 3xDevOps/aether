@@ -269,7 +269,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished session</>,
   'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished session</>,
   'run.review': (p, e) => (
-    <><Who id={e.actor_id} fallback="The owner" /> {text(p.review) === 'later' ? 'chose Not yet on the finished task' : 'marked the session complete'}</>
+    <><Who id={e.actor_id} fallback="The owner" /> {text(p.review) === 'later' ? 'chose Review later' : text(p.review) === '' ? 'said the task is not finished yet' : 'marked the session complete'}</>
   ),
   'run.title': (p) => <>Agent set the title to <Quote>{bounded(p.title, 160)}</Quote></>,
   'run.agent': (p) => agentLine(p),

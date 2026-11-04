@@ -70,7 +70,7 @@ export type RunActivity =
   | 'failed'
   | 'disconnected'
 
-/** `ready` awaits the owner's Mark complete; `later` is their Not yet. */
+/** `ready` awaits the owner's Mark complete; `later` is their Review later. Not yet clears it to `''`. */
 export type RunReview = '' | 'ready' | 'later' | 'accepted'
 
 export interface RunInputRequest {

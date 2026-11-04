@@ -210,7 +210,7 @@ import type {
   WorkspaceImportParams,
   WorkspaceImportResult,
 } from '@/lib/run-repository-types'
-import type { AssistantSettings, AssistantSettingsParams, AssistantStartParams, AssistantStatus, ViewContext } from '@/lib/assistant-types'
+import type { AssistantAccount, AssistantSettings, AssistantSettingsParams, AssistantStartParams, AssistantStatus, ViewContext } from '@/lib/assistant-types'
 import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-types'
 
 const API_BASE = '/api/v1'
@@ -669,6 +669,7 @@ export const api = {
   assistantItem: (seq: number) => call<{ item: SessionItem }>('assistant.item', { seq }).then((r) => r.item),
   assistantReset: () => call<AssistantStatus>('assistant.reset', {}),
   assistantSettings: (params: AssistantSettingsParams = {}) => call<AssistantSettings>('assistant.settings', params),
+  assistantAccount: (agent: string) => call<AssistantAccount>('assistant.account', { agent }),
   assistantHistory: (beforeSeq?: number, limit?: number) =>
     call<SessionHistory>('assistant.history', { before_seq: beforeSeq, limit }),
   runACPCancel: (runID: string, lease: SessionLease) =>
@@ -687,7 +688,7 @@ export const api = {
     call<{ run: Run }>('run.mode.switch', { run_id: runID, mode, ...lease }).then((r) => r.run),
   runClose: (runID: string, outcome: 'merged' | 'abandoned') =>
     call<{ run: Run }>('run.close', { run_id: runID, outcome }).then((r) => r.run),
-  runReview: (runID: string, action: 'complete' | 'later') =>
+  runReview: (runID: string, action: 'complete' | 'later' | 'not-yet') =>
     call<{ run: Run }>('run.review', { run_id: runID, action }).then((r) => r.run),
   runHandoff: (runID: string, toMemberID: string) =>
     call<unknown>('run.handoff', { run_id: runID, to_member_id: toMemberID }),
