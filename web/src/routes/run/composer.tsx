@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
+import { useIsMobile } from '@/lib/breakpoints'
 import { canReopenRun } from '@/lib/commands'
 import { useFileDrop } from '@/lib/file-drag'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
@@ -359,6 +360,7 @@ function useQueueHeld(active: boolean): boolean {
 }
 
 function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock, onEscape }: ComposerProps) {
+  const mobile = useIsMobile()
   const self = useSelf()
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
@@ -511,7 +513,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           reason={gate.reason}
           failure={gate.interrupt ? error : undefined}
           action={gate.interrupt && turnRunning && (
-            <Button size="sm" variant="danger" aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
+            <Button size="sm" variant={mobile ? 'secondary' : 'danger'} aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
               <Square className="fill-current" />
               Interrupt
             </Button>

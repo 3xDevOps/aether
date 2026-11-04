@@ -4,7 +4,7 @@ import { Ellipsis, LoaderCircle, User } from '@/components/icons'
 import { RunCommandConfirmation } from '@/components/run-command-confirmation'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { handoffCommands, runCommands, useCommandRunner } from '@/lib/commands'
 import type { Command, RunCommandContext } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
@@ -25,7 +25,13 @@ export interface ExtraItem {
   disabled?: boolean
 }
 
-export function RunActions({ run, extra = [], compact = false }: { run: RunRecord; extra?: ExtraItem[]; compact?: boolean }) {
+export function RunActions({ run, views = [], extra = [], compact = false }: {
+  run: RunRecord
+  /** Places to go, listed above the commands under their own label. */
+  views?: ExtraItem[]
+  extra?: ExtraItem[]
+  compact?: boolean
+}) {
   const paused = useStore((s) => s.pausedRuns[run.id])
   const predicting = useStore((s) => Boolean(s.predicting[run.id]))
   const waiting = useStore((s) => s.predicting[run.id]?.waiting === true)
@@ -68,6 +74,18 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
     event.preventDefault()
     trigger.current?.focus()
   }
+
+  const extraItem = (entry: ExtraItem) => (
+    <MenuItem
+      key={entry.id}
+      disabled={entry.disabled}
+      description={entry.description}
+      icon={<entry.Icon aria-hidden />}
+      onSelect={() => entry.onSelect(trigger.current)}
+    >
+      {entry.label}
+    </MenuItem>
+  )
 
   const item = (command: Command) => (
     <MenuItem
@@ -121,6 +139,13 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
             </MenuItem>
           )}
           {stale && <MenuItem disabled>Reconnect to act</MenuItem>}
+          {views.length > 0 && (
+            <>
+              <MenuLabel>Views</MenuLabel>
+              {views.map(extraItem)}
+              <MenuSeparator />
+            </>
+          )}
           {everyday.map(item)}
           {handoffs.length > 0 && (
             <MenuItem
@@ -136,17 +161,7 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
             </MenuItem>
           )}
           {extra.length > 0 && (everyday.length > 0 || handoffs.length > 0) && <MenuSeparator />}
-          {extra.map((entry) => (
-            <MenuItem
-              key={entry.id}
-              disabled={entry.disabled}
-              description={entry.description}
-              icon={<entry.Icon aria-hidden />}
-              onSelect={() => entry.onSelect(trigger.current)}
-            >
-              {entry.label}
-            </MenuItem>
-          ))}
+          {extra.map(extraItem)}
           {ending.length > 0 && <MenuSeparator />}
           {ending.map(item)}
         </MenuContent>

@@ -190,10 +190,14 @@ function UserRow({ row, ctx, name }: { row: Extract<SessionRow, { kind: 'user' }
       attachments={row.images?.length || row.files?.length ? <MessageAttachments runID={ctx.runID} images={row.images} files={row.files} /> : undefined}
       meta={
         <>
+          {author && <span aria-hidden>·</span>}
           {row.delivery && (
-            <span className={row.delivery === 'Not sent' || row.delivery === 'Denied' ? 'text-state-failed' : undefined}>
-              {row.delivery === 'Queued' && row.deliverAfter ? <DeliveryCountdown deliverAfter={row.deliverAfter} /> : row.delivery}
-            </span>
+            <>
+              <span className={row.delivery === 'Not sent' || row.delivery === 'Denied' ? 'text-state-failed' : undefined}>
+                {row.delivery === 'Queued' && row.deliverAfter ? <DeliveryCountdown deliverAfter={row.deliverAfter} /> : row.delivery}
+              </span>
+              <span aria-hidden>·</span>
+            </>
           )}
           <RelativeTime at={row.at} />
         </>

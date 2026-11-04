@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type * as React from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAssistantAvailable } from '@/components/assistant/button'
 import { ChartGantt, ChevronLeft, FolderTree, Globe, Lock, Network, PanelRight, Search, Sparkles } from '@/components/icons'
 import { RunActions, type ExtraItem } from '@/components/run-actions'
@@ -12,12 +13,15 @@ import { runLabel, stateName, toneOf } from '@/lib/status'
 import { historyDepth } from '@/lib/url-state'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { RunNavigation } from '@/routes/run/header'
-import { runViewLabel, type RunView } from '@/routes/run/views'
+import { defaultView, runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
+import { diffTotals } from '@/store/diff'
 import { useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 const tabViews = ['session', 'terminal', 'changes'] as const
+// A Standard session's agent runs only in its terminal, so its tabs lead with Terminal.
+const standardTabs: RunView[] = ['terminal', 'session', 'changes']
 
 type OverflowView = Exclude<RunView, (typeof tabViews)[number]>
 
@@ -69,7 +73,12 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
 }) {
   const shown = useRunPresentation(run)
   const assistant = useAssistantAvailable()
-  const tabs = views.filter((item) => inTabs(item) || item === view)
+  const totals = useStore(useShallow((s) => {
+    const snapshot = s.diffs[run.id]?.snapshots[0] ?? s.diffs[run.id]?.persisted
+    return snapshot?.truncated ? undefined : diffTotals(snapshot?.files)
+  }))
+  const order = defaultView(run) === 'terminal' ? standardTabs : tabViews
+  const tabs = [...order.filter((item) => views.includes(item)), ...(inTabs(view) ? [] : [view])]
   const elsewhere: ExtraItem[] = views
     .filter((item): item is OverflowView => !tabs.includes(item))
     .map((item) => ({ id: `view-${item}`, label: runViewLabel[item], Icon: viewIcon[item], onSelect: () => nav.go(item) }))
@@ -94,20 +103,25 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
           </h1>
           <p className="flex min-w-0 shrink-0 items-center gap-1.5 text-ui-sm text-muted">
             <StatusDot tone={toneOf(shown)} pulse={shown.state === 'working'} />
-            <span className={keyboard ? 'sr-only' : 'min-w-0 truncate'}>
+            <span className={keyboard ? 'whitespace-nowrap max-[399px]:sr-only' : 'min-w-0 truncate'}>
               <span role="status">{state}</span>
-              <span aria-hidden> · {agentName} · {modeLabel[run.mode] ?? run.mode}</span>
+              {!keyboard && <span aria-hidden> · {agentName} · {modeLabel[run.mode] ?? run.mode}</span>}
             </span>
           </p>
         </div>
         {primary && !keyboard && <Button size="sm" onClick={primary.act}>{primary.label}</Button>}
-        <RunActions run={run} compact extra={[...elsewhere, ...panels, ...extra]} />
+        <RunActions run={run} compact views={[...elsewhere, ...panels]} extra={extra} />
       </header>
       {!keyboard && (
         <div className="flex h-11 shrink-0 items-stretch border-b border-seam">
           <TabsList aria-label="Session views" className="h-11 min-w-0 flex-1 gap-0 coarse:h-11">
             {tabs.map((item) => (
-              <TabsTrigger key={item} value={item} className="min-w-0 flex-1 justify-center px-2">{runViewLabel[item]}</TabsTrigger>
+              <TabsTrigger key={item} value={item} className="min-w-0 flex-1 justify-center px-2">
+                {runViewLabel[item]}
+                {item === 'changes' && totals && (totals.additions > 0 || totals.deletions > 0) && (
+                  <span aria-hidden className="text-ui-sm font-normal text-muted tabular-nums">+{totals.additions} −{totals.deletions}</span>
+                )}
+              </TabsTrigger>
             ))}
           </TabsList>
           {pullRequest}

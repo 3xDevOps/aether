@@ -32,7 +32,7 @@ export function RequestActions({ extras, className, children }: { extras?: React
     <div className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}>
       {extras}
       <StaleReason />
-      <div className="ml-auto flex min-w-0 flex-1 flex-wrap justify-end gap-2 @min-[21rem]:flex-none [&>*]:flex-1 @min-[21rem]:[&>*]:flex-none">
+      <div className="ml-auto flex min-w-0 flex-1 flex-wrap justify-end gap-2 @min-[21rem]:flex-none [&>*]:flex-1 @min-[21rem]:[&>*]:flex-none max-md:@min-[21rem]:flex-1 max-md:@min-[21rem]:[&>*]:flex-1">
         <ReasonShown.Provider value>{children}</ReasonShown.Provider>
       </div>
     </div>

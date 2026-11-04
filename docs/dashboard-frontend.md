@@ -598,9 +598,12 @@ The header (`routes/run/phone-header.tsx`) is one 48px row: **Back**, the
 title with its protection lock, a state line (status dot, state, agent and
 mode), the header's primary action when there is one, and **More**. Under it
 the tabs **Chat**, **Terminal** and **Changes** fill a 44px row, with the
-pull request at its right end. Trace, Files and Browser, **Session details**,
-**Workflow**, **Search…**, **Assistant**, Captures and Raw events are items
-in **More**; a view opened from there joins the tabs while it shows. Close, Stop and Delete in **More**
+pull request at its right end; a Standard session orders them **Terminal**,
+**Chat**, **Changes**. **Changes** carries the muted `+N −M` of the latest
+snapshot, unless it was truncated. **More** opens with a **Views** group
+(Trace, Files, Browser, **Session details**, **Workflow**, **Search…**,
+**Assistant**), then the session's commands, Captures and Raw events; a view
+opened from there joins the tabs while it shows. Close, Stop and Delete in **More**
 are the same commands, with the same confirmations, as on desktop.
 
 Without a `view` in the address a phone lands on `defaultView`, never on the
@@ -612,8 +615,8 @@ steps back in the tab's history when the dashboard pushed the entry below
 session was opened by a link.
 
 While the keyboard is up (the composer has focus, or the terminal's input on
-a touch screen), the header shrinks to one 44px row with the title and the
-status dot, and the tabs, the wait line, the lineage line and the
+a touch screen), the header shrinks to one 44px row with the title, the
+status dot and, from 400px wide, the state's name, and the tabs, the wait line, the lineage line and the
 [multiplayer strip](#multiplayer-controls) leave. On a phone the strip shows
 only while someone else watches, another member or another of your tabs
 holds control, or control, presence or the stream failed
@@ -622,6 +625,8 @@ Details lists the people. A hidden tab bar removes `--phone-tabs-height`, so
 toasts fall back to the bottom safe area. The Chat
 composer is the desktop `ComposerBox`, padded by `--keyboard-inset`
 (`src/lib/keyboard-inset.ts`) so it sits above an iOS keyboard as well.
+While a request is open, the request card holds the one filled button: its
+answers fill the card's width, and the composer's **Interrupt** is outlined.
 
 ### Assistant panel
 

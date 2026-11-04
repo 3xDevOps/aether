@@ -30,7 +30,7 @@ test('an Enhanced session opens on Chat and takes a message from the pinned comp
     await page.getByRole('main').getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /demo/ }).tap()
 
     await expect(views.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true')
-    await expect(views.getByRole('tab')).toHaveText(['Chat', 'Terminal', 'Changes'])
+    await expect(views.getByRole('tab')).toHaveText([/^Chat/, /^Terminal/, /^Changes/])
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeHidden()
     await expect(log.getByText('pong').first()).toBeVisible({ timeout: 180_000 })
     expect(await overflowX(page)).toBe(0)
@@ -54,6 +54,37 @@ test('an Enhanced session opens on Chat and takes a message from the pinned comp
   await expect(log.getByText('hello from the phone')).toBeVisible()
   await expect(log.getByText('pong')).toHaveCount(2, { timeout: 60_000 })
   await restore()
+
+  // iOS shrinks only the visual viewport, so the composer rides --keyboard-inset above its keyboard.
+  await page.evaluate(() => document.documentElement.style.setProperty('--keyboard-inset', '200px'))
+  const height = page.viewportSize()!.height
+  await expect.poll(async () => {
+    const rect = await box.boundingBox()
+    return rect ? rect.y + rect.height : Infinity
+  }).toBeLessThanOrEqual(height - 200)
+})
+
+test('a link to a view wins on a phone, and Back returns to Needs you', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 360, height: 800 })
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+  await aether.installACPMock(alice, await memberID(alice))
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaces[0].id, harness: 'mock', mode: 'acp', task: 'ask permission',
+  })
+  const views = page.getByRole('tablist', { name: 'Session views' })
+
+  await page.goto(`${alice.url}&run=${run.id}&view=changes`)
+  await expect(views.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true')
+
+  await page.goto(alice.url)
+  const card = page.getByRole('list', { name: 'Needs you' }).getByRole('group').filter({ hasText: 'Permission requested' })
+  await card.getByRole('button', { name: 'ask permission' }).tap({ timeout: 180_000 })
+  await expect(views.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('button', { name: 'Back' }).tap()
+  await expect(page.getByRole('list', { name: 'Needs you' })).toBeVisible()
 })
 
 test('a Standard session opens on Terminal', async ({ page, aether }) => {
@@ -71,6 +102,7 @@ test('a Standard session opens on Terminal', async ({ page, aether }) => {
   await page.goto(`${alice.url}&run=${run.id}`)
   const views = page.getByRole('tablist', { name: 'Session views' })
   await expect(views.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true')
+  await expect(views.getByRole('tab')).toHaveText([/^Terminal/, /^Chat/, /^Changes/])
   expect(await overflowX(page)).toBe(0)
   // A link has no page behind it in the app, so Back lands on the session list.
   await page.getByRole('button', { name: 'Back' }).tap()
