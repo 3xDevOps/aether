@@ -500,7 +500,7 @@ describe('watch notification preferences', () => {
     expect(await screen.findByRole('radio', { name: /^Blockers now, the rest every half hour.*\(default\)$/ })).toBeDefined()
     expect(screen.getByText(/in one digest daily at 09:00/)).toBeDefined()
     expect(screen.getByText(/in a digest on each half hour/)).toBeDefined()
-    expect(screen.getByText(/No device receives pushes yet, so this applies once one does/)).toBeDefined()
+    expect(screen.getByText(/No device receives pushes yet; this takes effect once one does/)).toBeDefined()
     await user.click(screen.getByRole('radio', { name: 'Blockers now, the rest daily' }))
     // notify.prefs.set turns quiet hours off when they are left out.
     expect(client.notifyPrefsSet).toHaveBeenCalledWith({ level: 'blockers', quiet_hours: quiet })

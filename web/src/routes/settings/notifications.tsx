@@ -289,7 +289,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
         help={(
           <>
             <Guide page="failure-handling" to="needs-you">Needs you</Guide> is what waits on you: a question, a permission, a blocked or failed session.
-            {prefs?.destinations.push_devices === 0 && ' No device receives pushes yet, so this applies once one does.'}
+            {prefs?.destinations.push_devices === 0 && ' No device receives pushes yet; this takes effect once one does.'}
           </>
         )}
       >
@@ -310,21 +310,21 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
           ))}
         </RadioGroup>
         {level === 'blockers' && (
-          <div className="flex min-w-0 flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-ui-sm text-muted">
-              Daily digest at ({savedZone})
-              <Input type="time" required value={digestAt} disabled={busy} className="w-28" onChange={(event) => setDigestAt(event.target.value)} />
-            </label>
-            {digestAt !== savedDigest.at && (
-              <Button size="sm" variant="secondary" disabled={busy || !digestAt} onClick={() => prefs && save({ digest: { at: digestAt, tz: savedDigest.tz }, quiet_hours: prefs.quiet_hours }, 'level')}>
-                Save digest time
-              </Button>
-            )}
-            {here !== savedZone && (
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => prefs && save({ digest: { at: savedDigest.at, tz: here }, quiet_hours: prefs.quiet_hours }, 'level')}>
-                Use this browser’s zone ({here})
-              </Button>
-            )}
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="settings-digest-at" className="text-ui-sm text-muted">Daily digest at ({savedZone})</label>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Input id="settings-digest-at" type="time" required value={digestAt} disabled={busy} className="w-28" onChange={(event) => setDigestAt(event.target.value)} />
+              {digestAt !== savedDigest.at && (
+                <Button size="sm" variant="secondary" disabled={busy || !digestAt} onClick={() => prefs && save({ digest: { at: digestAt, tz: savedDigest.tz }, quiet_hours: prefs.quiet_hours }, 'level')}>
+                  Save digest time
+                </Button>
+              )}
+              {here !== savedZone && (
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => prefs && save({ digest: { at: savedDigest.at, tz: here }, quiet_hours: prefs.quiet_hours }, 'level')}>
+                  Use this browser’s zone ({here})
+                </Button>
+              )}
+            </div>
           </div>
         )}
         {error?.row === 'level' && <Callout tone="failed" role="alert">{error.text}</Callout>}

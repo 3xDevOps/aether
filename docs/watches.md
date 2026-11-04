@@ -296,9 +296,9 @@ result counts your subscribed devices.
 
 | `level` | Pushed at once | In a digest |
 | --- | --- | --- |
-| `blockers` (**Only what blocks me**) | What needs you: a session's [Needs you](failure-handling.md#needs-you) push and a watch's `needs_you` notice | Everything else, daily at `digest.at` (default `09:00`) |
-| `batched` (**Blockers now, the rest batched**, the default) | The same | Everything else, on the next half hour in `digest.tz` |
-| `all` (**Everything as it happens**) | Everything | Nothing |
+| `blockers` (**Blockers now, the rest daily**) | What needs you: a session's [Needs you](failure-handling.md#needs-you) push and a watch's `needs_you` notice | Everything else, daily at `digest.at` (default `09:00`) |
+| `batched` (**Blockers now, the rest every half hour**, the default) | The same | Everything else, on the next half hour in `digest.tz` |
+| `all` (**Everything at once**) | Everything | Nothing |
 
 "Everything else" is a finished, failed or stopped session (a success to
 review, a failure you have not seen), a merge, checks, reviews and closed pull
