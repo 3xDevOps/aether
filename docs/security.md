@@ -571,8 +571,14 @@ from the session.
 The Android app subscribes the same way through a UnifiedPush distributor and
 shows only messages encrypted to its own keys. Its **Decline** button declines
 an assistant card through `assistant.confirm` with the phone's tailnet
-identity, so Android requires the phone to be unlocked before it runs, and the
-lock screen shows no session text ([networking.md](networking.md#in-the-android-app)).
+identity, so the app offers it only on Android 12 and later, which require the
+phone to be unlocked before it runs. The notifications are marked private;
+whether a locked phone shows their text is Android's sensitive-notifications
+setting ([networking.md](networking.md#in-the-android-app)). The connector
+library adds two exported components, as every UnifiedPush app has: a
+receiver for the distributor's broadcasts, which acts only on a registration
+it made and hands the app only what decrypts with its keys, and a service the
+distributor binds to keep the app running while it delivers.
 
 ### Terminal image uploads
 

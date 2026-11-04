@@ -26,7 +26,6 @@ data class PushNotice(
     val quiet: Boolean,
 )
 
-/** Where a notification goes: what needs the member now, or an update to read later. */
 enum class PushChannel { NEEDS_YOU, UPDATES }
 
 /**
@@ -40,7 +39,6 @@ fun pushChannel(notice: PushNotice): PushChannel =
         PushChannel.UPDATES
     }
 
-/** The buttons a notification carries. */
 enum class PushAction { APPROVE, DECLINE }
 
 // The server offers a card's buttons only when the push shows the whole of

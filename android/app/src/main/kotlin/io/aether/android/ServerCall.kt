@@ -16,7 +16,6 @@ object LiveGateway {
     @Volatile var url: String? = null
 }
 
-/** The server refused a call, or could not be reached; [message] says which, in its own words. */
 class ServerCallException(message: String) : IOException(message)
 
 /**
@@ -37,6 +36,11 @@ fun Context.callServer(method: String, params: JSONObject, timeoutMs: Int = 15_0
                 LiveGateway.url ?: throw ServerCallException("Aether is not connected through Aether Edge right now. Open the app and try again.")
             null -> null
         } ?: throw ServerCallException("The app is not connected to a server.")
+    return callDashboard(dashboard, method, params, timeoutMs)
+}
+
+/** [callServer] on a tailnet [dashboard] that may no longer be the chosen one. */
+fun callDashboard(dashboard: String, method: String, params: JSONObject, timeoutMs: Int = 15_000): JSONObject {
     val (address, token) = rpcEndpoint(dashboard, method)
     val connection = URL(address).openConnection() as HttpURLConnection
     try {
@@ -64,7 +68,6 @@ fun Context.callServer(method: String, params: JSONObject, timeoutMs: Int = 15_0
     }
 }
 
-/** The server's own message in a `{"error":{"message":...}}` refusal. */
 private fun refusal(body: String): String? =
     try {
         JSONObject(body).optJSONObject("error")?.optString("message")?.takeIf { it.isNotEmpty() }

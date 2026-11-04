@@ -382,11 +382,12 @@ refused to register Aether: ACTION_REQUIRED` (sign in to it, then try again).
 An assistant card's notification follows the dashboard's rules: **Approve**
 opens the card, **Decline** declines it without opening the app, and a
 private card or one over 240 characters has no buttons. **Decline** needs
-**Tailscale** mode: it calls `assistant.confirm` on the server's dashboard,
-identified by the phone's tailnet login like any dashboard request. In
-**Aether Edge** mode the identity is the CLI the app runs only while it is
-open, so there a card's notification only opens it. On a locked phone
-**Decline** asks you to unlock first. While it runs the notification reads
+**Tailscale** mode and Android 12 or later: it calls `assistant.confirm` on
+the server's dashboard, identified by the phone's tailnet login like any
+dashboard request, and Android asks you to unlock the phone before it runs.
+Older Android cannot require that, so there, and in **Aether Edge** mode,
+where the identity is the CLI the app runs only while it is open, a card's
+notification only opens it. While it runs the notification reads
 `Declining…` with no buttons; then `Declined` with the card's text, or
 `Couldn't decline` with the server's own error, which alerts and opens the
 card. When a session stops needing you, its notification goes away.
@@ -394,9 +395,15 @@ card. When a session stops needing you, its notification goes away.
 Sessions and cards that need you arrive on the **Sessions that need you**
 channel; assistant notices, budgets and test notifications on **Assistant
 updates**, which you can quiet separately in Android's settings for the app.
-Until the phone is unlocked the lock screen shows only what kind of
-notification it is: `A session needs you`, `New update`, or `Assistant
-card` for a decision made from a notification.
+The notifications are marked private. Whether the lock screen shows their
+text is Android's setting for sensitive notifications; with it off, the lock
+screen shows only what kind each one is: `A session needs you`, `New update`,
+or `Assistant card` for a decision made from a notification.
+
+When you choose another server under **Connection**, the app drops its
+registration at the distributor, tells the previous tailnet server to forget
+the phone, and registers a new address for the new server, so nothing the
+previous server sends reaches the phone.
 
 Limits:
 

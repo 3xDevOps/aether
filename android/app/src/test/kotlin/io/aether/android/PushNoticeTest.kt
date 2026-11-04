@@ -96,7 +96,7 @@ class PushNoticeTest {
     }
 
     @Test
-    fun serverCallsUseTheDashboardsOwnIdentity() {
+    fun rpcAddressTokenAndOriginComeFromTheDashboardUrl() {
         assertEquals("https://h.ts.net/api/v1/push.subscribe" to null, rpcEndpoint("https://h.ts.net/", "push.subscribe"))
         assertEquals(
             "http://127.0.0.1:4000/api/v1/assistant.confirm" to "abc_-1",

@@ -28,10 +28,13 @@ request ([What an edge stores](#what-an-edge-stores)).
   `ACCESS_NETWORK_STATE`) and rewrites when the network changes. Nothing else
   the app writes is its own.
 - **With notifications on, the push registration**, in the app's private
-  storage: the distributor's address for this phone, the two Web Push keys
-  (the connector library keeps the private half), and the last error
-  registering. Showing notifications needs the `POST_NOTIFICATIONS`
-  permission, which Android asks for when you turn them on.
+  storage: the distributor's address for this phone, the two Web Push keys,
+  and the last error registering. The UnifiedPush connector library keeps
+  the private key in its own database, encrypted (AES-GCM) with a key held
+  in the Android Keystore. Showing notifications needs the
+  `POST_NOTIFICATIONS` permission, which Android asks for when you turn them
+  on; the connector adds `WAKE_LOCK`, to finish handling a message while the
+  phone sleeps.
 - **The WebView's ordinary cache** of the dashboard's files (none in Edge
   mode, which turns it off), and the
   dashboard's own local record of how you use it. That record holds how the
@@ -232,8 +235,8 @@ The push service relays the message to your browser under its own policy.
 
 In the Android app, turning it on registers the app with the UnifiedPush
 distributor app you installed, such as ntfy. The distributor's server issues
-the address; the app generates the two keys, keeps the private half in its
-own storage, and sends the address and the public keys to your server, the
+the address; the app generates the two keys, keeps the private one on the
+phone, and sends the address and the public keys to your server, the
 same three values as above. The distributor and its server receive what a
 push service does, listed above, and relay it to the app; they cannot read
 the notification. ntfy's policy covers what ntfy.sh keeps. Turning it off

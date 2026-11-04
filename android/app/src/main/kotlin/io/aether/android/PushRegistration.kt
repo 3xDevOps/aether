@@ -13,22 +13,16 @@ import org.json.JSONObject
 import org.unifiedpush.android.connector.INSTANCE_DEFAULT
 import org.unifiedpush.android.connector.UnifiedPush
 
-/** What the dashboard's push switch shows for this phone. */
 enum class PushKind(val wire: String) {
     ON("on"),
     OFF("off"),
-
-    /** Android blocks the app's notifications. */
     BLOCKED("blocked"),
-
-    /** No UnifiedPush distributor is installed to deliver them. */
     NO_DISTRIBUTOR("no-distributor"),
 
     /** Asking the distributor or the server; the answer follows. */
     PENDING("pending"),
 }
 
-/** [error] is why the last attempt failed, in the failing side's own words. */
 data class PushState(val kind: PushKind, val endpoint: String? = null, val error: String? = null)
 
 /**
@@ -99,10 +93,7 @@ object PushRegistration {
         pending = true
         context.storePush(context.storedPush().copy(error = null))
         changed()
-        val mine = ++attempt
-        main.postDelayed({
-            if (pending && attempt == mine) fail(context, "The push distributor did not answer within a minute.")
-        }, 60_000)
+        armTimeout(context)
         Thread {
                 val vapid =
                     try {
@@ -155,21 +146,25 @@ object PushRegistration {
             .start()
     }
 
-    /** The distributor gave a new endpoint: the server is told, now if it can be reached. */
     fun endpointChanged(context: Context, endpoint: String, p256dh: String, auth: String) {
-        context.storePush(StoredPush(endpoint, p256dh, auth, synced = false, error = null, server = null))
+        context.storePush(StoredPush(endpoint, p256dh, auth, synced = false, error = context.storedPush().error, server = null))
         sync(context)
     }
 
     /**
      * Hands a stored endpoint the server does not have yet to `push.subscribe`.
      * Called again whenever the app can reach the server, so an endpoint that
-     * arrived while it could not still gets there.
+     * arrived while it could not still gets there. After the connection
+     * changed, it moves the registration instead.
      */
     fun sync(context: Context) {
         val stored = context.storedPush()
         val server = context.pushServer()
         if (stored.endpoint == null || stored.p256dh == null || stored.auth == null) return
+        if (stored.synced && stored.server != null && stored.server != server) {
+            move(context, stored)
+            return
+        }
         if (stored.synced && stored.server == server) return
         Thread {
                 val keys = JSONObject().put("p256dh", stored.p256dh).put("auth", stored.auth)
@@ -183,12 +178,56 @@ object PushRegistration {
                 // A newer endpoint may have arrived meanwhile; only this one is settled.
                 val now = context.storedPush()
                 if (now.endpoint == stored.endpoint) {
-                    context.storePush(now.copy(synced = error == null, error = error, server = server))
+                    context.storePush(now.copy(synced = error == null, error = error ?: now.error, server = server))
                 }
                 pending = false
                 changed()
             }
             .start()
+    }
+
+    /**
+     * Gives the newly chosen server a registration of its own. The old one
+     * is dropped at the distributor, so nothing the previous server sends
+     * reaches this phone again, and the previous tailnet server is told to
+     * forget it; an Edge server cannot be reached once another is chosen.
+     */
+    private fun move(context: Context, stored: StoredPush) {
+        pending = true
+        changed()
+        armTimeout(context)
+        Thread {
+                val previous = stored.server
+                val forgotten =
+                    if (previous == null || !previous.startsWith("https://")) {
+                        null
+                    } else {
+                        try {
+                            callDashboard(previous, "push.unsubscribe", JSONObject().put("endpoint", stored.endpoint))
+                            null
+                        } catch (e: Exception) {
+                            "The previous server was not told to forget this phone: ${e.message}"
+                        }
+                    }
+                UnifiedPush.unregister(context, INSTANCE_DEFAULT)
+                context.storePush(StoredPush(null, null, null, synced = false, error = forgotten))
+                val vapid =
+                    try {
+                        context.callServer("push.status", JSONObject()).getString("public_key")
+                    } catch (e: Exception) {
+                        fail(context, listOfNotNull(forgotten, "Could not read the server's push key: ${e.message}").joinToString(" "))
+                        return@Thread
+                    }
+                main.post { UnifiedPush.register(context, INSTANCE_DEFAULT, null, vapid) }
+            }
+            .start()
+    }
+
+    private fun armTimeout(context: Context) {
+        val mine = ++attempt
+        main.postDelayed({
+            if (pending && attempt == mine) fail(context, "The push distributor did not answer within a minute.")
+        }, 60_000)
     }
 
     fun clearError(context: Context) {
@@ -201,7 +240,6 @@ object PushRegistration {
         changed()
     }
 
-    /** The distributor dropped the registration, as when it is uninstalled. */
     fun unregistered(context: Context) {
         val endpoint = context.storedPush().endpoint
         context.storePush(StoredPush(null, null, null, synced = false, error = null))

@@ -871,7 +871,11 @@ class MainActivity : ComponentActivity() {
                     }
                     sharePath(text)
                 }
-                ACTION_OPEN -> intent.getStringExtra(EXTRA_PATH)?.takeIf(::isDashboardPath)
+                ACTION_OPEN -> {
+                    // Approve leaves its notification up; this takes it down.
+                    cancelPush(this, intent)
+                    intent.getStringExtra(EXTRA_PATH)?.takeIf(::isDashboardPath)
+                }
                 else -> null
             }
         } catch (_: RuntimeException) {
@@ -883,7 +887,7 @@ class MainActivity : ComponentActivity() {
         val dashboard =
             when (mode) {
                 ConnectionMode.TAILSCALE -> storedDashboardUrl()
-                ConnectionMode.EDGE -> "http://127.0.0.1:${gatewayPort()}/"
+                ConnectionMode.EDGE -> gatewayUrl ?: "http://127.0.0.1:${gatewayPort()}/"
             } ?: return
         push.install(web, dashboard)
     }

@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -22,7 +23,6 @@ private const val CHANNEL_UPDATES = "updates"
 private const val ID = 1
 private const val EXTRA_KEEP = "io.aether.android.keep"
 
-/** MainActivity opens [EXTRA_PATH] on the dashboard. */
 const val ACTION_OPEN = "io.aether.android.OPEN"
 const val EXTRA_PATH = "io.aether.android.PATH"
 
@@ -84,13 +84,13 @@ fun showPush(context: Context, notice: PushNotice) {
             .setAutoCancel(true)
             .setSilent(notice.quiet)
             .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, notice.notice) })
-    val declinesDirectly = context.connectionMode() == ConnectionMode.TAILSCALE
+    // Below Android 12 an action cannot demand an unlock, and a locked
+    // phone must not decide anything.
+    val declinesDirectly =
+        context.connectionMode() == ConnectionMode.TAILSCALE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     for (action in pushActions(notice, declinesDirectly)) {
         when (action) {
             PushAction.APPROVE -> builder.addAction(0, context.getString(R.string.push_approve), open)
-            // A locked phone has to be unlocked first: Decline acts with
-            // this phone's identity, and no one should do that from the
-            // lock screen.
             PushAction.DECLINE ->
                 builder.addAction(
                     NotificationCompat.Action.Builder(0, context.getString(R.string.push_decline), declineIntent(context, notice))
@@ -156,9 +156,17 @@ private fun notify(manager: NotificationManagerCompat, tag: String, builder: Not
     }
 }
 
+/** Takes down the notification an open intent came from, as a tapped one goes by itself. */
+fun cancelPush(context: Context, intent: Intent) {
+    val tag = intent.data?.takeIf { it.scheme == PUSH_SCHEME }?.schemeSpecificPart ?: return
+    NotificationManagerCompat.from(context).cancel(tag, ID)
+}
+
+private const val PUSH_SCHEME = "aether-push"
+
 // Extras do not tell PendingIntents apart, and two tags can share a hash, so
 // the full tag goes in the data each one is matched by.
-private fun pushIdentity(tag: String): Uri = Uri.fromParts("aether-push", tag, null)
+private fun pushIdentity(tag: String): Uri = Uri.fromParts(PUSH_SCHEME, tag, null)
 
 private fun openIntent(context: Context, tag: String, path: String): PendingIntent {
     val intent =
@@ -226,7 +234,8 @@ class DeclineReceiver : BroadcastReceiver() {
         Thread {
                 val done =
                     try {
-                        // goAsync's receiver has 10 seconds in all.
+                        // Connecting and reading wait 4 s each; the DNS
+                        // lookup before them has no limit of its own.
                         app.callServer(
                             "assistant.confirm",
                             JSONObject().put("confirmation_id", card).put("approve", false),

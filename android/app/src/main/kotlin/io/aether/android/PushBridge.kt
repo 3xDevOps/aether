@@ -18,7 +18,6 @@ import org.unifiedpush.android.connector.UnifiedPush
 
 private const val BRIDGE = "AetherAndroid"
 
-/** The `scheme://host[:port]` of [url], as a web message origin rule takes it. */
 fun originOf(url: String): String {
     val uri = URI(url)
     return "${uri.scheme}://${uri.rawAuthority}"
@@ -37,6 +36,7 @@ fun originOf(url: String): String {
 class PushBridge(private val activity: ComponentActivity) {
     private var reply: JavaScriptReplyProxy? = null
     private var installed: WebView? = null
+    private var origin: String? = null
 
     private val permission =
         activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -53,10 +53,15 @@ class PushBridge(private val activity: ComponentActivity) {
      */
     fun install(web: WebView, dashboard: String) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+        val next = originOf(dashboard)
+        // Removing takes the bridge from the page already loaded, and adding
+        // reaches only the next one, so an unchanged origin keeps what it has.
+        if (installed === web && origin == next) return
         if (installed === web) WebViewCompat.removeWebMessageListener(web, BRIDGE)
         reply = null
         installed = web
-        WebViewCompat.addWebMessageListener(web, BRIDGE, setOf(originOf(dashboard))) { _, message, _, mainFrame, proxy ->
+        origin = next
+        WebViewCompat.addWebMessageListener(web, BRIDGE, setOf(next)) { _, message, _, mainFrame, proxy ->
             if (mainFrame) handle(message, proxy)
         }
     }
