@@ -17,7 +17,6 @@ import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
-import { shellEnded } from '@/store/terminal'
 
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const summary = usePresenceSummary(run, agent)
@@ -90,7 +89,7 @@ function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
     const dock = useStore.getState().shellDocks[runID]
     if (!dock || dock.shellShown) return
     const running = dock.terminals.find((terminal) =>
-      dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && !shellEnded(terminal))
+      dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && terminal.process.state === 'running')
     if (running) show(running.terminal_id)
   }, [runID, show])
   useEffect(() => {

@@ -48,16 +48,19 @@ const functionKeys: Key[] = [
  */
 export function useTextSizeStepper({ size, fitted }: TerminalFit) {
   const fitWidth = useStore((state) => state.terminalFitWidth)
+  const chosen = useStore((state) => state.terminalFontSize)
   const setFontSize = useStore((state) => state.setTerminalFontSize)
   const fit = useStore((state) => state.fitTerminalWidth)
+  // A grid that already fits at the chosen size, such as one sized to its pane, is not being fitted.
+  const fitting = fitWidth && fitted < chosen
   const smaller = Math.ceil(size) - 1
   const larger = Math.min(maxTerminalFontSize, Math.floor(size) + 1)
   return {
     size: `${Number(size.toFixed(1))} px`,
-    fitWidth,
+    fitWidth: fitting,
     fit,
-    canSmaller: !fitWidth,
-    smaller: () => (smaller < minTerminalFontSize || smaller <= fitted ? fit() : setFontSize(smaller)),
+    canSmaller: !fitting && smaller >= minTerminalFontSize,
+    smaller: () => (fitted < chosen && smaller <= fitted ? fit() : setFontSize(smaller)),
     canLarger: larger > size,
     larger: () => setFontSize(Math.max(minTerminalFontSize, larger)),
   }
