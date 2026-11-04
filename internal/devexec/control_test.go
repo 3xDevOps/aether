@@ -1,6 +1,7 @@
 package devexec
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"io"
@@ -28,7 +29,7 @@ func finalRecord(t *testing.T, key string) State {
 func TestControlReadsTheFinalRecordOfASupervisorThatExitsMidCall(t *testing.T) {
 	for name, readsRequest := range map[string]bool{"after reading the request": true, "before reading the request": false} {
 		t.Run(name, func(t *testing.T) {
-			key := "control-test-" + t.Name()
+			key := "control-test-" + t.Name() + "-" + rand.Text()
 			final := finalRecord(t, key)
 			listener, err := net.Listen("unix", filepath.Join(stateDir(key), "control.sock"))
 			if err != nil {
@@ -58,7 +59,7 @@ func TestControlReadsTheFinalRecordOfASupervisorThatExitsMidCall(t *testing.T) {
 // A status call that finds the supervisor's socket gone reads the final
 // record written before it went.
 func TestControlFailureFallsBackToTheFinalRecord(t *testing.T) {
-	key := "control-test-" + t.Name()
+	key := "control-test-" + t.Name() + "-" + rand.Text()
 	final := finalRecord(t, key)
 	request := Request{Action: "status", ExecID: "exec-1", ClaimToken: "claim-1"}
 	dialErr := &net.OpError{Op: "dial", Net: "unix", Err: syscall.ECONNREFUSED}
