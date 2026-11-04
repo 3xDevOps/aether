@@ -19,15 +19,6 @@ function key(): string {
   return keyPrefix + window.location.origin
 }
 
-function read(): Saved | null {
-  try {
-    const raw = window.localStorage.getItem(key())
-    return raw ? (JSON.parse(raw) as Saved) : null
-  } catch {
-    return null
-  }
-}
-
 export function clearSnapshot(): void {
   try {
     window.localStorage.removeItem(key())
@@ -40,6 +31,8 @@ export function clearSnapshot(): void {
 export function saveSnapshot(store: RootStore): void {
   const s = store.getState()
   if (!s.info || !s.identityKey || !s.hydrated) return
+  // A kill or close the server has not confirmed would read as done after a restart.
+  if (Object.keys(s.deletingRuns).length > 0 || Object.values(s.runs).some((r) => r.stateChangedAtPredicted)) return
   // The Edge gateway listens on a fixed loopback port that another app can
   // squat, and the app turns the WebView's own storage off for that reason.
   if (s.linkStatus?.edge_url) {
@@ -78,13 +71,33 @@ export function saveSnapshot(store: RootStore): void {
  */
 export function paintSnapshot(store: RootStore): void {
   if (store.getState().hydrated || store.getState().identityKey !== null) return
-  const saved = read()
-  if (!saved || !Array.isArray(saved.runs) || !Array.isArray(saved.workspaces)) return
+  let saved: Saved
+  try {
+    saved = JSON.parse(window.localStorage.getItem(key()) ?? 'null') as Saved
+  } catch {
+    return
+  }
+  // A damaged entry must not stop startup: drop it and load live.
+  if (
+    typeof saved?.identity !== 'string' ||
+    !saved.info?.member ||
+    !Array.isArray(saved.runs) ||
+    !Array.isArray(saved.workspaces) ||
+    !Array.isArray(saved.members?.members)
+  ) {
+    clearSnapshot()
+    return
+  }
   const s = store.getState()
   s.setIdentityKey(saved.identity)
   s.setInfo(saved.info as ServerInfo)
-  s.setCapabilities(saved.capabilities)
-  s.setWorkspaces(saved.workspaces)
+  s.setCapabilities(saved.capabilities ?? null)
+  // Not setWorkspaces: a route to a workspace made after the save must stay put.
+  const workspaces = Object.fromEntries(saved.workspaces.map((w) => [w.id, w as Workspace]))
+  store.setState({
+    workspaces,
+    activeWorkspace: workspaces[s.activeWorkspace] ? s.activeWorkspace : Object.keys(workspaces).sort()[0] ?? '',
+  })
   s.setMemberList(saved.members)
   // Display only: a live snapshot must replace these whatever their order.
   s.setRuns(saved.runs.map((run) => ({ ...run, status_seq: 0 })))

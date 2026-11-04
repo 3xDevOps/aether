@@ -21,7 +21,7 @@ import type { RunRoom } from '@/routes/run/room'
 import { SessionRequestCard } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
-import { useSelf } from '@/store/hooks'
+import { useSelf, useStale } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 
@@ -58,9 +58,10 @@ function ReplyForm({ question, room }: { question: RoomMessage; room: RunRoom })
   const [body, setBody] = useState('')
   const [sending, setSending] = useState<object | null>(null)
   const late = usePastDeadline(sending !== null)
+  const stale = useStale()
   const send = async () => {
     const text = body.trim()
-    if (!text || sending) return
+    if (!text || sending || stale) return
     const mine = {}
     setSending(mine)
     const posted = await room.post({ kind: 'reply', body: text, correlationID: question.id })
@@ -126,7 +127,9 @@ function SudoCard({ run, request }: { run: RunRecord; request: RunInputRequest }
   const mayAllow = allowed('sudo', self, { owner: run.member_id })
   const mayDeny = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const [error, setError] = useState<string>()
+  const stale = useStale()
   const decide = async (allow: boolean) => {
+    if (stale) return
     setError(undefined)
     try {
       await api.runInputRespond(run.id, request.id, allow ? sudoOption.allow : sudoOption.deny)

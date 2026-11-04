@@ -5,13 +5,7 @@ import { timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 
-/**
- * One line while the dashboard shows the saved snapshot or a refresh failed:
- * when the state is from and the failure verbatim (tap to read all of it),
- * with a retry. Retry fires the same `online` wake the stream and hydration
- * already listen for. The live region holds only the error, so the ageing
- * time is never re-announced.
- */
+/** The live region holds only the error, so the ageing time is never re-announced. */
 export function StaleBanner() {
   const staleSince = useStore((s) => s.staleSince)
   const error = useStore((s) => s.hydrationError)

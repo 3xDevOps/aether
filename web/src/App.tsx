@@ -24,14 +24,6 @@ const toastOffset = {
 
 const continueKey = 'aether.server-too-old-continued'
 
-function storedContinue(): string | null {
-  try {
-    return window.localStorage.getItem(continueKey)
-  } catch {
-    return null
-  }
-}
-
 export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
@@ -49,7 +41,13 @@ export function App() {
   // every other screen because the server refuses everything else.
   const gated = useStore((s) => s.updateRequired !== null || s.update?.client_update_required === true)
   const tooOld = useStore(useShallow((s) => serverTooOld(s.update, s.info?.server_version) ?? { client: '', server: '' }))
-  const [continued, setContinued] = useState(() => storedContinue())
+  const [continued, setContinued] = useState(() => {
+    try {
+      return window.localStorage.getItem(continueKey)
+    } catch {
+      return null
+    }
+  })
   const pair = `${tooOld.client}/${tooOld.server}`
   const [handed, setHanded] = useState(handedLink)
   useEffect(() => onHandedLink(setHanded), [])

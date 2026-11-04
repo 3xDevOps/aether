@@ -52,4 +52,14 @@ describe('snapshot cache', () => {
     saveSnapshot(live)
     expect(window.localStorage.getItem(`aether.snapshot.v1:${window.location.origin}`)).toBeNull()
   })
+
+  it('drops a damaged entry instead of failing startup', () => {
+    const key = `aether.snapshot.v1:${window.location.origin}`
+    window.localStorage.setItem(key, JSON.stringify({ identity: 'x', info: { member: {} }, runs: [], workspaces: [] }))
+    const store = createRootStore()
+    paintSnapshot(store)
+
+    expect(store.getState().hydrated).toBe(false)
+    expect(window.localStorage.getItem(key)).toBeNull()
+  })
 })
