@@ -126,6 +126,14 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 				if ctx.Err() != nil {
 					return State{}, ctx.Err()
 				}
+				// A supervisor that exits closes calls it accepted unanswered,
+				// after it wrote its final record.
+				if final, readErr := readState(key); readErr == nil && final.Exited && request.Action != "start" {
+					if final.ExecID != request.ExecID || final.ClaimToken != request.ClaimToken {
+						return State{}, errors.New("execution identity mismatch")
+					}
+					return final, nil
+				}
 				return State{}, err
 			}
 			if state.CreationKey != key || state.ExecID != request.ExecID || state.ClaimToken != request.ClaimToken {
