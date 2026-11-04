@@ -2,10 +2,8 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -236,24 +234,7 @@ func TestWorkspaceBudgetRoundTrip(t *testing.T) {
 // upgrade must add the cost tables without disturbing what is there.
 func TestCostMigrationUpgradesExistingDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
-	if err != nil {
-		t.Fatalf("open raw: %v", err)
-	}
-	if _, execErr := raw.Exec(`CREATE TABLE schema_migrations (
-		version    INTEGER PRIMARY KEY,
-		applied_at INTEGER NOT NULL
-	)`); execErr != nil {
-		t.Fatalf("create schema_migrations: %v", execErr)
-	}
-	for v := 1; v < costSchemaVersion; v++ {
-		if _, execErr := raw.Exec(migrations[v-1]); execErr != nil {
-			t.Fatalf("apply v%d: %v", v, execErr)
-		}
-		if _, execErr := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, v); execErr != nil {
-			t.Fatalf("record v%d: %v", v, execErr)
-		}
-	}
+	raw := openLegacy(t, path, costSchemaVersion-1)
 	if _, execErr := raw.Exec(`INSERT INTO members (id, display_name, public_key, color, role, created_at)
 		VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1)`, testKey(t, "")); execErr != nil {
 		t.Fatalf("seed member: %v", execErr)
