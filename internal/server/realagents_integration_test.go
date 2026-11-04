@@ -211,8 +211,10 @@ func TestIntegrationRealAgents(t *testing.T) {
 							// A reminder gets the same report, so whichever lands
 							// last leaves the run where the late one should.
 							model.remind(turn, "waiting --for process")
-							// Codex ends a command's process group with it.
-							return []step{{command: "setsid sh -c \"sleep 5; " + reportCommand("waiting --for process", turn) + "\" >/dev/null 2>&1 &"}}
+							// Codex kills a command's process group once it exits,
+							// so the command waits for the report's line, printed
+							// only after setsid has left that group.
+							return []step{{command: "{ setsid sh -c \"echo; exec >/dev/null 2>&1; sleep 5; " + reportCommand("waiting --for process", turn) + "\" & } | read -r _"}}
 						},
 						want: func(turn string) turnWant {
 							return turnWant{activity: domain.ActivityWaitingTools, cause: events.CauseReport, outcome: protocol.CoordOutcomeWaiting, waitingFor: protocol.CoordWaitingForProcess, summary: turn, reminders: -1, late: true}
