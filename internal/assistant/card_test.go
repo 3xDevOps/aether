@@ -467,6 +467,11 @@ func TestARefusedPullRequestMergeIsRecordedFailed(t *testing.T) {
 	if got := refusedIn(json.RawMessage(`{"creation_uncertain":true}`)); got == "" {
 		t.Fatal("an uncertain creation read as done")
 	}
+	for _, done := range []string{`{"merged":true,"error":"the first attempt timed out"}`, `{"reconciled":true,"error":"GitHub answered 502"}`, `{"created":true}`} {
+		if got := refusedIn(json.RawMessage(done)); got != "" {
+			t.Fatalf("%s read as refused: %q", done, got)
+		}
+	}
 	if got := refusedIn(json.RawMessage(`{"run":{"id":"run-1"}}`)); got != "" {
 		t.Fatalf("a launch's result read as refused: %q", got)
 	}

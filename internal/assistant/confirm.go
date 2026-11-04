@@ -473,13 +473,18 @@ func (c actionCaller) record(conv context.Context, method string, a protocol.Ass
 
 // refusedIn is the failure a successful call reports in its result, as
 // run.pr.create and run.pr.merge do for GitHub's refusal, or for a pull
-// request whose creation is uncertain.
+// request whose creation is uncertain. A merge that landed or a pull
+// request created or found after reconciling succeeded, whatever error an
+// earlier attempt left in the result.
 func refusedIn(result json.RawMessage) string {
 	var r struct {
 		Error             string `json:"error"`
 		CreationUncertain bool   `json:"creation_uncertain"`
+		Merged            bool   `json:"merged"`
+		Created           bool   `json:"created"`
+		Reconciled        bool   `json:"reconciled"`
 	}
-	if json.Unmarshal(result, &r) != nil {
+	if json.Unmarshal(result, &r) != nil || r.Merged || r.Created || r.Reconciled {
 		return ""
 	}
 	if r.Error == "" && r.CreationUncertain {
