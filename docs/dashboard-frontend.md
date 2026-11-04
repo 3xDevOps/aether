@@ -1163,7 +1163,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   line under the top bar: *Saved state from 3 minutes ago*, then the
   hydration error verbatim (or *reconnecting*; tap it to read it all), and
   **Retry**, which fires
-  the `online` wake below. While it shows, the main view is dimmed, the
+  the `online` wake below. While it shows, the main view is dimmed, session Approve and Deny are disabled (*Reconnect to act*), the
   toast, the empty-board "Cannot reach the server" cards and (below 768px)
   the header connection line stay out, and the banner is the one place the
   failure is written. A rejected link token clears the cache and shows
