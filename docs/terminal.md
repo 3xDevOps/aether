@@ -338,7 +338,7 @@ These work in every terminal Aether draws, when it has focus:
 
 On a touch screen, a key row below the terminal has **Ctrl**, **Alt**,
 **Esc**, **Tab**, the arrows, **Enter** and **More keys**. **More keys**
-opens the rest: `|`, `~`, `/`, `\`, `-`, `_`, `` ` ``, `^`, **^C**,
+opens the rest, and stays open until you tap it again or outside: `|`, `~`, `/`, `\`, `-`, `_`, `` ` ``, `^`, **^C**,
 **Home**, **End**, **PgUp**, **PgDn**, **Del**, **F1–F12** (which shows the
 function keys), **Show keyboard**, and the text size: **A−**, the current
 size with **Fit**, and **A+**. **Ctrl** and **Alt** are sticky: tap once and
@@ -362,6 +362,7 @@ On a phone:
 - **An Enhanced session's Terminal tab** shows a shell that is already
   running in the session's container. If none is, it says "No agent
   terminal" and offers **Open shell**; viewing the tab starts nothing.
+  With four shells running, it says so under the button.
 - To copy, choose **Tools → Copy screen**.
 - A phone opens every session as a read-only mirror, so tap **Take control**
   before the keyboard can send input.

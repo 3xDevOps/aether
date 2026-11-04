@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { LoaderCircle } from '@/components/icons'
 import { connectionLabel } from '@/components/shell/connection'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { Button } from '@/components/ui/button'
@@ -10,7 +11,7 @@ import { message } from '@/lib/format'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { usePresenceSummary } from '@/routes/run/multiplayer-controls'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
-import { StopShellDialog, terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
+import { limitReason, StopShellDialog, terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
 import { TerminalHistory } from '@/routes/terminal/history'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
@@ -73,9 +74,10 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
 function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
   const mobile = useIsMobile()
   const asked = useRef(false)
+  const [failed, setFailed] = useState(false)
   const { runID, visible, canOpen, show, setError } = shells
   useEffect(() => {
-    if (!mobile || !wanted || !visible || !canOpen || asked.current) return
+    if (!mobile || !wanted || !visible || !canOpen || asked.current || failed) return
     asked.current = true
     void (async () => {
       // Decided from a list this request read itself: the poll may not have
@@ -85,13 +87,19 @@ function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
         terminals = (await api.devTerminalList({ run_id: runID })).terminals
       } catch (cause) {
         setError(message(cause))
+        setFailed(true)
         return
       }
       useStore.getState().syncShellTerminals(runID, terminals)
       const running = terminals.find((terminal) => !shellEnded(terminal))
       if (running) show(running.terminal_id)
     })()
-  }, [canOpen, mobile, runID, setError, show, visible, wanted])
+  }, [canOpen, failed, mobile, runID, setError, show, visible, wanted])
+  return failed ? () => {
+    asked.current = false
+    setError(null)
+    setFailed(false)
+  } : undefined
 }
 
 export function TerminalView({ run, agent, shells, onCaptures }: {
@@ -105,13 +113,16 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
   const tabbed = shells.canOpen && shells.dock.tabs.length > 0
   const { controller, session, takeover } = agent
   const { state, replaying, controlMetadata } = session
-  useRunningShellOnPhone(shells, !agent.hasAgentTerminal && !shellShown)
+  const retryShellList = useRunningShellOnPhone(shells, !agent.hasAgentTerminal && !shellShown)
   const mobile = useIsMobile()
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {shells.error && (
-        <p role="alert" className="shrink-0 border-b border-seam px-3 py-1 text-ui-sm text-state-failed">{shells.error}</p>
+        <div className="flex shrink-0 items-center gap-2 border-b border-seam px-3 py-1">
+          <p role="alert" className="min-w-0 flex-1 text-ui-sm text-state-failed">{shells.error}</p>
+          {retryShellList && <Button size="sm" variant="ghost" onClick={retryShellList}>Retry</Button>}
+        </div>
       )}
       <div className="relative min-h-0 flex-1">
       {shellShown && (
@@ -170,7 +181,13 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
           <EmptyState
             title="No agent terminal"
             action={mobile && shells.canOpen && (
-              <Button disabled={!shells.canAdd} onClick={() => void shells.open()}>Open shell</Button>
+              <div className="flex flex-col items-center gap-2">
+                <Button disabled={!shells.canAdd} onClick={() => void shells.open()}>
+                  {shells.busy && <LoaderCircle aria-hidden className="animate-spin motion-reduce:animate-none" />}
+                  Open shell
+                </Button>
+                {shells.atLimit && <p className="max-w-80 text-ui-sm text-muted">{limitReason}</p>}
+              </div>
             )}
           >
             An Enhanced session talks to its agent in the Chat view. Open a shell to work in the session’s container.

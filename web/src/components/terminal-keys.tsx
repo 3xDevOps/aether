@@ -101,17 +101,33 @@ function KeyButton({
   )
 }
 
+/** How much of the visual viewport a soft keyboard takes, at least. */
+const keyboardHeight = 120
+
+/**
+ * Whether the soft keyboard is up: the textarea has focus and something took
+ * the bottom of the visual viewport. Focus alone is not enough, because
+ * Android's Back hides the keyboard and leaves the textarea focused.
+ */
 function useKeyboardOpen(textarea: HTMLTextAreaElement | undefined) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     if (!textarea) return
-    const update = () => setOpen(document.activeElement === textarea)
+    const viewport = window.visualViewport
+    let tallest = viewport?.height ?? 0
+    const update = () => {
+      if (viewport) tallest = Math.max(tallest, viewport.height)
+      const covered = viewport ? tallest - viewport.height >= keyboardHeight : true
+      setOpen(document.activeElement === textarea && covered)
+    }
     update()
     textarea.addEventListener('focus', update)
     textarea.addEventListener('blur', update)
+    viewport?.addEventListener('resize', update)
     return () => {
       textarea.removeEventListener('focus', update)
       textarea.removeEventListener('blur', update)
+      viewport?.removeEventListener('resize', update)
     }
   }, [textarea])
   return open
@@ -141,10 +157,7 @@ export function TerminalKeys({
     <KeyButton
       key={key.label}
       label={key.label}
-      onPress={() => {
-        setMore(false)
-        send(key.bytes)
-      }}
+      onPress={() => send(key.bytes)}
     >
       {key.name ?? key.label}
     </KeyButton>
@@ -219,9 +232,20 @@ export function TerminalKeys({
             {keyboardOpen ? 'Hide keyboard' : 'Show keyboard'}
           </Button>
           <KeyButton label="Smaller text" className="col-span-2" disabled={!stepper.canSmaller} onPress={stepper.smaller}>A−</KeyButton>
-          <KeyButton label={`Text size ${stepper.size}, ${stepper.fitWidth ? 'fitted to width' : 'fit to width'}`} className="col-span-3 font-sans" disabled={stepper.fitWidth} onPress={stepper.fit}>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            aria-label={`Text size ${stepper.size}, ${stepper.fitWidth ? 'fitted to width' : 'fit to width'}`}
+            aria-disabled={stepper.fitWidth}
+            className="col-span-3 h-11 min-w-0 px-0 text-ui coarse:h-11 aria-disabled:cursor-default aria-disabled:opacity-100"
+            onPointerDown={keepFocus}
+            onClick={() => {
+              if (!stepper.fitWidth) stepper.fit()
+            }}
+          >
             {stepper.size} · {stepper.fitWidth ? 'fitted' : 'Fit'}
-          </KeyButton>
+          </Button>
           <KeyButton label="Larger text" className="col-span-2" disabled={!stepper.canLarger} onPress={stepper.larger}>A+</KeyButton>
         </PopoverContent>
       </Popover>

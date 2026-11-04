@@ -82,8 +82,8 @@ describe('the terminal key bar', () => {
       fireEvent.click(screen.getByRole('button', { name: key }))
     }
     fireEvent.click(screen.getByRole('button', { name: 'More keys' }))
+    // The sheet stays open, so a second key needs no second trip.
     fireEvent.click(screen.getByRole('button', { name: 'PgUp' }))
-    fireEvent.click(screen.getByRole('button', { name: 'More keys' }))
     fireEvent.click(screen.getByRole('button', { name: 'Function keys' }))
     fireEvent.click(screen.getByRole('button', { name: 'F5' }))
 

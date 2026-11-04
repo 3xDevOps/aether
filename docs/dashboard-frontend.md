@@ -3257,9 +3257,10 @@ session with no agent terminal, such as an Enhanced session, shows "No agent
 terminal" and the shell controls. Under 768px (`useIsMobile`), the first time
 the Terminal view shows for such a session `useRunningShellOnPhone` reads the
 shell list itself with `dev.terminal.list` and shows a running shell; a
-failed read shows its error. It never starts one, because viewing a tab must
+failed read shows its error with **Retry**. It never starts one, because viewing a tab must
 not start a process or take a lease: the empty state carries a primary
-**Open shell** (`shells.open`) instead. On that view the Enhanced session's
+**Open shell** (`shells.open`) instead, with a spinner while it starts and
+the shell-limit reason under it when four are running. On that view the Enhanced session's
 `MultiplayerControls` strip, which is about the Chat lease, is hidden; the
 shell's toolbar shows the shell's own control. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
@@ -3529,8 +3530,13 @@ terminal is writable, a tablet included. Its row does not scroll: **Ctrl**,
 44px tall. 4px apart. **More keys** (its trigger carries Radix's `aria-expanded`) is a
 non-modal `Popover` above the row that keeps focus where it was: symbols a
 phone keyboard buries, ^C, Home/End, PgUp/PgDn and Del; **F1–F12**, which
-toggles the function keys; Show/Hide keyboard, labelled from the textarea's
-focus and blur; and the size stepper last, next to the row. Every key goes through
+toggles the function keys; Show/Hide keyboard; and the size stepper last,
+next to the row. It stays open while keys are tapped and closes on its
+trigger or a tap outside. The keyboard label reads the textarea's focus and
+whether the visual viewport has lost at least 120px from its tallest,
+because Android's Back hides the keyboard and keeps focus. The stepper's
+size readout stays focusable at full contrast while fitted, with
+`aria-disabled`, rather than a greyed disabled button. Every key goes through
 `terminal.input`, so the replay gate and `disableStdin` treat a tap exactly
 like a keystroke, refuses focus on `pointerdown` so the keyboard stays as it
 was, and then calls `focusTerminal()`, which a tablet honours and a phone

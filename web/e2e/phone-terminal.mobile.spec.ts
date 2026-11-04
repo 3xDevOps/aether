@@ -89,7 +89,10 @@ test('an Enhanced session offers a shell that fits a phone and takes a sticky Ct
   await keys.getByRole('button', { name: 'More keys' }).tap()
   await expect(page.getByRole('dialog', { name: 'More keys' })).toBeVisible()
   await shoot(page, testInfo, '360 more keys')
+  // A key leaves the sheet open for the next one; its trigger closes it.
   await page.getByRole('dialog', { name: 'More keys' }).getByRole('button', { name: 'PgUp' }).tap()
+  await expect(page.getByRole('dialog', { name: 'More keys' })).toBeVisible()
+  await keys.getByRole('button', { name: 'More keys' }).tap()
   await expect(page.getByRole('dialog', { name: 'More keys' })).toBeHidden()
   await restore()
 
