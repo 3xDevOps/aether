@@ -17,7 +17,7 @@ test('the Android app names a missing distributor, then turns notifications on',
         const send = (state: object) =>
           setTimeout(() => bridge.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(state) })))
         if (!installed) {
-          return send(op === 'enable' ? { kind: 'no-distributor', error: 'No UnifiedPush distributor is installed on this phone.' } : { kind: 'no-distributor' })
+          return send(op === 'enable' ? { kind: 'no-distributor', error: 'Still no distributor. Install ntfy, then tap again.' } : { kind: 'no-distributor' })
         }
         if (op === 'enable') send({ kind: 'pending' })
         send(op === 'enable' ? { kind: 'on', endpoint: 'https://ntfy.sh/upAetherE2E?up=1' } : { kind: 'off' })
@@ -34,7 +34,7 @@ test('the Android app names a missing distributor, then turns notifications on',
   // Edge's gateway: no installed Chrome dashboard to point to.
   await expect(page.getByText('Or open this dashboard in Chrome')).toHaveCount(0)
   await toggle.click()
-  await expect(page.getByRole('region', { name: 'Push notifications' }).getByRole('alert')).toHaveText('No UnifiedPush distributor is installed on this phone.')
+  await expect(page.getByRole('region', { name: 'Push notifications' }).getByRole('alert')).toHaveText('Still no distributor. Install ntfy, then tap again.')
   await expect(toggle).not.toBeChecked()
 
   await page.evaluate(() => (window as unknown as { installDistributor: () => void }).installDistributor())

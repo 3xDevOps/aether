@@ -89,7 +89,7 @@ class PushBridge(private val activity: ComponentActivity) {
     /** No distributor, no permission prompt: the switch names the fix first. */
     private fun enable() {
         if (UnifiedPush.getDistributors(activity).isEmpty()) {
-            send(PushState(PushKind.NO_DISTRIBUTOR, error = "No UnifiedPush distributor is installed on this phone."))
+            send(PushState(PushKind.NO_DISTRIBUTOR, error = "Still no distributor. Install ntfy, then tap again."))
             return
         }
         val needsPermission =
@@ -103,6 +103,9 @@ class PushBridge(private val activity: ComponentActivity) {
         val json = JSONObject().put("kind", state.kind.wire)
         state.endpoint?.let { json.put("endpoint", it) }
         state.error?.let { json.put("error", it) }
-        reply?.postMessage(json.toString())
+        val page = reply ?: return
+        page.postMessage(json.toString())
+        // Shown once: a later visit to Settings starts clean.
+        if (state.error != null) PushRegistration.clearError(activity)
     }
 }

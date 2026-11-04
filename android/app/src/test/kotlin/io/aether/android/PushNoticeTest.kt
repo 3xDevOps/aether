@@ -117,7 +117,8 @@ class PushNoticeTest {
             registered: Boolean = true,
             any: Boolean = true,
             allowed: Boolean = true,
-        ) = pushStateOf(stored, current, pending, registered, any, allowed)
+            mayAsk: Boolean = false,
+        ) = pushStateOf(stored, current, pending, registered, any, allowed, mayAsk)
         assertEquals(PushState(PushKind.ON, synced.endpoint), state())
         // Another server was chosen under Connection: it does not have the endpoint yet.
         assertEquals(PushKind.OFF, state(current = "edge").kind)
@@ -128,6 +129,9 @@ class PushNoticeTest {
         val unsent = synced.copy(synced = false, error = "HTTP 503")
         assertEquals(PushState(PushKind.OFF, error = "HTTP 503"), state(stored = unsent))
         val none = StoredPush(null, null, null, synced = false, error = null)
-        assertEquals(PushKind.OFF, state(stored = none, allowed = false).kind)
+        // Android 13 starts without the permission: the switch asks for it.
+        assertEquals(PushKind.OFF, state(stored = none, allowed = false, mayAsk = true).kind)
+        // Turned off in Android's settings, before or after subscribing.
+        assertEquals(PushKind.BLOCKED, state(stored = none, allowed = false).kind)
     }
 }

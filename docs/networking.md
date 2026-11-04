@@ -394,8 +394,9 @@ card. When a session stops needing you, its notification goes away.
 Sessions and cards that need you arrive on the **Sessions that need you**
 channel; assistant notices, budgets and test notifications on **Assistant
 updates**, which you can quiet separately in Android's settings for the app.
-The lock screen shows only `A session needs you` until the phone is
-unlocked.
+Until the phone is unlocked the lock screen shows only what kind of
+notification it is: `A session needs you`, `New update`, or `Assistant
+card` for a decision made from a notification.
 
 Limits:
 

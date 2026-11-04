@@ -65,6 +65,8 @@
     <string name="push_decline">Decline</string>
     <string name="push_channel_updates">Assistant updates</string>
     <string name="push_public">A session needs you</string>
+    <string name="push_public_update">New update</string>
+    <string name="push_public_card">Assistant card</string>
     <string name="push_declining">Declining…</string>
     <string name="push_declined">Declined</string>
     <string name="push_decline_failed">Couldn\'t decline</string>

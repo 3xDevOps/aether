@@ -116,10 +116,17 @@ fun createPushChannels(context: Context) {
 }
 
 /**
- * A notification on [channel]. The lock screen shows only that Aether has
- * something; the session and its text wait until the phone is unlocked.
+ * A notification on [channel]. The lock screen shows only [public], what
+ * kind of thing Aether has; the session and its text wait until the phone
+ * is unlocked.
  */
-private fun builder(context: Context, channel: PushChannel, title: String, body: String): NotificationCompat.Builder {
+private fun builder(
+    context: Context,
+    channel: PushChannel,
+    title: String,
+    body: String,
+    public: Int = if (channel == PushChannel.NEEDS_YOU) R.string.push_public else R.string.push_public_update,
+): NotificationCompat.Builder {
     createPushChannels(context)
     val id = if (channel == PushChannel.NEEDS_YOU) CHANNEL_NEEDS_YOU else CHANNEL_UPDATES
     fun base() =
@@ -129,7 +136,7 @@ private fun builder(context: Context, channel: PushChannel, title: String, body:
     val public =
         base()
             .setContentTitle(context.getString(R.string.app_name))
-            .setContentText(context.getString(R.string.push_public))
+            .setContentText(context.getString(public))
             .build()
     return base()
         .setContentTitle(title)
@@ -202,11 +209,19 @@ class DeclineReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         val manager = NotificationManagerCompat.from(app)
         fun outcome(title: String, body: String) =
-            builder(app, PushChannel.NEEDS_YOU, title, body)
+            builder(app, PushChannel.NEEDS_YOU, title, body, public = R.string.push_public_card)
                 .setAutoCancel(true)
                 .setContentIntent(openIntent(app, tag, CARD_PATH))
-                .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
-        notify(manager, tag, outcome(text, app.getString(R.string.push_declining)).setSilent(true).setOnlyAlertOnce(true))
+        // Not kept: a clear for the card may replace it, and it goes by
+        // itself if the receiver dies before the outcome.
+        notify(
+            manager,
+            tag,
+            outcome(text, app.getString(R.string.push_declining))
+                .setSilent(true)
+                .setOnlyAlertOnce(true)
+                .setTimeoutAfter(DECLINING_TIMEOUT_MS),
+        )
         val result = goAsync()
         Thread {
                 val done =
@@ -219,14 +234,20 @@ class DeclineReceiver : BroadcastReceiver() {
                         )
                         outcome(app.getString(R.string.push_declined), text).setSilent(true)
                     } catch (e: Exception) {
-                        outcome(app.getString(R.string.push_decline_failed), e.message ?: e.toString())
-                    }
+                        val error = e.message ?: e.toString()
+                        // The error first, then the card it was about.
+                        outcome(app.getString(R.string.push_decline_failed), error)
+                            .setStyle(NotificationCompat.BigTextStyle().bigText("$error\n\n$text"))
+                    }.addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
                 notify(manager, tag, done)
                 result.finish()
             }
             .start()
     }
 }
+
+// Longer than the call can take inside goAsync's 10 seconds.
+private const val DECLINING_TIMEOUT_MS = 15_000L
 
 // internal/push's CardLink: the dashboard with the assistant panel open.
 private const val CARD_PATH = "/?assistant=1"

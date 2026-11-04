@@ -1,6 +1,10 @@
 package io.aether.android
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -28,7 +32,8 @@ enum class PushKind(val wire: String) {
 data class PushState(val kind: PushKind, val endpoint: String? = null, val error: String? = null)
 
 /**
- * The switch's state from what is stored and installed. On means all of it
+ * The switch's state from what is stored and installed. [mayAsk] is whether
+ * Android has yet to be asked for the notification permission. On means all of it
  * holds: a distributor still holds the registration, [server], the current
  * connection, has its endpoint, and Android lets the app notify.
  */
@@ -39,10 +44,13 @@ fun pushStateOf(
     registered: Boolean,
     anyDistributor: Boolean,
     allowed: Boolean,
+    mayAsk: Boolean,
 ): PushState =
     when {
         pending -> PushState(PushKind.PENDING)
-        stored.endpoint != null && registered && !allowed -> PushState(PushKind.BLOCKED)
+        // Turning the switch on asks for the permission Android 13 starts
+        // without; anything else that keeps notifications off is a block.
+        !allowed && !mayAsk -> PushState(PushKind.BLOCKED)
         stored.endpoint != null && registered && stored.synced && stored.server == server ->
             PushState(PushKind.ON, stored.endpoint)
         !anyDistributor -> PushState(PushKind.NO_DISTRIBUTOR, error = stored.error)
@@ -74,6 +82,10 @@ object PushRegistration {
             registered = UnifiedPush.getAckDistributor(context) != null,
             anyDistributor = UnifiedPush.getDistributors(context).isNotEmpty(),
             allowed = NotificationManagerCompat.from(context).areNotificationsEnabled(),
+            mayAsk =
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED,
         )
 
     /**
@@ -177,6 +189,10 @@ object PushRegistration {
                 changed()
             }
             .start()
+    }
+
+    fun clearError(context: Context) {
+        context.storePush(context.storedPush().copy(error = null))
     }
 
     fun fail(context: Context, error: String) {
