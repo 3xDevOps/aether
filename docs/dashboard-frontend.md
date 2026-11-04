@@ -5967,7 +5967,7 @@ Assistant, Linked server, Sync daemon, Docker inside sessions, Remote access).
 
 Categories:
 
-- **General**: **Theme** (System, Light, Dark; the palette and the footer
+- **General**: **Theme** (Dark, the default, Light, System; the palette and the footer
   menu offer the same), **Text size** (Default, Large, Larger; it scales the
   interface type tokens through `data-text-size` on the root element and
   leaves terminal zoom alone), **Single-key shortcuts** (see

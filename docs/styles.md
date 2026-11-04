@@ -535,7 +535,7 @@ in the header on desktop and under the top bar on a phone.
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
 32px rows (44px on a coarse pointer). Theme is in **Settings > General** and the footer menu, with
-explicit **System**, **Light** and **Dark** choices and matching palette
+explicit **Dark**, **Light** and **System** choices and matching palette
 commands.
 
 `focusRing`, `fieldFocus` and `field` in `web/src/lib/utils.ts` are the shared

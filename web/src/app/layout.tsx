@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import '../index.css'
 import { themeColor } from './theme-color'
+import { themeScript } from './theme-script'
 
 /**
  * `apple-mobile-web-app-capable` is spelled out by hand, beside the
@@ -33,24 +34,6 @@ export const viewport: Viewport = {
   themeColor: themeColor.dark,
 }
 
-/**
- * Applies the stored theme before the first paint, so a light device does not
- * flash light before React mounts `ThemeEffect`. It mirrors the persisted
- * `aether.ui` state and its version 12 migration in `src/store/index.ts`.
- */
-const themeScript = `(() => {
-  let theme = 'dark'
-  try {
-    const stored = JSON.parse(localStorage.getItem('aether.ui') ?? 'null')
-    const saved = stored?.state?.theme
-    if (saved === 'light' || (saved === 'system' && stored.version >= 12)) theme = saved
-  } catch {}
-  const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-  const root = document.documentElement
-  root.classList.toggle('dark', dark)
-  root.dataset.theme = dark ? 'dark' : 'light'
-  root.style.colorScheme = dark ? 'dark' : 'light'
-})()`
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (

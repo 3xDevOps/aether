@@ -226,6 +226,7 @@ export function createRootStore() {
           return {
             ...current,
             ...stored,
+            theme: stored.theme === 'light' || stored.theme === 'system' ? stored.theme : current.theme,
             boardViews: normalizeBoardViews(stored.boardViews),
             boardMapAllWorkspaces: stored.boardMapAllWorkspaces === true,
             boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
