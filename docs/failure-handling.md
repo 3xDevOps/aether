@@ -244,7 +244,7 @@ is still there. To free space yourself:
 | `aether.db` | Deleting runs or the workspace. |
 | `repos/` | Nothing. Every push and session branch is kept. |
 
-Archiving a session (**Archive closed sessions…** or `aether archive <session-id>`) only
+Archiving a session (**Archive finished sessions…** or `aether archive <session-id>`) only
 hides it and frees nothing.
 
 `scheduler: host capacity unavailable: ...` means Aether could not measure a

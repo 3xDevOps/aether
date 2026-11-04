@@ -10,10 +10,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// SetArchived hides a Final run from the board (archived true) or
+// SetArchived hides an Archivable run from the board (archived true) or
 // restores it (false). archiveMu serializes this against Relaunch's own
-// restore so the two can never race past each other. Archiving a
-// non-Final run is refused; a no-op archive or restore publishes
+// restore so the two can never race past each other. Archiving any
+// other run is refused; a no-op archive or restore publishes
 // nothing and never changes the original archive timestamp.
 func (s *Scheduler) SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error) {
 	s.archiveMu.Lock()
@@ -25,8 +25,8 @@ func (s *Scheduler) SetArchived(ctx context.Context, run domain.RunID, actor dom
 		if err != nil {
 			return nil, err
 		}
-		if !current.Status.Final() {
-			return nil, fmt.Errorf("%w: session is %s; only merged, abandoned, failed or interrupted sessions can be archived",
+		if !current.Status.Archivable() {
+			return nil, fmt.Errorf("%w: session is %s; only completed, merged, abandoned, failed or interrupted sessions can be archived",
 				ErrInvalidTransition, current.Status)
 		}
 		now := time.Now().UTC()

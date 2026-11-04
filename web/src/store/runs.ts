@@ -339,12 +339,10 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
     }),
 })
 
-/**
- * A completed run still awaits Close, so it is not archivable. The archive gate
- * and every hide guard share this predicate; see docs/dashboard-frontend.md.
- */
+/** The archive gate and every hide guard share this predicate; see docs/dashboard-frontend.md. Mirrors domain.RunStatus.Archivable: a final disposition, or completed, which its owner accepted as done. */
 export function isArchivable(status: RunStatus): boolean {
   return (
+    status === 'completed' ||
     status === 'merged' ||
     status === 'abandoned' ||
     status === 'failed' ||
@@ -354,5 +352,5 @@ export function isArchivable(status: RunStatus): boolean {
 
 /** Freezes `finished_at`; never a hide guard, which wants `isArchivable`. */
 export function isTerminal(status: RunStatus): boolean {
-  return status === 'completed' || isArchivable(status)
+  return isArchivable(status)
 }

@@ -886,11 +886,11 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Archive closed sessions…'))
+    fireEvent.click(await screen.findByText('Archive finished sessions…'))
 
     expect(api.runArchive).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Archive 1' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive 1' }))
 
     await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(done.id, true))
   })

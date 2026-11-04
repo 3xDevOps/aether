@@ -220,3 +220,43 @@ func plural(n int, one, many string) string {
 	}
 	return many
 }
+
+// archiveHolds refuses to archive a completed session while it still holds
+// work a close would warn about: live subsessions, a pull request not merged,
+// sessions waiting on it, or pending cleanup. A Final session was closed past
+// those warnings already.
+func (s *Server) archiveHolds(ctx context.Context, member domain.MemberID, id domain.RunID) *protocol.Error {
+	run, err := s.cfg.Store.GetRun(ctx, id)
+	if err != nil {
+		return rpcError(err)
+	}
+	if run.Status != domain.RunCompleted {
+		return nil
+	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return rpcError(err)
+	}
+	warnings, perr := s.closeWarnings(ctx, actor, id, domain.RunCompleted)
+	if perr != nil {
+		return perr
+	}
+	var held []string
+	for _, w := range warnings {
+		if archiveHolding(w.Kind) {
+			held = append(held, w.Detail)
+		}
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	return &protocol.Error{Code: protocol.CodeInvalidState, Message: "completed session " + string(id) + " still holds work: " + strings.Join(held, "; ")}
+}
+
+func archiveHolding(kind string) bool {
+	switch kind {
+	case protocol.CloseWarningSubsessions, protocol.CloseWarningPullRequest, protocol.CloseWarningAwaited, protocol.CloseWarningCleanupPending:
+		return true
+	}
+	return false
+}

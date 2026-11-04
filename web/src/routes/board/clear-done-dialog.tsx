@@ -14,62 +14,80 @@ import { runLabel } from '@/lib/status'
 
 export function ClearDoneConfirm({
   plan,
+  held,
   running,
   onConfirm,
   onCancel,
 }: {
   plan: ClearDonePlan
+  /** Completed sessions kept back and why; undefined while they are being checked. */
+  held: Map<string, string[]> | undefined
   running: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const n = plan.eligible.length
+  const archived = plan.eligible.filter((run) => !held?.has(run.id))
+  const kept = plan.eligible.filter((run) => held?.has(run.id))
+  const n = archived.length
+  const checking = held === undefined
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
       <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
         <DialogHeader>
           <DialogTitle>
-            {n === 0 ? 'No closed sessions to archive' : `Archive ${n} closed ${n === 1 ? 'session' : 'sessions'}?`}
+            {checking
+              ? 'Checking finished sessions…'
+              : n === 0
+                ? 'No finished sessions to archive'
+                : `Archive ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>
-            {n === 0 ? (
-              'Archive acts on merged, abandoned, failed and interrupted sessions you may act on.'
-            ) : (
-'Hides them from Finished. History stays; restore any time. Containers keep running; free them separately.'
-            )}
+            {n === 0 && !checking
+              ? 'Archive acts on completed, merged, abandoned, failed and interrupted sessions you may act on.'
+              : 'Hides them from Finished. History stays; restore any time. Containers keep running; free them separately.'}
           </DialogDescription>
         </DialogHeader>
-        {(plan.notClosed > 0 || plan.notAllowed > 0) && (
-          <ul className="list-disc space-y-1 pl-4 text-ui leading-5 text-muted">
-            {plan.notClosed > 0 && (
-              <li>
-                {plan.notClosed} {plan.notClosed === 1 ? 'session stays' : 'sessions stay'}: completed but
-                not yet closed - close them as merged or abandoned first.
-              </li>
-            )}
-            {plan.notAllowed > 0 && (
-              <li>
-                {plan.notAllowed} {plan.notAllowed === 1 ? 'session stays' : 'sessions stay'}: you may not
-                act on {plan.notAllowed === 1 ? 'it' : 'them'}.
-              </li>
-            )}
-          </ul>
+        {plan.notAllowed > 0 && (
+          <p className="text-ui leading-5 text-muted">
+            {plan.notAllowed} {plan.notAllowed === 1 ? 'session stays' : 'sessions stay'}: you may not act on{' '}
+            {plan.notAllowed === 1 ? 'it' : 'them'}.
+          </p>
         )}
-        {n > 0 && (
+        {checking && plan.eligible.length > 0 && (
+          <p className="flex items-center gap-2 text-ui text-muted">
+            <Spinner className="size-3" /> Checking completed sessions for open pull requests, waiting sessions, subsessions and cleanup
+          </p>
+        )}
+        {!checking && n > 0 && (
           <ul aria-label="Sessions to archive" className="max-h-40 space-y-1 overflow-y-auto text-ui">
-            {plan.eligible.map((run) => (
+            {archived.map((run) => (
               <li key={run.id} className="truncate">{runLabel(run)}</li>
             ))}
           </ul>
         )}
+        {kept.length > 0 && (
+          <section aria-label="Sessions kept">
+            <h3 className="text-ui font-medium">
+              Kept: {kept.length} completed {kept.length === 1 ? 'session still holds' : 'sessions still hold'} work
+            </h3>
+            <ul className="mt-1 max-h-40 space-y-1.5 overflow-y-auto text-ui">
+              {kept.map((run) => (
+                <li key={run.id}>
+                  <span className="block truncate">{runLabel(run)}</span>
+                  <span className="block text-ui-sm text-muted">{held?.get(run.id)?.join(' · ')}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <DialogFooter>
           <Button variant="secondary" disabled={running} onClick={onCancel}>
-            {n === 0 ? 'Close' : 'Cancel'}
+            {n === 0 && !checking ? 'Close' : 'Cancel'}
           </Button>
-          {n > 0 && (
-            <Button disabled={running} onClick={onConfirm}>
-              {running && <Spinner className="size-3 text-current" />}
-              Archive {n}
+          {(checking || n > 0) && (
+            <Button disabled={running || checking} onClick={onConfirm}>
+              {(running || checking) && <Spinner className="size-3 text-current" />}
+              {checking ? 'Archive' : `Archive ${n}`}
             </Button>
           )}
         </DialogFooter>

@@ -8,6 +8,7 @@ import { run } from '@/test/fixtures'
 const archiveMocks = vi.hoisted(() => ({
   runArchive: vi.fn(),
   runRelease: vi.fn(),
+  runCloseCheck: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ api: archiveMocks }))
@@ -20,6 +21,7 @@ const closed = [
 
 beforeEach(() => {
   vi.clearAllMocks()
+  archiveMocks.runCloseCheck.mockImplementation(async (ids: string[]) => ids.map((id) => ({ run_id: id, warnings: [] })))
   archiveMocks.runArchive.mockImplementation(async (id: string) =>
     run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }),
   )
@@ -35,7 +37,7 @@ describe('archive confirmation dialog', () => {
   it('archives every eligible run in order and closes the palette form', async () => {
     render(<ClearDoneDialog />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Archive 2' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive 2' }))
 
     await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
     expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(1, 'run_b', true)
@@ -49,10 +51,35 @@ describe('archive confirmation dialog', () => {
     expect(archiveMocks.runArchive).not.toHaveBeenCalled()
   })
 
-  it('says so when no closed run qualifies', () => {
+  it('archives completed sessions too, keeping each one that still holds work with its reason', async () => {
+    const completed = [
+      run({ id: 'run_c', status: 'completed', review: 'accepted', finished_at: '2026-08-14T10:05:00Z' }),
+      run({ id: 'run_d', status: 'completed', review: 'accepted', finished_at: '2026-08-14T10:00:00Z' }),
+    ]
+    useStore.setState({ runs: Object.fromEntries([...closed, ...completed].map((r) => [r.id, toRecord(r)])) })
+    archiveMocks.runCloseCheck.mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        run_id: id,
+        warnings: id === 'run_d'
+          ? [{ kind: 'pull_request', detail: 'Pull request acme/shop#42 was open, not merged' }, { kind: 'unmerged_work', detail: 'Commits may not be merged' }]
+          : [{ kind: 'protected', detail: 'Protected' }],
+      })),
+    )
+    render(<ClearDoneDialog />)
+
+    expect(screen.getByText('Checking finished sessions…')).toBeDefined()
+    const archive = await screen.findByRole('button', { name: 'Archive 3' })
+    expect(archiveMocks.runCloseCheck).toHaveBeenCalledWith(['run_c', 'run_d'], 'completed')
+    expect(screen.getByText('Pull request acme/shop#42 was open, not merged')).toBeDefined()
+    fireEvent.click(archive)
+    await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
+    expect(archiveMocks.runArchive.mock.calls.map(([id]) => id).sort()).toEqual(['run_a', 'run_b', 'run_c'])
+  })
+
+  it('says so when no finished run qualifies', async () => {
     useStore.setState({ runs: {} })
     render(<ClearDoneDialog />)
-    expect(screen.getByText('No closed sessions to archive')).toBeDefined()
+    expect(await screen.findByText('No finished sessions to archive')).toBeDefined()
     expect(screen.queryByRole('button', { name: /Archive/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(useStore.getState().paletteDialog).toBeNull()
