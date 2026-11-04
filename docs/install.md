@@ -293,7 +293,7 @@ backups. Uninstalling the app or clearing its storage deletes the key, so the
 phone signs in as a new device and may need approval again. To switch mode or
 check for updates, long-press the app icon and choose **Connection**.
 
-**Share** text or a link to **New Aether session** from any app and the
+**Share** text or a link to Aether's **New session** from any app and the
 dashboard opens a new session with it as the prompt, cut to 8000 characters;
 nothing starts until you send it. Back walks the dashboard's history, returns
 to its home from a page a share opened, and leaves the app only from home.
