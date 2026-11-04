@@ -73,8 +73,9 @@ default as `system`, which is how a never-chosen theme was saved, becomes
 `dark`; a stored `light` or `dark` is kept. An inline script in
 `web/src/app/layout.tsx` applies the stored theme before the first paint, so a
 light device never flashes light. The desktop window and the Android
-WebView, with its launch window and light status bar icons, start on the
-dark `--canvas` for the same reason.
+WebView and its launch window start on the dark `--canvas` for the same
+reason; Android's system bar icons are light over the dashboard and follow
+the system theme over the native error and update panels.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
