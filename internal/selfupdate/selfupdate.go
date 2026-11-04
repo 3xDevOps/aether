@@ -167,26 +167,41 @@ func oldPath(dst string) string { return dst + ".old" }
 // executable but allows renaming it: dst moves to dst.old, tmp takes its
 // name, and the first move is undone if the second fails. A dst.old a
 // process still runs from cannot be deleted, so dst moves to a name of its
-// own beside it instead. It returns where dst went, empty if it did not
-// exist.
+// own beside it instead. Defender can hold a freshly written tmp open for a
+// moment, so a swap undone that way is tried again with dst back in place
+// between attempts. It returns where dst went, empty if it did not exist.
 func swapAside(tmp, dst string) (string, error) {
-	old := oldPath(dst)
+	var old string
+	err := retry(context.Background(), func() (bool, error) {
+		var again bool
+		var err error
+		old, again, err = swapOnce(tmp, dst)
+		return again, err
+	})
+	return old, err
+}
+
+// swapOnce is one attempt of swapAside. again reports a failure undone with
+// dst restored, which is safe to try again.
+func swapOnce(tmp, dst string) (old string, again bool, err error) {
+	old = oldPath(dst)
 	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		old = fmt.Sprintf("%s.%d", old, time.Now().UnixNano())
 	}
 	if err := os.Rename(dst, old); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			return "", err
+			return "", false, err
 		}
-		return "", renameSettled(tmp, dst)
+		err := os.Rename(tmp, dst)
+		return "", err != nil && !errors.Is(err, fs.ErrNotExist), err
 	}
-	if err := renameSettled(tmp, dst); err != nil {
+	if err := os.Rename(tmp, dst); err != nil {
 		if rerr := renameSettled(old, dst); rerr != nil {
-			return "", errors.Join(err, fmt.Errorf("restore %s: %w", dst, rerr))
+			return "", false, errors.Join(err, fmt.Errorf("restore %s: %w", dst, rerr))
 		}
-		return "", err
+		return "", !errors.Is(err, fs.ErrNotExist), err
 	}
-	return old, nil
+	return old, false, nil
 }
 
 // renameSettled renames on Windows once Defender or a just-failed start
