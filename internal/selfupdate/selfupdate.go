@@ -167,26 +167,52 @@ func oldPath(dst string) string { return dst + ".old" }
 // executable but allows renaming it: dst moves to dst.old, tmp takes its
 // name, and the first move is undone if the second fails. A dst.old a
 // process still runs from cannot be deleted, so dst moves to a name of its
-// own beside it instead. It returns where dst went, empty if it did not
-// exist.
+// own beside it instead. Defender can hold a freshly written tmp open for a
+// moment, so a swap undone that way is tried again with dst back in place
+// between attempts. It returns where dst went, empty if it did not exist.
 func swapAside(tmp, dst string) (string, error) {
-	old := oldPath(dst)
+	var old string
+	err := retry(context.Background(), func() (bool, error) {
+		var again bool
+		var err error
+		old, again, err = swapOnce(tmp, dst)
+		return again, err
+	})
+	return old, err
+}
+
+// swapOnce is one attempt of swapAside. again reports a failure that left
+// dst in place, which is safe to try again.
+func swapOnce(tmp, dst string) (old string, again bool, err error) {
+	old = oldPath(dst)
 	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		old = fmt.Sprintf("%s.%d", old, time.Now().UnixNano())
 	}
 	if err := os.Rename(dst, old); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			return "", err
+			return "", true, err
 		}
-		return "", os.Rename(tmp, dst)
+		err := os.Rename(tmp, dst)
+		return "", err != nil && !errors.Is(err, fs.ErrNotExist), err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		if rerr := os.Rename(old, dst); rerr != nil {
-			return "", errors.Join(err, fmt.Errorf("restore %s: %w", dst, rerr))
+		if rerr := renameSettled(old, dst); rerr != nil {
+			return "", false, errors.Join(err, fmt.Errorf("restore %s: %w", dst, rerr))
 		}
-		return "", err
+		return "", !errors.Is(err, fs.ErrNotExist), err
 	}
-	return old, nil
+	return old, false, nil
+}
+
+// renameSettled renames on Windows once Defender or a just-failed start
+// lets go of the file: a freshly written or just-refused binary is held
+// open for a moment, and renaming it fails with a sharing violation until
+// then. A missing file is not retried.
+func renameSettled(from, to string) error {
+	return retry(context.Background(), func() (bool, error) {
+		err := os.Rename(from, to)
+		return !errors.Is(err, fs.ErrNotExist), err
+	})
 }
 
 // keepOldEnv makes RemoveOld keep the previous build: the start check runs
@@ -219,16 +245,13 @@ func (s *Staged) commitChecked() error {
 	if cause == nil {
 		return nil
 	}
-	// Defender or the failed start can hold the refused binary open for a
-	// moment, and moving the previous build back over it fails with a
-	// sharing violation until they let go.
-	restore := func() (bool, error) {
+	restore := func() error {
 		if s.aside == "" {
-			return true, os.Remove(s.dst)
+			return retry(context.Background(), func() (bool, error) { return true, os.Remove(s.dst) })
 		}
-		return true, os.Rename(s.aside, s.dst)
+		return renameSettled(s.aside, s.dst)
 	}
-	if err := retry(context.Background(), restore); err != nil {
+	if err := restore(); err != nil {
 		return fmt.Errorf("replace %s: the new build does not start (%w) and the previous build could not be restored (%v); move %s back over %s", s.dst, cause, err, s.aside, s.dst)
 	}
 	s.committed = false
