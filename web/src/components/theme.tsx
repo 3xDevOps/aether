@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from 'react'
+import { themeColor } from '@/app/theme-color'
 import { useStore } from '@/store'
 
 const darkQuery = '(prefers-color-scheme: dark)'
@@ -24,6 +25,7 @@ export function ThemeEffect() {
       root.classList.toggle('dark', dark)
       root.dataset.theme = dark ? 'dark' : 'light'
       root.style.colorScheme = dark ? 'dark' : 'light'
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? themeColor.dark : themeColor.light)
     }
     apply()
     if (theme !== 'system') return

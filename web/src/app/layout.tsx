@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import '../index.css'
 import { themeColor } from './theme-color'
+import { themeScript } from './theme-script'
 
 /**
  * `apple-mobile-web-app-capable` is spelled out by hand, beside the
@@ -30,15 +31,16 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: 'cover',
   interactiveWidget: 'resizes-content',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: themeColor.light },
-    { media: '(prefers-color-scheme: dark)', color: themeColor.dark },
-  ],
+  themeColor: themeColor.dark,
 }
+
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark" data-theme="dark" style={{ colorScheme: 'dark' }} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="h-full">
         <div id="root" className="h-full">
           {children}

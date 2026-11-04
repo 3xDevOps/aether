@@ -22,9 +22,9 @@ import { useStore } from '@/store'
 import type { Theme } from '@/store/ui'
 
 const themes: { value: Theme; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'system', label: 'System' },
 ]
 
 export function UpdateNotice() {

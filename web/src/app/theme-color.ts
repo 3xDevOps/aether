@@ -1,4 +1,4 @@
-/** Browser chrome colour per OS scheme. A manifest carries one `theme_color`, so it takes the dark one. */
+/** Browser chrome colour per resolved theme; the page starts on the dark default, and a manifest carries one `theme_color`, the dark one. */
 export const themeColor = {
   light: '#f7f7f7',
   dark: '#1b1c1d',

@@ -67,8 +67,15 @@ pair it with `font-*` classes.
 ## Semantic palette
 
 `web/src/index.css` is authoritative: light values sit on `:root`, dark ones
-on `.dark`. The theme preference is `system`, `light` or `dark`; `system`
-follows `prefers-color-scheme` live.
+on `.dark`. The theme preference is `dark` (the default), `light` or `system`;
+`system` follows `prefers-color-scheme` live. A theme stored before the dark
+default as `system`, which is how a never-chosen theme was saved, becomes
+`dark`; a stored `light` or `dark` is kept. An inline script in
+`web/src/app/layout.tsx` applies the stored theme before the first paint, so a
+light device never flashes light. The desktop window and the Android
+WebView and its launch window start on the dark `--canvas` for the same
+reason; Android's system bar icons are light over the dashboard and follow
+the system theme over the native error and update panels.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
@@ -82,7 +89,8 @@ follows `prefers-color-scheme` live.
 | `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
 | `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
 | `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |
-| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, focus ring, control outline |
+| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, control outline |
+| `--focus-ring` | `outline-focus` | `#367f77` | `#5fb3a8` | Keyboard focus ring; 3:1 on every surface and on the selected row in both themes |
 | `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
 | `--on-accent` | `text-on-accent` | `#ffffff` | `#ffffff` | Text on `bg-accent` |
 | `--selection` | `bg-selection` | `#dfebe9` | `#17413d` | Selected rows |
@@ -530,7 +538,7 @@ in the header on desktop and under the top bar on a phone.
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
 32px rows (44px on a coarse pointer). Theme is in **Settings > General** and the footer menu, with
-explicit **System**, **Light** and **Dark** choices and matching palette
+explicit **Dark**, **Light** and **System** choices and matching palette
 commands.
 
 `focusRing`, `fieldFocus` and `field` in `web/src/lib/utils.ts` are the shared
