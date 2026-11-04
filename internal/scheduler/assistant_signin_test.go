@@ -31,6 +31,7 @@ type fakeIssuer struct {
 	used        map[string]bool
 	down        bool
 	profileDown bool
+	tokenCalls  int
 }
 
 func newFakeIssuer(t *testing.T) (*fakeIssuer, AssistantIssuer) {
@@ -70,9 +71,10 @@ func (f *fakeIssuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"account": map[string]string{"uuid": account}, "organization": map[string]string{"uuid": "org-" + account}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"account": map[string]string{"uuid": account, "email_address": account + "@example.test"}, "organization": map[string]string{"uuid": "org-" + account}})
 		return
 	}
+	f.tokenCalls++
 	var req map[string]string
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	client := map[string]string{"/claude/token": claudeClientID, "/codex/token": codexClientID}[r.URL.Path]

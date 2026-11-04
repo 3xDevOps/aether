@@ -118,6 +118,7 @@ type credential struct {
 	token       string
 	accountID   string
 	plan        string
+	expired     bool
 	fingerprint string
 }
 

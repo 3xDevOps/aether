@@ -3,6 +3,7 @@ package quota
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -52,7 +53,7 @@ func parseClaudeCredential(data []byte, readErr error, now time.Time) credential
 		return credential{status: "unauthenticated", err: "Claude OAuth access token is missing or invalid", fingerprint: fingerprint("claude-no-token", string(data))}
 	}
 	if oauth.ExpiresAt > 0 && now.UnixMilli() >= oauth.ExpiresAt {
-		return credential{status: "unauthenticated", err: "Claude OAuth credential is expired", fingerprint: fingerprint("claude-expired", token, string(data))}
+		return credential{status: "unauthenticated", err: "Claude OAuth credential is expired", expired: true, fingerprint: fingerprint("claude-expired", token, string(data))}
 	}
 	if len(oauth.Scopes) > 0 && !hasScope(oauth.Scopes, "user:inference") {
 		return credential{status: "unauthenticated", err: "Claude OAuth credential lacks user:inference scope", fingerprint: fingerprint("claude-wrong-scope", token, sortedScopes(oauth.Scopes))}
@@ -63,6 +64,19 @@ func parseClaudeCredential(data []byte, readErr error, now time.Time) credential
 		plan:        oauth.SubscriptionType,
 		fingerprint: fingerprint("claude-oauth", token, oauth.SubscriptionType, strconv.FormatInt(oauth.ExpiresAt, 10), sortedScopes(oauth.Scopes)),
 	}
+}
+
+// ClaudeAccessToken returns the access token in a Claude Code credential
+// file without refreshing it. expired reports one past its expiresAt.
+func ClaudeAccessToken(data []byte, now time.Time) (token string, expired bool, err error) {
+	cred := parseClaudeCredential(data, nil, now)
+	switch {
+	case cred.status == "ok":
+		return cred.token, false, nil
+	case cred.expired:
+		return "", true, nil
+	}
+	return "", false, errors.New(cred.err)
 }
 
 func parseCodexCredential(data []byte, readErr error, _ time.Time) credential {

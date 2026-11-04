@@ -61,6 +61,8 @@ func (i AssistantIssuer) withDefaults() AssistantIssuer {
 
 const issuerTimeout = 30 * time.Second
 
+const assistantSignInWords = "the assistant's sign-in"
+
 // assistantSignInDir holds what the server recorded of each agent's sign-in:
 // <agent>.json, the account of the sign-in the member made, and
 // <agent>.pending, left by a sign-in until the next start records it. No
@@ -290,26 +292,43 @@ func (i AssistantIssuer) refreshClaude(ctx context.Context, data []byte) (string
 	}
 	// The exchange already spent the old refresh token, so the rotated one
 	// is returned even when the profile check fails.
-	var profile struct {
-		Account struct {
-			UUID string `json:"uuid"`
-		} `json:"account"`
-		Organization struct {
-			UUID string `json:"uuid"`
-		} `json:"organization"`
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, i.ClaudeProfile, nil)
+	profile, err := i.claudeProfile(ctx, assistantSignInWords, tokens.AccessToken)
 	if err != nil {
-		return "", rotated, fmt.Errorf("couldn't verify the assistant's sign-in with Anthropic: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
-	if err = i.do(req, "Anthropic", &profile); err != nil {
 		return "", rotated, err
 	}
-	if profile.Account.UUID == "" {
-		return "", rotated, errors.New("couldn't verify the assistant's sign-in with Anthropic: the profile names no account")
+	return profile.account(), rotated, nil
+}
+
+type claudeProfile struct {
+	Account struct {
+		UUID  string `json:"uuid"`
+		Email string `json:"email_address"`
+	} `json:"account"`
+	Organization struct {
+		UUID string `json:"uuid"`
+	} `json:"organization"`
+}
+
+func (p claudeProfile) account() string {
+	return "account=" + p.Account.UUID + ";organization=" + p.Organization.UUID
+}
+
+// claudeProfile asks the profile endpoint which account accessToken
+// belongs to. It spends nothing.
+func (i AssistantIssuer) claudeProfile(ctx context.Context, what, accessToken string) (claudeProfile, error) {
+	var profile claudeProfile
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, i.ClaudeProfile, nil)
+	if err != nil {
+		return profile, fmt.Errorf("couldn't verify %s with Anthropic: %w", what, err)
 	}
-	return "account=" + profile.Account.UUID + ";organization=" + profile.Organization.UUID, rotated, nil
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	if err = i.do(req, what, "Anthropic", &profile); err != nil {
+		return profile, err
+	}
+	if profile.Account.UUID == "" {
+		return profile, fmt.Errorf("couldn't verify %s with Anthropic: the profile names no account", what)
+	}
+	return profile, nil
 }
 
 // refreshCodex refreshes a Codex ChatGPT sign-in and returns the mode Codex
@@ -320,34 +339,15 @@ func (i AssistantIssuer) refreshClaude(ctx context.Context, data []byte) (string
 // its token exchange, which is part of its identity too.
 func (i AssistantIssuer) refreshCodex(ctx context.Context, data []byte) (string, []byte, error) {
 	var file map[string]json.RawMessage
-	var auth struct {
-		Mode   string  `json:"auth_mode"`
-		Key    *string `json:"OPENAI_API_KEY"`
-		Tokens *struct {
-			RefreshToken string `json:"refresh_token"`
-		} `json:"tokens"`
-	}
-	if json.Unmarshal(data, &file) != nil || json.Unmarshal(data, &auth) != nil {
+	if json.Unmarshal(data, &file) != nil {
 		return "", nil, fmt.Errorf("the Codex sign-in is not JSON: %w", ErrAssistantNotSignedIn)
 	}
-	keyID := ""
-	if auth.Key != nil && *auth.Key != "" {
-		sum := sha256.Sum256([]byte(*auth.Key))
-		keyID = ":key=" + hex.EncodeToString(sum[:])
+	auth, err := parseCodexSignIn(data)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", err, ErrAssistantNotSignedIn)
 	}
-	mode := auth.Mode
-	switch {
-	case mode != "":
-	case keyID != "":
-		mode = "apikey"
-	default:
-		mode = "chatgpt"
-	}
-	if mode != "chatgpt" {
-		if keyID == "" {
-			return "", nil, fmt.Errorf("the Codex sign-in holds no API key: %w", ErrAssistantNotSignedIn)
-		}
-		return mode + keyID, nil, nil
+	if auth.mode != "chatgpt" {
+		return auth.mode + auth.keyID, nil, nil
 	}
 	if auth.Tokens == nil || auth.Tokens.RefreshToken == "" {
 		return "", nil, fmt.Errorf("the Codex sign-in holds no refresh token: %w", ErrAssistantNotSignedIn)
@@ -357,7 +357,7 @@ func (i AssistantIssuer) refreshCodex(ctx context.Context, data []byte) (string,
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := i.post(ctx, "OpenAI", i.CodexToken, map[string]string{
+	if err = i.post(ctx, "OpenAI", i.CodexToken, map[string]string{
 		"client_id": codexClientID, "grant_type": "refresh_token", "refresh_token": auth.Tokens.RefreshToken, "scope": "openid profile email",
 	}, &tokens); err != nil {
 		return "", nil, err
@@ -390,7 +390,42 @@ func (i AssistantIssuer) refreshCodex(ctx context.Context, data []byte) (string,
 	if err != nil {
 		return "", nil, err
 	}
-	return "chatgpt:" + account + keyID, rotated, nil
+	return "chatgpt:" + account + auth.keyID, rotated, nil
+}
+
+// codexSignIn is a Codex auth.json with the mode Codex will use.
+type codexSignIn struct {
+	Mode   string  `json:"auth_mode"`
+	Key    *string `json:"OPENAI_API_KEY"`
+	Tokens *struct {
+		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
+		AccessToken  string `json:"access_token"`
+	} `json:"tokens"`
+	mode, keyID string
+}
+
+func parseCodexSignIn(data []byte) (codexSignIn, error) {
+	var auth codexSignIn
+	if json.Unmarshal(data, &auth) != nil {
+		return auth, errors.New("the Codex sign-in is not JSON")
+	}
+	if auth.Key != nil && *auth.Key != "" {
+		sum := sha256.Sum256([]byte(*auth.Key))
+		auth.keyID = ":key=" + hex.EncodeToString(sum[:])
+	}
+	auth.mode = auth.Mode
+	switch {
+	case auth.mode != "":
+	case auth.keyID != "":
+		auth.mode = "apikey"
+	default:
+		auth.mode = "chatgpt"
+	}
+	if auth.mode != "chatgpt" && auth.keyID == "" {
+		return auth, errors.New("the Codex sign-in holds no API key")
+	}
+	return auth, nil
 }
 
 // rewriteSignIn sets fields in the object file[key] and encodes file.
@@ -418,28 +453,28 @@ func rewriteSignIn(file map[string]json.RawMessage, key string, inner map[string
 func (i AssistantIssuer) post(ctx context.Context, vendor, url string, body map[string]string, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("couldn't verify the assistant's sign-in with %s: %w", vendor, err)
+		return fmt.Errorf("couldn't verify %s with %s: %w", assistantSignInWords, vendor, err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("couldn't verify the assistant's sign-in with %s: %w", vendor, err)
+		return fmt.Errorf("couldn't verify %s with %s: %w", assistantSignInWords, vendor, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return i.do(req, vendor, out)
+	return i.do(req, assistantSignInWords, vendor, out)
 }
 
-// do sends req and decodes a 2xx answer into out. A 400 or 401 is the
-// issuer refusing the sign-in; any other failure is reported with the
-// issuer's answer.
-func (i AssistantIssuer) do(req *http.Request, vendor string, out any) error {
+// do sends req to verify what, a sign-in, and decodes a 2xx answer into
+// out. A 400 or 401 is the issuer refusing the sign-in; any other
+// failure is reported with the issuer's answer.
+func (i AssistantIssuer) do(req *http.Request, what, vendor string, out any) error {
 	resp, err := i.Client.Do(req)
 	if err != nil {
-		return fmt.Errorf("couldn't verify the assistant's sign-in with %s: %w", vendor, err)
+		return fmt.Errorf("couldn't verify %s with %s: %w", what, vendor, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return fmt.Errorf("couldn't verify the assistant's sign-in with %s: %w", vendor, err)
+		return fmt.Errorf("couldn't verify %s with %s: %w", what, vendor, err)
 	}
 	detail := strings.TrimSpace(string(body[:min(len(body), 512)]))
 	switch {
@@ -447,10 +482,10 @@ func (i AssistantIssuer) do(req *http.Request, vendor string, out any) error {
 		// A refusal's body can echo the token it refused.
 		return fmt.Errorf("%s answered %s: %w", vendor, resp.Status, ErrAssistantSignInRefused)
 	case resp.StatusCode/100 != 2:
-		return fmt.Errorf("couldn't verify the assistant's sign-in with %s: %s: %s", vendor, resp.Status, detail)
+		return fmt.Errorf("couldn't verify %s with %s: %s: %s", what, vendor, resp.Status, detail)
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("couldn't verify the assistant's sign-in with %s: malformed answer: %w", vendor, err)
+		return fmt.Errorf("couldn't verify %s with %s: malformed answer: %w", what, vendor, err)
 	}
 	return nil
 }

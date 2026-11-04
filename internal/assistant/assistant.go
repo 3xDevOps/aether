@@ -79,6 +79,7 @@ type Host interface {
 	DiscardAssistantState(ctx context.Context, member domain.MemberID) error
 	RemoveAssistant(ctx context.Context, member domain.MemberID) error
 	AssistantLoginFound(member domain.MemberID, agent string) (bool, error)
+	AssistantAccount(ctx context.Context, member domain.MemberID, agent string) (protocol.AssistantAccount, error)
 }
 
 type Service struct {
@@ -255,6 +256,16 @@ func (s *Service) agents(ctx context.Context, id domain.MemberID) ([]protocol.As
 		return nil, fmt.Errorf("assistant: decode the agent list: %w", err)
 	}
 	return readiness(listed.Agents, func(agent string) (bool, error) { return s.cfg.Host.AssistantLoginFound(id, agent) })
+}
+
+// Account compares agent's assistant sign-in with the login in the member's
+// environment. It is information only and starts nothing.
+func (s *Service) Account(ctx context.Context, id domain.MemberID, agent string) (protocol.AssistantAccount, error) {
+	account, err := s.cfg.Host.AssistantAccount(ctx, id, agent)
+	if err != nil {
+		return protocol.AssistantAccount{}, fmt.Errorf("assistant: compare the %s sign-in: %w", agent, err)
+	}
+	return account, nil
 }
 
 func (s *Service) stored(ctx context.Context, id domain.MemberID) (*store.AssistantSession, error) {
