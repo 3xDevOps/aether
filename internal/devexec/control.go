@@ -97,47 +97,15 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 	ctx, cancel := context.WithTimeout(ctx, StartupTimeout)
 	defer cancel()
 	for {
-		if state, err := readState(key); err == nil && state.Exited {
-			if state.ExecID != request.ExecID || state.ClaimToken != request.ClaimToken {
-				return State{}, errors.New("execution identity mismatch")
-			}
-			if request.Action == "start" {
-				return state, errors.New("execution creation key has already been used")
-			}
-			return state, nil
+		if state, ok, err := finalState(key, request); ok {
+			return state, err
 		}
 		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(stateDir(key), "control.sock"))
 		if err == nil {
-			defer func() { _ = conn.Close() }()
-			deadline, _ := ctx.Deadline()
-			if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
-				return State{}, deadlineErr
-			}
-			// A deadline alone does not unblock an already connected socket
-			// when its parent context is cancelled before that deadline.
-			stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
-			defer stopCancel()
-			if encodeErr := json.NewEncoder(conn).Encode(request); encodeErr != nil {
-				return State{}, encodeErr
-			}
-			var state State
-			err = json.NewDecoder(io.LimitReader(conn, 16<<10)).Decode(&state)
-			if err != nil {
-				if ctx.Err() != nil {
-					return State{}, ctx.Err()
-				}
-				// A supervisor that exits closes calls it accepted unanswered,
-				// after it wrote its final record.
-				if final, readErr := readState(key); readErr == nil && final.Exited && request.Action != "start" {
-					if final.ExecID != request.ExecID || final.ClaimToken != request.ClaimToken {
-						return State{}, errors.New("execution identity mismatch")
-					}
-					return final, nil
-				}
-				return State{}, err
-			}
-			if state.CreationKey != key || state.ExecID != request.ExecID || state.ClaimToken != request.ClaimToken {
-				return State{}, errors.New("execution identity mismatch")
+			state, exchangeErr := exchange(ctx, conn, key, request)
+			_ = conn.Close()
+			if exchangeErr != nil {
+				return orFinal(key, request, exchangeErr)
 			}
 			if state.Error != "" {
 				return state, errors.New(state.Error)
@@ -145,7 +113,7 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 			return state, nil
 		}
 		if request.Action != "start" && request.Action != "stop" {
-			return State{}, fmt.Errorf("%w: %w", ErrNoSupervisor, err)
+			return orFinal(key, request, fmt.Errorf("%w: %w", ErrNoSupervisor, err))
 		}
 		select {
 		case <-ctx.Done():
@@ -153,6 +121,59 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
+}
+
+// finalState is key's final record, ok when one is on disk.
+func finalState(key string, request Request) (state State, ok bool, err error) {
+	state, err = readState(key)
+	if err != nil || !state.Exited {
+		return State{}, false, nil
+	}
+	if state.ExecID != request.ExecID || state.ClaimToken != request.ClaimToken {
+		return State{}, true, errors.New("execution identity mismatch")
+	}
+	if request.Action == "start" {
+		return state, true, errors.New("execution creation key has already been used")
+	}
+	return state, true, nil
+}
+
+// orFinal answers a call that reached no supervisor's reply with the final
+// record when there is one: a supervisor writes it, then stops serving, so a
+// call that races its exit finds no socket or is closed unanswered.
+func orFinal(key string, request Request, err error) (State, error) {
+	if request.Action != "start" {
+		if state, ok, finalErr := finalState(key, request); ok {
+			return state, finalErr
+		}
+	}
+	return State{}, err
+}
+
+// exchange sends request on conn and reads the supervisor's reply.
+func exchange(ctx context.Context, conn net.Conn, key string, request Request) (State, error) {
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return State{}, err
+	}
+	// A deadline alone does not unblock an already connected socket when
+	// its parent context is cancelled before that deadline.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	if err := json.NewEncoder(conn).Encode(request); err != nil {
+		return State{}, err
+	}
+	var state State
+	if err := json.NewDecoder(io.LimitReader(conn, 16<<10)).Decode(&state); err != nil {
+		if ctx.Err() != nil {
+			return State{}, ctx.Err()
+		}
+		return State{}, err
+	}
+	if state.CreationKey != key || state.ExecID != request.ExecID || state.ClaimToken != request.ClaimToken {
+		return State{}, errors.New("execution identity mismatch")
+	}
+	return state, nil
 }
 
 // saveState writes state readable by the members of group, unless it is -1.
