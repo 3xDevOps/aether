@@ -361,6 +361,8 @@ function announce(runId, run, held) {
     entry = undefined
   }
   if (attention && !entry) {
+    // A need replaces the session's own success notice; a watch's stays.
+    closeOwnFinished(runId)
     entry = { key, run, notification: null }
     standing.set(runId, entry)
     updateBadge()

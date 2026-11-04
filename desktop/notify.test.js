@@ -548,3 +548,13 @@ test("a follow-up closes the session's own finished notice but not a watch's", a
   assert.ok(!shown[0].closed, "the watch's notice stays")
   mock.restoreAll()
 })
+
+test("a disconnect after a success closes the session's own success notice", async () => {
+  const run = { ...lead('r29'), acp: true }
+  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' })
+  assert.equal(shown.length, 1)
+  await status(run, { state: 'disconnected', reason: 'enhanced session ended: exit code 1' })
+  assert.ok(shown[0].closed)
+  assert.equal(shown.length, 2)
+  assert.equal(badge, 1)
+})
