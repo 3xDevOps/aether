@@ -3172,8 +3172,11 @@ dictation is installed.
 The button and the composer around it share state through `state.ts`, keyed by
 the box's ref: `useDictationState(textarea)` returns `active` (starting,
 recording or transcribing) and the current `notice`. While `active`, the
-composer's send is disabled and Enter does nothing, so a missed press cannot
-send the old draft mid-recording. The New session dialog and the onboarding
+composer's text-sending actions (Send, Steer, Queue) are disabled and Enter
+does nothing, so a missed press cannot send the old draft mid-recording;
+Interrupt, Stop waiting and Resume stay available. The mic will not start in
+a box that is read-only because its message is still sending, since the sent
+draft would replace the dictated words; it shows a notice instead. The New session dialog and the onboarding
 first run hold **Launch** the same way through `useDictating()`, which is true
 while any box dictates. `DictationNotice` draws the notice as a strip
 above the box: failed tint, alert icon and `role="alert"` for an error, a plain

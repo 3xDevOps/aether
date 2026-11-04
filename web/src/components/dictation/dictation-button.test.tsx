@@ -160,6 +160,18 @@ describe('DictationButton', () => {
     await waitFor(() => expect(box.value).toBe('please fix the bug quickly'))
   })
 
+  it('stops from the keyboard after a tap released while the mic was starting', async () => {
+    vi.mocked(api.dictationTranscribe).mockResolvedValue({ text: 'done' })
+    const box = mount()
+    box.setSelectionRange(11, 11)
+    const mic = screen.getByRole('button', { name: 'Dictate', pressed: false })
+    fireEvent.pointerDown(mic, { button: 0, pointerId: 1 })
+    fireEvent.pointerUp(mic, { button: 0, pointerId: 1 })
+    const stop = await screen.findByRole('button', { name: 'Dictate', pressed: true })
+    fireEvent.click(stop, { detail: 0 })
+    await waitFor(() => expect(box.value).toBe('fix the bug done'))
+  })
+
   it('leaves an Escape pressed elsewhere to its owner', async () => {
     mount()
     fireEvent.click(screen.getByRole('button', { name: 'Dictate', pressed: false }))
@@ -189,5 +201,12 @@ describe('insertTranscript', () => {
     expect(insertTranscript('fix the bug', 'now', 11, 11)).toEqual({ body: 'fix the bug now', caret: 15 })
     expect(insertTranscript('fix the bug', 'a', 4, 7)).toEqual({ body: 'fix a bug', caret: 5 })
     expect(insertTranscript('', 'hello', 0, 0)).toEqual({ body: 'hello', caret: 5 })
+  })
+
+  it('keeps punctuation and brackets attached', () => {
+    expect(insertTranscript('keep the old.', 'one', 12, 12)).toEqual({ body: 'keep the old one.', caret: 16 })
+    expect(insertTranscript('Done.', 'next', 5, 5)).toEqual({ body: 'Done. next', caret: 10 })
+    expect(insertTranscript('call ()', 'it', 6, 6)).toEqual({ body: 'call (it)', caret: 8 })
+    expect(insertTranscript('a, b', 'and', 1, 1)).toEqual({ body: 'a and, b', caret: 5 })
   })
 })

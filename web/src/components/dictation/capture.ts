@@ -1,5 +1,7 @@
 import { maxSeconds } from '@/components/dictation/wav'
 
+const flushTimeout = 2_000
+
 export interface Capture {
   /** Input loudness from 0 to 1, read from an AnalyserNode. */
   level: () => number
@@ -45,24 +47,26 @@ export async function startCapture(): Promise<Capture> {
     throw new Error(`The browser offers no microphone on ${location.protocol}//${location.host}: dictation needs an https page or localhost.`)
   }
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-  const context = new AudioContext()
+  let context: AudioContext | undefined
   const release = () => {
     for (const track of stream.getTracks()) track.stop()
-    void context.close()
+    void context?.close()
   }
   try {
+    const audio = new AudioContext()
+    context = audio
     const url = URL.createObjectURL(new Blob([recorder], { type: 'text/javascript' }))
     try {
-      await context.audioWorklet.addModule(url)
+      await audio.audioWorklet.addModule(url)
     } finally {
       URL.revokeObjectURL(url)
     }
-    const source = context.createMediaStreamSource(stream)
-    const node = new AudioWorkletNode(context, 'aether-dictation')
-    const analyser = context.createAnalyser()
+    const source = audio.createMediaStreamSource(stream)
+    const node = new AudioWorkletNode(audio, 'aether-dictation')
+    const analyser = audio.createAnalyser()
     analyser.fftSize = 1024
     const frame = new Float32Array(analyser.fftSize)
-    const limit = maxSeconds * context.sampleRate
+    const limit = maxSeconds * audio.sampleRate
     const chunks: Float32Array[] = []
     let length = 0
     const done = new Promise<void>((resolve) => {
@@ -77,8 +81,8 @@ export async function startCapture(): Promise<Capture> {
     source.connect(analyser)
     source.connect(node)
     // A worklet the graph never pulls is not processed; it writes no output, so this plays nothing.
-    node.connect(context.destination)
-    await context.resume()
+    node.connect(audio.destination)
+    await audio.resume()
     return {
       level: () => {
         analyser.getFloatTimeDomainData(frame)
@@ -90,8 +94,14 @@ export async function startCapture(): Promise<Capture> {
       stop: async () => {
         for (const track of stream.getTracks()) track.stop()
         node.port.postMessage('flush')
-        await done
-        void context.close()
+        // A suspended or broken audio thread never answers; keep what already arrived.
+        let timer = 0
+        try {
+          await Promise.race([done, new Promise<void>((resolve) => { timer = window.setTimeout(resolve, flushTimeout) })])
+        } finally {
+          clearTimeout(timer)
+          void audio.close()
+        }
         const samples = new Float32Array(Math.min(length, limit))
         let at = 0
         for (const chunk of chunks) {
@@ -99,7 +109,7 @@ export async function startCapture(): Promise<Capture> {
           samples.set(chunk.subarray(0, samples.length - at), at)
           at += chunk.length
         }
-        return { samples, rate: context.sampleRate }
+        return { samples, rate: audio.sampleRate }
       },
       cancel: release,
     }

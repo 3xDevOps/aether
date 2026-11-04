@@ -60,7 +60,7 @@ export function DictationButton({ textarea, onInsert, hints }: {
   const request = useRef<AbortController | null>(null)
   const generation = useRef(0)
   const selection = useRef({ value: '', start: 0, end: 0 })
-  const press = useRef<{ at: number; started: boolean } | null>(null)
+  const press = useRef<{ at: number; started: boolean; held: boolean } | null>(null)
   const mine = useRef<HTMLSpanElement>(null)
   const latest = useRef({ textarea, onInsert, hints })
   latest.current = { textarea, onInsert, hints }
@@ -76,6 +76,8 @@ export function DictationButton({ textarea, onInsert, hints }: {
 
   const start = async () => {
     const box = latest.current.textarea.current
+    // A read-only box is sending; the sent draft would replace whatever dictation put in it.
+    if (box?.readOnly) return fail('The message is still sending; dictate again once it is sent.', false)
     const value = box?.value ?? ''
     selection.current = { value, start: box?.selectionStart ?? value.length, end: box?.selectionEnd ?? value.length }
     const run = ++generation.current
@@ -190,22 +192,31 @@ export function DictationButton({ textarea, onInsert, hints }: {
     if (phase.kind === 'recording') void stop()
     else if (phase.kind === 'idle') void start()
   }
+  const release = () => {
+    const held = press.current
+    // A press that outlasted the permission prompt is a tap: the hold counts from when recording began.
+    if (!held?.started || phase.kind !== 'recording') return
+    if (performance.now() - Math.max(held.at, phase.since) >= holdMs) {
+      press.current = { ...held, started: false, held: true }
+      void stop()
+    }
+  }
   const handlers = {
     onPointerDown: (event: React.PointerEvent) => {
       if (event.button !== 0) return
-      press.current = { at: performance.now(), started: phase.kind === 'idle' }
+      // Captured, so a hold released off the button still stops.
+      event.currentTarget.setPointerCapture(event.pointerId)
+      press.current = { at: performance.now(), started: phase.kind === 'idle', held: false }
       if (press.current.started) void start()
     },
-    onPointerUp: () => {
-      const held = press.current
-      // A press that outlasted the permission prompt is a tap: the hold counts from when recording began.
-      if (!held?.started || phase.kind !== 'recording') return
-      if (performance.now() - Math.max(held.at, phase.since) >= holdMs) void stop()
-    },
-    onClick: () => {
+    onPointerUp: release,
+    onPointerCancel: release,
+    onLostPointerCapture: release,
+    onClick: (event: React.MouseEvent) => {
       const pointer = press.current
       press.current = null
-      if (!pointer?.started) toggle()
+      // A keyboard click has no detail and no press before it.
+      if (event.detail === 0 || !(pointer?.started || pointer?.held)) toggle()
     },
     // Focus stays in the box, so a phone keeps its keyboard up while recording.
     onMouseDown: (event: React.MouseEvent) => event.preventDefault(),
@@ -231,7 +242,7 @@ export function DictationButton({ textarea, onInsert, hints }: {
           <span aria-hidden>{clock(meter.elapsed)}</span>
         </Button>
       ) : phase.kind === 'starting' || phase.kind === 'transcribing' ? (
-        <Button type="button" size="pill" variant="secondary" aria-label="Dictate" aria-pressed={phase.kind === 'starting'} aria-disabled hint="Escape cancels" className={cn(pill, 'aria-disabled:cursor-default aria-disabled:opacity-100')} onMouseDown={handlers.onMouseDown}>
+        <Button type="button" size="pill" variant="secondary" aria-label="Dictate" aria-pressed={phase.kind === 'starting'} aria-disabled hint="Escape cancels" className={cn(pill, 'aria-disabled:cursor-default aria-disabled:opacity-100')} {...handlers}>
           <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />
           <span aria-hidden>{phase.kind === 'starting' ? 'Starting mic…' : 'Transcribing…'}</span>
         </Button>

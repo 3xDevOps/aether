@@ -530,7 +530,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     )
   }
 
-  const pillDisabled = busy || dictating || images.uploading || (pill !== 'interrupt' && pill !== 'stop-waiting' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages))
+  const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'stop-waiting' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages || dictating))
   const hintText = moderated ? (control.waits ? 'Delivers in 45 s unless the controller decides sooner.' : '') : turnRunning || pill === 'stop-waiting' || pill === 'resume' ? pillHint[pill] : ''
   const keyHint = coarse || pill === 'stop-waiting' ? undefined : pill === 'steer' ? `${shortcutLabel('composer-send')}; ${shortcutLabel('composer-queue')} queues` : shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')
 

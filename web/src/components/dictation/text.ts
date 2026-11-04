@@ -3,12 +3,16 @@ import type { RootState } from '@/store'
 const maxHints = 200
 const maxHintBytes = 80
 
+// No space after whitespace or an opening bracket or quote; one before a word or an opening bracket only, so punctuation stays attached.
+const opens = /[\s([{"'“‘/-]$/u
+const starts = /^[\p{L}\p{N}([{]/u
+
 /** `text` in place of the selection, spaced from the words around it; the caret lands after it. */
 export function insertTranscript(body: string, text: string, start: number, end: number): { body: string; caret: number } {
   const before = body.slice(0, Math.min(start, body.length))
   const after = body.slice(Math.min(end, body.length))
-  const lead = before && !/\s$/.test(before) ? ' ' : ''
-  const trail = after && !/^\s/.test(after) ? ' ' : ''
+  const lead = before && !opens.test(before) ? ' ' : ''
+  const trail = after && starts.test(after) ? ' ' : ''
   return { body: before + lead + text + trail + after, caret: before.length + lead.length + text.length }
 }
 

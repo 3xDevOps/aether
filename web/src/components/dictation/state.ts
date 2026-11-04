@@ -13,7 +13,6 @@ const idle: DictationState = { active: false, notice: null }
 const states = new Map<Box, DictationState>()
 const listeners = new Set<() => void>()
 
-/** Keyed by the box's ref, so the button and the composer around it share one state without a prop. */
 export function setDictationState(box: Box, next: Partial<DictationState>) {
   const current = states.get(box) ?? idle
   const merged = { ...current, ...next }
