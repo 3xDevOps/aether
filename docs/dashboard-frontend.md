@@ -3175,7 +3175,8 @@ recording or transcribing) and the current `notice`. While `active`, the
 composer's send is disabled and Enter does nothing, so a missed press cannot
 send the old draft mid-recording. `DictationNotice` draws the notice as a strip
 above the box: failed tint, alert icon and `role="alert"` for an error, a plain
-`role="status"` strip for "No speech was recognized.", and an **x** to dismiss.
+`role="status"` strip for "No speech was recognized.", and an **x** that
+dismisses it and returns focus to the box.
 
 | State | Button | Live region |
 | --- | --- | --- |
@@ -3212,7 +3213,8 @@ never sends: the mic has `type="button"`, so a press inside the New session
 form does not launch. Errors show verbatim, with paths and the install command
 in code: the server's message (not installed, busy, too long) or the
 browser's, as `Microphone: <DOMException name>: <message>`. A
-`NotAllowedError` adds how to allow the microphone again. A page served over
+`NotAllowedError` adds, on its own muted line, how to allow the microphone
+again. A page served over
 plain http to a non-loopback host is not a secure context and has no
 microphone; the notice names the origin. The meter keeps reading the level
 under reduced motion but drops its transition. On a coarse pointer the mic and

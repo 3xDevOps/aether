@@ -19,10 +19,20 @@ export function DictationNotice({ textarea, className }: { textarea: RefObject<H
       className={cn('flex items-start gap-2 rounded-control py-1.5 pr-1 pl-2.5 text-ui-sm', notice.error ? 'bg-state-failed-soft text-text' : 'bg-chrome text-muted', className)}
     >
       {notice.error && <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0 text-state-failed" />}
-      <p className="min-w-0 flex-1 py-0.5 break-words whitespace-pre-line select-text">
-        {parts.map((part, i) => (i % 2 ? <Code key={i}>{part}</Code> : part))}
-      </p>
-      <Button type="button" size="icon-sm" variant="ghost" label="Dismiss" onClick={() => setDictationState(textarea, { notice: null })}>
+      <div className="min-w-0 flex-1 py-0.5 break-words select-text">
+        <p>{parts.map((part, i) => (i % 2 ? <Code key={i}>{part}</Code> : part))}</p>
+        {notice.hint && <p className="text-muted">{notice.hint}</p>}
+      </div>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        label="Dismiss"
+        onClick={() => {
+          setDictationState(textarea, { notice: null })
+          textarea.current?.focus()
+        }}
+      >
         <X />
       </Button>
     </div>

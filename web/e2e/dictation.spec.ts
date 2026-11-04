@@ -54,6 +54,7 @@ test('a dictated message lands at the caret of the session composer, unsent', as
   const uploads: { audio_base64: string; hints: string[] }[] = []
   await page.route('**/api/v1/dictation.transcribe', async (route) => {
     uploads.push(route.request().postDataJSON())
+    if (uploads.length > 1) return route.fulfill({ status: 503, json: { error: { code: -32004, message: 'dictation is busy: 2 requests queued; try again' } } })
     await route.fulfill({ json: { text: 'and keep the old parser' } })
   })
   const sent: string[] = []
@@ -84,12 +85,20 @@ test('a dictated message lands at the caret of the session composer, unsent', as
   await expect(box).toHaveValue('Rewrite the parser and keep the old parser then ship it')
   await expect(box).toBeFocused()
   expect(await box.evaluate((el: HTMLTextAreaElement) => el.selectionStart)).toBe('Rewrite the parser and keep the old parser'.length)
-  expect(uploads).toHaveLength(1)
   const wav = Buffer.from(uploads[0].audio_base64, 'base64')
   expect(wav.toString('ascii', 0, 4)).toBe('RIFF')
   expect(wav.readUInt16LE(22)).toBe(1)
   expect(wav.readUInt32LE(24)).toBe(16_000)
   expect(wav.readUInt32LE(40)).toBeGreaterThan(16_000)
   expect(uploads[0].hints).toEqual(expect.arrayContaining(['project', 'Tidy the importer']))
+
+  // A failure shows the server's words above the box and leaves the draft and focus where they were.
+  await page.getByRole('button', { name: 'Dictate', pressed: false }).click()
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'Dictate', pressed: true }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'dictation is busy: 2 requests queued; try again' })).toBeVisible()
+  await expect(box).toBeFocused()
+  await expect(box).toHaveValue('Rewrite the parser and keep the old parser then ship it')
+  expect(uploads).toHaveLength(2)
   expect(sent).toEqual([])
 })

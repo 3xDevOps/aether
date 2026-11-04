@@ -34,10 +34,10 @@ type Phase =
   | { kind: 'recording'; since: number }
   | { kind: 'transcribing' }
 
-function micError(err: unknown): string {
-  if (!(err instanceof DOMException)) return message(err)
-  const said = `Microphone: ${err.name}: ${err.message}`
-  return err.name === 'NotAllowedError' ? `${said}\nAllow the microphone for this site in your browser's settings, then press the mic again.` : said
+function micError(err: unknown): { text: string; hint?: string } {
+  if (!(err instanceof DOMException)) return { text: message(err) }
+  const text = `Microphone: ${err.name}: ${err.message}`
+  return err.name === 'NotAllowedError' ? { text, hint: "Allow the microphone for this site in your browser's settings, then press the mic again." } : { text }
 }
 
 function clock(ms: number): string {
@@ -67,8 +67,8 @@ export function DictationButton({ textarea, onInsert, hints }: {
     setPhase(next)
     setDictationState(latest.current.textarea, { active: next.kind !== 'idle', notice })
   }
-  const fail = (text: string, error = true) => {
-    show({ kind: 'idle' }, { text, error })
+  const fail = (text: string, error = true, hint?: string) => {
+    show({ kind: 'idle' }, { text, error, hint })
     setStatus('')
   }
 
@@ -87,7 +87,9 @@ export function DictationButton({ textarea, onInsert, hints }: {
       show({ kind: 'recording', since: performance.now() })
       setStatus('Recording. Press again to stop, Escape to cancel.')
     } catch (err) {
-      if (run === generation.current) fail(micError(err))
+      if (run !== generation.current) return
+      const { text, hint } = micError(err)
+      fail(text, true, hint)
     }
   }
 
@@ -213,7 +215,7 @@ export function DictationButton({ textarea, onInsert, hints }: {
                 key={i}
                 data-slot="dictation-meter"
                 className="h-full w-[3px] rounded-full bg-current transition-transform duration-75 motion-reduce:transition-none"
-                style={{ transform: `scaleY(${0.12 + 0.88 * (meter.levels[i] ?? 0)})` }}
+                style={{ transform: `scaleY(${0.35 + 0.65 * (meter.levels[i] ?? 0)})` }}
               />
             ))}
           </span>

@@ -5,7 +5,8 @@ type Box = RefObject<HTMLTextAreaElement | null>
 export interface DictationState {
   /** Starting the microphone, recording or transcribing: the box's send waits. */
   active: boolean
-  notice: { text: string; error: boolean } | null
+  /** `text` is verbatim; `hint` is ours, shown apart from it. */
+  notice: { text: string; error: boolean; hint?: string } | null
 }
 
 const idle: DictationState = { active: false, notice: null }
