@@ -72,6 +72,35 @@ func TestQueueAdmitsOneAndQueuesFour(t *testing.T) {
 	}
 }
 
+// A waiter gives up after maxWait with the busy error, before a gateway
+// would time out.
+func TestQueueWaitIsBounded(t *testing.T) {
+	old := maxWait
+	maxWait = 50 * time.Millisecond
+	defer func() { maxWait = old }()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, manifestName), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	engine := heldEngine{release: make(chan struct{})}
+	defer close(engine.release)
+	svc := New(dir, engine)
+	wav, err := os.ReadFile("testdata/speech.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = svc.Transcribe(t.Context(), "m0", wav, nil) }()
+	waitFor(t, func() bool { return len(svc.slot) == 1 })
+	_, err = svc.Transcribe(t.Context(), "m1", wav, nil)
+	if perr, ok := err.(*protocol.Error); !ok || perr.Code != protocol.CodeUnavailable ||
+		perr.Message != "dictation is busy: waited 50ms and 0 requests are still queued; try again" {
+		t.Fatalf("waiter = %v, want busy after maxWait", err)
+	}
+	if svc.queuedNow() != 0 {
+		t.Fatalf("queued = %d after the waiter left", svc.queuedNow())
+	}
+}
+
 func (s *Service) queuedNow() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

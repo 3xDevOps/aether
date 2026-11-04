@@ -120,8 +120,8 @@ Limits:
 - Audio is a RIFF WAV of 16-bit little-endian PCM, mono, 16000 Hz, at most
   120 s (3,840,000 bytes of samples). The dashboard resamples before upload.
   The HTTP body cap for this method is 6 MiB.
-- The server transcribes one clip at a time. Four more may wait; each member
-  has at most one transcribing or waiting. A clip has 3 minutes once its turn
+- The server transcribes one clip at a time. Four more may wait, each for at
+  most 1 minute; each member has at most one transcribing or waiting. A clip has 3 minutes once its turn
   comes, and `aether gui` waits 4 minutes for the answer.
 - `hints` holds at most 200 names, each 1 to 80 bytes: the dashboard sends
   workspace, repository and session names. After transcription, a run of one to
@@ -140,7 +140,7 @@ Limits:
 | `-32004` | `start the dictation engine: runtime: ...` | Docker refused the container; the message carries Docker's error. For `--gpu` without the NVIDIA Container Toolkit, Docker reports that it cannot select a device driver with the `gpu` capability. |
 | `-32004` | `the dictation engine exited with status N: ...` | The engine failed; the message ends with the last 3 lines of its output. A missing CUDA library shows here. |
 | `-32004` | `the dictation engine was killed: out of memory (limit 2.5 GiB)` | The container hit its memory cap. |
-| `-32004` | `dictation is busy: 4 requests queued; try again` or `dictation is busy: you already have a dictation transcribing or queued` | Wait for the queue. |
+| `-32004` | `dictation is busy: 4 requests queued; try again`, `dictation is busy: waited 1m0s and N requests are still queued; try again` or `dictation is busy: you already have a dictation transcribing or queued` | Wait for the queue. |
 
 ## Privacy
 

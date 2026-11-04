@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -13,6 +14,11 @@ const (
 	// maxQueued bounds the requests waiting behind the one transcribing.
 	maxQueued = 4
 )
+
+// maxWait keeps queueing plus DictationTimeout within the 4 minutes aether
+// gui waits, so a waiter hears it is busy instead of timing out. A variable
+// so a test can shorten it.
+var maxWait = time.Minute
 
 // Service transcribes one clip at a time server-wide so dictation never
 // takes more than one engine's threads from the agents. Audio lives only
@@ -83,14 +89,16 @@ func (s *Service) admit(ctx context.Context, member domain.MemberID) (func(), er
 		s.queued++
 		s.members[member] = true
 		s.mu.Unlock()
+		wait := time.NewTimer(maxWait)
+		defer wait.Stop()
 		select {
 		case s.slot <- struct{}{}:
 		case <-ctx.Done():
-			s.mu.Lock()
-			s.queued--
-			delete(s.members, member)
-			s.mu.Unlock()
+			s.leave(member)
 			return nil, unavailable("dictation request ended while queued: " + ctx.Err().Error())
+		case <-wait.C:
+			n := s.leave(member)
+			return nil, unavailable(fmt.Sprintf("dictation is busy: waited %s and %d requests are still queued; try again", maxWait, n))
 		}
 		s.mu.Lock()
 		s.queued--
@@ -103,6 +111,15 @@ func (s *Service) admit(ctx context.Context, member domain.MemberID) (func(), er
 		s.mu.Unlock()
 		<-s.slot
 	}, nil
+}
+
+// leave takes member out of the queue and returns how many still wait.
+func (s *Service) leave(member domain.MemberID) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queued--
+	delete(s.members, member)
+	return s.queued
 }
 
 func (s *Service) Close() error { return s.engine.Close() }
