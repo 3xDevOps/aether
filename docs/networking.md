@@ -398,12 +398,13 @@ updates**, which you can quiet separately in Android's settings for the app.
 The notifications are marked private. Whether the lock screen shows their
 text is Android's setting for sensitive notifications; with it off, the lock
 screen shows only what kind each one is: `A session needs you`, `New update`,
-or `Assistant card` for a decision made from a notification.
+or `Assistant card` for a card's own notification and the outcome of
+declining it.
 
-When you choose another server under **Connection**, the app drops its
-registration at the distributor, tells the previous tailnet server to forget
-the phone, and registers a new address for the new server, so nothing the
-previous server sends reaches the phone.
+In **Tailscale** mode, when you choose another server under **Connection**,
+the app drops its registration at the distributor, tells the previous server
+to forget the phone, and registers a new address for the new server, so
+nothing the previous server sends reaches the phone.
 
 Limits:
 

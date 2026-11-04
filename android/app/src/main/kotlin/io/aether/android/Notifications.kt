@@ -21,6 +21,7 @@ private const val TAG = "aether"
 private const val CHANNEL_NEEDS_YOU = "needs-you"
 private const val CHANNEL_UPDATES = "updates"
 private const val ID = 1
+private const val DECLINING_ID = 2
 private const val EXTRA_KEEP = "io.aether.android.keep"
 
 const val ACTION_OPEN = "io.aether.android.OPEN"
@@ -72,6 +73,7 @@ class AetherPushService : PushService() {
 fun showPush(context: Context, notice: PushNotice) {
     val manager = NotificationManagerCompat.from(context)
     if (notice.clear) {
+        manager.cancel(notice.tag, DECLINING_ID)
         val current = manager.activeNotifications.firstOrNull { it.tag == notice.tag && it.id == ID }
         if (current?.notification?.extras?.getBoolean(EXTRA_KEEP) != true) manager.cancel(notice.tag, ID)
         return
@@ -79,7 +81,13 @@ fun showPush(context: Context, notice: PushNotice) {
     if (!manager.areNotificationsEnabled()) return
     val open = openIntent(context, notice.tag, pushPath(notice))
     val builder =
-        builder(context, pushChannel(notice), notice.title, notice.body)
+        builder(
+                context,
+                pushChannel(notice),
+                notice.title,
+                notice.body,
+                public = if (notice.card != null || notice.tag.startsWith("card:")) R.string.push_public_card else null,
+            )
             .setContentIntent(open)
             .setAutoCancel(true)
             .setSilent(notice.quiet)
@@ -125,7 +133,7 @@ private fun builder(
     channel: PushChannel,
     title: String,
     body: String,
-    public: Int = if (channel == PushChannel.NEEDS_YOU) R.string.push_public else R.string.push_public_update,
+    public: Int? = null,
 ): NotificationCompat.Builder {
     createPushChannels(context)
     val id = if (channel == PushChannel.NEEDS_YOU) CHANNEL_NEEDS_YOU else CHANNEL_UPDATES
@@ -136,7 +144,11 @@ private fun builder(
     val public =
         base()
             .setContentTitle(context.getString(R.string.app_name))
-            .setContentText(context.getString(public))
+            .setContentText(
+                context.getString(
+                    public ?: if (channel == PushChannel.NEEDS_YOU) R.string.push_public else R.string.push_public_update,
+                ),
+            )
             .build()
     return base()
         .setContentTitle(title)
@@ -148,9 +160,9 @@ private fun builder(
 }
 
 // areNotificationsEnabled was checked; Android can still revoke it between.
-private fun notify(manager: NotificationManagerCompat, tag: String, builder: NotificationCompat.Builder) {
+private fun notify(manager: NotificationManagerCompat, tag: String, builder: NotificationCompat.Builder, id: Int = ID) {
     try {
-        manager.notify(tag, ID, builder.build())
+        manager.notify(tag, id, builder.build())
     } catch (e: SecurityException) {
         Log.w(TAG, "push: not allowed to notify: ${e.message}")
     }
@@ -159,7 +171,10 @@ private fun notify(manager: NotificationManagerCompat, tag: String, builder: Not
 /** Takes down the notification an open intent came from, as a tapped one goes by itself. */
 fun cancelPush(context: Context, intent: Intent) {
     val tag = intent.data?.takeIf { it.scheme == PUSH_SCHEME }?.schemeSpecificPart ?: return
-    NotificationManagerCompat.from(context).cancel(tag, ID)
+    NotificationManagerCompat.from(context).apply {
+        cancel(tag, ID)
+        cancel(tag, DECLINING_ID)
+    }
 }
 
 private const val PUSH_SCHEME = "aether-push"
@@ -222,6 +237,7 @@ class DeclineReceiver : BroadcastReceiver() {
                 .setContentIntent(openIntent(app, tag, CARD_PATH))
         // Not kept: a clear for the card may replace it, and it goes by
         // itself if the receiver dies before the outcome.
+        // Under its own id, so its timeout cannot take the outcome with it.
         notify(
             manager,
             tag,
@@ -229,6 +245,7 @@ class DeclineReceiver : BroadcastReceiver() {
                 .setSilent(true)
                 .setOnlyAlertOnce(true)
                 .setTimeoutAfter(DECLINING_TIMEOUT_MS),
+            DECLINING_ID,
         )
         val result = goAsync()
         Thread {
@@ -248,6 +265,7 @@ class DeclineReceiver : BroadcastReceiver() {
                         outcome(app.getString(R.string.push_decline_failed), error)
                             .setStyle(NotificationCompat.BigTextStyle().bigText("$error\n\n$text"))
                     }.addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
+                manager.cancel(tag, DECLINING_ID)
                 notify(manager, tag, done)
                 result.finish()
             }

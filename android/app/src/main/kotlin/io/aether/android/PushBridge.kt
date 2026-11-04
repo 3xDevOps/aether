@@ -87,30 +87,37 @@ class PushBridge(private val activity: ComponentActivity) {
         when (op) {
             "enable" -> enable()
             "disable" -> PushRegistration.disable(activity)
-            else -> send(PushRegistration.state(activity))
+            else -> send(PushRegistration.state(activity), answering = true)
         }
     }
 
     /** No distributor, no permission prompt: the switch names the fix first. */
     private fun enable() {
         if (UnifiedPush.getDistributors(activity).isEmpty()) {
-            send(PushState(PushKind.NO_DISTRIBUTOR, error = "Still no distributor. Install ntfy, then tap again."))
+            send(PushState(PushKind.NO_DISTRIBUTOR, error = "Still no distributor. Install ntfy, then tap again."), answering = true)
             return
         }
         val needsPermission =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
-        if (needsPermission) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else PushRegistration.enable(activity)
+        if (needsPermission) {
+            activity.markPushPermissionAsked()
+            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            PushRegistration.enable(activity)
+        }
     }
 
-    private fun send(state: PushState) {
+    private fun send(state: PushState, answering: Boolean = false) {
         val json = JSONObject().put("kind", state.kind.wire)
         state.endpoint?.let { json.put("endpoint", it) }
         state.error?.let { json.put("error", it) }
         val page = reply ?: return
         page.postMessage(json.toString())
-        // Shown once: a later visit to Settings starts clean.
-        if (state.error != null) PushRegistration.clearError(activity)
+        // Shown once: a later visit to Settings starts clean. Only an answer
+        // to the page's own question counts as seen; an unprompted send may
+        // reach a page that is not listening.
+        if (answering && state.error != null) PushRegistration.clearError(activity)
     }
 }

@@ -26,6 +26,14 @@ enum class PushKind(val wire: String) {
 data class PushState(val kind: PushKind, val endpoint: String? = null, val error: String? = null)
 
 /**
+ * Whether the switch may still ask for the notification permission: Android
+ * 13 or later starts without it, and a refusal is final for the switch, since
+ * Android stops showing the dialog after two.
+ */
+fun mayAskForPermission(sdk: Int, granted: Boolean, asked: Boolean): Boolean =
+    sdk >= Build.VERSION_CODES.TIRAMISU && !granted && !asked
+
+/**
  * The switch's state from what is stored and installed. [mayAsk] is whether
  * Android has yet to be asked for the notification permission. On means all of it
  * holds: a distributor still holds the registration, [server], the current
@@ -77,9 +85,13 @@ object PushRegistration {
             anyDistributor = UnifiedPush.getDistributors(context).isNotEmpty(),
             allowed = NotificationManagerCompat.from(context).areNotificationsEnabled(),
             mayAsk =
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-                    PackageManager.PERMISSION_GRANTED,
+                mayAskForPermission(
+                    Build.VERSION.SDK_INT,
+                    granted =
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                            PackageManager.PERMISSION_GRANTED,
+                    asked = context.pushPermissionAsked(),
+                ),
         )
 
     /**
@@ -158,6 +170,7 @@ object PushRegistration {
      * changed, it moves the registration instead.
      */
     fun sync(context: Context) {
+        if (pending) return
         val stored = context.storedPush()
         val server = context.pushServer()
         if (stored.endpoint == null || stored.p256dh == null || stored.auth == null) return

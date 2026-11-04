@@ -20,6 +20,7 @@ private const val PUSH_AUTH = "push_auth"
 private const val PUSH_SYNCED = "push_synced"
 private const val PUSH_ERROR = "push_error"
 private const val PUSH_SERVER = "push_server"
+private const val PUSH_PERMISSION_ASKED = "push_permission_asked"
 
 /** How the shell reaches a server. */
 enum class ConnectionMode(val stored: String) {
@@ -155,5 +156,12 @@ fun Context.pushServer(): String? =
         ConnectionMode.EDGE -> "edge"
         null -> null
     }
+
+/** Whether Android's notification permission dialog was ever launched. */
+fun Context.pushPermissionAsked(): Boolean = prefs().getBoolean(PUSH_PERMISSION_ASKED, false)
+
+fun Context.markPushPermissionAsked() {
+    prefs().edit().putBoolean(PUSH_PERMISSION_ASKED, true).commit()
+}
 
 private fun Context.prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)

@@ -107,6 +107,18 @@ class PushNoticeTest {
     }
 
     @Test
+    fun aRefusedPermissionStaysBlocked() {
+        val t = android.os.Build.VERSION_CODES.TIRAMISU
+        assertEquals(true, mayAskForPermission(t, granted = false, asked = false))
+        assertEquals(false, mayAskForPermission(t, granted = false, asked = true))
+        assertEquals(false, mayAskForPermission(t, granted = true, asked = false))
+        assertEquals(false, mayAskForPermission(t - 1, granted = false, asked = false))
+        val none = StoredPush(null, null, null, synced = false, error = null)
+        val asked = mayAskForPermission(t, granted = false, asked = true)
+        assertEquals(PushKind.BLOCKED, pushStateOf(none, "edge", false, false, true, false, asked).kind)
+    }
+
+    @Test
     fun switchIsOnOnlyWhenEveryPartHolds() {
         val server = "https://h.ts.net/"
         val synced = StoredPush("https://ntfy.sh/upX?up=1", "k", "a", synced = true, error = null, server = server)
