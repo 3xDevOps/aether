@@ -3207,7 +3207,7 @@ ends. `wav.ts` averages down to 16 kHz, clips at 120 s and encodes PCM16 mono
 WAV; `api.dictationTranscribe` posts it base64 to `dictation.transcribe` with
 the hints. Without `hints`, `dictationHints` sends up to 200 names of at most
 80 bytes: every workspace, the open workspace's repo and run repos, and its
-sessions' titles, newest first. Transcription times out after 120 s.
+sessions' titles, newest first. Transcription times out after 240 s, the local gateway's bound.
 
 `insertTranscript` puts the text where the caret or selection was when
 recording started; if the text changed meanwhile, at the caret the member left

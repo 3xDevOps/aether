@@ -25,7 +25,8 @@ function useDictation(): boolean {
 /** A press held at least this long stops on release: hold-to-talk. Shorter is a tap that toggles. */
 const holdMs = 300
 const meterMs = 1000 / 15
-const transcribeTimeout = 120_000
+// The local gateway's bound on dictation.transcribe: the server's 3-minute dictation timeout plus 60 s.
+const transcribeTimeout = 240_000
 const meterBars = 7
 
 type Phase =
