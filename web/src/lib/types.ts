@@ -81,6 +81,45 @@ export interface RunInputRequest {
   title?: string
 }
 
+/** A pending request as attention.list carries it; a Standard session's has no options. */
+export interface AttentionRequest {
+  id: string
+  kind: string
+  title?: string
+  options?: { id: string; label: string; kind?: string }[]
+  schema?: unknown
+  url?: string
+}
+
+/** In the order the server checks a session, as internal/protocol/attention.go lists them. */
+export type AttentionKind =
+  | 'permission'
+  | 'question'
+  | 'queued-message'
+  | 'room-question'
+  | 'disconnected'
+  | 'blocked'
+  | 'needs-input'
+  | 'ready'
+  | 'failed'
+
+/** One session that waits on the caller, under the first Needs you row that holds for it. */
+export interface AttentionItem {
+  kind: AttentionKind
+  run_id: string
+  workspace_id: string
+  title: string
+  harness: string
+  reason: string
+  since?: string
+  request?: AttentionRequest
+  message?: { id: string; body: string; from?: string }
+}
+
+export interface RunInputRespondResult {
+  status: 'answered' | 'already_answered'
+}
+
 type WaitConditionKind = 'pr_merged' | 'pr_checks' | 'run_finished'
 export type WaitState = 'pending' | 'resolved' | 'cancelled' | 'superseded' | 'expired' | 'error'
 
@@ -98,6 +137,30 @@ interface WaitObserved {
   merged_at?: string
   checks?: WaitChecks
   run_status?: string
+}
+
+export type CloseWarningKind = 'protected' | 'pull_request' | 'unmerged_work' | 'messages' | 'awaited' | 'subsessions' | 'cleanup_pending'
+
+export type CloseOutcome = 'merged' | 'abandoned' | 'completed'
+
+/** One thing closing a run would affect, from `run.close_check`; `subsession` names the subsession closing with it that the warning is about. */
+export interface CloseWarning {
+  kind: CloseWarningKind
+  detail: string
+  url?: string
+  count?: number
+  run_ids?: string[]
+  subsession?: string
+  /** On a pull_request warning: its number and when Aether last observed it. */
+  number?: number
+  observed_at?: string
+}
+
+/** A run's close warnings, or the error reading them. */
+export interface RunCloseCheck {
+  run_id: string
+  warnings: CloseWarning[]
+  error?: { code: number; message: string }
 }
 
 /** One condition a run registered with `report --outcome waiting --until`. */

@@ -1,3 +1,4 @@
+import { mobileScreen } from '@/lib/breakpoints'
 import { isRunView, runRoute } from '@/routes/run/views'
 import type { Route } from '@/store/ui'
 
@@ -24,7 +25,8 @@ export function routeQuery(route: Route): URLSearchParams {
     if (repo && view === 'changes') query.set('repo', repo)
     return query
   }
-  if (route.name === 'board') return query
+  // A phone's empty address opens Needs you, so its board needs a name.
+  if (route.name === 'board' && !window.matchMedia?.(mobileScreen).matches) return query
   query.set('page', route.name)
   const id = route.params[pageIDs[route.name] ?? '']
   if (id) query.set('id', id)
@@ -63,6 +65,8 @@ export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
   if (handedLink()) return { name: 'onboarding', params: {} }
   const route = routeFromQuery(new URLSearchParams(window.location.search))
+  // A phone lands on Needs you; the board stays one link away.
+  if (route === boardRoute && window.matchMedia?.(mobileScreen).matches) return { name: 'needs-you', params: {} }
   const hash = window.location.hash.slice(1)
   if (route.name !== 'settings' || route.params.section || !hash) return route
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)

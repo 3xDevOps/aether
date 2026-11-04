@@ -38,13 +38,14 @@ import { copyText } from '@/lib/clipboard'
 import { errorSentence, message } from '@/lib/format'
 import { awaitsCompletion, outcomeHeld } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
-import type { LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
+import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
+import { closeBusyText, closeChangedText, closeState, closeWarned, readCloseCheck } from '@/lib/close-check'
 import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
 import type { PaletteDialog } from '@/store/palette'
-import { isArchivable, isTerminal, toRecord, type PredictionMarker, type RunRecord } from '@/store/runs'
+import { isTerminal, toRecord, type PredictionMarker, type RunRecord } from '@/store/runs'
 import type { Theme } from '@/store/ui'
 
 export interface CommandDeps {
@@ -78,6 +79,8 @@ export interface Command {
   predict?: () => Prediction
   /** The server answers only once the change is done, which can outlast the deadline, so the prediction waits for that answer. */
   slow?: boolean
+  /** The close this verb makes: the runner reads `run.close_check` first and asks before a close with warnings. */
+  closes?: { runID: string; outcome: CloseOutcome }
   perform: (deps: CommandDeps) => Promise<unknown> | void
 }
 
@@ -104,7 +107,12 @@ export interface RunCommandContext {
   steerOthers?: string
   /** A predicted verb is pending on the run; the caller subscribes to it. */
   predicting?: boolean
+  /** The run comes from a painted snapshot that a live load has not replaced yet. */
+  stale?: boolean
 }
+
+/** Dialogs whose own submit changes the run, beside every gateway verb. */
+const changingDialogs = new Set(['inject', 'close'])
 
 interface BoardCommandContext {
   cap: Capability
@@ -120,8 +128,6 @@ export interface RunActionCandidate {
 
 export interface ClearDonePlan {
   eligible: RunRecord[]
-  /** Stopped but not yet closed; archive cannot act on them. */
-  notClosed: number
   /** Runs whose status qualifies but this member may not kill. */
   notAllowed: number
 }
@@ -182,14 +188,11 @@ export function clearDonePlan(
   cap: Capability,
   self: { id: string | null; role: Member['role'] | null },
 ): ClearDonePlan {
-  const plan: ClearDonePlan = { eligible: [], notClosed: 0, notAllowed: 0 }
+  const plan: ClearDonePlan = { eligible: [], notAllowed: 0 }
   if (!cap.hasMethod('run.archive')) return plan
   for (const { run, workspace } of candidates) {
     if (run.archived_at) continue
-    if (!isArchivable(run.status)) {
-      if (run.status === 'completed') plan.notClosed++
-      continue
-    }
+    if (!isTerminal(run.status)) continue
     const target = { owner: run.member_id, protected: run.protected, steerOthers: workspace?.steer_others }
     if (!allowed('kill', self, target)) {
       plan.notAllowed++
@@ -278,7 +281,7 @@ function handoffTargets(
   )
 }
 
-export function handoffCommands({ run, members, self }: RunCommandContext): Command[] {
+export function handoffCommands({ run, members, self, stale }: RunCommandContext): Command[] {
   if (!allowed('handoff', self, { owner: run.member_id })) return []
   return handoffTargets(run, members).map((m) => ({
     id: `handoff:${m.id}`,
@@ -286,6 +289,7 @@ export function handoffCommands({ run, members, self }: RunCommandContext): Comm
     Icon: UserPlus,
     value: `transfer reassign ${m.id}`,
     done: `Handed off to ${m.display_name}`,
+    disabled: stale,
     perform: (d: CommandDeps) => d.api.runHandoff(run.id, m.id),
   }))
 }
@@ -396,6 +400,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
             : { review: 'accepted' },
         }),
         slow: live,
+        closes: { runID: id, outcome: 'completed' },
         perform: (d) => d.api.runReview(id, 'complete'),
       })
     }
@@ -502,7 +507,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
-  if (cap.hasMethod('run.archive') && mayKill && isArchivable(run.status)) {
+  if (cap.hasMethod('run.archive') && mayKill && isTerminal(run.status)) {
     if (run.archived_at) {
       list.push({
         id: 'restore',
@@ -513,7 +518,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         predict: () => ({ runID: id, record: { archived_at: undefined } }),
         perform: (d) => d.api.runArchive(id, false),
       })
-    } else {
+    } else if (!awaitsCompletion(run)) {
       list.push({
         id: 'archive',
         label: 'Archive session',
@@ -588,7 +593,10 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   }
 
   // A verb offered from a pending prediction's state could re-read the run and erase that prediction.
-  return ctx.predicting ? list.filter((command) => !command.predict) : list
+  const offered = ctx.predicting ? list.filter((command) => !command.predict) : list
+  // A painted snapshot may be minutes old: Mark complete could close work the agent started since.
+  if (!ctx.stale) return offered
+  return offered.map((command) => (command.done || changingDialogs.has(command.id) ? { ...command, disabled: true } : command))
 }
 
 /** Checks out a pulled run branch in the linked repository; a refusal, such as uncommitted changes, is shown as the gateway words it. */
@@ -712,7 +720,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('run.archive')) {
     list.push({
       id: 'clear-done',
-      label: 'Archive closed sessions…',
+      label: 'Archive finished sessions…',
       Icon: Archive,
       value: 'clear cleanup',
       perform: (d) => d.openDialog('clear-done'),
@@ -1029,6 +1037,8 @@ export function useCommandRunner(
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
+  const openCloseConfirmation = useStore((s) => s.openCloseConfirmation)
+  const setCloseChecking = useStore((s) => s.setCloseChecking)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
   const setTheme = useStore((s) => s.setTheme)
@@ -1037,6 +1047,27 @@ export function useCommandRunner(
   return useCallback(
     async (command: Command) => {
       onDone?.()
+      if (command.closes) {
+        const { runID, outcome } = command.closes
+        if (useStore.getState().closeChecking[runID]) return
+        const same = sameIdentity()
+        const asked = closeState(useStore.getState().runs[runID])
+        setCloseChecking(runID, true)
+        const check = await readCloseCheck(runID, outcome).finally(() => setCloseChecking(runID, false))
+        if (!same()) return
+        if (closeState(useStore.getState().runs[runID]) !== asked) {
+          toast.info(closeChangedText)
+          return
+        }
+        if (closeWarned(check, outcome)) {
+          if (useStore.getState().closeConfirmation) {
+            toast.info(closeBusyText)
+            return
+          }
+          openCloseConfirmation({ check, asked, outcome, command: { ...command, closes: undefined } })
+          return
+        }
+      }
       const deps: CommandDeps = {
         api,
         navigate,
@@ -1076,6 +1107,8 @@ export function useCommandRunner(
       navigate,
       onDone,
       onTemplates,
+      openCloseConfirmation,
+      setCloseChecking,
       openDialog,
       openForwardDialog,
       recordPull,

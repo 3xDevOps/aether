@@ -343,6 +343,9 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. `terminal.file` has 96 MiB for a decoded 64 MiB file.
+`dictation.transcribe` has 6 MiB for a 120 s clip in base64, and `aether gui`
+waits 4 minutes for its answer and never repeats it
+([dictation.md](dictation.md)).
 File and configuration exceptions are listed below.
 
 ### Chat image previews
@@ -749,9 +752,13 @@ the payload.
 
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished session from the board
-and keeps its data, restorable any time: only a session in a final disposition
-(`merged`, `abandoned`, `failed`, or `interrupted`) can be archived, and
-archiving any other status returns `-32002` naming the session's real status.
+and keeps its data, restorable any time: only a `completed` session or one in a
+final disposition (`merged`, `abandoned`, `failed`, or `interrupted`) can be
+archived, and archiving any other status returns `-32002` naming the session's
+real status. A `completed` session is also refused with `-32002`, naming what it
+holds, while its result awaits review or `run.close_check` would warn of live
+subsessions, a pull request not merged, sessions waiting on it or pending
+cleanup.
 Archiving an already-archived session is a no-op that leaves its timestamp
 unchanged; calling it with `"archived":false` restores the session. The response
 is a `RunResult` with `run.archived_at` set while archived and absent otherwise.
@@ -810,6 +817,31 @@ reports success again.
 Each change publishes `run.review` with
 `{"review":"...","review_changed_at":"...","status_seq":N}`; apply it only
 when `status_seq` is above the one you hold.
+
+`run.close_check` takes `{"run_ids":["...", ...],"outcome":"merged"}`, 1 to 50
+sessions, and returns `{"runs":[{"run_id":"...","warnings":[...]}]}`, each
+distinct id once, in order: what closing each session would affect. `outcome`
+is optional: `merged`, `abandoned` or `completed` (Mark complete); `merged`
+skips `unmerged_work`. It reads like `run.get`, so any approved
+member may call it; a session that does not exist answers with its own
+`error` and leaves the others unaffected. Each warning has a `kind`, a `detail`
+sentence and, where it applies, `url`, `count` and `run_ids`. A subsession that
+closes with the session adds its own `pull_request`, `unmerged_work` and
+`awaited` warnings, with `subsession` naming it; their `detail` does not repeat the subsession:
+
+| `kind` | When |
+| --- | --- |
+| `protected` | The session is protected (`aether protect`). |
+| `pull_request` | A pull request recorded for it was neither merged nor closed when Aether last checked it; `url` links it. The check does not ask GitHub. |
+| `unmerged_work` | Its branch has commits past its base and no open pull request, or merged one, recorded for its own repository after Aether last recorded a commit. Recorded pull requests carry no commit, so the warning says the commits may not be merged. |
+| `messages` | Mail from other sessions that asks it something (not a reply) and it has not acknowledged, or any mail in the last 30 minutes from a session other than its parent and subsessions; `count`, and the senders in `run_ids`. |
+| `awaited` | Live sessions wait on `run:<session-id>:finished`; `run_ids`. Closing wakes them with its outcome. |
+| `subsessions` | Attached subsessions not yet merged, abandoned, failed, interrupted or accepted, which close with it; `count`, `run_ids`. |
+| `cleanup_pending` | Its container cleanup is pending or failed; `detail` carries the error. |
+
+Closing stays allowed: `run.close` and `run.review` do not read the check.
+The dashboard, `aether close` and the connector's close tools show the
+warnings and ask first ([failure-handling.md](failure-handling.md#before-a-close)).
 
 The `push.*` methods manage Web Push for the caller's own browsers
 ([networking.md](networking.md#notifications)). `push.status` accepts an
@@ -2428,7 +2460,10 @@ Both transports reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires
 `visibilitychange` (visible) or `online`. A phone freezes a background tab's
 timers, so without those two events a tab returning from the pocket would sit
-out the rest of a 30-second wait. A foreground return leaves a socket that is
+out the rest of a 30-second wait. The events stream also treats a watchdog tick
+more than 15 seconds late, a `pageshow`, and a settled `navigator.connection`
+`change` as those two events ([dashboard-frontend.md](dashboard-frontend.md)).
+A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.

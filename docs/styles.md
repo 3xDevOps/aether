@@ -530,14 +530,18 @@ are sentence-case 12px muted disclosure buttons with their count. The footer
 holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.
 
-Under 768px a second, 48px toolbar (`bg-chrome`) holds the sidebar button,
-with a needs-you dot while anything needs the viewer, the view title in
-13/20 medium, **Search** and **New session**. When the page has its own primary
-action, the toolbar's **New session** becomes a ghost `+` icon so the screen keeps
-one filled button. The sidebar opens as a left side sheet. Content views draw
-`PaneHeader`: the title in `text-title`, one optional muted line under it,
-and actions on the right. A connection problem is a failed-tone `StateLine`,
-in the header on desktop and under the top bar on a phone.
+Under 768px the header is one 48px row (`bg-chrome`): the view title in 13/20
+medium and **Search**. A `bg-chrome` tab bar along the bottom holds Needs you,
+Sessions, New, Assistant and More: 56px tall, a 20px icon in the same 28 ×
+44px box over a 12px label, muted at rest and accent when current, with a 2px
+accent bar along the top edge. Counts over 99 read 99+. The Needs you count is
+an amber chip with `text-canvas` figures, the one place amber fills a count,
+because it is the needs-you signal. **New** is an accent pill unless the page
+has its own primary action, so the screen keeps one filled button. More opens
+as a bottom sheet. Content views draw `PaneHeader`: the title in `text-title`,
+one optional muted line under it, and actions on the right. A connection
+problem is a failed-tone `StateLine`, in the header on desktop and under the
+top bar on a phone.
 
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
@@ -547,7 +551,9 @@ commands.
 
 `focusRing`, `fieldFocus` and `field` in `web/src/lib/utils.ts` are the shared
 focus and field styles. Buttons and navigation show their outlines only
-after Tab, never after a click or another key; text fields use a 1px inset accent outline over the existing border with a
+after Tab, never after a click or another key. One exception: Cancel in a
+close confirmation takes focus when the confirmation opens and shows its
+outline then (`focusRingShown`), so the safe default is visible; text fields use a 1px inset accent outline over the existing border with a
 faint 4px glow and no offset gap. The outline remains visible in forced-colors
 mode, where box shadows disappear. The Chat composer draws this treatment
 on its enclosing box, not its embedded textarea, so attachments do not clip

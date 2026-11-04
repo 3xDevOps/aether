@@ -64,6 +64,8 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 		return json.RawMessage(`{"id":"pref-1","text":"Prefer table output","scope":"all","source":"assistant"}`), nil
 	case protocol.MethodRunGet:
 		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2"}}`), nil
+	case protocol.MethodRunCloseCheck:
+		return json.RawMessage(`{"runs":[{"run_id":"run-1","warnings":[{"kind":"pull_request","detail":"Pull request acme/shop#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z","url":"https://github.com/acme/shop/pull/7"}]}]}`), nil
 	case protocol.MethodWatchGet:
 		return json.RawMessage(`{"watch":{"id":"w-1","target":{"kind":"run","run_id":"run-1"},"target_title":"Fix login",
 			"conditions":["needs_you","finished"],"state":"active"},"notifications":[{"id":"n-2"},{"id":"n-1"}]}`), nil
@@ -111,7 +113,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodTemplateLaunch:  `Launch template "triage" in shop: claude (acp, opus) on your account: "triage issue 42…"`,
 		protocol.MethodRunInject:       `Send to session run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
 		protocol.MethodRunKill:         `Stop session run-1 ("Fix login"), owned by Grace`,
-		protocol.MethodRunClose:        `Close session run-1 ("Fix login") as abandoned, owned by Grace`,
+		protocol.MethodRunClose:        `Close session run-1 ("Fix login") as abandoned, owned by Grace. Before closing: Pull request acme/shop#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z`,
 		protocol.MethodEnvSave:         `Save your environment as a new image; new sessions and terminals start from it`,
 		protocol.MethodRunInputRespond: `Allow once session run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
 		protocol.MethodRunRoomPost:     `Reply on session run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,

@@ -230,6 +230,7 @@ func TestContainersAreSampledOnlyWhileWatched(t *testing.T) {
 	s.interval, s.delay, s.ttl = 40*time.Millisecond, 10*time.Millisecond, 150*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	started := time.Now()
 	go s.Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
@@ -237,12 +238,29 @@ func TestContainersAreSampledOnlyWhileWatched(t *testing.T) {
 		t.Fatalf("idle sampler read containers %d times", n)
 	}
 
-	s.Read(time.Time{})
-	waitFor(t, "wake sample and the sample after it", func() bool { return src.calls.Load() >= 2 })
-
-	// Reads keep it watched; once they stop, sampling stops after the TTL.
-	waitFor(t, "ticks while watched", func() bool { return src.calls.Load() >= 5 })
+	// Reads keep it watched, as a polling dashboard does; once they stop,
+	// sampling stops after the TTL.
+	watched := func(calls int64, d time.Duration) func() bool {
+		begin := time.Now()
+		return func() bool {
+			s.Read(time.Time{})
+			return src.calls.Load() >= calls && time.Since(begin) >= d
+		}
+	}
+	waitFor(t, "wake sample and the sample after it", watched(2, 0))
+	waitFor(t, "ticks while watched", watched(5, 4*s.interval))
+	// Only ticks sample while watched: beyond the wake sample and the one
+	// after it, a Read must not trigger a sample.
+	n := src.calls.Load()
+	if limit := 3 + int64(time.Since(started)/s.interval); n > limit {
+		t.Fatalf("%d samples while watched, more than the %d the ticker allows", n, limit)
+	}
 	time.Sleep(s.ttl + 2*s.interval)
+	waitFor(t, "the last sample to finish", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return !s.running
+	})
 	stopped := src.calls.Load()
 	time.Sleep(4 * s.interval)
 	if n := src.calls.Load(); n != stopped {

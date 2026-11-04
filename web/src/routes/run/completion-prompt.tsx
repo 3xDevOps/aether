@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { runCommands, useCommandRunner, type Command } from '@/lib/commands'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useCapability, useSelf } from '@/store/hooks'
+import { useCapability, useSelf, useStale } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { TimelinePayload } from '@/store/sessions'
 
@@ -17,21 +17,23 @@ export function CompletionPrompt({ run, className }: { run: RunRecord; className
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
+  const stale = useStale()
   if ((run.review !== 'ready' && run.review !== 'later') || run.member_id !== self.id) return null
   // The prompt shows with the session, so what the agent left is open.
-  const commands = runCommands({ run: { ...run, finish_unopened: false }, paused, cap, members, self, steerOthers, predicting })
+  const commands = runCommands({ run: { ...run, finish_unopened: false }, paused, cap, members, self, steerOthers, predicting, stale })
   const complete = commands.find((command) => command.id === 'complete')
   const notYet = commands.find((command) => command.id === 'not-yet')
   if (!complete) return null
   const later = commands.find((command) => command.id === 'review-later')
-  return <Ask run={run} complete={complete} notYet={notYet} later={later} className={className} />
+  return <Ask run={run} complete={complete} notYet={notYet} later={later} stale={stale} className={className} />
 }
 
-function Ask({ run, complete, notYet, later, className }: {
+function Ask({ run, complete, notYet, later, stale, className }: {
   run: RunRecord
   complete: Command
   notYet?: Command
   later?: Command
+  stale: boolean
   className?: string
 }) {
   const perform = useCommandRunner()
@@ -58,12 +60,13 @@ function Ask({ run, complete, notYet, later, className }: {
         title={<span className="text-text">Your agent reports this task is finished. <span className="whitespace-nowrap">Mark complete?</span></span>}
         actions={
           <>
+            {stale && <span className="self-center text-ui-sm text-muted">Reconnect to act</span>}
             <span className="flex items-center gap-2">
-              <Button size="sm" variant="secondary" aria-describedby={closes} onClick={() => void perform(complete)}>Mark complete</Button>
+              <Button size="sm" variant="secondary" aria-describedby={closes} disabled={complete.disabled} onClick={() => void perform(complete)}>Mark complete</Button>
               <span id={closes} className="text-ui-sm text-muted">Closes the session.</span>
             </span>
-            {notYet && <Button size="sm" variant="secondary" onClick={() => void perform(notYet)}>Not yet</Button>}
-            <Button size="sm" variant="ghost" onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
+            {notYet && <Button size="sm" variant="secondary" disabled={notYet.disabled} onClick={() => void perform(notYet)}>Not yet</Button>}
+            <Button size="sm" variant="ghost" disabled={later?.disabled} onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
           </>
         }
       >

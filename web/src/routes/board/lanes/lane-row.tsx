@@ -1,5 +1,6 @@
 import { memo, type CSSProperties, type ReactNode } from 'react'
 import { ChevronRight, Network } from '@/components/icons'
+import { ProtectedMark } from '@/components/protected-mark'
 import { modeLabel } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
@@ -179,6 +180,7 @@ function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agen
       <span className="flex items-center gap-1">
         <StatusDot tone={stateTone[state]} pulse={state === 'working'} />
         <AgentGlyph agent={card.run.harness} />
+        {card.run.protected && <ProtectedMark />}
       </span>
     )
   }
@@ -188,6 +190,7 @@ function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agen
         <StatusDot tone={stateTone[state]} />
         {owner}
         <span className={cn('min-w-0 truncate text-ui leading-4 font-medium', lane.outcome && 'text-muted')}>{lane.title}</span>
+        {card.run.protected && <ProtectedMark />}
         {card.group === 'needs-you' && <Badge tone="needs-you" className="h-4 text-ui-xs">Needs you</Badge>}
         {card.group === 'review' && <Badge tone="review" className="h-4 text-ui-xs">{stateLabel.ready}</Badge>}
       </span>

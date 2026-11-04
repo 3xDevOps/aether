@@ -712,7 +712,7 @@ func (d *DB) SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time)
 		var placeholders []string
 		args := []any{ts, id}
 		for _, s := range domain.AllRunStatuses {
-			if s.Final() {
+			if s.Archivable() {
 				placeholders = append(placeholders, "?")
 				args = append(args, s)
 			}
