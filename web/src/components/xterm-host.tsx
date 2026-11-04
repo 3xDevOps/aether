@@ -645,14 +645,24 @@ export function useXterm({
       host.addEventListener('wheel', noteViewportInteraction, { passive: true })
       host.addEventListener('touchmove', noteViewportInteraction, { passive: true })
       host.addEventListener('pointerdown', noteScrollbarInteraction)
-      // xterm hands a paste to onData like a keystroke, synchronously inside
-      // its own paste listener; a one-character paste must not take a modifier.
+      // xterm hands a paste to onData like a keystroke, synchronously; a
+      // one-character paste must not take a modifier.
       let pasting = false
       const notePaste = () => {
         pasting = true
         queueMicrotask(() => { pasting = false })
       }
       host.addEventListener('paste', notePaste, true)
+      // Tools → Paste calls paste() directly, with no DOM event to flag.
+      const paste = created.paste.bind(created)
+      created.paste = (data) => {
+        pasting = true
+        try {
+          paste(data)
+        } finally {
+          pasting = false
+        }
+      }
       const input = created.onData((data) => {
         const { ctrl, alt } = modifiersRef.current
         const modified = pasting || (ctrl === 'off' && alt === 'off')

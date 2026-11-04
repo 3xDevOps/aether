@@ -3325,8 +3325,9 @@ open a shell in it" in place of the terminal.
 reading history), the text size with **Smaller text**, **Larger text** and
 **Reset text size**, **Copy selection**, **Copy screen**, **Paste**,
 **Upload image…** and, on a session, **Captures…**. On `phoneScreen` the
-trigger is icon-only so the toolbar fits 360px, and the size items follow
-`useTextSizeStepper` (below), with **Fit to width** in place of the reset. It is one menu at every
+trigger is icon-only so the toolbar fits 360px, and, except while reading recorded history (drawn at the
+chosen size), the size items follow `useTextSizeStepper` (below), with
+**Fit to width** in place of the reset. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
 The rest of this section is the terminal machinery the session terminal, its
@@ -3563,8 +3564,9 @@ Ctrl+` are NUL, Ctrl+? is DEL, Ctrl+Backspace is ^H) and/or an ESC prefix for
 Alt, and the cursor, Home/End, paging and function-key sequences into
 xterm's `1;<n>` modifier parameter form. A key it does not cover passes
 unmodified and keeps the modifiers armed rather than spending them on the
-wrong byte, and a paste (flagged from the DOM `paste` event, since xterm
-hands it to `onData` like a key) never takes them. The row's arrows, Home
+wrong byte, and a paste (flagged from the DOM `paste` event and around
+`terminal.paste()`, which Tools → Paste calls, since xterm hands either to
+`onData` like a key) never takes them. The row's arrows, Home
 and End send SS3 (`ESC O`) while the program has asked for application
 cursor keys (`terminal.modes.applicationCursorKeysMode`).
 Losing write access clears them.

@@ -509,6 +509,10 @@ describe('the key bar modifiers', () => {
     act(() => host().terminal?.input('f'))
     expect(sent.slice(4)).toEqual(['\x1bb', '\x1bf'])
     expect(host().modifiers.alt).toBe('locked')
+
+    // A paste is text, not a key: it reaches the shell as copied.
+    act(() => host().terminal?.paste('b'))
+    expect(sent.slice(6)).toEqual(['b'])
     view.unmount()
   })
 })
