@@ -49,7 +49,7 @@ async function closeFirstRun(page: Page): Promise<void> {
   await page.getByRole('menuitem', { name: 'Close session…', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Close this session?' })
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Close as merged', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(header).toContainText('Merged')
   await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('Last reasonClosed')
