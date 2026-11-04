@@ -432,7 +432,8 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); code(err) != protocol.CodeInvalidState {
 		t.Fatalf("success with unfinished subsessions = %v, want refused", err)
 	}
-	if err := h.db.DetachChild(h.ctx, domain.RunID(kept.RunID)); err != nil {
+	// Handing a subsession to another member detaches it from its parent.
+	if err := h.db.TransferRun(h.ctx, domain.RunID(kept.RunID), h.bob.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildCancel, json.RawMessage(`{"run_id":"`+stopped.RunID+`"}`)); err != nil {
