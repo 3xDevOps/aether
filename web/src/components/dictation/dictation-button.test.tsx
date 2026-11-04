@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useRef } from 'react'
 import { AssistantComposer } from '@/components/assistant/composer'
+import { DictationButton } from '@/components/dictation/dictation-button'
 import { insertTranscript } from '@/components/dictation/text'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
@@ -124,6 +125,25 @@ describe('DictationButton', () => {
     mount()
     fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
     expect((await screen.findByRole('dialog')).textContent).toContain('Microphone: NotAllowedError: Permission denied')
+  })
+
+  it('never submits the form it sits in', async () => {
+    vi.mocked(api.dictationTranscribe).mockResolvedValue({ text: 'add tests' })
+    const submit = vi.fn((event: React.FormEvent) => event.preventDefault())
+    const Form = () => {
+      const textarea = useRef<HTMLTextAreaElement>(null)
+      return (
+        <form onSubmit={submit}>
+          <textarea aria-label="Task" ref={textarea} defaultValue="" />
+          <DictationButton textarea={textarea} onInsert={(next) => { textarea.current!.value = next }} />
+        </form>
+      )
+    }
+    render(<Form />)
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop dictation' }))
+    await waitFor(() => expect((screen.getByRole('textbox', { name: 'Task' }) as HTMLTextAreaElement).value).toBe('add tests'))
+    expect(submit).not.toHaveBeenCalled()
   })
 
   it('drops the recording on Escape', async () => {

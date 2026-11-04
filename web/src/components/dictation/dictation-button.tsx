@@ -195,7 +195,7 @@ export function DictationButton({ textarea, onInsert, hints }: {
   let button: React.ReactNode
   if (phase.kind === 'recording') {
     button = (
-      <Button size="pill" variant="danger" aria-label="Stop dictation" aria-pressed hint={`Stop dictation, Escape cancels. Stops by itself at ${clock(maxSeconds * 1000)}.`} className="touch-none select-none gap-2 px-2.5 tabular-nums" {...handlers}>
+      <Button type="button" size="pill" variant="danger" aria-label="Stop dictation" aria-pressed hint={`Stop dictation, Escape cancels. Stops by itself at ${clock(maxSeconds * 1000)}.`} className="touch-none select-none gap-2 px-2.5 tabular-nums" {...handlers}>
         <Square className="fill-current" aria-hidden />
         <span aria-hidden className="flex h-3.5 items-center gap-0.5">
           {Array.from({ length: meterBars }, (_, i) => (
@@ -212,14 +212,14 @@ export function DictationButton({ textarea, onInsert, hints }: {
     )
   } else if (phase.kind === 'starting' || phase.kind === 'transcribing') {
     button = (
-      <Button size="pill" variant="ghost" aria-label={phase.kind === 'starting' ? 'Starting microphone' : 'Transcribing'} aria-disabled hint="Escape cancels" className="gap-1.5 px-2.5">
+      <Button type="button" size="pill" variant="ghost" aria-label={phase.kind === 'starting' ? 'Starting microphone' : 'Transcribing'} aria-disabled hint="Escape cancels" className="gap-1.5 px-2.5 aria-disabled:cursor-default aria-disabled:opacity-100">
         <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />
         <span aria-hidden>{phase.kind === 'starting' ? 'Starting mic…' : 'Transcribing…'}</span>
       </Button>
     )
   } else {
     button = (
-      <Button size="icon-sm" variant="ghost" label="Start dictation" aria-pressed={false} hint="Dictate: tap to start and stop, or hold to talk" className="touch-none select-none" {...handlers}>
+      <Button type="button" size="icon-sm" variant="ghost" label="Start dictation" aria-pressed={false} hint="Dictate: tap to start and stop, or hold to talk" className="touch-none select-none" {...handlers}>
         <Mic />
       </Button>
     )
