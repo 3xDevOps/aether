@@ -57,13 +57,15 @@ sudo aether-server dictation remove
 
 All three read `--data-dir` and `--config` like `serve`. `install` downloads
 the two pinned tarballs below over HTTPS, checks each one's size and SHA-256
-before reading it, and keeps only the files the engine runs in
-`<data-dir>/dictation/` (default `/var/lib/aether/dictation`): `runtime/bin/`,
-`runtime/lib/` and `model/`. It then pulls the engine's image, pinned by
-digest, so the first clip does not wait for a pull, and writes `install.json`
-last: an install that stops partway never reads as installed, and an earlier
-install stays usable until the new one is complete. Running it again with the
-same choice does nothing. On amd64 without `--gpu`, it suggests `--gpu` when
+before reading it, and keeps only the files the engine runs, in a new
+`files-<n>/` directory (`runtime/bin/`, `runtime/lib/` and `model/`) below
+`<data-dir>/dictation/` (default `/var/lib/aether/dictation`). It then pulls
+the engine's image, pinned by digest, so the first clip does not wait for a
+pull. Writing `install.json`, which names the `files-<n>/` directory, publishes
+the install; only then is the previous one deleted, so an install that fails
+or is interrupted leaves the earlier one working. A running engine is replaced
+on the next clip after a new install. Running `install` again with the same
+choice does nothing. On amd64 without `--gpu`, it suggests `--gpu` when
 `nvidia-smi -L` succeeds.
 
 The server never installs or updates dictation on its own. `remove` deletes
@@ -82,10 +84,12 @@ remove it.
 
 ## The engine container
 
-The first clip starts one container, `aether-dictation`, labelled
-`aether.managed=true` and `aether.dictation=true`. It is removed after 10
-minutes without a clip, when the server stops, and when a restarted server
-finds one left over; a clip after the engine died starts a new one. Loading
+The first clip starts one container, `aether-dictation-<owner>`, labelled
+`aether.managed=true` and `aether.dictation=<owner>`, where `<owner>` is a
+short hash of the dictation directory, so two servers on one Docker daemon
+never touch each other's engine. It is removed after 10 minutes without a
+clip, when the server stops, and when the same server, restarted, finds one
+left over; a clip after the engine died starts a new one. Loading
 the model takes a few seconds, so the first clip after a pause is slower. A
 request that ends while the model loads, or while its clip is transcribed,
 leaves the engine running for the next clip.

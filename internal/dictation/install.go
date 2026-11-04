@@ -88,6 +88,10 @@ type Manifest struct {
 	Runtime   string `json:"runtime"`
 	Model     string `json:"model"`
 	Precision string `json:"precision"`
+	// Files is the directory below dir holding runtime/ and model/. Each
+	// install writes a new one, so publishing install.json swaps installs
+	// at once and a failed install leaves the previous one whole.
+	Files string `json:"files"`
 }
 
 // Dir is dictation's directory below the server data directory.
@@ -96,13 +100,13 @@ func Dir(dataDir string) string { return filepath.Join(dataDir, "dictation") }
 func pick(goarch string, gpu bool) (Manifest, []artifact, error) {
 	switch {
 	case gpu && goarch == "amd64":
-		return Manifest{gpuImage, "cuda", runtimeCUDA.name, modelFP16.name, "fp16"}, []artifact{runtimeCUDA, modelFP16}, nil
+		return Manifest{gpuImage, "cuda", runtimeCUDA.name, modelFP16.name, "fp16", ""}, []artifact{runtimeCUDA, modelFP16}, nil
 	case gpu:
 		return Manifest{}, nil, fmt.Errorf("--gpu needs linux/amd64; this server is linux/%s", goarch)
 	case goarch == "amd64":
-		return Manifest{cpuImage, "cpu", runtimeAMD64.name, modelInt8.name, "int8"}, []artifact{runtimeAMD64, modelInt8}, nil
+		return Manifest{cpuImage, "cpu", runtimeAMD64.name, modelInt8.name, "int8", ""}, []artifact{runtimeAMD64, modelInt8}, nil
 	case goarch == "arm64":
-		return Manifest{cpuImage, "cpu", runtimeARM64.name, modelInt8.name, "int8"}, []artifact{runtimeARM64, modelInt8}, nil
+		return Manifest{cpuImage, "cpu", runtimeARM64.name, modelInt8.name, "int8", ""}, []artifact{runtimeARM64, modelInt8}, nil
 	}
 	return Manifest{}, nil, fmt.Errorf("dictation runs on linux/amd64 and linux/arm64; this server is linux/%s", goarch)
 }
@@ -140,18 +144,28 @@ func Install(ctx context.Context, dir, goarch string, gpu bool, images ImagePull
 	if err != nil {
 		return err
 	}
-	if have, haveErr := ReadManifest(dir); haveErr == nil && have == want {
+	have, haveErr := ReadManifest(dir)
+	if haveErr == nil && have.Files != "" && withoutFiles(have) == want {
 		_, _ = fmt.Fprintf(w, "Dictation is already installed in %s (%s, %s).\n", dir, want.Provider, want.Precision)
 		return nil
 	}
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	staging, err := os.MkdirTemp(dir, ".install-")
+	staging, err := os.MkdirTemp(dir, "files-")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	if err = os.Chmod(staging, 0o755); err != nil {
+		return err
+	}
+	want.Files = filepath.Base(staging)
 	for _, a := range artifacts {
 		if err = fetch(ctx, a, staging, w); err != nil {
 			return err
@@ -165,22 +179,18 @@ func Install(ctx context.Context, dir, goarch string, gpu bool, images ImagePull
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(staging, manifestName), append(b, '\n'), 0o600); err != nil {
+	pending := filepath.Join(dir, manifestName+".new")
+	if err = os.WriteFile(pending, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(dir, manifestName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err = os.Rename(pending, filepath.Join(dir, manifestName)); err != nil {
 		return err
 	}
-	for _, sub := range []string{"runtime", "model"} {
-		if err := os.RemoveAll(filepath.Join(dir, sub)); err != nil {
-			return err
+	published = true
+	if haveErr == nil && have.Files != "" {
+		if err = os.RemoveAll(filepath.Join(dir, have.Files)); err != nil {
+			return fmt.Errorf("remove the previous install: %w", err)
 		}
-		if err := os.Rename(filepath.Join(staging, sub), filepath.Join(dir, sub)); err != nil {
-			return err
-		}
-	}
-	if err := os.Rename(filepath.Join(staging, manifestName), filepath.Join(dir, manifestName)); err != nil {
-		return err
 	}
 	_, _ = fmt.Fprintf(w, "Dictation installed in %s (%s, %s). The dashboard shows the microphone from its next page load; the server needs no restart.\n", dir, want.Provider, want.Precision)
 	if !gpu && goarch == "amd64" && exec.CommandContext(ctx, "nvidia-smi", "-L").Run() == nil {
@@ -258,6 +268,11 @@ func writeFile(path string, r io.Reader, mode os.FileMode) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return f.Close()
+}
+
+func withoutFiles(m Manifest) Manifest {
+	m.Files = ""
+	return m
 }
 
 // Remove deletes an install, manifest first so a partial removal never

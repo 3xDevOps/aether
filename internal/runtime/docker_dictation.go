@@ -20,6 +20,9 @@ const labelDictation = "aether.dictation"
 // (docs/dictation.md): no network, a read-only root, every capability
 // dropped, and only the host paths listed mounted.
 type DictationSpec struct {
+	// Owner names the server the engine belongs to; another server's
+	// engine on the same daemon is never touched.
+	Owner      string
 	Image      string
 	Entrypoint []string
 	User       string
@@ -56,7 +59,7 @@ func (d *Docker) PullDictationImage(ctx context.Context, ref string) error {
 // StartDictation removes any earlier engine container, then creates and
 // starts one for spec, pulling its image if the daemon lacks it.
 func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, error) {
-	if err := d.RemoveDictation(ctx); err != nil {
+	if err := d.RemoveDictation(ctx, spec.Owner); err != nil {
 		return "", err
 	}
 	if err := d.PullDictationImage(ctx, spec.Image); err != nil {
@@ -67,7 +70,7 @@ func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, er
 		labels = make(map[string]string)
 	}
 	labels[labelManaged] = "true"
-	labels[labelDictation] = "true"
+	labels[labelDictation] = spec.Owner
 	var mounts []mount.Mount
 	for _, src := range slices.Sorted(maps.Keys(spec.ReadOnly)) {
 		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: src, Target: spec.ReadOnly[src], ReadOnly: true})
@@ -96,7 +99,7 @@ func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, er
 	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     &container.Config{Image: spec.Image, User: spec.User, Entrypoint: spec.Entrypoint, Labels: labels},
 		HostConfig: host,
-		Name:       "aether-dictation",
+		Name:       "aether-dictation-" + spec.Owner,
 	})
 	if err != nil {
 		return "", fmt.Errorf("runtime: create dictation engine container: %w", err)
@@ -131,12 +134,12 @@ func (d *Docker) DictationState(ctx context.Context, id ID) (DictationState, err
 	return DictationState{Running: st.Running, ExitCode: st.ExitCode, OOMKilled: st.OOMKilled}, nil
 }
 
-// RemoveDictation force-removes every engine container, a leftover of an
-// earlier server included.
-func (d *Docker) RemoveDictation(ctx context.Context) error {
+// RemoveDictation force-removes owner's engine containers, a leftover of
+// an earlier run of the same server included.
+func (d *Docker) RemoveDictation(ctx context.Context, owner string) error {
 	list, err := d.cli.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
-		Filters: make(client.Filters).Add("label", labelDictation+"=true"),
+		Filters: make(client.Filters).Add("label", labelDictation+"="+owner),
 	})
 	if err != nil {
 		return fmt.Errorf("runtime: list dictation engine containers: %w", err)

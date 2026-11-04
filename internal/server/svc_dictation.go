@@ -7,10 +7,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/dictation"
 )
 
-// Dictation: transcribes recorded clips with the engine `aether-server
-// dictation install` put in the data directory, in a container started on
-// the first clip. A runtime that cannot run that container leaves
-// dictation unconfigured.
 func init() {
 	registerService("dictation", func(d Deps) (Service, error) {
 		containers, ok := d.Runtime.(dictation.Containers)
@@ -24,18 +20,19 @@ func init() {
 		}
 		svc := dictation.New(dir, engine)
 		d.SSH.Services.Dictation = svc
-		return dictationService{Service: svc, containers: containers}, nil
+		return dictationService{Service: svc, containers: containers, owner: dictation.Owner(dir)}, nil
 	})
 }
 
 type dictationService struct {
 	*dictation.Service
 	containers dictation.Containers
+	owner      string
 }
 
 // Start removes an engine container an earlier server left running.
 func (s dictationService) Start(ctx context.Context) error {
-	if err := s.containers.RemoveDictation(ctx); err != nil {
+	if err := s.containers.RemoveDictation(ctx, s.owner); err != nil {
 		return fmt.Errorf("remove a dictation engine left by an earlier server: %w", err)
 	}
 	return nil

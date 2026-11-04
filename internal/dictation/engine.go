@@ -3,7 +3,9 @@ package dictation
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +38,7 @@ type Transcriber interface {
 type Containers interface {
 	StartDictation(ctx context.Context, spec containerruntime.DictationSpec) (containerruntime.ID, error)
 	DictationState(ctx context.Context, id containerruntime.ID) (containerruntime.DictationState, error)
-	RemoveDictation(ctx context.Context) error
+	RemoveDictation(ctx context.Context, owner string) error
 }
 
 const (
@@ -64,8 +66,13 @@ type sidecar struct {
 	containers Containers
 	memory     func() (uint64, error)
 
+	// owner tells this server's engine container from another server's
+	// on the same Docker daemon.
+	owner string
+
 	mu        sync.Mutex
 	id        containerruntime.ID
+	manifest  Manifest
 	startedAt time.Time
 	ready     bool
 	output    *tailBuffer
@@ -80,7 +87,14 @@ func NewEngine(dir string, containers Containers) (Transcriber, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &sidecar{dir: dir, wrapper: self, containers: containers, memory: sysstats.MemoryAvailable}, nil
+	return &sidecar{dir: dir, wrapper: self, containers: containers, memory: sysstats.MemoryAvailable, owner: Owner(dir)}, nil
+}
+
+// Owner names the engine container of the install in dir: a short hash of
+// the directory, stable across restarts of the server that uses it.
+func Owner(dir string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(dir)))
+	return hex.EncodeToString(sum[:6])
 }
 
 func (s *sidecar) socket() string { return filepath.Join(s.dir, "sock", "engine.sock") }
@@ -138,19 +152,22 @@ func (s *sidecar) armIdle() {
 // running returns the live engine container once it accepts clips,
 // starting one if there is none. Callers hold s.mu.
 func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
-	if s.id != "" {
-		st, err := s.containers.DictationState(ctx, s.id)
-		switch {
-		case err == nil && st.Running && s.ready:
-			return s.id, nil
-		case err == nil && st.Running:
-			return s.id, s.awaitReady(ctx)
-		}
-		s.stop(s.id)
-	}
 	m, err := ReadManifest(s.dir)
 	if err != nil {
 		return "", unavailable(err.Error())
+	}
+	if s.id != "" && m != s.manifest {
+		s.stop(s.id)
+	}
+	if s.id != "" {
+		st, stateErr := s.containers.DictationState(ctx, s.id)
+		switch {
+		case stateErr == nil && st.Running && s.ready:
+			return s.id, nil
+		case stateErr == nil && st.Running:
+			return s.id, s.awaitReady(ctx)
+		}
+		s.stop(s.id)
 	}
 	avail, err := s.memory()
 	if err != nil {
@@ -166,13 +183,14 @@ func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
 	output := &tailBuffer{}
 	entrypoint := []string{wrapperTarget, "dictation", "engine", socketDir + "/engine.sock", strconv.Itoa(enginePort), "--"}
 	id, err := s.containers.StartDictation(ctx, containerruntime.DictationSpec{
+		Owner:      s.owner,
 		Image:      m.Image,
 		Entrypoint: append(entrypoint, engineArgs(m)...),
 		User:       user,
 		ReadOnly: map[string]string{
-			s.wrapper:                       wrapperTarget,
-			filepath.Join(s.dir, "runtime"): engineRoot + "/runtime",
-			filepath.Join(s.dir, "model"):   engineRoot + "/model",
+			s.wrapper:                                wrapperTarget,
+			filepath.Join(s.dir, m.Files, "runtime"): engineRoot + "/runtime",
+			filepath.Join(s.dir, m.Files, "model"):   engineRoot + "/model",
 		},
 		Writable:    map[string]string{filepath.Join(s.dir, "sock"): socketDir},
 		CPUs:        float64(threads()),
@@ -183,7 +201,7 @@ func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
 	if err != nil {
 		return "", unavailable("start the dictation engine: " + err.Error())
 	}
-	s.id, s.startedAt, s.ready, s.output = id, time.Now(), false, output
+	s.id, s.manifest, s.startedAt, s.ready, s.output = id, m, time.Now(), false, output
 	return id, s.awaitReady(ctx)
 }
 
@@ -271,7 +289,7 @@ func (s *sidecar) stop(id containerruntime.ID) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_ = s.containers.RemoveDictation(ctx)
+	_ = s.containers.RemoveDictation(ctx, s.owner)
 }
 
 func (s *sidecar) Close() error {
@@ -287,7 +305,7 @@ func (s *sidecar) Close() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return s.containers.RemoveDictation(ctx)
+	return s.containers.RemoveDictation(ctx, s.owner)
 }
 
 func threads() int { return min(max(runtime.NumCPU()/4, 1), 4) }
