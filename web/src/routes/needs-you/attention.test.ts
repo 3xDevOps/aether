@@ -38,6 +38,14 @@ describe('byAttention', () => {
     expect([needs!.count, needs!.runs.map((row) => row.run.id)]).toEqual([1, ['asks', 'local']])
   })
 
+  it('pulls a session the server lists as asking out of Working', () => {
+    const groups: SidebarGroup[] = [{ key: 'working', label: 'Working', runs: [tree('queued'), tree('busy')], count: 2 }]
+    expect(byAttention(groups, [item('queued', 'queued-message')], 0).map((group) => [group.key, group.count, group.runs.map((row) => row.run.id)])).toEqual([
+      ['needs-you', 1, ['queued']],
+      ['working', 1, ['busy']],
+    ])
+  })
+
   it('leaves the groups alone until the list loads', () => {
     const groups: SidebarGroup[] = [{ key: 'needs-you', label: 'Needs you', runs: [tree('a')], count: 1 }]
     expect(byAttention(groups, null, 0)).toBe(groups)
