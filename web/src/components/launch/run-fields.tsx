@@ -131,17 +131,10 @@ export function RunFields({
   disabled?: boolean
   autoFocus?: boolean
 }) {
-  const { agents, agent, harness, mode, noAgents } = choice
+  const { agents, harness, mode, noAgents } = choice
   return (
     <>
-      <FormField
-        label="Task"
-        help={mode === 'headless'
-          ? 'Required. A Background session starts with this task and takes no input.'
-          : 'Optional. Leave it blank to open the agent with no prompt.'}
-      >
-        <Textarea className="max-h-48 [field-sizing:content]" autoFocus={autoFocus} required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
-      </FormField>
+      <TaskField mode={mode} task={task} onTask={onTask} autoFocus={autoFocus} />
       {agents === null ? (
         <p className="text-ui-sm text-muted">Loading agents…</p>
       ) : (
@@ -154,10 +147,42 @@ export function RunFields({
           disabled={disabled}
         />
       )}
-      {harness && (
-        <ModeControl label="Mode" value={mode} onChange={(next) => { onChoice?.(); choice.setMode(next) }} refused={refusals(agent, harness)} onSetUp={onSetUp} />
-      )}
-      {harness && <ModelField harness={harness} accountMemberID={choice.accountMemberID} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />}
+      <AgentOptions choice={choice} onSetUp={onSetUp} onChoice={onChoice} disabled={disabled} />
+    </>
+  )
+}
+
+export function TaskField({ mode, task, onTask, autoFocus = false }: {
+  mode: LaunchMode
+  task: string
+  onTask: (task: string) => void
+  autoFocus?: boolean
+}) {
+  return (
+    <FormField
+      label="Task"
+      help={mode === 'headless'
+        ? 'Required. A Background session starts with this task and takes no input.'
+        : 'Optional. Leave it blank to open the agent with no prompt.'}
+    >
+      <Textarea className="max-h-48 [field-sizing:content]" autoFocus={autoFocus} required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
+    </FormField>
+  )
+}
+
+/** The chosen agent's mode, model and effort. */
+export function AgentOptions({ choice, onSetUp, onChoice, disabled = false }: {
+  choice: ReturnType<typeof useAgentChoice>
+  onSetUp: () => void
+  onChoice?: () => void
+  disabled?: boolean
+}) {
+  const { agent, harness, mode } = choice
+  if (!harness) return null
+  return (
+    <>
+      <ModeControl label="Mode" value={mode} onChange={(next) => { onChoice?.(); choice.setMode(next) }} refused={refusals(agent, harness)} onSetUp={onSetUp} />
+      <ModelField harness={harness} accountMemberID={choice.accountMemberID} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />
       {choice.effortLevels.length > 0 && <EffortField levels={choice.effortLevels} value={choice.effort} onChange={(next) => { onChoice?.(); choice.setEffort(next) }} disabled={disabled} />}
     </>
   )

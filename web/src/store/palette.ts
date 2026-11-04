@@ -14,8 +14,11 @@ export interface PaletteSlice {
   paletteForwardTarget: string | null
   /** The pull request the Watch form is for; a run's comes from paletteRunID. */
   paletteWatchTarget: WatchTarget | null
+  /** The task the launch form opens with: text shared to Aether. */
+  paletteLaunchTask: string
   togglePalette: (open?: boolean) => void
   openPaletteDialog: (dialog: PaletteDialog, runID?: string) => void
+  openLaunchWithTask: (task: string) => void
   openForwardDialog: (target: string) => void
   openWatchDialog: (target: WatchTarget) => void
   closePaletteDialog: () => void
@@ -27,6 +30,7 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
   paletteRunID: null,
   paletteForwardTarget: null,
   paletteWatchTarget: null,
+  paletteLaunchTask: '',
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
   openPaletteDialog: (dialog, runID) =>
     set({
@@ -35,6 +39,16 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
       paletteRunID: runID ?? null,
       paletteForwardTarget: null,
       paletteWatchTarget: null,
+      paletteLaunchTask: '',
+    }),
+  openLaunchWithTask: (task) =>
+    set({
+      paletteOpen: false,
+      paletteDialog: 'launch',
+      paletteRunID: null,
+      paletteForwardTarget: null,
+      paletteWatchTarget: null,
+      paletteLaunchTask: task,
     }),
   openForwardDialog: (target) =>
     set({
@@ -58,5 +72,6 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
       paletteRunID: null,
       paletteForwardTarget: null,
       paletteWatchTarget: null,
+      paletteLaunchTask: '',
     }),
 })

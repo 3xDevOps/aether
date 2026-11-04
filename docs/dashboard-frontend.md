@@ -500,7 +500,7 @@ one's name, muted, after the title.
 | --- | --- |
 | **Needs you** | the `needs-you` route; its badge counts what asks you |
 | **Sessions** | the `sessions` route: the sidebar's session list, full width; current on a session, the board and All workspaces too |
-| **New** | the launch dialog; named **New session**, hidden if you cannot launch |
+| **New** | the [launch sheet](#the-forms); named **New session**, hidden if you cannot launch |
 | **Assistant** | the assistant sheet, with the desktop button's dot and name |
 | **More** | a bottom sheet, a `dialog` named "More"; the tab is **More pages** |
 
@@ -1093,8 +1093,9 @@ layout viewport for the keyboard, so `useKeyboardInset()`
 browsers that resize. `md` is a width breakpoint, so a desktop window
 narrower than 768px is treated as a phone here too. A menu with more than six
 items also opens as a bottom sheet below `md`. On a phone (`phoneScreen`)
-the New session sheet's agent list shows only the chosen agent with **Change**,
+onboarding's First session agent list shows only the chosen agent with **Change**,
 so **Mode** sits above the fold; picking an agent collapses the list again.
+New session has its own phone sheet ([the forms](#the-forms)).
 
 What gives way first:
 
@@ -2371,6 +2372,24 @@ nothing is preselected, Launch stays disabled, and the form says "No agent is
 installed in your environment." with a **Set up an agent** button in place of
 **Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
+
+Below 768px the same form is a bottom sheet (`phone-launch.tsx`): **Task**
+first, focused, then three chips, **Repository**, the base branch (sessions
+always start from it) and **Agent**, then **Launch** pinned under the form.
+Permission, Mode, Model, Effort, Resource limits, Subsessions, extra
+repositories and the account sit under **More options**, whose caption names
+the mode. The repository starts on the workspace of your newest session, else
+the active workspace; choosing another affects only this launch. The agent
+starts as on desktop. So a quick task is three steps: **New**, type, Launch.
+
+**Share to Aether.** The Android app's share target opens
+`/?new=1&prompt=<encodeURIComponent(text)>`, or the gateway URL with
+`&new=1&prompt=...` through an edge, with at most 8000 characters. Once the
+dashboard has hydrated, `useSharedPrompt` (`components/launch/shared-prompt.ts`)
+removes `new` and `prompt` from the address with `history.replaceState`, so a
+reload does not reopen the form, and opens New session with the text as the task.
+It never launches on its own. On desktop the panel opens the same way; a member
+who cannot launch gets nothing.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
 "Native messages, approvals and progress", see

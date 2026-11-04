@@ -6,7 +6,8 @@ import { RefusalNotes } from '@/components/launch/agent-picker'
 import { AccountOptions, automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
 import { PermissionControl, permissionFeature } from '@/components/launch/permission-control'
 import { ExtraRepos } from '@/components/launch/extra-repos'
-import { needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
+import { PhoneLaunchSheet } from '@/components/launch/phone-launch'
+import { AgentOptions, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
 import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
@@ -15,12 +16,13 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { SlideOut } from '@/components/ui/slide-out'
 import { api } from '@/lib/api'
+import { useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
 import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
-import type { Member, Permission } from '@/lib/types'
+import type { Member, Permission, Run } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
 import { cn, surface } from '@/lib/utils'
-import { sameIdentity, useStore } from '@/store'
+import { type RootState, sameIdentity, useStore } from '@/store'
 import { useChildSettings, useChildSettingsRead } from '@/store/children'
 import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -29,8 +31,13 @@ import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 /** `open` turns false when the panel starts to leave; the host unmounts it after the slide. */
 export function LaunchDialog({ open = true }: { open?: boolean }) {
   const returnFocus = useReturnFocus()
-  const workspaceID = useStore((s) => s.activeWorkspace)
-  const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
+  const phone = useIsMobile()
+  const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(null)
+  const lastWorkspace = useStore(lastSessionWorkspace)
+  const activeWorkspace = useStore((s) => s.activeWorkspace)
+  // A phone has no sidebar showing the active workspace, so it starts where your last session ran.
+  const workspaceID = pickedWorkspace ?? ((phone && lastWorkspace) || activeWorkspace)
+  const workspace = useStore((s) => s.workspaces[workspaceID])
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
   const upsertRun = useStore((s) => s.upsertRun)
@@ -38,10 +45,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const features = useStore((s) => s.info?.features)
   const cap = useCapability()
   const workspaces = useStore((s) => s.workspaces)
-  const extraOptions = useMemo(
-    () => Object.values(workspaces).filter((item) => item.id !== workspaceID).sort((a, b) => a.name.localeCompare(b.name)),
-    [workspaces, workspaceID],
-  )
+  const allWorkspaces = useMemo(() => Object.values(workspaces).sort((a, b) => a.name.localeCompare(b.name)), [workspaces])
+  const extraOptions = useMemo(() => allWorkspaces.filter((item) => item.id !== workspaceID), [allWorkspaces, workspaceID])
   const [extras, setExtras] = useState<string[]>([])
   const identity = useSelf()
   const ownAccountID = identity?.id ?? self?.id ?? ''
@@ -75,7 +80,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const permissionPicked = useRef(false)
   const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick })
   const { agents, agentError, harness, mode, model, effort, noAgents } = choice
-  const [task, setTask] = useState('')
+  const [task, setTask] = useState(() => useStore.getState().paletteLaunchTask)
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
@@ -212,9 +217,47 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       {saved && <SavedIssues title="Saved defaults not used" issues={(saved.invalid ?? []).filter((issue) => !issue.field.startsWith('agents.') || issue.field.split('.')[1] === harness)} />}
     </>
   )
-  const options = accounts.length > 1 && (
+  const accountOptions = accounts.length > 1 && (
     <AccountOptions label="Account" accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} save={savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />} />
   )
+
+  const failure = error && <Callout ref={errorCallout} tone="failed" role="alert" title="Launch failed">{error}{setup && <SetupOutput output={setup} />}</Callout>
+  const launchLabel = (
+    <>
+      {launching && <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}
+      {late ? stillWaiting : launching ? 'Launching…' : 'Launch'}
+    </>
+  )
+  const launchDisabled = launching || !workspaceID || !account || !harness || taskMissing
+
+  if (phone) {
+    return (
+      <PhoneLaunchSheet
+        open={open}
+        onClose={close}
+        onSubmit={() => void submit()}
+        task={task}
+        onTask={setTask}
+        choice={choice}
+        onAgent={(name) => { setError(null); choice.choose(name) }}
+        workspaces={allWorkspaces}
+        workspace={workspace}
+        onWorkspace={(id) => { setError(null); setPickedWorkspace(id) }}
+        options={
+          <>
+            {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
+            <AgentOptions choice={choice} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} />
+            {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
+            {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
+            {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
+            {accountOptions}
+          </>
+        }
+        notes={<>{notes}{failure}</>}
+        launch={<Button type="submit" form="launch-form" className="w-full" disabled={launchDisabled}>{launchLabel}</Button>}
+      />
+    )
+  }
 
   return (
     <Dialog open={open} modal={false} onOpenChange={close}>
@@ -241,22 +284,15 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
           {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
           {notes}
-          {options}
-          {error && <Callout ref={errorCallout} tone="failed" role="alert" title="Launch failed">{error}{setup && <SetupOutput output={setup} />}</Callout>}
+          {accountOptions}
+          {failure}
         </form>
         <DialogFooter className="sm:items-center">
           <div className="min-w-0 max-sm:order-last sm:mr-auto">
             <WorkspaceLine workspace={workspace} />
           </div>
           <Button variant="secondary" onClick={close}>Cancel</Button>
-          <Button
-            type="submit"
-            form="launch-form"
-            disabled={launching || !workspaceID || !account || !harness || taskMissing}
-          >
-            {launching && <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}
-            {late ? stillWaiting : launching ? 'Launching…' : 'Launch'}
-          </Button>
+          <Button type="submit" form="launch-form" disabled={launchDisabled}>{launchLabel}</Button>
         </DialogFooter>
         <DialogPrimitive.Close asChild>
           <Button variant="ghost" size="icon-sm" label="Close" className="absolute top-2 right-2">
@@ -267,4 +303,13 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       </SlideOut>
     </Dialog>
   )
+}
+
+function lastSessionWorkspace(s: RootState): string {
+  const me = s.info?.member.id
+  let last: Run | undefined
+  for (const run of Object.values(s.runs)) {
+    if (run.member_id === me && s.workspaces[run.workspace_id] && (!last || run.created_at > last.created_at)) last = run
+  }
+  return last?.workspace_id ?? ''
 }

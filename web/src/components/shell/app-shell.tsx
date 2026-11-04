@@ -1,4 +1,5 @@
 import { AssistantPanel } from '@/components/assistant/panel'
+import { useSharedPrompt } from '@/components/launch/shared-prompt'
 import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { CenterView, focusView } from '@/components/shell/center-view'
@@ -18,6 +19,7 @@ import { useStore } from '@/store'
 export function AppShell() {
   useNavShortcuts()
   useTeamRefresh()
+  useSharedPrompt()
   const profileOpen = useStore((s) => s.profileOpen)
   const setProfileOpen = useStore((s) => s.setProfileOpen)
   const mobile = useIsMobile()
