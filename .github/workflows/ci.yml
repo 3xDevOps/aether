@@ -15,12 +15,13 @@ permissions:
   pull-requests: read
 
 # A newer push to a pull request cancels that pull request's run in flight.
-# Pushes to main run to completion so every main commit keeps its own CI
-# verdict and cache write. The event name is in the group so a pull_request
+# Pushes to main and merge queue entries group by commit, so none cancels or
+# replaces another and every main commit keeps its own CI verdict and cache
+# write. The event name is in the group so a pull_request
 # run from this branch does not cancel the base branch's in-flight run of
 # the same workflow under the trigger this file replaces.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # GitHub-hosted runners are ephemeral, so untrusted pull request code does
