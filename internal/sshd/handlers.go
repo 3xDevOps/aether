@@ -541,8 +541,10 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	if p.RunID == "" {
 		return nil, invalidParams("run_id is required")
 	}
-	if p.Action != protocol.RunReviewComplete && p.Action != protocol.RunReviewLater {
-		return nil, invalidParams(`action must be "complete" or "later"`)
+	switch p.Action {
+	case protocol.RunReviewComplete, protocol.RunReviewLater, protocol.RunReviewNotYet:
+	default:
+		return nil, invalidParams(`action must be "complete", "later" or "not-yet"`)
 	}
 	reportedOnly := p.Action == protocol.RunReviewComplete && connectorReviewReportedOnly(ctx)
 	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action, reportedOnly)

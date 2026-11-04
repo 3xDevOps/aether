@@ -817,6 +817,14 @@ func (s *serverNode) start() {
 	}
 	s.id, s.db, s.ssh, s.agent, s.bus = agent.ServerID(), db, srv, agent, bus
 	s.waitEnrolled()
+	// Serve binds the listener in its goroutine; enrollment goes through the
+	// agent, so it can finish first.
+	eventually(s.h.t, "sshd listening", func() error {
+		if srv.Addr() == nil {
+			return errors.New("not listening yet")
+		}
+		return nil
+	})
 	s.addr = srv.Addr().String()
 }
 

@@ -241,7 +241,7 @@ function withEntry(record: Record<string, string>, key: string, value: string | 
 }
 
 export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
-  theme: 'system',
+  theme: 'dark',
   textSize: 'default',
   sidebarWidth: defaultSidebarWidth,
   sidebarCollapsed: false,
