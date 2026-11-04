@@ -287,6 +287,8 @@ export interface Attachment {
   isEnded: () => boolean
   /** Current tab identity and server-fenced control lease metadata. */
   controlMetadata?: () => ControlMetadata
+  /** Whether the server holds, or may have granted, this session the lease. */
+  mayHoldControl: () => boolean
   /** Update callbacks when a persistent socket gets a new terminal host. */
   rebind: (handlers: AttachHandlers) => void
   close: () => void
@@ -472,6 +474,8 @@ export function connectAttach(
   const controlSessionID = seededSessionID ?? crypto.randomUUID()
   let controlGeneration = 0
   let hasControl = false
+  // An unanswered write ask may already have been granted.
+  let writeUnanswered = false
   // A seeded attach can race the server's teardown of this session's
   // previous transport, which reads as occupied until it lands. Until the
   // first successful ack, keep asking for as long as the lease is held.
@@ -544,6 +548,7 @@ export function connectAttach(
   ) => {
     controlGeneration = generation
     hasControl = granted
+    writeUnanswered = false
     controlRevision++
     if (position !== undefined) controlPosition = position
     const metadata: ControlMetadata = {
@@ -974,6 +979,7 @@ export function connectAttach(
       if (options.takeover || queuedTakeover || (askedWrite && hasControl)) header.takeover = true
       if (options.releaseControl) header.release_control = true
       if (askedWrite) header.write = true
+      writeUnanswered = header.write === true || header.takeover === true
       if (follows) header.follow = true
       if (resumePosition !== null) {
         header.resume = true
@@ -1159,6 +1165,7 @@ export function connectAttach(
         return
       }
       answered = true
+      writeUnanswered = false
       // A refused write is not a dead attach: drop the request and mirror.
       if (ack.code === codeDenied && askedWrite) {
         pendingControl = null
@@ -1593,6 +1600,8 @@ export function connectAttach(
       if (controlPosition !== null) metadata.position = controlPosition
       return metadata
     },
+    mayHoldControl: () =>
+      hasControl || writeUnanswered || [...pendingControls.values()].some((pending) => pending.write),
     resetWriteDenial: () => {
       writeDenied = false
     },
