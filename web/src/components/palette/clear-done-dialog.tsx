@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { readArchiveHolds } from '@/lib/close-check'
+import { closeWarned, idleOutcome, readArchiveHolds, readCloseChecks } from '@/lib/close-check'
 import type { RunCloseCheck } from '@/lib/types'
 import type { StateContext } from '@/lib/needs-you'
 import { clearDonePlan, releaseFinishedPlan, runClearDone, runReleaseFinished } from '@/lib/commands'
+import { idleArchivePlan } from '@/lib/idle-archive'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
 import { finishedRuns, workspaceRuns } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -24,7 +25,13 @@ export function ClearDoneDialog() {
   const close = useStore((s) => s.closePaletteDialog)
   const removeRun = useStore((s) => s.removeRun)
   const [plan] = useState(() => clearDonePlan(finishedRuns(...scope()), cap, self))
+  const [idle] = useState(() => {
+    const [workspace, ctx] = scope()
+    return idleArchivePlan(workspaceRuns(workspace, ctx), ctx, cap, self)
+  })
   const [held, setHeld] = useState<Map<string, RunCloseCheck>>()
+  const [idleChecks, setIdleChecks] = useState<Map<string, RunCloseCheck>>()
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [reads, setReads] = useState(0)
   const [running, setRunning] = useState(false)
 
@@ -42,10 +49,30 @@ export function ClearDoneDialog() {
     }
   }, [plan, reads])
 
+  // A session with a close warning is listed unchecked, so closing it is the member's explicit choice.
+  useEffect(() => {
+    let live = true
+    if (idle.idle.length === 0) return
+    setIdleChecks(undefined)
+    void readCloseChecks(idle.idle.map(({ run }) => run.id)).then((checks) => {
+      if (!live) return
+      setIdleChecks(checks)
+      setSelected(new Set(idle.idle.filter(({ run }) => {
+        const check = checks.get(run.id)
+        return check && !closeWarned(check, idleOutcome(check))
+      }).map(({ run }) => run.id)))
+    })
+    return () => {
+      live = false
+    }
+  }, [idle, reads])
+
   const confirm = async () => {
     if (!held) return
     setRunning(true)
-    await runClearDone(plan.eligible.filter((run) => !held.has(run.id)), { api, removeRun })
+    const closing = idle.idle.filter(({ run }) => selected.has(run.id)).map(({ run }) => run)
+    const outcomes = new Map(closing.map((run) => [run.id, idleOutcome(idleChecks!.get(run.id)!)]))
+    await runClearDone([...plan.eligible.filter((run) => !held.has(run.id)), ...closing], { api, removeRun }, outcomes)
     setRunning(false)
     close()
   }
@@ -54,7 +81,15 @@ export function ClearDoneDialog() {
     <ClearDoneConfirm
       plan={plan}
       held={held}
+      idle={idle}
+      idleChecks={idleChecks}
+      selected={selected}
       running={running}
+      onToggle={(id) => setSelected((current) => {
+        const next = new Set(current)
+        if (!next.delete(id)) next.add(id)
+        return next
+      })}
       onRecheck={() => setReads((n) => n + 1)}
       onConfirm={() => void confirm()}
       onCancel={close}

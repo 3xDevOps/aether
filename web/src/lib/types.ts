@@ -121,6 +121,8 @@ export interface CloseWarning {
 export interface RunCloseCheck {
   run_id: string
   warnings: CloseWarning[]
+  /** A pull request recorded for the run's own repository merged. */
+  merged_pull_request?: boolean
   error?: { code: number; message: string }
 }
 

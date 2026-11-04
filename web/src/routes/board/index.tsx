@@ -7,6 +7,7 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ViewHeader } from '@/components/view-header'
 import { clearDonePlan, releaseFinishedPlan } from '@/lib/commands'
+import { idleArchivePlan } from '@/lib/idle-archive'
 import { useDelayed } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { BoardMap } from '@/routes/board/board-map'
@@ -228,7 +229,8 @@ function FinishedMenu() {
   const admin = useIsAdmin()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const openDialog = useStore((s) => s.openPaletteDialog)
-  const canArchive = clearDonePlan(finishedRuns(activeWorkspace, ctx), caps, self).eligible.length > 0
+  const canArchive = clearDonePlan(finishedRuns(activeWorkspace, ctx), caps, self).eligible.length > 0 ||
+    idleArchivePlan(workspaceRuns(activeWorkspace, ctx), ctx, caps, self).idle.length > 0
   const canFree = admin && releaseFinishedPlan(workspaceRuns(activeWorkspace, ctx), caps, self).eligible.length > 0
   if (!canArchive && !canFree) return null
 

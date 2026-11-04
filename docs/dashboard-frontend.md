@@ -1497,7 +1497,7 @@ drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
 when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
 `src/lib/commands.ts`, over the whole active workspace whoever owns the session.
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
-continue past failures and report the first real error; archive counts
+continue past failures and report each session's real error; archive counts
 `CodeNotFound` as done. Archiving hides a session whose status is final or
 `completed` (`isTerminal`) from every group without deleting its history.
 Before the archive confirmation offers its count, it reads `run.close_check` for
@@ -1506,6 +1506,18 @@ reasons, each one that still has live subsessions, a pull request not merged,
 sessions waiting on it or pending cleanup; the server refuses those too, and a
 completed session whose result still awaits review, which the single Archive
 command does not offer.
+The same confirmation offers live sessions that are idle and done:
+`idleArchivePlan()` (`src/lib/idle-archive.ts`) takes a running or parked
+session whose agent replied, or whose turn ended without a report, more than 24
+hours ago, with nothing that needs you, no pending request, no reported wait, no
+live subsessions or held background tasks, and not paused. Each is listed with
+why ("Idle 3d 4h, replied") and the outcome it closes with: merged when
+`run.close_check` reports `merged_pull_request`, otherwise abandoned. One with
+a close warning, or whose check failed, is listed unchecked with its warnings;
+the rest start checked. Every other live session in scope is listed under
+**Not included (n)**, collapsed, with what keeps it. Archiving a checked one
+closes it first, then archives it; a failed close leaves it live and
+unarchived, and the toast names each session that failed with its error.
 Freeing removes a retained container and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet

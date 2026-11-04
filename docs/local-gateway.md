@@ -819,8 +819,10 @@ Each change publishes `run.review` with
 when `status_seq` is above the one you hold.
 
 `run.close_check` takes `{"run_ids":["...", ...],"outcome":"merged"}`, 1 to 50
-sessions, and returns `{"runs":[{"run_id":"...","warnings":[...]}]}`, each
-distinct id once, in order: what closing each session would affect. `outcome`
+sessions, and returns `{"runs":[{"run_id":"...","warnings":[...],"merged_pull_request":true}]}`, each
+distinct id once, in order: what closing each session would affect.
+`merged_pull_request` is true when a pull request recorded for the session's
+own repository merged, so a caller can close it as merged. `outcome`
 is optional: `merged`, `abandoned` or `completed` (Mark complete); `merged`
 skips `unmerged_work`. It reads like `run.get`, so any approved
 member may call it; a session that does not exist answers with its own

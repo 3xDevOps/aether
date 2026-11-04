@@ -39,7 +39,34 @@ describe('archive closed runs', () => {
     for (const id of ids) settle.get(id)!.resolve()
     await done
 
-    expect(toast.error).toHaveBeenCalledWith('Archived 6, 2 failed: fourth failed')
+    expect(toast.error).toHaveBeenCalledWith('Archived 6, 2 failed', { description: 'rewrite the checkout flow: fourth failed\nrewrite the checkout flow: seventh failed', duration: Infinity })
+  })
+
+  it('closes an idle session with its outcome before archiving it, and names each session that failed', async () => {
+    const [done, replied, stuck] = [
+      toRecord(run({ id: 'run_done', status: 'merged', task: 'Done already' })),
+      toRecord(run({ id: 'run_replied', status: 'running', task: 'Replied days ago' })),
+      toRecord(run({ id: 'run_stuck', status: 'running', task: 'Close refused' })),
+    ]
+    const calls: string[] = []
+    const api = {
+      runClose: vi.fn(async (id: string, outcome: string) => {
+        calls.push(`close ${id} ${outcome}`)
+        if (id === stuck.id) throw new ApiError(409, 'session is finishing', -32002)
+        return run({ id })
+      }),
+      runArchive: vi.fn(async (id: string) => {
+        calls.push(`archive ${id}`)
+        return run({ id })
+      }),
+    } as unknown as Api
+    await runClearDone([done, replied, stuck], { api, removeRun: vi.fn() }, new Map([[replied.id, 'merged'], [stuck.id, 'abandoned']]))
+
+    expect(calls).toContain('close run_replied merged')
+    expect(calls.indexOf('close run_replied merged')).toBeLessThan(calls.indexOf('archive run_replied'))
+    expect(calls).toContain('archive run_done')
+    expect(calls).not.toContain('archive run_stuck')
+    expect(toast.error).toHaveBeenCalledWith('Archived 2, 1 failed', { description: 'Close refused: session is finishing', duration: Infinity })
   })
 
   it('treats a run that is already gone as archived and drops it locally', async () => {

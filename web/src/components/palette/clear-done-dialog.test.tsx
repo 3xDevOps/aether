@@ -9,6 +9,7 @@ const archiveMocks = vi.hoisted(() => ({
   runArchive: vi.fn(),
   runRelease: vi.fn(),
   runCloseCheck: vi.fn(),
+  runClose: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ api: archiveMocks }))
@@ -42,6 +43,38 @@ describe('archive confirmation dialog', () => {
     await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
     expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(1, 'run_b', true)
     expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(2, 'run_a', true)
+  })
+
+  it('offers live sessions idle for over a day, unchecking those with warnings, and closes before archiving', async () => {
+    const days = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString()
+    const idle = [
+      run({ id: 'run_quiet', task: 'Quiet reply', status: 'running', state: 'answered', status_changed_at: days(3) }),
+      run({ id: 'run_pr', task: 'Open PR', status: 'running', state: 'answered', status_changed_at: days(2) }),
+      run({ id: 'run_busy', task: 'Still busy', status: 'running', state: 'waiting-ci', status_changed_at: days(2) }),
+    ]
+    useStore.setState({ runs: Object.fromEntries([...closed, ...idle].map((r) => [r.id, toRecord(r)])) })
+    archiveMocks.runCloseCheck.mockImplementation(async (ids: string[]) => ids.map((id) => id === 'run_pr'
+      ? { run_id: id, warnings: [{ kind: 'pull_request', detail: 'Pull request acme/shop#42 was open, not merged', url: 'https://github.com/acme/shop/pull/42', number: 42 }] }
+      : { run_id: id, warnings: [], merged_pull_request: id === 'run_quiet' }))
+    archiveMocks.runClose.mockImplementation(async (id: string, outcome: string) => run({ id, status: outcome as never }))
+    render(<ClearDoneDialog />)
+
+    const list = await screen.findByRole('list', { name: 'Idle sessions' })
+    expect(list.textContent).toContain('Quiet reply')
+    expect(list.textContent).toMatch(/Idle 3d \dh, replied · closes as merged/)
+    expect(list.textContent).toContain('closes as abandoned')
+    expect(list.textContent).toContain('acme/shop#42')
+    expect(screen.getByRole('checkbox', { name: 'Quiet reply' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('checkbox', { name: 'Open PR' }).getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Not included (1)' }))
+    expect(screen.getByRole('list', { name: 'Live sessions not included' }).textContent).toBe('Still busyExcluded: waiting on CI')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive 3' }))
+    await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
+    expect(archiveMocks.runClose).toHaveBeenCalledTimes(1)
+    expect(archiveMocks.runClose).toHaveBeenCalledWith('run_quiet', 'merged')
+    expect(archiveMocks.runArchive).toHaveBeenCalledWith('run_quiet', true)
+    expect(archiveMocks.runArchive).not.toHaveBeenCalledWith('run_pr', true)
   })
 
   it('cancels without calling the gateway', () => {

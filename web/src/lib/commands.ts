@@ -36,6 +36,7 @@ import {
 import { api, ApiError, codeInvalidState, codeNotFound, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { errorSentence, message } from '@/lib/format'
+import { runLabel } from '@/lib/status'
 import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
 import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
@@ -206,10 +207,14 @@ export function clearDonePlan(
 // Both bulk actions bound gateway requests rather than opening one per run.
 const bulkRunConcurrency = 6
 
-/** Each call's `run.archived` event moves the run in every dashboard, so only settled calls are counted here. */
+/**
+ * Each call's `run.archived` event moves the run in every dashboard, so only settled calls are counted here.
+ * A live run in `closes` is closed with its outcome first; a failed close leaves it live and unarchived.
+ */
 export async function runClearDone(
   eligible: RunRecord[],
   deps: Pick<CommandDeps, 'api' | 'removeRun'>,
+  closes: Map<string, 'merged' | 'abandoned'> = new Map(),
 ): Promise<void> {
   // One slot per run, so the failures read back in Done order however the
   // calls settle.
@@ -219,13 +224,15 @@ export async function runClearDone(
     while (next < eligible.length) {
       const i = next++
       try {
+        const outcome = closes.get(eligible[i].id)
+        if (outcome) await deps.api.runClose(eligible[i].id, outcome)
         await deps.api.runArchive(eligible[i].id, true)
       } catch (err) {
         // The run was already deleted, so there is nothing left to archive.
         if (err instanceof ApiError && err.code === codeNotFound) {
           deps.removeRun(eligible[i].id)
         } else {
-          errors[i] = message(err)
+          errors[i] = `${runLabel(eligible[i])}: ${message(err)}`
         }
       }
     }
@@ -236,7 +243,7 @@ export async function runClearDone(
   const failures = errors.filter((error) => error !== undefined)
   const archived = eligible.length - failures.length
   if (failures.length > 0) {
-    toast.error(`Archived ${archived}, ${failures.length} failed: ${failures[0]}`)
+    toast.error(`Archived ${archived}, ${failures.length} failed`, { description: failures.join('\n'), duration: Infinity })
   } else {
     toast.success(`Archived ${archived} ${archived === 1 ? 'session' : 'sessions'}`)
   }
