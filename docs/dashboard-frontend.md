@@ -2226,7 +2226,8 @@ Cancel first. Cancel holds the focus with the ring drawn (`focusRingShown`); clo
 is checked by the runner itself before it runs, once at a time per session
 (`closeChecking`): with warnings, or a check that failed, the runner opens
 `CloseConfirmation` instead, and **Close anyway** runs the command. More locks
-while that check and the close run. **Open in Standard** lists the same warnings in its
+while that check and the close run. A check that has not answered within 15
+seconds counts as failed, so no close waits on it forever. **Open in Standard** lists the same warnings in its
 confirmation. Palette confirmations
 capture the authenticated identity with the session and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to

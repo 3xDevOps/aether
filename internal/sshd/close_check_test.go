@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,5 +247,47 @@ func TestRunCloseCheckAuthorization(t *testing.T) {
 	}
 	if err := c.Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: ids}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
 		t.Fatalf("a check of %d runs = %v, want CodeInvalidParams", len(ids), err)
+	}
+}
+
+type childReadFails struct {
+	store.Store
+	fail domain.RunID
+}
+
+func (s childReadFails) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
+	if id == s.fail {
+		return nil, errors.New("store: get session: disk I/O error")
+	}
+	return s.Store.GetRun(ctx, id)
+}
+
+// A subsession that cannot be read fails the check for its parent rather
+// than leaving out what closing it would affect.
+func TestRunCloseCheckChildReadFails(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	db := e.store.(*store.DB)
+	c, _, err := db.ReserveChild(ctx, &domain.ChildReservation{ParentRunID: e.run.ID, RootRunID: e.run.ID, TreeKey: string(e.run.ID),
+		WorkspaceID: e.ws.ID, OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "claude", Mode: domain.LaunchTUI, Purpose: "help",
+		Task: "help", IdempotencyKey: "kid", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateRunWithID(ctx, &domain.Run{ID: c.RunID, WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "kid", Harness: "claude",
+		Mode: domain.LaunchTUI, Status: domain.RunRunning, Branch: "aether/run-kid"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildQueued, domain.ChildLaunching); err != nil {
+		t.Fatal(err)
+	}
+	e.srv.cfg.Store = childReadFails{Store: e.store, fail: c.RunID}
+	var res protocol.RunCloseCheckResult
+	if err := controlClient(t, e).Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(e.run.ID)}}, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Runs) != 1 || res.Runs[0].Error == nil || !strings.Contains(res.Runs[0].Error.Message, "disk I/O error") {
+		t.Fatalf("a check whose subsession cannot be read = %+v, want its error", res.Runs)
 	}
 }

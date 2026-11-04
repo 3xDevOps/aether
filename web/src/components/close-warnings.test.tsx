@@ -117,6 +117,21 @@ describe('Mark complete with close warnings', () => {
     expect(toast.info).toHaveBeenCalledWith('The session changed while its close was being checked, so it was not closed')
   })
 
+  it('asks anyway when the check does not answer in time, and lets a later press check again', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(api.runCloseCheck).mockReset()
+      vi.mocked(api.runCloseCheck).mockReturnValueOnce(new Promise(() => {}))
+      render(<><MarkComplete /><CloseConfirmation /></>)
+      fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
+      await act(async () => vi.advanceTimersByTime(15_000))
+      expect(screen.getByRole('alert').textContent).toBe('Could not check what closing affects: the server did not answer within 15 seconds')
+      expect(useStore.getState().closeChecking).toEqual({})
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('drops the confirmation when its run is gone', async () => {
     render(<CloseConfirmation />)
     act(() => useStore.setState({ runs: {}, closeConfirmation: { check: { run_id: 'run_1', warnings: [{ kind: 'protected', detail: 'Protected' }] }, asked: '', outcome: 'completed', command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } } }))

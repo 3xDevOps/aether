@@ -101,8 +101,14 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	// A subsession closes as its parent does, so what closing it would
 	// affect is part of this close.
 	for _, childID := range deps.Children {
-		child := known[childID]
-		if child == nil || child.ID == "" {
+		child, read := known[childID]
+		if !read {
+			var err error
+			if child, err = s.cfg.Store.GetRun(ctx, childID); err != nil && !errors.Is(err, store.ErrNotFound) {
+				return nil, rpcError(err)
+			}
+		}
+		if child == nil {
 			continue
 		}
 		waiters, err := s.cfg.Store.RunWaiters(ctx, childID)
@@ -181,16 +187,19 @@ func (s *Server) runLabels(ctx context.Context, known map[domain.RunID]*domain.R
 		r, read := known[id]
 		if !read {
 			var err error
-			if r, err = s.cfg.Store.GetRun(ctx, id); err != nil && !errors.Is(err, store.ErrNotFound) {
-				r = &domain.Run{}
+			r, err = s.cfg.Store.GetRun(ctx, id)
+			// A failed read only costs the label its title; the caller
+			// that needs the run reads it again and returns the error.
+			if err == nil || errors.Is(err, store.ErrNotFound) {
+				known[id] = r
 			}
-			known[id] = r
 		}
+		_, cached := known[id]
 		labels[i] = string(id)
 		switch {
-		case r == nil:
+		case cached && r == nil:
 			labels[i] += " (queued)"
-		case r.Title != "":
+		case r != nil && r.Title != "":
 			labels[i] += " (" + r.Title + ")"
 		}
 	}
