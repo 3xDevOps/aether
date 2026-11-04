@@ -44,7 +44,9 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   // The command and its answer are steps; once the turn ends their block shuts behind the header.
   const asked = log.getByRole('button', { name: /^Ran 1 command/ })
   await expect(asked).toHaveAttribute('aria-expanded', 'false')
-  await asked.click()
+  // The chat list still scrolls and measures rows after a turn ends or a block opens, and a click whose
+  // button moves between mouse down and up never fires, so these disclosures open from the keyboard.
+  await asked.press('Enter')
   await expect(log.getByText(/Allowed once · run/)).toBeVisible()
   await expect.poll(async () => {
     const [row, view] = await Promise.all([log.getByText('permission: allow').boundingBox(), log.boundingBox()])
@@ -65,10 +67,10 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   const steps = log.getByRole('button', { name: /^Read 2 files, ran 1 command and edited 1 file/ })
   await expect(steps).toHaveAttribute('aria-expanded', 'false', { timeout: 30_000 })
   await expect(log.getByText(/^Finished in \d+s$/).last()).toBeVisible()
-  await steps.click()
+  await steps.press('Enter')
   await expect(log.getByText('billing.js', { exact: true })).toBeVisible()
   await expect(log.getByText('All 3 steps done')).toBeVisible()
-  await log.getByRole('button', { name: /Edited src\/billing\.js/ }).click()
+  await log.getByRole('button', { name: /Edited src\/billing\.js/ }).press('Enter')
   await expect(log.locator('[data-slot="diff-block"]')).toContainText('Math.round')
   await expect(log.getByText(/^Changed \d+ files?$/)).toHaveCount(0)
 
@@ -77,7 +79,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(changed).toBeVisible({ timeout: 30_000 })
   await expect(changed).toContainText('+3')
   await expect(changed).toHaveAttribute('aria-expanded', 'false')
-  await changed.click()
+  await changed.press('Enter')
   await changes.getByRole('button', { name: /billing\.js/ }).click()
   await expect(page.getByRole('tab', { name: 'Changes', selected: true })).toBeVisible()
   await expect(page.getByRole('tabpanel', { name: 'Changes' }).getByText('Math.round((a + b) * 100) / 100')).toBeVisible()
