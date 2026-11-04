@@ -1516,12 +1516,15 @@ batched `run.close_check` then says how long each has been idle
 abandoned); one changed within 24 hours is not included. Each row leads with
 its outcome, then why ("Closes as merged · idle 3d, replied"). One with a
 close warning, a failed check, or an older server that cannot tell its
-outcome starts unchecked and says "Check to close anyway"; the rest start
-checked, and the section header selects all. Every other live session in
-scope is listed under **Not included**, collapsed, with what keeps it. The
-title and primary button say what happens ("Close 2 and archive 5
-sessions?", **Close 2, archive 5**), Cancel holds the focus with its ring
-drawn, and **Check again** rebuilds the whole plan. Each checked session is
+outcome starts unchecked and says "Check to close anyway", or "Closing
+anyway" once checked; the rest start checked. The section header's select
+all takes only rows without warnings, so a warned row always needs its own
+click. Every other live session in scope is listed under **Not included**,
+collapsed, with what keeps it. The title and primary button say what happens
+("Archive 5 sessions, closing 2 first?", **Close 2, archive 5**), Cancel
+holds the focus with its ring drawn, and **Check again** rebuilds the whole
+plan. On desktop the Idle list scrolls in a bounded box that fades at the
+bottom while more is below; on a phone the sheet scrolls instead. Each checked session is
 closed, then archived, unless it changed since the plan saw it; a skipped or
 failed close leaves it live and unarchived, and the toast names each session
 that failed with its error.

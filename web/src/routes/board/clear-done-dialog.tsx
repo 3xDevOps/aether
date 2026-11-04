@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { CloseWarningLines } from '@/components/close-warnings'
 import { ChevronRight } from '@/components/icons'
 import { RunRetention } from '@/components/run-retention'
@@ -20,7 +20,8 @@ import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
 import type { IdleCandidate, IdleRow } from '@/lib/idle-archive'
 import { cn, focusRingShown } from '@/lib/utils'
 import type { RunCloseCheck } from '@/lib/types'
-import { runLabel } from '@/lib/status'
+import { compactAge } from '@/lib/format'
+import { finishedReason, runLabel } from '@/lib/status'
 
 const shownNames = 5
 
@@ -78,15 +79,14 @@ export function ClearDoneConfirm({
               : n === 0
                 ? 'Nothing to archive'
                 : closing > 0
-                  ? `Close ${closing} and archive ${sessions(n)}?`
+                  ? `Archive ${sessions(n)}, closing ${closing} first?`
                   : `Archive ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>
             {n === 0 && !checking && kept.length === 0 && unchecked.length === 0 && rows.length === 0
               ? 'Archive acts on completed, merged, abandoned, failed and interrupted sessions you may act on, and on live ones idle and done for over a day.'
-              : 'Moves them to Archived at the foot of Finished, where you can restore them. Retained containers stay.'}
-            {rows.length > 0 &&
-              ' Idle sessions replied or ended their turn over a day ago and have nothing left to do. Checked ones are closed with the outcome shown — their agents stop — then archived.'}
+              : 'Moves them to Archived, where you can restore them.'}
+            {closing > 0 && ' Checked idle sessions are closed with the outcome shown — their agents stop — then archived.'}
           </DialogDescription>
         </DialogHeader>
         {plan.notAllowed > 0 && (
@@ -106,7 +106,10 @@ export function ClearDoneConfirm({
               <SectionLabel as="h3" className="flex items-center gap-1.5">Archiving <CountBadge>{archived.length}</CountBadge></SectionLabel>
               <InsetList tabIndex={0} aria-label="Sessions to archive" className="max-h-48 overflow-y-auto">
                 {names.map((run) => (
-                  <li key={run.id} className="shrink-0 truncate px-3 py-1.5 text-ui">{runLabel(run)}</li>
+                  <li key={run.id} className="flex min-w-0 shrink-0 items-baseline gap-2 px-3 py-1.5">
+                    <span className="min-w-0 truncate text-ui">{runLabel(run)}</span>
+                    <span className="ml-auto shrink-0 text-ui-sm text-muted">{finishedReason(run)} · {compactAge(run.finished_at ?? run.stateChangedAt)}</span>
+                  </li>
                 ))}
               </InsetList>
               {archived.length > shownNames && (
@@ -169,33 +172,51 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
   onSelect: (selected: Set<string>) => void
   onLeave: () => void
 }) {
+  const list = useRef<HTMLUListElement>(null)
+  const below = useMoreBelow(list)
   const checked = rows.filter((row) => selected.has(row.run.id)).length
+  // Select all takes only rows with nothing to warn about; a warned row needs its own click.
+  const clean = rows.filter((row) => row.clean)
+  const allClean = clean.length > 0 && clean.every((row) => selected.has(row.run.id))
   const toggle = (id: string) => {
     const next = new Set(selected)
     if (!next.delete(id)) next.add(id)
+    onSelect(next)
+  }
+  const selectClean = () => {
+    const next = new Set(selected)
+    for (const row of clean) {
+      if (allClean) next.delete(row.run.id)
+      else next.add(row.run.id)
+    }
     onSelect(next)
   }
   return (
     <section className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2.5 px-3">
         <Checkbox
-          id="idle-all"
-          aria-label="Select all idle sessions"
-          checked={checked === rows.length ? true : checked === 0 ? false : 'indeterminate'}
-          disabled={running}
-          onCheckedChange={() => onSelect(new Set(checked === rows.length ? [] : rows.map((row) => row.run.id)))}
+          aria-label="Select all idle sessions without warnings"
+          checked={allClean ? true : checked === 0 ? false : 'indeterminate'}
+          disabled={running || clean.length === 0}
+          onCheckedChange={selectClean}
         />
-        <SectionLabel as="h3" className="flex items-center gap-1.5">
+        <SectionLabel as="h3" className="flex items-center gap-1.5" title="Live sessions whose agent replied or ended its turn over a day ago, with nothing left to do">
           Idle <CountBadge>{`${checked} of ${rows.length}`}</CountBadge>
           <span className="font-normal">· closed, then archived</span>
         </SectionLabel>
       </div>
-      <InsetList aria-label="Idle sessions" className="max-h-64 overflow-y-auto">
+      <InsetList
+        ref={list}
+        aria-label="Idle sessions"
+        className="md:max-h-64 md:overflow-y-auto"
+        style={below ? { maskImage: 'linear-gradient(to bottom, #000 calc(100% - 28px), transparent)' } : undefined}
+      >
         {rows.map((row) => {
           const id = `idle-${row.run.id}`
+          const on = selected.has(row.run.id)
           return (
             <li key={row.run.id} className="flex min-w-0 shrink-0 gap-2.5 px-3 py-2">
-              <Checkbox id={id} className="mt-0.5" checked={selected.has(row.run.id)} disabled={running} onCheckedChange={() => toggle(row.run.id)} />
+              <Checkbox id={id} className="mt-0.5" checked={on} disabled={running} onCheckedChange={() => toggle(row.run.id)} />
               <div className="flex min-w-0 flex-col gap-1">
                 <label htmlFor={id} className="truncate text-ui">{runLabel(row.run)}</label>
                 <span className="text-ui-sm">
@@ -205,7 +226,9 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
                 {row.outcomeUnknown && (
                   <span className="text-ui-sm text-muted">This server cannot tell whether its pull request merged.</span>
                 )}
-                {!row.clean && <span className="text-ui-sm text-muted">Check to close anyway.</span>}
+                {!row.clean && (on
+                  ? <span className="text-ui-sm text-text">Closing anyway.</span>
+                  : <span className="text-ui-sm text-muted">Check to close anyway.</span>)}
                 {(row.check.error || row.check.warnings.length > 0) && <CloseWarningLines check={row.check} run={row.run} onLeave={onLeave} />}
               </div>
             </li>
@@ -214,6 +237,25 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
       </InsetList>
     </section>
   )
+}
+
+/** Whether the element scrolls and hides more below its bottom edge. */
+function useMoreBelow(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [below, setBelow] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => setBelow(el.scrollTop < el.scrollHeight - el.clientHeight - 1)
+    measure()
+    el.addEventListener('scroll', measure, { passive: true })
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => {
+      el.removeEventListener('scroll', measure)
+      observer.disconnect()
+    }
+  }, [ref])
+  return below
 }
 
 function NotIncluded({ excluded }: { excluded: IdleCandidate[] }) {

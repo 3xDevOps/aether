@@ -133,7 +133,7 @@ export function outcomeState(status: RunStatus): PresentationState | undefined {
   return outcomes[status]
 }
 
-function finishedReason(run: RunRecord): string {
+export function finishedReason(run: RunRecord): string {
   switch (run.status) {
     case 'merged':
       return 'Merged'
