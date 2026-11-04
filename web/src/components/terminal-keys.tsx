@@ -2,7 +2,7 @@
 // so the replay gate, `disableStdin` and the sticky modifiers apply to a tap
 // as to a keystroke.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft, Ellipsis, Keyboard, Lock } from '@/components/icons'
 import type { TerminalFit } from '@/components/terminal-fit'
@@ -136,8 +136,16 @@ function useKeyboardOpen(textarea: HTMLTextAreaElement | undefined) {
     if (!textarea) return
     const viewport = window.visualViewport
     let tallest = viewport?.height ?? 0
+    let width = viewport?.width ?? 0
     const update = () => {
-      if (viewport) tallest = Math.max(tallest, viewport.height)
+      if (viewport) {
+        // A rotation changes the height without a keyboard; start over.
+        if (viewport.width !== width) {
+          width = viewport.width
+          tallest = viewport.height
+        }
+        tallest = Math.max(tallest, viewport.height)
+      }
       const covered = viewport ? tallest - viewport.height >= keyboardHeight : true
       setOpen(document.activeElement === textarea && covered)
     }
@@ -167,6 +175,7 @@ export function TerminalKeys({
   const { terminal, modifiers, tapModifier, focusTerminal } = controller
   const [more, setMore] = useState(false)
   const [functions, setFunctions] = useState(false)
+  const moreTrigger = useRef<HTMLButtonElement>(null)
   const keyboardOpen = useKeyboardOpen(terminal?.textarea)
   // On a phone focusTerminal does nothing, so a key taps through without
   // raising the soft keyboard; a tablet keeps typing where the key left it.
@@ -216,6 +225,7 @@ export function TerminalKeys({
       <Popover open={more} onOpenChange={setMore} modal={false}>
         <PopoverTrigger asChild>
           <Button
+            ref={moreTrigger}
             type="button"
             size="sm"
             variant={more ? 'primary' : 'secondary'}
@@ -235,7 +245,11 @@ export function TerminalKeys({
             // Moving focus off a focused textarea would drop the keyboard.
             if (terminal?.textarea && document.activeElement === terminal.textarea) event.preventDefault()
           }}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            // The keyboard button hands focus to the terminal itself.
+            if (document.activeElement === document.body || !document.activeElement) moreTrigger.current?.focus()
+          }}
         >
           {moreKeys.map(sheetKey)}
           {functions && functionKeys.map(sheetKey)}

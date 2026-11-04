@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LoaderCircle } from '@/components/icons'
 import { connectionLabel } from '@/components/shell/connection'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { useIsMobile } from '@/lib/breakpoints'
+import { useMediaQuery } from '@/lib/hooks'
 import { isRetainedRun } from '@/lib/commands'
 import { message } from '@/lib/format'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
@@ -20,6 +21,8 @@ import { shellEnded } from '@/store/terminal'
 
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const summary = usePresenceSummary(run, agent)
+  // "Nobody controls" would truncate beside Take control at 360px.
+  const narrow = useMediaQuery('(max-width: 399px)')
   const { state } = agent.session
   const ended = endedStatuses.includes(run.status)
   const showConnection = !agent.starting && !ended && state.connection !== 'live'
@@ -27,7 +30,11 @@ function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
     <div role="group" aria-label="Session presence" className="control-matrix-clear flex min-w-0 items-center gap-2">
       {ended && <span className="shrink-0 text-ui-sm text-muted">{isRetainedRun(run) ? 'Container stopped' : 'Container removed'} · read-only</span>}
       {showConnection && <span className="shrink-0 text-ui-sm text-state-needs-you">{connectionLabel[state.connection]}</span>}
-      {agent.steerable && <span className="min-w-0 truncate text-ui-sm text-muted">{summary}</span>}
+      {agent.steerable && (
+        <span className="min-w-0 truncate text-ui-sm text-muted">
+          {narrow ? summary.replace(/^Nobody controls/, 'No one') : summary}
+        </span>
+      )}
       {agent.steerable && (
         <ControlButton
           ownsControl={agent.localControl}
@@ -64,6 +71,8 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   )
 }
 
+const emptyList: object = []
+
 /**
  * On a phone an Enhanced session has no agent terminal to land on, so the
  * first time its Terminal tab is viewed it shows a running shell a person
@@ -74,13 +83,23 @@ function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
   const mobile = useIsMobile()
   const asked = useRef(false)
   const [failed, setFailed] = useState(false)
+  const [waiting, setWaiting] = useState<object | null>(null)
   const { runID, visible, canOpen, refresh, show, setError } = shells
+  const terminals = useStore((state) => state.shellDocks[runID]?.terminals)
+  const showRunning = useCallback(() => {
+    const dock = useStore.getState().shellDocks[runID]
+    if (!dock || dock.shellShown) return
+    const running = dock.terminals.find((terminal) =>
+      dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && !shellEnded(terminal))
+    if (running) show(running.terminal_id)
+  }, [runID, show])
   useEffect(() => {
     if (!mobile || !wanted || !visible || !canOpen || asked.current || failed) return
     asked.current = true
     void (async () => {
-      // refresh() drops a list that an Open shell overtook, so the shell it
-      // started is never synced away.
+      const before = useStore.getState().shellDocks[runID]?.terminals
+      // refresh() drops a list that an Open shell or a newer poll overtook,
+      // so the shell it started is never synced away.
       try {
         await refresh()
       } catch (cause) {
@@ -88,13 +107,17 @@ function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
         setFailed(true)
         return
       }
-      const dock = useStore.getState().shellDocks[runID]
-      if (!dock || dock.shellShown) return
-      const running = dock.terminals.find((terminal) =>
-        dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && !shellEnded(terminal))
-      if (running) show(running.terminal_id)
+      showRunning()
+      // A newer poll syncs the list instead; the effect below picks it up.
+      const after = useStore.getState().shellDocks[runID]?.terminals
+      if (after === before) setWaiting(after ?? emptyList)
     })()
-  }, [canOpen, failed, mobile, refresh, runID, setError, show, visible, wanted])
+  }, [canOpen, failed, mobile, refresh, runID, setError, showRunning, visible, wanted])
+  useEffect(() => {
+    if (!waiting || terminals === waiting) return
+    setWaiting(null)
+    showRunning()
+  }, [waiting, terminals, showRunning])
   return failed ? () => {
     asked.current = false
     setError(null)

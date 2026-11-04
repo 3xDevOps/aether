@@ -88,8 +88,7 @@ function TerminalTools({
           <span className="ml-auto text-ui-sm text-muted">Ctrl+Shift+F</span>
         </MenuItem>
         <MenuSeparator />
-        {/* Recorded history draws at the chosen size, which the plain items step. */}
-        {phone && !readingSurface ? (
+        {phone ? (
           <>
             <MenuLabel>Text size {stepper.size}{stepper.fitWidth && ', fitted to width'}</MenuLabel>
             <MenuItem disabled={!terminal || !stepper.canSmaller} onSelect={(event) => { stay(event); stepper.smaller() }}>

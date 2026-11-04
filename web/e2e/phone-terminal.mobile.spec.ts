@@ -96,6 +96,19 @@ test('an Enhanced session offers a shell that fits a phone and takes a sticky Ct
   await expect(page.getByRole('dialog', { name: 'More keys' })).toBeHidden()
   await restore()
 
+  // A+ draws the terminal at a chosen size, and Fit returns to fitting.
+  await keys.getByRole('button', { name: 'More keys' }).tap()
+  const sheet = page.getByRole('dialog', { name: 'More keys' })
+  const fitted = sheet.getByRole('button', { name: /^Text size .*fitted to width/ })
+  await expect(fitted).toBeVisible()
+  await sheet.getByRole('button', { name: 'Larger text' }).tap()
+  const fit = sheet.getByRole('button', { name: /^Text size .*, fit to width/ })
+  await expect(fit).toBeVisible()
+  await fit.tap()
+  await expect(fitted).toBeVisible()
+  await keys.getByRole('button', { name: 'More keys' }).tap()
+  await expect(sheet).toBeHidden()
+
   await page.setViewportSize({ width: 430, height: 932 })
   await expect.poll(() => sideways(page)).toEqual({ pane: 0, page: 0 })
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
@@ -107,10 +120,9 @@ test('an Enhanced session offers a shell that fits a phone and takes a sticky Ct
   await restoreWide()
 
   // Back later, the tab shows the shell that is still running rather than
-  // offering another.
+  // offering another. Selecting Terminal saved view=terminal in the URL, so
+  // a reload opens on it.
   await page.reload()
-  await expect(page.getByRole('log', { name: 'Chat' })).toBeVisible({ timeout: 30_000 })
-  await page.getByRole('tab', { name: 'Terminal', exact: true }).tap()
   await expect(rows(page)).toContainText('after-42', { timeout: 30_000 })
   await expect(page.getByRole('button', { name: 'Open shell', exact: true })).toBeHidden()
   expect(await keyboardFocused(page)).toBe(false)
