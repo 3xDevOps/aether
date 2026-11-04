@@ -20,8 +20,8 @@ test('a confirm opens as a sheet along the bottom of a phone screen', async ({
   })
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: 'More navigation' }).tap()
-  await page.getByRole('menuitem', { name: 'Templates', exact: true }).tap()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'More' }).tap()
+  await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: 'Templates', exact: true }).tap()
   await page.getByRole('option', { name: 'Template nightly' }).tap()
   await page.getByRole('button', { name: 'More for nightly' }).tap()
   await page.getByRole('menuitem', { name: 'Delete' }).tap()
@@ -53,7 +53,7 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
   await shrinkToKeyboardHeight(page)
 
   await page
-    .getByRole('banner')
+    .getByRole('navigation', { name: 'Main navigation' })
     .getByRole('button', { name: 'New session' })
     .tap()
 
@@ -82,7 +82,7 @@ test('a launch refusal sits below the form, not over it', async ({ page, aether 
 
   await page.goto(alice.url)
   await page
-    .getByRole('banner')
+    .getByRole('navigation', { name: 'Main navigation' })
     .getByRole('button', { name: 'New session' })
     .tap()
   const dialog = page.getByRole('dialog', { name: 'New session' })

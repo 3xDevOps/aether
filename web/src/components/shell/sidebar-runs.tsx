@@ -77,8 +77,9 @@ function useRovingRows(region: React.RefObject<HTMLElement | null>) {
   return { onFocus, onKeyDown }
 }
 
-export function SidebarRuns() {
-  const groups = useSidebarGroups()
+export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) => SidebarGroup[] } = {}) {
+  const listed = useSidebarGroups()
+  const groups = regroup ? regroup(listed) : listed
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)

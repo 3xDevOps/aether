@@ -270,7 +270,7 @@ export async function hydrate(
     const unknownLink = first && current.route === s.route && !!linked && !current.runs[linked]
     if (
       first &&
-      (s.route.name === 'board' || unknownLink) &&
+      (s.route.name === 'board' || s.route.name === 'needs-you' || unknownLink) &&
       current.route === s.route &&
       !current.onboarded &&
       (capabilities?.local?.includes('link.status') === true ||
@@ -706,6 +706,7 @@ export async function applyEvent(
       const workspaceID = ev.workspace_id
       const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string; state?: string }
       store.getState().clearTyping(runID, ev.actor_id)
+      store.getState().noteRoomEvent()
       if (
         runID &&
         (payload.kind === 'question' || payload.kind === 'reply')

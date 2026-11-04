@@ -585,6 +585,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     assistantAccount: vi.fn(async (agent: string) => ({ agent, state: 'unrecorded' as const })),
     runInputAnswer: vi.fn(async () => needsOverride('runInputAnswer')),
     runInputRespond: vi.fn(async () => needsOverride('runInputRespond')),
+    attentionList: vi.fn(async () => ({ items: [] })),
     runACPCancel: vi.fn(async () => needsOverride('runACPCancel')),
     runACPSetOption: vi.fn(async () => needsOverride('runACPSetOption')),
     runACPHistory: vi.fn(async () => needsOverride('runACPHistory')),

@@ -1,16 +1,18 @@
 import { render, screen } from '@testing-library/react'
 import { useStore } from '@/store'
-import { useNeedsYouCount } from '@/store/hooks'
+import { useNeedsYouByWorkspace } from '@/store/hooks'
 import { toRecord } from '@/store/runs'
 import { alice, bob, otherWorkspace, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 
 function Probe({ workspace }: { workspace?: string }) {
-  return <output aria-label="needs you count">{useNeedsYouCount(workspace)}</output>
+  const counts = useNeedsYouByWorkspace()
+  const count = workspace === undefined ? Object.values(counts).reduce((total, n) => total + n, 0) : counts[workspace] ?? 0
+  return <output aria-label="needs you count">{count}</output>
 }
 
 const count = () => screen.getByLabelText('needs you count').textContent
 
-describe('useNeedsYouCount', () => {
+describe('useNeedsYouByWorkspace', () => {
   beforeEach(() => {
     useStore.setState({
       info: serverInfo,

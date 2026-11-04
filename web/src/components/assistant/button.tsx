@@ -8,7 +8,7 @@ import { useCapability, useSelfRole } from '@/store/hooks'
 
 export const assistantTriggerID = 'assistant-trigger'
 
-function label(waiting: number, updates: number): string {
+export function assistantLabel(waiting: number, updates: number): string {
   const parts = []
   if (waiting > 0) parts.push(`${waiting} ${waiting === 1 ? 'request' : 'requests'} waiting`)
   if (updates > 0) parts.push(`${updates} ${updates === 1 ? 'update' : 'updates'}`)
@@ -22,7 +22,7 @@ export function useAssistantAvailable(): boolean {
   return role !== null && cap.hasMethod('assistant.status') && canLaunch({ cap, role })
 }
 
-/** Mounted in exactly one place at a time: the phone toolbar, the sidebar header, or the top bar when the sidebar is hidden. */
+/** Mounted in exactly one place at a time: the sidebar header, or the top bar when the sidebar is hidden. A phone has its Assistant tab instead. */
 export function AssistantButton({ variant = 'ghost' }: { variant?: 'ghost' | 'secondary' }) {
   const supported = useAssistantAvailable()
   const open = useStore((s) => s.assistantOpen)
@@ -36,7 +36,7 @@ export function AssistantButton({ variant = 'ghost' }: { variant?: 'ghost' | 'se
         id={assistantTriggerID}
         variant={variant}
         size="icon"
-        label={label(waiting, updates)}
+        label={assistantLabel(waiting, updates)}
         hint={`Assistant · ${shortcutLabel('assistant')}`}
         aria-expanded={open}
         aria-controls="assistant"

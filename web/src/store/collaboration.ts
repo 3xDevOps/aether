@@ -30,6 +30,9 @@ export interface CollaborationSlice {
   /** Errors reading room history; presence and action failures live separately. */
   roomError: Record<string, string | undefined>
   roomActionError: Record<string, string | undefined>
+  /** Bumped on every room message event, loaded room or not: the server's Needs you reads rooms this page never opened. */
+  roomEvents: number
+  noteRoomEvent: () => void
   noteDrafts: Record<string, string | undefined>
   /** Per run, the key of each note text sent and not yet saved, so a resend never adds a second copy. */
   noteKeys: Record<string, Record<string, string> | undefined>
@@ -186,6 +189,8 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
   roomLoading: {},
   roomError: {},
   roomActionError: {},
+  roomEvents: 0,
+  noteRoomEvent: () => set((s) => ({ roomEvents: s.roomEvents + 1 })),
   noteDrafts: {},
   noteKeys: {},
   failedNotes: {},
