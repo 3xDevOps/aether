@@ -343,6 +343,9 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. `terminal.file` has 96 MiB for a decoded 64 MiB file.
+`dictation.transcribe` has 6 MiB for a 120 s clip in base64, and `aether gui`
+waits 4 minutes for its answer and never repeats it
+([dictation.md](dictation.md)).
 File and configuration exceptions are listed below.
 
 ### Chat image previews
@@ -2426,7 +2429,10 @@ Both transports reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires
 `visibilitychange` (visible) or `online`. A phone freezes a background tab's
 timers, so without those two events a tab returning from the pocket would sit
-out the rest of a 30-second wait. A foreground return leaves a socket that is
+out the rest of a 30-second wait. The events stream also treats a watchdog tick
+more than 15 seconds late, a `pageshow`, and a settled `navigator.connection`
+`change` as those two events ([dashboard-frontend.md](dashboard-frontend.md)).
+A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.

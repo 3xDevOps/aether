@@ -43,6 +43,10 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 	s.mu.Lock()
 	dashboardURL, dashboardErr := s.tailnetDashboardURL, s.tailnetDashboardErr
 	s.mu.Unlock()
+	features := []string{protocol.FeatureMultiRepo, protocol.FeaturePermission}
+	if s.dictationInstalled() {
+		features = append(features, protocol.FeatureDictation)
+	}
 	return protocol.ServerInfoResult{
 		ServerVersion:         s.cfg.release,
 		ProtocolVersion:       protocol.Version,
@@ -53,7 +57,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
-		Features:              []string{protocol.FeatureMultiRepo, protocol.FeaturePermission},
+		Features:              features,
 	}, nil
 }
 

@@ -80,7 +80,7 @@ export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) =>
   const listed = useSidebarGroups()
   const groups = regroup ? regroup(listed) : listed
   const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => s.hydrationError)
+  const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const loading = useDelayed(!hydrated && error === null && groups.length === 0)

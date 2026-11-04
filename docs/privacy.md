@@ -40,6 +40,32 @@ request ([What an edge stores](#what-an-edge-stores)).
   preferences in origin-local `aether.ui` storage: they are separate for each
   server origin, including its port. Nothing reads them but the dashboard,
   and they last until you uninstall the app. Both are private to the app.
+- **The last snapshot the dashboard loaded**, in `localStorage` under
+  `aether.snapshot.v1:<origin>`, so the next launch paints at once, marked
+  *Saved state from ...*, until the live state arrives. It holds:
+  - the server info: version, your member (without git name or email) and
+    the tailnet host name;
+  - the workspace list (name, base branch, id; not the git origin URL);
+  - every session the server listed, as the server sent it: task text,
+    title, branch, status, pending question ids and wait conditions, but not
+    the last tool the agent used;
+  - the member list without git names and emails;
+  - the gateway's capability list.
+
+  It holds no token, key, environment variable, transcript, file or terminal
+  output, and no disk usage. It is rewritten after a load, ten seconds after
+  the last change and when the page is hidden, deleted when the dashboard
+  sees a different member or server, or any refusal of access (a rejected
+  token, a refused or removed member, a revoked or pending device); after a
+  refusal nothing is saved again until a load succeeds. It is skipped above
+  1 MB. In Aether Edge mode the dashboard never saves it and deletes any
+  copy, because another app could serve script from the gateway's loopback
+  port. `localStorage` itself stays on in the app's WebView there; the app
+  turns off only its HTTP cache and service workers' network loads. It is
+  keyed by origin, so two members who share one browser profile and one
+  dashboard address see each other's saved state until the first live load
+  replaces it; sign in with separate browser profiles. It is not sent
+  anywhere. In a browser, *Clear site data* deletes it.
 
 In Tailscale mode the app stores no account, password, token, cookie or key:
 there is no dashboard sign-in, and the phone's Tailscale login identifies it
@@ -510,6 +536,17 @@ Removing a member deletes their preferences in the same transaction and
 records each as deleted in the same file before it commits. Merging two members moves all of them to the member that
 remains, even past the 200 limit; new saves are then refused until enough
 are forgotten.
+
+## Dictation
+
+With [dictation](dictation.md) installed, the dashboard sends each clip you
+record to your server, never to the publisher or another service. The clip
+lives only in the server's memory while it is transcribed: the server does not
+write it to disk, log it, put it in audit entries or error messages, or keep
+it after the request, and the speech-to-text engine runs on the server with
+its log file set to `/dev/null` and no Docker logs. The server does not keep the transcript
+either; it returns to your browser, which puts it in the box you were typing
+in. Nothing is stored that you would need to delete.
 
 ## Permissions
 

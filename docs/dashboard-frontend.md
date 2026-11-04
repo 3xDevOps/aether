@@ -1245,6 +1245,49 @@ Removal also repairs the selection and open route before any refresh awaits.
   there is no token check: WhoIs identifies the source address on every
   request, while a tagged node is denied and an unavailable identity service
   reports its own `403` or `503` refusal.
+- **The last snapshot paints before the network answers.** After a
+  successful hydration, ten seconds after later changes and when the page is
+  hidden, `saveSnapshot` (`src/lib/snapshot-cache.ts`) writes the
+  workspaces, sessions, members, server info and capabilities to
+  `localStorage` (`aether.snapshot.v1:<origin>`; contents and deletion in
+  [privacy.md](privacy.md#what-the-app-stores-on-the-phone)). `connect`
+  calls `paintSnapshot` first, on a cold start only (a reconnect to another
+  server never repaints the last one): it fills the store, sets `hydrated` and
+  `staleSince` (the save time), and seeds `identityKey` so hydration treats a
+  different member or server as an identity change and drops the cache.
+  `hydrate` still counts a painted store as a first load (workspace
+  selection, onboarding redirect) and clears `staleSince` when it succeeds.
+  While `staleSince` is set, or a refresh failed, `StaleBanner` shows one
+  line under the top bar: *Saved state from 3 minutes ago*, then the
+  hydration error verbatim (or *reconnecting*; tap it to read it all), and
+  **Retry**, which fires
+  the `online` wake below. While it shows (a saved snapshot, or any failed refresh), the
+  toast, the empty-board "Cannot reach the server" cards and (below 768px)
+  the header connection line stay out, and the banner is the one place the
+  failure is written. On a saved snapshot, every `RequestAction` (Approve,
+  Deny, Reply, permission choices) is disabled, and `RequestActions` writes
+  *Reconnect to act* beside the row: a disabled button shows no tooltip on
+  touch. `runCommands` and `handoffCommands` get `stale` too and disable
+  every gateway verb and the Send and Close dialogs, so **Mark complete**,
+  the **More** menu (which says *Reconnect to act* at its top) and the
+  palette cannot act on a session the agent may have moved on from. Each
+  saved session keeps its current paused state from `pausedRuns` and its
+  confirmed change time as `status_changed_at`; an estimated time is left
+  out and estimated again on paint. Any access refusal (a 401 or 403, or a
+  `refused`, `signed-out`, `not-member`, `device-revoked` or
+  `device-pending` hop, from a load, the stream or the connect probe)
+  calls `refuseSnapshot`: it deletes the saved entry and blocks every save
+  until a hydration succeeds. On a painted snapshot it also shows the
+  connection error instead. A rejected link token does the same and shows
+  the expired-link page as before.
+- **Resuming from the pocket also reconnects without an event.**
+  `connectEvents` runs a 5 s watchdog; a tick more than 15 s late while the
+  tab is visible means the page was frozen, and it replaces the socket like
+  `online`. `pageshow` (back/forward cache) counts as a foreground return, and
+  a `navigator.connection` change of `type` counts as `online` after it has
+  been quiet for 1 s, so a burst of interface events reconnects once. Speed
+  estimates (`effectiveType`, `rtt`, `downlink`) never count, and a browser
+  that reports no `type` never reconnects on a connection change.
 - **The sockets reopen on a foreground or network return.** Both
   `connectEvents` and `connectAttach` subscribe to `visibilitychange`
   (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
@@ -6907,6 +6950,22 @@ that runs a newer release than a client refuses that client
   is refused everything except `server.info` and `server.update_status`.
   The hydration retry and the event stream stop for good, since every
   retry would be refused the same way.
+
+  The reverse direction is `ServerTooOldBanner`: when the server release
+  is older than this client's (release cores compared, so a source build of
+  the same release does not count), `App` floats *This server is older than
+  this app*, the versions and `aether server update` over the mounted
+  shell. The check can answer while a form is half filled, so the warning
+  never replaces the shell or takes focus. The server version is whichever
+  was read last: `server.info` on a hydration, or the live server half of
+  a later `update.check`, which writes it back into `info` unless a
+  hydration replaced `info` while the check was out. The server
+  refuses nothing in this direction, so **Continue anyway** dismisses it for
+  that pair of versions (`aether.server-too-old-continued` in `localStorage`),
+  so a reload or a killed WebView does not bring it back until either
+  version changes. It is only reachable where
+  `update.check` is: the local gateway, which includes the Android app. The
+  server gateway serves a dashboard built into the server itself.
 
   The gate cannot be dismissed. It is a region labelled by its heading,
   which takes focus when the gate appears. It shows the server's own
