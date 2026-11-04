@@ -758,7 +758,9 @@ included. A new job must be added to its `needs` list to gate `main`.
 `main` takes changes through a merge queue. `gh pr merge <n> --squash` adds a
 ready pull request whose `CI gate` passed; the queue batches up to five
 entries, runs the full suite on each batch's merge result, and moves `main`
-only when that run's `CI gate` passes.
+only when that run's `CI gate` passes. Each queue run's `changes` job first
+cancels the runs of groups the queue has discarded, so they stop holding
+runners.
 
 | Job | Sessions | Locally |
 | --- | --- | --- |
