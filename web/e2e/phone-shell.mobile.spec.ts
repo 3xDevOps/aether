@@ -1,7 +1,7 @@
 // The phone shell against a real server: the tab bar at the narrowest and
 // widest common phones, Needs you as the landing page with its count, and
-// a permission and a question decided from their cards without opening the
-// session.
+// an agent's permission denied from its card (approving one opens the
+// session, where its change is shown) and a question answered from its card.
 
 import { runCoordCLI } from './harness/coord'
 import { dockerReachable } from './harness/server'
@@ -57,7 +57,7 @@ sleep 2
 /opt/aether/aether-server report pi --json '{"state":"waiting","reason":"agent idle"}'
 sleep 600`
 
-test('Needs you approves a permission and replies to a question from their cards', async ({ page, aether }) => {
+test('Needs you denies a permission and replies to a question from their cards', async ({ page, aether }) => {
   test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -74,7 +74,8 @@ test('Needs you approves a permission and replies to a question from their cards
   await page.goto(alice.url)
   const cards = page.getByRole('list', { name: 'Needs you' })
   const permission = cards.getByRole('group').filter({ hasText: 'Permission requested' })
-  await expect(permission.getByRole('button', { name: 'Approve' })).toBeVisible({ timeout: 180_000 })
+  await expect(permission.getByRole('button', { name: 'Review' })).toBeVisible({ timeout: 180_000 })
+  await expect(permission.getByRole('button', { name: 'Approve' })).toHaveCount(0)
   await expect(permission.getByRole('button', { name: /always/i })).toHaveCount(0)
 
   await expect.poll(async () => {
@@ -90,15 +91,15 @@ test('Needs you approves a permission and replies to a question from their cards
   // Requests rank before what only needs the agent's own question answered.
   await expect(cards.getByRole('group').first()).toContainText('Permission requested')
 
-  const approve = permission.getByRole('button', { name: 'Approve' })
-  expect((await approve.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
-  await approve.tap()
+  const deny = permission.getByRole('button', { name: 'Deny' })
+  expect((await deny.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  await deny.tap()
   await expect(permission).toHaveCount(0, { timeout: 30_000 })
   await expect(tabs.getByRole('button', { name: 'Needs you, 1' })).toBeVisible()
   await expect.poll(async () => {
     const history = await alice.api.rpc<{ frames: { item?: { text?: string } }[] }>('run.acp.history', { run_id: asker.run.id })
     return JSON.stringify(history.frames)
-  }, { timeout: 30_000 }).toContain('permission: allow')
+  }, { timeout: 30_000 }).toContain('permission: reject')
 
   await question.getByRole('button', { name: 'Reply…' }).tap()
   await question.getByRole('textbox', { name: /^Reply to / }).fill('carry on with the tests')

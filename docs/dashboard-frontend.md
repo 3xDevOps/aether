@@ -554,11 +554,14 @@ condition names; the request's detail is clamped to five lines with **Show
 more**. Then comes its inline answer:
 
 - A permission with `allow_once` and `reject_once` options shows **Deny** and
-  **Approve** as two halves, the session's own `DecisionButtons`. Each sends
-  `run.input.respond` with the request's id and that option, so a tap that
-  lands after the request changed decides nothing else. **Always** is not
-  offered. A Standard session's permission has no options and opens the
-  terminal instead.
+  a second half. A sudo request's title is the whole command, so the second
+  half is **Approve** (the session's own `DecisionButtons`). An agent's tool
+  call can be a file edit or a plan that `attention.list` does not carry, so
+  its second half is **Review**, which opens the session where the change is
+  shown and approved. Deny and Approve send `run.input.respond` with the
+  request's id and that option, so a tap that lands after the request changed
+  decides nothing else. **Always** is not offered. A Standard session's
+  permission has no options and opens the terminal instead.
 - An Enhanced session's question shows its form and its options, answered the
   same way. A link question opens the session.
 - A turn that ended asking (`needs input`, the condition's **Reply**) shows

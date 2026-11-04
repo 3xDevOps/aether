@@ -687,6 +687,7 @@ export async function applyEvent(
       const workspaceID = ev.workspace_id
       const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string; state?: string }
       store.getState().clearTyping(runID, ev.actor_id)
+      store.getState().noteRoomEvent()
       if (
         runID &&
         (payload.kind === 'question' || payload.kind === 'reply')

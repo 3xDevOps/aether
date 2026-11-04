@@ -54,7 +54,7 @@ function settle(result: RunInputRespondResult) {
 /** Whether the server took the reply; one not sent or uncertain keeps its draft for a retry. */
 function settleMessage(result: RoomPostResult): boolean {
   const label = `Reply ${deliveryLabel(result).toLowerCase()}`
-  const unconfirmed = result.receipt === 'not_sent' || result.receipt === 'uncertain' || result.message.state === 'not_sent' || result.message.state === 'uncertain'
+  const unconfirmed = result.receipt === 'not_sent' || result.receipt === 'uncertain' || ['not_sent', 'uncertain', 'denied'].includes(result.message.state)
   if (unconfirmed) toast.error(label)
   else toast.success(label)
   void refreshAttention()
@@ -78,6 +78,7 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
   const [answered, setAnswered] = useState(false)
   const { allow, deny } = decisionOptions(item)!
   const request = item.request!
+  const open = useOpen(item)
   const decide = async (approve: boolean) => {
     onError(undefined)
     try {
@@ -88,6 +89,15 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
     }
   }
   if (answered) return <Answered />
+  // The card carries only a sudo command in full; an agent's edit or plan is reviewed where its preview is.
+  if (!request.id.startsWith('sudo-')) {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        <RequestAction label="Deny" onClick={() => void decide(false)} />
+        <RequestAction label="Review" variant="primary" onClick={open} />
+      </div>
+    )
+  }
   return <div className="grid grid-cols-2 gap-2"><DecisionButtons decide={decide} /></div>
 }
 
