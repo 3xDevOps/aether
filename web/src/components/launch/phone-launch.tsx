@@ -30,6 +30,7 @@ export function PhoneLaunchSheet({
   onAddWorkspace,
   options,
   notes,
+  failure,
   launch,
 }: {
   open: boolean
@@ -49,13 +50,15 @@ export function PhoneLaunchSheet({
   /** Permission, mode, model, limits and the rest of the desktop form. */
   options: ReactNode
   notes: ReactNode
+  /** Stays above Launch, outside the scrolling form, so the keyboard cannot hide it. */
+  failure: ReactNode
   launch: ReactNode
 }) {
   const { agents, harness, mode } = choice
   const offered = (agents ?? []).filter(launchable)
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent variant="bottom" className="grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden">
+      <DialogContent variant="bottom" className="grid-rows-[auto_minmax(0,1fr)_auto_auto] gap-3 overflow-hidden">
         <div className="flex flex-col gap-0.5 pr-10">
           <DialogTitle>New session</DialogTitle>
           <DialogDescription className="sr-only">Starts an agent in its own container on the workspace&apos;s base branch.</DialogDescription>
@@ -108,6 +111,7 @@ export function PhoneLaunchSheet({
           </Collapsible>
           {notes}
         </form>
+        <div className="max-h-32 overflow-y-auto empty:hidden">{failure}</div>
         {launch}
       </DialogContent>
     </Dialog>

@@ -275,7 +275,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
             {accountOptions}
           </>
         }
-        notes={<>{notes}{failure}</>}
+        notes={notes}
+        failure={failure}
         launch={<Button type="submit" form="launch-form" className="w-full" disabled={launchDisabled}>{launchLabel}</Button>}
       />
     )
