@@ -357,6 +357,8 @@ func TestRunExitsWhenExecutableIsReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ln.Close() }()
+	// Run records the executable before it first connects.
+	connected := make(chan struct{})
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -364,19 +366,23 @@ func TestRunExitsWhenExecutableIsReplaced(t *testing.T) {
 				return
 			}
 			defer func() { _ = c.Close() }()
+			select {
+			case <-connected:
+			default:
+				close(connected)
+			}
 		}
 	}()
 	d, _, _ := newTestDaemon(t, "")
 	d.cfg.Server = ln.Addr().String()
-	recorded := make(chan struct{})
-	d.executable = func() (string, error) { close(recorded); return path, nil }
+	d.executable = func() (string, error) { return path, nil }
 	d.updatePoll = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	done := make(chan error, 1)
 	go func() { done <- d.Run(ctx) }()
 
-	<-recorded
+	<-connected
 	next := path + ".new"
 	if err := os.WriteFile(next, []byte("v2"), 0o755); err != nil {
 		t.Fatal(err)

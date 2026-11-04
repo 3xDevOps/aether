@@ -78,6 +78,7 @@ type harness struct {
 	bob   *domain.Member
 	keys  int
 	sink  Sink
+	clock clock
 
 	keyPath string
 }
@@ -130,7 +131,7 @@ func (h *harness) start() {
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet, Now: h.clock.now})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
 	}
