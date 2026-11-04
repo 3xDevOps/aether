@@ -183,19 +183,20 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
   const holderConnected = useStore((s) => s.roomStatus[run.id]?.controller?.connected !== false)
   const free = run.member_id === self.id && holder === undefined
   const implicit = !agent.localControl && free && agent.steerable && !agent.controlUnavailable
-  const queued = useRef<{ act: () => void; lost?: () => void } | null>(null)
+  // In order, so an option chosen before a send reaches the agent first.
+  const queued = useRef<{ act: () => void; lost?: () => void }[]>([])
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
-    if (!agent.localControl || !queued.current) return
-    const { act } = queued.current
-    queued.current = null
+    if (!agent.localControl || queued.current.length === 0) return
+    const acts = queued.current
+    queued.current = []
     clearTimeout(timer.current)
-    act()
+    for (const { act } of acts) act()
   }, [agent.localControl])
   const drop = () => {
     const dropped = queued.current
-    queued.current = null
-    dropped?.lost?.()
+    queued.current = []
+    for (const { lost } of dropped) lost?.()
   }
   useEffect(() => () => {
     clearTimeout(timer.current)
@@ -205,8 +206,7 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
   const withControl = (act: () => void, lost?: () => void) => {
     if (agent.localControl) return act()
     if (!implicit) return lost?.()
-    drop()
-    queued.current = { act, lost }
+    queued.current.push({ act, lost })
     clearTimeout(timer.current)
     timer.current = setTimeout(drop, implicitControlWindowMs)
     agent.session.takeControl()

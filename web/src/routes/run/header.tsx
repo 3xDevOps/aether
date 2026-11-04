@@ -326,6 +326,7 @@ export function RunHeader({
           onDetails={onDetails}
           onWorkflow={onWorkflow}
           extra={extra}
+          pullRequest={pullRequest.status}
         />
         {!keyboard && <WaitLine run={run} />}
         {!keyboard && <RunLineage run={run} />}

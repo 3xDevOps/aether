@@ -46,7 +46,7 @@ function leave() {
   else redirectRoute(useStore, { name: 'sessions', params: {} })
 }
 
-export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, primary, detailsOpen, onDetails, onWorkflow, extra }: {
+export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, primary, detailsOpen, onDetails, onWorkflow, extra, pullRequest }: {
   run: RunRecord
   view: RunView
   views: RunView[]
@@ -58,6 +58,8 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   onDetails: (opener: HTMLElement | null) => void
   onWorkflow: (opener: HTMLElement | null) => void
   extra: ExtraItem[]
+  /** Kept to the Changes tab, where it cannot crowd the tabs. */
+  pullRequest: React.ReactNode
 }) {
   const shown = useRunPresentation(run)
   const assistant = useAssistantAvailable()
@@ -115,6 +117,9 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
           ))}
         </TabsList>
       </div>
+      {!keyboard && view === 'changes' && pullRequest && (
+        <div className="flex h-11 shrink-0 items-center border-b border-seam px-2 [&>[role=group]]:ml-0 [&>[role=group]]:pl-0">{pullRequest}</div>
+      )}
       <ConnectionLine className="border-b border-seam px-4 py-1" />
     </>
   )

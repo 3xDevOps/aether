@@ -600,8 +600,9 @@ mode), the header's primary action when there is one, and **More**. Under it
 the tabs **Chat**, **Terminal** and **Changes** fill a 44px row; a Standard
 session orders them **Terminal**, **Chat**, **Changes**. **Changes** carries
 the muted `+N −M` of the latest snapshot, unless it was truncated, and drops
-it below 400px while a fourth tab shows. The header carries no pull request;
-the Changes tab's git card shows it.
+it below 400px while a fourth tab shows. The pull request, with its checks,
+feedback and **Watch PR**, would crowd the tabs, so it sits in a 44px row of
+its own under them on the Changes tab only.
 
 **More** opens with a **Views** group (Trace, Files, Browser, **Session
 details**, **Workflow**, **Search…**, **Assistant**), then the session's
@@ -637,8 +638,9 @@ On a phone the strip shows only while someone else watches, another member
 or another of your tabs holds control, the session is not yours, or control,
 presence or the stream failed (`useSharedPresence`). Only the owner takes
 free control implicitly, by sending a message or changing a model, mode or
-effort option; an option change that does not get control within 10 seconds
-says so at the composer. Details lists the people. A hidden tab bar removes
+effort option. What waits for control runs in the order it was asked, so an
+option chosen before a send reaches the agent first. An option change that does not
+get control within 10 seconds says so at the composer. Details lists the people. A hidden tab bar removes
 `--phone-tabs-height`, so toasts fall back to the bottom safe area.
 
 The Chat composer is the desktop `ComposerBox`. It pads by
