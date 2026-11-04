@@ -89,6 +89,17 @@ describe('session rows', () => {
     ])
   })
 
+  it('records Not yet in the session, and no other review answer', () => {
+    const events = [
+      event('run.review', { review: 'later', status_seq: 5 }, '2026-08-14T10:03:00Z', alice.id),
+      event('run.review', { review: '', status_seq: 6 }, '2026-08-14T10:04:00Z', alice.id),
+    ]
+    expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events, room: [], memberName, paused: false })).toEqual([
+      { kind: 'event', text: 'Session started' },
+      { kind: 'event', text: 'Alice said the task is not finished yet' },
+    ])
+  })
+
   it('shows the owner\'s own question as a note with no request', () => {
     const own = roomMessage({ id: 'q1', kind: 'question', actor_id: alice.id, body: 'anyone know the port?', created_at: '2026-08-14T10:05:00Z' })
     expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events: [], room: [own], memberName, paused: false }).at(-1)).toEqual({
@@ -149,7 +160,7 @@ describe('session log', () => {
     await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
 
     expect(workspaceTimeline).toHaveBeenCalledTimes(2)
-    expect(workspaceTimeline.mock.calls[0]![0]).toMatchObject({ run_id: 'run_1', newest: true, before_seq: undefined, types: ['run.agent', 'workspace.timeline', 'run.status'] })
+    expect(workspaceTimeline.mock.calls[0]![0]).toMatchObject({ run_id: 'run_1', newest: true, before_seq: undefined, types: ['run.agent', 'workspace.timeline', 'run.status', 'run.review'] })
     expect(workspaceTimeline.mock.calls[1]![0]).toMatchObject({ newest: true, before_seq: 2001 })
     const log = store.getState().sessionLogs.run_1!
     expect([log.events.length, log.events[0]!.seq, log.cursor]).toEqual([2000, 1001, 3000])

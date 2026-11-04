@@ -1979,7 +1979,8 @@ placeholder reads "Say what is left to do". **Review later**
 the callout back and toasts the server's error. While `review` is `later` the
 callout folds to one line, "Finished, kept for later ·" and **Review now**,
 which unfolds it. After Not yet the session reads Answered, "Not finished
-yet" (`notFinishedYet` in `src/lib/status.ts`), and the callout
+yet" (`notFinishedYet` in `src/lib/status.ts`), its Chat view records
+"*name* said the task is not finished yet" from the `run.review` event, and the callout
 stays hidden until a new success report sets `ready` again. The session's
 actions menu and the palette offer the same commands, except that until
 someone opens the result (`finish_unopened`, which any member opening the
@@ -2680,8 +2681,8 @@ progress, takeover loss and reduced-motion behavior.
 The Chat view (`session-view.tsx`) is the session's conversation: what was said
 to the agent, what it did and asked, and the session's notes. It is a `virtua`
 list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
-session the rows come from the session's `run.agent`, `workspace.timeline` and
-`run.status` events (read with `workspace.timeline` filtered by session and type,
+session the rows come from the session's `run.agent`, `workspace.timeline`,
+`run.status` and `run.review` events (read with `workspace.timeline` filtered by session and type,
 then kept live by sync), room messages, the session record and its pending inputs:
 `user` (a message to the agent with its delivery word), `note` (the Notes
 thread's row, without the thread's own arrival motion), `steps` (consecutive

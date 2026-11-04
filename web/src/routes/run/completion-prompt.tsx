@@ -54,15 +54,18 @@ function Ask({ run, complete, notYet, later, className }: {
     <div className={className}>
       <Callout
         tone="review"
+        className="border border-seam"
         role="region"
         aria-label="Completion"
         title={<span className="text-text">Your agent reports this task is finished. <span className="whitespace-nowrap">Mark complete?</span></span>}
         actions={
           <>
-            <Button size="sm" variant="secondary" aria-describedby={closes} onClick={() => void perform(complete)}>Mark complete</Button>
+            <span className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" aria-describedby={closes} onClick={() => void perform(complete)}>Mark complete</Button>
+              <span id={closes} className="text-ui-sm text-muted">Closes the session.</span>
+            </span>
             {notYet && <Button size="sm" variant="secondary" onClick={() => void perform(notYet)}>Not yet</Button>}
             <Button size="sm" variant="ghost" onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
-            <span id={closes} className="text-ui-sm text-muted">Closes the session.</span>
           </>
         }
       >
