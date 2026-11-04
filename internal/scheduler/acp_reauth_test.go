@@ -34,9 +34,12 @@ func TestEnhancedAuthRefusalRestartsTheAgentAndResendsTheTurn(t *testing.T) {
 		t.Fatalf("message after the restart: %v", err)
 	}
 	waitItems(t, e.sched, run.ID, "the answered turn", assistantSaid("pong"))
-	if row := e.waitStoreStatus(t, run.ID, domain.RunRunning); strings.HasPrefix(row.Reason, acpTurnFailedReason) {
-		t.Fatalf("reason %q after recovery", row.Reason)
-	}
+	// The answered turn ends without a report, so the run may already wait
+	// on the member; what matters is that the refusal no longer shows.
+	waitFor(t, "the refusal cleared", func() bool {
+		row, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && !strings.HasPrefix(row.Reason, acpTurnFailedReason)
+	})
 }
 
 // When the restarted agent still finds no sign-in, the failure shows with
