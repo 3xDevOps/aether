@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { toast } from 'sonner'
 import { DecisionButtons } from '@/components/decision-buttons'
 import { SysboxNudge } from '@/components/sysbox-nudge'
@@ -25,6 +26,7 @@ import { useDelayed } from '@/lib/hooks'
 import { redirectRoute } from '@/lib/url-state'
 import { memberName } from '@/lib/member-name'
 import { needsYouConditions } from '@/lib/needs-you'
+import { groupOf, presentRun } from '@/lib/status'
 import type { AttentionItem, RoomPostResult, RunInputRespondResult } from '@/lib/types'
 import { targetRoute } from '@/routes/board/card-action'
 import { runRoute } from '@/routes/run/views'
@@ -36,6 +38,7 @@ import { registerRoute } from '@/routes/registry'
 import { choicePlan } from '@/routes/run/request-options'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
 import { useStore } from '@/store'
+import { stateContextOf } from '@/store/selectors'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 const tones: Partial<Record<AttentionItem['kind'], Tone>> = { failed: 'failed', disconnected: 'disconnected', ready: 'review' }
@@ -315,6 +318,36 @@ function FinishedRow({ item }: { item: AttentionItem }) {
   )
 }
 
+/** While the page shows a saved snapshot, the sessions it says need you; answering waits for the server. */
+function SavedNeeds() {
+  const runs = useStore(useShallow((s) => {
+    const ctx = stateContextOf(s, Date.now())
+    return Object.values(s.runs).filter((run) => groupOf(presentRun(run, ctx)) === 'needs-you')
+  }))
+  const navigate = useStore((s) => s.navigate)
+  if (runs.length === 0) return null
+  return (
+    <section aria-label="Saved: needs you" className="mb-3">
+      <p className="mb-2 text-ui-sm text-muted">Saved before the connection dropped. Reconnect to answer.</p>
+      <ul>
+        {runs.map((run) => (
+          <li key={run.id}>
+            <ListRow
+              leading={<StatusDot tone="needs-you" />}
+              onClick={() => {
+                const route = runRoute(run.id)
+                navigate(route.name, route.params)
+              }}
+            >
+              {run.title || run.task}
+            </ListRow>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 /** A phone's shell keeps the list in step; a wider window reached by link does it here. */
 function Feed() {
   useAttentionFeed()
@@ -338,14 +371,17 @@ function NeedsYou() {
   const done = items ? finished(items) : []
   const { devices, merges } = useAccountNeeds()
   const mergeError = useStore((s) => s.mergeProposalsError)
-  const loading = useDelayed(items === null && !error)
+  // The saved-state banner carries a failed read's error while the page shows saved data.
+  const stale = useStore((s) => s.staleSince !== null)
+  const loading = useDelayed(items === null && !error && !stale)
   return (
     <div className="flex h-full min-w-0 flex-col">
       {!mobile && <Feed />}
       <ViewHeader title="Needs you" />
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-[calc(1.5rem+var(--keyboard-inset,0px))]">
         <div className="mb-3 empty:hidden"><SysboxNudge /></div>
-        {error && (
+        {stale && items === null && <SavedNeeds />}
+        {error && !stale && (
           <Callout
             tone="failed"
             role="alert"
@@ -369,7 +405,7 @@ function NeedsYou() {
             <Skeleton className="h-32 rounded-panel" />
           </div>
         )}
-        {items && !mergeError && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions, devices and sign-in merges show up here.</EmptyState>}
+        {items && !mergeError && !stale && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions, devices and sign-in merges show up here.</EmptyState>}
         {asks.length > 0 && (
           <ul aria-label="Needs you" className="flex flex-col gap-3">
             {asks.map((item) => <AttentionCard key={item.run_id} item={item} />)}
