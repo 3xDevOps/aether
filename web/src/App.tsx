@@ -9,7 +9,7 @@ import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { UpdateChecks } from '@/components/update-checks'
-import { ServerTooOldGate } from '@/components/server-too-old-gate'
+import { ServerTooOldBanner } from '@/components/server-too-old-banner'
 import { UpdateGate } from '@/components/update-gate'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
 import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from '@/lib/url-state'
@@ -127,26 +127,13 @@ export function App() {
       <LaunchSplash />
       <UpdateChecks />
       <div className="flex min-w-0 h-full flex-col">
-        {(blocked || gated || (tooOld.client !== '' && continued !== pair)) && desktopBridge() && <TopBar navigation={false} />}
+        {(blocked || gated) && desktopBridge() && <TopBar navigation={false} />}
         <div className="min-h-0 min-w-0 flex-1">
           {gated ? (
             <>
               <UpdateGate />
               {toaster}
             </>
-          ) : tooOld.client && continued !== pair ? (
-            <ServerTooOldGate
-              client={tooOld.client}
-              server={tooOld.server}
-              onContinue={() => {
-                try {
-                  window.localStorage.setItem(continueKey, pair)
-                } catch {
-                  // Storage that cannot be written only brings the screen back next load.
-                }
-                setContinued(pair)
-              }}
-            />
           ) : blocked ? (
             <ConnectionError
               kind={unreachable}
@@ -160,6 +147,20 @@ export function App() {
           ) : (
             <>
               <AppShell />
+              {tooOld.client && continued !== pair && (
+                <ServerTooOldBanner
+                  client={tooOld.client}
+                  server={tooOld.server}
+                  onContinue={() => {
+                    try {
+                      window.localStorage.setItem(continueKey, pair)
+                    } catch {
+                      // Storage that cannot be written only brings the warning back next load.
+                    }
+                    setContinued(pair)
+                  }}
+                />
+              )}
               {toaster}
             </>
           )}

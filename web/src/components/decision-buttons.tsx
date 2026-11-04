@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RequestAction } from '@/components/ui/request-choice'
+import { RequestAction, StaleReason } from '@/components/ui/request-choice'
 import { useStale } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
@@ -18,7 +18,7 @@ export function DecisionButtons({ decide }: { decide: (approve: boolean) => Prom
     : late ? stillWaiting : approve ? 'Approving…' : 'Denying…'
   return (
     <>
-      {stale && <span className="self-center text-ui-sm text-muted">Reconnect to act</span>}
+      <StaleReason />
       <RequestAction label={label(false)} variant="danger" disabled={pending !== null} onClick={() => press(false)} />
       <RequestAction label={label(true)} variant="confirm" disabled={pending !== null} onClick={() => press(true)} />
     </>

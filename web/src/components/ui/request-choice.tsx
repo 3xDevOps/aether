@@ -1,4 +1,5 @@
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
+import { createContext, useContext } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
@@ -16,12 +17,23 @@ export function RequestFooter({ className, ...props }: React.ComponentProps<'div
   )
 }
 
+const ReasonShown = createContext(false)
+
+/** Why a painted snapshot's request actions are disabled: a title alone
+ * never shows on touch, and disabled buttons take no pointer events. */
+export function StaleReason() {
+  const stale = useStale()
+  const shown = useContext(ReasonShown)
+  return stale && !shown ? <span className="self-center text-ui-sm text-muted">Reconnect to act</span> : null
+}
+
 export function RequestActions({ extras, className, children }: { extras?: React.ReactNode; className?: string; children: React.ReactNode }) {
   return (
     <div className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}>
       {extras}
+      <StaleReason />
       <div className="ml-auto flex min-w-0 flex-1 flex-wrap justify-end gap-2 @min-[21rem]:flex-none [&>*]:flex-1 @min-[21rem]:[&>*]:flex-none">
-        {children}
+        <ReasonShown.Provider value>{children}</ReasonShown.Provider>
       </div>
     </div>
   )

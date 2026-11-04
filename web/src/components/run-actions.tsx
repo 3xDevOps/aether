@@ -9,7 +9,7 @@ import { handoffCommands, runCommands, useCommandRunner } from '@/lib/commands'
 import type { Command, RunCommandContext } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 import { useStore } from '@/store'
-import { useCapability, useSelf } from '@/store/hooks'
+import { useCapability, useSelf, useStale } from '@/store/hooks'
 import { stillWaiting } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 
@@ -33,6 +33,7 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
+  const stale = useStale()
   const perform = useCommandRunner()
   const [asking, setAsking] = useState<Command | null>(null)
   const [handoff, setHandoff] = useState(false)
@@ -43,7 +44,7 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
   const trigger = useRef<HTMLButtonElement>(null)
   const openingDialog = useRef(false)
 
-  const context: RunCommandContext = { run, paused, cap, members, self, steerOthers, predicting }
+  const context: RunCommandContext = { run, paused, cap, members, self, steerOthers, predicting, stale }
   const commands = runCommands(context).filter((command) => !replaced.has(command.id))
   const handoffs = handoffCommands(context)
   const everyday = commands.filter((command) => !closing.has(command.id))
@@ -119,10 +120,11 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
               {stillWaiting}
             </MenuItem>
           )}
+          {stale && <MenuItem disabled>Reconnect to act</MenuItem>}
           {everyday.map(item)}
           {handoffs.length > 0 && (
             <MenuItem
-              disabled={running !== null}
+              disabled={running !== null || stale}
               onSelect={() => {
                 if (inFlight.current) return
                 openingDialog.current = true

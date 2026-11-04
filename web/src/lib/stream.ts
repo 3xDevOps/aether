@@ -50,7 +50,6 @@ const suspendGapMs = 15_000
 const watchdogMs = 5_000
 interface NetworkInformation extends EventTarget {
   type?: string
-  effectiveType?: string
 }
 
 /** Network-change events arrive in bursts as an interface comes up. */
@@ -71,9 +70,10 @@ export function onWake(wake: (kind: WakeKind) => void): () => void {
   const online = () => wake('online')
   let settle: ReturnType<typeof setTimeout> | null = null
   const changed = () => {
-    // The estimates (rtt, downlink) fire this constantly; only a new kind of network counts.
-    const now = connection?.type ?? connection?.effectiveType
-    if (now === kind) return
+    // The estimates (effectiveType, rtt, downlink) fire this constantly; only
+    // a new kind of network counts, and without `type` nothing says so.
+    const now = connection?.type
+    if (now === undefined || now === kind) return
     kind = now
     if (settle) clearTimeout(settle)
     settle = setTimeout(() => {
@@ -82,7 +82,7 @@ export function onWake(wake: (kind: WakeKind) => void): () => void {
     }, networkSettleMs)
   }
   const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection
-  let kind = connection?.type ?? connection?.effectiveType
+  let kind = connection?.type
   document.addEventListener('visibilitychange', visible)
   window.addEventListener('online', online)
   const restored = (e: PageTransitionEvent) => {

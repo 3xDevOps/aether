@@ -115,6 +115,12 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
       const previous = store.getState().update
       const next = status.cli_error && previous ? { ...status, cli: previous.cli } : status
       store.getState().setUpdate(next)
+      // The gateway reads server.info live for this answer, while a reconnect
+      // that replays events never re-reads it: this is the latest version.
+      const info = store.getState().info
+      if (info && next.server_version && next.server_version !== info.server_version) {
+        store.getState().setInfo({ ...info, server_version: next.server_version })
+      }
       store.setState({ clientCheckError: status.cli_error || null })
       const s = store.getState()
       const apply = s.clientApply

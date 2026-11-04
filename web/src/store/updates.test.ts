@@ -217,6 +217,17 @@ describe('checkClient', () => {
     expect(s.getState().clientCheckError).toBe('check for releases: api.github.com: 403 rate limit exceeded')
     expect(clientTarget(s.getState()).state).toBe('available')
   })
+
+  it('takes the server version a later check confirmed over the one server.info read', async () => {
+    const s = store()
+    s.setState({ info: { ...serverInfo, server_version: 'v0.8.5' } })
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => ({ ...updateStatus(), cli: { ...updateStatus().cli, version: 'v0.9.0' }, server_version: 'v0.9.0' })),
+    })
+    await checkClient(s, client)
+    expect(s.getState().info?.server_version).toBe('v0.9.0')
+    expect(serverTooOld(s.getState().update, s.getState().info?.server_version)).toBeNull()
+  })
 })
 
 describe('applyClientUpdate', () => {

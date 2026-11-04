@@ -4,7 +4,7 @@ import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
 import { runCommands, useCommandRunner, type Command } from '@/lib/commands'
 import { useStore } from '@/store'
-import { useCapability, useSelf } from '@/store/hooks'
+import { useCapability, useSelf, useStale } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { TimelinePayload } from '@/store/sessions'
 
@@ -16,15 +16,16 @@ export function CompletionPrompt({ run, className }: { run: RunRecord; className
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
+  const stale = useStale()
   if (run.review !== 'ready' || run.member_id !== self.id) return null
-  const commands = runCommands({ run, paused, cap, members, self, steerOthers, predicting })
+  const commands = runCommands({ run, paused, cap, members, self, steerOthers, predicting, stale })
   const complete = commands.find((command) => command.id === 'complete')
   const later = commands.find((command) => command.id === 'not-yet')
   if (!complete || !later) return null
-  return <Ask run={run} complete={complete} later={later} className={className} />
+  return <Ask run={run} complete={complete} later={later} stale={stale} className={className} />
 }
 
-function Ask({ run, complete, later, className }: { run: RunRecord; complete: Command; later: Command; className?: string }) {
+function Ask({ run, complete, later, stale, className }: { run: RunRecord; complete: Command; later: Command; stale: boolean; className?: string }) {
   const perform = useCommandRunner()
   const summary = useReportedSummary(run)
   return (
@@ -36,8 +37,9 @@ function Ask({ run, complete, later, className }: { run: RunRecord; complete: Co
         title="Your agent reports this task is finished. Mark it complete?"
         actions={
           <>
-            <Button size="sm" onClick={() => void perform(complete)}>Mark complete</Button>
-            <Button size="sm" variant="ghost" onClick={() => void perform(later)}>Not yet</Button>
+            {stale && <span className="self-center text-ui-sm text-muted">Reconnect to act</span>}
+            <Button size="sm" disabled={complete.disabled} onClick={() => void perform(complete)}>Mark complete</Button>
+            <Button size="sm" variant="ghost" disabled={later.disabled} onClick={() => void perform(later)}>Not yet</Button>
           </>
         }
       >

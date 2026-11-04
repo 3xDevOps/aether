@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { clearSnapshot, paintSnapshot, saveSnapshot } from '@/lib/snapshot-cache'
 import type { ServerInfo } from '@/lib/types'
 import { createRootStore } from '@/store'
-import { serverInfo } from '@/test/fixtures'
+import { run, serverInfo } from '@/test/fixtures'
 
 describe('snapshot cache', () => {
   it('paints a saved snapshot as stale, without member git identity or disk usage', () => {
@@ -51,6 +51,26 @@ describe('snapshot cache', () => {
     live.setState({ linkStatus: { edge_url: 'https://edge.example.test' } as never })
     saveSnapshot(live)
     expect(window.localStorage.getItem(`aether.snapshot.v1:${window.location.origin}`)).toBeNull()
+  })
+
+  it('saves the current pause and the confirmed change time', () => {
+    window.localStorage.clear()
+    const live = createRootStore()
+    live.getState().setInfo(serverInfo)
+    live.getState().setIdentityKey('o\u0000h\u0000m1')
+    live.getState().setRuns([
+      run({ id: 'run_1', paused: false, status_changed_at: '2026-08-14T10:30:00Z' }),
+      run({ id: 'run_2', status_changed_at: undefined, finished_at: undefined }),
+    ])
+    live.getState().setPaused('run_1', true)
+    live.getState().setHydrated(true)
+    saveSnapshot(live)
+
+    const fresh = createRootStore()
+    paintSnapshot(fresh)
+    expect(fresh.getState().pausedRuns.run_1).toBe(true)
+    expect(fresh.getState().runs.run_1.stateChangedAt).toBe('2026-08-14T10:30:00Z')
+    expect(fresh.getState().runs.run_2.stateChangedAtEstimated).toBe(true)
   })
 
   it('drops a damaged entry instead of failing startup', () => {

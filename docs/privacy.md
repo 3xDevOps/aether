@@ -55,10 +55,13 @@ request ([What an edge stores](#what-an-edge-stores)).
   It holds no token, key, environment variable, transcript, file or terminal
   output, and no disk usage. It is rewritten after a load, ten seconds after
   the last change and when the page is hidden, deleted when the dashboard
-  sees a different member or server, a rejected link token or a refused
-  member, and skipped above 1 MB. In Aether Edge mode it is never saved and
-  any copy is deleted: the app turns the WebView's storage off there because
-  another app could serve script from the gateway's loopback port. It is
+  sees a different member or server, or any refusal of access (a rejected
+  token, a refused or removed member, a revoked or pending device); after a
+  refusal nothing is saved again until a load succeeds. It is skipped above
+  1 MB. In Aether Edge mode the dashboard never saves it and deletes any
+  copy, because another app could serve script from the gateway's loopback
+  port. `localStorage` itself stays on in the app's WebView there; the app
+  turns off only its HTTP cache and service workers' network loads. It is
   keyed by origin, so two members who share one browser profile and one
   dashboard address see each other's saved state until the first live load
   replaces it; sign in with separate browser profiles. It is not sent

@@ -103,7 +103,12 @@ export interface RunCommandContext {
   steerOthers?: string
   /** A predicted verb is pending on the run; the caller subscribes to it. */
   predicting?: boolean
+  /** The run comes from a painted snapshot that a live load has not replaced yet. */
+  stale?: boolean
 }
+
+/** Dialogs whose own submit changes the run, beside every gateway verb. */
+const changingDialogs = new Set(['inject', 'close'])
 
 interface BoardCommandContext {
   cap: Capability
@@ -277,7 +282,7 @@ function handoffTargets(
   )
 }
 
-export function handoffCommands({ run, members, self }: RunCommandContext): Command[] {
+export function handoffCommands({ run, members, self, stale }: RunCommandContext): Command[] {
   if (!allowed('handoff', self, { owner: run.member_id })) return []
   return handoffTargets(run, members).map((m) => ({
     id: `handoff:${m.id}`,
@@ -285,6 +290,7 @@ export function handoffCommands({ run, members, self }: RunCommandContext): Comm
     Icon: UserPlus,
     value: `transfer reassign ${m.id}`,
     done: `Handed off to ${m.display_name}`,
+    disabled: stale,
     perform: (d: CommandDeps) => d.api.runHandoff(run.id, m.id),
   }))
 }
@@ -559,7 +565,10 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   }
 
   // A verb offered from a pending prediction's state could re-read the run and erase that prediction.
-  return ctx.predicting ? list.filter((command) => !command.predict) : list
+  const offered = ctx.predicting ? list.filter((command) => !command.predict) : list
+  // A painted snapshot may be minutes old: Mark complete could close work the agent started since.
+  if (!ctx.stale) return offered
+  return offered.map((command) => (command.done || changingDialogs.has(command.id) ? { ...command, disabled: true } : command))
 }
 
 /** Checks out a pulled run branch in the linked repository; a refusal, such as uncommitted changes, is shown as the gateway words it. */

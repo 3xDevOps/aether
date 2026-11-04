@@ -3,7 +3,7 @@ import { api, ApiError, type Api, type ApiErrorData } from '@/lib/api'
 import { edgeHost, errorSentence } from '@/lib/format'
 import { watchPush } from '@/lib/push'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
-import { clearSnapshot, paintSnapshot, saveSnapshot } from '@/lib/snapshot-cache'
+import { allowSnapshot, clearSnapshot, paintSnapshot, refuseSnapshot, saveSnapshot } from '@/lib/snapshot-cache'
 import { redirectRoute } from '@/lib/url-state'
 import type {
   CoordMessageAckedPayload,
@@ -121,6 +121,9 @@ function noteUnreachable(store: RootStore, client: Api, err: unknown, signal: Ab
   recordUnreachable(store, client, classifyUnreachable(err, store), data?.refusal?.approval_code, measuredAt(store, data))
 }
 
+/** The kinds that refuse this member or device access, not just a route to it. */
+const accessRefusals: ReadonlySet<UnreachableKind> = new Set(['refused', 'signed-out', 'not-member', 'device-revoked', 'device-pending'])
+
 /** A failure measured on another server than the linked one means the
  * gateway followed a re-link (`aether link --from-edge`) without telling
  * the page. The link is re-read, and a moved link resets the connection
@@ -132,6 +135,7 @@ function recordUnreachable(
   approvalCode: string | undefined,
   at: Partial<EdgePath> | undefined,
 ): void {
+  if (kind && accessRefusals.has(kind)) refuseSnapshot(store)
   store.getState().setUnreachable(kind, approvalCode, at)
   const linked = store.getState().linkStatus?.server_id
   if (!at?.server_id || !linked || at.server_id === linked) return
@@ -280,13 +284,15 @@ export async function hydrate(
     }
     else if (unknownLink) redirectRoute(store, { name: 'board', params: {} })
     s.setUnreachable(null)
+    allowSnapshot(store)
     saveSnapshot(store)
     return true
   } catch (err) {
     if (signal?.aborted) return false
-    if (err instanceof ApiError && err.status === 403 && store.getState().staleSince !== null) {
+    const refusedAccess = err instanceof ApiError && (err.status === 401 || err.status === 403)
+    if (refusedAccess) refuseSnapshot(store)
+    if (refusedAccess && store.getState().staleSince !== null) {
       // Access was withdrawn since the snapshot was saved: show none of it.
-      clearSnapshot()
       s.setHydrated(false, err.message)
       noteUnreachable(store, client, err, signal)
       return false
@@ -951,11 +957,13 @@ export function connect(store: RootStore, client: Api = api): () => void {
         if (signal.aborted) return
         const s = store.getState()
         const refusal = data?.refusal
-        recordUnreachable(store, client, kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind, refusal?.approval_code, measuredAt(store, data))
+        const hop = kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind
+        recordUnreachable(store, client, hop, refusal?.approval_code, measuredAt(store, data))
         // A refused subscribe never goes live, so nothing else records this.
         // A dead token already recorded is more precise than a dead hop.
-        // A painted snapshot stays on screen with the error written beside it.
-        if (!s.streamDead && (!s.hydrated || s.staleSince !== null)) s.setHydrated(s.hydrated, detail)
+        // A painted snapshot stays on screen with the error written beside
+        // it, unless access itself was refused.
+        if (!s.streamDead && (!s.hydrated || s.staleSince !== null)) s.setHydrated(s.hydrated && !accessRefusals.has(hop), detail)
       },
       onUpgradeRequired: (required) => store.getState().setUpdateRequired(required),
       afterSeq: () => store.getState().lastSeq,
@@ -993,7 +1001,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (probe && 'rejected' in probe) {
       // Every reconnect would carry the same rejected credential, so the
       // stream is never opened.
-      clearSnapshot()
+      refuseSnapshot(store)
       store.getState().setStreamDead()
       store.getState().setConnection('offline')
       store.getState().setHydrated(false, probe.rejected)
@@ -1003,12 +1011,13 @@ export function connect(store: RootStore, client: Api = api): () => void {
       // The handshake status never reaches the stream code, so this stays the
       // reason while the stream keeps retrying.
       const { refused } = probe
-      recordUnreachable(store, client, refusalKind(refused, store), refused.data?.refusal?.approval_code, measuredAt(store, refused.data))
+      const kind = refusalKind(refused, store)
+      recordUnreachable(store, client, kind, refused.data?.refusal?.approval_code, measuredAt(store, refused.data))
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
       // An unreachable server keeps a painted snapshot on screen; an access
-      // refusal (403) must not show data the member may no longer read.
-      const keep = refused.status === 503 && store.getState().staleSince !== null
+      // refusal must not show data the member may no longer read.
+      const keep = refused.status === 503 && store.getState().staleSince !== null && !(kind && accessRefusals.has(kind))
       store.getState().setHydrated(keep, refused.message.replace(/^[^\s:]+: /, ''))
       if (!keep) clearSnapshot()
     } else if (probe) {

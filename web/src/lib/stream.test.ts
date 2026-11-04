@@ -274,6 +274,21 @@ describe('connectEvents', () => {
     stop()
   })
 
+  it('ignores speed estimates on a connection that does not report its type', () => {
+    const connection = Object.assign(new EventTarget(), { effectiveType: '4g' })
+    vi.stubGlobal('navigator', { connection })
+    const stop = open()
+    StubSocket.last().onopen?.()
+    const before = StubSocket.opened.length
+
+    connection.effectiveType = '3g'
+    connection.dispatchEvent(new Event('change'))
+    vi.advanceTimersByTime(1_000)
+
+    expect(StubSocket.opened).toHaveLength(before)
+    stop()
+  })
+
   it('does not read a hidden tab\'s throttled timers as a freeze', () => {
     const stop = open()
     StubSocket.last().onopen?.()
