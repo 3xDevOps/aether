@@ -54,6 +54,12 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: write is for the merge queue step below, which runs no code
+    # from the change.
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
     outputs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
@@ -73,6 +79,30 @@ jobs:
             scripts/ci-classify-edge.sh
             scripts/ci-classify-platform.sh
           sparse-checkout-cone-mode: false
+      # The merge queue discards a group when an entry ahead of it leaves or
+      # the queue is reordered, but GitHub does not stop that group's run,
+      # which keeps holding runners. Each new queue run cancels every merge
+      # queue run whose branch is gone or now points at another commit. Runs
+      # are listed before branches, so a group created in between is never
+      # mistaken for a discarded one.
+      - name: Cancel runs of discarded merge groups
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(for status in requested waiting pending queued in_progress; do
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?event=merge_group&status=$status&per_page=100" \
+              --jq '.workflow_runs[] | "\(.id) \(.head_branch) \(.head_sha)"'
+          done)
+          live=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/gh-readonly-queue/" \
+            --jq '.[] | "\(.ref | ltrimstr("refs/heads/")) \(.object.sha)"')
+          printf '%s\n' "$runs" | while read -r id branch sha; do
+            [ -n "$id" ] || continue
+            printf '%s\n' "$live" | grep -qxF "$branch $sha" && continue
+            echo "Cancelling run $id of discarded group $branch at $sha"
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" ||
+              echo "::warning::Could not cancel run $id; it may have finished"
+          done
       - name: Classify changed paths
         id: classify
         env:
@@ -108,38 +138,6 @@ jobs:
               out=true
             fi
             echo "$mode=$out" >> "$GITHUB_OUTPUT"
-          done
-
-  # The merge queue discards a group when an entry ahead of it leaves or the
-  # queue is reordered, but GitHub does not stop that group's run, which keeps
-  # holding runners. Each new queue run cancels the runs whose queue branch is
-  # gone. Runs are listed before branches, so a group created in between is
-  # never mistaken for a discarded one. ci-gate does not need this job: it
-  # checks no code.
-  reap-queue-runs:
-    if: ${{ github.event_name == 'merge_group' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Cancel runs of discarded merge groups
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          runs=$(for status in queued in_progress; do
-            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?event=merge_group&status=$status&per_page=100" \
-              --jq '.workflow_runs[] | "\(.id) \(.head_branch)"'
-          done)
-          live=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/gh-readonly-queue/" \
-            --jq '.[].ref | ltrimstr("refs/heads/")')
-          printf '%s\n' "$runs" | while read -r id branch; do
-            [ -n "$id" ] || continue
-            printf '%s\n' "$live" | grep -qxF "$branch" && continue
-            echo "Cancelling run $id of discarded group $branch"
-            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" ||
-              echo "::warning::Could not cancel run $id; it may have finished"
           done
 
   # Runs on every pull request, including a docs-only one. This is the
