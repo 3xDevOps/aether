@@ -33,7 +33,7 @@ func TestLifecycleReportsPreserveForegroundAndHookBudgets(t *testing.T) {
 	}
 	// Another connection must share the same bounded lifecycle allowance.
 	reconnected := h.dial(t, a)
-	if err := reconnected.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Idle)}, nil); err == nil {
+	if err := reconnected.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Working)}, nil); err == nil {
 		t.Fatal("lifecycle flood escaped its per-run budget")
 	}
 	socket := filepath.Join(dir, coordtransport.SocketName)
@@ -97,4 +97,45 @@ func TestForegroundExhaustionPreservesLifecycleReports(t *testing.T) {
 		t.Fatalf("idle report after foreground burst: %v", err)
 	}
 	requireTransportConflict(t, client.Call(protocol.MethodCoordStatus, nil, nil))
+}
+
+// A native harness reports every tool use, so a turn whose tools outrun the
+// lifecycle budget would spend the allowance its own end needs: a dropped
+// turn end leaves the run working, with the question it reported never
+// shown (internal/scheduler/report.go). The turn end has its own budget,
+// and that budget still bounds it.
+func TestTurnEndSurvivesALifecycleFlood(t *testing.T) {
+	sink := &fakeSink{}
+	h := newHarness(t, 1, func(c *Config) { c.Reports = sink })
+	h.start()
+	run := h.run(0)
+	if _, err := h.svc.Provision(t.Context(), run, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := h.dial(t, run)
+	working := protocol.RunReportParams{State: string(agentstatus.Working)}
+	for i := range requestBurst {
+		if err := client.Call(protocol.MethodRunReport, working, nil); err != nil {
+			t.Fatalf("tool-use report %d: %v", i, err)
+		}
+	}
+	if err := client.Call(protocol.MethodRunReport, working, nil); err == nil {
+		t.Fatal("tool-use reports escaped their per-run budget")
+	}
+	turnEnd := protocol.RunReportParams{State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle, Stop: true}
+	if err := client.Call(protocol.MethodRunReport, turnEnd, nil); err != nil {
+		t.Fatalf("turn end after a tool-use flood: %v", err)
+	}
+	_, reports := sink.reports()
+	if len(reports) != requestBurst+1 || reports[len(reports)-1].State != agentstatus.Idle {
+		t.Fatalf("admitted reports = %+v, want the turn end after %d tool-use reports", reports, requestBurst)
+	}
+	for i := range requestBurst - 1 {
+		if err := client.Call(protocol.MethodRunReport, turnEnd, nil); err != nil {
+			t.Fatalf("turn end %d within its budget: %v", i, err)
+		}
+	}
+	if err := client.Call(protocol.MethodRunReport, turnEnd, nil); err == nil {
+		t.Fatal("turn ends escaped their per-run budget")
+	}
 }

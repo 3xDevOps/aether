@@ -2,6 +2,7 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
@@ -174,27 +176,49 @@ func rpcError(method string, err error) *protocol.Error {
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
-func (s *Service) transportAllowed(run domain.RunID, method string) bool {
-	buckets := s.requestBuckets
+
+// transportBudget names the per-run allowance a request spends. A turn end
+// gets its own: it decides the whole state of the run, while a native
+// harness reports every tool use against the lifecycle budget, so a busy
+// turn would otherwise spend the allowance its own end needs.
+func transportBudget(method string, params json.RawMessage) string {
 	switch method {
 	case protocol.MethodCoordHookStatus:
-		buckets = s.hookBuckets
+		return "hook"
 	case protocol.MethodRunReport:
+		if turnEndReport(params) {
+			return "turn end"
+		}
+		return "lifecycle"
+	}
+	return "transport"
+}
+
+// turnEndReport reports whether a run.report says the agent stopped. The
+// state is all this needs; whether the stop ended the turn or failed it is
+// the scheduler's to judge.
+func turnEndReport(params json.RawMessage) bool {
+	p, err := protocol.DecodeParams[protocol.RunReportParams](params)
+	return err == nil && p.State == string(agentstatus.Idle)
+}
+
+func (s *Service) transportAllowed(run domain.RunID, budget string) bool {
+	buckets := s.requestBuckets
+	switch budget {
+	case "hook":
+		buckets = s.hookBuckets
+	case "lifecycle":
 		buckets = s.lifecycleBuckets
+	case "turn end":
+		buckets = s.turnBuckets
 	}
 	return s.spend(buckets, run, requestBurst, requestRefill)
 }
 
-func transportRateError(method string) *protocol.Error {
-	budget := "transport"
-	code := protocol.CodeConflict
-	switch method {
-	case protocol.MethodCoordHookStatus:
-		budget = "hook"
-		code = protocol.CodeUnavailable
-	case protocol.MethodRunReport:
-		budget = "lifecycle"
-		code = protocol.CodeUnavailable
+func transportRateError(budget string) *protocol.Error {
+	code := protocol.CodeUnavailable
+	if budget == "transport" {
+		code = protocol.CodeConflict
 	}
 	return &protocol.Error{
 		Code: code,

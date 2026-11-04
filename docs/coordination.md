@@ -210,12 +210,14 @@ also enforces these bounds:
   refilling at one request per second. Malformed envelopes and unknown methods
   consume this budget too;
 - valid `coord.hook.status` and `run.report` envelopes each use their own
-  per-session budget with the same limits. Native inbox observations and lifecycle
-  reports cannot spend foreground orchestration allowance or each other's
-  allowance; reconnecting does not reset any budget. Malformed envelopes and
-  unknown methods still spend the ordinary budget. Admission happens before
-  method-specific work, so repeated lifecycle reports remain bounded even
-  when the scheduler has no state change to persist;
+  per-session budget with the same limits, and a `run.report` whose `state` is
+  `waiting` - the agent's turn end - uses a third. Native inbox observations and
+  lifecycle reports cannot spend foreground orchestration allowance or each other's
+  allowance, and the reports a harness sends for every tool use cannot spend the
+  allowance the end of that turn needs; reconnecting does not reset any budget.
+  Malformed envelopes and unknown methods still spend the ordinary budget.
+  Admission happens before method-specific work, so repeated lifecycle reports
+  remain bounded even when the scheduler has no state change to persist;
 - `wait_seconds` is a server-side wait from 0 through 30 seconds;
 - each session socket accepts at most 16 concurrent connections, and inactive
   connections are reaped after five minutes;

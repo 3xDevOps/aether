@@ -208,6 +208,7 @@ type Service struct {
 	requestBuckets    map[domain.RunID]*bucket
 	hookBuckets       map[domain.RunID]*bucket
 	lifecycleBuckets  map[domain.RunID]*bucket
+	turnBuckets       map[domain.RunID]*bucket
 	inboxWaiters      map[domain.RunID]*inboxWaiter
 	hookWaiters       map[domain.RunID]map[*hookWaiter]struct{}
 	inboxConsumers    map[domain.RunID]int
@@ -277,6 +278,7 @@ func New(cfg Config) (*Service, error) {
 		requestBuckets:    make(map[domain.RunID]*bucket),
 		hookBuckets:       make(map[domain.RunID]*bucket),
 		lifecycleBuckets:  make(map[domain.RunID]*bucket),
+		turnBuckets:       make(map[domain.RunID]*bucket),
 		inboxWaiters:      make(map[domain.RunID]*inboxWaiter),
 		hookWaiters:       make(map[domain.RunID]map[*hookWaiter]struct{}),
 		inboxConsumers:    make(map[domain.RunID]int),
