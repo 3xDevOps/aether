@@ -283,7 +283,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
             />
           )}
         />
-        {run.mode === 'acp' && view !== 'browser' && view !== 'files' && (!mobile || (shared && !keyboard)) && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
+        {run.mode === 'acp' && view !== 'browser' && view !== 'files' && (!mobile || (shared && !keyboard && view !== 'terminal')) && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div ref={frameRef} className="flex min-h-0 flex-1">
           <div className="relative min-h-0 min-w-0 flex-1">
             {visited.has('session') && (

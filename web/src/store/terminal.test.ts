@@ -10,7 +10,7 @@ function socket(close = vi.fn()): RunShellSocket {
   return {
     close, send: vi.fn(), resize: vi.fn(), reopen: vi.fn(), rebind: vi.fn(),
     suspend: vi.fn(), resume: vi.fn(), resetWriteDenial: vi.fn(),
-    setControl: vi.fn(), isEnded: () => false,
+    setControl: vi.fn(), isEnded: () => false, mayHoldControl: () => false,
     requestTakeover: vi.fn(() => false),
   }
 }

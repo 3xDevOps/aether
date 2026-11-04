@@ -3498,7 +3498,23 @@ while a live session's attach is not live. A finished session reads "Container
 removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
 session with no agent terminal, such as an Enhanced session, shows "No agent
-terminal" and the shell controls. The frame renders one `TakeoverDialog`
+terminal" and the shell controls. Under 768px (`useIsMobile`), the first time
+the Terminal view shows for such a session `useRunningShellOnPhone` reads
+the shell list with `shells.refresh()`, whose revision counter drops a list
+that an **Open shell** overtook. It then shows a running shell a member
+started (`started_by: 'member'`) and has not hidden; the agent's own shells
+stay behind the tab menu. A failed read shows its error with **Retry**. It
+never starts a shell, because viewing a tab must not start a process or take
+a lease: the empty state carries a primary **Open shell** (`shells.open`)
+instead, with a spinner while it starts and the shell-limit reason under it
+when four are running. On that view the Enhanced session's
+`MultiplayerControls` strip, which is about the Chat lease, is hidden; the
+shell's toolbar shows the shell's own control. These three follow the phone
+layout's breakpoint (`useIsMobile`, under 768px, any pointer), because they
+are layout. Fitting, read-first focus and the size stepper follow
+`phoneScreen` (a coarse pointer under 640px) instead: the same query that
+makes a terminal follow the PTY, which fitting needs, and the screens where
+focus raises a soft keyboard. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
@@ -3552,7 +3568,10 @@ open a shell in it" in place of the terminal.
 (named "Terminal tools"): **Find** (**Find in recorded output** while
 reading history), the text size with **Smaller text**, **Larger text** and
 **Reset text size**, **Copy selection**, **Copy screen**, **Paste**,
-**Upload image…** and, on a session, **Captures…**. It is one menu at every
+**Upload image…** and, on a session, **Captures…**. On `phoneScreen` the
+trigger is icon-only so the toolbar fits 360px, and, except while reading recorded history (drawn at the
+chosen size), the size items follow `useTextSizeStepper` (below), with
+**Fit to width** in place of the reset. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
 The rest of this section is the terminal machinery the session terminal, its
@@ -3724,14 +3743,77 @@ A following terminal therefore:
   what makes xterm's textarea read-only, so a tap on a mirror raises no
   keyboard.
 
+**Sizing the PTY to a phone is not done.** A phone could size the PTY
+while no wider client is attached, but the server keeps one grid and one
+transcript per session, so: every keyboard open and close would resize the
+agent's screen and make its TUI redraw; a desktop attaching or leaving would
+flip the width, and output drawn at the phone's 45 columns stays in the
+recorded transcript that later desktop viewers replay; and an older server
+reads an unknown "size only when alone" flag as an ordinary writer imposing
+its size, shrinking every desktop viewer. A phone therefore follows, and fits
+on the client.
+
+**Fit to width.** `useTerminalFit` (`src/components/terminal-fit.ts`), on
+`phoneScreen`, sets xterm's `fontSize` so the followed grid's columns fit the
+host's content box: proportional from the drawn `.xterm-screen` width,
+floored to 0.25px steps, no larger than the chosen size and no smaller than
+`minFitTerminalFontSize` (7px, `src/lib/term-font.ts`), below which the grid
+pans. It grows only when the pane, the grid or the preference changes; a
+render only shrinks an overflow, so device-pixel rounding cannot make it
+oscillate. 80 columns fit a 360px screen at about 7px. The fitted size is
+not stored: the store keeps `terminalFitWidth` (persisted, default on) beside
+`terminalFontSize`, and `setTerminalFontSize` turns fitting off.
+`useTextSizeStepper` (`terminal-keys.tsx`) backs the sheet's bottom row -
+**A−**, the drawn size with **Fit**, **A+** - and the phone's Tools menu: a
+step is one whole pixel from the drawn size, and a step down to the fitted
+size or below the 8px zoom minimum returns to fitting, so **A−** is disabled
+while fitted. Only a phone shows the stepper; a tablet keeps the Tools
+items. A two-finger pinch on the host draws the size live in 0.5px steps;
+on release it returns to fitting when it ends at or below the size fitting
+would draw or below 8px, and otherwise stores the size rounded to a whole
+pixel.
+
+**Read first.** On `phoneScreen` `focusTerminal()` does nothing, so no
+effect - a new shell, a tab change, a closed find bar - raises the soft
+keyboard. Only a tap on the terminal's own textarea, or **Show keyboard** in
+the more-keys sheet, focuses it.
+
 `TerminalKeys` is shown under the host on any coarse pointer while the
-terminal is writable, a tablet included: Ctrl, Esc, Tab, the arrows, Enter
-and Ctrl+C, each through `terminal.input` so the replay gate and
-`disableStdin` treat a tap exactly like a keystroke. Ctrl is a one-shot
-modifier held in the host (`armCtrl`), because a soft keyboard sends
-characters and never a modifier: it rewrites the next character into its
-control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte.
+terminal is writable, a tablet included. Its row does not scroll: **Ctrl**,
+**Alt**, Esc, Tab, the arrows, Enter and **More keys** share the width at
+44px tall. 4px apart. **More keys** (its trigger carries Radix's `aria-expanded`) is a
+non-modal `Popover` above the row that keeps focus where it was: symbols a
+phone keyboard buries, ^C, Home/End, PgUp/PgDn and Del; **F1–F12**, which
+toggles the function keys; Show/Hide keyboard; and the size stepper last,
+next to the row. It stays open while keys are tapped and closes on its
+trigger or a tap outside. The keyboard label reads the textarea's focus and
+whether the visual viewport has lost at least 120px from its tallest,
+because Android's Back hides the keyboard and keeps focus. The stepper's
+size readout stays focusable at full contrast while fitted, with
+`aria-disabled`, rather than a greyed disabled button. Every key goes through
+`terminal.input`, so the replay gate and `disableStdin` treat a tap exactly
+like a keystroke, refuses focus on `pointerdown` so the keyboard stays as it
+was, and then calls `focusTerminal()`, which a tablet honours and a phone
+ignores. The row pads its bottom by `--keyboard-inset` (`keyboard-inset.ts`)
+so it stays above an iOS keyboard.
+
+Ctrl and Alt are sticky modifiers held in the host (`modifiers`,
+`tapModifier`, `clearModifiers` on `XtermController`), because a soft
+keyboard sends characters and never a modifier. `terminal-modifiers.ts` has
+the rules: a tap arms a modifier for one key, a second tap within 400ms locks
+it, the next tap releases it. A locked modifier stays `aria-pressed`, shows a
+lock glyph and adds a visually hidden ", locked" to its name. `applyModifiers`
+rewrites a single character into its control code (xterm's: Ctrl+Space and
+Ctrl+` are NUL, Ctrl+? is DEL, Ctrl+Backspace is ^H) and/or an ESC prefix for
+Alt, and the cursor, Home/End, paging and function-key sequences into
+xterm's `1;<n>` modifier parameter form. A key it does not cover passes
+unmodified and keeps the modifiers armed rather than spending them on the
+wrong byte, and a paste (flagged from the DOM `paste` event and around
+`terminal.paste()`, which Tools → Paste calls, since xterm hands either to
+`onData` like a key) never takes them. The row's arrows, Home
+and End send SS3 (`ESC O`) while the program has asked for application
+cursor keys (`terminal.modes.applicationCursorKeysMode`).
+Losing write access clears them.
 
 In a session's normal buffer, a downward finger drag pans the live grid to its
 top before handing off continuously to integrated history. Horizontal drags
