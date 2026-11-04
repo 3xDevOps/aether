@@ -21,6 +21,7 @@ beforeEach(() => {
     capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
     paletteDialog: null,
     paletteLaunchTask: '',
+    staleSince: null,
   })
 })
 
@@ -51,6 +52,15 @@ it('counts and cuts by character, never splitting an emoji', () => {
   renderHook(() => useSharedPrompt())
   expect(useStore.getState().paletteLaunchTask).toBe('😀'.repeat(8000))
   expect(toast.warning).not.toHaveBeenCalled()
+})
+
+it('waits for the server rather than a saved snapshot\'s role', () => {
+  useStore.setState({ staleSince: Date.now(), info: { ...serverInfo, member: { ...serverInfo.member, role: 'viewer' } } })
+  share('new=1&prompt=hi')
+  renderHook(() => useSharedPrompt())
+  expect(toast.error).not.toHaveBeenCalled()
+  act(() => useStore.setState({ staleSince: null, info: serverInfo }))
+  expect(useStore.getState().paletteLaunchTask).toBe('hi')
 })
 
 it('names the role that cannot launch', () => {

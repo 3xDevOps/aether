@@ -10,11 +10,12 @@ const sharedLimit = 8000
 
 /**
  * Opens New session with the text shared at load (`takeSharedPrompt`) once
- * the dashboard has hydrated and no other form is open, so the share never
+ * the server has answered and no other form is open, so the share never
  * replaces another form's draft. The form waits for Launch.
  */
 export function useSharedPrompt() {
-  const hydrated = useStore((s) => s.hydrated)
+  // A saved snapshot hydrates before the server answers; its role may be out of date.
+  const hydrated = useStore((s) => s.hydrated && s.staleSince === null)
   const free = useStore((s) => s.paletteDialog === null)
   const role = useSelfRole()
   const cap = useCapability()

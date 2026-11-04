@@ -2492,7 +2492,8 @@ app, so the text only fills the form. At load, before any route is written to
 history, `initialRoute` (`src/lib/url-state.ts`) takes `new` and `prompt` off
 the address with `history.replaceState` and keeps the text in memory, so
 neither Back nor a reload brings it back; a `prompt` without `new=1` is
-dropped. Once the dashboard has hydrated and no other form is open,
+dropped. Once the server has answered (not only a saved snapshot) and no
+other form is open,
 `useSharedPrompt` (`components/launch/shared-prompt.ts`) opens the form,
 keeping the first 8000 characters (counted by code point, so an emoji is never split) and saying so in a toast when it cut any.
 Above the task a callout says "Shared from another app: review it before
