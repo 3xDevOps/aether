@@ -106,7 +106,7 @@ func TestPreferenceUpdateOrdersAndAborts(t *testing.T) {
 // neither the database file nor its write-ahead log.
 func TestForgottenPreferenceTextLeavesTheFiles(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "aether.db")
+	path := templateDBPath(t)
 	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
