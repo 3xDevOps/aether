@@ -56,6 +56,15 @@ runs:
       with:
         path: ${{ steps.paths.outputs.mod }}
         key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}
+    # Each save starts from the archive the job restored, so without a trim
+    # the compiler cache only grows; on Nov 4 2026 the Linux archive reached
+    # 3 GB compressed and unpacking it filled hosted runners' disks. Go
+    # refreshes an entry's mtime when a build uses it and the mtime is over an
+    # hour old, so entries untouched for 90 minutes were not used by this job.
+    - name: Trim the Go compiler cache to what this job used
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      shell: bash
+      run: find "${{ steps.paths.outputs.build }}" -type f -mmin +90 -delete
     - name: Check for saved Go compiler cache
       id: saved-build
       if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
