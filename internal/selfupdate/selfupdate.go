@@ -219,13 +219,16 @@ func (s *Staged) commitChecked() error {
 	if cause == nil {
 		return nil
 	}
-	restore := func() error {
+	// Defender or the failed start can hold the refused binary open for a
+	// moment, and moving the previous build back over it fails with a
+	// sharing violation until they let go.
+	restore := func() (bool, error) {
 		if s.aside == "" {
-			return os.Remove(s.dst)
+			return true, os.Remove(s.dst)
 		}
-		return os.Rename(s.aside, s.dst)
+		return true, os.Rename(s.aside, s.dst)
 	}
-	if err := restore(); err != nil {
+	if err := retry(context.Background(), restore); err != nil {
 		return fmt.Errorf("replace %s: the new build does not start (%w) and the previous build could not be restored (%v); move %s back over %s", s.dst, cause, err, s.aside, s.dst)
 	}
 	s.committed = false
