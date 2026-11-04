@@ -65,12 +65,19 @@ func (f *actionServer) ran(method string) bool {
 // serveTools serves m's tool socket as a live session does.
 func serveTools(t *testing.T, svc *Service, m *member) (string, *actionServer) {
 	t.Helper()
+	fake := &actionServer{}
+	return serveCaller(t, svc, m, fake), fake
+}
+
+// serveCaller serves m's tool socket with fake as the server it calls.
+func serveCaller(t *testing.T, svc *Service, m *member, fake tools.Caller) string {
+	t.Helper()
 	sock := filepath.Join(t.TempDir(), "a.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := &actionServer{}
+	svc.cfg.Caller = func(domain.MemberID) tools.Caller { return fake }
 	srv := &tools.Server{Caller: actionCaller{Caller: fake, s: svc, m: m}, Confirm: svc.approver(m), Member: string(m.id)}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -81,7 +88,7 @@ func serveTools(t *testing.T, svc *Service, m *member) (string, *actionServer) {
 			t.Errorf("Serve: %v", err)
 		}
 	})
-	return sock, fake
+	return sock
 }
 
 // actions reads the action records in m's transcript, grouped by action in

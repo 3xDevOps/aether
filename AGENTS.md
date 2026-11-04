@@ -149,6 +149,30 @@ refactor(store): collapse sessions into workspaces
 feat(cli)!: drop the aether dash command
 ```
 
+## Working in parallel as an Aether agent
+
+Many sessions share the same CI runners.
+
+- Keep a pull request as a draft while you iterate. A draft runs only
+  `changes`, `audit`, `lint` and `build-and-test`, and its `CI gate` fails
+  on purpose; read those four jobs instead.
+- Push milestones freely; Greptile reviews them. Do not wait on CI or rerun
+  it between pushes.
+- Run the checks for what you changed locally first; see
+  [docs/testing.md](docs/testing.md).
+- Mark the pull request ready (`gh pr ready <n>`) only when it is done.
+  That runs the full suite, and the merge gate applies.
+- The merge gate: an adversarial review by a separate Opus session;
+  Greptile findings that are real are fixed and the rest resolved with a
+  reason; `CI gate` green on the current head. Then
+  `gh pr merge <n> --squash` puts it in the merge queue, which runs the
+  full suite once per batch before `main` moves. Never pass `--admin`.
+- A UI change also gets a design review loop: a separate Opus session
+  reviews dark-mode screenshots at the affected widths as a senior product
+  designer would. Apply or rebut each point and re-shoot until none blocks.
+  Aether is dark-first, so every screenshot is dark mode; force
+  `colorScheme: 'dark'` in headless browsers.
+
 ## Repository shape
 
 - `cmd/aether` is the client CLI.

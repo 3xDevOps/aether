@@ -476,6 +476,10 @@ type supervised struct {
 	relaunchedAt time.Time
 	// sessionLostAt is when the agent last lost the run's Enhanced session.
 	sessionLostAt time.Time
+	// authLostAt is when the agent last refused a turn for want of a sign-in,
+	// and authRefused that refusal until the restarted session shows it.
+	authLostAt  time.Time
+	authRefused error
 	// usageLimit is the agent's usage-limit message its headless output
 	// carried, and accountSwap the move to another account in progress.
 	usageLimit  string
