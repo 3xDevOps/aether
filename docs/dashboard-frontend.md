@@ -3031,7 +3031,8 @@ The timeline rows and both composers share `sessionColumn`
 the message box line up at every width. The box (`rounded-composer`, 14px)
 holds the textarea above one footer row: attach, **Insert a template**, the
 agent's mode, model and effort pickers, the context meter, and the send pill
-at the end. The Standard composer's row has attach, **Insert a template** and
+at the end, with the dictation mic (see [Dictation](#dictation)) just left of
+it. The Standard composer's row has attach, **Insert a template**, the mic and
 Send. The pill is a
 round arrow while it reads **Send** and widens to its word otherwise. Hints
 and the 45-second delivery notice sit under the box. Footer controls wrap on
@@ -3157,6 +3158,53 @@ you** shows one link, "1 request, shown below the timeline", that closes a
 Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
 agent's auth methods.
+
+### Dictation
+
+`components/dictation/` turns speech into text in a message box. Its
+`DictationButton` takes `{ textarea, onInsert, hints? }`: the box, a callback
+that stores the new text, and optional hints. It is mounted left of **Send** in
+the session composer and the assistant composer, and in the bottom-right corner
+of the New session **Task** box (`run-fields.tsx`, which pads the box while the
+mic shows). It renders nothing unless `server.info` lists the `dictation`
+feature, which the server sets only once dictation is installed.
+
+| State | Button | Live region |
+| --- | --- | --- |
+| Idle | Ghost mic, **Start dictation**, `aria-pressed="false"` | - |
+| Starting | Spinner, "Starting mic…" | Starting microphone |
+| Recording | Red pill: stop square, five-bar level meter, elapsed time; **Stop dictation**, `aria-pressed="true"` | Recording. Press again to stop, Escape to cancel. |
+| Transcribing | Spinner, "Transcribing…" | Transcribing |
+| Notice | Idle mic with a popover holding the message and **Dismiss** | The same message |
+
+A tap starts and a second tap stops. A press held 300 ms or more after
+recording began stops on release (hold to talk); a press that outlasted the
+browser's permission prompt counts as a tap. Enter and Space toggle like a tap.
+Escape, caught in the capture phase while starting, recording or transcribing,
+drops the audio or the request in flight. Recording stops by itself at 2:00.
+
+The browser asks for the microphone on the first press, never on load.
+`capture.ts` opens it with `getUserMedia` at the hardware rate (a 16 kHz
+`AudioContext` records silence on some macOS devices), downmixes each render
+quantum to mono in an `AudioWorklet` loaded from a blob URL, and reads the
+meter from an `AnalyserNode` at 15 Hz. The track stops as soon as recording
+ends. `wav.ts` averages down to 16 kHz, clips at 120 s and encodes PCM16 mono
+WAV; `api.dictationTranscribe` posts it base64 to `dictation.transcribe` with
+the hints. Without `hints`, `dictationHints` sends up to 200 names of at most
+80 bytes: every workspace, the open workspace's repo and run repos, and its
+sessions' titles, newest first. Transcription times out after 120 s.
+
+`insertTranscript` puts the text where the caret or selection was when
+recording started, adding a space on either side only where a word would
+otherwise touch it, then focuses the box with the caret after the text. It
+never sends: the mic has `type="button"`, so a press inside the New session
+form does not launch. An empty result shows "No speech was recognized." Errors
+show verbatim: the server's message (not installed, busy, too long) or the
+browser's, as `Microphone: <DOMException name>: <message>` (for example
+`NotAllowedError` when access is refused). A page served over plain http to a
+non-loopback host is not a secure context and has no microphone; the notice
+names the origin. The meter keeps reading the level under reduced motion but
+drops its transition. On a coarse pointer the mic and pill are 44px tall.
 
 ### Trace view
 
