@@ -46,6 +46,10 @@ import java.util.concurrent.Executors
 
 private const val TAG = "aether"
 
+// The dashboard routes on popstate (web/src/lib/url-state.ts); replacing the
+// entry leaves nothing behind home for back to walk into.
+private const val ROUTE_HOME = "history.replaceState(history.state, '', '/'); dispatchEvent(new PopStateEvent('popstate'))"
+
 // Not the main thread: a WebView waiting on a hung renderer can be blocking
 // it. One for the process, never shut down, since WebView may deliver to it
 // after any one window is gone.
@@ -143,18 +147,18 @@ class MainActivity : ComponentActivity() {
      * would drop the terminal's scrollback on the way to the home screen.
      * Where the platform does that itself the callback stands down at home,
      * so the predictive back-to-home animation runs.
+     *
+     * Home is reached the way the dashboard's own back button would, by
+     * routing in the page: a reload would lose what the page holds, such as
+     * a shared prompt's unsent draft.
      */
     private val back =
         object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val home = if (mode == ConnectionMode.EDGE) gatewayUrl else loaded
                 when {
                     gate?.isShown == true -> moveTaskToBack(true)
                     web.canGoBack() -> web.goBack()
-                    home != null && !atDashboardHome(web.url) -> {
-                        clearHistoryOnLoad = true
-                        web.loadUrl(home)
-                    }
+                    !atDashboardHome(web.url) -> web.evaluateJavascript(ROUTE_HOME, null)
                     else -> moveTaskToBack(true)
                 }
             }
@@ -842,9 +846,11 @@ class MainActivity : ComponentActivity() {
             when (intent?.action) {
                 Intent.ACTION_SEND -> {
                     val text =
-                        (intent.getCharSequenceExtra(Intent.EXTRA_TEXT) ?: intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT))
-                            ?.toString()
-                    if ((text?.trim()?.length ?: 0) > MAX_SHARED_CHARS) {
+                        sharedText(
+                            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+                            intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString(),
+                        )
+                    if ((text?.length ?: 0) > MAX_SHARED_CHARS) {
                         Toast.makeText(this, getString(R.string.share_cut, MAX_SHARED_CHARS), Toast.LENGTH_LONG).show()
                     }
                     sharePath(text)

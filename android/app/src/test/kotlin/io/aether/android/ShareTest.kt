@@ -8,6 +8,15 @@ import org.junit.Test
 
 class ShareTest {
     @Test
+    fun subjectComesFirstUnlessTheTextHoldsIt() {
+        assertEquals("Flaky build\nhttps://x.test/1", sharedText(" https://x.test/1 ", "Flaky build"))
+        assertEquals("Flaky build: https://x.test/1", sharedText("Flaky build: https://x.test/1", "Flaky build"))
+        assertEquals("Flaky build", sharedText(null, "Flaky build"))
+        assertEquals("https://x.test/1", sharedText("https://x.test/1", " "))
+        assertNull(sharedText(" ", null))
+    }
+
+    @Test
     fun shareBecomesAPrefilledPrompt() {
         assertEquals("/?new=1&prompt=fix%20https%3A%2F%2Fx.test%2Fa%3Fb%3D1%26c", sharePath("  fix https://x.test/a?b=1&c \n"))
         assertNull(sharePath("   "))

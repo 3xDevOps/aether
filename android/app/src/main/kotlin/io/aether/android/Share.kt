@@ -19,3 +19,18 @@ fun sharePath(text: String?): String? {
     val encoded = URLEncoder.encode(trimmed.substring(0, end), "UTF-8").replace("+", "%20")
     return "/?new=1&prompt=$encoded"
 }
+
+/**
+ * What a share carries: its text, with its subject on the line before when
+ * the text does not already hold it, as a page shared from a browser has
+ * its title as the subject and its address as the text.
+ */
+fun sharedText(text: String?, subject: String?): String? {
+    val body = text?.trim().orEmpty()
+    val title = subject?.trim().orEmpty()
+    return when {
+        title.isEmpty() -> body.ifEmpty { null }
+        body.isEmpty() || body.contains(title) -> body.ifEmpty { title }
+        else -> "$title\n$body"
+    }
+}
