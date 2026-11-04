@@ -98,9 +98,10 @@ fun popupNavigation(url: String, scheme: String?): Navigation =
 
 /**
  * Whether [url] is the dashboard's home: the root with no route in its
- * query. The Edge gateway's `token` is not a route. Back leaves the app
- * only from here; from any other page with no history behind it, back goes
- * home first.
+ * query. The Edge gateway's `token` is not a route, and onboarding is home
+ * until a server is linked: the dashboard sends the root there. Back leaves
+ * the app only from here; from any other page with no history behind it,
+ * back goes home first.
  */
 fun atDashboardHome(url: String?): Boolean {
     val uri =
@@ -112,5 +113,5 @@ fun atDashboardHome(url: String?): Boolean {
     if (uri.scheme != "http" && uri.scheme != "https") return true
     if (uri.rawPath != "/" && !uri.rawPath.isNullOrEmpty()) return false
     val query = uri.rawQuery ?: return true
-    return query.split('&').all { it.isEmpty() || it.startsWith("token=") }
+    return query.split('&').all { it.isEmpty() || it.startsWith("token=") || it == "page=onboarding" }
 }

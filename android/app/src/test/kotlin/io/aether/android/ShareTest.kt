@@ -35,6 +35,8 @@ class ShareTest {
         assertTrue(atDashboardHome("https://h.ts.net/"))
         assertTrue(atDashboardHome("http://127.0.0.1:4000/?token=abc"))
         assertTrue(atDashboardHome("http://127.0.0.1:4000/"))
+        // Where the dashboard sends the root before a server is linked.
+        assertTrue(atDashboardHome("http://127.0.0.1:4000/?page=onboarding"))
         assertTrue(atDashboardHome("about:blank"))
         assertTrue(atDashboardHome(null))
         assertFalse(atDashboardHome("https://h.ts.net/?run=r"))
