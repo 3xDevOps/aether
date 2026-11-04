@@ -2,7 +2,8 @@ package server
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/dictation"
 )
@@ -30,10 +31,14 @@ type dictationService struct {
 	owner      string
 }
 
-// Start removes an engine container an earlier server left running.
+// Start removes an engine container an earlier server left running. It
+// never holds up or fails the server: the first clip removes a leftover
+// again before it starts an engine.
 func (s dictationService) Start(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if err := s.containers.RemoveDictation(ctx, s.owner); err != nil {
-		return fmt.Errorf("remove a dictation engine left by an earlier server: %w", err)
+		slog.Warn("dictation: remove an engine left by an earlier server", "error", err)
 	}
 	return nil
 }

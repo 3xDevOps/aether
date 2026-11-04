@@ -6,6 +6,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -32,9 +33,9 @@ type DictationSpec struct {
 	CPUs        float64
 	MemoryBytes int64
 	GPU         bool
-	// Output receives the engine's stdout and stderr while it runs. Docker
-	// keeps none of it.
-	Output io.Writer
+	// Output receives the engine's stdout and stderr while it runs, and is
+	// closed once the container's output ends. Docker keeps none of it.
+	Output io.WriteCloser
 }
 
 // DictationState is an engine container's state.
@@ -59,6 +60,9 @@ func (d *Docker) PullDictationImage(ctx context.Context, ref string) error {
 // StartDictation removes any earlier engine container, then creates and
 // starts one for spec, pulling its image if the daemon lacks it.
 func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, error) {
+	if _, err := d.Capacity(ctx); err != nil {
+		return "", fmt.Errorf("runtime: dictation engine limits: %w", err)
+	}
 	if err := d.RemoveDictation(ctx, spec.Owner); err != nil {
 		return "", err
 	}
@@ -107,18 +111,27 @@ func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, er
 	id := ID(created.ID)
 	attached, err := d.cli.ContainerAttach(ctx, string(id), client.ContainerAttachOptions{Stream: true, Stdout: true, Stderr: true})
 	if err != nil {
-		_ = d.Destroy(context.WithoutCancel(ctx), id)
+		d.destroyDictation(ctx, id)
 		return "", fmt.Errorf("runtime: attach dictation engine container: %w", err)
 	}
 	go func() {
+		defer func() { _ = spec.Output.Close() }()
 		defer attached.Close()
 		_, _ = stdcopy.StdCopy(spec.Output, spec.Output, attached.Reader)
 	}()
 	if _, err := d.cli.ContainerStart(ctx, string(id), client.ContainerStartOptions{}); err != nil {
-		_ = d.Destroy(context.WithoutCancel(ctx), id)
+		d.destroyDictation(ctx, id)
 		return "", fmt.Errorf("runtime: start dictation engine container: %w", err)
 	}
 	return id, nil
+}
+
+// destroyDictation removes a container StartDictation could not finish,
+// even after ctx ended, within its own deadline.
+func (d *Docker) destroyDictation(ctx context.Context, id ID) {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	_ = d.Destroy(cleanup, id)
 }
 
 // DictationState inspects the engine container id.

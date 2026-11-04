@@ -75,7 +75,11 @@ func (s *Server) serveControlFrame(ctx context.Context, member domain.MemberID, 
 		return true
 	}
 	slot := &afterResponse{}
-	ctx = context.WithValue(ctx, frameReleaseKey{}, input.releaseSlot)
+	ctx = context.WithValue(ctx, frameReleaseKey{}, func(maxLine int) {
+		if len(line) <= maxLine {
+			input.releaseSlot()
+		}
+	})
 	resp := s.handleRequest(context.WithValue(ctx, afterResponseKey{}, slot), member, line)
 	// Do not answer or restart for an update after channel/server teardown.
 	if ctx.Err() != nil {

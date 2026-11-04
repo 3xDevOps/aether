@@ -256,7 +256,13 @@ func extract(r io.Reader, a artifact, dest string) error {
 			return err
 		}
 	}
-	return nil
+	// The engine runs as another user, so the modes cannot follow umask.
+	return filepath.WalkDir(dest, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return err
+		}
+		return os.Chmod(path, 0o755)
+	})
 }
 
 func writeFile(path string, r io.Reader, mode os.FileMode) error {
@@ -270,6 +276,10 @@ func writeFile(path string, r io.Reader, mode os.FileMode) error {
 	if _, err := io.Copy(f, r); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
 	}
 	return f.Close()
 }

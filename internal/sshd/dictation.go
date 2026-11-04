@@ -19,6 +19,10 @@ type DictationService interface {
 	Transcribe(ctx context.Context, member domain.MemberID, wav []byte, hints []string) (string, error)
 }
 
+// dictationEnvelope bounds the rest of a dictation request line: the
+// JSON-RPC envelope and 200 hints of 80 bytes, escaped.
+const dictationEnvelope = 128 << 10
+
 func init() {
 	registerGuarded(protocol.MethodDictationTranscribe, permissions.View, nil, (*Server).dictationTranscribe)
 }
@@ -43,8 +47,10 @@ func (s *Server) dictationTranscribe(ctx context.Context, member domain.MemberID
 	if err != nil {
 		return nil, invalidParams("audio_base64 is not standard base64: " + err.Error())
 	}
-	if release, ok := ctx.Value(frameReleaseKey{}).(func()); ok {
-		release()
+	// Only a line no larger than a clip's gives its slot up, so a huge id
+	// or other padding keeps the usual frame handling.
+	if release, ok := ctx.Value(frameReleaseKey{}).(func(int)); ok {
+		release(base64.StdEncoding.EncodedLen(dictation.MaxWAVBytes) + dictationEnvelope)
 	}
 	text, err := svc.Transcribe(ctx, member, wav, p.Hints)
 	if err != nil {

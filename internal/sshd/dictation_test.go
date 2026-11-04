@@ -147,9 +147,24 @@ func TestDictationTranscribe(t *testing.T) {
 	if perr := call(e.member.ID, clip, nil); perr == nil || perr.Code != protocol.CodeUnavailable || !strings.Contains(perr.Message, "you already have a dictation") {
 		t.Fatalf("second request from one member = %v, want unavailable", perr)
 	}
-	close(engine.release)
+	engine.release <- struct{}{}
 	if err := <-results; err != nil || text.Text != "open the syncd log" {
 		t.Fatalf("transcript = %q, %v; want the hinted, trimmed text", text.Text, err)
+	}
+
+	// A line padded past a clip's size keeps its slot until it is answered.
+	padded := map[string]string{"audio_base64": clip, "pad": strings.Repeat("x", base64.StdEncoding.EncodedLen(dictation.MaxWAVBytes)+dictationEnvelope)}
+	go func() { results <- sshClient.Call(protocol.MethodDictationTranscribe, padded, &text) }()
+	<-engine.started
+	e.srv.mu.Lock()
+	held = len(e.srv.controlFrames)
+	e.srv.mu.Unlock()
+	if held != 1 {
+		t.Fatalf("a padded request line holds %d large control-frame slots, want 1", held)
+	}
+	engine.release <- struct{}{}
+	if err := <-results; err != nil {
+		t.Fatalf("padded request = %v", err)
 	}
 	root := filepath.Dir(t.TempDir())
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {

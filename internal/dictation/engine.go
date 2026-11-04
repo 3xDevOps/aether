@@ -96,7 +96,11 @@ func NewEngine(dir string, containers Containers) (Transcriber, error) {
 // Owner names the engine container of the install in dir: a short hash of
 // the directory, stable across restarts of the server that uses it.
 func Owner(dir string) string {
-	sum := sha256.Sum256([]byte(filepath.Clean(dir)))
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		resolved = filepath.Clean(dir)
+	}
+	sum := sha256.Sum256([]byte(resolved))
 	return hex.EncodeToString(sum[:6])
 }
 
@@ -151,6 +155,9 @@ func (s *sidecar) armIdle() {
 		defer s.mu.Unlock()
 		if gen == s.idleGen && s.inflight == 0 {
 			s.stop(id)
+			if s.id == id {
+				s.armIdle()
+			}
 		}
 	})
 }
@@ -175,6 +182,20 @@ func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
 		}
 		s.stop(s.id)
 	}
+	id, err := s.start(ctx, m)
+	if err != nil && ctx.Err() == nil {
+		// A reinstall can delete the files this start read; start once more
+		// from the install that replaced them.
+		if again, readErr := ReadManifest(s.dir); readErr == nil && again != m {
+			return s.start(ctx, again)
+		}
+	}
+	return id, err
+}
+
+// start starts an engine container for m and waits until it accepts
+// clips. Callers hold s.mu.
+func (s *sidecar) start(ctx context.Context, m Manifest) (containerruntime.ID, error) {
 	avail, err := s.memory()
 	if err != nil {
 		return "", unavailable("dictation cannot check free memory: " + err.Error())
@@ -186,7 +207,7 @@ func (s *sidecar) running(ctx context.Context) (containerruntime.ID, error) {
 	if err != nil {
 		return "", unavailable("prepare the dictation engine's socket directory: " + err.Error())
 	}
-	output := &tailBuffer{}
+	output := &tailBuffer{done: make(chan struct{})}
 	entrypoint := []string{wrapperTarget, "dictation", "engine", socketDir + "/engine.sock", strconv.Itoa(enginePort), "--"}
 	id, err := s.containers.StartDictation(ctx, containerruntime.DictationSpec{
 		Owner:      s.owner,
@@ -275,8 +296,13 @@ func (s *sidecar) failure(id containerruntime.ID, msg string) error {
 	return unavailable(msg)
 }
 
-// exited reports how the live engine ended, with its last lines of output.
+// exited reports how the live engine ended, with its last lines of output
+// once Docker has delivered them.
 func (s *sidecar) exited(st containerruntime.DictationState) error {
+	select {
+	case <-s.output.done:
+	case <-time.After(2 * time.Second):
+	}
 	if st.OOMKilled {
 		return unavailable(fmt.Sprintf("the dictation engine was killed: out of memory (limit %.1f GiB)", gib(memoryLimit)))
 	}
@@ -289,13 +315,20 @@ func (s *sidecar) stop(id containerruntime.ID) {
 	if s.id != id {
 		return
 	}
-	s.id, s.ready = "", false
 	if s.timer != nil {
 		s.timer.Stop()
 	}
+	if s.remove() == nil {
+		s.id, s.ready = "", false
+	}
+}
+
+// remove removes the engine container. Callers hold s.mu and keep s.id
+// when it fails, so Close or the next idle timer tries again.
+func (s *sidecar) remove() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_ = s.containers.RemoveDictation(ctx, s.owner)
+	return s.containers.RemoveDictation(ctx, s.owner)
 }
 
 func (s *sidecar) Close() error {
@@ -305,13 +338,14 @@ func (s *sidecar) Close() error {
 	if s.id == "" {
 		return nil
 	}
-	s.id = ""
 	if s.timer != nil {
 		s.timer.Stop()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return s.containers.RemoveDictation(ctx, s.owner)
+	if err := s.remove(); err != nil {
+		return err
+	}
+	s.id, s.ready = "", false
+	return nil
 }
 
 func threads() int { return min(max(runtime.NumCPU()/4, 1), 4) }
@@ -382,8 +416,15 @@ func gib(b uint64) float64 { return float64(b) / (1 << 30) }
 
 // tailBuffer keeps the last outputTail bytes the engine wrote.
 type tailBuffer struct {
-	mu  sync.Mutex
-	buf []byte
+	mu   sync.Mutex
+	buf  []byte
+	done chan struct{}
+	once sync.Once
+}
+
+func (t *tailBuffer) Close() error {
+	t.once.Do(func() { close(t.done) })
+	return nil
 }
 
 func (t *tailBuffer) Write(p []byte) (int, error) {
