@@ -19,7 +19,7 @@ export function accountSentence(account: AssistantAccount, where: 'panel' | 'set
         <>
           <span className="font-medium text-text">Different {name} account:</span> the assistant does not use the account your sessions use.
           {' '}Your sessions: {account.email ? `${account.email}, ` : ''}<code className="font-code">{account.environment}</code>.
-          {where === 'panel' && ` To switch, select Sign in again in Settings > Assistant and sign in ${account.email ? `as ${account.email}` : "with your sessions' account"}.`}
+          {where === 'panel' && account.environment !== 'an API key' && ` To switch, select Sign in again in Settings > Assistant and sign in ${account.email ? `as ${account.email}` : "with your sessions' account"}.`}
         </>
       )
     case 'expired':
@@ -35,8 +35,8 @@ export function accountSentence(account: AssistantAccount, where: 'panel' | 'set
 export function AssistantAccountCheck({ agent, client, className, where = 'settings' }: { agent: string; client: Api; className?: string; where?: 'panel' | 'settings' }) {
   const supported = useCapability().hasMethod('assistant.account')
   const assistantState = useStore((s) => s.assistantStatus?.state)
-  // A start records the account, so only a check made before it reads
-  // again; one that found it keeps the state it was made in.
+  // A start records the account and a session refreshes an expired token,
+  // so only a check that compared nothing reads again.
   const found = useRef<{ state: typeof assistantState } | null>(null)
   const retry = found.current ? found.current.state : assistantState
   const [text, setText] = useState<ReactNode>(null)
@@ -47,7 +47,7 @@ export function AssistantAccountCheck({ agent, client, className, where = 'setti
     client.assistantAccount(agent).then(
       (account) => {
         if (!live) return
-        if (account.state !== 'unrecorded') found.current = { state: retry }
+        if (account.state === 'same' || account.state === 'other') found.current = { state: retry }
         setText(accountSentence(account, where))
       },
       // A server behind a gateway that lists every method may not have it.
