@@ -31,7 +31,7 @@ type RunCloseCheck struct {
 }
 
 // CloseWarning.Subsession names the subsession a warning is about, when
-// it is one that closes with the checked run.
+// it is one that closes with the checked run; Detail does not repeat it.
 type CloseWarning struct {
 	Kind       string   `json:"kind"`
 	Detail     string   `json:"detail"`

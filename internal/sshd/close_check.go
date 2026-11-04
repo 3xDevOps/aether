@@ -88,10 +88,11 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	}
 	out = append(out, work...)
 	if deps.Messages > 0 {
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages,
-			Detail: fmt.Sprintf("%d %s from other sessions awaiting it or sent in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"))})
+		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages, RunIDs: runIDStrings(deps.Senders),
+			Detail: fmt.Sprintf("%d %s from %s, unanswered or from the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"),
+				s.runLabels(ctx, deps.Senders))})
 	}
-	out = append(out, s.awaitedWarnings(ctx, deps.Awaiting, "")...)
+	out = append(out, s.awaitedWarnings(ctx, deps.Awaiting)...)
 	if len(deps.Children) > 0 {
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningSubsessions, Count: len(deps.Children), RunIDs: runIDStrings(deps.Children),
 			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), s.runLabels(ctx, deps.Children))})
@@ -115,11 +116,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 			return nil, rpcError(err)
 		}
 		waiters := slices.DeleteFunc(childDeps.Awaiting, func(w domain.RunID) bool { return w == id || slices.Contains(deps.Children, w) })
-		prefix := "Subsession " + s.runLabels(ctx, []domain.RunID{childID}) + ": "
-		for _, w := range append(childWork, s.awaitedWarnings(ctx, waiters, prefix)...) {
-			if w.Kind != protocol.CloseWarningAwaited {
-				w.Detail = prefix + w.Detail
-			}
+		for _, w := range append(childWork, s.awaitedWarnings(ctx, waiters)...) {
 			w.Subsession = string(childID)
 			out = append(out, w)
 		}
@@ -165,12 +162,12 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 	return out, nil
 }
 
-func (s *Server) awaitedWarnings(ctx context.Context, waiters []domain.RunID, prefix string) []protocol.CloseWarning {
+func (s *Server) awaitedWarnings(ctx context.Context, waiters []domain.RunID) []protocol.CloseWarning {
 	if len(waiters) == 0 {
 		return nil
 	}
 	return []protocol.CloseWarning{{Kind: protocol.CloseWarningAwaited, RunIDs: runIDStrings(waiters),
-		Detail: prefix + "Waiting for it to finish: " + s.runLabels(ctx, waiters)}}
+		Detail: "Waiting for it to finish: " + s.runLabels(ctx, waiters)}}
 }
 
 func (s *Server) runLabels(ctx context.Context, ids []domain.RunID) string {

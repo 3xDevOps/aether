@@ -50,7 +50,11 @@ func closeSession(c *protocol.Client, runID, outcome string, force, interactive 
 	if len(warnings) > 0 {
 		_, _ = fmt.Fprintf(errOut, "Before closing %s:\n", runID)
 		for _, w := range warnings {
-			_, _ = fmt.Fprintf(errOut, "  %s: %s\n", w.Kind, w.Detail)
+			if w.Subsession != "" {
+				_, _ = fmt.Fprintf(errOut, "  %s (subsession %s): %s\n", w.Kind, w.Subsession, w.Detail)
+			} else {
+				_, _ = fmt.Fprintf(errOut, "  %s: %s\n", w.Kind, w.Detail)
+			}
 			if w.URL != "" {
 				_, _ = fmt.Fprintf(errOut, "    %s\n", w.URL)
 			}

@@ -15,6 +15,8 @@ type CloseDependents struct {
 	// it has not acknowledged, and any mail since the recent cutoff from
 	// runs other than its parent and subsessions.
 	Messages int
+	// Senders lists the runs that sent that mail.
+	Senders []domain.RunID
 	// Awaiting lists the live runs with a pending wait on it finishing.
 	Awaiting []domain.RunID
 	// Children lists the attached subsessions that close with it, theirs
@@ -33,11 +35,26 @@ func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.
 	if err != nil {
 		return out, fmt.Errorf("store: close dependents: %w", err)
 	}
-	if err = d.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_messages
+	rows, err := d.db.QueryContext(ctx, `SELECT from_run, COUNT(*) FROM run_messages
 		WHERE to_run = ?1 AND from_run <> ?1 AND ((acked_at IS NULL AND retired_at IS NULL AND kind <> 'reply')
 			OR (created_at > ?2 AND from_run NOT IN (SELECT parent_run_id FROM run_children WHERE run_id = ?1
-				UNION SELECT run_id FROM run_children WHERE parent_run_id = ?1)))`,
-		run, since).Scan(&out.Messages); err != nil {
+				UNION SELECT run_id FROM run_children WHERE parent_run_id = ?1)))
+		GROUP BY from_run ORDER BY MIN(created_at), from_run`, run, since)
+	if err != nil {
+		return out, fmt.Errorf("store: close dependents: messages: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	for rows.Next() {
+		var (
+			from domain.RunID
+			n    int
+		)
+		if err = rows.Scan(&from, &n); err != nil {
+			return out, fmt.Errorf("store: close dependents: messages: %w", err)
+		}
+		out.Senders, out.Messages = append(out.Senders, from), out.Messages+n
+	}
+	if err = rows.Err(); err != nil {
 		return out, fmt.Errorf("store: close dependents: messages: %w", err)
 	}
 	if out.Awaiting, err = d.runIDs(ctx, `SELECT DISTINCT w.owner_run_id FROM watches w JOIN runs r ON r.id = w.owner_run_id

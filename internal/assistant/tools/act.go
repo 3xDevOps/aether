@@ -101,6 +101,9 @@ func (s *Server) summarizeClose(ctx context.Context, req protocol.Request, c *pr
 	details := make([]string, len(res.Runs[0].Warnings))
 	for i, w := range res.Runs[0].Warnings {
 		details[i] = w.Detail
+		if w.Subsession != "" {
+			details[i] = "subsession " + w.Subsession + ": " + w.Detail
+		}
 	}
 	if len(details) > 0 {
 		c.Summary += ". Before closing: " + strings.Join(details, "; ")
