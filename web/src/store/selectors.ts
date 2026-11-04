@@ -118,9 +118,11 @@ function childRunTree(root: RunRow, members: RunRow[]): RunTree {
     else counts.done++
   }
   const waits = [root, ...children].filter((row) => row.needsYou)
+  // A child's surfaced success puts the family under review, as a need puts it in Needs you.
+  const review = root.group !== 'needs-you' && members.some((row) => row.group === 'review')
   return {
     ...root,
-    group: children.length > 0 ? 'needs-you' : root.group,
+    group: children.length > 0 ? 'needs-you' : review ? 'review' : root.group,
     waitingSince: waits.map((row) => row.waitingSince).sort()[0] ?? root.waitingSince,
     children,
     childRuns: { counts, members },

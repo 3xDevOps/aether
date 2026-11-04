@@ -18,6 +18,9 @@ const watchShown = new Map()
 // Watch finished notices per run, closed once the member sees the outcome or
 // puts it off.
 const finishedShown = new Map()
+// The session's own success notices per run, also closed when the run leaves
+// its finished standing; a watch's stay until the watch's own rules end them.
+const ownFinished = new Map()
 // The need key last announced per run. It outlives a reconnect, so a need
 // already announced stays quiet when its run's next event arrives.
 const announced = new Map()
@@ -124,6 +127,7 @@ function connect(wsURL) {
     }
     if (!ev.run_id) return
     if (ev.type === 'run.status') onStatus(ev.run_id, ev.payload || {})
+    else if (ev.type === 'workspace.timeline' && ['pause', 'resume'].includes((ev.payload || {}).kind)) rereadSubsessions(ev.run_id)
     else if (ev.type === 'run.outcome_seen') onOutcomeSeen(ev.run_id)
     else if (ev.type === 'run.review') onReview(ev.run_id, ev.payload || {})
   }
@@ -218,6 +222,12 @@ function closeFinished(runId) {
   ended.set(`${runId} done`, ++ends)
   for (const notification of finishedShown.get(runId) || []) notification.close()
   finishedShown.delete(runId)
+  closeOwnFinished(runId)
+}
+
+function closeOwnFinished(runId) {
+  for (const notification of ownFinished.get(runId) || []) notification.close()
+  ownFinished.delete(runId)
 }
 
 // Without the socket nothing tells us when these notices' needs and
@@ -225,9 +235,10 @@ function closeFinished(runId) {
 function closeShown() {
   cleared = ++ends
   for (const list of watchShown.values()) for (const { notification } of list) notification.close()
-  for (const list of finishedShown.values()) for (const notification of list) notification.close()
+  for (const list of [...finishedShown.values(), ...ownFinished.values()]) for (const notification of list) notification.close()
   watchShown.clear()
   finishedShown.clear()
+  ownFinished.clear()
 }
 
 async function readWatch(watchId) {
@@ -296,10 +307,11 @@ function read(runId) {
 
 // leave ends what runId was announced for. A live run that announces
 // nothing has also left its finished standing, as when a follow-up restarts
-// it or its parent holds the outcome; an ended run's finish stays until seen.
+// it or its parent holds the outcome, so its own success notice closes; a
+// watch's finished notice and an ended run's finish stay until seen.
 function leave(runId, run) {
   resolve(runId)
-  if (isLive(run)) closeFinished(runId)
+  if (isLive(run)) closeOwnFinished(runId)
 }
 
 function onOutcomeSeen(runId) {
@@ -367,7 +379,7 @@ function announce(runId, run, held) {
   notification.on('click', () => openRun(runId))
   notification.show()
   if (entry) entry.notification = notification
-  if (finished) finishedShown.set(runId, [...(finishedShown.get(runId) || []), notification])
+  if (finished) ownFinished.set(runId, [...(ownFinished.get(runId) || []), notification])
 }
 
 // resolve ends runId's need and closes its watch notices shown before `before`.
@@ -417,9 +429,9 @@ const hasOutcome = (run) => run.state === 'finished' || run.state === 'failed' |
 async function outcomeHeld(run, depth = 0) {
   if (!run.parent_run_id || run.detached || depth >= maxHeldDepth) return false
   const parent = await readRun(run.parent_run_id)
-  if (!parent) return false
+  if (!parent || parent.paused) return false
   if (hasOutcome(parent) && (await outcomeHeld(parent, depth + 1))) return true
-  return isLive(parent) && !parent.paused && activeStates.has(parent.state)
+  return isLive(parent) && activeStates.has(parent.state)
 }
 
 function needKey(run) {

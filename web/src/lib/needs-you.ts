@@ -138,9 +138,9 @@ const hasOutcome = (run: Pick<Run, 'status' | 'state'>) =>
 export function outcomeHeld(run: RunRecord, ctx: Pick<StateContext, 'runs' | 'pausedRuns'>, depth = 0): boolean {
   if (!run.parent_run_id || run.detached || depth >= maxHeldDepth) return false
   const parent = ctx.runs[run.parent_run_id]
-  if (!parent) return false
+  if (!parent || isPaused(parent, ctx)) return false
   if (hasOutcome(parent) && outcomeHeld(parent, ctx, depth + 1)) return true
-  return isLive(parent) && !isPaused(parent, ctx) && activeStates.has(parent.state)
+  return isLive(parent) && activeStates.has(parent.state)
 }
 
 // Room status loads only while the run is open; an older gateway's snapshot has no controller.

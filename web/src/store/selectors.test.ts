@@ -233,6 +233,8 @@ describe('a subsession outcome held for its parent', () => {
     expect(row('done').needsYou).toBeUndefined()
     expect(row('leaf').needsYou).toBeUndefined()
     expect(rows.some((r) => r.group === 'review' || r.group === 'needs-you')).toBe(false)
+    const groups = sidebarGroups(input([parent('waiting'), done]))
+    expect(groups.map((group) => [group.key, group.count])).toEqual([['review', 1]])
     const idle = listedRuns(workspace.id, input([parent('waiting'), done, grandchild]).ctx)
     expect(idle.find((r) => r.run.id === 'done')?.group).toBe('review')
     expect(idle.find((r) => r.run.id === 'leaf')?.needsYou).toBe('failed')

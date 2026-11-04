@@ -292,6 +292,10 @@ func TestASubsessionOutcomeIsHeldWhileItsParentIsActive(t *testing.T) {
 	if held, err := OutcomeHeldIn(grandchild, lookup); err != nil || !held {
 		t.Errorf("a grandchild under a finished parent held for its working root: held = %v, %v; want held", held, err)
 	}
+	pausedParent := func(id RunID) (*Run, bool, error) { return tree[id], id == "run-parent", nil }
+	if held, _ := OutcomeHeldIn(grandchild, pausedParent); held {
+		t.Error("a grandchild is held although its parent is paused")
+	}
 	tree["run-root"].Activity = ActivityAnswered
 	if held, _ := OutcomeHeldIn(grandchild, lookup); held {
 		t.Error("a grandchild is held although its root stopped and its parent finished")

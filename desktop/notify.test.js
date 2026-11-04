@@ -534,3 +534,17 @@ test('a finished notice closes when a follow-up restarts the run', async () => {
   await status(run, { status: 'running', state: 'working', reason: '', review: '' })
   assert.ok(shown[0].closed)
 })
+
+test("a follow-up closes the session's own finished notice but not a watch's", async () => {
+  const run = lead('r28')
+  watchWith('wat-28', { kind: 'run', run_id: 'r28' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r28' })
+  await watchChanged({ watch_id: 'wat-28', member_id: 'me', notification_id: 'not-1' })
+  const now = Date.now()
+  mock.method(Date, 'now', () => now + 6000)
+  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' })
+  assert.equal(shown.length, 2)
+  await status(run, { status: 'running', state: 'working', reason: '', review: '' })
+  assert.ok(shown[1].closed, "the session's own notice closes")
+  assert.ok(!shown[0].closed, "the watch's notice stays")
+  mock.restoreAll()
+})

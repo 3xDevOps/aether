@@ -193,17 +193,17 @@ func (r *Run) AwaitsReview(paused, held bool) bool {
 
 // OutcomeHeld reports whether an attached subsession's reported outcome is
 // its parent agent's to read rather than a person's: its parent, nil when
-// unknown, is live, not paused and still active, or has an outcome of its
-// own that is held (parentHeld) further up the tree. Requests the
+// unknown and never when paused, is live and still active, or has an
+// outcome of its own that is held (parentHeld) further up the tree. Requests the
 // subsession makes of a person are never held.
 func (r *Run) OutcomeHeld(parent *Run, parentPaused, parentHeld bool) bool {
-	if r.ParentRunID == "" || r.Detached || parent == nil {
+	if r.ParentRunID == "" || r.Detached || parent == nil || parentPaused {
 		return false
 	}
 	if parentHeld && parent.hasOutcome() {
 		return true
 	}
-	if parentPaused || !parent.Status.Live() {
+	if !parent.Status.Live() {
 		return false
 	}
 	switch parent.Activity {
