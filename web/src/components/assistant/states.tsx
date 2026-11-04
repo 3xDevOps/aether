@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { AssistantSignIn } from '@/components/assistant/sign-in'
-import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -72,12 +71,10 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
   if (signingIn) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-        <div>
-          <Button size="sm" variant="ghost" onClick={() => setSigning('')}><ArrowLeft />Choose another agent</Button>
-        </div>
         <AssistantSignIn
           key={signingIn.name}
           agent={signingIn}
+          onBack={() => setSigning('')}
           client={api}
           terminal={false}
           onDone={() => {

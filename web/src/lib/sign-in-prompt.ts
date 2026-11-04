@@ -15,15 +15,6 @@ export interface SignInPrompt {
 // The vendors' own sign-in hosts: a button opens only those.
 const hosts: Record<string, string[]> = { claude: ['claude.com', 'claude.ai', 'anthropic.com'], codex: ['openai.com', 'chatgpt.com'] }
 
-function vendorURL(agent: string, raw: string): boolean {
-  try {
-    const host = new URL(raw).hostname
-    return (hosts[agent] ?? []).some((h) => host === h || host.endsWith(`.${h}`))
-  } catch {
-    return false
-  }
-}
-
 /** The last line the sign-in printed, without escapes. */
 export function lastLine(output: string): string {
   return output.replace(escapes, '').split(/\r?\n|\r/).map((line) => line.trim()).filter(Boolean).at(-1) ?? ''
@@ -36,7 +27,10 @@ export function readSignInPrompt(output: string, agent: string): SignInPrompt {
   // since a retried sign-in prints a new one.
   const links = [...output.matchAll(/\x1b\]8;[^;\x07\x1b]*;(https:\/\/[^\x07\x1b]+)(?:\x07|\x1b\\)/g)].map((m) => m[1]!)
   const plain = [...text.matchAll(/https:\/\/\S+(?=\s)/g)].map((m) => m[0])
-  const url = (links.length ? links : plain).filter((u) => vendorURL(agent, u)).at(-1)
+  const url = (links.length ? links : plain).filter((u) => {
+    const host = URL.canParse(u) ? new URL(u).hostname : ''
+    return (hosts[agent] ?? []).some((h) => host === h || host.endsWith(`.${h}`))
+  }).at(-1)
   const linked = links.length > 0 && url !== undefined
   const code = /one-time code[^\n]*\n\s*(\S+)\s/.exec(text)?.[1]
   return linked ? { url, linked, code } : { url, code }

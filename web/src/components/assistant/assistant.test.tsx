@@ -268,6 +268,27 @@ describe('states', () => {
     expect(signIns()).toHaveLength(1)
   })
 
+  it("offers Codex's link after a saved screen, and stops the sign-in when the member chooses another agent", async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({
+      state: 'setup', agent: undefined, sign_in_recorded: false,
+      agents: [{ name: 'codex', display_name: 'Codex', ready: false, reason: 'Not signed in for the assistant' }],
+    }))
+    const aside = await openPanel()
+    const region = await within(aside).findByRole('region', { name: 'Sign in to Codex' })
+    const socket = await waitFor(() => StubSocket.opened.find((s) => s.url.includes('assistant_login=codex'))!)
+    const screen = new TextEncoder().encode('\x1b[H\x1b[2J')
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({ data: JSON.stringify({ ok: true, has_control: true, cols: 80, rows: 24, replay: screen.length }) })
+      socket.onmessage?.({ data: screen.buffer })
+      socket.onmessage?.({ data: new TextEncoder().encode('1. Open this link\r\n   https://auth.openai.com/codex/device\r\n\r\n2. Enter this one-time code\r\n   WXYZ-12345\r\n').buffer })
+    })
+    expect((await within(region).findByRole('link', { name: 'Open Codex sign-in' })).getAttribute('href')).toBe('https://auth.openai.com/codex/device')
+    await userEvent.click(within(region).getByRole('button', { name: 'Choose another agent' }))
+    expect(socket.frames().filter((frame) => (frame as { type?: string }).type === 'input')).toEqual([{ type: 'input', data: '\x03' }])
+    expect(await within(aside).findByRole('list', { name: 'Agents' })).toBeDefined()
+  })
+
   it('keeps the sign-in the member chose over an automatic start still waiting on its read', async () => {
     const agents = [
       { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' },

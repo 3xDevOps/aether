@@ -2,6 +2,7 @@ import type { Terminal } from '@xterm/xterm'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { TerminalPane } from '@/components/terminal-pane'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { ArrowLeft } from '@/components/icons'
 import { Callout } from '@/components/ui/callout'
 import { CopyButton } from '@/components/ui/copy-button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +18,7 @@ const vendor: Record<string, string> = { claude: 'Claude', codex: 'Codex' }
  * Runs the agent's sign-in in the assistant's own container, so the login it writes is the assistant's alone.
  * It offers the URL and code the sign-in prints; the terminal shows from the start only with `terminal`, and once the sign-in ends.
  */
-export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst = true }: { agent: AssistantAgent; client: Api; onDone: () => void; terminal?: boolean }) {
+export function AssistantSignIn({ agent, client, onDone, onBack, terminal: terminalFirst = true }: { agent: AssistantAgent; client: Api; onDone: () => void; onBack?: () => void; terminal?: boolean }) {
   const attachment = useRef<Attachment | null>(null)
   const output = useRef<Uint8Array[]>([])
   const live = useRef<Terminal | null>(null)
@@ -26,9 +27,9 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
   const [refused, setRefused] = useState<string>()
   const [ended, setEnded] = useState(false)
   const [shown, setShown] = useState(terminalFirst)
-  // A reattach replays a rendered screen, where a wrapped URL without its
-  // link target cannot be read whole.
-  const [replayed, setReplayed] = useState(false)
+  // A replay is a rendered screen, where a wrapped URL without its link
+  // target cannot be read whole; one printed live can.
+  const [liveURL, setLiveURL] = useState<string>()
   const [said, setSaid] = useState('')
   const [sent, setSent] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -42,11 +43,16 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
     let wasAttached = false
     let decoder = new TextDecoder()
     let text = ''
+    let liveText = ''
     const attached = connectAttach(() => client.assistantLoginSocket(agent.name), {
       onData: (chunk, kind) => {
-        if (kind !== 'live') setReplayed(true)
         output.current.push(chunk)
-        text += decoder.decode(chunk, { stream: true })
+        const decoded = decoder.decode(chunk, { stream: true })
+        text += decoded
+        if (kind === 'live') {
+          liveText += decoded
+          setLiveURL(readSignInPrompt(liveText, agent.name).url)
+        }
         setPrompt(readSignInPrompt(text, agent.name))
         setSaid(lastLine(text))
         live.current?.write(chunk)
@@ -56,8 +62,9 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
         output.current = []
         decoder = new TextDecoder()
         text = ''
+        liveText = ''
         live.current?.reset()
-        setReplayed(false)
+        setLiveURL(undefined)
         setSaid('')
         setRefused(undefined)
         // A size measured before the attach was accepted was dropped.
@@ -97,7 +104,8 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
   }, [terminal])
   // What the sign-in printed last is its real outcome or error.
   const settled = ended || refused !== undefined
-  const url = prompt.linked || !replayed ? prompt.url : undefined
+  const url = prompt.linked || prompt.url === liveURL ? prompt.url : undefined
+  const forced = prompt.url !== undefined && url === undefined
   const name = vendor[agent.name] ?? agent.display_name
   const sendCode = (event: FormEvent) => {
     event.preventDefault()
@@ -110,6 +118,8 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
     setSent(true)
   }
   const retry = () => {
+    setPrompt({})
+    setCode('')
     setRefused(undefined)
     setEnded(false)
     setSent(false)
@@ -117,6 +127,15 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
   }
   return (
     <section aria-label={`Sign in to ${agent.display_name}`} className="flex flex-col gap-3">
+      {onBack && (
+        <div>
+          <Button size="sm" variant="ghost" onClick={() => {
+            // The sign-in outlives its socket, and while it runs no other agent's can start.
+            if (!ended) attachment.current?.send('\x03')
+            onBack()
+          }}><ArrowLeft />Choose another agent</Button>
+        </div>
+      )}
       <p className="text-ui">
         Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own container and is kept there, apart from your sessions, which cannot read or change it.
       </p>
@@ -150,11 +169,11 @@ export function AssistantSignIn({ agent, client, onDone, terminal: terminalFirst
       ))}
       <div className="flex gap-2">
         <Button size="sm" variant={ended ? 'primary' : 'secondary'} onClick={onDone}>{ended ? 'Done' : 'Close'}</Button>
-        {!settled && <Button size="sm" variant="ghost" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide terminal' : 'Show terminal'}</Button>}
+        {!settled && !forced && <Button size="sm" variant="ghost" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide terminal' : 'Show terminal'}</Button>}
       </div>
       {/* The terminal draws on a canvas, so what the sign-in said last is also read out. */}
       {sent && <p className="sr-only" aria-live="polite">{said}</p>}
-      {(shown || ended || (prompt.url && !url) || (refused !== undefined && said !== '')) && (
+      {(shown || ended || forced || (refused !== undefined && said !== '')) && (
         // The fit addon sizes the terminal from this box, so its height must not follow the terminal's.
         <div className="h-[min(32rem,70dvh)] min-h-64">
           <TerminalPane controller={controller} />
