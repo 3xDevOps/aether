@@ -329,7 +329,7 @@ Mail marks and links use the categorical series by meaning:
 | --- | --- | --- | --- |
 | Agent message, at rest | `text-series-5` | sent: 5.5px filled dot with a 1px `--canvas` halo; received: 6px `--canvas` ring, 1.5px stroke; 2px outside the bar edge facing the other lane | a `text-ui-xs` tabular count on a `--canvas` halo when marks merge |
 | Agent message, focused lane | `text-series-5` | solid 1.5px, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a count chip on bundles |
-| Agent message, live | `text-series-5` over a 4px `--canvas` halo; the recipient's track `bg-series-5/10` | dashed `4 3` 2px, round caps | dot at the sender, filled arrowhead at the recipient; a `×n` chip left of the line |
+| Agent message, live | `text-series-5` over a 4px `--canvas` halo; the recipient's track `bg-series-5/10` | dashed `4 3` 2px, round caps, an arc bowing left of the send time | dot at the sender, filled arrowhead along the arc at the recipient; a `×n` chip left of the arc |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
@@ -342,9 +342,10 @@ glyph, left of the age. A mark added after the view opens fades in once with
 `motion-safe:animate-fade-in`; nothing loops. A live arrow draws above the
 bars for `--duration-mail-live` (4.5s, under WCAG 2.2.2's five seconds):
 `animate-mail-live` fades it and the recipient's tint in over 150ms, holds
-them to 2s and fades them out on `--ease-in-out`; `animate-mail-travel` runs an 8px dot from sender to
-recipient once over 500ms, and `animate-mail-ping` grows a ring at the head
-once. Each arrow is its own HTML box and animates only `opacity` and
+them to 2s and fades them out on `--ease-in-out`; `animate-mail-travel`
+(down, linear) and `animate-mail-bow` (sideways, quadratic) run an 8px dot
+along the arc from sender to recipient once over 500ms, and
+`animate-mail-ping` grows a ring at the head once. Each arrow is its own HTML box and animates only `opacity` and
 `transform`, which an SVG child could not keep on the compositor. Under
 reduced motion the arrow and tint show still, without the dot or ring, and
 go when their time ends. Tree focus without hover or a

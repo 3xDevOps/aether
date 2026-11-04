@@ -759,7 +759,7 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
 	for reservation := range s.credentialUsers {
-		if reservation.home == member && reservation.user != "" {
+		if reservation.home == member && reservation.user != "" && reservation.user != unknownRecoveryRunUser {
 			return s.reservationConflictLocked(member, account, reservation.user, "") == nil, nil
 		}
 	}

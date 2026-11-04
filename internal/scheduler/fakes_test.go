@@ -33,6 +33,7 @@ type fakeRuntime struct {
 	createHook  func()
 	stopErr     error
 	destroyErr  error
+	findErr     error
 	waitCalls   int
 	startErr    error
 	waitErr     error
@@ -435,6 +436,9 @@ func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.Contain
 func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.ID, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.findErr != nil {
+		return "", r.findErr
+	}
 	for id, c := range r.containers {
 		if c.spec.CreationKey != "" && c.spec.CreationKey == key {
 			return id, nil

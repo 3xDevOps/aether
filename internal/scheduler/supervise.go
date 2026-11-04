@@ -404,6 +404,10 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 		found, err := s.cfg.Runtime.FindByCreationKey(ctx, string(entry.runID))
 		if err != nil {
 			if errors.Is(err, runtime.ErrNotFound) {
+				cause = cleanupStateError
+				if releaseErr := s.releaseGoneRunUser(entry); releaseErr != nil {
+					return releaseErr
+				}
 				cause = cleanupEvidenceError
 				if preserveErr := s.preserveRecoveryWork(ctx, entry.runID, entry.task); preserveErr != nil {
 					return preserveErr
@@ -434,6 +438,9 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 		return fmt.Errorf("destroy-pending container: %w", err)
 	}
 	cause = cleanupStateError
+	if releaseErr := s.releaseGoneRunUser(entry); releaseErr != nil {
+		return releaseErr
+	}
 	return s.finishDestroyPending(ctx, entry)
 }
 

@@ -830,6 +830,9 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 	}
 	if live && entry.destroyPending {
 		s.mu.Unlock()
+		if status == outcome {
+			return s.retryDestroyPendingLocked(ctx, entry)
+		}
 		return fmt.Errorf("%w: session cleanup is pending", ErrInvalidTransition)
 	}
 	if !live || (entry.finalizing && !entry.retained) {
