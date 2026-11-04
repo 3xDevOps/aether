@@ -177,29 +177,39 @@ func rpcError(method string, err error) *protocol.Error {
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
 
-// transportBudget names the per-run allowance a request spends. A turn end
-// gets its own: it decides the whole state of the run, while a native
-// harness reports every tool use against the lifecycle budget, so a busy
-// turn would otherwise spend the allowance its own end needs.
+// transportBudget names the per-run allowance a request spends. A report
+// that decides the run's state gets its own: a native harness reports every
+// tool use against the lifecycle budget, so a busy turn would otherwise
+// spend the allowance its own end, its questions or its held background
+// tasks need.
 func transportBudget(method string, params json.RawMessage) string {
 	switch method {
 	case protocol.MethodCoordHookStatus:
 		return "hook"
 	case protocol.MethodRunReport:
-		if turnEndReport(params) {
-			return "turn end"
+		if turnStateReport(params) {
+			return "turn state"
 		}
 		return "lifecycle"
 	}
 	return "transport"
 }
 
-// turnEndReport reports whether a run.report says the agent stopped. The
-// state is all this needs; whether the stop ended the turn or failed it is
-// the scheduler's to judge.
-func turnEndReport(params json.RawMessage) bool {
-	p, err := protocol.DecodeParams[protocol.RunReportParams](params)
-	return err == nil && p.State == string(agentstatus.Idle)
+// turnStateReport reports whether a run.report ends the agent's turn,
+// opens or closes a question, or keeps the run waiting on background
+// tasks. Whether a stop ended the turn or failed it is the scheduler's to
+// judge.
+func turnStateReport(params json.RawMessage) bool {
+	var p struct {
+		State        string            `json:"state"`
+		Reason       string            `json:"reason"`
+		InputUpdates []json.RawMessage `json:"input_updates"`
+	}
+	if json.Unmarshal(params, &p) != nil {
+		return false
+	}
+	return p.State == string(agentstatus.Idle) || len(p.InputUpdates) > 0 ||
+		(p.State == string(agentstatus.Working) && strings.HasPrefix(p.Reason, agentstatus.ReasonBackground))
 }
 
 func (s *Service) transportAllowed(run domain.RunID, budget string) bool {
@@ -209,7 +219,7 @@ func (s *Service) transportAllowed(run domain.RunID, budget string) bool {
 		buckets = s.hookBuckets
 	case "lifecycle":
 		buckets = s.lifecycleBuckets
-	case "turn end":
+	case "turn state":
 		buckets = s.turnBuckets
 	}
 	return s.spend(buckets, run, requestBurst, requestRefill)
