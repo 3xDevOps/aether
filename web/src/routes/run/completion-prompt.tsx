@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
+import { useEffect, useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
 import { runCommands, useCommandRunner, type Command } from '@/lib/commands'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -37,33 +37,41 @@ function Ask({ run, complete, notYet, later, className }: {
   const perform = useCommandRunner()
   const summary = useReportedSummary(run)
   const [reviewing, setReviewing] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const closes = useId()
   if (run.review === 'later' && !reviewing) {
     return (
       <div className={className}>
-        <div role="region" aria-label="Completion" className="flex items-center gap-2 text-ui-sm text-muted">
-          <span>Finished:</span>
-          <Badge tone="review">Review later</Badge>
+        <div role="region" aria-label="Completion" className="flex items-center gap-1 text-ui-sm text-muted">
+          <span>Finished, kept for later ·</span>
           <Button size="sm" variant="link" onClick={() => setReviewing(true)}>Review now</Button>
         </div>
       </div>
     )
   }
+  const long = summary !== undefined && (summary.split('\n').length > 3 || summary.length > 280)
   return (
     <div className={className}>
       <Callout
         tone="review"
         role="region"
         aria-label="Completion"
-        title="Your agent reports this task is finished. Mark it complete?"
+        title={<span className="text-text">Your agent reports this task is finished. <span className="whitespace-nowrap">Mark complete?</span></span>}
         actions={
           <>
-            <Button size="sm" variant="secondary" onClick={() => void perform(complete)}>Mark complete</Button>
+            <Button size="sm" variant="secondary" aria-describedby={closes} onClick={() => void perform(complete)}>Mark complete</Button>
             {notYet && <Button size="sm" variant="secondary" onClick={() => void perform(notYet)}>Not yet</Button>}
             <Button size="sm" variant="ghost" onClick={() => (later ? void perform(later) : setReviewing(false))}>Review later</Button>
+            <span id={closes} className="text-ui-sm text-muted">Closes the session.</span>
           </>
         }
       >
-        {summary && <p className="max-h-32 overflow-y-auto text-ui-sm text-muted">{summary}</p>}
+        {summary && (
+          <>
+            <p className={cn('text-ui-sm whitespace-pre-wrap text-muted', !expanded && 'line-clamp-3')}>{summary}</p>
+            {long && <Button variant="link" size="sm" onClick={() => setExpanded((open) => !open)}>{expanded ? 'Show less' : 'Show more'}</Button>}
+          </>
+        )}
       </Callout>
     </div>
   )

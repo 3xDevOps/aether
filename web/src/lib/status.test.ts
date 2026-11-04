@@ -68,7 +68,7 @@ describe('run presentation', () => {
     const notYet = { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review_changed_at: '2026-08-14T10:10:00Z' } as const
     for (const review of ['', undefined] as const) {
       const presented = shown({ ...notYet, review })
-      expect(presented).toMatchObject({ state: 'answered', reason: 'Not finished yet: marked Not yet' })
+      expect(presented).toMatchObject({ state: 'answered', reason: 'Not finished yet' })
       expect(groupOf(presented)).toBe('working')
     }
     expect(shown({ ...notYet, review: 'ready' }).state).not.toBe('answered')

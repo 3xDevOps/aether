@@ -111,7 +111,7 @@ function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'ne
   if (state === 'working' && run.toolActivity) {
     return { state, reason: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() }
   }
-  if (notFinishedYet(run)) return { state: 'answered', reason: 'Not finished yet: marked Not yet' }
+  if (notFinishedYet(run)) return { state: 'answered', reason: 'Not finished yet' }
   const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
   if (possiblyStalled(run)) return { state: 'stalled', reason, next: stateNext.stalled }
   if (state === 'failed') return { state, reason: `${reason}. Session remains open for follow-up.` }
