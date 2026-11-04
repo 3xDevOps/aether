@@ -50,6 +50,17 @@ class PushNoticeTest {
     }
 
     @Test
+    fun needsGoToTheirOwnChannelAndUpdatesToTheOther() {
+        assertEquals(PushChannel.NEEDS_YOU, pushChannel(push(CARD)))
+        assertEquals(PushChannel.NEEDS_YOU, pushChannel(push(RUN)))
+        // A private card has no id but is still a card.
+        assertEquals(PushChannel.NEEDS_YOU, pushChannel(push(CARD.replace(",\"card\":\"ABCDEFGHIJKLMNOPQRSTUVWXYZ\"", ""))))
+        assertEquals(PushChannel.UPDATES, pushChannel(push("""{"title":"t","body":"b","run":"run-7k2m9q4xbd","notice":true}""")))
+        assertEquals(PushChannel.UPDATES, pushChannel(push("""{"title":"ws","body":"Budget warning","workspace":"ws_1"}""")))
+        assertEquals(PushChannel.UPDATES, pushChannel(push("""{"title":"Aether","body":"Notifications work on this device."}""")))
+    }
+
+    @Test
     fun unreadableOrHostileFieldsFallBack() {
         val unreadable = parsePush(byteArrayOf(0x00, 0x7f))
         assertEquals("Aether", unreadable.title)

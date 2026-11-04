@@ -26,7 +26,8 @@ function Guide({ page = 'networking', to, children }: { page?: string; to?: stri
 
 const hosted = <Guide to="the-dashboard">the dashboard your server hosts</Guide>
 
-function help(state: PushState | null, hinted = false): ReactNode {
+/** gateway is the capabilities' name for what serves this dashboard: `server` for the tailnet one. */
+function help(state: PushState | null, gateway: string | undefined, hinted = false): ReactNode {
   if (!state) return 'Reading this device…'
   if (state.kind === 'blocked') {
     if (androidShell()) return 'Android blocks notifications from Aether. Allow them under App info → Notifications (long-press the Aether icon), then turn this on.'
@@ -44,7 +45,13 @@ function help(state: PushState | null, hinted = false): ReactNode {
       if (hinted) return 'On iPhone and iPad, only the home-screen app gets notifications.'
       return <>On iPhone and iPad, notifications reach Aether only when it is opened from the home screen. <Guide to="add-it-to-your-home-screen">Add it to your home screen</Guide>, open it from there and turn this on.</>
     case 'distributor':
-      return <>The app gets notifications through a UnifiedPush distributor, and this phone has none. Install ntfy from Google Play or F-Droid, then turn this on. Or open {hosted} in Chrome and install it. <Guide to="in-the-android-app">Android notifications</Guide></>
+      return (
+        <>
+          The app gets notifications through a UnifiedPush distributor, and this phone has none. Install <a href="https://ntfy.sh" target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">ntfy</a> from Google Play or F-Droid, then turn this on.
+          {gateway === 'server' && <> Or open this dashboard in Chrome and install it.</>}{' '}
+          <Guide to="in-the-android-app">Android notifications guide</Guide>
+        </>
+      )
     case 'browser':
       return <>This browser cannot receive push notifications. On a phone, open this dashboard in Chrome or Safari and <Guide to="add-it-to-your-home-screen">add it to your home screen</Guide>.</>
   }
@@ -209,13 +216,13 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
 
   const on = state?.kind === 'on'
   const install = state?.kind === 'unsupported' && state.why === 'home-screen'
-  const failure = error ?? (state?.kind === 'off' ? state.error : undefined)
+  const failure = error ?? (state && 'error' in state ? state.error : undefined)
   return (
     <SettingsSection title="Push notifications" id="push" scope="This device">
       <SettingRow
         label="Notify this device when a session needs me"
         labelFor={install ? undefined : 'settings-push'}
-        help={help(state, install && !dismissed)}
+        help={help(state, gateway, install && !dismissed)}
         control={install ? undefined : (
           <Checkbox
             id="settings-push"

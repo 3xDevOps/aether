@@ -83,10 +83,7 @@ object PushRegistration {
      */
     fun enable(activity: Activity) {
         val context = activity.applicationContext
-        if (UnifiedPush.getDistributors(context).isEmpty()) {
-            changed()
-            return
-        }
+        createPushChannels(context)
         pending = true
         context.storePush(context.storedPush().copy(error = null))
         changed()

@@ -568,6 +568,12 @@ browser and signed with the key in `<data-dir>/push/vapid_key.pem`, which
 grants nothing on the server. A notice carries the session's title and a reason
 from the session.
 
+The Android app subscribes the same way through a UnifiedPush distributor and
+shows only messages encrypted to its own keys. Its **Decline** button declines
+an assistant card through `assistant.confirm` with the phone's tailnet
+identity, so Android requires the phone to be unlocked before it runs, and the
+lock screen shows no session text ([networking.md](networking.md#in-the-android-app)).
+
 ### Terminal image uploads
 
 You upload only bytes you pick or paste; the server never reads a path on your

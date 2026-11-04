@@ -13,7 +13,7 @@ import { capability } from '@/store/hooks'
 /** error is why the Android app's last attempt failed, in its own words. */
 export type PushState =
   | { kind: 'on' | 'off' | 'blocked'; error?: string }
-  | { kind: 'unsupported'; why: 'desktop' | 'gateway' | 'home-screen' | 'browser' | 'distributor' }
+  | { kind: 'unsupported'; why: 'desktop' | 'gateway' | 'home-screen' | 'browser' | 'distributor'; error?: string }
 
 const worker = '/sw.js'
 
@@ -41,7 +41,9 @@ async function subscription(): Promise<PushSubscription | null> {
  * gui` is a loopback port behind a per-process token.
  */
 function fromAndroid(state: AndroidPushState): PushState {
-  if (state.kind === 'no-distributor') return { kind: 'unsupported', why: 'distributor' }
+  if (state.kind === 'no-distributor') {
+    return state.error ? { kind: 'unsupported', why: 'distributor', error: state.error } : { kind: 'unsupported', why: 'distributor' }
+  }
   if (state.kind === 'on' || state.kind === 'blocked') return { kind: state.kind }
   return state.error ? { kind: 'off', error: state.error } : { kind: 'off' }
 }

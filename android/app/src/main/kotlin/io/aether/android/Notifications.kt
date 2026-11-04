@@ -17,7 +17,8 @@ import org.unifiedpush.android.connector.data.PushEndpoint
 import org.unifiedpush.android.connector.data.PushMessage
 
 private const val TAG = "aether"
-private const val CHANNEL = "needs-you"
+private const val CHANNEL_NEEDS_YOU = "needs-you"
+private const val CHANNEL_UPDATES = "updates"
 private const val ID = 1
 private const val EXTRA_KEEP = "io.aether.android.keep"
 
@@ -28,7 +29,7 @@ const val EXTRA_PATH = "io.aether.android.PATH"
 private const val ACTION_DECLINE = "io.aether.android.DECLINE"
 private const val EXTRA_CARD = "io.aether.android.CARD"
 private const val EXTRA_TAG = "io.aether.android.TAG"
-private const val EXTRA_TITLE = "io.aether.android.TITLE"
+private const val EXTRA_TEXT = "io.aether.android.TEXT"
 
 /**
  * Receives from the phone's UnifiedPush distributor. Only the connector in
@@ -76,10 +77,9 @@ fun showPush(context: Context, notice: PushNotice) {
         return
     }
     if (!manager.areNotificationsEnabled()) return
-    val path = pushPath(notice)
-    val open = openIntent(context, notice.tag, path)
+    val open = openIntent(context, notice.tag, pushPath(notice))
     val builder =
-        builder(context, notice.title, notice.body)
+        builder(context, pushChannel(notice), notice.title, notice.body)
             .setContentIntent(open)
             .setAutoCancel(true)
             .setSilent(notice.quiet)
@@ -88,25 +88,56 @@ fun showPush(context: Context, notice: PushNotice) {
     for (action in pushActions(notice, declinesDirectly)) {
         when (action) {
             PushAction.APPROVE -> builder.addAction(0, context.getString(R.string.push_approve), open)
-            PushAction.DECLINE -> builder.addAction(0, context.getString(R.string.push_decline), declineIntent(context, notice))
+            // A locked phone has to be unlocked first: Decline acts with
+            // this phone's identity, and no one should do that from the
+            // lock screen.
+            PushAction.DECLINE ->
+                builder.addAction(
+                    NotificationCompat.Action.Builder(0, context.getString(R.string.push_decline), declineIntent(context, notice))
+                        .setAuthenticationRequired(true)
+                        .build(),
+                )
         }
     }
     notify(manager, notice.tag, builder)
 }
 
-private fun builder(context: Context, title: String, body: String): NotificationCompat.Builder {
-    val manager = context.getSystemService(NotificationManager::class.java)
-    if (manager.getNotificationChannel(CHANNEL) == null) {
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, context.getString(R.string.push_channel), NotificationManager.IMPORTANCE_HIGH),
-        )
-    }
-    return NotificationCompat.Builder(context, CHANNEL)
-        .setSmallIcon(R.mipmap.ic_launcher_foreground)
+/**
+ * Both channels, so Android's settings for the app list them from the
+ * moment notifications are turned on, before the first push.
+ */
+fun createPushChannels(context: Context) {
+    context.getSystemService(NotificationManager::class.java).createNotificationChannels(
+        listOf(
+            NotificationChannel(CHANNEL_NEEDS_YOU, context.getString(R.string.push_channel), NotificationManager.IMPORTANCE_HIGH),
+            NotificationChannel(CHANNEL_UPDATES, context.getString(R.string.push_channel_updates), NotificationManager.IMPORTANCE_DEFAULT),
+        ),
+    )
+}
+
+/**
+ * A notification on [channel]. The lock screen shows only that Aether has
+ * something; the session and its text wait until the phone is unlocked.
+ */
+private fun builder(context: Context, channel: PushChannel, title: String, body: String): NotificationCompat.Builder {
+    createPushChannels(context)
+    val id = if (channel == PushChannel.NEEDS_YOU) CHANNEL_NEEDS_YOU else CHANNEL_UPDATES
+    fun base() =
+        NotificationCompat.Builder(context, id)
+            .setSmallIcon(R.drawable.ic_stat_aether)
+            .setColor(context.getColor(R.color.accent_fill))
+    val public =
+        base()
+            .setContentTitle(context.getString(R.string.app_name))
+            .setContentText(context.getString(R.string.push_public))
+            .build()
+    return base()
         .setContentTitle(title)
         .setContentText(body)
         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-        .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        .setCategory(if (channel == PushChannel.NEEDS_YOU) NotificationCompat.CATEGORY_REMINDER else null)
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        .setPublicVersion(public)
 }
 
 // areNotificationsEnabled was checked; Android can still revoke it between.
@@ -144,7 +175,7 @@ private fun declineIntent(context: Context, notice: PushNotice): PendingIntent {
             .setData(pushIdentity(notice.tag))
             .putExtra(EXTRA_CARD, notice.card)
             .putExtra(EXTRA_TAG, notice.tag)
-            .putExtra(EXTRA_TITLE, notice.title)
+            .putExtra(EXTRA_TEXT, notice.body)
     return PendingIntent.getBroadcast(
         context,
         0,
@@ -157,18 +188,28 @@ private fun declineIntent(context: Context, notice: PushNotice): PendingIntent {
  * Declines a card from its notification without opening the app, with
  * `assistant.confirm` over the tailnet dashboard: the same call the service
  * worker makes, identified the same way, by this phone's tailnet login. Not
- * exported: only this app's own notification can send it. The outcome, or
- * the server's own refusal, replaces the notification.
+ * exported: only this app's own notification can send it.
+ *
+ * The buttons go at once, so nothing can be tapped twice while the call
+ * runs. The outcome names the card it was about; a refusal alerts, with the
+ * server's own error, and opens the card.
  */
 class DeclineReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val card = intent.getStringExtra(EXTRA_CARD) ?: return
         val tag = intent.getStringExtra(EXTRA_TAG) ?: return
-        val title = intent.getStringExtra(EXTRA_TITLE) ?: context.getString(R.string.app_name)
+        val text = intent.getStringExtra(EXTRA_TEXT).orEmpty()
         val app = context.applicationContext
+        val manager = NotificationManagerCompat.from(app)
+        fun outcome(title: String, body: String) =
+            builder(app, PushChannel.NEEDS_YOU, title, body)
+                .setAutoCancel(true)
+                .setContentIntent(openIntent(app, tag, CARD_PATH))
+                .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
+        notify(manager, tag, outcome(text, app.getString(R.string.push_declining)).setSilent(true).setOnlyAlertOnce(true))
         val result = goAsync()
         Thread {
-                val body =
+                val done =
                     try {
                         // goAsync's receiver has 10 seconds in all.
                         app.callServer(
@@ -176,17 +217,11 @@ class DeclineReceiver : BroadcastReceiver() {
                             JSONObject().put("confirmation_id", card).put("approve", false),
                             timeoutMs = 4_000,
                         )
-                        app.getString(R.string.push_declined)
+                        outcome(app.getString(R.string.push_declined), text).setSilent(true)
                     } catch (e: Exception) {
-                        app.getString(R.string.push_not_decided, e.message)
+                        outcome(app.getString(R.string.push_decline_failed), e.message ?: e.toString())
                     }
-                val builder =
-                    builder(app, title, body)
-                        .setSilent(true)
-                        .setAutoCancel(true)
-                        .setContentIntent(openIntent(app, tag, CARD_PATH))
-                        .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
-                notify(NotificationManagerCompat.from(app), tag, builder)
+                notify(manager, tag, done)
                 result.finish()
             }
             .start()

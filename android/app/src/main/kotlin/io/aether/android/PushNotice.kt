@@ -26,6 +26,20 @@ data class PushNotice(
     val quiet: Boolean,
 )
 
+/** Where a notification goes: what needs the member now, or an update to read later. */
+enum class PushChannel { NEEDS_YOU, UPDATES }
+
+/**
+ * A session's need and an assistant card, private ones included, need the
+ * member; an assistant's notice, a budget and a test do not.
+ */
+fun pushChannel(notice: PushNotice): PushChannel =
+    if (notice.card != null || notice.tag.startsWith("card:") || (notice.run != null && !notice.notice)) {
+        PushChannel.NEEDS_YOU
+    } else {
+        PushChannel.UPDATES
+    }
+
 /** The buttons a notification carries. */
 enum class PushAction { APPROVE, DECLINE }
 

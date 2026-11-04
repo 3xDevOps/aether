@@ -14,6 +14,7 @@ import androidx.webkit.WebViewFeature
 import java.net.URI
 import org.json.JSONException
 import org.json.JSONObject
+import org.unifiedpush.android.connector.UnifiedPush
 
 private const val BRIDGE = "AetherAndroid"
 
@@ -85,7 +86,12 @@ class PushBridge(private val activity: ComponentActivity) {
         }
     }
 
+    /** No distributor, no permission prompt: the switch names the fix first. */
     private fun enable() {
+        if (UnifiedPush.getDistributors(activity).isEmpty()) {
+            send(PushState(PushKind.NO_DISTRIBUTOR, error = "No UnifiedPush distributor is installed on this phone."))
+            return
+        }
         val needsPermission =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) !=

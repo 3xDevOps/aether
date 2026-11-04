@@ -374,7 +374,8 @@ in the app decrypts, and the app drops any message not encrypted to its keys.
 
 With no distributor installed the switch row says `The app gets notifications
 through a UnifiedPush distributor, and this phone has none.` Install ntfy and
-turn the switch on, or open the dashboard in Chrome and install it there.
+turn the switch on, or, in **Tailscale** mode, open the dashboard in Chrome
+and install it there.
 A distributor that refuses shows its reason, such as `The push distributor
 refused to register Aether: ACTION_REQUIRED` (sign in to it, then try again).
 
@@ -384,9 +385,17 @@ private card or one over 240 characters has no buttons. **Decline** needs
 **Tailscale** mode: it calls `assistant.confirm` on the server's dashboard,
 identified by the phone's tailnet login like any dashboard request. In
 **Aether Edge** mode the identity is the CLI the app runs only while it is
-open, so there a card's notification only opens it. The outcome, or the
-server's own refusal (`Not decided: <error>`), replaces the notification.
-When a session stops needing you, its notification goes away.
+open, so there a card's notification only opens it. On a locked phone
+**Decline** asks you to unlock first. While it runs the notification reads
+`Declining…` with no buttons; then `Declined` with the card's text, or
+`Couldn't decline` with the server's own error, which alerts and opens the
+card. When a session stops needing you, its notification goes away.
+
+Sessions and cards that need you arrive on the **Sessions that need you**
+channel; assistant notices, budgets and test notifications on **Assistant
+updates**, which you can quiet separately in Android's settings for the app.
+The lock screen shows only `A session needs you` until the phone is
+unlocked.
 
 Limits:
 

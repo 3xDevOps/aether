@@ -63,7 +63,10 @@
     <string name="push_channel">Sessions that need you</string>
     <string name="push_approve">Approve</string>
     <string name="push_decline">Decline</string>
+    <string name="push_channel_updates">Assistant updates</string>
+    <string name="push_public">A session needs you</string>
+    <string name="push_declining">Declining…</string>
     <string name="push_declined">Declined</string>
-    <string name="push_not_decided">Not decided: %1$s</string>
+    <string name="push_decline_failed">Couldn\'t decline</string>
     <string name="no_app_for_link">No app on this phone opens %1$s</string>
 </resources>
