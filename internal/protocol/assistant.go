@@ -26,6 +26,11 @@ const (
 	MethodAssistantView = "assistant.view"
 	// MethodAssistantViewContext is served only on the assistant tool socket.
 	MethodAssistantViewContext = "assistant.view_context"
+	// MethodAssistantRules lists the caller's approval rules, and
+	// MethodAssistantRuleRevoke deletes one. Neither the assistant nor a
+	// connector may call them; assistant.confirm with always creates one.
+	MethodAssistantRules      = "assistant.rules"
+	MethodAssistantRuleRevoke = "assistant.rules.revoke"
 )
 
 const (
@@ -72,6 +77,54 @@ type AssistantConfirmation struct {
 	// launch, as the assistant's launch tool reported it. It is shown on the
 	// card and decides nothing.
 	Defaults *AssistantDefaultsUse `json:"defaults,omitempty"`
+	// Rule is the approval rule approving this card with always would
+	// save, when the card may become one.
+	Rule *AssistantRuleOffer `json:"rule,omitempty"`
+}
+
+// AssistantRuleOffer is the rule a card offers: the key the server built
+// from the card's params and its wording of it. Suggested marks a card
+// whose kind the member approved by hand three times in a row.
+type AssistantRuleOffer struct {
+	Key       AssistantRuleKey `json:"key"`
+	Wording   string           `json:"wording"`
+	Suggested bool             `json:"suggested,omitempty"`
+}
+
+// AssistantRuleKey is what an approval rule matches: a card passes when its
+// method and every field equal the rule's.
+type AssistantRuleKey struct {
+	Method          string `json:"method"`
+	WorkspaceID     string `json:"workspace_id,omitempty"`
+	Agent           string `json:"agent,omitempty"`
+	AccountMemberID string `json:"account_member_id,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
+	Permission      string `json:"permission,omitempty"`
+	NoFallback      bool   `json:"no_fallback,omitempty"`
+}
+
+// AssistantRule is one of a member's approval rules. Wording is what the
+// member clicked and Summary the card it came from. Inactive, when set, is
+// why the rule no longer passes cards.
+type AssistantRule struct {
+	ID         string    `json:"id"`
+	Method     string    `json:"method"`
+	Wording    string    `json:"wording"`
+	Summary    string    `json:"summary"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at,omitzero"`
+	Uses       int       `json:"uses"`
+	Inactive   string    `json:"inactive,omitempty"`
+}
+
+type AssistantRulesResult struct {
+	Rules []AssistantRule `json:"rules"`
+}
+
+type AssistantRuleRevokeParams struct {
+	ID string `json:"id"`
 }
 
 // AssistantDefaultsUse names the launch fields saved defaults filled, each
@@ -222,6 +275,13 @@ type AssistantAnswerParams struct {
 type AssistantConfirmParams struct {
 	ConfirmationID string `json:"confirmation_id"`
 	Approve        bool   `json:"approve"`
+	// Always approves the card and saves the rule it offers.
+	Always bool `json:"always,omitempty"`
+}
+
+// AssistantConfirmResult names the rule an always answer saved.
+type AssistantConfirmResult struct {
+	Rule *AssistantRule `json:"rule,omitempty"`
 }
 
 type AssistantHistoryParams struct {
@@ -286,9 +346,10 @@ type AssistantAction struct {
 	Target  AssistantActionTarget `json:"target"`
 	Outcome string                `json:"outcome"`
 	// Approval is how the call was allowed to run: "card" when the member
-	// approved it, "auto" by auto-approval, empty for a reversible call
-	// that needs none.
+	// approved it, "auto" by auto-approval, "rule" by the approval rule
+	// RuleID, empty for a reversible call that needs none.
 	Approval string `json:"approval,omitempty"`
+	RuleID   string `json:"rule_id,omitempty"`
 	// ConfirmationID is the card's id, when the action showed one.
 	ConfirmationID string `json:"confirmation_id,omitempty"`
 	// IdempotencyKey is the call's, when its method takes one, so a client
