@@ -414,12 +414,14 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 func (s *Scheduler) resolveCacheRuntimeOwners(ctx context.Context, info *memberhome.CacheInfo, owners *cacheOwnership) error {
 	member := info.Member
 	// A stopped kept terminal does not own the pool; only a running one does.
+	// Inspect reads the state directly: a deadline-bounded Wait would mistake
+	// a slow runtime for a running terminal and protect a stopped one's pool.
 	if cid, err := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member)); err == nil {
-		running, probeErr := s.terminalContainerRunning(ctx, cid, 50*time.Millisecond)
-		if probeErr != nil {
-			return probeErr
+		state, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
+		if inspectErr != nil && !errors.Is(inspectErr, runtime.ErrNotFound) {
+			return inspectErr
 		}
-		if running {
+		if inspectErr == nil && !state.Exited {
 			owners.terminal[member], owners.legacy[member] = true, true
 		}
 	} else if !errors.Is(err, runtime.ErrNotFound) {
