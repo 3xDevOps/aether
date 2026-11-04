@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { AskAssistantButton } from '@/components/assistant/ask'
-import { CloseWarnings, useCloseCheck } from '@/components/close-warnings'
+import { CloseWarnings, useCloseCheck, warningScroll } from '@/components/close-warnings'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
@@ -113,7 +113,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
               This agent cannot move a running conversation between modes. Aether starts a new Standard session with the same task and closes this one without merging. The conversation so far stays in this session’s history.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {check ? <CloseWarnings check={check} run={run} onLeave={() => setConfirm(false)} /> : <p className="text-ui-sm text-muted">Checking what closing affects…</p>}
+          {check ? <CloseWarnings check={check} run={run} onLeave={() => setConfirm(false)} className={warningScroll} /> : <p className="text-ui-sm text-muted">Checking what closing affects…</p>}
           <AlertDialogFooter>
             <AlertDialogCancel className={focusRingShown}>Keep this session</AlertDialogCancel>
             <AlertDialogAction disabled={!check} onClick={() => void act()}>

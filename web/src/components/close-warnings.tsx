@@ -14,7 +14,7 @@ import {
 import { GitBranch, GitPullRequest, Hourglass, Lock, MessageSquare, Network, PackageX } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { focusRingShown } from '@/lib/utils'
+import { cn, focusRingShown } from '@/lib/utils'
 import { closeChangedText, closeState, readCloseCheck } from '@/lib/close-check'
 import { useCommandRunner } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
@@ -51,15 +51,19 @@ const icons: Record<CloseWarningKind, typeof Lock> = {
   protected: Lock,
 }
 
+/** The height a confirmation without its own scrolling body gives the warnings, so its buttons stay in view. */
+export const warningScroll = 'max-h-[min(50dvh,24rem)] overflow-y-auto'
+
 const byRisk = (a: CloseWarning, b: CloseWarning) => order.indexOf(a.kind) - order.indexOf(b.kind)
 
-/** onLeave closes whatever dialog shows the warnings before a session link navigates away. */
-export function CloseWarnings({ check, run, onLeave }: { check: RunCloseCheck; run: Run; onLeave: () => void }) {
+/** onLeave closes whatever dialog shows the warnings before a session link navigates away; a dialog that does not scroll its body passes a height limit in className. */
+export function CloseWarnings({ check, run, onLeave, className }: { check: RunCloseCheck; run: Run; onLeave: () => void; className?: string }) {
   const listed = check.warnings
     .filter((warning) => !warning.subsession && (warning.kind !== 'cleanup_pending' || !retentionShows(run, warning)))
     .sort(byRisk)
+  if (!check.error && listed.length === 0 && !run.container_retained_until && !run.cleanup_pending && !run.cleanup_error) return null
   return (
-    <div className="flex max-h-[min(50dvh,24rem)] flex-col gap-2 overflow-y-auto text-ui-sm">
+    <div className={cn('flex flex-col gap-2 text-ui-sm', className)}>
       {check.error && <p role="alert" className="break-words text-state-failed">Could not check what closing affects: {check.error.message}</p>}
       {listed.length > 0 && (
         <ul aria-label="What closing affects" className="flex flex-col gap-1.5">
@@ -194,7 +198,7 @@ export function CloseConfirmation() {
             {pending.command.label}: records it as {pending.outcome} and closes the session.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <CloseWarnings check={pending.check} run={run} onLeave={dismiss} />
+        <CloseWarnings check={pending.check} run={run} onLeave={dismiss} className={warningScroll} />
         <AlertDialogFooter>
           {/* Radix AlertDialog focuses Cancel when the confirmation opens. */}
           <AlertDialogCancel className={focusRingShown}>Cancel</AlertDialogCancel>

@@ -88,7 +88,7 @@ export function CloseDialog() {
             The outcome is recorded and the session leaves the board. Its branch stays.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto px-3 py-3 sm:px-4">
+        <div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto px-3 py-3 empty:hidden sm:px-4">
           {!check && <p className="text-ui-sm text-muted">Checking what closing affects…</p>}
           {check && run && <CloseWarnings check={check} run={run} onLeave={close} />}
           {error && (
