@@ -1023,7 +1023,7 @@ describe('approval rules', () => {
     acpOpen()
     assistantSocket().send({ status: status({ confirmations: [{ ...launch, rule: { ...launch.rule!, suggested: true } }] }) })
     const offered = await card(aside)
-    expect(within(offered).getByText('You approved this kind three times in a row.')).toBeDefined()
+    expect(within(offered).getByText(/^You approved this kind three times in a row\./)).toBeDefined()
   })
 
   it('approves the card with Approve everything, then confirms before turning auto-approval on', async () => {

@@ -565,10 +565,14 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
-  `confirmations` frame stops listing it. A card with `rule` adds a button
-  labeled with `rule.wording` (`assistant.confirm` with `always: true`),
-  styled as the confirm action with `You approved this kind three times in a
-  row.` above it when `rule.suggested`, and, while `auto_approve` is off,
+  `confirmations` frame stops listing it. A card's footer is not sticky: the dock (65dvh with an empty
+  conversation, whose suggestion chips it hides, else 40dvh, 50dvh on tall
+  screens) scrolls the whole card, so its actions come after every row they
+  approve, and rows have no scroll of their own. A card with `rule` adds,
+  under `Or save a rule:`, a secondary button labeled with `rule.wording`
+  (`assistant.confirm` with `always: true`), marked with an accent left rule
+  and `You approved this kind three times in a row.` when `rule.suggested`,
+  and, while `auto_approve` is off,
   **Approve everything from now on**: it approves the card, then sets the
   store's `assistantConfirmAutoApprove`, which opens the panel's **Let the
   assistant act without asking?** confirm (`AutoApproveConfirm` in
@@ -6090,7 +6094,9 @@ Categories:
   when it was created and last used and how many times, `Inactive: <reason>`
   when set, and **Revoke** (`assistant.rules.revoke`), which drops the row
   once the server answers and reads the list again; with none it says **No rules yet**, and a failed
-  read shows its error with **Try again**. It reads again when a card saves a
+  read shows `Couldn’t read your rules` with its error and **Try again**. A
+  muted line under the heading says rules work with auto-approval off; an
+  inactive rule's wording is muted with an `Inactive` badge. It reads again when a card saves a
   rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.

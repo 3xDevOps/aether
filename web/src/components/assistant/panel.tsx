@@ -102,6 +102,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
   const error = useStore((s) => s.assistantStatusError)
   const setDraft = useStore((s) => s.setAssistantDraft)
   const hasRows = useMemo(() => (session ? assistantRows(session).length > 0 : false), [session])
+  const waiting = confirmations.length > 0 || (session?.pending.length ?? 0) > 0
 
   if (!status) {
     return error ? (
@@ -136,6 +137,8 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
         <p role="status" className="p-4 text-ui-sm text-muted">Connecting…</p>
       ) : hasRows ? (
         <Transcript session={session} />
+      ) : waiting || status.approval_chosen === false ? (
+        <div className="flex-1" />
       ) : (
         <>
           {status.agent && <AssistantAccountCheck agent={status.agent} client={api} where="panel" className="shrink-0 px-4 pt-3" />}
@@ -155,8 +158,8 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
         <AssistantComposer
           textarea={textarea}
           running={running}
-          dock={(confirmations.length > 0 || (session?.pending.length ?? 0) > 0) && (
-            <div className="flex max-h-[30dvh] flex-col gap-2 overflow-y-auto [@media(min-height:50rem)]:max-h-[40dvh]">
+          dock={waiting && (
+            <div className={cn('flex flex-col gap-2 overflow-y-auto', hasRows ? 'max-h-[40dvh] [@media(min-height:50rem)]:max-h-[50dvh]' : 'max-h-[65dvh]')}>
               {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
               {session?.pending.map((request) => <AssistantRequestCard key={request.id} request={request} />)}
             </div>

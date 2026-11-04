@@ -13,6 +13,7 @@ import { RequestRows, RequestSection } from '@/components/ui/request-section'
 import { api } from '@/lib/api'
 import type { AssistantConfirmation } from '@/lib/assistant-types'
 import { message } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { useSecondsUntil } from '@/lib/hooks'
 import type { SessionRequest } from '@/lib/session-types'
 import { AcpRequestCard } from '@/routes/run/session-requests'
@@ -94,18 +95,22 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
       meta={<>expires <RelativeTime at={confirmation.expires_at} /></>}
       timeBar={remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
       footer={(
-        <RequestFooter>
+        // The dock scrolls the whole card: its actions come after every row they approve.
+        <RequestFooter className="static">
           <RequestActions>
             <RequestAction label={busy === 'decline' ? 'Declining…' : 'Decline'} disabled={busy !== null} onClick={() => decide(false)} />
             <RequestAction label={busy === 'approve' ? 'Approving…' : 'Approve'} variant="primary" disabled={busy !== null} onClick={() => decide(true)} />
           </RequestActions>
           {rule && (
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
-              {rule.suggested && <p className="text-ui-xs text-muted">You approved this kind three times in a row.</p>}
+              <p className="text-ui-xs text-muted">
+                {rule.suggested ? 'You approved this kind three times in a row. Or save a rule:' : 'Or save a rule:'}
+              </p>
               <Button
                 size="md"
-                variant={rule.suggested ? 'confirm' : 'secondary'}
-                className="h-auto min-h-8 justify-start py-1.5 text-left whitespace-normal coarse:h-auto coarse:min-h-11"
+                variant="secondary"
+                className={cn('h-auto min-h-8 w-full min-w-0 justify-start py-1.5 text-left whitespace-normal coarse:h-auto coarse:min-h-11',
+                  rule.suggested && 'border-l-2 border-l-accent bg-accent-soft')}
                 disabled={busy !== null}
                 onClick={() => void run('always', () => api.assistantApproveAlways(confirmation.id).then(() => useStore.getState().noteRuleSaved(), (err: unknown) => {
                   // The server may have approved the card before saving the rule failed, and the card is gone by then.
@@ -141,7 +146,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             {launch.map(([key, value]) => (
               <div key={key} className="flex min-w-0 gap-3 py-0.5">
                 <dt className="w-24 shrink-0 text-muted">{key}</dt>
-                <dd className="max-h-32 min-w-0 flex-1 overflow-y-auto break-words whitespace-pre-wrap">{value}</dd>
+                <dd className="min-w-0 flex-1 break-words whitespace-pre-wrap">{value}</dd>
               </div>
             ))}
           </dl>
@@ -153,7 +158,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             rows={params.map(([key, value]) => (
               <div key={key} className="flex min-w-0 gap-3 py-0.5 text-ui-sm">
                 <span className="w-20 shrink-0 text-muted">{key}</span>
-                <span className="max-h-24 min-w-0 flex-1 overflow-y-auto break-words whitespace-pre-wrap">{value}</span>
+                <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{value}</span>
               </div>
             ))}
           />

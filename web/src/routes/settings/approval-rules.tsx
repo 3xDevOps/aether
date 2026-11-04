@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Callout } from '@/components/ui/callout'
+import { Badge } from '@/components/ui/badge'
 import { RelativeTime } from '@/components/ui/relative-time'
 import type { Api } from '@/lib/api'
 import type { AssistantRule } from '@/lib/assistant-types'
@@ -47,6 +47,7 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
 
   return (
     <SettingsSection title="Approval rules" id="approval-rules" scope="Your account">
+      <p className="px-4 py-3 text-ui-sm text-muted">Each rule lets one kind of action run without a card, from any of your conversations. Rules apply with auto-approval off; turning it on passes every covered action.</p>
       {rules === null && !error && <SettingRow label="Reading your rules…" />}
       {rules?.length === 0 && (
         <SettingRow label="No rules yet" help="Approve a card with Always approve to let the assistant do that kind of action without asking." />
@@ -54,9 +55,10 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
       {rules?.map((rule) => (
         <SettingRow
           key={rule.id}
-          label={rule.wording}
+          label={rule.inactive ? <span className="text-muted">{rule.wording} <Badge>Inactive</Badge></span> : rule.wording}
           help={(
             <>
+              {rule.inactive && <p>Inactive: {rule.inactive}</p>}
               <p className="break-words">From: {rule.summary}</p>
               <p>
                 Created <RelativeTime at={rule.created_at} />
@@ -70,12 +72,10 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
               {revoking === rule.id ? 'Revoking…' : 'Revoke'}
             </Button>
           )}
-        >
-          {rule.inactive && <Callout tone="needs-you" role="status">Inactive: {rule.inactive}</Callout>}
-        </SettingRow>
+        />
       ))}
       {error && (
-        <SettingRow label="Approval rules" help={<span role="alert" className="text-state-failed">{error}</span>}>
+        <SettingRow label="Couldn’t read your rules" help={<span role="alert" className="text-state-failed">{error}</span>}>
           {rules === null && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
         </SettingRow>
       )}

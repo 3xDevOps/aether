@@ -39,10 +39,13 @@ export function ApprovalChoice() {
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col items-start gap-1">
-          <Button size="sm" variant="primary" disabled={sending !== null} onClick={() => choose('ask')}>
-            {sending === 'ask' ? 'Saving…' : 'Ask before acting'}
-          </Button>
-          <p className="text-ui-sm text-muted">It shows a card before it launches, messages or stops a session, or saves your environment. Rules you save with Always approve still skip their card. Recommended.</p>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="primary" disabled={sending !== null} onClick={() => choose('ask')}>
+              {sending === 'ask' ? 'Saving…' : 'Ask before acting'}
+            </Button>
+            <span className="text-ui-sm text-muted">Recommended</span>
+          </div>
+          <p className="text-ui-sm text-muted">It shows a card before it launches, messages or stops a session, or saves your environment. You can still let one kind of action skip its card from the card itself.</p>
         </div>
         <div className="flex flex-col items-start gap-1">
           <Button size="sm" variant="secondary" disabled={sending !== null} onClick={() => choose('act')}>
@@ -50,6 +53,7 @@ export function ApprovalChoice() {
           </Button>
           <p className="text-ui-sm text-muted">{autoApproveWarning} Messaging or stopping another member’s session still asks.</p>
         </div>
+        <p className="text-ui-sm text-muted">Until you choose, it asks before acting. Change this in Settings → Assistant.</p>
         {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
       </div>
     </Callout>
@@ -64,7 +68,7 @@ export function AutoApproveConfirm() {
   return (
     <Confirm
       title="Let the assistant act without asking?"
-      description={autoApproveWarning}
+      description={`This card is approved. ${autoApproveWarning} Messaging or stopping another member’s session still asks.`}
       action="Turn on"
       pending="Turning on…"
       onConfirm={() => {
