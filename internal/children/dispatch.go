@@ -153,8 +153,8 @@ const maxNoticeSummary = 3000
 // settle ends the attached children of ended parents and tells a parent
 // once when a child ended without a final report. A parent a person closed
 // takes its children with it: finished ones are closed as it was, live ones
-// are stopped and closed. A parent that ended otherwise detaches children
-// that already reported and stops the rest.
+// are stopped and closed. A parent that ended otherwise keeps children that
+// already reported, to close with it, and stops the rest.
 func (s *Service) settle(ctx context.Context) error {
 	list, err := s.cfg.Store.ChildrenToSettle(ctx)
 	if err != nil {
@@ -209,17 +209,14 @@ func (s *Service) settle(ctx context.Context) error {
 			continue
 		}
 		if !c.Detached && parentEnded && (c.State == domain.ChildQueued || childLive) {
-			// A child that already delivered its result keeps it for review
-			// instead of being stopped with its parent.
+			// A child that already delivered its result stays with its
+			// parent, whose state is what a person sees, and closes with it;
+			// one whose parent was deleted has nothing to close with.
 			reported, err := s.cfg.Store.ChildReported(ctx, c.RunID)
 			if err != nil {
 				return err
 			}
-			if childLive && (reported || finished(child)) {
-				if err := s.cfg.Store.DetachChild(ctx, c.RunID); err != nil {
-					return err
-				}
-				s.publish(ctx, c.RunID, "")
+			if childLive && !gone && (reported || finished(child)) {
 				continue
 			}
 			if stopErr := s.stop(ctx, c); stopErr != nil {

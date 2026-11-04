@@ -989,7 +989,7 @@ func TestASubsessionOutcomeIsNeverPushed(t *testing.T) {
 	for {
 		select {
 		case got := <-heard.heard:
-			if strings.HasPrefix(got, string(child.ID)+" needs \"") {
+			if strings.HasPrefix(got, string(child.ID)+" ") && got != string(child.ID)+" needs nothing" {
 				t.Fatalf("the sink heard the subsession's outcome: %s", got)
 			}
 		default:

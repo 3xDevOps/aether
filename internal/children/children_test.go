@@ -594,7 +594,9 @@ func TestRefusalNoticeComesFromTheParent(t *testing.T) {
 	}
 }
 
-func TestFinishedChildrenOutliveTheirParent(t *testing.T) {
+// A subsession that already reported stays with its ended parent, whose
+// state is what a person sees, and its outcome stays for the parent only.
+func TestFinishedChildrenStayWithTheirEndedParent(t *testing.T) {
 	h := newHarness(t)
 	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
 	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
@@ -611,8 +613,8 @@ func TestFinishedChildrenOutliveTheirParent(t *testing.T) {
 	h.settle()
 	kept, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID))
 	stopped, _ := h.db.GetRun(h.ctx, domain.RunID(busy.RunID))
-	if kept.Status.Terminal() || !kept.Detached || !stopped.Status.Terminal() {
-		t.Fatalf("finished subsession %s detached=%v, busy subsession %s; want the finished one kept for review and the busy one stopped",
+	if kept.Status.Terminal() || kept.Detached || !kept.OutcomeHeld() || !stopped.Status.Terminal() {
+		t.Fatalf("finished subsession %s detached=%v, busy subsession %s; want the finished one kept under its parent and the busy one stopped",
 			kept.Status, kept.Detached, stopped.Status)
 	}
 }
