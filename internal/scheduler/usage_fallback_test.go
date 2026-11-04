@@ -76,6 +76,9 @@ func newFallbackEnv(t *testing.T, mutate func(*Config)) (*shareEnv, *acpRuntime,
 	rt := newACPRuntime(t)
 	e := newShareEnv(t, func(cfg *Config) {
 		cfg.Runtime = rt
+		// The updater creates its container from a goroutine of its own,
+		// which would land among the creates these tests count or time.
+		cfg.HarnessUpdateDisabled = true
 		mutate(cfg)
 	})
 	rt.images = e.rt.images
