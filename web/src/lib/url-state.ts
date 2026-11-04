@@ -143,10 +143,33 @@ export function redirectRoute(store: { setState: (state: { route: Route }) => vo
   store.setState({ route })
 }
 
+interface EntryState {
+  /** How many entries the dashboard pushed in this tab below this one. */
+  depth?: number
+  /** The depth of the entry that opened the session this entry shows; later entries of the same session carry it on. */
+  entered?: number
+}
+
+const entryState = (): EntryState => (window.history.state as EntryState | null) ?? {}
+
 /** How many entries the dashboard pushed in this tab below the current one, so back stays in the app while it is above 0. */
 export function historyDepth(): number {
-  const depth = (window.history.state as { depth?: unknown } | null)?.depth
+  const { depth } = entryState()
   return typeof depth === 'number' ? depth : 0
+}
+
+/** The depth at which the session on screen was opened, absent when a link or reload opened it with nothing of the app below. */
+export function sessionEntry(): number | undefined {
+  const { entered } = entryState()
+  return typeof entered === 'number' && entered > 0 ? entered : undefined
+}
+
+/** The state for an entry pushed above the current one, showing `route` after `previous`. */
+export function pushedEntry(route: Route, previous: Route): EntryState {
+  const depth = historyDepth() + 1
+  if (route.name !== 'run') return { depth }
+  const same = previous.name === 'run' && previous.params.runId === route.params.runId
+  return { depth, entered: same ? sessionEntry() ?? depth : depth }
 }
 
 interface RouteStore {
@@ -159,15 +182,15 @@ interface RouteStore {
  * history entry, and back or forward navigates to the entry's route.
  */
 export function bindRouteToUrl(store: RouteStore): () => void {
-  const sync = (route: Route, push: boolean) => {
+  const sync = (route: Route, previous?: Route) => {
     const next = hrefFor(window.location.href, route)
     if (next === window.location.href) return
-    if (push) window.history.pushState({ depth: historyDepth() + 1 }, '', next)
+    if (previous) window.history.pushState(pushedEntry(route, previous), '', next)
     else window.history.replaceState(window.history.state, '', next)
   }
-  sync(store.getState().route, false)
+  sync(store.getState().route)
   const stop = store.subscribe((state, previous) => {
-    if (state.route !== previous.route) sync(state.route, true)
+    if (state.route !== previous.route) sync(state.route, previous.route)
   })
   const pop = () => {
     const route = routeFromQuery(new URLSearchParams(window.location.search))

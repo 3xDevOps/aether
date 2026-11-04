@@ -2,6 +2,7 @@ import { ArrowLeft, CircleAlert } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
+import { useIsMobile } from '@/lib/breakpoints'
 import { useDelayed } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { useStore } from '@/store'
@@ -12,6 +13,8 @@ export function MissingRun() {
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
   const navigate = useStore((s) => s.navigate)
+  // A phone opens a session over its tab bar, so a session that is still loading needs its own way out.
+  const mobile = useIsMobile()
   useKeybindings('run', { 'leave-run': () => navigate('board') })
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable)
@@ -61,6 +64,12 @@ export function MissingRun() {
           <Spinner className="size-4" />
           <p className="text-ui leading-5 text-muted">Loading session details…</p>
         </div>
+        {mobile && (
+          <Button variant="secondary" size="sm" className="mt-2" onClick={() => navigate('sessions')}>
+            <ArrowLeft className="size-3.5" aria-hidden />
+            Back to sessions
+          </Button>
+        )}
         <div className="mt-2 grid gap-1">
           <div className="h-7"><Skeleton className="size-full" /></div>
           <div className="h-7"><Skeleton className="size-full" /></div>

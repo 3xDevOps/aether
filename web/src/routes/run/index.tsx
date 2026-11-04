@@ -26,7 +26,7 @@ import { CompletionPrompt } from '@/routes/run/completion-prompt'
 import { RunDetails } from '@/routes/run/details'
 import { RunHeader, type RunNavigation } from '@/routes/run/header'
 import { MultiplayerControls, useSharedPresence } from '@/routes/run/multiplayer-controls'
-import { useTerminalTyping } from '@/routes/run/phone-header'
+import { useKeyboardFold } from '@/routes/run/phone-header'
 import { dockedRequestID } from '@/routes/run/request-dock'
 import { useRunRoom } from '@/routes/run/room'
 import { SessionView } from '@/routes/run/session-view'
@@ -82,7 +82,6 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const workflowPreference = useStore((s) => s.workflowOpen)
   const setWorkflowPreference = useStore((s) => s.setWorkflowOpen)
   const [overlayWorkflow, setOverlayWorkflow] = useState(false)
-  const [composing, setComposing] = useState(false)
   const [dialog, setDialog] = useState<'captures' | 'events' | null>(null)
   const returnTo = useRef<HTMLElement | null>(null)
   const [noteFocus, setNoteFocus] = useState(0)
@@ -114,7 +113,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const shells = useRunShells(run.id, view === 'terminal')
   const room = useRunRoom(run, agent.roomControl)
   const shared = useSharedPresence(run, agent)
-  const terminalTyping = useTerminalTyping()
+  const keyboard = useKeyboardFold()
 
   const agentID = defaultView(run) === 'session' ? params.agent : undefined
   const agentOpener = useRef<HTMLElement | null>(null)
@@ -259,7 +258,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           views={views}
           agent={agent}
           nav={nav}
-          composing={mobile && (composing || terminalTyping)}
+          keyboard={mobile && keyboard}
           detailsOpen={detailsOpen}
           onDetails={(opener) => {
             returnTo.current = opener
@@ -284,7 +283,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
             />
           )}
         />
-        {run.mode === 'acp' && view !== 'browser' && view !== 'files' && (!mobile || (shared && !composing && !terminalTyping)) && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
+        {run.mode === 'acp' && view !== 'browser' && view !== 'files' && (!mobile || (shared && !keyboard)) && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div ref={frameRef} className="flex min-h-0 flex-1">
           <div className="relative min-h-0 min-w-0 flex-1">
             {visited.has('session') && (
@@ -299,7 +298,6 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
                   textarea={textarea}
                   focusComposer={composeRequested}
                   onComposing={(focused) => {
-                    setComposing(focused)
                     if (focused) setComposeRequested(false)
                   }}
                   shells={shells}

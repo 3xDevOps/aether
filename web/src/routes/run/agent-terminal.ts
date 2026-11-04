@@ -183,22 +183,32 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
   const holderConnected = useStore((s) => s.roomStatus[run.id]?.controller?.connected !== false)
   const free = run.member_id === self.id && holder === undefined
   const implicit = !agent.localControl && free && agent.steerable && !agent.controlUnavailable
-  const queued = useRef<(() => void) | null>(null)
+  const queued = useRef<{ act: () => void; lost?: () => void } | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     if (!agent.localControl || !queued.current) return
-    const act = queued.current
+    const { act } = queued.current
     queued.current = null
     clearTimeout(timer.current)
     act()
   }, [agent.localControl])
-  useEffect(() => () => clearTimeout(timer.current), [])
-  const withControl = (act: () => void) => {
-    if (agent.localControl) return act()
-    if (!implicit) return
-    queued.current = act
+  const drop = () => {
+    const dropped = queued.current
+    queued.current = null
+    dropped?.lost?.()
+  }
+  useEffect(() => () => {
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => { queued.current = null }, implicitControlWindowMs)
+    drop()
+  }, [])
+  /** Runs `act` once this tab holds control, taking free control first; `lost` hears that it never will. */
+  const withControl = (act: () => void, lost?: () => void) => {
+    if (agent.localControl) return act()
+    if (!implicit) return lost?.()
+    drop()
+    queued.current = { act, lost }
+    clearTimeout(timer.current)
+    timer.current = setTimeout(drop, implicitControlWindowMs)
     agent.session.takeControl()
   }
   const canAct = agent.localControl || implicit

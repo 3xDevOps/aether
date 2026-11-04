@@ -13,6 +13,10 @@ test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 const overflowX = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
+/** Folded, the tabs stay mounted for their panels' labels inside a 1px visually hidden row. */
+const tabRowHeight = (page: Page) =>
+  page.getByRole('tablist', { name: 'Session views' }).locator('..').evaluate((row) => row.getBoundingClientRect().height)
+
 test('an Enhanced session opens on Chat and takes a message from the pinned composer', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -46,7 +50,7 @@ test('an Enhanced session opens on Chat and takes a message from the pinned comp
   const restore = await shrinkToKeyboardHeight(page)
   const box = page.getByRole('combobox', { name: 'Message the agent' })
   await box.tap()
-  await expect(views).toBeHidden()
+  await expect.poll(() => tabRowHeight(page)).toBeLessThanOrEqual(1)
   await expect(page.getByRole('heading', { name: 'demo', exact: true })).toBeInViewport()
   await expect(box).toBeInViewport({ ratio: 1 })
   await box.fill('hello from the phone')
@@ -113,4 +117,52 @@ test('a Standard session opens on Terminal', async ({ page, aether }) => {
   // A link has no page behind it in the app, so Back lands on the session list.
   await page.getByRole('button', { name: 'Back' }).tap()
   await expect(page.getByRole('main').getByRole('region', { name: 'Sessions' })).toBeVisible()
+})
+
+test('Back leaves a session in one step, a reopened one lands on Chat, and the tabs return with the keyboard down', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 360, height: 800 })
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+  await aether.installACPMock(alice, await memberID(alice))
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  await alice.api.rpc('run.launch', { workspace_id: workspaces[0].id, harness: 'mock', mode: 'acp', task: 'demo' })
+  const sessions = page.getByRole('main').getByRole('region', { name: 'Sessions' })
+  const views = page.getByRole('tablist', { name: 'Session views' })
+  const log = page.getByRole('log', { name: 'Chat' })
+
+  await page.goto(alice.url)
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).tap()
+  await sessions.getByRole('button', { name: /demo/ }).tap()
+  await expect(log.getByText('pong').first()).toBeVisible({ timeout: 180_000 })
+  await views.getByRole('tab', { name: 'Terminal' }).tap()
+  await views.getByRole('tab', { name: /^Changes/ }).tap()
+  await views.getByRole('tab', { name: 'Chat' }).tap()
+
+  const box = page.getByRole('combobox', { name: 'Message the agent' })
+  await box.fill('subagents')
+  await page.getByRole('button', { name: 'Send', exact: true }).tap()
+  await expect(log.getByText('All three subagents finished.')).toBeVisible({ timeout: 30_000 })
+  await log.getByRole('button', { name: /^Delegated 3 tasks/ }).tap()
+  await log.getByRole('button', { name: 'Map the billing module, Explore, Done' }).tap()
+  const inspector = page.getByRole('dialog', { name: 'Subagent' })
+  await inspector.getByRole('button', { name: 'Close subagent' }).tap()
+  await expect(inspector).toBeHidden()
+
+  await page.getByRole('button', { name: 'Back' }).tap()
+  await expect(sessions).toBeVisible()
+
+  await sessions.getByRole('button', { name: /demo/ }).tap()
+  await views.getByRole('tab', { name: 'Terminal' }).tap()
+  await page.getByRole('button', { name: 'Back' }).tap()
+  await sessions.getByRole('button', { name: /demo/ }).tap()
+  await expect(views.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true')
+
+  // Android's Back and iOS's Done drop the keyboard without a blur.
+  const restore = await shrinkToKeyboardHeight(page)
+  await box.tap()
+  await expect.poll(() => tabRowHeight(page)).toBeLessThanOrEqual(1)
+  await restore()
+  await expect(box).toBeFocused()
+  await expect.poll(() => tabRowHeight(page)).toBeGreaterThanOrEqual(44)
 })

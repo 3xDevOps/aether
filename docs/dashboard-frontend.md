@@ -600,37 +600,54 @@ mode), the header's primary action when there is one, and **More**. Under it
 the tabs **Chat**, **Terminal** and **Changes** fill a 44px row; a Standard
 session orders them **Terminal**, **Chat**, **Changes**. **Changes** carries
 the muted `+N −M` of the latest snapshot, unless it was truncated, and drops
-it below 400px while a fourth tab shows. A phone header carries no pull
-request: the Changes tab's git card shows it. **More** opens with a **Views** group
-(Trace, Files, Browser, **Session details**, **Workflow**, **Search…**,
-**Assistant**), then the session's commands, Captures and Raw events; a view
-opened from there joins the tabs while it shows. Close, Stop and Delete in **More**
-are the same commands, with the same confirmations, as on desktop.
+it below 400px while a fourth tab shows. The header carries no pull request;
+the Changes tab's git card shows it.
+
+**More** opens with a **Views** group (Trace, Files, Browser, **Session
+details**, **Workflow**, **Search…**, **Assistant**), then the session's
+commands, Captures and Raw events. A view opened from there joins the tabs
+while it shows. The views stay reachable while a command runs. Close, Stop
+and Delete are the same commands, with the same confirmations, as on
+desktop.
 
 Without a `view` in the address a phone lands on `defaultView`, never on the
 view this tab last showed: Chat for an Enhanced session, Terminal for a
 Standard one. A link that names a view still opens it. A tab switch replaces
-the history entry instead of pushing one, so **Back** leaves the session. It
-steps back past every entry pushed since the session opened, a subagent's
-included, when the dashboard pushed the entry below (`historyDepth` in
-`src/lib/url-state.ts`, which a notification's entry counts too), and opens
-Sessions when the session was opened by a link.
+the history entry instead of pushing one. Each history entry records its
+depth, and an entry of a session records the depth at which that session
+was opened, carried across the session's own entries, a subagent's included
+(`pushedEntry` and `sessionEntry` in `src/lib/url-state.ts`; a
+notification's entry records them too). **Back** steps back to the entry
+below that one, so it leaves the session in one step. A session opened by a
+link or a reload has no app page below it, and **Back** replaces it with
+Sessions.
 
-While the keyboard is up (the composer has focus, or the terminal's input on
-a touch screen while the visible viewport is a keyboard shorter,
-`useKeyboardUp` in `src/lib/keyboard-inset.ts`), the header shrinks to one 44px row with the title, the
-status dot and, from 400px wide, the state's name, and the tabs, the wait line, the lineage line and the
-[multiplayer strip](#multiplayer-controls) leave. On a phone the strip shows
-only while someone else watches, another member or another of your tabs
-holds control, the session is not yours, or control, presence or the stream
-failed (`useSharedPresence`). Only the owner takes free control implicitly
-by sending; Details lists the people. A hidden tab bar removes `--phone-tabs-height`, so
-toasts fall back to the bottom safe area. The Chat
-composer is the desktop `ComposerBox`, padded by `--keyboard-inset`
-(`src/lib/keyboard-inset.ts`) so it sits above an iOS keyboard as well.
-While a request is open, the request card holds the one filled button: its
-answers fill the card's width, and on Chat the header's action and the
-composer's **Interrupt** are outlined.
+While the soft keyboard is up, the header folds to one 44px row: the title,
+the status dot and, from 400px wide, the state's name. The tabs (kept
+mounted but visually hidden, since each view's panel is labelled by its
+tab), the wait line, the lineage line and the
+[multiplayer strip](#multiplayer-controls) leave. The keyboard counts as up
+on a touch screen while a text field, the composer or the terminal's input,
+has focus and the visible viewport is more than 150px shorter than the
+tallest it has been at that width (`useKeyboardUp` in
+`src/lib/keyboard-inset.ts`, which the tab bar uses too). Android's Back and
+iOS's Done close the keyboard without a blur, so focus alone is not enough.
+
+On a phone the strip shows only while someone else watches, another member
+or another of your tabs holds control, the session is not yours, or control,
+presence or the stream failed (`useSharedPresence`). Only the owner takes
+free control implicitly, by sending a message or changing a model, mode or
+effort option; an option change that does not get control within 10 seconds
+says so at the composer. Details lists the people. A hidden tab bar removes
+`--phone-tabs-height`, so toasts fall back to the bottom safe area.
+
+The Chat composer is the desktop `ComposerBox`. It pads by
+`--keyboard-inset` (`src/lib/keyboard-inset.ts`) less the bottom safe area
+that `main` already pads, so it sits on an iOS keyboard. While a request is
+open, the request card holds the one filled button: its answers fill the
+card's width, and on Chat the header's action and the composer's
+**Interrupt** are outlined. A session that is still loading on a phone shows
+**Back to sessions**.
 
 ### Assistant panel
 

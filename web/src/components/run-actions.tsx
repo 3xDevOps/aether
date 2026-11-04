@@ -109,13 +109,14 @@ export function RunActions({ run, views = [], extra = [], compact = false }: {
       <Menu
         open={menuOpen}
         onOpenChange={(open) => {
-          if (open && inFlight.current) return
+          // Views stay reachable while a command runs; the commands themselves are disabled.
+          if (open && inFlight.current && views.length === 0) return
           setMenuOpen(open)
         }}
       >
         <MenuTrigger asChild>
           {compact ? (
-            <Button ref={trigger} variant="ghost" size="icon" label="More" aria-disabled={running !== null || undefined}>
+            <Button ref={trigger} variant="ghost" size="icon" label="More" aria-disabled={(running !== null && views.length === 0) || undefined}>
               {running !== null ? <LoaderCircle className="animate-spin motion-reduce:animate-none" /> : <Ellipsis />}
             </Button>
           ) : (

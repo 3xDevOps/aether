@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAssistantAvailable } from '@/components/assistant/button'
@@ -12,7 +11,7 @@ import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { useKeyboardUp } from '@/lib/keyboard-inset'
 import { cn } from '@/lib/utils'
 import { runLabel, stateName, toneOf } from '@/lib/status'
-import { historyDepth } from '@/lib/url-state'
+import { historyDepth, redirectRoute, sessionEntry } from '@/lib/url-state'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { RunNavigation } from '@/routes/run/header'
 import { defaultView, runViewLabel, type RunView } from '@/routes/run/views'
@@ -33,16 +32,18 @@ const viewIcon: Record<OverflowView, React.ComponentType<{ className?: string }>
   browser: Globe,
 }
 
-/** The terminal's own input has focus on a touch screen with the keyboard up. */
-export function useTerminalTyping(): boolean {
+/** A text field, the composer or the terminal's input, has focus on a touch screen with the keyboard up. */
+export function useKeyboardFold(): boolean {
   const coarse = useMediaQuery(coarsePointer)
-  return useKeyboardUp('.xterm-helper-textarea') && coarse
+  return useKeyboardUp('textarea') && coarse
 }
 
-/** Steps back past every entry this session pushed, such as a subagent's, to the page it was opened from. */
-function leave(entered: number) {
-  if (entered > 0) window.history.go(entered - 1 - historyDepth())
-  else useStore.getState().navigate('sessions')
+/** Steps back past every entry this session pushed, a subagent's included, to the page it was opened from. */
+function leave() {
+  const entered = sessionEntry()
+  const steps = entered === undefined ? 0 : entered - 1 - historyDepth()
+  if (steps < 0) window.history.go(steps)
+  else redirectRoute(useStore, { name: 'sessions', params: {} })
 }
 
 export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, primary, detailsOpen, onDetails, onWorkflow, extra }: {
@@ -55,11 +56,10 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   primary: { label: string; act: () => void } | null
   detailsOpen: boolean
   onDetails: (opener: HTMLElement | null) => void
-  onWorkflow?: (opener: HTMLElement | null) => void
+  onWorkflow: (opener: HTMLElement | null) => void
   extra: ExtraItem[]
 }) {
   const shown = useRunPresentation(run)
-  const [entered] = useState(historyDepth)
   const assistant = useAssistantAvailable()
   // Chat shows an open request's own card, whose answer is the screen's one filled button.
   const asking = useStore((s) => (s.acpSessions[run.id]?.pending.length ?? 0) > 0)
@@ -74,7 +74,7 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
     .map((item) => ({ id: `view-${item}`, label: runViewLabel[item], Icon: viewIcon[item], onSelect: () => nav.go(item) }))
   const panels: ExtraItem[] = [
     { id: 'details', label: detailsOpen ? 'Hide details' : 'Session details', Icon: PanelRight, onSelect: onDetails },
-    ...(onWorkflow ? [{ id: 'workflow', label: 'Workflow', Icon: Network, onSelect: onWorkflow }] : []),
+    { id: 'workflow', label: 'Workflow', Icon: Network, onSelect: onWorkflow },
     { id: 'search', label: 'Search…', Icon: Search, onSelect: () => useStore.getState().togglePalette(true) },
     ...(assistant ? [{ id: 'assistant', label: 'Assistant', Icon: Sparkles, onSelect: () => useStore.getState().setAssistantOpen(true) }] : []),
   ]
@@ -83,7 +83,7 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
   return (
     <>
       <header data-slot="pane-header" className={keyboard ? 'flex h-11 shrink-0 items-center gap-1 border-b border-seam px-1' : 'flex h-12 shrink-0 items-center gap-1 px-1'}>
-        <Button variant="ghost" size="icon" label="Back" onClick={() => leave(entered)}>
+        <Button variant="ghost" size="icon" label="Back" onClick={leave}>
           <ChevronLeft />
         </Button>
         <div className={keyboard ? 'flex min-w-0 flex-1 items-center gap-2' : 'flex min-w-0 flex-1 flex-col'}>
@@ -95,27 +95,26 @@ export function PhoneRunHeader({ run, view, views, nav, agentName, keyboard, pri
             <StatusDot tone={toneOf(shown)} pulse={shown.state === 'working'} />
             <span className={keyboard ? 'whitespace-nowrap max-[399px]:sr-only' : 'min-w-0 truncate'}>
               <span role="status">{state}</span>
-              {!keyboard && <span aria-hidden> · {agentName} · {modeLabel[run.mode] ?? run.mode}</span>}
+              {!keyboard && <span> · {agentName} · {modeLabel[run.mode] ?? run.mode}</span>}
             </span>
           </p>
         </div>
         {primary && !keyboard && <Button size="sm" variant={asking && view === 'session' ? 'secondary' : 'primary'} onClick={primary.act}>{primary.label}</Button>}
         <RunActions run={run} compact views={[...elsewhere, ...panels]} extra={extra} />
       </header>
-      {!keyboard && (
-        <div className="flex h-11 shrink-0 items-stretch border-b border-seam">
-          <TabsList aria-label="Session views" className="h-11 min-w-0 flex-1 gap-0 coarse:h-11">
-            {tabs.map((item) => (
-              <TabsTrigger key={item} value={item} className="min-w-0 flex-1 justify-center px-2">
-                {runViewLabel[item]}
-                {item === 'changes' && totals && (totals.additions > 0 || totals.deletions > 0) && (
-                  <span aria-hidden className={cn('text-ui-sm font-normal text-muted tabular-nums', tabs.length > 3 && 'max-[399px]:hidden')}>+{totals.additions} −{totals.deletions}</span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-      )}
+      {/* Folded, the tabs stay mounted out of sight: each view's panel is labelled by its tab. */}
+      <div className={keyboard ? 'sr-only' : 'flex h-11 shrink-0 items-stretch border-b border-seam'}>
+        <TabsList aria-label="Session views" className="h-11 min-w-0 flex-1 gap-0 coarse:h-11">
+          {tabs.map((item) => (
+            <TabsTrigger key={item} value={item} className="min-w-0 flex-1 justify-center px-2">
+              {runViewLabel[item]}
+              {item === 'changes' && totals && (totals.additions > 0 || totals.deletions > 0) && (
+                <span aria-hidden className={cn('text-ui-sm font-normal text-muted tabular-nums', tabs.length > 3 && 'max-[399px]:hidden')}>+{totals.additions} −{totals.deletions}</span>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
       <ConnectionLine className="border-b border-seam px-4 py-1" />
     </>
   )

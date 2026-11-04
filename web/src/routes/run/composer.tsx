@@ -47,7 +47,7 @@ interface ComposerProps {
 
 function ComposerFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="shrink-0 bg-canvas pb-[var(--keyboard-inset,0px)]">
+    <div className="shrink-0 bg-canvas pb-[max(0px,calc(var(--keyboard-inset,0px)-env(safe-area-inset-bottom)))]">
       <div className={cn(sessionColumn, 'flex flex-col gap-2 pb-4')}>{children}</div>
     </div>
   )
@@ -94,6 +94,8 @@ function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock
     </ComposerFrame>
   )
 }
+
+const optionUnsent = 'This tab did not get control of the session, so the option was not changed.'
 
 const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'primary' | 'danger' }> = {
   send: { label: 'Send', Icon: ArrowUp, variant: 'primary' },
@@ -499,14 +501,12 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     }
   }
 
-  const setOption = (option: ConfigOption, value: string): Promise<void> => {
-    let set = Promise.resolve()
+  const setOption = (option: ConfigOption, value: string) => new Promise<void>((resolve) => {
     control.withControl(() => {
       const lease = sessionLease(useStore, run.id)
-      if (lease) set = attempt(() => api.runACPSetOption(run.id, option.id, value, lease)).then(() => {})
-    })
-    return set
-  }
+      void attempt(() => lease ? api.runACPSetOption(run.id, option.id, value, lease) : Promise.reject(new Error(optionUnsent))).then(resolve)
+    }, () => void attempt(() => Promise.reject(new Error(optionUnsent))).then(resolve))
+  })
 
   if (gate) {
     return (

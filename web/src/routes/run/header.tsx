@@ -259,7 +259,7 @@ export function RunHeader({
   views,
   agent,
   nav,
-  composing,
+  keyboard,
   detailsOpen,
   onDetails,
   onCaptures,
@@ -275,12 +275,13 @@ export function RunHeader({
   /** The Workflow chip, which sits beside the view switch. */
   workflow?: React.ReactNode
   /** Opens the workflow, which a phone lists under the session's actions instead of the chip. */
-  onWorkflow?: (returnTo: HTMLElement | null) => void
+  onWorkflow: (returnTo: HTMLElement | null) => void
   view: RunView
   views: RunView[]
   agent: AgentTerminal
   nav: RunNavigation
-  composing: boolean
+  /** The phone's soft keyboard is up, so the header folds to one row. */
+  keyboard: boolean
   detailsOpen: boolean
   onDetails: (returnTo: HTMLElement | null) => void
   onCaptures: (returnTo: HTMLElement | null) => void
@@ -319,15 +320,15 @@ export function RunHeader({
           views={views}
           nav={nav}
           agentName={agentName}
-          keyboard={composing}
+          keyboard={keyboard}
           primary={primary}
           detailsOpen={detailsOpen}
           onDetails={onDetails}
           onWorkflow={onWorkflow}
           extra={extra}
         />
-        {!composing && <WaitLine run={run} />}
-        {!composing && <RunLineage run={run} />}
+        {!keyboard && <WaitLine run={run} />}
+        {!keyboard && <RunLineage run={run} />}
         <RunRetention run={run} className="border-b border-seam px-4 py-2" />
         {dialogs}
       </>
