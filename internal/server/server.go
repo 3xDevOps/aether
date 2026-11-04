@@ -697,6 +697,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.startServices(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
+	if err := s.assistant.Resume(ctx); err != nil {
+		return errors.Join(err, s.Close())
+	}
 	if s.egress != nil {
 		// Not fatal: only egress-limited runs need the proxy, and the next
 		// launch of one tries again.

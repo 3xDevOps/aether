@@ -66,7 +66,7 @@ export type SessionRow =
       authorID?: string
       reply?: { authorID: string; body: string }
     }
-  | { kind: 'event'; id: string; at: string; text: string; detail?: string; tone?: Tone; report?: true }
+  | { kind: 'event'; id: string; at: string; text: string; detail?: string; tone?: Tone; report?: true; full?: true }
   | { kind: 'finished'; id: string; at: string; text: string; tone: Tone }
   | { kind: 'agent-message'; id: string; at: string; messageID: string }
 

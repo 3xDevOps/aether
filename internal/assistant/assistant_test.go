@@ -25,6 +25,7 @@ type memStore struct {
 	// settingsReads counts AssistantSettings calls.
 	settingsReads int
 	rules         []store.AssistantRule
+	cards         []store.AssistantCard
 }
 
 func newMemStore() *memStore {
@@ -199,7 +200,7 @@ func TestPromptKeyIsSharedByDuplicates(t *testing.T) {
 	m.op.Lock()
 	results := make(chan error, 2)
 	for range 2 {
-		go func() { results <- s.Prompt(t.Context(), "m1", "hi", "k", nil) }()
+		go func() { results <- s.Prompt(t.Context(), "m1", "hi", "k", nil, Door("")) }()
 	}
 	time.Sleep(50 * time.Millisecond)
 	m.op.Unlock()
@@ -225,10 +226,10 @@ func TestPersistedPromptKeyIsIgnoredAfterRestart(t *testing.T) {
 	}
 	s := New(Config{Store: db})
 	s.cancel()
-	if err := s.Prompt(t.Context(), "m1", "hi", "k", nil); err != nil {
+	if err := s.Prompt(t.Context(), "m1", "hi", "k", nil, Door("")); err != nil {
 		t.Fatalf("a key accepted before the restart ran again: %v", err)
 	}
-	if err := s.Prompt(t.Context(), "m1", "hi", "other", nil); !errors.Is(err, ErrClosed) {
+	if err := s.Prompt(t.Context(), "m1", "hi", "other", nil, Door("")); !errors.Is(err, ErrClosed) {
 		t.Fatalf("a new key = %v, want it to run", err)
 	}
 }

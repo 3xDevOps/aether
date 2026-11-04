@@ -274,7 +274,7 @@ function Row({ row, open, ctx }: { row: SessionRow; open: boolean; ctx: RowConte
         />
       )
     case 'event':
-      return <EventRow tone={row.tone} detail={row.detail && <span className="whitespace-pre-wrap"><LinkedText text={row.detail} /></span>} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
+      return <EventRow tone={row.tone} full={row.full} detail={row.detail && <span className="whitespace-pre-wrap"><LinkedText text={row.detail} /></span>} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
     case 'finished':
       return <EventRow tone={row.tone} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
     case 'agent-message':

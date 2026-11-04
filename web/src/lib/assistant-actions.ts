@@ -1,3 +1,4 @@
+import type { Tone } from '@/components/ui/status-dot'
 import type { AssistantActionRecord, AssistantConfirmation } from '@/lib/assistant-types'
 import { routeFromQuery } from '@/lib/url-state'
 import type { SessionToolCall } from '@/lib/session-types'
@@ -383,6 +384,51 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
   return fits.find((d) => d.block === newest)
 }
 
+const recordTone: Partial<Record<AssistantActionRecord['outcome'], Tone>> = {
+  approved: 'working', auto_approved: 'working', succeeded: 'done', failed: 'failed',
+}
+
+/**
+ * Keeps each unclaimed action's latest record in the place of its first,
+ * toned by its outcome: a call the server ran after its turn ended has no
+ * tool call to fold its records into, and its Done record replaces its
+ * Approved one. Cards placed after a dropped record move to the kept one.
+ */
+function latestRecords(rows: SessionRow[], records: Map<string, AssistantActionRecord>, groups: Map<string, ActionGroup[]>): SessionRow[] {
+  const latest = new Map<string, { id: string; text: string; detail?: string; tone?: Tone; failed: boolean }>()
+  const visit = (item: Step | SessionRow) => {
+    const saved = item.kind === 'event' ? records.get(item.id) : undefined
+    if (saved && item.kind === 'event') latest.set(saved.id, { id: item.id, text: item.text, detail: item.detail, tone: recordTone[saved.outcome] ?? item.tone, failed: saved.outcome === 'failed' })
+  }
+  for (const row of rows) {
+    if (row.kind === 'steps') row.steps.forEach(visit)
+    else visit(row)
+  }
+  if (latest.size === 0) return rows
+  const placed = new Map<string, string>()
+  const fold = <T extends Step | SessionRow>(item: T): T | undefined => {
+    const saved = item.kind === 'event' ? records.get(item.id) : undefined
+    if (!saved) return item
+    const kept = placed.get(saved.id)
+    if (kept !== undefined) {
+      const moved = groups.get(item.id)
+      if (moved) {
+        groups.set(kept, [...(groups.get(kept) ?? []), ...moved])
+        groups.delete(item.id)
+      }
+      return undefined
+    }
+    placed.set(saved.id, item.id)
+    const last = latest.get(saved.id)!
+    return { ...item, text: last.text, detail: last.detail, tone: last.tone, ...(last.failed ? { full: true as const } : {}) }
+  }
+  return rows.flatMap((row): SessionRow[] => {
+    if (row.kind !== 'steps') return [fold(row)].filter((r) => r !== undefined)
+    const steps = row.steps.flatMap((step) => fold(step) ?? [])
+    return steps.length ? [{ ...row, steps }] : []
+  })
+}
+
 /**
  * Pulls the assistant's Aether tool calls out of the transcript's step
  * blocks into cards, consecutive reads into one line, and folds each
@@ -495,7 +541,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     if (row.kind === 'steps') return [{ ...row, live: said }]
     return said ? [{ ...row, ...said }] : []
   })
-  return { rows: shown, groups, actions }
+  return { rows: latestRecords(shown, records, groups), groups, actions }
 }
 
 export interface ActionNames {

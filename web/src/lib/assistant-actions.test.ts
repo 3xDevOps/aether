@@ -279,3 +279,24 @@ describe('launchLine', () => {
     expect(launchLine(launched!, names)).toBe('session · api · Claude Code opus')
   })
 })
+
+describe('a call the server ran after its turn ended', () => {
+  it('shows one row that its Done record replaces, toned done', () => {
+    const when = '2026-11-03T12:00:00Z'
+    const record = (outcome: 'approved' | 'succeeded') => ({ id: 'A1', method: 'memory.add', summary: 'Remember x', target: {}, outcome, approval: 'card' as const, confirmation_id: 'c1', created_at: when })
+    const rows = [
+      { kind: 'event' as const, id: 'ev:1', at: when, text: 'Approved: Remember x', detail: 'memory.add runs now' },
+      { kind: 'event' as const, id: 'ev:2', at: when, text: 'Done: Remember x', detail: '' },
+    ]
+    const view = assistantView(rows, [], { records: new Map([['ev:1', record('approved')], ['ev:2', record('succeeded')]]), calls: new Map() })
+    expect(view.rows).toEqual([{ kind: 'event', id: 'ev:1', at: when, text: 'Done: Remember x', detail: '', tone: 'done' }])
+  })
+})
+
+it('shows a failed record whole, which the reason needs', () => {
+  const when = '2026-11-03T12:00:00Z'
+  const failed = { id: 'F1', method: 'run.kill', summary: 'Stop r1', target: {}, outcome: 'failed' as const, confirmation_id: 'c1', created_at: when }
+  const rows = [{ kind: 'event' as const, id: 'ev:1', at: when, text: 'Failed: Stop r1', detail: 'You approved: a\nIt now reads: b' }]
+  const view = assistantView(rows, [], { records: new Map([['ev:1', failed]]), calls: new Map() })
+  expect(view.rows).toEqual([{ ...rows[0], tone: 'failed', full: true }])
+})

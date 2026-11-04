@@ -4,7 +4,7 @@ import { MessageSquarePlus, X } from '@/components/icons'
 import { AssistantAccountCheck } from '@/components/assistant/account-check'
 import { ActionHistory } from '@/components/assistant/action-history'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
-import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
+import { AssistantRequestCard, cardsHeading, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
 import { TemporaryChatToggle } from '@/components/assistant/temporary'
 import { AssistantFailed, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
@@ -28,7 +28,7 @@ import { splitterTarget } from '@/lib/keys'
 import { cn, focusRing } from '@/lib/utils'
 import { requestAnnouncement } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
-import { assistantSessionID, assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
+import { assistantSessionID, assistantWaiting, cardPending, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
 import { connectAssistant, refreshAssistant } from '@/store/assistant-stream'
 import { useIdentityKnown } from '@/store/hooks'
 import { assistantShareView, syncViewContext, trackViewContext } from '@/store/view-context'
@@ -62,7 +62,7 @@ function useAssistantState() {
   const session = useStore((s) => s.acpSessions.assistant)
   const confirmations = useStore((s) => s.assistantConfirmations)
   const running = session?.state?.turn_in_flight ?? status?.state === 'running'
-  const waiting = confirmations.length > 0 || (session?.pending.length ?? 0) > 0
+  const waiting = confirmations.some(cardPending) || (session?.pending.length ?? 0) > 0
   return { status, session, confirmations, running, waiting }
 }
 
@@ -70,7 +70,7 @@ function useAnnouncement(agentName: string): string {
   const { session, confirmations, running } = useAssistantState()
   const [text, setText] = useState('')
   const pending = session?.pending.at(-1)
-  const confirmation = confirmations.at(-1)
+  const confirmation = confirmations.filter(cardPending).at(-1)
   const seen = useRef({ pending: pending?.id, confirmation: confirmation?.id, running })
   useEffect(() => {
     const prior = seen.current
@@ -115,13 +115,28 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       <div className="p-4"><Skeleton className="h-20 w-full" /></div>
     )
   }
-  if (status.state === 'setup') return <AssistantSetup status={status} />
+  // Stored cards need no session: they stay decidable while the assistant needs setup or failed.
+  const cards = confirmations.length > 0 && (
+    <div className="flex min-h-0 shrink flex-col gap-2 overflow-y-auto px-3 pt-3">
+      <p className="text-ui-xs text-muted">{cardsHeading(confirmations)}</p>
+      {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
+    </div>
+  )
+  if (status.state === 'setup') {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {cards}
+        <AssistantSetup status={status} />
+      </div>
+    )
+  }
 
   const failed = status.state === 'failed'
   const connection = session && connectionWord[session.stream]
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {failed && <AssistantFailed error={status.error} />}
+      {failed && cards}
       {session?.stream === 'refused' && (
         <Callout tone="failed" role="alert" className="mx-3 mt-3 shrink-0" title="The conversation stream was refused">
           {session.streamError}
@@ -160,6 +175,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
           running={running}
           dock={waiting && (
             <div className={cn('flex flex-col gap-2 overflow-y-auto', hasRows ? 'max-h-[40dvh] [@media(min-height:50rem)]:max-h-[50dvh]' : 'max-h-[65dvh]')}>
+              {confirmations.length > 1 && <p className="text-ui-xs text-muted">{cardsHeading(confirmations)}</p>}
               {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
               {session?.pending.map((request) => <AssistantRequestCard key={request.id} request={request} />)}
             </div>
@@ -325,7 +341,9 @@ export function AssistantPanel() {
   const supported = useAssistantAvailable()
   const textarea = useRef<HTMLTextAreaElement>(null)
   const shown = supported && open
-  const hasSession = supported && state !== undefined && state !== 'setup'
+  const cards = useStore((s) => s.assistantConfirmations.length > 0)
+  // Stored cards stay decidable in setup, so their status updates must arrive.
+  const hasSession = supported && state !== undefined && (state !== 'setup' || cards)
   // Closed, the stream stays up only while the assistant works or waits on an approval.
   const streamable = hasSession && (open || state === 'running' || state === 'installing' || state === 'starting' || waiting)
 

@@ -16,8 +16,12 @@ export function onPhone(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(mobileScreen).matches
 }
 
+export function cardPending(c: AssistantConfirmation): boolean {
+  return (c.state ?? 'pending') === 'pending'
+}
+
 export function assistantWaiting(s: Pick<RootState, 'assistantConfirmations' | 'acpSessions'>): number {
-  return s.assistantConfirmations.length + (s.acpSessions[assistantSessionID]?.pending.length ?? 0)
+  return s.assistantConfirmations.filter(cardPending).length + (s.acpSessions[assistantSessionID]?.pending.length ?? 0)
 }
 
 export function clampAssistantWidth(width: number): number {

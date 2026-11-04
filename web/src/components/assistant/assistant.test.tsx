@@ -466,6 +466,31 @@ describe('confirmations', () => {
     expect(within(template).getByText((_, el) => el?.textContent === 'triage issue 42\nthen label it')).toBeDefined()
   })
 
+  it('keeps stored cards decidable while the assistant needs setup or failed', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', confirmations: [stop] }) })
+    expect(await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })).toBeDefined()
+    assistantSocket().send({ status: status({ state: 'failed', error: 'assistant: no agent is ready', confirmations: [stop] }) })
+    expect(await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })).toBeDefined()
+  })
+
+  it('keeps an approved card that runs on the server without buttons, and names a connector turn', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [
+      { ...stop, state: 'running' },
+      { ...stop, id: 'c2', summary: 'Save your environment', origin: { door: 'connector', client: 'ChatGPT', connector_id: 'con_1' } },
+    ] }) })
+    const running = await within(aside).findByRole('group', { name: `Approved, running: ${stop.summary}` })
+    expect(running.textContent).toContain('running…')
+    expect(within(aside).getByText('2 cards: 1 waits for you, 1 running')).toBeDefined()
+    expect(within(running).queryByRole('button')).toBeNull()
+    const parked = within(aside).getByRole('group', { name: 'Approve this action? Save your environment' })
+    expect(within(parked).getByText('via ChatGPT')).toBeDefined()
+    expect(within(parked).getByRole('button', { name: 'Approve' })).toBeDefined()
+  })
+
   it('approves and declines through assistant.confirm and clears on a status frame', async () => {
     vi.mocked(api.assistantConfirm).mockResolvedValue({})
     const aside = await openPanel()

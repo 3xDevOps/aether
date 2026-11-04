@@ -51,6 +51,7 @@ var memberRefs = map[string]bool{
 	"assistant_settings.member_id":             false,
 	"assistant_rules.member_id":                false,
 	"assistant_rules.account_member_id":        false,
+	"assistant_cards.member_id":                false,
 	"launch_defaults.member_id":                false,
 	"launch_defaults.account_member_id":        true,
 	"events.actor_id":                          false,
