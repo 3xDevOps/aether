@@ -51,14 +51,24 @@ function settle(result: RunInputRespondResult) {
   void refreshAttention()
 }
 
-/** Whether the server took the reply; one not sent or uncertain keeps its draft for a retry. */
-function settleMessage(result: RoomPostResult): boolean {
-  const label = `Reply ${deliveryLabel(result).toLowerCase()}`
-  const unconfirmed = result.receipt === 'not_sent' || result.receipt === 'uncertain' || ['not_sent', 'uncertain', 'denied'].includes(result.message.state)
-  if (unconfirmed) toast.error(label)
-  else toast.success(label)
+/**
+ * Whether the server took the reply. A refused one keeps its draft under a fresh key so a resend
+ * tries again; an uncertain one keeps its key so a resend cannot deliver it twice.
+ */
+function settleMessage(result: RoomPostResult): 'taken' | 'refused' | 'uncertain' {
+  const reason = result.message.failure?.message
+  const label = `Reply ${deliveryLabel(result).toLowerCase()}${reason ? `: ${reason}` : ''}`
   void refreshAttention()
-  return !unconfirmed
+  if (result.receipt === 'uncertain' || result.message.state === 'uncertain') {
+    toast.error(label)
+    return 'uncertain'
+  }
+  if (result.receipt === 'not_sent' || result.message.state === 'not_sent' || result.message.state === 'denied') {
+    toast.error(label)
+    return 'refused'
+  }
+  toast.success(label)
+  return 'taken'
 }
 
 /** Approve and Deny answer this request by id, so a tap that lands after it changed decides nothing else. */
@@ -177,13 +187,11 @@ function Reply({ item, onError }: { item: AttentionItem; onError: (error?: strin
     setSending(true)
     onError(undefined)
     try {
-      const taken = settleMessage(item.message
+      const outcome = settleMessage(item.message
         ? await api.runRoomPost({ workspace_id: item.workspace_id, run_id: item.run_id, kind: 'reply', body: text, correlation_id: item.message.id, idempotency_key: key })
         : await api.runInject(item.run_id, text, key))
-      if (taken) {
-        setSent(null)
-        setBody((current) => (current.trim() === text ? '' : current))
-      }
+      if (outcome !== 'uncertain') setSent(null)
+      if (outcome === 'taken') setBody((current) => (current.trim() === text ? '' : current))
     } catch (err) {
       onError(`Send failed: ${message(err)}`)
     } finally {
@@ -245,7 +253,9 @@ function AttentionCard({ item }: { item: AttentionItem }) {
   const action = run && condition?.action(run)
   const viewer = useStore((s) => s.info?.member.id)
   // run.input.respond refuses while another member holds control: the request is theirs.
-  const holder = run?.controller_member_id && run.controller_member_id !== viewer ? run.controller_member_id : undefined
+  // A sudo request is answered by the owner or an admin whoever holds control.
+  const sudo = item.request?.id.startsWith('sudo-') === true
+  const holder = !sudo && run?.controller_member_id && run.controller_member_id !== viewer ? run.controller_member_id : undefined
   const holderName = useStore((s) => (holder ? memberName(s, holder) : undefined))
   const answers = item.kind === 'permission' || item.kind === 'question'
   const Inline = holder && answers ? undefined : inline(item, action?.kind === 'reply')
