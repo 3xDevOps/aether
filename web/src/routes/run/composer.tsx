@@ -499,9 +499,13 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     }
   }
 
-  const setOption = async (option: ConfigOption, value: string) => {
-    const lease = sessionLease(useStore, run.id)
-    if (lease) await attempt(() => api.runACPSetOption(run.id, option.id, value, lease))
+  const setOption = (option: ConfigOption, value: string): Promise<void> => {
+    let set = Promise.resolve()
+    control.withControl(() => {
+      const lease = sessionLease(useStore, run.id)
+      if (lease) set = attempt(() => api.runACPSetOption(run.id, option.id, value, lease)).then(() => {})
+    })
+    return set
   }
 
   if (gate) {
