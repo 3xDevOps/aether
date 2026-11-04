@@ -813,8 +813,10 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	phone := h.subscribe(h.ada)
 	other := h.subscribe(h.bob)
 	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
-	h.svc.Active(h.ada.ID)
+	// The quiet window starts at Active, so the wait is measured from
+	// before it, not after.
 	started := time.Now()
+	h.svc.Active(h.ada.ID)
 
 	if err := h.svc.Notify(h.ctx, h.ada.ID, `Session "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
