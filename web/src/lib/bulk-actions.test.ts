@@ -1,6 +1,8 @@
 import { toast } from 'sonner'
 import { ApiError, type Api } from '@/lib/api'
+import { closeState } from '@/lib/close-check'
 import { runClearDone, runReleaseFinished } from '@/lib/commands'
+import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
 
@@ -60,7 +62,8 @@ describe('archive closed runs', () => {
         return run({ id })
       }),
     } as unknown as Api
-    await runClearDone([done, replied, stuck], { api, removeRun: vi.fn() }, new Map([[replied.id, 'merged'], [stuck.id, 'abandoned']]))
+    useStore.setState({ runs: { [done.id]: done, [replied.id]: replied, [stuck.id]: stuck } })
+    await runClearDone([done, replied, stuck], { api, removeRun: vi.fn() }, new Map([[replied.id, { outcome: 'merged' as const, asked: closeState(replied) }], [stuck.id, { outcome: 'abandoned' as const, asked: closeState(stuck) }]]))
 
     expect(calls).toContain('close run_replied merged')
     expect(calls.indexOf('close run_replied merged')).toBeLessThan(calls.indexOf('archive run_replied'))
@@ -98,5 +101,15 @@ describe('free retained containers', () => {
 
     expect(api.runRelease).toHaveBeenCalledTimes(2)
     expect(toast.error).toHaveBeenCalledWith('Freed 1, 1 failed: evidence is still pending')
+  })
+
+  it('skips a close whose session changed since the member chose it, naming it, and archives nothing of it', async () => {
+    const chosen = toRecord(run({ id: 'run_moved', status: 'running', task: 'Moved on', status_seq: 4 }))
+    useStore.setState({ runs: { [chosen.id]: { ...chosen, status_seq: 5, state: 'working' } } })
+    const api = { runClose: vi.fn(), runArchive: vi.fn() } as unknown as Api
+    await runClearDone([chosen], { api, removeRun: vi.fn() }, new Map([[chosen.id, { outcome: 'abandoned' as const, asked: closeState(chosen) }]]))
+    expect(api.runClose).not.toHaveBeenCalled()
+    expect(api.runArchive).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('Archived 0, 1 failed', { description: 'Moved on: The session changed while its close was being checked, so it was not closed', duration: Infinity })
   })
 })

@@ -35,15 +35,21 @@ export const closeBusyText = 'Another close is waiting for your answer, so this 
 // Mirrors archiveHolding in internal/sshd/close_check.go: what keeps a completed session from being archived.
 const archiveHolding = new Set<CloseWarningKind>(['subsessions', 'pull_request', 'awaited', 'cleanup_pending'])
 
-/** Every session's check, keyed by run id, 50 to a call; a failed call is the error of every session it covers. */
+/** Every session's check, keyed by run id, 50 to a call; a failed or late call is the error of every session it covers. */
 export async function readCloseChecks(runIDs: string[], outcome?: CloseOutcome): Promise<Map<string, RunCloseCheck>> {
   const checks = new Map<string, RunCloseCheck>()
   const batches = Array.from({ length: Math.ceil(runIDs.length / 50) }, (_, i) => runIDs.slice(i * 50, i * 50 + 50))
   await Promise.all(batches.map(async (ids) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`the server did not answer within ${closeCheckDeadlineMs / 1000} seconds`)), closeCheckDeadlineMs)
+    })
     try {
-      for (const check of await api.runCloseCheck(ids, outcome)) checks.set(check.run_id, check)
+      for (const check of await Promise.race([api.runCloseCheck(ids, outcome), late])) checks.set(check.run_id, check)
     } catch (err) {
       for (const id of ids) checks.set(id, { run_id: id, warnings: [], error: { code: 0, message: errorSentence(err) } })
+    } finally {
+      clearTimeout(timer)
     }
   }))
   return checks
@@ -59,9 +65,5 @@ export async function readArchiveHolds(runIDs: string[]): Promise<Map<string, Ru
   return held
 }
 
-/** The close an idle session gets: merged when a pull request of its own repository merged, else abandoned. */
-export function idleOutcome(check: RunCloseCheck): 'merged' | 'abandoned' {
-  return check.merged_pull_request ? 'merged' : 'abandoned'
-}
 
 export const closeChangedText = 'The session changed while its close was being checked, so it was not closed'

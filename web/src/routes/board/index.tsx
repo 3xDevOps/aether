@@ -230,7 +230,7 @@ function FinishedMenu() {
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const canArchive = clearDonePlan(finishedRuns(activeWorkspace, ctx), caps, self).eligible.length > 0 ||
-    idleArchivePlan(workspaceRuns(activeWorkspace, ctx), ctx, caps, self).idle.length > 0
+    idleArchivePlan(workspaceRuns(activeWorkspace, ctx), ctx, caps, self).done.length > 0
   const canFree = admin && releaseFinishedPlan(workspaceRuns(activeWorkspace, ctx), caps, self).eligible.length > 0
   if (!canArchive && !canFree) return null
 

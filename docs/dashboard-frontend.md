@@ -1508,16 +1508,23 @@ completed session whose result still awaits review, which the single Archive
 command does not offer.
 The same confirmation offers live sessions that are idle and done:
 `idleArchivePlan()` (`src/lib/idle-archive.ts`) takes a running or parked
-session whose agent replied, or whose turn ended without a report, more than 24
-hours ago, with nothing that needs you, no pending request, no reported wait, no
-live subsessions or held background tasks, and not paused. Each is listed with
-why ("Idle 3d 4h, replied") and the outcome it closes with: merged when
-`run.close_check` reports `merged_pull_request`, otherwise abandoned. One with
-a close warning, or whose check failed, is listed unchecked with its warnings;
-the rest start checked. Every other live session in scope is listed under
-**Not included (n)**, collapsed, with what keeps it. Archiving a checked one
-closes it first, then archives it; a failed close leaves it live and
-unarchived, and the toast names each session that failed with its error.
+session whose agent replied, or whose turn ended without a report, with
+nothing that needs you, no pending request, no reported wait, no live
+subsessions or held background tasks, not paused, and no open parent. The
+batched `run.close_check` then says how long each has been idle
+(`idle_since`) and whether it closes as merged (`merged_pull_request`, else
+abandoned); one changed within 24 hours is not included. Each row leads with
+its outcome, then why ("Closes as merged · idle 3d, replied"). One with a
+close warning, a failed check, or an older server that cannot tell its
+outcome starts unchecked and says "Check to close anyway"; the rest start
+checked, and the section header selects all. Every other live session in
+scope is listed under **Not included**, collapsed, with what keeps it. The
+title and primary button say what happens ("Close 2 and archive 5
+sessions?", **Close 2, archive 5**), Cancel holds the focus with its ring
+drawn, and **Check again** rebuilds the whole plan. Each checked session is
+closed, then archived, unless it changed since the plan saw it; a skipped or
+failed close leaves it live and unarchived, and the toast names each session
+that failed with its error.
 Freeing removes a retained container and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet

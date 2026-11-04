@@ -209,12 +209,13 @@ const bulkRunConcurrency = 6
 
 /**
  * Each call's `run.archived` event moves the run in every dashboard, so only settled calls are counted here.
- * A live run in `closes` is closed with its outcome first; a failed close leaves it live and unarchived.
+ * A live run in `closes` is closed with its outcome first, unless it changed since the member chose it
+ * (`asked`, from closeState); a skipped or failed close leaves it live and unarchived.
  */
 export async function runClearDone(
   eligible: RunRecord[],
   deps: Pick<CommandDeps, 'api' | 'removeRun'>,
-  closes: Map<string, 'merged' | 'abandoned'> = new Map(),
+  closes: Map<string, { outcome: 'merged' | 'abandoned'; asked: string }> = new Map(),
 ): Promise<void> {
   // One slot per run, so the failures read back in Done order however the
   // calls settle.
@@ -224,8 +225,14 @@ export async function runClearDone(
     while (next < eligible.length) {
       const i = next++
       try {
-        const outcome = closes.get(eligible[i].id)
-        if (outcome) await deps.api.runClose(eligible[i].id, outcome)
+        const close = closes.get(eligible[i].id)
+        if (close) {
+          if (closeState(useStore.getState().runs[eligible[i].id]) !== close.asked) {
+            errors[i] = `${runLabel(eligible[i])}: ${closeChangedText}`
+            continue
+          }
+          await deps.api.runClose(eligible[i].id, close.outcome)
+        }
         await deps.api.runArchive(eligible[i].id, true)
       } catch (err) {
         // The run was already deleted, so there is nothing left to archive.

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { closeWarned, idleOutcome, readArchiveHolds, readCloseChecks } from '@/lib/close-check'
+import { readArchiveHolds, readCloseChecks } from '@/lib/close-check'
 import type { RunCloseCheck } from '@/lib/types'
 import type { StateContext } from '@/lib/needs-you'
 import { clearDonePlan, releaseFinishedPlan, runClearDone, runReleaseFinished } from '@/lib/commands'
-import { idleArchivePlan } from '@/lib/idle-archive'
+import { idleArchivePlan, idleRows } from '@/lib/idle-archive'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
 import { finishedRuns, workspaceRuns } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -24,55 +24,49 @@ export function ClearDoneDialog() {
   const self = useSelf()
   const close = useStore((s) => s.closePaletteDialog)
   const removeRun = useStore((s) => s.removeRun)
-  const [plan] = useState(() => clearDonePlan(finishedRuns(...scope()), cap, self))
-  const [idle] = useState(() => {
+  const build = () => {
     const [workspace, ctx] = scope()
-    return idleArchivePlan(workspaceRuns(workspace, ctx), ctx, cap, self)
-  })
+    return { plan: clearDonePlan(finishedRuns(workspace, ctx), cap, self), idle: idleArchivePlan(workspaceRuns(workspace, ctx), ctx, cap, self) }
+  }
+  const [{ plan, idle }, setPlans] = useState(build)
   const [held, setHeld] = useState<Map<string, RunCloseCheck>>()
-  const [idleChecks, setIdleChecks] = useState<Map<string, RunCloseCheck>>()
+  const [rows, setRows] = useState<ReturnType<typeof idleRows>>()
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [reads, setReads] = useState(0)
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
     let live = true
     const completed = plan.eligible.filter((run) => run.status === 'completed')
-    if (completed.length === 0) {
-      setHeld(new Map())
-      return
-    }
-    setHeld(undefined)
-    void readArchiveHolds(completed.map((run) => run.id)).then((next) => live && setHeld(next))
+    setHeld(completed.length === 0 ? new Map() : undefined)
+    if (completed.length > 0) void readArchiveHolds(completed.map((run) => run.id)).then((next) => live && setHeld(next))
     return () => {
       live = false
     }
-  }, [plan, reads])
+  }, [plan])
 
-  // A session with a close warning is listed unchecked, so closing it is the member's explicit choice.
+  // A session with a close warning, or whose outcome is unknown, is listed unchecked, so closing it is the member's explicit choice.
   useEffect(() => {
     let live = true
-    if (idle.idle.length === 0) return
-    setIdleChecks(undefined)
-    void readCloseChecks(idle.idle.map(({ run }) => run.id)).then((checks) => {
-      if (!live) return
-      setIdleChecks(checks)
-      setSelected(new Set(idle.idle.filter(({ run }) => {
-        const check = checks.get(run.id)
-        return check && !closeWarned(check, idleOutcome(check))
-      }).map(({ run }) => run.id)))
-    })
+    setRows(idle.done.length === 0 ? { idle: [], recent: [] } : undefined)
+    if (idle.done.length > 0) {
+      void readCloseChecks(idle.done.map(({ run }) => run.id)).then((checks) => {
+        if (!live) return
+        const next = idleRows(idle.done, checks, Date.now())
+        setRows(next)
+        setSelected(new Set(next.idle.filter((row) => row.clean).map((row) => row.run.id)))
+      })
+    }
     return () => {
       live = false
     }
-  }, [idle, reads])
+  }, [idle])
 
   const confirm = async () => {
-    if (!held) return
+    if (!held || !rows) return
     setRunning(true)
-    const closing = idle.idle.filter(({ run }) => selected.has(run.id)).map(({ run }) => run)
-    const outcomes = new Map(closing.map((run) => [run.id, idleOutcome(idleChecks!.get(run.id)!)]))
-    await runClearDone([...plan.eligible.filter((run) => !held.has(run.id)), ...closing], { api, removeRun }, outcomes)
+    const closing = rows.idle.filter((row) => selected.has(row.run.id))
+    const closes = new Map(closing.map((row) => [row.run.id, { outcome: row.outcome, asked: row.asked }]))
+    await runClearDone([...plan.eligible.filter((run) => !held.has(run.id)), ...closing.map((row) => row.run)], { api, removeRun }, closes)
     setRunning(false)
     close()
   }
@@ -81,16 +75,12 @@ export function ClearDoneDialog() {
     <ClearDoneConfirm
       plan={plan}
       held={held}
-      idle={idle}
-      idleChecks={idleChecks}
+      idle={rows}
+      excluded={[...idle.excluded, ...(rows?.recent ?? [])]}
       selected={selected}
       running={running}
-      onToggle={(id) => setSelected((current) => {
-        const next = new Set(current)
-        if (!next.delete(id)) next.add(id)
-        return next
-      })}
-      onRecheck={() => setReads((n) => n + 1)}
+      onSelect={setSelected}
+      onRecheck={() => setPlans(build())}
       onConfirm={() => void confirm()}
       onCancel={close}
     />
