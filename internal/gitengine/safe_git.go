@@ -58,11 +58,8 @@ func (e *Engine) checkoutObjectFormat(workTree string) (string, error) {
 // agent-writable and may contain config, attributes, hooks, or command names.
 func (e *Engine) ensureScratchGitDir(ctx context.Context, dir, workTree string) error {
 	config := filepath.Join(dir, "config")
-	if _, err := os.Stat(config); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("gitengine: inspect scratch git directory: %w", err)
-	}
+	// Git 2.44 and later write config before HEAD, so config is no sign that
+	// an init still running under the lock has finished.
 	scratchGitMu.Lock()
 	defer scratchGitMu.Unlock()
 	if _, err := os.Stat(config); err == nil {
