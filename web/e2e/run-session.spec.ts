@@ -65,10 +65,12 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   const steps = log.getByRole('button', { name: /^Read 2 files, ran 1 command and edited 1 file/ })
   await expect(steps).toHaveAttribute('aria-expanded', 'false', { timeout: 30_000 })
   await expect(log.getByText(/^Finished in \d+s$/).last()).toBeVisible()
-  await steps.click()
+  // The chat list still scrolls and measures rows after a turn ends or a block opens, and a click whose
+  // button moves between mouse down and up never fires, so these disclosures open from the keyboard.
+  await steps.press('Enter')
   await expect(log.getByText('billing.js', { exact: true })).toBeVisible()
   await expect(log.getByText('All 3 steps done')).toBeVisible()
-  await log.getByRole('button', { name: /Edited src\/billing\.js/ }).click()
+  await log.getByRole('button', { name: /Edited src\/billing\.js/ }).press('Enter')
   await expect(log.locator('[data-slot="diff-block"]')).toContainText('Math.round')
   await expect(log.getByText(/^Changed \d+ files?$/)).toHaveCount(0)
 
