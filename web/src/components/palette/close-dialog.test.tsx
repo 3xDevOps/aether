@@ -123,6 +123,17 @@ describe('close dialog', () => {
     expect(toast.info).toHaveBeenCalledWith('The session changed while its close was being checked, so it was not closed')
   })
 
+  it('drops a close when the session changed while its check ran', async () => {
+    const answer = Promise.withResolvers<{ run_id: string; warnings: [] }[]>()
+    vi.mocked(api.runCloseCheck).mockReturnValueOnce(answer.promise)
+    render(<CloseDialog />)
+    act(() => useStore.setState((s) => ({ runs: { run_1: { ...s.runs.run_1!, status_seq: s.runs.run_1!.status_seq + 1 } } })))
+    await act(async () => answer.resolve([{ run_id: 'run_1', warnings: [] }]))
+    fireEvent.click(await screen.findByRole('button', { name: 'Close as merged' }))
+    expect(api.runClose).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('The session changed while its close was being checked, so it was not closed')
+  })
+
   it('shows a failed check and still lets the owner close', async () => {
     vi.mocked(api.runCloseCheck).mockRejectedValueOnce(new Error('method not found: run.close_check'))
     render(<CloseDialog />)

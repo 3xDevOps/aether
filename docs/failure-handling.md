@@ -161,8 +161,9 @@ you are saying the work is merged.
 
 `aether close` prints the warnings to stderr and asks `Close anyway? [y/N]` on
 a terminal; `--force` skips the question. Without a terminal it prints them
-and closes, so scripts keep working. A check that fails, such as on a server
-older than the CLI, prints its error and the close goes ahead:
+and closes, so scripts keep working. A failed check prints its error. On a
+terminal it then asks too, unless the server is older than the CLI and has no
+check; there the close goes ahead:
 
 ```
 Before closing run-d6ay38tj8j:

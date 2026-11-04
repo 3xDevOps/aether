@@ -1,6 +1,6 @@
 // Recording either outcome also makes the server stop a still-live container.
 
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CloseWarnings, useCloseCheck } from '@/components/close-warnings'
 import { Archive, GitMerge } from '@/components/icons'
@@ -34,10 +34,10 @@ export function CloseDialog() {
   const [closing, setClosing] = useState<Outcome | null>(null)
   const late = usePastDeadline(closing !== null)
   const [error, setError] = useState<string | null>(null)
+  // The session as the check is asked about it: a change while it runs makes
+  // its warnings stale, so the close is dropped.
+  const [asked] = useState(() => (runID ? closeState(useStore.getState().runs[runID]) : ''))
   const check = useCloseCheck(runID)
-  // Read as the check's answer renders, so a click right after it compares
-  // against the session the warnings describe.
-  const asked = useMemo(() => (check && runID ? closeState(useStore.getState().runs[runID]) : ''), [check, runID])
   const cancel = useRef<HTMLButtonElement>(null)
 
   const finish = async (outcome: Outcome) => {
