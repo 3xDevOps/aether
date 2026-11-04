@@ -25,7 +25,7 @@ export function AppShell() {
   const mobile = useIsMobile()
   const stacked = useStore((s) => mobile && s.route.name === 'run')
   return (
-    <div className="flex h-full min-h-0 flex-col bg-canvas text-ui text-text">
+    <div className={cn('flex h-full min-h-0 flex-col bg-canvas text-ui text-text', stacked && 'pt-[var(--safe-top)]')}>
       <a
         href="#main"
         onClick={(event) => {
@@ -43,7 +43,7 @@ export function AppShell() {
         <main
           id="main"
           tabIndex={-1}
-          className={cn('min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] outline-none md:pb-[env(safe-area-inset-bottom)]', stacked && 'pt-[var(--safe-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]')}
+          className={cn('min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] outline-none md:pb-[env(safe-area-inset-bottom)]', stacked && 'pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]')}
         >
           <CenterView />
         </main>

@@ -593,7 +593,8 @@ opening one opens the session.
 ### Phone session
 
 On a phone a session opens full screen: the `run` route renders no top bar
-and the tab bar hides, so `main` pads the top and bottom safe areas itself.
+and the tab bar hides, so the shell pads the top safe area (above the
+reconnect banner) and `main` the bottom and side ones.
 The header (`routes/run/phone-header.tsx`) is one 48px row: **Back**, the
 title with its protection lock, a state line (status dot, state, agent and
 mode), the header's primary action when there is one, and **More**. Under it

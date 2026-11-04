@@ -55,7 +55,6 @@ function Tab({ label, icon, active, badge, dot, className, ...props }: Omit<Reac
 // A terminal's own input is left out: hiding the bar would resize the PTY on every focus change.
 const typingTarget = 'input:is(:not([type]), [type=text], [type=search], [type=email], [type=url], [type=tel], [type=password], [type=number]), textarea:not(.xterm-helper-textarea), [contenteditable=true]'
 
-
 /** The phone's navigation, below 768px. Needs you is home; More holds what the desktop sidebar and header carry. */
 export function PhoneTabBar() {
   const cap = useCapability()
