@@ -55,20 +55,14 @@ function settle(result: RunInputRespondResult) {
  * Whether the server took the reply. A refused one keeps its draft under a fresh key so a resend
  * tries again; an uncertain one keeps its key so a resend cannot deliver it twice.
  */
-function settleMessage(result: RoomPostResult): 'taken' | 'refused' | 'uncertain' {
+function settleMessage(result: RoomPostResult): { outcome: 'taken' | 'refused' | 'uncertain'; label: string } {
   const reason = result.message.failure?.message
   const label = `Reply ${deliveryLabel(result).toLowerCase()}${reason ? `: ${reason}` : ''}`
   void refreshAttention()
-  if (result.receipt === 'uncertain' || result.message.state === 'uncertain') {
-    toast.error(label)
-    return 'uncertain'
-  }
-  if (result.receipt === 'not_sent' || result.message.state === 'not_sent' || result.message.state === 'denied') {
-    toast.error(label)
-    return 'refused'
-  }
+  if (result.receipt === 'uncertain' || result.message.state === 'uncertain') return { outcome: 'uncertain', label }
+  if (result.receipt === 'not_sent' || result.message.state === 'not_sent' || result.message.state === 'denied') return { outcome: 'refused', label }
   toast.success(label)
-  return 'taken'
+  return { outcome: 'taken', label }
 }
 
 /** Approve and Deny answer this request by id, so a tap that lands after it changed decides nothing else. */
@@ -187,9 +181,11 @@ function Reply({ item, onError }: { item: AttentionItem; onError: (error?: strin
     setSending(true)
     onError(undefined)
     try {
-      const outcome = settleMessage(item.message
+      const { outcome, label } = settleMessage(item.message
         ? await api.runRoomPost({ workspace_id: item.workspace_id, run_id: item.run_id, kind: 'reply', body: text, correlation_id: item.message.id, idempotency_key: key })
         : await api.runInject(item.run_id, text, key))
+      // On the card, not a toast: the keyboard stays up over a toast while the field keeps focus.
+      if (outcome !== 'taken') onError(label)
       if (outcome !== 'uncertain') setSent(null)
       if (outcome === 'taken') setBody((current) => (current.trim() === text ? '' : current))
     } catch (err) {
