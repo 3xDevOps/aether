@@ -64,7 +64,10 @@ runs:
     - name: Trim the Go compiler cache to what this job used
       if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       shell: bash
-      run: find "${{ steps.paths.outputs.build }}" -type f -mmin +90 -delete
+      run: |
+        if [ -d "${{ steps.paths.outputs.build }}" ]; then
+          find "${{ steps.paths.outputs.build }}" -type f -mmin +90 -delete
+        fi
     - name: Check for saved Go compiler cache
       id: saved-build
       if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
