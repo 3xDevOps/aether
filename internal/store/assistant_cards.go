@@ -35,7 +35,9 @@ type AssistantCard struct {
 	Error    string
 	// ShownAt is when the row the card shows was last updated, to the
 	// nanosecond, for a call that must act on that version only.
-	ShownAt   time.Time
+	ShownAt time.Time
+	// DecidedAt is when the card left pending, zero before.
+	DecidedAt time.Time
 	CreatedAt time.Time
 	ExpiresAt time.Time
 	UpdatedAt time.Time
@@ -44,10 +46,12 @@ type AssistantCard struct {
 // AssistantCardMove is a card's next state and what it records.
 type AssistantCardMove struct {
 	State string
-	// ActionID, Result and Error replace the card's when set.
+	// ActionID, Result and Error replace the card's when set; Decided
+	// records now as when the card was decided.
 	ActionID string
 	Result   string
 	Error    string
+	Decided  bool
 }
 
 // AssistantCardStore keeps the assistants' approval cards. Removing a member
@@ -91,15 +95,18 @@ func (d *DB) AddAssistantCard(ctx context.Context, c *AssistantCard) error {
 	return nil
 }
 
-const assistantCardColumns = `id, member_id, generation, method, params, card, origin, state, action_id, result, error, shown_at, created_at, expires_at, updated_at`
+const assistantCardColumns = `id, member_id, generation, method, params, card, origin, state, action_id, result, error, shown_at, decided_at, created_at, expires_at, updated_at`
 
 func scanAssistantCard(row interface{ Scan(...any) error }) (AssistantCard, error) {
 	var c AssistantCard
-	var shown, created, expires, updated int64
+	var shown, decided, created, expires, updated int64
 	err := row.Scan(&c.ID, &c.MemberID, &c.Generation, &c.Method, &c.Params, &c.Card, &c.Origin, &c.State, &c.ActionID, &c.Result, &c.Error,
-		&shown, &created, &expires, &updated)
+		&shown, &decided, &created, &expires, &updated)
 	if shown != 0 {
 		c.ShownAt = time.Unix(0, shown).UTC()
+	}
+	if decided != 0 {
+		c.DecidedAt = time.UnixMilli(decided).UTC()
 	}
 	c.CreatedAt, c.ExpiresAt, c.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(expires).UTC(), time.UnixMilli(updated).UTC()
 	return c, err
@@ -149,13 +156,15 @@ func (d *DB) MoveAssistantCard(ctx context.Context, member domain.MemberID, id s
 	if len(from) == 0 {
 		return false, errors.New("store: move assistant card: no state to move from")
 	}
-	args := []any{move.State, move.ActionID, move.Result, move.Error, time.Now().UnixMilli(), member, id}
+	now := time.Now().UnixMilli()
+	args := []any{move.State, move.ActionID, move.Result, move.Error, move.Decided, now, now, member, id}
 	for _, s := range from {
 		args = append(args, s)
 	}
 	res, err := d.db.ExecContext(ctx,
 		`UPDATE assistant_cards SET state = ?, action_id = COALESCE(NULLIF(?, ''), action_id),
-		   result = COALESCE(NULLIF(?, ''), result), error = COALESCE(NULLIF(?, ''), error), updated_at = ?
+		   result = COALESCE(NULLIF(?, ''), result), error = COALESCE(NULLIF(?, ''), error),
+		   decided_at = CASE WHEN ? THEN ? ELSE decided_at END, updated_at = ?
 		 WHERE member_id = ? AND id = ? AND state IN (?`+strings.Repeat(", ?", len(from)-1)+`)`, args...)
 	if err != nil {
 		return false, fmt.Errorf("store: move assistant card: %w", err)

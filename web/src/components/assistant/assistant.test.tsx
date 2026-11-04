@@ -466,6 +466,15 @@ describe('confirmations', () => {
     expect(within(template).getByText((_, el) => el?.textContent === 'triage issue 42\nthen label it')).toBeDefined()
   })
 
+  it('asks before approving everything from a card while the assistant needs setup', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', confirmations: [stop] }) })
+    await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })
+    act(() => useStore.getState().setAssistantConfirmAutoApprove(true))
+    expect(await screen.findByRole('alertdialog', { name: 'Let the assistant act without asking?' })).toBeDefined()
+  })
+
   it('keeps stored cards decidable while the assistant needs setup or failed', async () => {
     const aside = await openPanel()
     acpOpen()

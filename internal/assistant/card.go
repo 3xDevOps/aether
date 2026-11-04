@@ -262,9 +262,7 @@ func cardOf(row store.AssistantCard) (Card, error) {
 		return Card{}, fmt.Errorf("assistant: decode the origin of card %s: %w", row.ID, err)
 	}
 	out.Params, out.State, out.Shown, out.Generation = json.RawMessage(row.Params), row.State, row.ShownAt, row.Generation
-	if row.State != protocol.AssistantCardPending {
-		out.DecidedAt = row.UpdatedAt
-	}
+	out.DecidedAt = row.DecidedAt
 	out.Origin.Door = cmp.Or(out.Origin.Door, protocol.AssistantDoorDashboard)
 	out.AssistantConfirmation.Origin = out.Origin.AssistantOrigin
 	return out, nil
@@ -345,7 +343,7 @@ func (s *Service) Confirm(ctx context.Context, member domain.MemberID, id string
 // the call waiting for the card, or else runs the call itself, and records
 // any other decision in the conversation.
 func (s *Service) decide(ctx context.Context, m *member, id, state string) error {
-	moved, err := s.cfg.Store.MoveAssistantCard(ctx, m.id, id, []string{protocol.AssistantCardPending}, store.AssistantCardMove{State: state})
+	moved, err := s.cfg.Store.MoveAssistantCard(ctx, m.id, id, []string{protocol.AssistantCardPending}, store.AssistantCardMove{State: state, Decided: true})
 	if err != nil {
 		return fmt.Errorf("assistant: decide card %s: %w", id, err)
 	}
@@ -585,11 +583,18 @@ func (s *Service) Resume(ctx context.Context) error {
 					"error", errors.Join(err, s.fail(m, row.ID, protocol.AssistantCardRunning, restartedWhileRunning)))
 				continue
 			}
-			if current, cerr := s.current(ctx, m, row.Generation); cerr != nil || !current {
+			current, cerr := s.current(ctx, m, row.Generation)
+			if cerr != nil {
+				// Left running, the next start tries again; one member's store
+				// read must not stop the server.
+				slog.Warn("assistant: read the conversation of a card a restart cut off; the next start retries", "member", row.MemberID, "card", row.ID, "error", cerr)
+				continue
+			}
+			if !current {
 				// A card of a discarded conversation fails without a record in
 				// the new one.
-				if ferr := s.fail(m, row.ID, protocol.AssistantCardRunning, restartedWhileRunning); cerr != nil || ferr != nil {
-					slog.Warn("assistant: fail the card a restart cut off", "member", row.MemberID, "card", row.ID, "error", errors.Join(cerr, ferr))
+				if ferr := s.fail(m, row.ID, protocol.AssistantCardRunning, restartedWhileRunning); ferr != nil {
+					slog.Warn("assistant: fail the card a restart cut off", "member", row.MemberID, "card", row.ID, "error", ferr)
 				}
 				continue
 			}

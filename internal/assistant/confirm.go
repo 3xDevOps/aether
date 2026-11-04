@@ -457,6 +457,8 @@ func (c actionCaller) record(conv context.Context, method string, a protocol.Ass
 	body := ""
 	if rpcErr != nil {
 		a.Outcome, a.Error, body = protocol.AssistantActionFailed, rpcErr.Message, rpcErr.Message
+	} else if refused := refusedIn(result); refused != "" {
+		a.Outcome, a.Error, body = protocol.AssistantActionFailed, refused, refused
 	} else {
 		a.Outcome, a.Result = protocol.AssistantActionSucceeded, created(result, a.Target)
 		if a.Result != nil {
@@ -467,6 +469,23 @@ func (c actionCaller) record(conv context.Context, method string, a protocol.Ass
 	if err := c.s.noteOutcome(conv, c.m, a, body); err != nil {
 		slog.Warn("assistant: record the action's outcome", "member", c.m.id, "method", method, "action", a.ID, "error", err)
 	}
+}
+
+// refusedIn is the failure a successful call reports in its result, as
+// run.pr.create and run.pr.merge do for GitHub's refusal, or for a pull
+// request whose creation is uncertain.
+func refusedIn(result json.RawMessage) string {
+	var r struct {
+		Error             string `json:"error"`
+		CreationUncertain bool   `json:"creation_uncertain"`
+	}
+	if json.Unmarshal(result, &r) != nil {
+		return ""
+	}
+	if r.Error == "" && r.CreationUncertain {
+		return "GitHub may have created the pull request; check before retrying"
+	}
+	return r.Error
 }
 
 // created names the run a call's result holds that its target does not:

@@ -443,3 +443,31 @@ func TestACardOfAnEarlierConversationCutOffByARestartLeavesNoRecord(t *testing.T
 		t.Fatalf("records in the new conversation = %+v, want none", got)
 	}
 }
+
+func TestAnApprovalKeepsItsTimeWhenItsCallStarts(t *testing.T) {
+	w := newCardWorld(t)
+	c := w.leaveCard()
+	if err := w.svc.Confirm(t.Context(), w.member, c.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	row := w.settled(c.ID)
+	if row.DecidedAt.IsZero() || !row.DecidedAt.Before(row.UpdatedAt.Add(time.Millisecond)) {
+		t.Fatalf("card = %+v, want the decision time kept", row)
+	}
+	card, err := w.svc.Card(t.Context(), w.member, c.ID)
+	if err != nil || !card.DecidedAt.Equal(row.DecidedAt) {
+		t.Fatalf("card on the wire decided at %v, %v, want %v", card.DecidedAt, err, row.DecidedAt)
+	}
+}
+
+func TestARefusedPullRequestMergeIsRecordedFailed(t *testing.T) {
+	if got := refusedIn(json.RawMessage(`{"merged":false,"error":"GitHub refused the merge: required checks failed"}`)); got != "GitHub refused the merge: required checks failed" {
+		t.Fatalf("refusal = %q", got)
+	}
+	if got := refusedIn(json.RawMessage(`{"creation_uncertain":true}`)); got == "" {
+		t.Fatal("an uncertain creation read as done")
+	}
+	if got := refusedIn(json.RawMessage(`{"run":{"id":"run-1"}}`)); got != "" {
+		t.Fatalf("a launch's result read as refused: %q", got)
+	}
+}

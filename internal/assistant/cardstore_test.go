@@ -59,6 +59,9 @@ func (m *memStore) MoveAssistantCard(_ context.Context, member domain.MemberID, 
 		if move.Error != "" {
 			c.Error = move.Error
 		}
+		if move.Decided {
+			c.DecidedAt = time.Now()
+		}
 		m.cards[i] = c
 		return true, nil
 	}

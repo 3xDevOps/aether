@@ -249,6 +249,11 @@ function recordApproval(saved: AssistantActionRecord): Approval | undefined {
  * expired card, a pending confirmation for the same method, and the
  * approval note written before the call ran.
  */
+/** The error of a call that stopped waiting for its card, which then runs on the server if approved. */
+function stoppedWaiting(error: string | undefined): boolean {
+  return !!error && (error.includes('the turn ended before the member answered') || error.includes('context canceled'))
+}
+
 function actionOutcome(
   entry: Pick<WorkItem, 'status' | 'waiting'>,
   error: string | undefined,
@@ -265,8 +270,9 @@ function actionOutcome(
     case 'failed':
       return { state: 'failed', approval }
     case 'succeeded':
-      // The call can still fail after its method succeeded, as when GitHub refuses a merge it was asked for.
-      return { state: entry.status === 'failed' ? 'failed' : 'done', approval }
+      // The call can still fail after its method succeeded, as when GitHub refuses a merge it was asked for; one that only stopped
+      // waiting for its card, as Stop leaves it, ran on the server.
+      return { state: entry.status === 'failed' && !stoppedWaiting(error) ? 'failed' : 'done', approval }
   }
   if (entry.status === 'failed') {
     if (!saved && error?.includes('the member declined this action')) return { state: 'declined' }
@@ -405,27 +411,30 @@ function latestRecords(rows: SessionRow[], records: Map<string, AssistantActionR
     else visit(row)
   }
   if (latest.size === 0) return rows
+  // An action's kept record, by the row cards anchor to: its own, or the block it sits in.
   const placed = new Map<string, string>()
-  const fold = <T extends Step | SessionRow>(item: T): T | undefined => {
+  const fold = <T extends Step | SessionRow>(item: T, anchor: string): T | undefined => {
     const saved = item.kind === 'event' ? records.get(item.id) : undefined
     if (!saved) return item
     const kept = placed.get(saved.id)
     if (kept !== undefined) {
       const moved = groups.get(item.id)
-      if (moved) {
+      if (moved && kept !== item.id) {
         groups.set(kept, [...(groups.get(kept) ?? []), ...moved])
         groups.delete(item.id)
       }
       return undefined
     }
-    placed.set(saved.id, item.id)
+    placed.set(saved.id, anchor)
     const last = latest.get(saved.id)!
     return { ...item, text: last.text, detail: last.detail, tone: last.tone, ...(last.failed ? { full: true as const } : {}) }
   }
   return rows.flatMap((row): SessionRow[] => {
-    if (row.kind !== 'steps') return [fold(row)].filter((r) => r !== undefined)
-    const steps = row.steps.flatMap((step) => fold(step) ?? [])
-    return steps.length ? [{ ...row, steps }] : []
+    if (row.kind !== 'steps') return [fold(row, row.id)].filter((r) => r !== undefined)
+    const steps = row.steps.flatMap((step) => fold(step, row.id) ?? [])
+    if (steps.length === row.steps.length && steps.every((step, i) => step === row.steps[i])) return [row]
+    // The block's counts follow the steps it keeps.
+    return steps.length ? [{ ...stepsBlock(row.id, steps, row.start, row.current), live: row.live }] : []
   })
 }
 
@@ -522,7 +531,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       : actionOutcome(entry, error, methods.some((method) => waitingMethods.has(method)), noted, saved))
     // GitHub's reply to the create was lost and no pull request was found after: it may exist or not.
     if (action.state === 'done' && action.tool === 'aether_pr_create' && record(action.result).write === 'pending') action.state = 'unconfirmed'
-    action.error = saved?.error ?? error
+    action.error = saved?.outcome === 'succeeded' && stoppedWaiting(error) ? undefined : saved?.error ?? error
     // The server creates a watch that cannot check its target, such as a pull request without GitHub connected, in state error.
     const watched = record(action.result)
     if (action.state === 'done' && action.tool === 'aether_watch' && watched.state === 'error') {

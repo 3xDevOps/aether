@@ -2503,6 +2503,7 @@ CREATE TABLE assistant_cards (
 	result      TEXT NOT NULL DEFAULT '',
 	error       TEXT NOT NULL DEFAULT '',
 	shown_at    INTEGER NOT NULL DEFAULT 0,
+	decided_at  INTEGER NOT NULL DEFAULT 0,
 	created_at  INTEGER NOT NULL,
 	expires_at  INTEGER NOT NULL,
 	updated_at  INTEGER NOT NULL

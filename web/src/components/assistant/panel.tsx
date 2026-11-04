@@ -117,7 +117,8 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
   }
   // Stored cards need no session: they stay decidable while the assistant needs setup or failed.
   const cards = confirmations.length > 0 && (
-    <div className="flex min-h-0 shrink flex-col gap-2 overflow-y-auto px-3 pt-3">
+    // Grows with its cards, but leaves sign-in or the conversation below it room.
+    <div className="flex max-h-[70%] min-h-0 shrink-0 flex-col gap-2 overflow-y-auto px-3 pt-3">
       <p className="text-ui-xs text-muted">{cardsHeading(confirmations)}</p>
       {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
     </div>
@@ -126,6 +127,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {cards}
+        <AutoApproveConfirm />
         <AssistantSetup status={status} />
       </div>
     )

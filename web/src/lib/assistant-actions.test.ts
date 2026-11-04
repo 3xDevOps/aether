@@ -300,3 +300,12 @@ it('shows a failed record whole, which the reason needs', () => {
   const view = assistantView(rows, [], { records: new Map([['ev:1', failed]]), calls: new Map() })
   expect(view.rows).toEqual([{ ...rows[0], tone: 'failed', full: true }])
 })
+
+it('shows a call that stopped waiting, then ran on the server, as done', () => {
+  const stop = { id: '1:t0', name: 'mcp__aether__aether_stop_session', status: 'failed' as const, input: { run_id: 'r1' },
+    result: 'run.kill was not approved: the turn ended before the member answered; the card stays open, and approving it runs the call on the server' }
+  const done: AssistantActionRecord = { id: 'a1', method: 'run.kill', summary: 'Done: stop', target: { run_id: 'r1' }, outcome: 'succeeded', approval: 'card', confirmation_id: 'c1', created_at: at }
+  const records = new Map([['ev:9', done]])
+  const view = assistantView([block(stop), { kind: 'event', id: 'ev:9', at, text: 'Done: stop' }], [], { records, calls: new Map() })
+  expect(view.actions.map((a) => [a.state, a.error])).toEqual([['done', undefined]])
+})
