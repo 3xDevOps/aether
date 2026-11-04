@@ -1601,7 +1601,8 @@ export function connectAttach(
       return metadata
     },
     mayHoldControl: () =>
-      hasControl || writeUnanswered || [...pendingControls.values()].some((pending) => pending.write),
+      hasControl || writeUnanswered || requestedTakeover !== null ||
+      [...pendingControls.values()].some((pending) => pending.write),
     resetWriteDenial: () => {
       writeDenied = false
     },
