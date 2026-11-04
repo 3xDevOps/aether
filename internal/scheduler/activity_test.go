@@ -250,8 +250,8 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		// success awaits review and no wait ever needs anyone.
 		needs := p.Activity == domain.ActivityNeedsYou || p.Activity == domain.ActivityFailed ||
 			p.Activity == domain.ActivityDisconnected
-		if row.NeedsAttention(false, false) != needs || row.AwaitsReview(false, false) != (p.Activity == domain.ActivityFinished) || (p.Review == domain.ReviewReady) != (p.Activity == domain.ActivityFinished) || row.Review != p.Review {
-			t.Fatalf("%s: %s run needs attention %v with review %q (stored %q)", step.name, p.Activity, row.NeedsAttention(false, false), p.Review, row.Review)
+		if row.NeedsAttention(false) != needs || row.AwaitsReview(false) != (p.Activity == domain.ActivityFinished) || (p.Review == domain.ReviewReady) != (p.Activity == domain.ActivityFinished) || row.Review != p.Review {
+			t.Fatalf("%s: %s run needs attention %v with review %q (stored %q)", step.name, p.Activity, row.NeedsAttention(false), p.Review, row.Review)
 		}
 	}
 	// Nothing changed: no event, and no new sequence for a client to apply.

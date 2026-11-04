@@ -81,8 +81,8 @@ type Insights struct {
 	Members      []*InsightsMemberOutcomes
 	Recent       []*InsightsRun
 	// NeedsYou is the runs domain.Run.NeedsAttention selects, before the
-	// caller drops paused ones and outcomes held for a parent.
-	NeedsYou          []*domain.Run
+	// caller drops paused ones.
+	NeedsYou          []domain.RunID
 	StateTimesSince   *time.Time
 	PullRequestsSince *time.Time
 }
@@ -784,8 +784,8 @@ func insightsLive(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, 
 		if scanErr != nil {
 			return fmt.Errorf("store: insights: needs you: %w", scanErr)
 		}
-		if r.NeedsAttention(false, false) {
-			out.NeedsYou = append(out.NeedsYou, r)
+		if r.NeedsAttention(false) {
+			out.NeedsYou = append(out.NeedsYou, r.ID)
 		}
 	}
 	if err = rows.Err(); err != nil {

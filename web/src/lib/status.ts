@@ -27,7 +27,7 @@ type Outcome = 'completed' | 'merged' | 'closed' | 'interrupted'
  * A live run's state, a finished run's outcome, or Paused. `stalled` is the wire's `waiting` parked by a
  * stall whose reason names the turn's phase: the turn may still be in flight, so it did not end.
  */
-/** `reported` is a subsession's success its parent agent holds (outcomeHeld). */
+/** `reported` is a subsession's success, which is for its parent agent only (outcomeHeld). */
 export type PresentationState = LiveState | Outcome | 'paused' | 'stalled' | 'reported'
 
 export type RunGroup = 'needs-you' | 'working' | 'review' | 'finished'
@@ -167,7 +167,7 @@ function presentation(run: RunRecord, ctx: StateContext): RunPresentation {
     return { state: condition.state, reason: condition.reason(run, ctx), next: stateNext[condition.state], needsYou: condition }
   }
   if (awaitsCompletion(run) && !isPaused(run, ctx)) {
-    if (outcomeHeld(run, ctx)) return { state: 'reported', reason: stateLabel.reported }
+    if (outcomeHeld(run)) return { state: 'reported', reason: stateLabel.reported }
     const reason = run.reason && !isTerminal(run.status) ? plainReason(run.reason) : stateReasons.ready
     return { state: 'ready', reason, next: stateNext.ready }
   }

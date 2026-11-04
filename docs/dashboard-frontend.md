@@ -1819,7 +1819,7 @@ running".
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Finished: review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Finished: review, never Needs you |
 | Completed / Merged | check | `completed`, `merged` | Finished |
-| Finished: reported to its parent | check in `icon-faint` | a subsession's reported success its parent agent still holds ([failure-handling.md](failure-handling.md#needs-you)) | Finished, beneath its parent |
+| Finished: reported to its parent | check in `icon-faint` | an attached subsession's reported success, which is for its parent agent only ([failure-handling.md](failure-handling.md#needs-you)) | Finished, beneath its parent |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
 | Interrupted | ring with an exclamation mark | `interrupted` | Finished |
@@ -1864,11 +1864,13 @@ share ([failure-handling.md](failure-handling.md)): a live session (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`. Waiting, every Waiting
 for state, Working, a reported success awaiting review (`review` `ready` or
-`later`) and a finished session never count. A subsession's failure held for
-its active parent (`outcomeHeld` in `src/lib/needs-you.ts`,
-[failure-handling.md](failure-handling.md#needs-you)) does not count either,
-so the family stays in its parent's group and counts the subsession as done
-or failed. The sidebar's Needs you count, the workspace badges and the
+`later`) and a finished session never count. An attached subsession's
+success or failure is for its parent agent only (`outcomeHeld` in
+`src/lib/needs-you.ts`, [failure-handling.md](failure-handling.md#needs-you)),
+so it never counts either: the family stays in its parent's group and counts
+the subsession as done or failed. Its run commands offer no **Mark
+complete**, **Not yet** or **Review later**, and its session view shows no
+completion prompt. The sidebar's Needs you count, the workspace badges and the
 list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused session
 too.
 Needs you means the viewer can resolve it.

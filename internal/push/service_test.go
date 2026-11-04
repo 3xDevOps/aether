@@ -953,10 +953,9 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 	}
 }
 
-// A subsession's failure is its parent agent's while the parent works: it
-// is announced when the parent stops, withdrawn when the parent works
-// again, and not announced twice, though only the parent's state changed.
-func TestASubsessionOutcomeFollowsItsParent(t *testing.T) {
+// A subsession's failure is for its parent agent only: it is never pushed
+// or shown in the sink, whatever the parent does.
+func TestASubsessionOutcomeIsNeverPushed(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	heard := &sink{heard: make(chan string, 64)}
@@ -983,24 +982,18 @@ func TestASubsessionOutcomeFollowsItsParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.publish(child, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFailed, OutcomeUnseen: true})
-	phone.expectNone(t, testQuiet)
-
 	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
-	phone.expect(t, notification{Title: "Port the schema", Body: "Agent reported failure, review the result", Run: string(child.ID)})
-
-	h.status(parent, domain.RunRunning, domain.ActivityWorking, "agent resumed")
-	phone.expect(t, notification{Title: "Port the schema", Body: clearedBody, Run: string(child.ID), Clear: true})
-
-	// The parent stopping again lets the same failure through; it was
-	// announced once already, so it is not pushed again.
-	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
+	h.status(parent, domain.RunCompleted, "", "agent reported success")
+	h.publish(child, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFailed, OutcomeUnseen: true})
 	phone.expectNone(t, testQuiet)
-	failure := fmt.Sprintf("%s needs %q, answered by %q", child.ID, "Agent reported failure, review the result", "")
-	for got := ""; got != failure; {
+	for {
 		select {
-		case got = <-heard.heard:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("the sink was not told the failure again, want %q", failure)
+		case got := <-heard.heard:
+			if strings.HasPrefix(got, string(child.ID)+" needs \"") {
+				t.Fatalf("the sink heard the subsession's outcome: %s", got)
+			}
+		default:
+			return
 		}
 	}
 }

@@ -269,30 +269,29 @@ func TestOwnersRunNotificationCoversOnlyWhatItPushes(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		run  *domain.Run
-		held bool
 		n    Notice
 		want bool
 	}{
-		{"a need of the owner's run", own(nil), false, need, true},
-		{"a need of someone else's run", own(func(r *domain.Run) { r.MemberID = "bob" }), false, need, false},
-		{"a success parked for review", own(nil), false, reported, true},
-		{"a success never put up for review", own(func(r *domain.Run) { r.Review = "" }), false, reported, false},
-		{"a success put off for later", own(func(r *domain.Run) { r.Review = domain.ReviewLater }), false, reported, false},
-		{"a failure nobody has seen", own(func(r *domain.Run) { r.OutcomeUnseen = true }), false, failed, true},
-		{"a failure already seen", own(nil), false, failed, false},
-		{"a subsession success held for its parent", own(nil), true, reported, false},
-		{"a subsession failure held for its parent", own(func(r *domain.Run) { r.OutcomeUnseen = true }), true, failed, false},
-		{"closed as merged", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "merged"}, false},
-		{"closed as abandoned", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "abandoned"}, false},
-		{"stopped", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "interrupted"}, false},
-		{"completed", own(nil), false, Notice{Condition: protocol.WatchFinished, Key: "completed"}, false},
-		{"its pull request merged", own(nil), false, Notice{Condition: protocol.WatchPRMerged, Key: "merged"}, false},
-		{"a need entered before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), false, need, false},
-		{"a success parked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), false, reported, false},
-		{"a question asked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), false,
+		{"a need of the owner's run", own(nil), need, true},
+		{"a need of someone else's run", own(func(r *domain.Run) { r.MemberID = "bob" }), need, false},
+		{"a success parked for review", own(nil), reported, true},
+		{"a success never put up for review", own(func(r *domain.Run) { r.Review = "" }), reported, false},
+		{"a success put off for later", own(func(r *domain.Run) { r.Review = domain.ReviewLater }), reported, false},
+		{"a failure nobody has seen", own(func(r *domain.Run) { r.OutcomeUnseen = true }), failed, true},
+		{"a failure already seen", own(nil), failed, false},
+		{"a subsession success", own(func(r *domain.Run) { r.ParentRunID = "run-parent" }), reported, false},
+		{"a subsession failure", own(func(r *domain.Run) { r.OutcomeUnseen, r.ParentRunID = true, "run-parent" }), failed, false},
+		{"closed as merged", own(nil), Notice{Condition: protocol.WatchFinished, Key: "merged"}, false},
+		{"closed as abandoned", own(nil), Notice{Condition: protocol.WatchFinished, Key: "abandoned"}, false},
+		{"stopped", own(nil), Notice{Condition: protocol.WatchFinished, Key: "interrupted"}, false},
+		{"completed", own(nil), Notice{Condition: protocol.WatchFinished, Key: "completed"}, false},
+		{"its pull request merged", own(nil), Notice{Condition: protocol.WatchPRMerged, Key: "merged"}, false},
+		{"a need entered before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), need, false},
+		{"a success parked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }), reported, false},
+		{"a question asked before the server started", own(func(r *domain.Run) { r.StatusChangedAt = &before }),
 			Notice{Condition: protocol.WatchNeedsYou, Key: "input:s|question|q1"}, true},
 	} {
-		if got := ownerPushed(w, c.run, c.held, c.n, started); got != c.want {
+		if got := ownerPushed(w, c.run, c.n, started); got != c.want {
 			t.Errorf("%s: skipped = %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -439,10 +438,10 @@ func TestAssistantNoticeWithoutItsToastIsDeliveredWithTheReason(t *testing.T) {
 	}
 }
 
-// A subsession's success under a working parent is its parent agent's: the
-// assistant's own follow of the subsession waits until the parent stops,
+// A subsession's outcome is for its parent agent only: the assistant's own
+// follow of the subsession never announces it, whatever the parent does,
 // while a watch someone asked for on that subsession hears of it at once.
-func TestAFollowWaitsForAHeldSubsessionOutcome(t *testing.T) {
+func TestAFollowNeverAnnouncesASubsessionOutcome(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.assistant = &conversation{}
@@ -490,12 +489,10 @@ func TestAFollowWaitsForAHeldSubsessionOutcome(t *testing.T) {
 	if got := append(h.notices(followed.ID), h.notices(failedFollow.ID)...); len(got) != 0 {
 		t.Fatalf("follow notices under a working parent = %q, want none", bodies(got))
 	}
-	if state := h.watchState(failedFollow.ID).State; state != protocol.WatchActive {
-		t.Fatalf("the follow of a held failure is %s, want active until the parent lets it through", state)
-	}
-
 	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
-	h.eventually("the follows' finishes once the parent stops", func() bool {
-		return len(h.notices(followed.ID)) == 1 && len(h.notices(failedFollow.ID)) == 1
-	})
+	h.publish(done.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
+	h.settle()
+	if got := append(h.notices(followed.ID), h.notices(failedFollow.ID)...); len(got) != 0 {
+		t.Fatalf("follow notices once the parent stopped = %q, want none", bodies(got))
+	}
 }

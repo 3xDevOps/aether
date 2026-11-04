@@ -41,6 +41,18 @@ beforeEach(() => {
 })
 
 describe('CompletionPrompt', () => {
+  it('asks nothing of a subsession, which finishes by reporting to its parent', () => {
+    seed({ parent_run_id: 'run_0' })
+    render(<Prompt />)
+    expect(banner()).toBeNull()
+  })
+
+  it('asks a detached subsession like any session', () => {
+    seed({ parent_run_id: 'run_0', detached: true })
+    render(<Prompt />)
+    expect(screen.getByRole('button', { name: 'Mark complete' })).toBeDefined()
+  })
+
   it('asks while the reported success is ready, with the agent’s summary', async () => {
     seed()
     vi.mocked(api.workspaceTimeline).mockResolvedValueOnce({

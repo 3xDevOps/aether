@@ -298,8 +298,8 @@ and to every admin when a workspace's spend rises past its
 | asks you with `report --outcome needs-input` | the question |
 | needs you another way | `Waiting for your reply`, or the usage-limit reason |
 | loses its Enhanced session | `Enhanced could not start: <error>` or `Agent disconnected: <cause>` |
-| fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result` |
-| reports success | `Finished: review the result`, once and quietly; not while its parent agent still works (a [subsession](teams.md#subsessions)) |
+| fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result`; never for an attached subsession |
+| reports success | `Finished: review the result`, once and quietly; never for an attached [subsession](teams.md#subsessions), whose outcome is for its parent agent |
 | ends `failed` with a result nobody has seen | `Failed, review the result` |
 | *(admins, titled with the workspace)* spend reaches the budget's warning or cap | `Budget warning: $8.50 of $10.00 spent` or `Budget reached: $21.00 of $20.00 spent, new sessions are refused` |
 

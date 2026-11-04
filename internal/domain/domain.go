@@ -166,80 +166,36 @@ const ReportedSuccessReason = "agent reported success"
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether sessions --needs-you and
 // the dashboard's Needs you list share: a live run with an open human
-// request, a disconnected agent, or a failure nobody has seen unless that
-// failure is held for its parent (OutcomeHeld). A reported success is
-// AwaitsReview, never this. A paused run never does.
-func (r *Run) NeedsAttention(paused, held bool) bool {
+// request, a disconnected agent, or a failure nobody has seen unless it is a
+// subsession's (OutcomeHeld). A reported success is AwaitsReview, never this.
+// A paused run never does.
+func (r *Run) NeedsAttention(paused bool) bool {
 	switch {
 	case paused, !r.Status.Live():
 		return false
 	case r.Activity == ActivityNeedsYou, r.Activity == ActivityDisconnected:
 		return true
 	}
-	return !held && r.Activity == ActivityFailed && r.OutcomeUnseen
+	return !r.OutcomeHeld() && r.Activity == ActivityFailed && r.OutcomeUnseen
 }
 
 // AwaitsReview is the one rule for Finished: review the result: a success
 // its agent reported that the owner has not marked complete, on a live
 // finished run or a completed one. It asks nothing of anyone, so it is never
-// NeedsAttention. A paused run, or one whose outcome is held for its parent,
-// never does.
-func (r *Run) AwaitsReview(paused, held bool) bool {
-	if paused || held || r.Review != ReviewReady && r.Review != ReviewLater {
+// NeedsAttention. A paused run, or a subsession (OutcomeHeld), never does.
+func (r *Run) AwaitsReview(paused bool) bool {
+	if paused || r.OutcomeHeld() || r.Review != ReviewReady && r.Review != ReviewLater {
 		return false
 	}
 	return r.Status == RunCompleted || r.Status.Live() && r.Activity == ActivityFinished
 }
 
-// OutcomeHeld reports whether an attached subsession's reported outcome is
-// its parent agent's to read rather than a person's: its parent, nil when
-// unknown and never when paused, is live and still active, or has an
-// outcome of its own that is held (parentHeld) further up the tree. Requests the
-// subsession makes of a person are never held.
-func (r *Run) OutcomeHeld(parent *Run, parentPaused, parentHeld bool) bool {
-	if r.ParentRunID == "" || r.Detached || parent == nil || parentPaused {
-		return false
-	}
-	if parentHeld && parent.hasOutcome() {
-		return true
-	}
-	if !parent.Status.Live() {
-		return false
-	}
-	switch parent.Activity {
-	case ActivityWorking, ActivityWaitingAgents, ActivityWaitingCI, ActivityWaitingTools:
-		return true
-	}
-	return false
-}
-
-func (r *Run) hasOutcome() bool {
-	return r.Activity == ActivityFinished || r.Activity == ActivityFailed || r.Status == RunCompleted || r.Status == RunFailed
-}
-
-// MaxHeldDepth bounds the walk up a tree of subsessions.
-const MaxHeldDepth = 8
-
-// OutcomeHeldIn is OutcomeHeld with the parents read through lookup, which
-// returns a run (nil when unknown) and whether it is paused, walking up the
-// attached chain at most MaxHeldDepth levels.
-func OutcomeHeldIn(run *Run, lookup func(RunID) (*Run, bool, error)) (bool, error) {
-	return outcomeHeldIn(run, lookup, 0)
-}
-
-func outcomeHeldIn(run *Run, lookup func(RunID) (*Run, bool, error), depth int) (bool, error) {
-	if run.ParentRunID == "" || run.Detached || depth >= MaxHeldDepth {
-		return false, nil
-	}
-	parent, paused, err := lookup(run.ParentRunID)
-	if err != nil || parent == nil {
-		return false, err
-	}
-	parentHeld, err := outcomeHeldIn(parent, lookup, depth+1)
-	if err != nil {
-		return false, err
-	}
-	return run.OutcomeHeld(parent, paused, parentHeld), nil
+// OutcomeHeld reports whether the run's reported outcome is for its parent
+// agent only, never a person: it is an attached subsession. A detached one
+// is a session of its own. Requests a subsession makes of a person are
+// never held.
+func (r *Run) OutcomeHeld() bool {
+	return r.ParentRunID != "" && !r.Detached
 }
 
 // NeedKey identifies the standing the run is in: its status, state and

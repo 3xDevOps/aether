@@ -253,60 +253,28 @@ func TestNormalizeOrigin(t *testing.T) {
 	}
 }
 
-func TestASubsessionOutcomeIsHeldWhileItsParentIsActive(t *testing.T) {
+func TestASubsessionOutcomeIsForItsParentOnly(t *testing.T) {
 	t.Parallel()
-	parent := func(status RunStatus, activity RunActivity) *Run { return &Run{Status: status, Activity: activity} }
-	child := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityFinished, Review: ReviewReady}
+	success := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityFinished, Review: ReviewReady}
 	failed := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityFailed, OutcomeUnseen: true}
 	asks := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityNeedsYou}
-	for _, tc := range []struct {
-		name   string
-		child  *Run
-		parent *Run
-		paused bool
-		held   bool
-	}{
-		{"parent working", child, parent(RunRunning, ActivityWorking), false, true},
-		{"parent waiting on subsessions", child, parent(RunNeedsAttention, ActivityWaitingAgents), false, true},
-		{"parent waiting on CI", child, parent(RunNeedsAttention, ActivityWaitingCI), false, true},
-		{"parent waiting on a process", child, parent(RunNeedsAttention, ActivityWaitingTools), false, true},
-		{"parent turn ended", child, parent(RunNeedsAttention, ActivityWaiting), false, false},
-		{"parent answered", child, parent(RunNeedsAttention, ActivityAnswered), false, false},
-		{"parent needs you", child, parent(RunNeedsAttention, ActivityNeedsYou), false, false},
-		{"parent paused", child, parent(RunRunning, ActivityWorking), true, false},
-		{"parent completed", child, parent(RunCompleted, ""), false, false},
-		{"parent unknown", child, nil, false, false},
-		{"detached", &Run{ParentRunID: "run-parent", Detached: true}, parent(RunRunning, ActivityWorking), false, false},
-		{"top level", &Run{}, parent(RunRunning, ActivityWorking), false, false},
-	} {
-		if got := tc.child.OutcomeHeld(tc.parent, tc.paused, false); got != tc.held {
-			t.Errorf("%s: OutcomeHeld = %v, want %v", tc.name, got, tc.held)
+	completed := &Run{ParentRunID: "run-parent", Status: RunCompleted, Review: ReviewReady}
+	for name, r := range map[string]*Run{"success": success, "failure": failed, "completed": completed} {
+		if !r.OutcomeHeld() || r.NeedsAttention(false) || r.AwaitsReview(false) {
+			t.Errorf("a subsession's %s is held = %v, needs attention = %v, awaits review = %v; want held only", name, r.OutcomeHeld(), r.NeedsAttention(false), r.AwaitsReview(false))
 		}
 	}
-	tree := map[RunID]*Run{
-		"run-root":   {ID: "run-root", Status: RunRunning, Activity: ActivityWorking},
-		"run-parent": {ID: "run-parent", ParentRunID: "run-root", Status: RunNeedsAttention, Activity: ActivityFinished, Review: ReviewReady},
+	if !asks.NeedsAttention(false) {
+		t.Error("a subsession that asks a person needs them")
 	}
-	lookup := func(id RunID) (*Run, bool, error) { return tree[id], false, nil }
-	grandchild := &Run{ParentRunID: "run-parent", Status: RunNeedsAttention, Activity: ActivityFailed, OutcomeUnseen: true}
-	if held, err := OutcomeHeldIn(grandchild, lookup); err != nil || !held {
-		t.Errorf("a grandchild under a finished parent held for its working root: held = %v, %v; want held", held, err)
+	detached := *failed
+	detached.Detached = true
+	if detached.OutcomeHeld() || !detached.NeedsAttention(false) {
+		t.Error("a detached subsession is a session of its own")
 	}
-	pausedParent := func(id RunID) (*Run, bool, error) { return tree[id], id == "run-parent", nil }
-	if held, _ := OutcomeHeldIn(grandchild, pausedParent); held {
-		t.Error("a grandchild is held although its parent is paused")
-	}
-	tree["run-root"].Activity = ActivityAnswered
-	if held, _ := OutcomeHeldIn(grandchild, lookup); held {
-		t.Error("a grandchild is held although its root stopped and its parent finished")
-	}
-	if child.AwaitsReview(false, true) || !child.AwaitsReview(false, false) || child.NeedsAttention(false, false) {
-		t.Error("a held success awaits no review, a surfaced one does, and neither needs anyone")
-	}
-	if failed.NeedsAttention(false, true) || !failed.NeedsAttention(false, false) {
-		t.Error("a held unseen failure needs nobody; a surfaced one needs its owner")
-	}
-	if !asks.NeedsAttention(false, true) {
-		t.Error("a subsession that asks a person needs them even while its parent works")
+	top := *success
+	top.ParentRunID = ""
+	if !top.AwaitsReview(false) {
+		t.Error("a top-level success awaits review")
 	}
 }

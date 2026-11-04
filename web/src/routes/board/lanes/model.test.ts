@@ -168,10 +168,10 @@ describe('buildLanes', () => {
     expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['parent'])
   })
 
-  it('keeps a subsession awaiting review visible in a folded family once its parent ended', () => {
+  it('keeps a detached subsession awaiting review visible in a folded family once its parent ended', () => {
     const ctx = ctxOf([
       run({ id: 'parent', status: 'merged', state: undefined, created_at: at(5), started_at: at(5), finished_at: at(40) }),
-      run({ id: 'c1', parent_run_id: 'parent', status: 'completed', state: undefined, review: 'ready', created_at: at(10), finished_at: at(20) }),
+      run({ id: 'c1', parent_run_id: 'parent', detached: true, status: 'completed', state: undefined, review: 'ready', created_at: at(10), finished_at: at(20) }),
       run({ id: 'c2', parent_run_id: 'parent', status: 'completed', state: undefined, created_at: at(10), finished_at: at(20) }),
     ])
     const { lanes } = buildLanes(input(ctx, { open: new Map([['section:review', true], ['section:finished', true]]) }))

@@ -233,21 +233,16 @@ func TestLatestReportCostsOneCallForARunThatNeverReported(t *testing.T) {
 	}
 }
 
-func TestAHeldSubsessionOutcomeReadsAsItsParents(t *testing.T) {
-	runs := []protocol.Run{
-		{ID: "root", Status: "running", Activity: "working"},
-		{ID: "lead", ParentRunID: "root", Status: "needs-attention", Activity: "finished", Review: "ready"},
-		{ID: "leaf", ParentRunID: "lead", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true},
-		{ID: "top", Status: "needs-attention", Activity: "finished", Review: "ready"},
+func TestASubsessionOutcomeReadsAsItsParents(t *testing.T) {
+	done := protocol.Run{ID: "lead", ParentRunID: "root", Status: "needs-attention", Activity: "finished", Review: "ready"}
+	if got := displayStatus(done); got != "Finished: reported to its parent" {
+		t.Errorf("a subsession's success = %q", got)
 	}
-	held := heldIn(runs)
-	if got := displayStatus(runs[1], held(runs[1])); got != "Finished: reported to its parent" {
-		t.Errorf("held success = %q", got)
+	top := protocol.Run{ID: "top", Status: "needs-attention", Activity: "finished", Review: "ready"}
+	if got := displayStatus(top); got != "Finished: review" {
+		t.Errorf("a top-level success = %q", got)
 	}
-	if got := displayStatus(runs[3], held(runs[3])); got != "Finished: review" {
-		t.Errorf("top-level success = %q", got)
-	}
-	if !held(runs[2]) || needsYou(runs[2], held(runs[2])) {
-		t.Error("a grandchild's failure under a held parent outcome needs someone")
+	if needsYou(protocol.Run{ID: "leaf", ParentRunID: "lead", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true}) {
+		t.Error("a subsession's failure needs someone")
 	}
 }

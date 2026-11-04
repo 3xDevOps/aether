@@ -210,45 +210,45 @@ describe('listedRuns', () => {
   })
 })
 
-describe('a subsession outcome held for its parent', () => {
+describe('a subsession outcome is for its parent only', () => {
   const parent = (state: Run['state'], over: Partial<Run> = {}) =>
     record({ id: 'lead', mode: 'acp', acp: true, status: state === 'working' ? 'running' : 'needs-attention', state, ...over })
   const done = record({ id: 'done', parent_run_id: 'lead', status: 'needs-attention', state: 'finished', review: 'ready' })
   const broke = record({ id: 'broke', parent_run_id: 'lead', status: 'needs-attention', state: 'failed', outcome_unseen: true })
   const asks = record({ id: 'asks', parent_run_id: 'lead', status: 'needs-attention', state: 'needs-you', reason: 'blocked: no key' })
+  const parents = [
+    parent('working'), parent('waiting-agents'), parent('waiting-ci'), parent('waiting-tools'), parent('waiting'), parent('answered'),
+    parent('working', { paused: true }), record({ id: 'lead', status: 'completed' }),
+  ]
 
-  it.each(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'] as const)('never moves the family to Needs you while the parent is %s', (state) => {
-    const groups = sidebarGroups(input([parent(state), done, broke]))
-    expect(groups.map((group) => group.key)).toEqual(['working'])
-    expect(needsYouByWorkspace(input([parent(state), done, broke]).ctx)).toEqual({})
-    const [tree] = groups[0].runs
+  it.each(parents.map((lead) => [lead.paused ? 'paused' : lead.state || lead.status, lead] as const))('never surfaces under a parent that is %s', (_, lead) => {
+    const groups = sidebarGroups(input([lead, done, broke]))
+    expect(groups.some((group) => group.key === 'needs-you' || group.key === 'review')).toBe(false)
+    expect(needsYouByWorkspace(input([lead, done, broke]).ctx)).toEqual({})
+    const [tree] = groups.flatMap((group) => group.runs)
     expect(tree.childRuns?.counts).toEqual({ working: 0, needsYou: 0, done: 1, failed: 1 })
   })
 
-  it('shows a held success as reported to its parent, never Finished: review, and holds a grandchild under it', () => {
+  it('shows a success as reported to its parent, never Finished: review, down the tree', () => {
     const grandchild = record({ id: 'leaf', parent_run_id: 'done', status: 'needs-attention', state: 'failed', outcome_unseen: true })
-    const rows = listedRuns(workspace.id, input([parent('working'), done, grandchild]).ctx)
+    const rows = listedRuns(workspace.id, input([parent('waiting'), done, grandchild]).ctx)
     const row = (id: string) => rows.find((r) => r.run.id === id)!
     expect(row('done')).toMatchObject({ state: 'reported', reason: 'Finished: reported to its parent', group: 'finished' })
     expect(row('done').needsYou).toBeUndefined()
     expect(row('leaf').needsYou).toBeUndefined()
     expect(rows.some((r) => r.group === 'review' || r.group === 'needs-you')).toBe(false)
-    const groups = sidebarGroups(input([parent('waiting'), done]))
-    expect(groups.map((group) => [group.key, group.count])).toEqual([['review', 1]])
-    const idle = listedRuns(workspace.id, input([parent('waiting'), done, grandchild]).ctx)
-    expect(idle.find((r) => r.run.id === 'done')?.group).toBe('review')
-    expect(idle.find((r) => r.run.id === 'leaf')?.needsYou).toBe('failed')
   })
 
-  it('still surfaces a request the subsession makes of a person', () => {
+  it('still surfaces a request the subsession makes of a person, with its family', () => {
     const groups = sidebarGroups(input([parent('working'), asks]))
-    expect(groups.find((group) => group.key === 'needs-you')?.count).toBe(1)
+    const needs = groups.find((group) => group.key === 'needs-you')
+    expect(needs?.count).toBe(1)
+    expect(ids(needs?.runs ?? [])).toEqual(['lead'])
   })
 
-  it('surfaces the outcome once the parent is idle, gone, paused or the subsession detached', () => {
-    for (const lead of [parent('waiting'), parent('answered'), record({ id: 'lead', status: 'completed' }), parent('working', { paused: true })]) {
-      expect(needsYouByWorkspace(input([lead, broke]).ctx)).toEqual({ [workspace.id]: 1 })
-    }
+  it('treats a detached subsession as a session of its own', () => {
     expect(needsYouByWorkspace(input([parent('working'), { ...broke, detached: true }]).ctx)).toEqual({ [workspace.id]: 1 })
+    const groups = sidebarGroups(input([parent('waiting'), { ...done, detached: true }]))
+    expect(groups.map((group) => [group.key, ids(group.runs)])).toEqual([['review', ['done']], ['working', ['lead']]])
   })
 })

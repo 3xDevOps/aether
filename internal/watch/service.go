@@ -51,7 +51,6 @@ type Store interface {
 	GetCoordStateReport(ctx context.Context, run domain.RunID, key string) (*store.CoordStateReport, error)
 	GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, key string) (*store.RunMessage, error)
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
-	ListHoldingChildren(ctx context.Context, parent domain.RunID) ([]domain.RunID, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	RunResumedSince(ctx context.Context, id domain.RunID, at time.Time) (bool, error)
@@ -427,46 +426,11 @@ func (s *Service) advance(ctx context.Context, seq uint64) error {
 	return nil
 }
 
-// affected is the watches e may change: those on its run and, when the
-// run's standing changed, those on the attached subsessions below it that
-// hold an outcome, which follows it (domain.OutcomeHeldIn).
 func (s *Service) affected(ctx context.Context, e events.Event) ([]string, error) {
 	if e.RunID == "" {
 		return nil, nil
 	}
-	ids, err := s.store.EvaluableWatchIDs(ctx, e.RunID)
-	if err != nil {
-		return nil, err
-	}
-	switch p := e.Payload.(type) {
-	case events.RunStatusPayload:
-	case events.TimelinePayload:
-		if p.Kind != events.TimelinePause && p.Kind != events.TimelineResume {
-			return ids, nil
-		}
-	default:
-		return ids, nil
-	}
-	level := []domain.RunID{e.RunID}
-	for depth := 0; depth < domain.MaxHeldDepth && len(level) > 0; depth++ {
-		var next []domain.RunID
-		for _, id := range level {
-			children, err := s.store.ListHoldingChildren(ctx, id)
-			if err != nil {
-				return nil, fmt.Errorf("list the subsessions of %s: %w", id, err)
-			}
-			for _, child := range children {
-				below, err := s.store.EvaluableWatchIDs(ctx, child)
-				if err != nil {
-					return nil, err
-				}
-				ids = append(ids, below...)
-			}
-			next = append(next, children...)
-		}
-		level = next
-	}
-	return ids, nil
+	return s.store.EvaluableWatchIDs(ctx, e.RunID)
 }
 
 // background expires watches, retries failing ones and polls pull

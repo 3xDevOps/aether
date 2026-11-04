@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -29,9 +28,6 @@ type attentionRun struct {
 	controller domain.MemberID
 	inputs     []domain.RunInputRequest
 	pending    []acphost.Request
-	// held is whether the run's outcome is its parent's to read
-	// (domain.Run.OutcomeHeld).
-	held bool
 	// open are the run's open room questions and queued steer requests,
 	// oldest first, read only when a room row can hold.
 	open []*store.RoomMessage
@@ -70,30 +66,23 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 		return nil, rpcError(err)
 	}
 	viewer := attentionViewer{id: member, admin: caller.Role == domain.RoleAdmin, name: names}
-	var runs []*domain.Run
-	for _, ws := range workspaces {
-		listed, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
-		if err != nil {
-			return nil, rpcError(err)
-		}
-		runs = append(runs, listed...)
-	}
-	byID := make(map[domain.RunID]*domain.Run, len(runs))
-	for _, run := range runs {
-		byID[run.ID] = run
-	}
-	parents := s.parentLookup(ctx, byID)
 	items := []protocol.AttentionItem{}
-	for _, run := range runs {
-		if run.ArchivedAt != nil {
-			continue
-		}
-		r, err := s.attentionRun(ctx, run, parents)
+	for _, ws := range workspaces {
+		runs, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		if item, ok := attentionItem(r, viewer); ok {
-			items = append(items, item)
+		for _, run := range runs {
+			if run.ArchivedAt != nil {
+				continue
+			}
+			r, err := s.attentionRun(ctx, run)
+			if err != nil {
+				return nil, rpcError(err)
+			}
+			if item, ok := attentionItem(r, viewer); ok {
+				items = append(items, item)
+			}
 		}
 	}
 	// A finished run asks nothing of anyone, so it follows every row that does.
@@ -124,40 +113,8 @@ func compareSince(a, b string) int {
 	return at.Compare(bt)
 }
 
-// parentLookup reads the parents domain.OutcomeHeldIn walks: from known,
-// else the store.
-func (s *Server) parentLookup(ctx context.Context, known map[domain.RunID]*domain.Run) func(domain.RunID) (*domain.Run, bool, error) {
-	return func(id domain.RunID) (*domain.Run, bool, error) {
-		run := known[id]
-		if run == nil {
-			got, err := s.cfg.Store.GetRun(ctx, id)
-			if errors.Is(err, store.ErrNotFound) {
-				return nil, false, nil
-			}
-			if err != nil {
-				return nil, false, err
-			}
-			run = got
-		}
-		return run, s.cfg.Runs.Paused(id), nil
-	}
-}
-
-// holdable is whether run has an outcome a parent could hold, the only
-// case worth reading its parents for.
-func holdable(run *domain.Run) bool {
-	return run.ParentRunID != "" && (run.OutcomeUnseen || run.Review == domain.ReviewReady || run.Review == domain.ReviewLater)
-}
-
-func (s *Server) attentionRun(ctx context.Context, run *domain.Run, parents func(domain.RunID) (*domain.Run, bool, error)) (*attentionRun, error) {
+func (s *Server) attentionRun(ctx context.Context, run *domain.Run) (*attentionRun, error) {
 	r := &attentionRun{run: run}
-	if holdable(run) {
-		held, err := domain.OutcomeHeldIn(run, parents)
-		if err != nil {
-			return nil, err
-		}
-		r.held = held
-	}
 	if !run.Status.Terminal() {
 		r.paused = s.cfg.Runs.Paused(run.ID)
 		r.inputs = s.cfg.Runs.PendingInputs(run.ID)
@@ -431,7 +388,7 @@ var attentionRows = []attentionRow{
 		background: true,
 		completed:  true,
 		holds: func(r *attentionRun) bool {
-			return !r.held && r.run.Review == domain.ReviewReady &&
+			return !r.run.OutcomeHeld() && r.run.Review == domain.ReviewReady &&
 				(r.run.Status == domain.RunCompleted || r.live() && r.run.Activity == domain.ActivityFinished)
 		},
 		resolvers: owner,
@@ -446,7 +403,7 @@ var attentionRows = []attentionRow{
 		kind:       protocol.AttentionKindFailed,
 		background: true,
 		holds: func(r *attentionRun) bool {
-			return !r.held && r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen
+			return !r.run.OutcomeHeld() && r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen
 		},
 		resolvers: owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {

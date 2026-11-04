@@ -235,15 +235,8 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	r := reading{ok: true, title: push.RunTitle(run), final: run.Status.Final()}
 	link := RunLink(run.ID)
 	r.observed = protocol.WatchObserved{RunStatus: string(run.Status), Activity: string(run.Activity)}
-	held := false
-	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) || followed(w) {
-		var err error
-		if held, err = s.outcomeHeld(ctx, run); err != nil {
-			return reading{}, err
-		}
-	}
 	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
-		for i, n := range s.runNeeds(run, held) {
+		for i, n := range s.runNeeds(run) {
 			if i == 0 {
 				r.observed.Need = n.body
 			}
@@ -266,9 +259,8 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	}
 	var finished string
 	key, body, ok := runFinish(run, fired)
-	if ok && held && followed(w) && reportedOutcome(run, key) {
-		// Not done until the parent lets the outcome through.
-		ok, r.final = false, false
+	if ok && run.OutcomeHeld() && followed(w) && (strings.HasPrefix(key, "reported|") || key == "failed") {
+		ok = false
 	}
 	if ok {
 		finished = body
@@ -309,9 +301,8 @@ var questionKinds = []string{"question", "form", "extension_ui"}
 // runNeeds is what the run waits on a member for, in the Needs you
 // table's order: each of its own open permission requests and questions,
 // else its status when domain.Run.NeedsAttention holds. Each is a need
-// of its own. A reported success is the finished condition's, not a need,
-// and an outcome held for the run's parent (domain.Run.OutcomeHeld) is none.
-func (s *Service) runNeeds(run *domain.Run, held bool) []need {
+// of its own. A reported success is the finished condition's, not a need.
+func (s *Service) runNeeds(run *domain.Run) []need {
 	if !run.Status.Live() || s.runs.Paused(run.ID) {
 		return nil
 	}
@@ -329,43 +320,18 @@ func (s *Service) runNeeds(run *domain.Run, held bool) []need {
 			}
 		}
 	}
-	if len(out) > 0 || !run.NeedsAttention(false, held) || run.Review == domain.ReviewReady {
+	if len(out) > 0 || !run.NeedsAttention(false) || run.Review == domain.ReviewReady {
 		return out
 	}
-	return []need{{key: "status:" + run.NeedKey(), body: push.AttentionBody(run, held)}}
+	return []need{{key: "status:" + run.NeedKey(), body: push.AttentionBody(run)}}
 }
 
 // followed is whether Follow made w for the assistant, rather than a person
-// or an assistant asking for that session. Its finished notice waits while
-// the session's parent agent holds the outcome; an asked-for one does not.
+// or an assistant asking for that session. Its finished notice skips a
+// subsession's outcome, which is for the parent agent only
+// (domain.Run.OutcomeHeld); an asked-for one does not.
 func followed(w *store.Watch) bool {
 	return w.Source == protocol.WatchSourceAssistant && strings.HasPrefix(w.IdempotencyKey, followKeyPrefix)
-}
-
-// reportedOutcome is whether a runFinish key is an outcome a parent can
-// hold: a success awaiting review or a failure nobody has seen, the ones
-// store.ListHoldingChildren finds again when the parent changes.
-func reportedOutcome(run *domain.Run, key string) bool {
-	return strings.HasPrefix(key, "reported|") && run.AwaitsReview(false, false) || key == "failed" && run.OutcomeUnseen
-}
-
-// outcomeHeld reports whether run's outcome is its parent's to read
-// (domain.OutcomeHeldIn).
-func (s *Service) outcomeHeld(ctx context.Context, run *domain.Run) (bool, error) {
-	held, err := domain.OutcomeHeldIn(run, func(id domain.RunID) (*domain.Run, bool, error) {
-		parent, err := s.store.GetRun(ctx, id)
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, false, nil
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		return parent, s.runs.Paused(id), nil
-	})
-	if err != nil {
-		return false, fmt.Errorf("read the parents of session %s: %w", run.ID, err)
-	}
-	return held, nil
 }
 
 func (s *Service) requestLine(run *domain.Run, input *domain.RunInputRequest, label string) string {
@@ -452,7 +418,6 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 	var out []*store.WatchNotification
 	var prefs *store.NotifyPrefs
 	var run *domain.Run
-	held := false
 	devices := -1
 	for _, n := range notices {
 		if slices.Contains(strings.Split(w.Fired[n.Condition], firedSep), n.Key) {
@@ -466,9 +431,6 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			prefs = &p
 			if w.TargetKind == protocol.WatchTargetRun {
 				if run, err = s.store.GetRun(ctx, w.RunID); err != nil {
-					return nil, err
-				}
-				if held, err = s.outcomeHeld(ctx, run); err != nil {
 					return nil, err
 				}
 			}
@@ -496,7 +458,7 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 				d.Status, d.Detail = protocol.WatchStatusNoDestination, "No device has notifications turned on"
 				break
 			}
-			if ownerPushed(w, run, held, n, s.startedAt()) {
+			if ownerPushed(w, run, n, s.startedAt()) {
 				d.Status, d.Detail = protocol.WatchStatusSkipped, "The session notification already sent it"
 				break
 			}

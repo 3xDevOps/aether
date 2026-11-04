@@ -99,10 +99,6 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	needsYou, err := s.needsYou(ctx, got.NeedsYou)
-	if err != nil {
-		return nil, rpcError(err)
-	}
 	out := protocol.InsightsResult{
 		GeneratedAt: q.Now.Format(time.RFC3339),
 		From:        q.From.In(loc).Format(time.RFC3339),
@@ -139,7 +135,7 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 			Members: make([]protocol.InsightsMemberOutcome, 0, len(got.Members)),
 		},
 		Recent:   make([]protocol.InsightsRecentRun, 0, len(got.Recent)),
-		NeedsYou: needsYou,
+		NeedsYou: s.unpaused(got.NeedsYou),
 		Coverage: protocol.InsightsCoverage{
 			StateTimesSince:   optionalRFC3339(got.StateTimesSince),
 			PullRequestsSince: optionalRFC3339(got.PullRequestsSince),
@@ -253,29 +249,12 @@ func optionalRFC3339(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// needsYou counts the runs that are not paused and whose need is not an
-// outcome held for their parent (domain.OutcomeHeldIn).
-func (s *Server) needsYou(ctx context.Context, runs []*domain.Run) (int, error) {
-	known := make(map[domain.RunID]*domain.Run, len(runs))
-	for _, run := range runs {
-		known[run.ID] = run
-	}
-	parents := s.parentLookup(ctx, known)
+func (s *Server) unpaused(runs []domain.RunID) int {
 	n := 0
-	for _, run := range runs {
-		if s.cfg.Runs.Paused(run.ID) {
-			continue
+	for _, id := range runs {
+		if !s.cfg.Runs.Paused(id) {
+			n++
 		}
-		if holdable(run) {
-			held, err := domain.OutcomeHeldIn(run, parents)
-			if err != nil {
-				return 0, fmt.Errorf("read the parents of session %s: %w", run.ID, err)
-			}
-			if !run.NeedsAttention(false, held) {
-				continue
-			}
-		}
-		n++
 	}
-	return n, nil
+	return n
 }

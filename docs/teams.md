@@ -606,7 +606,10 @@ session or are handed it. The subsession appears under its parent in the
 dashboard, with its purpose, agent, model, account and state, and you open,
 message, take over or stop it like any session. Its result reaches the parent's
 inbox, as does a notice when it has sat idle or waiting for over an hour, so
-the parent can wake or stop it. The agent commands are in
+the parent can wake or stop it. Its success or failure is for the parent
+alone: it never shows as Needs you or Finished: review and never notifies
+you, though its requests of a person still do
+([failure-handling.md](failure-handling.md#needs-you)). The agent commands are in
 [coordination.md](coordination.md#subsessions).
 
 Subsessions go one level deep: a subsession cannot start subsessions. A parent must be

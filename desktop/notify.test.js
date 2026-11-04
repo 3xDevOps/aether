@@ -490,41 +490,29 @@ test('a watch notice read when the connection drops never shows', async () => {
   }
 })
 
-test("a subsession's outcome stays with its working parent, and surfaces once the parent stops", async () => {
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+test("a subsession's outcome never notifies or counts, whatever its parent does", async () => {
   const parent = { ...lead('r22'), acp: true }
   await status(parent, { status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 1 subsession' })
   const child = { ...lead('r23'), acp: true, parent_run_id: 'r22' }
   await status(child, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
-  await settle()
-  await status(child, { state: 'finished', reason: 'agent reported success', review: 'ready' })
-  await settle()
+  await status(parent, { state: 'waiting', reason: 'turn ended without a report' })
+  await status(child, { state: 'finished', reason: 'agent reported success', outcome_unseen: false, review: 'ready' })
+  await status(parent, { status: 'completed', state: '' })
+  await status(child, { status: 'completed', state: '', review: 'ready' })
   assert.equal(shown.length, 0)
   assert.equal(badge, 0)
 
-  runs.set('r23', { ...child, state: 'failed', reason: 'agent reported failure', outcome_unseen: true, review: '' })
-  await status(parent, { state: 'waiting', reason: 'turn ended without a report' })
-  await settle()
-  assert.equal(shown.length, 1, "the parent's turn ending surfaces the failure")
+  const asks = { ...lead('r25'), acp: true, parent_run_id: 'r22' }
+  await status(asks, { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no credentials for the registry' })
+  assert.equal(shown.length, 1, "a subsession's request of a person still notifies")
   assert.equal(badge, 1)
-
-  await status(parent, { status: 'running', state: 'working', reason: '' })
-  await settle()
-  assert.ok(shown[0].closed, 'the parent working again takes the failure back')
-  assert.equal(badge, 0)
 })
 
-test('a grandchild under a finished subsession held for a working root stays quiet', async () => {
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
-  const root = lead('r24')
-  await status(root, { status: 'running', state: 'working' })
-  const middle = { ...lead('r25'), parent_run_id: 'r24' }
-  await status(middle, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' })
-  const leaf = { ...lead('r26'), parent_run_id: 'r25' }
-  await status(leaf, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
-  await settle()
-  assert.equal(shown.length, 0)
-  assert.equal(badge, 0)
+test('a detached subsession notifies like any session', async () => {
+  const run = { ...lead('r26'), parent_run_id: 'r22', detached: true }
+  await status(run, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
+  assert.equal(shown.length, 1)
+  assert.equal(badge, 1)
 })
 
 test('a finished notice closes when a follow-up restarts the run', async () => {

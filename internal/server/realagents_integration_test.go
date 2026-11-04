@@ -352,7 +352,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 						if needsYou(r) {
 							t.Errorf("needs you (review %q), want not", r.Review)
 						}
-						if got, want := domainRun(r).AwaitsReview(r.Paused, false), tc.outcome == protocol.CoordOutcomeSuccess; got != want {
+						if got, want := domainRun(r).AwaitsReview(r.Paused), tc.outcome == protocol.CoordOutcomeSuccess; got != want {
 							t.Errorf("awaits review = %v (review %q), want %v", got, r.Review, want)
 						}
 					})
@@ -406,7 +406,7 @@ func (a *realAgentRun) get(t *testing.T) protocol.Run {
 
 // needsYou is the rule the dashboard's Needs you list applies.
 func needsYou(r protocol.Run) bool {
-	return domainRun(r).NeedsAttention(r.Paused, false)
+	return domainRun(r).NeedsAttention(r.Paused)
 }
 
 func domainRun(r protocol.Run) *domain.Run {

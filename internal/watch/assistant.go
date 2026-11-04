@@ -151,10 +151,10 @@ func (s *Service) baseline(ctx context.Context, w *store.Watch) error {
 // pushed what push.needOf finds: every need of it, a reported success
 // while it waits for review and a failure nobody has seen, so only its
 // other ends are news to their devices. A success the owner already put
-// off or accepted is not pushed by the run. Push, started before the watch
+// off or accepted, or a subsession's outcome, is not pushed by the run. Push, started before the watch
 // service, does not announce a standing entered before it started, which
 // a watch evaluated on recovery then pushes itself.
-func ownerPushed(w *store.Watch, run *domain.Run, held bool, n Notice, started time.Time) bool {
+func ownerPushed(w *store.Watch, run *domain.Run, n Notice, started time.Time) bool {
 	if run == nil || run.MemberID != w.MemberID {
 		return false
 	}
@@ -168,7 +168,7 @@ func ownerPushed(w *store.Watch, run *domain.Run, held bool, n Notice, started t
 	case protocol.WatchNeedsYou:
 		return true
 	case protocol.WatchFinished:
-		return !held && (strings.HasPrefix(n.Key, "reported|") && run.Review == domain.ReviewReady || n.Key == "failed" && run.OutcomeUnseen)
+		return !run.OutcomeHeld() && (strings.HasPrefix(n.Key, "reported|") && run.Review == domain.ReviewReady || n.Key == "failed" && run.OutcomeUnseen)
 	}
 	return false
 }

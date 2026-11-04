@@ -124,23 +124,9 @@ export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>):
   return !isTerminal(run.status) && (ctx.pausedRuns[run.id] ?? run.paused) === true
 }
 
-const activeStates = new Set<string | undefined>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools'])
-// Mirrors domain.MaxHeldDepth.
-const maxHeldDepth = 8
-
-const hasOutcome = (run: Pick<Run, 'status' | 'state'>) =>
-  run.state === 'finished' || run.state === 'failed' || run.status === 'completed' || run.status === 'failed'
-
-/**
- * An attached subsession's outcome is its parent agent's to read while that parent is live, unpaused and
- * active, or has an outcome of its own held further up. Mirrors domain.OutcomeHeldIn.
- */
-export function outcomeHeld(run: RunRecord, ctx: Pick<StateContext, 'runs' | 'pausedRuns'>, depth = 0): boolean {
-  if (!run.parent_run_id || run.detached || depth >= maxHeldDepth) return false
-  const parent = ctx.runs[run.parent_run_id]
-  if (!parent || isPaused(parent, ctx)) return false
-  if (hasOutcome(parent) && outcomeHeld(parent, ctx, depth + 1)) return true
-  return isLive(parent) && activeStates.has(parent.state)
+/** A subsession's reported outcome is for its parent agent only, never a person; a detached one is a session of its own. Mirrors domain.Run.OutcomeHeld. */
+export function outcomeHeld(run: Pick<Run, 'parent_run_id' | 'detached'>): boolean {
+  return Boolean(run.parent_run_id) && run.detached !== true
 }
 
 // Room status loads only while the run is open; an older gateway's snapshot has no controller.
@@ -287,7 +273,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     state: 'failed',
     target: 'changes',
     background: true,
-    holds: (run, ctx) => run.state === 'failed' && run.outcome_unseen === true && !outcomeHeld(run, ctx),
+    holds: (run) => run.state === 'failed' && run.outcome_unseen === true && !outcomeHeld(run),
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
     reason: (run) =>
