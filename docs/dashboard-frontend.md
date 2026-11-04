@@ -560,8 +560,8 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   **N more**), or for `run.launch` a **What starts**
   list (`components/assistant/launch-summary.tsx`; the title then stops
   before the quoted task) of kind, workspace,
-  agent with model and mode, account (`Yours` or `<name>'s, shared with
-  you`), fallback, task, and how the member hears back, a
+  agent with model and mode, effort when set, permission tier (`default`
+  when unset), account (`Yours` or `<name>'s, shared with you`), fallback, task, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a

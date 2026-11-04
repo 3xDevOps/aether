@@ -13,7 +13,7 @@ import { expect, test } from './fixtures'
 const at = () => new Date().toISOString()
 const later = () => new Date(Date.now() + 600_000).toISOString()
 
-const wording = 'Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback'
+const wording = 'Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task'
 
 function launchCard(id: string, task: string, rule?: { wording: string; suggested?: boolean }) {
   return {
@@ -101,7 +101,7 @@ test('Always approve saves a rule, a matching launch passes, another kind asks, 
   await cards()
   await expect(first).toBeHidden()
 
-  await cards(launchCard('conf-2', 'another kind', { wording: wording.replace('(acp)', '(tui)') }))
+  await cards(launchCard('conf-2', 'another kind', { wording: wording.replace('(Enhanced)', '(Standard)') }))
   const other = assistant.getByRole('group', { name: /^Approve this action\? .*"another kind"/ })
   await other.getByRole('button', { name: 'Decline' }).click()
   await expect.poll(() => confirmed.at(-1)).toEqual({ confirmation_id: 'conf-2', approve: false })

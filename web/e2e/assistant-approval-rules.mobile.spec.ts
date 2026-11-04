@@ -7,7 +7,7 @@ import { expect, test } from './fixtures'
 
 test.use({ viewport: { width: 390, height: 844 } })
 
-const wording = 'Always approve launches of Claude Code (acp, model "claude-opus-5-5", effort "high") in api on your account, permission isolated, no fallback'
+const wording = 'Always approve launches of Claude Code (Enhanced, model "claude-opus-5-5", effort "high") in api on your account, permission isolated, no fallback, for any task'
 
 test('a launch card shows every row it covers before Always approve, inside the screen', async ({ page, aether }) => {
   const alice = await aether.member('alice')

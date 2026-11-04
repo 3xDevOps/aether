@@ -165,7 +165,7 @@ describe('assistant settings', () => {
 })
 
 describe('approval rules', () => {
-  const rule = { id: 'rule-1', method: 'run.launch', wording: 'Always approve launches of Claude Code (acp) in api on your account, permission default', summary: 'Launch claude (acp) in api: "Fix it"', created_at: '2026-11-01T10:00:00Z', last_used_at: '2026-11-03T10:00:00Z', uses: 3 }
+  const rule = { id: 'rule-1', method: 'run.launch', wording: 'Always approve launches of Claude Code (Enhanced) in api on your account, permission default, for any task', summary: 'Launch claude (acp) in api: "Fix it"', created_at: '2026-11-01T10:00:00Z', last_used_at: '2026-11-03T10:00:00Z', uses: 3 }
 
   it('lists each rule with the card it came from and its use, and revokes one at once', async () => {
     const user = userEvent.setup()

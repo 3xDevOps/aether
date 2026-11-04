@@ -420,6 +420,7 @@ describe('confirmations', () => {
       Agent: 'Claude Code opus (Enhanced)',
       Account: "Bob's account, shared with you",
       Fallback: 'Then mem_carol',
+      Permission: 'default',
       Task: 'Fix the flaky login test\nthen open a PR',
       'You hear back': hearBack.run,
     })
@@ -999,7 +1000,7 @@ describe('approval rules', () => {
     method: 'run.launch',
     summary: 'Launch claude (acp) in api, no fallback: "Fix the flaky login test"',
     params: { workspace_id: workspace.id, harness: 'claude', mode: 'acp', no_fallback: true, task: 'Fix the flaky login test' },
-    rule: { wording: 'Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback' },
+    rule: { wording: 'Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task' },
   }
   const card = (aside: HTMLElement) => within(aside).findByRole('group', { name: `Approve this action? ${launch.summary}` })
 

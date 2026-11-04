@@ -12,7 +12,7 @@ func TestAssistantRulesListsAndRevokes(t *testing.T) {
 	at := time.Date(2026, 11, 3, 14, 2, 0, 0, time.Local)
 	c := fakeControlMethods(t, map[string]*fakeReply{
 		protocol.MethodAssistantRules: {result: protocol.AssistantRulesResult{Rules: []protocol.AssistantRule{
-			{ID: "rule-1", Method: protocol.MethodRunLaunch, Wording: "Always approve launches of Claude Code (acp) in api on your account, permission default",
+			{ID: "rule-1", Method: protocol.MethodRunLaunch, Wording: "Always approve launches of Claude Code (Enhanced) in api on your account, permission default, for any task",
 				Summary: `Launch claude (acp) in api: "Fix it"`, CreatedAt: at, LastUsedAt: at, Uses: 3},
 			{ID: "rule-2", Method: protocol.MethodRunKill, Wording: "Always approve stopping your own sessions in web", Summary: "Stop session run-1",
 				CreatedAt: at, Inactive: "workspace ws-web no longer exists or you lost access to it"},
@@ -24,7 +24,7 @@ func TestAssistantRulesListsAndRevokes(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "rule-1  created 2026-11-03 14:02, 3 uses, last 2026-11-03 14:02\n" +
-		"  Always approve launches of Claude Code (acp) in api on your account, permission default\n" +
+		"  Always approve launches of Claude Code (Enhanced) in api on your account, permission default, for any task\n" +
 		"  from: Launch claude (acp) in api: \"Fix it\"\n" +
 		"rule-2  created 2026-11-03 14:02, never used\n" +
 		"  Always approve stopping your own sessions in web\n" +

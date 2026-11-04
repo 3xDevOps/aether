@@ -107,7 +107,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			Fallback: &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOrdered, Order: []string{"m1", "m3"}}}},
 	}
 	want := map[string]string{
-		protocol.MethodRunLaunch:       `Launch claude (default mode) in shop on "Grace"'s account, falling back to your account in order, with repositories "web": "fix it"`,
+		protocol.MethodRunLaunch:       `Launch claude (default mode) in shop on Grace's account, falling back to your account in order, with repositories "web": "fix it"`,
 		protocol.MethodTemplateLaunch:  `Launch template "triage" in shop: claude (acp, opus) on your account: "triage issue 42…"`,
 		protocol.MethodRunInject:       `Send to session run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
 		protocol.MethodRunKill:         `Stop session run-1 ("Fix login"), owned by Grace`,
@@ -205,14 +205,14 @@ func TestOnlyAutomaticFallbackToATeammateAlwaysAsks(t *testing.T) {
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
 		t.Fatal(perr)
 	}
-	if got.OtherMember || !strings.Contains(got.Summary, `falling back to "Grace"'s account in order`) {
+	if got.OtherMember || !strings.Contains(got.Summary, `falling back to Grace's account in order`) {
 		t.Fatalf("explicit fallback confirmation = %+v, want Grace named and the card the member's own", got)
 	}
 	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", AccountMemberID: "m2", NoFallback: true})
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
 		t.Fatal(perr)
 	}
-	if got.OtherMember || !strings.Contains(got.Summary, `on "Grace"'s account`) {
+	if got.OtherMember || !strings.Contains(got.Summary, `on Grace's account`) {
 		t.Fatalf("explicit account confirmation = %+v, want Grace named and the card the member's own", got)
 	}
 	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it"})
@@ -279,7 +279,7 @@ func TestSavedChoicesThatCountAsChosen(t *testing.T) {
 	}
 	launch(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","account_member_id":"m2","fallback_account_member_ids":["m2"],
 		"saved_defaults":{"applied":["account_member_id","fallback"]}}`)
-	if got.OtherMember || !strings.Contains(got.Summary, `on "Grace"'s account (your saved default), falling back to "Grace"'s account (your saved default) in order`) {
+	if got.OtherMember || !strings.Contains(got.Summary, `on Grace's account (your saved default), falling back to Grace's account (your saved default) in order`) {
 		t.Fatalf("saved account and fallback order confirmation = %+v, want both named as saved and no forced card", got)
 	}
 

@@ -47,7 +47,7 @@ export function ApprovalRulesSection({ client }: { client: Api }) {
 
   return (
     <SettingsSection title="Approval rules" id="approval-rules" scope="Your account">
-      <p className="px-4 py-3 text-ui-sm text-muted">Each rule lets one kind of action run without a card, from any of your conversations. Rules apply with auto-approval off; turning it on passes every covered action.</p>
+      <p className="px-4 py-3 text-ui-sm text-muted">Each rule lets one kind of action run without a card. Rules matter only while Let the assistant act without asking is off; with it on, every action it covers runs without a card.</p>
       {rules === null && !error && <SettingRow label="Reading your rules…" />}
       {rules?.length === 0 && (
         <SettingRow label="No rules yet" help="Approve a card with Always approve to let the assistant do that kind of action without asking." />

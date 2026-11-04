@@ -66,7 +66,7 @@ func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 	svc, m, db, sock, _ := newRuleService(t)
 	launch := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Mode: "acp", NoFallback: true, Task: "fix the login redirect"}
 	c, done := card(t, sock, m, protocol.MethodRunLaunch, launch)
-	want := "Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback"
+	want := "Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task"
 	if c.Rule == nil || c.Rule.Wording != want || c.Rule.Suggested {
 		t.Fatalf("card rule = %+v, want %q", c.Rule, want)
 	}
@@ -129,8 +129,8 @@ func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 func TestRuleWordingNamesEveryKeyField(t *testing.T) {
 	svc, m, _, sock, _ := newRuleService(t)
 	for params, want := range map[*protocol.RunLaunchParams]string{
-		{WorkspaceID: "ws-1", Harness: "codex", Model: "gpt-5", Effort: "high", Permission: "isolated", AccountMemberID: "m2", NoFallback: true, Task: "x"}: `Always approve launches of Codex (default mode, model "gpt-5", effort "high") in api on Dana's account, permission isolated, no fallback`,
-		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m1", NoFallback: true, Task: "x"}:                                                        "Always approve launches of Claude Code (default mode) in api on your account, permission default, no fallback",
+		{WorkspaceID: "ws-1", Harness: "codex", Model: "gpt-5", Effort: "high", Permission: "isolated", AccountMemberID: "m2", NoFallback: true, Task: "x"}: `Always approve launches of Codex (default mode, model "gpt-5", effort "high") in api on Dana's account, permission isolated, no fallback, for any task`,
+		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m1", NoFallback: true, Task: "x"}:                                                        "Always approve launches of Claude Code (default mode) in api on your account, permission default, no fallback, for any task",
 	} {
 		c, done := card(t, sock, m, protocol.MethodRunLaunch, params)
 		if c.Rule == nil || c.Rule.Wording != want {

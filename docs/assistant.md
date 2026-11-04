@@ -263,7 +263,7 @@ Save your environment as a new image; new sessions and terminals start from it
 ```
 
 A launch card instead lists what starts: the kind, workspace, agent with model
-and mode, the account, the fallback when that account's usage runs out, the
+and mode, the effort when set, the permission tier, the account, the fallback when that account's usage runs out, the
 task, and how you hear back. Its title names the
 [permission tier](security.md#permission-tiers) when the launch sets one, from
 your request or your saved choices, as in `Launch claude (acp) in api,
@@ -325,7 +325,7 @@ server's wording of exactly what the rule covers:
 ```text
 Launch claude (acp) in api, no fallback: "Fix the flaky login test"
   [Decline]  [Approve]
-  [Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback]
+  [Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task]
   [Approve everything from now on]
 ```
 
@@ -374,7 +374,7 @@ aether member assistant rules --revoke <rule-id>
 
 ```
 rule-7k2m9q4xbd  created 2026-11-03 14:02, 3 uses, last 2026-11-03 16:40
-  Always approve launches of Claude Code (acp) in api on your account, permission default
+  Always approve launches of Claude Code (Enhanced) in api on your account, permission default, for any task
   from: Launch claude (acp) in api: "Fix the flaky login test"
 ```
 

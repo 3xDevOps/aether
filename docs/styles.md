@@ -157,6 +157,11 @@ than restyling it.
 | `link` | Accent text, underline on hover | Inline actions that read as links |
 | `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
 
+A `secondary` button the app suggests, such as a card's approval rule after
+three approvals of its kind, adds a 2px `border-l-accent` over
+`bg-accent-soft` and a muted line saying why; it never becomes `primary` or
+`confirm`, which stay the card's own Approve.
+
 Sizes are `md` (28px, the default), `sm` (24px), `icon` (28px square),
 `icon-sm` (24px square), and the composer's and the Notes field's send control: `round` (28px
 circle) and `pill` (28px, fully rounded); each grows to 44px on a coarse

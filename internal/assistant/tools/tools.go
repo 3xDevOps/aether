@@ -551,9 +551,9 @@ func (n launchNames) account(id string) string {
 		return "your account"
 	}
 	if id == n.savedAccount {
-		return fmt.Sprintf("%q's account (your saved default)", n.owner(id))
+		return fmt.Sprintf("%s's account (your saved default)", n.owner(id))
 	}
-	return fmt.Sprintf("%q's account", n.owner(id))
+	return fmt.Sprintf("%s's account", n.owner(id))
 }
 
 // maxNamed bounds how many accounts, repositories or agents a card names.

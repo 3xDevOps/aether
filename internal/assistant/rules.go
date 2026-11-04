@@ -165,6 +165,9 @@ func callAs[T any](ctx context.Context, s *Service, m *member, method string, pa
 	return out, nil
 }
 
+// modeNames are the launch modes as the dashboard's launch card names them.
+var modeNames = map[string]string{"acp": "Enhanced", "tui": "Standard", "headless": "Background"}
+
 // ruleWording is the server's sentence for what a rule with key covers,
 // which the card's button and the rules list show.
 func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.AssistantRuleKey) (string, error) {
@@ -185,7 +188,7 @@ func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.Assis
 	if p, ok := harness.Lookup(key.Agent); ok && p.DisplayName != "" {
 		agent = p.DisplayName
 	}
-	how := []string{cmp.Or(key.Mode, "default mode")}
+	how := []string{cmp.Or(modeNames[key.Mode], key.Mode, "default mode")}
 	if key.Model != "" {
 		how = append(how, fmt.Sprintf("model %q", key.Model))
 	}
@@ -207,7 +210,7 @@ func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.Assis
 	if key.NoFallback {
 		wording += ", no fallback"
 	}
-	return wording, nil
+	return wording + ", for any task", nil
 }
 
 // sharedAccount names the owner of account when the member may launch on
