@@ -25,7 +25,8 @@ export function routeQuery(route: Route): URLSearchParams {
     if (repo && view === 'changes') query.set('repo', repo)
     return query
   }
-  if (route.name === 'board') return query
+  // A phone's empty address opens Needs you, so its board needs a name.
+  if (route.name === 'board' && !window.matchMedia?.(mobileScreen).matches) return query
   query.set('page', route.name)
   const id = route.params[pageIDs[route.name] ?? '']
   if (id) query.set('id', id)

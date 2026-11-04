@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { DecisionButtons } from '@/components/decision-buttons'
 import { deliveryLabel } from '@/components/palette/inject-dialog'
@@ -18,10 +18,11 @@ import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
+import { redirectRoute } from '@/lib/url-state'
 import { needsYouConditions } from '@/lib/needs-you'
 import type { AttentionItem, RoomPostResult, RunInputRespondResult } from '@/lib/types'
 import { targetRoute } from '@/routes/board/card-action'
-import { asking, finished, refreshAttention, useAttention, useAttentionFeed } from '@/routes/needs-you/attention'
+import { asking, finished, refreshAttention, useAttention, useAttentionFeed, useAttentionSupported } from '@/routes/needs-you/attention'
 import { registerRoute } from '@/routes/registry'
 import { choicePlan } from '@/routes/run/request-options'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
@@ -43,11 +44,14 @@ function settle(result: RunInputRespondResult) {
   void refreshAttention()
 }
 
-function settleMessage(result: RoomPostResult) {
+/** Whether the server took the reply; one not sent or uncertain keeps its draft for a retry. */
+function settleMessage(result: RoomPostResult): boolean {
   const label = `Reply ${deliveryLabel(result).toLowerCase()}`
-  if (result.receipt === 'not_sent' || result.receipt === 'uncertain' || result.message.state === 'not_sent' || result.message.state === 'uncertain') toast.error(label)
+  const unconfirmed = result.receipt === 'not_sent' || result.receipt === 'uncertain' || result.message.state === 'not_sent' || result.message.state === 'uncertain'
+  if (unconfirmed) toast.error(label)
   else toast.success(label)
   void refreshAttention()
+  return !unconfirmed
 }
 
 /** Approve and Deny answer this request by id, so a tap that lands after it changed decides nothing else. */
@@ -125,10 +129,13 @@ function Reply({ item, onError }: { item: AttentionItem; onError: (error?: strin
     setSending(true)
     onError(undefined)
     try {
-      settleMessage(item.message
+      const taken = settleMessage(item.message
         ? await api.runRoomPost({ workspace_id: item.workspace_id, run_id: item.run_id, kind: 'reply', body: text, correlation_id: item.message.id, idempotency_key: key })
         : await api.runInject(item.run_id, text, key))
-      setBody('')
+      if (taken) {
+        setSent(null)
+        setBody((current) => (current.trim() === text ? '' : current))
+      }
     } catch (err) {
       onError(`Send failed: ${message(err)}`)
     } finally {
@@ -193,7 +200,7 @@ function AttentionCard({ item }: { item: AttentionItem }) {
         )}
         footer={(
           <RequestFooter className="static">
-            {Inline ? <Inline item={item} onError={setError} /> : (
+            {Inline ? <Inline key={item.request?.id ?? item.message?.id ?? item.kind} item={item} onError={setError} /> : (
               <RequestActions>
                 <RequestAction label={action && action.kind === 'open' ? action.label : 'Open'} onClick={open} />
               </RequestActions>
@@ -232,6 +239,15 @@ function Feed() {
 
 function NeedsYou() {
   const mobile = useIsMobile()
+  const supported = useAttentionSupported()
+  const hydrated = useStore((s) => s.hydrated)
+  useEffect(() => {
+    if (!supported) {
+      if (hydrated) redirectRoute(useStore, { name: 'board', params: {} })
+      return
+    }
+    void refreshAttention()
+  }, [supported, hydrated])
   const items = useAttention((s) => s.items)
   const error = useAttention((s) => s.error)
   const asks = items ? asking(items) : []

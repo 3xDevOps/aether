@@ -518,11 +518,14 @@ are sentence-case 12px muted disclosure buttons with their count. The footer
 holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.
 
-Under 768px a second, 48px toolbar (`bg-chrome`) holds the sidebar button,
-with a needs-you dot while anything needs the viewer, the view title in
-13/20 medium, **Search** and **New session**. When the page has its own primary
-action, the toolbar's **New session** becomes a ghost `+` icon so the screen keeps
-one filled button. The sidebar opens as a left side sheet. Content views draw
+Under 768px the header is one 48px row (`bg-chrome`): the view title in
+13/20 medium and **Search**. A `bg-chrome` tab bar along the bottom holds
+Needs you, Sessions, New, Assistant and More: 56px tall, a 20px icon over a
+12px label, muted at rest and accent when current. The Needs you count is an
+amber chip with `text-canvas` figures, the one place amber fills a count,
+because it is the needs-you signal. **New** is an accent pill unless the page
+has its own primary action, so the screen keeps one filled button. More opens
+as a bottom sheet. Content views draw
 `PaneHeader`: the title in `text-title`, one optional muted line under it,
 and actions on the right. A connection problem is a failed-tone `StateLine`,
 in the header on desktop and under the top bar on a phone.

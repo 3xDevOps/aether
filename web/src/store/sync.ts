@@ -261,7 +261,7 @@ export async function hydrate(
     const unknownLink = !s.hydrated && current.route === s.route && !!linked && !current.runs[linked]
     if (
       !s.hydrated &&
-      (s.route.name === 'board' || unknownLink) &&
+      (s.route.name === 'board' || s.route.name === 'needs-you' || unknownLink) &&
       current.route === s.route &&
       !current.onboarded &&
       (capabilities?.local?.includes('link.status') === true ||

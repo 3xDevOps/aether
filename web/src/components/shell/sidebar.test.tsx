@@ -571,7 +571,7 @@ describe('phone shell', () => {
 
     expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
     const tabs = within(screen.getByRole('navigation', { name: 'Main navigation' }))
-    fireEvent.click(tabs.getByRole('button', { name: 'More' }))
+    fireEvent.click(tabs.getByRole('button', { name: 'More pages' }))
 
     const more = within(await screen.findByRole('dialog', { name: 'More' }))
     fireEvent.click(more.getByRole('button', { name: 'Settings' }))

@@ -498,11 +498,16 @@ keyboard is likely up and the bar hides.
 | **Sessions** | the `sessions` route: the sidebar's session list, full width. Current on a session, the board and All workspaces too |
 | **New** | the launch dialog; named **New session**, and hidden for a member who cannot launch |
 | **Assistant** | the assistant sheet, with the dot the desktop button shows |
-| **More** | a bottom sheet, a `dialog` named "More" |
+| **More** | a bottom sheet, a `dialog` named "More"; the tab is named **More pages**, apart from a session's **More** actions |
 
 A phone that opens the dashboard with no `run` or `page` in the address lands
-on Needs you (`initialRoute` in `src/lib/url-state.ts`). Every other link
-still opens its own page, the board included: it is in More.
+on Needs you (`initialRoute` in `src/lib/url-state.ts`), or on onboarding on
+a first visit, as the board does on desktop. Every other link still opens its
+own page. The board is in More, and on a phone its address carries
+`page=board`, so a reload stays on it. A gateway without `attention.list` has
+no Needs you tab, and its landing page redirects to the board. The Sessions
+route exists only on a phone; a wider window redirects it to the board, whose
+sidebar has the same list.
 
 A phone screen has one filled button. A page whose own action is filled calls
 `useHeaderPrimary(shown)` (`src/store/hooks.ts`) while that action shows; the
@@ -522,9 +527,10 @@ open.
 
 **Needs you** (`src/routes/needs-you/`) reads the server's `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)),
-not the dashboard's copy of the rule, and reads it again 250ms after any
-session's status, state, review, requests, room questions or controller
-change. The badge counts the same list. Cards are ranked by kind in the order
+not the dashboard's copy of the rule. It reads it again 250ms after any
+session's status, state, review, outcome flag, requests, room messages or
+controller change, after a reconnect, and each time the page opens. A
+different member or server clears the list. The badge counts the same list. Cards are ranked by kind in the order
 the server checks them (`needsYouConditions` in `src/lib/needs-you.ts`):
 permission, question, queued message, room question, disconnected, blocked,
 needs input, failed. Within a kind the server's order holds, oldest first.
@@ -541,7 +547,8 @@ session's view the condition names, and its inline answer:
   the same way. A link question opens the session.
 - A turn that ended asking (`needs input`, the condition's **Reply**) shows a
   text field whose **Reply** sends `run.inject`. A room question replies with
-  `run.room.post`, correlated to the question.
+  `run.room.post`, correlated to the question. A retry of the same text
+  reuses its idempotency key; a reply not sent or uncertain keeps its draft.
 - Everything else has one button that opens the session.
 
 `already_answered` shows "Already answered: an earlier answer won". A refusal

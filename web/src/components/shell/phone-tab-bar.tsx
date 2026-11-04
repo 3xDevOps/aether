@@ -5,7 +5,7 @@ import { Bell, Ellipsis, List, Plus, Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { canLaunch, launchBlocked } from '@/lib/commands'
 import { cn, focusRingInset } from '@/lib/utils'
-import { useAskingCount } from '@/routes/needs-you/attention'
+import { useAskingCount, useAttentionSupported } from '@/routes/needs-you/attention'
 import { useStore } from '@/store'
 import { assistantWaiting } from '@/store/assistant'
 import { useCapability, useSelfRole } from '@/store/hooks'
@@ -36,7 +36,7 @@ function Tab({ label, icon, active, badge, dot, className, ...props }: Omit<Reac
         <span className="relative">
           {icon}
           {badge !== undefined && badge > 0 && (
-            <span aria-hidden className="absolute -top-1.5 left-3 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-state-needs-you px-1 text-ui-xs leading-none font-semibold text-on-accent tabular-nums">
+            <span aria-hidden className="absolute -top-1.5 left-3 inline-flex h-4 min-w-4 items-center justify-center rounded-chip bg-state-needs-you px-1 text-ui-xs leading-none font-semibold text-canvas tabular-nums">
               {badge}
             </span>
           )}
@@ -83,6 +83,7 @@ export function PhoneTabBar() {
   const setMoreOpen = useStore((s) => s.setSidebarDrawerOpen)
   const asking = useAskingCount()
   const assistant = useAssistantAvailable()
+  const attention = useAttentionSupported()
   const go = (name: string) => {
     setAssistantOpen(false)
     navigate(name)
@@ -105,14 +106,16 @@ export function PhoneTabBar() {
   return (
     <nav ref={bar} aria-label="Main navigation" hidden={typing} className="shrink-0 border-t border-seam bg-chrome pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       <ul className="flex items-stretch px-1">
-        <Tab
-          label="Needs you"
-          aria-label={asking > 0 ? `Needs you, ${asking}` : 'Needs you'}
-          icon={<Bell />}
-          badge={asking}
-          active={page && route === 'needs-you'}
-          onClick={() => go('needs-you')}
-        />
+        {attention && (
+          <Tab
+            label="Needs you"
+            aria-label={asking > 0 ? `Needs you, ${asking}` : 'Needs you'}
+            icon={<Bell />}
+            badge={asking}
+            active={page && route === 'needs-you'}
+            onClick={() => go('needs-you')}
+          />
+        )}
         <Tab label="Sessions" icon={<List />} active={page && sessionRoutes.has(route)} onClick={() => go('sessions')} />
         {canLaunch({ cap, role }) && (
           <Tab
@@ -139,6 +142,7 @@ export function PhoneTabBar() {
         <Tab
           id="sidebar-drawer-trigger"
           label="More"
+          aria-label="More pages"
           icon={<Ellipsis />}
           active={moreOpen || (!assistantOpen && !sessionRoutes.has(route) && route !== 'needs-you')}
           aria-expanded={moreOpen}
