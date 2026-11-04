@@ -229,7 +229,7 @@ describe('a subsession outcome held for its parent', () => {
     const grandchild = record({ id: 'leaf', parent_run_id: 'done', status: 'needs-attention', state: 'failed', outcome_unseen: true })
     const rows = listedRuns(workspace.id, input([parent('working'), done, grandchild]).ctx)
     const row = (id: string) => rows.find((r) => r.run.id === id)!
-    expect(row('done')).toMatchObject({ state: 'completed', reason: 'Finished: reported to its parent', group: 'finished' })
+    expect(row('done')).toMatchObject({ state: 'reported', reason: 'Finished: reported to its parent', group: 'finished' })
     expect(row('done').needsYou).toBeUndefined()
     expect(row('leaf').needsYou).toBeUndefined()
     expect(rows.some((r) => r.group === 'review' || r.group === 'needs-you')).toBe(false)

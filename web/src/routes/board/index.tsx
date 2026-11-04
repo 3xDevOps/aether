@@ -123,7 +123,7 @@ export function Board() {
         <Column column={column('needs-you')} devices={devices} merges={merges} placeholder={placeholder} agentNames={agentNames} listScroll={list} />
         {listed && review.cards.length > 0 && <Column column={review} placeholder={placeholder} agentNames={agentNames} listScroll={list} />}
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} listScroll={list} />
-        <Column
+        {(!listed || finished.cards.length > 0 || archivedCards.length > 0) && <Column
           column={finished}
           label={showArchived ? 'Archived' : undefined}
           placeholder={placeholder}
@@ -138,7 +138,7 @@ export function Board() {
               onToggleArchived={() => setShowArchived((shown) => !shown)}
             />
           }
-        />
+        />}
       </>
     )
     body = layout === 'board' ? (

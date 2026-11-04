@@ -99,7 +99,8 @@ The session states (see
 [dashboard-frontend.md](dashboard-frontend.md#session-state)), used on dots,
 state lines, badges, callouts and request cards. Finished: review, a reported
 success awaiting its owner, takes the accent and a filled check circle; it
-asks nothing, so it is never amber:
+asks nothing, so it is never amber. A subsession's success its parent agent
+still holds draws the done check in `icon-faint` (the `held` tone):
 
 | State | Utility | Light | Dark |
 | --- | --- | --- | --- |

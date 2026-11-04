@@ -110,7 +110,7 @@ export interface LanesModel {
   inWindow: number
 }
 
-const sectionOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
+const sectionOrder: RunGroup[] = ['needs-you', 'review', 'working', 'finished']
 const groupRank = Object.fromEntries(sectionOrder.map((group, i) => [group, i])) as Record<RunGroup, number>
 const familyChildrenOpen = 8
 const agentDepth = 4
@@ -206,6 +206,7 @@ const familyRank: Record<Tone, number> = {
   disconnected: 3,
   neutral: 3,
   done: 2,
+  held: 2,
   closed: 1,
 }
 const outcomeRank: Partial<Record<Tone, number>> = { failed: 3, done: 2, closed: 1 }
@@ -230,7 +231,7 @@ function childCounts(members: RunLane[]): string {
   return [
     counts.needsYou > 0 && `${counts.needsYou} needs you`,
     counts.working > 0 && `${counts.working} working`,
-    counts.done > 0 && `${counts.done} done`,
+    counts.done > 0 && `${counts.done} finished`,
     counts.failed > 0 && `${counts.failed} failed`,
   ].filter(Boolean).join(' · ')
 }

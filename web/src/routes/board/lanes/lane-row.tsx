@@ -115,8 +115,7 @@ function Strip({ strip, g, height }: { strip: Stretch[]; g: LaneGeometry; height
 function barText(lane: RunLane): string {
   const { card } = lane
   if (lane.outcome) return stateLabel[card.state]
-  // A live session reads Completed only while its parent holds its outcome; the reason says so.
-  if (card.group === 'needs-you' || card.state === 'completed') return card.reason
+  if (card.group === 'needs-you') return card.reason
   const words = stateWords(card)
   return [words.label, words.detail].filter(Boolean).join(' · ')
 }

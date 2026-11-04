@@ -230,11 +230,11 @@ describe('run presentation', () => {
   it('labels every state in words and gives each its own dot, so no state is told by colour alone', () => {
     expect(Object.values(stateLabel)).toEqual([
       'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Turn ended', 'Waiting', 'Answered', 'Needs you', 'Finished: review',
-      'Failed', 'Disconnected', 'Completed', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running', 'Possibly stalled',
+      'Failed', 'Disconnected', 'Completed', 'Finished: reported to its parent', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running', 'Possibly stalled',
     ])
     expect(stateTone).toMatchObject({
       'waiting-agents': 'waiting', 'waiting-ci': 'waiting', 'waiting-tools': 'waiting', ended: 'ended', waiting: 'ended',
-      'needs-you': 'needs-you', ready: 'review', completed: 'done', failed: 'failed', disconnected: 'disconnected', stalled: 'waiting',
+      'needs-you': 'needs-you', ready: 'review', completed: 'done', reported: 'held', failed: 'failed', disconnected: 'disconnected', stalled: 'waiting',
     })
   })
 })

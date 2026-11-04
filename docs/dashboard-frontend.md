@@ -1595,8 +1595,8 @@ The axis counts back from now ("−20m") up to an hour wide; wider windows
 show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
 dragging the track pans; the history page loads as the window reaches it.
 
-**Sections.** By status, sections follow Board: Needs you (oldest wait first),
-Working and Finished: review (newest start first), then Finished
+**Sections.** By status, sections follow the sidebar: Needs you (oldest wait
+first), Finished: review and Working (newest start first), then Finished
 (failed first, then latest end). Finished starts folded into one summary lane ("37
 finished · 3 failed") whose strip shows each moment's outcome. By owner, there
 is one section per owner, yours first. A section header counts the sessions that
@@ -1810,6 +1810,7 @@ running".
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Finished: review | filled accent circle with a check | `finished` (a reported success on a live session), or a `completed` run whose `review` is `ready` or `later` | Finished: review, never Needs you |
 | Completed / Merged | check | `completed`, `merged` | Finished |
+| Finished: reported to its parent | check in `icon-faint` | a subsession's reported success its parent agent still holds ([failure-handling.md](failure-handling.md#needs-you)) | Finished, beneath its parent |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
 | Interrupted | ring with an exclamation mark | `interrupted` | Finished |
