@@ -5,7 +5,6 @@ package gitengine
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -109,13 +108,17 @@ func TestCheckoutMetadataReadsAreBounded(t *testing.T) {
 	}
 }
 
-// Git 2.44 and later write a new repository's config before its HEAD. The
-// wrapper holds that window open on any Git version.
-func TestCheckoutHeadWaitsForAScratchInitInProgress(t *testing.T) {
+// Git 2.44 and later write a new repository's config before its HEAD, so a
+// reader racing an init, or a store whose init was killed, sees config alone.
+func TestCheckoutHeadCompletesAStoreWithConfigButNoHEAD(t *testing.T) {
 	e := newUnitEngine(t)
 	seedEvidenceWorkspace(t, e, "ws-init")
 	ctx := t.Context()
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws-init", "run-init", "main", "init race", "")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws-init", "run-init", "main", "half init", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := e.checkoutHead(ctx, "run-init", checkout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,47 +126,11 @@ func TestCheckoutHeadWaitsForAScratchInitInProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.RemoveAll(store); err != nil {
+	if err = os.Remove(filepath.Join(store, "HEAD")); err != nil {
 		t.Fatal(err)
 	}
-	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrapper := filepath.Join(t.TempDir(), "git")
-	script := "#!/bin/sh\n" +
-		"for last; do :; done\n" +
-		"case \" $* \" in *\" init \"*)\n" +
-		"  \"" + git + "\" \"$@\" || exit\n" +
-		"  mv \"$last/HEAD\" \"$last/HEAD.hold\"\n" +
-		"  sleep 1\n" +
-		"  mv \"$last/HEAD.hold\" \"$last/HEAD\"\n" +
-		"  exit 0;;\n" +
-		"esac\n" +
-		"exec \"" + git + "\" \"$@\"\n"
-	if err = os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	e.cfg.GitPath = wrapper
-	first := make(chan error, 1)
-	go func() {
-		_, headErr := e.checkoutHead(ctx, "run-init", checkout)
-		first <- headErr
-	}()
-	for {
-		if _, statErr := os.Stat(filepath.Join(store, "HEAD.hold")); statErr == nil {
-			break
-		}
-		select {
-		case firstErr := <-first:
-			t.Fatalf("the first lookup ended before its init held HEAD: %v", firstErr)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	if _, err = e.checkoutHead(ctx, "run-init", checkout); err != nil {
-		t.Fatalf("lookup during another's init: %v", err)
-	}
-	if err = <-first; err != nil {
-		t.Fatalf("lookup that ran the init: %v", err)
+	got, err := e.checkoutHead(ctx, "run-init", checkout)
+	if err != nil || got != want {
+		t.Fatalf("checkout HEAD with a half-initialized store = %q, %v; want %q", got, err, want)
 	}
 }
