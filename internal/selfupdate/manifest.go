@@ -431,6 +431,13 @@ func download(ctx context.Context, url string, f *os.File, want Asset, progress 
 	})
 }
 
+// DownloadPinned streams url into f the way a release asset is fetched:
+// https redirects only, transient failures retried, and the bytes checked
+// against want before it returns.
+func DownloadPinned(ctx context.Context, url string, f *os.File, want Asset, progress io.Writer) error {
+	return download(ctx, url, f, want, progress)
+}
+
 // errInsecureRedirect refuses a redirect that leaves https.
 var errInsecureRedirect = errors.New("refusing a redirect away from https")
 
