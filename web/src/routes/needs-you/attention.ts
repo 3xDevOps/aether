@@ -3,9 +3,11 @@ import { create } from 'zustand'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { needsYouConditions } from '@/lib/needs-you'
+import { groupLabel } from '@/lib/status'
 import type { AttentionItem } from '@/lib/types'
 import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
+import type { RunTree, SidebarGroup } from '@/store/selectors'
 
 interface Attention {
   items: AttentionItem[] | null
@@ -32,6 +34,36 @@ export function finished(items: AttentionItem[]): AttentionItem[] {
 
 export function useAskingCount(): number {
   return useAttention((s) => (s.items ? asking(s.items).length : 0))
+}
+
+/** Per workspace, what asks the viewer; null until the list loads. */
+export function askingByWorkspace(items: AttentionItem[] | null): Record<string, number> | undefined {
+  if (!items) return undefined
+  const counts: Record<string, number> = {}
+  for (const item of asking(items)) counts[item.workspace_id] = (counts[item.workspace_id] ?? 0) + 1
+  return counts
+}
+
+/**
+ * The session list's groups in the server's terms, so a phone shows one Needs you count: requests
+ * in the server's order under Needs you, and a session the server lists as finished under review.
+ */
+export function byAttention(groups: SidebarGroup[], items: AttentionItem[] | null): SidebarGroup[] {
+  const needs = groups.find((group) => group.key === 'needs-you')
+  if (!items || !needs) return groups
+  const asks = asking(items)
+  const order = new Map(asks.map((item, index) => [item.run_id, index]))
+  const done = new Set(finished(items).map((item) => item.run_id))
+  const at = (tree: RunTree) => Math.min(...[tree, ...tree.children].map((row) => order.get(row.run.id) ?? Number.MAX_SAFE_INTEGER))
+  const moved = needs.runs.filter((tree) => done.has(tree.run.id) && !order.has(tree.run.id) && tree.children.every((row) => !order.has(row.run.id)))
+  const kept = needs.runs.filter((tree) => !moved.includes(tree)).sort((a, b) => at(a) - at(b))
+  const review = groups.find((group) => group.key === 'review')
+  const reviewRuns = [...moved, ...(review?.runs ?? [])]
+  return [
+    ...(kept.length > 0 ? [{ ...needs, runs: kept, count: asks.length }] : []),
+    ...(reviewRuns.length > 0 ? [{ key: 'review' as const, label: groupLabel.review, runs: reviewRuns, count: reviewRuns.length }] : []),
+    ...groups.filter((group) => group.key !== 'needs-you' && group.key !== 'review'),
+  ]
 }
 
 let fetches = 0

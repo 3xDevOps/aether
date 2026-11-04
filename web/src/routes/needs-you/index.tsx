@@ -1,23 +1,27 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { DecisionButtons } from '@/components/decision-buttons'
+import { SysboxNudge } from '@/components/sysbox-nudge'
 import { deliveryLabel } from '@/components/palette/inject-dialog'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { CodeBlock } from '@/components/ui/code'
 import { EmptyState } from '@/components/ui/empty-state'
 import { IconTile } from '@/components/ui/icon-tile'
 import { ListRow } from '@/components/ui/list-row'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { RequestCard } from '@/components/ui/request-card'
+import { Clamped, RequestCard } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { SectionLabel } from '@/components/ui/section-label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { Textarea } from '@/components/ui/textarea'
 import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
+import { useDelayed } from '@/lib/hooks'
 import { redirectRoute } from '@/lib/url-state'
 import { needsYouConditions } from '@/lib/needs-you'
 import type { AttentionItem, RoomPostResult, RunInputRespondResult } from '@/lib/types'
@@ -69,7 +73,7 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
       onError(message(err))
     }
   }
-  return <RequestActions><DecisionButtons decide={decide} /></RequestActions>
+  return <div className="grid grid-cols-2 gap-2"><DecisionButtons decide={decide} /></div>
 }
 
 function Question({ item, onError }: { item: AttentionItem; onError: (error?: string) => void }) {
@@ -115,11 +119,27 @@ function Question({ item, onError }: { item: AttentionItem; onError: (error?: st
   )
 }
 
+// The field stays above the soft keyboard: iOS reports it only as --keyboard-inset, and the list pads for it.
+function keepInView(element: HTMLElement | null) {
+  requestAnimationFrame(() => element?.scrollIntoView({ block: 'nearest' }))
+}
+
 function Reply({ item, onError }: { item: AttentionItem; onError: (error?: string) => void }) {
+  const [open, setOpen] = useState(false)
   const [body, setBody] = useState('')
   const [sent, setSent] = useState<{ text: string; key: string } | null>(null)
   const [sending, setSending] = useState(false)
   const late = usePastDeadline(sending)
+  const form = useRef<HTMLFormElement>(null)
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!open || !viewport) return
+    const follow = () => {
+      if (form.current?.contains(document.activeElement)) keepInView(form.current)
+    }
+    viewport.addEventListener('resize', follow)
+    return () => viewport.removeEventListener('resize', follow)
+  }, [open])
   const send = async () => {
     const text = body.trim()
     if (!text || sending) return
@@ -142,8 +162,16 @@ function Reply({ item, onError }: { item: AttentionItem; onError: (error?: strin
       setSending(false)
     }
   }
+  if (!open) {
+    return (
+      <RequestActions>
+        <RequestAction label="Reply…" onClick={() => setOpen(true)} />
+      </RequestActions>
+    )
+  }
   return (
     <form
+      ref={form}
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
@@ -151,15 +179,24 @@ function Reply({ item, onError }: { item: AttentionItem; onError: (error?: strin
       }}
     >
       <Textarea
+        autoFocus
         rows={2}
         aria-label={`Reply to ${item.title}`}
         placeholder="Reply to the agent…"
         value={body}
+        onFocus={() => keepInView(form.current)}
         onChange={(event) => setBody(event.target.value)}
+        onKeyDown={(event) => {
+          if (!event.nativeEvent.isComposing && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault()
+            void send()
+          }
+        }}
       />
-      <RequestActions>
-        <RequestAction type="submit" label={sending ? (late ? stillWaiting : 'Sending…') : 'Reply'} variant="primary" disabled={sending || !body.trim()} />
-      </RequestActions>
+      <div className="grid grid-cols-2 gap-2">
+        <RequestAction type="button" label="Cancel" disabled={sending} onClick={() => setOpen(false)} />
+        <RequestAction type="submit" label={sending ? (late ? stillWaiting : 'Sending…') : 'Send'} variant="primary" disabled={sending || !body.trim()} />
+      </div>
     </form>
   )
 }
@@ -188,14 +225,16 @@ function AttentionCard({ item }: { item: AttentionItem }) {
         avatar={<IconTile aria-hidden><AgentGlyph agent={item.harness} className="size-4" /></IconTile>}
         title={(
           <Button variant="quiet" onClick={open} className="text-left font-medium whitespace-normal text-text">
-            {item.title}
+            <span className="line-clamp-2">{item.title}</span>
           </Button>
         )}
         meta={item.since && <RelativeTime at={item.since} compact />}
         description={(
           <>
             <span className="text-text">{item.reason}</span>
-            {detail && detail !== item.reason && <CodeBlock className="mt-1.5 whitespace-pre-wrap">{detail}</CodeBlock>}
+            {detail && detail !== item.reason && (
+              <Clamped className="mt-1.5 max-h-[5lh]"><CodeBlock className="whitespace-pre-wrap">{detail}</CodeBlock></Clamped>
+            )}
           </>
         )}
         footer={(
@@ -204,9 +243,6 @@ function AttentionCard({ item }: { item: AttentionItem }) {
               <RequestActions>
                 <RequestAction label={action && action.kind === 'open' ? action.label : 'Open'} onClick={open} />
               </RequestActions>
-            )}
-            {Inline && (
-              <Button variant="link" size="sm" className="self-start" onClick={open}>Open session</Button>
             )}
             {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
           </RequestFooter>
@@ -252,12 +288,30 @@ function NeedsYou() {
   const error = useAttention((s) => s.error)
   const asks = items ? asking(items) : []
   const done = items ? finished(items) : []
+  const loading = useDelayed(items === null && !error)
   return (
     <div className="flex h-full min-w-0 flex-col">
       {!mobile && <Feed />}
       <ViewHeader title="Needs you" />
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-6">
-        {error && <p role="alert" className="mb-3 text-ui-sm break-words text-state-failed">{error}</p>}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-[calc(1.5rem+var(--keyboard-inset,0px))]">
+        <div className="mb-3 empty:hidden"><SysboxNudge /></div>
+        {error && (
+          <Callout
+            tone="failed"
+            role="alert"
+            title="Could not read what needs you"
+            className="mb-3"
+            actions={<Button size="sm" variant="secondary" onClick={() => void refreshAttention()}>Retry</Button>}
+          >
+            {error}
+          </Callout>
+        )}
+        {loading && (
+          <div aria-label="Loading" className="flex flex-col gap-3">
+            <Skeleton className="h-32 rounded-panel" />
+            <Skeleton className="h-32 rounded-panel" />
+          </div>
+        )}
         {items && asks.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions show up here.</EmptyState>}
         {asks.length > 0 && (
           <ul aria-label="Needs you" className="flex flex-col gap-3">

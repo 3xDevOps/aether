@@ -520,8 +520,9 @@ update notice above it is one 12px muted line with an **Update** link.
 
 Under 768px the header is one 48px row (`bg-chrome`): the view title in
 13/20 medium and **Search**. A `bg-chrome` tab bar along the bottom holds
-Needs you, Sessions, New, Assistant and More: 56px tall, a 20px icon over a
-12px label, muted at rest and accent when current. The Needs you count is an
+Needs you, Sessions, New, Assistant and More: 56px tall, a 20px icon in the
+same 28 × 44px box over a 12px label, muted at rest and accent when current,
+with a 2px accent bar along the top edge. Counts over 99 read 99+. The Needs you count is an
 amber chip with `text-canvas` figures, the one place amber fills a count,
 because it is the needs-you signal. **New** is an accent pill unless the page
 has its own primary action, so the screen keeps one filled button. More opens

@@ -100,8 +100,9 @@ test('Needs you approves a permission and replies to a question from their cards
     return JSON.stringify(history.frames)
   }, { timeout: 30_000 }).toContain('permission: allow')
 
+  await question.getByRole('button', { name: 'Reply…' }).tap()
   await question.getByRole('textbox', { name: /^Reply to / }).fill('carry on with the tests')
-  await question.getByRole('button', { name: 'Reply', exact: true }).tap()
+  await question.getByRole('button', { name: 'Send', exact: true }).tap()
   await expect(page.getByText(/^Reply (sent|queued)$/)).toBeVisible()
   const { messages } = await alice.api.rpc<{ messages: { body: string }[] }>('run.room.list', {
     workspace_id: workspaces[0].id,

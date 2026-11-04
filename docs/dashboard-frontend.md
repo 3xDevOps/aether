@@ -489,13 +489,14 @@ bottom tab bar, `phone-tab-bar.tsx`, a `nav` named "Main navigation". Desktop
 is unchanged. The tabs are at least 44px square, and the bar pads itself by
 the bottom and side safe-area insets, so `main` does not pad the bottom on a
 phone. Its measured height sets `--phone-tabs-height`, which keeps toasts
-8px above it. While a text field other than the terminal's has focus, the soft
-keyboard is likely up and the bar hides.
+8px above it. On a touch screen, while a text field other than the terminal's
+has focus, the soft keyboard is likely up and the bar hides. With more than one
+workspace the header shows the active one's name, muted, after the title.
 
 | Tab | Opens |
 | --- | --- |
 | **Needs you** | the `needs-you` route, with the count of what asks you as a badge |
-| **Sessions** | the `sessions` route: the sidebar's session list, full width. Current on a session, the board and All workspaces too |
+| **Sessions** | the `sessions` route: the sidebar's session list, full width, regrouped by the same `attention.list` (`byAttention`): Needs you has the badge's count and order, and a session the server lists as finished moves to the review group. Current on a session, the board and All workspaces too |
 | **New** | the launch dialog; named **New session**, and hidden for a member who cannot launch |
 | **Assistant** | the assistant sheet, with the dot the desktop button shows |
 | **More** | a bottom sheet, a `dialog` named "More"; the tab is named **More pages**, apart from a session's **More** actions |
@@ -517,9 +518,9 @@ header with a primary action, Environment's **Open** or **Save
 environment**, onboarding, Files with a file open and the Changes view's
 **Publish…**.
 
-**More** holds the workspace switcher, every page the desktop header and
+**More** holds the workspace switcher, whose amber counts come from `attention.list` too, every page the desktop header and
 sidebar link to (Board, Activity, Insights, Memory, Files, Environment,
-Agents, Templates, Members, Settings, Members › Devices, Manage workspaces),
+Agents, Templates, Members, Settings, Devices, Manage workspaces) in a list that scrolls,
 the update notice and the profile footer. A tap outside, Escape or any
 navigation closes it, and navigation moves focus to the new view's heading.
 `Mod+B` opens and closes it; every other shell key stands down while it is
@@ -534,23 +535,30 @@ different member or server clears the list. The badge counts the same list. Card
 the server checks them (`needsYouConditions` in `src/lib/needs-you.ts`):
 permission, question, queued message, room question, disconnected, blocked,
 needs input, failed. Within a kind the server's order holds, oldest first.
-Each card is a `RequestCard` with the session's title, which opens the
-session's view the condition names, and its inline answer:
+Each card is a `RequestCard`. Its title, at most two lines, opens the session's
+view the condition names; the request's detail is clamped to five lines with
+**Show more**. Then comes its inline answer:
 
 - A permission with `allow_once` and `reject_once` options shows **Deny** and
-  **Approve**, the session's own `DecisionButtons`. Each sends
+  **Approve** as two halves, the session's own `DecisionButtons`. Each sends
   `run.input.respond` with the request's id and that option, so a tap that
   lands after the request changed decides nothing else. **Always** is not
   offered. A Standard session's permission has no options and opens the
   terminal instead.
 - An Enhanced session's question shows its form and its options, answered
   the same way. A link question opens the session.
-- A turn that ended asking (`needs input`, the condition's **Reply**) shows a
-  text field whose **Reply** sends `run.inject`. A room question replies with
+- A turn that ended asking (`needs input`, the condition's **Reply**) shows
+  **Reply…**, which opens a focused text field; **Send** or `Mod+Enter` sends
+  `run.inject`. The field scrolls into view above the keyboard, and the list
+  pads by `--keyboard-inset` for iOS, whose keyboard leaves the layout tall. A room question replies with
   `run.room.post`, correlated to the question. A retry of the same text
   reuses its idempotency key; a reply not sent or uncertain keeps its draft.
 - Everything else has one button that opens the session.
 
+Setup notices the board shows, such as letting agents use Docker, sit above
+the cards. While the first read is in flight two skeleton cards show; a failed
+read is a failed-tone callout with the server's error and **Retry**, and the
+list and badge keep their last values.
 `already_answered` shows "Already answered: an earlier answer won". A refusal
 shows the server's error on the card, such as `-32003` while another member
 controls the session. Below the cards, **Finished: review the result** lists

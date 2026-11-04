@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { AssistantButton } from '@/components/assistant/button'
 import { PanelLeft, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
@@ -16,6 +16,7 @@ import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
 import { surfaces } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
+import { askingByWorkspace, useAttention } from '@/routes/needs-you/attention'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
@@ -105,6 +106,7 @@ export function Sidebar() {
           id="sidebar-drawer"
           variant="bottom"
           aria-describedby={undefined}
+          className="pr-[calc(1rem+env(safe-area-inset-right))] pl-[calc(1rem+env(safe-area-inset-left))]"
           onOpenAutoFocus={() => {
             opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
           }}
@@ -255,13 +257,19 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
 function MoreContent() {
   const cap = useCapability()
   const admin = useIsAdmin()
-  const list = surfaces(cap, admin).filter((surface) => surface.place !== 'link')
+  const items = useAttention((s) => s.items)
+  const needsYou = useMemo(() => askingByWorkspace(items), [items])
+  const list = surfaces(cap, admin)
+    .filter((surface) => surface.place !== 'link')
+    .map((surface) => (surface.name === 'devices' ? { ...surface, label: 'Devices' } : surface))
   return (
     <nav aria-label="More" className="flex min-h-0 flex-col gap-1">
       <div className="flex shrink-0 items-center pr-10">
-        <WorkspaceSwitcher />
+        <WorkspaceSwitcher needsYou={needsYou} />
       </div>
-      <NavRows surfaces={list} />
+      <div className="min-h-0 overflow-y-auto">
+        <NavRows surfaces={list} />
+      </div>
       <UpdateNotice />
       <SidebarFooter />
     </nav>

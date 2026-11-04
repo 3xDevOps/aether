@@ -4,6 +4,7 @@ import { assistantTriggerID, useAssistantAvailable } from '@/components/assistan
 import { Bell, Ellipsis, List, Plus, Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { canLaunch, launchBlocked } from '@/lib/commands'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRingInset } from '@/lib/utils'
 import { useAskingCount, useAttentionSupported } from '@/routes/needs-you/attention'
 import { useStore } from '@/store'
@@ -27,20 +28,21 @@ function Tab({ label, icon, active, badge, dot, className, ...props }: Omit<Reac
         aria-current={active ? 'page' : undefined}
         className={cn(
           focusRingInset,
-          'h-auto min-h-14 min-w-0 flex-1 flex-col gap-0.5 px-0 text-ui-xs font-normal coarse:h-auto coarse:px-0 [&_svg:not([class*=size-])]:size-5',
+          'relative h-auto min-h-14 min-w-0 flex-1 flex-col gap-0.5 px-0 text-ui-xs font-normal coarse:h-auto coarse:px-0 [&_svg:not([class*=size-])]:size-5',
           active && 'font-medium text-accent hover:not-aria-disabled:text-accent',
           className,
         )}
         {...props}
       >
-        <span className="relative">
+        {active && <span aria-hidden className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-accent" />}
+        <span className="relative flex h-7 w-11 items-center justify-center">
           {icon}
           {badge !== undefined && badge > 0 && (
-            <span aria-hidden className="absolute -top-1.5 left-3 inline-flex h-4 min-w-4 items-center justify-center rounded-chip bg-state-needs-you px-1 text-ui-xs leading-none font-semibold text-canvas tabular-nums">
-              {badge}
+            <span aria-hidden className="absolute -top-1 left-6 inline-flex h-4 min-w-4 items-center justify-center rounded-chip bg-state-needs-you px-1 text-ui-xs leading-none font-semibold text-canvas tabular-nums">
+              {badge > 99 ? '99+' : badge}
             </span>
           )}
-          {dot && <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-state-needs-you" />}
+          {dot && <span aria-hidden className="absolute top-0.5 right-2.5 size-2 rounded-full bg-state-needs-you" />}
         </span>
         <span className="max-w-full truncate">{label}</span>
       </Button>
@@ -83,13 +85,15 @@ export function PhoneTabBar() {
   const setMoreOpen = useStore((s) => s.setSidebarDrawerOpen)
   const asking = useAskingCount()
   const assistant = useAssistantAvailable()
+  const coarse = useMediaQuery(coarsePointer)
   const attention = useAttentionSupported()
   const go = (name: string) => {
     setAssistantOpen(false)
     navigate(name)
   }
   const page = !assistantOpen && !moreOpen
-  const typing = useTyping()
+  // A mouse and a hardware keyboard leave the screen alone, so only touch hides the bar.
+  const hidden = useTyping() && coarse
   const bar = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     const element = bar.current
@@ -104,7 +108,7 @@ export function PhoneTabBar() {
   }, [])
 
   return (
-    <nav ref={bar} aria-label="Main navigation" hidden={typing} className="shrink-0 border-t border-seam bg-chrome pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
+    <nav ref={bar} aria-label="Main navigation" hidden={hidden} className="shrink-0 border-t border-seam bg-chrome pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       <ul className="flex items-stretch px-1">
         {attention && (
           <Tab
@@ -123,7 +127,7 @@ export function PhoneTabBar() {
             aria-label="New session"
             hint={blocked}
             aria-disabled={blocked ? true : undefined}
-            icon={<span className={cn('flex h-7 w-11 items-center justify-center rounded-full', filledLaunch && 'bg-accent text-on-accent')}><Plus /></span>}
+            icon={<span className={cn('flex size-full items-center justify-center rounded-full', filledLaunch && 'bg-accent text-on-accent')}><Plus /></span>}
             onClick={() => !blocked && openDialog('launch')}
           />
         )}

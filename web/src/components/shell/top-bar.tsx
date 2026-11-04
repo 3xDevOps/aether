@@ -191,6 +191,7 @@ function PhoneToolbar() {
   const route = useStore((s) => s.route)
   const workspace = useStore((s) => (s.route.name === 'workspace' ? s.workspaces[s.route.params.workspaceId ?? ''] : undefined))
   const togglePalette = useStore((s) => s.togglePalette)
+  const activeWorkspace = useStore((s) => (Object.keys(s.workspaces).length > 1 ? s.workspaces[s.activeWorkspace]?.name : undefined))
   const title = route.name === 'run'
     ? 'Session'
     : workspace?.name ?? titles[route.name] ?? surfaces(cap, true).find((surface) => surface.name === route.name)?.label ?? 'Aether'
@@ -198,7 +199,10 @@ function PhoneToolbar() {
   return (
     <>
       <div className="flex h-[calc(var(--top-bar-height)-1px)] items-center gap-1 pr-1 pl-3">
-        <p className="min-w-0 flex-1 truncate text-ui font-medium text-text">{title}</p>
+        <p className="flex min-w-0 flex-1 items-baseline gap-2 text-ui">
+          <span className="truncate font-medium text-text">{title}</span>
+          {activeWorkspace && activeWorkspace !== title && <span className="truncate text-ui-sm text-muted">{activeWorkspace}</span>}
+        </p>
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
           <Search />
         </Button>
