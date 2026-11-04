@@ -51,6 +51,11 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: write lets the merge queue step below cancel runs.
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
     outputs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
@@ -61,7 +66,16 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-areas.sh
+            scripts/ci-reap-queue-runs.sh
           sparse-checkout-cone-mode: false
+      # The merge queue discards a group when an entry ahead of it leaves or
+      # the queue is reordered, but GitHub does not stop that group's run,
+      # which keeps holding runners.
+      - name: Cancel runs of discarded merge groups
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/ci-reap-queue-runs.sh "$GITHUB_REPOSITORY" "${GITHUB_REF#refs/heads/}"
       - name: Classify changed paths
         id: classify
         env:
