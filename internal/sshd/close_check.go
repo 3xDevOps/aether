@@ -47,9 +47,13 @@ func (s *Server) runCloseCheck(ctx context.Context, member domain.MemberID, para
 		}
 		seen[id] = true
 		check := protocol.RunCloseCheck{RunID: id, Warnings: []protocol.CloseWarning{}}
-		warnings, perr := s.closeWarnings(ctx, actor, domain.RunID(id), outcome)
+		warnings, merged, perr := s.closeWarnings(ctx, actor, domain.RunID(id), outcome)
 		if perr == nil {
-			check.MergedPullRequest, perr = s.mergedPullRequest(ctx, domain.RunID(id))
+			check.MergedPullRequest = merged
+			var since time.Time
+			if since, perr = s.lastChange(ctx, domain.RunID(id)); perr == nil {
+				check.IdleSince = since.UTC().Format(time.RFC3339)
+			}
 		}
 		if perr != nil {
 			check.Error = perr
@@ -61,33 +65,35 @@ func (s *Server) runCloseCheck(ctx context.Context, member domain.MemberID, para
 	return out, nil
 }
 
-func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id domain.RunID, outcome domain.RunStatus) ([]protocol.CloseWarning, *protocol.Error) {
+// closeWarnings also reports whether a merged pull request of the run's
+// own repository holds its last commit.
+func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id domain.RunID, outcome domain.RunStatus) ([]protocol.CloseWarning, bool, *protocol.Error) {
 	if id == "" {
-		return nil, invalidParams("run_id is required")
+		return nil, false, invalidParams("run_id is required")
 	}
 	target, err := resolveRunTarget(ctx, s.cfg.Store, id)
 	if err != nil {
-		return nil, rpcError(err)
+		return nil, false, rpcError(err)
 	}
 	if cerr := permissions.Check(permissions.View, actor, target); cerr != nil {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunCloseCheck + ": " + cerr.Error()}
+		return nil, false, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunCloseCheck + ": " + cerr.Error()}
 	}
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
-		return nil, rpcError(err)
+		return nil, false, rpcError(err)
 	}
 	deps, err := s.cfg.Store.CloseDependents(ctx, id, time.Now().Add(-recentMail))
 	if err != nil {
-		return nil, rpcError(err)
+		return nil, false, rpcError(err)
 	}
 	known := map[domain.RunID]*domain.Run{id: run}
 	var out []protocol.CloseWarning
 	if run.Protected {
 		out = append(out, protectedWarning)
 	}
-	work, err := s.workWarnings(ctx, run, outcome)
+	work, merged, err := s.workWarnings(ctx, run, outcome)
 	if err != nil {
-		return nil, rpcError(err)
+		return nil, false, rpcError(err)
 	}
 	out = append(out, work...)
 	if deps.Messages > 0 {
@@ -108,7 +114,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 		if !read {
 			var err error
 			if child, err = s.cfg.Store.GetRun(ctx, childID); err != nil && !errors.Is(err, store.ErrNotFound) {
-				return nil, rpcError(err)
+				return nil, false, rpcError(err)
 			}
 		}
 		if child == nil {
@@ -116,11 +122,11 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 		}
 		waiters, err := s.cfg.Store.RunWaiters(ctx, childID)
 		if err != nil {
-			return nil, rpcError(err)
+			return nil, false, rpcError(err)
 		}
-		childWork, err := s.workWarnings(ctx, child, outcome)
+		childWork, _, err := s.workWarnings(ctx, child, outcome)
 		if err != nil {
-			return nil, rpcError(err)
+			return nil, false, rpcError(err)
 		}
 		if child.Protected {
 			childWork = append(childWork, protectedWarning)
@@ -138,16 +144,16 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 		}
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningCleanupPending, Detail: detail})
 	}
-	return out, nil
+	return out, merged, nil
 }
 
 // workWarnings reads recorded pull request states as last observed; it
 // never asks GitHub, so a 50-run check stays fast. Recorded pull requests
 // carry no commit, so whether one holds the branch tip is judged by time.
-func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome domain.RunStatus) ([]protocol.CloseWarning, error) {
+func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome domain.RunStatus) ([]protocol.CloseWarning, bool, error) {
 	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out []protocol.CloseWarning
 	open, merged := false, false
@@ -168,15 +174,15 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningUnmergedWork,
 			Detail: "Commits on " + run.Branch + " may not be merged: no merged pull request includes its last commit"})
 	}
-	return out, nil
+	return out, merged, nil
 }
 
-func (s *Server) mergedPullRequest(ctx context.Context, id domain.RunID) (bool, *protocol.Error) {
-	prs, err := s.cfg.Store.RunPullRequests(ctx, id)
+func (s *Server) lastChange(ctx context.Context, id domain.RunID) (time.Time, *protocol.Error) {
+	at, err := s.cfg.Store.RunLastChange(ctx, id)
 	if err != nil {
-		return false, rpcError(err)
+		return time.Time{}, rpcError(err)
 	}
-	return slices.ContainsFunc(prs, func(pr *store.RunPullRequest) bool { return pr.RepoWorkspace == "" && pr.State == "merged" }), nil
+	return at, nil
 }
 
 var protectedWarning = protocol.CloseWarning{Kind: protocol.CloseWarningProtected,
@@ -253,7 +259,7 @@ func (s *Server) archiveHolds(ctx context.Context, member domain.MemberID, id do
 	if err != nil {
 		return rpcError(err)
 	}
-	warnings, perr := s.closeWarnings(ctx, actor, id, domain.RunCompleted)
+	warnings, _, perr := s.closeWarnings(ctx, actor, id, domain.RunCompleted)
 	if perr != nil {
 		return perr
 	}
