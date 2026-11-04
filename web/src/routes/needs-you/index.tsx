@@ -27,6 +27,8 @@ import { memberName } from '@/lib/member-name'
 import { needsYouConditions } from '@/lib/needs-you'
 import type { AttentionItem, RoomPostResult, RunInputRespondResult } from '@/lib/types'
 import { targetRoute } from '@/routes/board/card-action'
+import { runRoute } from '@/routes/run/views'
+import { ProposalsReadError } from '@/routes/members/sign-ins'
 import { asking, finished, refreshAttention, useAccountNeeds, useAttention, useAttentionFeed, useAttentionSupported } from '@/routes/needs-you/attention'
 import { DeviceCard } from '@/routes/board/device-card'
 import { MergeProposalCard } from '@/routes/board/merge-card'
@@ -82,7 +84,12 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
   const [answered, setAnswered] = useState(false)
   const { allow, deny } = decisionOptions(item)!
   const request = item.request!
-  const open = useOpen(item)
+  const navigate = useStore((s) => s.navigate)
+  // The permission's preview is in the session view, whatever tab the session last showed.
+  const review = () => {
+    const route = runRoute(item.run_id, 'session')
+    navigate(route.name, route.params)
+  }
   const decide = async (approve: boolean) => {
     onError(undefined)
     try {
@@ -98,7 +105,7 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
     return (
       <div className="grid grid-cols-2 gap-2">
         <RequestAction label="Deny" onClick={() => void decide(false)} />
-        <RequestAction label="Review" variant="primary" onClick={open} />
+        <RequestAction label="Review" variant="primary" onClick={review} />
       </div>
     )
   }
@@ -330,6 +337,7 @@ function NeedsYou() {
   const asks = items ? asking(items) : []
   const done = items ? finished(items) : []
   const { devices, merges } = useAccountNeeds()
+  const mergeError = useStore((s) => s.mergeProposalsError)
   const loading = useDelayed(items === null && !error)
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -348,6 +356,7 @@ function NeedsYou() {
             {error}
           </Callout>
         )}
+        {mergeError && <div className="mb-3"><ProposalsReadError /></div>}
         {(merges.length > 0 || devices.length > 0) && (
           <ul aria-label="Approvals" className="mb-3 flex flex-col gap-3">
             {merges.map((proposal) => <li key={proposal.id}><MergeProposalCard proposal={proposal} /></li>)}
@@ -360,7 +369,7 @@ function NeedsYou() {
             <Skeleton className="h-32 rounded-panel" />
           </div>
         )}
-        {items && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions, devices and sign-in merges show up here.</EmptyState>}
+        {items && !mergeError && asks.length === 0 && merges.length === 0 && devices.length === 0 && <EmptyState title="Nothing needs you" className="py-10">Requests from your sessions, devices and sign-in merges show up here.</EmptyState>}
         {asks.length > 0 && (
           <ul aria-label="Needs you" className="flex flex-col gap-3">
             {asks.map((item) => <AttentionCard key={item.run_id} item={item} />)}
