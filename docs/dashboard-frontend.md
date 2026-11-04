@@ -1519,7 +1519,8 @@ close warning, a failed check, or an older server that cannot tell its
 outcome starts unchecked and says "Check to close anyway", or "Closing
 anyway" once checked; the rest start checked. The section header's select
 all takes only rows without warnings, so a warned row always needs its own
-click. Every other live session in scope is listed under **Not included**,
+click; it shows a full check only when every idle row is checked. On a phone
+the Idle header stays at the top of the scrolling body. Every other live session in scope is listed under **Not included**,
 collapsed, with what keeps it. The title and primary button say what happens
 ("Archive 5 sessions, closing 2 first?", **Close 2, archive 5**), Cancel
 holds the focus with its ring drawn, and **Check again** rebuilds the whole

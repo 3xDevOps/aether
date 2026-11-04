@@ -73,7 +73,7 @@ describe('archive confirmation dialog', () => {
     expect(screen.getByRole('checkbox', { name: 'Quiet reply' }).getAttribute('aria-checked')).toBe('true')
     expect(screen.getByRole('checkbox', { name: 'Open PR' }).getAttribute('aria-checked')).toBe('false')
     const all = screen.getByRole('checkbox', { name: 'Select all idle sessions without warnings' })
-    expect(all.getAttribute('aria-checked')).toBe('true')
+    expect(all.getAttribute('aria-checked')).toBe('mixed')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Open PR' }))
     expect(screen.getByRole('list', { name: 'Idle sessions' }).textContent).toContain('Closing anyway.')
     expect(all.getAttribute('aria-checked')).toBe('true')

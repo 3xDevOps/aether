@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { CloseWarningLines } from '@/components/close-warnings'
-import { ChevronRight } from '@/components/icons'
+import { ChevronRight, TriangleAlert } from '@/components/icons'
 import { RunRetention } from '@/components/run-retention'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
@@ -196,10 +196,11 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
   }
   return (
     <section className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2.5 px-3">
+      {/* Sticky in the scrolling body, so the count and select all stay in reach on a phone sheet. */}
+      <div className="sticky top-0 z-10 -mx-1 flex items-center gap-2.5 bg-raised px-1 py-1">
         <Checkbox
           aria-label="Select all idle sessions without warnings"
-          checked={allClean ? true : checked === 0 ? false : 'indeterminate'}
+          checked={checked === rows.length ? true : checked === 0 ? false : 'indeterminate'}
           disabled={running || clean.length === 0}
           onCheckedChange={selectClean}
         />
@@ -211,7 +212,7 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
       <InsetList
         ref={list}
         aria-label="Idle sessions"
-        className="md:max-h-64 md:overflow-y-auto"
+        className="md:max-h-[max(16rem,calc(100dvh-34rem))] md:overflow-y-auto"
         style={below ? { maskImage: 'linear-gradient(to bottom, #000 calc(100% - 28px), transparent)' } : undefined}
       >
         {rows.map((row) => {
@@ -226,13 +227,19 @@ function IdleSection({ rows, selected, running, onSelect, onLeave }: {
                   <span className="text-text">Closes as {row.outcome}</span>
                   <span className="text-muted"> · {row.reason}</span>
                 </span>
-                {row.outcomeUnknown && (
-                  <span className="text-ui-sm text-muted">This server cannot tell whether its pull request merged.</span>
-                )}
-                {!row.clean && (on
-                  ? <span className="text-ui-sm text-text">Closing anyway.</span>
-                  : <span className="text-ui-sm text-muted">Check to close anyway.</span>)}
                 {(row.check.error || row.check.warnings.length > 0) && <CloseWarningLines check={row.check} run={row.run} onLeave={onLeave} />}
+                {row.outcomeUnknown && (
+                  <span className="flex gap-2 text-ui-sm text-muted">
+                    <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0 text-state-needs-you" />
+                    This server cannot tell whether its pull request merged.
+                  </span>
+                )}
+                {!row.clean && (
+                  <span className={cn('flex gap-2 text-ui-sm', on ? 'text-text' : 'text-muted')}>
+                    <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0 text-state-needs-you" />
+                    {on ? 'Closing anyway.' : 'Check to close anyway.'}
+                  </span>
+                )}
               </div>
             </li>
           )
