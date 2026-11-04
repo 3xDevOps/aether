@@ -153,8 +153,9 @@ const maxNoticeSummary = 3000
 // settle ends the attached children of ended parents and tells a parent
 // once when a child ended without a final report. A parent a person closed
 // takes its children with it: finished ones are closed as it was, live ones
-// are stopped and closed. A parent that ended otherwise keeps children that
-// already reported, to close with it, and stops the rest.
+// are stopped and closed. A completed parent not yet accepted keeps
+// children that already reported, to close with it; any other ended
+// parent's children are stopped.
 func (s *Service) settle(ctx context.Context) error {
 	list, err := s.cfg.Store.ChildrenToSettle(ctx)
 	if err != nil {
@@ -170,8 +171,8 @@ func (s *Service) settle(ctx context.Context) error {
 		childLive := childErr == nil && !child.Status.Terminal()
 		parentEnded := gone || parent.Status.Terminal()
 		// A person closed the parent when they chose its final disposition
-		// or accepted its completion; a kill also ends a run abandoned but
-		// leaves its finished children for review.
+		// or accepted its completion; a kill also ends a run abandoned, and
+		// its children are stopped below.
 		closed := !gone && (parent.Status == domain.RunMerged ||
 			(parent.Status == domain.RunAbandoned && parent.Reason != "killed") ||
 			(parent.Status == domain.RunCompleted && parent.Review == domain.ReviewAccepted))
@@ -209,14 +210,14 @@ func (s *Service) settle(ctx context.Context) error {
 			continue
 		}
 		if !c.Detached && parentEnded && (c.State == domain.ChildQueued || childLive) {
-			// A child that already delivered its result stays with its
-			// parent, whose state is what a person sees, and closes with it;
-			// one whose parent was deleted has nothing to close with.
+			// A child that already delivered its result stays with a parent
+			// someone can still close, whose state is what a person sees, and
+			// closes with it. One whose parent is final or deleted is stopped.
 			reported, err := s.cfg.Store.ChildReported(ctx, c.RunID)
 			if err != nil {
 				return err
 			}
-			if childLive && !gone && (reported || finished(child)) {
+			if childLive && !gone && !parent.Status.Final() && (reported || finished(child)) {
 				continue
 			}
 			if stopErr := s.stop(ctx, c); stopErr != nil {

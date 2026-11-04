@@ -189,10 +189,13 @@ pushing, when you have a device to push to (with none it is
 
 - every `needs_you` notice;
 - `Agent reported done` while the result waits for your review, which the
-  session's notification announces as `Agent reported success, review the
-  result`. Once you chose **Later** or accepted it, the watch pushes it;
+  session's notification announces as `Finished: review the result`. Once
+  you chose **Review later** or accepted it, the watch pushes it. A
+  subsession's result is never the session's notification, so a watch you
+  set on a subsession pushes it;
 - `Failed: ...` while you have not opened the failed session, which the session's
-  notification announces as `Failed, review the result`.
+  notification announces as `Failed, review the result`, unless it is a
+  subsession's.
 
 Every other notice is pushed: the session closed as merged or abandoned, stopped,
 completed, its pull request merged or its checks finished. A watch on someone

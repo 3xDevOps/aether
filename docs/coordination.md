@@ -1290,9 +1290,9 @@ person closes a parent (merged, abandoned, or completed and accepted), the
 server closes its subsessions the same way: finished ones are relabeled, working
 ones are stopped first, and queued ones are cancelled. When a parent ends
 otherwise (failed, killed, interrupted or deleted), working subsessions are
-stopped and queued ones cancelled; a subsession that already reported its result
-stays under its parent and closes with it when someone closes the parent. If the
-parent was deleted, it is stopped too. A subsession's result is for its parent
+stopped and queued ones cancelled, and so is a subsession that already reported
+its result. Under a parent that completed but is not yet accepted, such a
+subsession stays under the parent and closes with it. A subsession's result is for its parent
 alone, never shown to a person as needing review
 ([failure-handling.md](failure-handling.md#needs-you)). Their own subsessions follow. Pausing a
 parent does not pause its subsessions.

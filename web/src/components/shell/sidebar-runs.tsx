@@ -169,10 +169,10 @@ export const connectors = cn(
   'after:absolute after:top-[calc(var(--wire,50%)+0.5px)] after:bottom-0 after:left-[calc(var(--trunk,--spacing(3.25))-0.5px)] after:border-l after:border-icon-faint last:after:hidden',
 )
 
-/** `toggled` is true once the viewer has turned this group, so only their own change fades the list in. */
 // Finished: review sits above Working, so it shows a few rows and offers the rest.
 const reviewRows = 3
 
+/** `toggled` is true once the viewer has turned this group, so only their own change fades the list in. */
 function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; expanded: boolean; toggled: boolean; onToggle: () => void }) {
   const listID = `sidebar-group-${group.key}`
   const [all, setAll] = useState(false)

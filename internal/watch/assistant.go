@@ -42,6 +42,9 @@ type Assistant interface {
 // written into their owner's assistant conversation. Call it before Start.
 func (s *Service) UseAssistant(a Assistant) { s.assistant = a }
 
+// followKeyPrefix starts the idempotency key of every watch Follow makes.
+const followKeyPrefix = "assistant:"
+
 // Follow watches run for member on the assistant's behalf, on the run's
 // default conditions: one assistant watch per member and run, returned as
 // it stands, paused or not, when there is one, and renewed if it expired.
@@ -51,9 +54,6 @@ func (s *Service) UseAssistant(a Assistant) { s.assistant = a }
 // the run or wrote to it, so only the next one is news. A live assistant
 // watch on the run's default conditions without the key, such as one
 // aether_watch made an assistant watch, is that watch too.
-// followKeyPrefix starts the idempotency key of every watch Follow makes.
-const followKeyPrefix = "assistant:"
-
 func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain.RunID) (protocol.WatchResult, error) {
 	conditions, err := s.normalize(protocol.WatchTargetRun, nil)
 	if err != nil {
