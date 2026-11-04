@@ -19,7 +19,7 @@ expect() {
 	fi
 }
 
-for mode in client installer release; do
+for mode in client release; do
 	expect $mode true go.mod
 	expect $mode true go.sum
 	expect $mode true cmd/aether/main.go
@@ -49,11 +49,10 @@ for mode in client installer release; do
 done
 
 expect client true web/src/app/page.tsx
-expect client true android/app/build.gradle.kts
+expect client false android/app/build.gradle.kts
 expect client true Makefile
-expect client true scripts/android-version-code.sh
+expect client false scripts/android-version-code.sh
 expect client true .github/workflows/windows-install.yml
-expect installer true .github/workflows/windows-install.yml
 expect release false .github/workflows/windows-install.yml
 expect client true desktop/main.js
 expect client true scripts/install.ps1
@@ -65,7 +64,6 @@ expect client false scripts/edge-update.sh
 
 expect release true .github/workflows/release.yml
 expect client false .github/workflows/release.yml
-expect installer false .github/workflows/release.yml
 expect release true Makefile
 expect release true packaging/windows/versioninfo.json
 expect release true cmd/aether/main.go
@@ -75,16 +73,6 @@ expect release false web/src/app/page.tsx
 expect release false android/app/build.gradle.kts
 expect release false desktop/main.js
 expect release false scripts/install.ps1
-
-expect installer true desktop/main.js
-expect installer true scripts/update-smoke.ps1
-expect installer true internal/cli/root.go
-expect installer false web/src/app/page.tsx
-expect installer false android/app/build.gradle.kts
-expect installer false Makefile
-expect installer false scripts/android-version-code.sh
-expect installer false internal/store/store.go
-expect installer false internal/harness/harness.go
 
 if sh "$script" 2>/dev/null </dev/null; then
 	echo "ci-classify-platform-test: no mode should fail" >&2

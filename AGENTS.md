@@ -161,7 +161,8 @@ Many sessions share the same CI runners.
 - Run the checks for what you changed locally first; see
   [docs/testing.md](docs/testing.md).
 - Mark the pull request ready (`gh pr ready <n>`) only when it is done.
-  That runs the full suite, and the merge gate applies.
+  That runs the Linux suite, and the merge gate applies. The Windows,
+  Android, arm64 and edge jobs run only in the merge queue.
 - The merge gate: an adversarial review by a separate Opus session;
   Greptile findings that are real are fixed and the rest resolved with a
   reason; `CI gate` green on the current head. Then

@@ -1,11 +1,10 @@
 #!/bin/sh
 # Whether a pull request's changed paths can affect the platform jobs.
 #
-# usage: ci-classify-platform.sh client|installer|release
+# usage: ci-classify-platform.sh client|release
 # stdin: newline-separated repo paths. Prints true or false.
-# client covers what the cross-compiled aether client, the Android app and
-# the Linux desktop build are made from. installer covers what the Windows
-# install and update lanes exercise. release covers what the release
+# client covers what the aether client and the Linux desktop build are
+# made from. release covers what the release
 # cross-compile adds to the native builds: the Makefile recipe, packaging
 # and the Windows resources. false only when at least one path is
 # present and every path is in the unrelated set for the mode. Empty input
@@ -13,7 +12,7 @@
 set -eu
 
 if [ "$#" -ne 1 ]; then
-	echo "usage: ci-classify-platform.sh client|installer|release" >&2
+	echo "usage: ci-classify-platform.sh client|release" >&2
 	exit 2
 fi
 mode=$1
@@ -34,35 +33,15 @@ client() {
 		internal/syncd/* | internal/version/* | internal/webgate/*)
 		return 0
 		;;
-	go.mod | go.sum | Makefile | desktop/* | web/* | android/* | packaging/windows/* | \
-		scripts/android-* | scripts/install* | scripts/*.ps1 | scripts/make-icons.py | \
+	go.mod | go.sum | Makefile | desktop/* | web/* | packaging/windows/* | \
+		scripts/install* | scripts/*.ps1 | scripts/make-icons.py | \
 		scripts/ci-classify-platform* | .github/actions/* | \
 		.github/workflows/ci.yml | .github/workflows/windows-install.yml)
 		return 0
 		;;
-	cmd/* | internal/* | docs/* | images/* | packaging/*) return 1 ;;
+	cmd/* | internal/* | docs/* | images/* | packaging/* | android/*) return 1 ;;
 	scripts/*) return 1 ;;
 	.github/workflows/* | .gitignore | .golangci.yml) return 1 ;;
-	*/*) return 0 ;;
-	*.md)
-		[ -z "${1%.md}" ] && return 0
-		return 1
-		;;
-	*) return 0 ;;
-	esac
-}
-
-installer() {
-	case $1 in
-	cmd/aether/* | internal/cli/* | internal/selfupdate/* | internal/localops/* | \
-		internal/macinstall/* | internal/version/* | desktop/* | packaging/windows/* | \
-		go.mod | go.sum | scripts/install* | scripts/*.ps1 | scripts/ci-classify-platform* | \
-		.github/actions/* | .github/workflows/ci.yml | .github/workflows/windows-install.yml)
-		return 0
-		;;
-	cmd/* | internal/* | docs/* | images/* | packaging/* | web/* | android/*) return 1 ;;
-	scripts/*) return 1 ;;
-	.github/workflows/* | .gitignore | .golangci.yml | Makefile) return 1 ;;
 	*/*) return 0 ;;
 	*.md)
 		[ -z "${1%.md}" ] && return 0
@@ -91,9 +70,9 @@ release() {
 }
 
 case $mode in
-client | installer | release) ;;
+client | release) ;;
 *)
-	echo "usage: ci-classify-platform.sh client|installer|release" >&2
+	echo "usage: ci-classify-platform.sh client|release" >&2
 	exit 2
 	;;
 esac

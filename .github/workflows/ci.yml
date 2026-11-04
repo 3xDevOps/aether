@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
   # A draft pull request runs changes, audit, lint and build-and-test only.
-  # Every other job waits until the pull request is ready for review; the
-  # merge queue and pushes to main always run them.
+  # The other Linux jobs wait until it is ready for review. The Windows,
+  # Android, arm64 and edge jobs run only in the merge queue and on pushes
+  # to main.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   merge_group:
@@ -42,9 +43,8 @@ jobs:
   # scripts/ci-classify-areas.sh sets go and web: a change confined to
   # docs/ and root-level markdown files skips both, one confined to web/
   # skips the Go jobs, and one that no dashboard input can see skips
-  # dashboard and dashboard-e2e. The edge, desktop, client, installer and
-  # release outputs follow the same rules with scripts/ci-classify-edge.sh,
-  # scripts/ci-classify-desktop.sh and scripts/ci-classify-platform.sh.
+  # dashboard and dashboard-e2e. The client and release outputs follow the
+  # same rules with scripts/ci-classify-platform.sh.
   # Each classifier is the base revision's copy: a pull request can edit
   # its own, and that copy is not what this job runs. A rename is
   # classified by its old path as well as its new one, so a move into docs/
@@ -57,10 +57,7 @@ jobs:
     outputs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
-      edge: ${{ steps.classify.outputs.edge }}
-      desktop: ${{ steps.classify.outputs.desktop }}
       client: ${{ steps.classify.outputs.client }}
-      installer: ${{ steps.classify.outputs.installer }}
       release: ${{ steps.classify.outputs.release }}
     steps:
       - uses: actions/checkout@v4
@@ -69,8 +66,6 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-areas.sh
-            scripts/ci-classify-desktop.sh
-            scripts/ci-classify-edge.sh
             scripts/ci-classify-platform.sh
           sparse-checkout-cone-mode: false
       - name: Classify changed paths
@@ -80,13 +75,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            printf '%s\n' go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true client=true release=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
-            printf '%s\n' go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true client=true release=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           for mode in go web; do
@@ -95,15 +90,7 @@ jobs:
             fi
             echo "$mode=$out" >> "$GITHUB_OUTPUT"
           done
-          if ! edge=$(printf '%s\n' "$files" | sh scripts/ci-classify-edge.sh); then
-            edge=true
-          fi
-          echo "edge=$edge" >> "$GITHUB_OUTPUT"
-          if ! desktop=$(printf '%s\n' "$files" | sh scripts/ci-classify-desktop.sh); then
-            desktop=true
-          fi
-          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
-          for mode in client installer release; do
+          for mode in client release; do
             if ! out=$(printf '%s\n' "$files" | sh scripts/ci-classify-platform.sh "$mode"); then
               out=true
             fi
@@ -463,17 +450,12 @@ jobs:
           mode: save
           save-modules: 'true'
 
-  # A pull request runs the edge image build and smoke test only when
-  # scripts/ci-classify-edge.sh says a changed path can affect the image.
   # A workflow of its own so it can be started by hand on any branch.
   edge-image:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.edge == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     permissions:
       contents: read
     uses: ./.github/workflows/edge-image.yml
-    with:
-      full: ${{ github.event_name != 'pull_request' }}
 
   dashboard:
     needs: changes
@@ -713,11 +695,9 @@ jobs:
           key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
 
   # The packaging and launch check release.yml runs for each tag, on both
-  # Windows architectures, when scripts/ci-classify-desktop.sh says a
-  # changed path can affect the desktop app.
+  # Windows architectures.
   desktop-windows:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.desktop == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -740,11 +720,9 @@ jobs:
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
-  # design and internal/gitengine does not compile for Windows. Docs-only
-  # pull requests skip this job. changes does not choose the runner.
+  # design and internal/gitengine does not compile for Windows.
   windows:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -783,8 +761,7 @@ jobs:
   # Reuse the installer lanes so their verdict is part of CI and therefore
   # the exact-commit CI success required by release authorization.
   windows-install:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.installer == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     uses: ./.github/workflows/windows-install.yml
 
   release-build:
@@ -838,8 +815,7 @@ jobs:
           retention-days: 7
 
   android:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     # A wedged Gradle daemon must not hold the runner for the six-hour default.
     timeout-minutes: 45
@@ -895,9 +871,10 @@ jobs:
   # run. It is signal, not a flake - the response is to submit the binary at
   # https://www.microsoft.com/en-us/wdsi/filesubmission as a developer false
   # positive, and to check what changed in the client's syscalls or embedded
-  # strings. See docs/install.md. Skipped when release-build is skipped.
+  # strings. See docs/install.md.
   windows-defender:
     needs: release-build
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
