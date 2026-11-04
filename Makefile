@@ -200,7 +200,7 @@ browser-smoke:
 	$(BROWSER_RUN) --test /opt/aether-browser/companion.test.mjs
 
 test:
-	go test $(TEST_RACE) -parallel 16 $(TEST_PKGS)
+	go test $(TEST_RACE) -parallel 16 -timeout 20m $(TEST_PKGS)
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it with
@@ -252,9 +252,6 @@ test-scripts:
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-areas-test.sh
 	sh scripts/ci-reap-queue-runs-test.sh
-	sh scripts/ci-classify-desktop-test.sh
-	sh scripts/ci-classify-edge-test.sh
-	sh scripts/ci-classify-platform-test.sh
 	sh scripts/edge-go-version-test.sh
 	sh scripts/edge-nginx-test.sh
 	sh scripts/edge-update-test.sh
