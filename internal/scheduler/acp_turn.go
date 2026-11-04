@@ -41,6 +41,15 @@ func heldByTasks(report agentstatus.Report) bool {
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
+	// The first state after a sign-in restart shows the refusal, unless a
+	// turn started meanwhile.
+	d.s.mu.Lock()
+	refused := entry.authRefused
+	entry.authRefused = nil
+	d.s.mu.Unlock()
+	if refused != nil && !st.Working && st.Failed == nil {
+		st.Reason, st.Failed = "error", refused
+	}
 	// A child run's ended turn hands its last message to its parent.
 	forward, message := false, ""
 	switch acp.StopReason(st.Reason) {

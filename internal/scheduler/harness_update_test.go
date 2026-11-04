@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -468,5 +469,26 @@ func TestHarnessUpdateHeadless(t *testing.T) {
 	notes := launchNotes(t, e, "claude", domain.LaunchHeadless)
 	if len(notes) != 1 || len(rt.updates()) != 1 {
 		t.Fatalf("headless launch: notes = %q, update containers = %d, want one update", noteMessages(notes), len(rt.updates()))
+	}
+}
+
+// The updater runs the vendor CLI over the member's home but sees no login:
+// a refresh there would spend the token every running session holds.
+func TestHarnessUpdateHidesTheLogins(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newUpdateEnv(t, nil)
+	installInHome(t, e, "claude")
+
+	launchNotes(t, e, "claude", domain.LaunchTUI)
+	updates := rt.updates()
+	if len(updates) != 1 {
+		t.Fatalf("updates = %d, want one", len(updates))
+	}
+	home := updates[0].Mounts[0]
+	hidden := slices.ContainsFunc(updates[0].Mounts, func(m runtime.Mount) bool {
+		return m.ContainerPath == path.Join(home.ContainerPath, ".claude/.credentials.json") && m.ReadOnly && m.HostPath != home.HostPath
+	})
+	if !hidden {
+		t.Fatalf("updater mounts %+v leave the Claude login visible", updates[0].Mounts)
 	}
 }

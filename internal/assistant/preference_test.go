@@ -59,7 +59,8 @@ func newPrefFixture(t *testing.T) *prefFixture {
 	}
 	f.host = &fakeHost{}
 	f.db, f.prefs = db, preference.New(db, filepath.Join(f.dir, "preference-tombstones"))
-	f.svc = New(Config{Dir: filepath.Join(f.dir, "assistant"), Store: db, Host: f.host, Preferences: f.prefs})
+	fake := &actionServer{}
+	f.svc = New(Config{Dir: filepath.Join(f.dir, "assistant"), Store: db, Host: f.host, Preferences: f.prefs, Caller: func(domain.MemberID) tools.Caller { return fake }})
 	t.Cleanup(func() { _ = f.svc.Close() })
 	f.m = f.svc.member(alice.ID)
 
@@ -73,7 +74,7 @@ func newPrefFixture(t *testing.T) *prefFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	caller := f.svc.preferenceCaller(f.m, actionCaller{Caller: &actionServer{}, s: f.svc, m: f.m})
+	caller := f.svc.preferenceCaller(f.m, actionCaller{Caller: fake, s: f.svc, m: f.m})
 	caller.prompt = func() (acphost.UserMessage, bool) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
