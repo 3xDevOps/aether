@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CloseConfirmation, CloseWarnings } from '@/components/close-warnings'
 import { Check } from '@/components/icons'
 import { toast } from 'sonner'
@@ -51,7 +51,10 @@ describe('Mark complete with close warnings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
     const dialog = await screen.findByRole('alertdialog', { name: 'Close this session anyway?' })
     expect(dialog.textContent).toContain('Commits on aether/run-1 are in no merged pull request. The branch stays, but nothing merges it.')
-    expect(dialog.textContent).toContain('Protected: only its owner or an admin can steer, message or close it.')
+    expect(dialog.textContent).toContain('Mark complete: records it as completed and closes the session.')
+    expect(dialog.textContent).toContain('Protected. You can still close it as its owner.')
+    expect(dialog.textContent!.indexOf('Commits on')).toBeLessThan(dialog.textContent!.indexOf('Protected.'))
+    expect(screen.getByRole('button', { name: 'Cancel' }).className).toContain('focus:outline-accent')
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
     expect(api.runReview).not.toHaveBeenCalled()
     expect(useStore.getState().runs.run_1.review).toBe('ready')
@@ -114,20 +117,25 @@ describe('Mark complete with close warnings', () => {
 
   it('drops the confirmation when its run is gone', async () => {
     render(<CloseConfirmation />)
-    act(() => useStore.setState({ runs: {}, closeConfirmation: { check: { run_id: 'run_1', warnings: [{ kind: 'protected', detail: 'Protected' }] }, asked: '', command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } } }))
+    act(() => useStore.setState({ runs: {}, closeConfirmation: { check: { run_id: 'run_1', warnings: [{ kind: 'protected', detail: 'Protected' }] }, asked: '', outcome: 'completed', command: { id: 'complete', label: 'Mark complete', Icon: Check, perform: () => {} } } }))
     await waitFor(() => expect(useStore.getState().closeConfirmation).toBeNull())
   })
 })
 
 describe('CloseWarnings', () => {
-  it('names the subsession a warning is about, and shows a cleanup failure the session record does not have', () => {
+  it('nests each subsession\'s own warnings under its name, names mail senders, and shows a cleanup failure the session record does not have', () => {
     useStore.setState({ runs: { ...useStore.getState().runs, run_2: toRecord(run({ id: 'run_2', title: 'Worker' })), run_3: toRecord(run({ id: 'run_3', title: 'Watcher' })) } })
     render(<CloseWarnings run={useStore.getState().runs.run_1!} onLeave={() => {}} check={{ run_id: 'run_1', warnings: [
-      { kind: 'awaited', detail: 'Subsession run_2 (Worker): Waiting for it to finish: run_3 (Watcher)', run_ids: ['run_3'], subsession: 'run_2' },
       { kind: 'cleanup_pending', detail: 'Cleanup failed: remove container: device busy' },
+      { kind: 'messages', detail: '2 messages from run_3 (Watcher)', count: 2, run_ids: ['run_3'] },
+      { kind: 'subsessions', detail: '1 subsession close with it: run_2 (Worker)', count: 1, run_ids: ['run_2'] },
+      { kind: 'pull_request', detail: 'Pull request acme/shop#9 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z', url: 'https://github.com/acme/shop/pull/9', subsession: 'run_2' },
+      { kind: 'awaited', detail: 'Waiting for it to finish: run_3 (Watcher)', run_ids: ['run_3'], subsession: 'run_2' },
     ] }} />)
-    const list = screen.getByRole('list', { name: 'What closing affects' })
-    expect(list.textContent).toContain('Subsession Worker: waiting for it to finish: Watcher. Closing wakes them with its outcome.')
-    expect(list.textContent).toContain('Cleanup failed: remove container: device busy.')
+    const items = within(screen.getByRole('list', { name: 'What closing affects' })).getAllByRole('listitem').map((li) => li.textContent)
+    expect(items[0]).toMatch(/^Closes with it:Worker.*Pull request acme\/shop#9 was open, not merged, when Aether last checked .*Waiting for it to finish: Watcher/)
+    expect(items.at(-2)).toBe('2 messages from Watcher, unanswered or from the last 30 minutes. They may expect it to answer.')
+    expect(items.at(-1)).toBe('Cleanup failed: remove container: device busy.')
+    expect(screen.getByRole('time').getAttribute('datetime')).toBe('2026-11-03T18:20:00Z')
   })
 })

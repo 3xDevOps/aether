@@ -1,5 +1,5 @@
 import type { Command } from '@/lib/commands'
-import type { RunCloseCheck, WatchTarget } from '@/lib/types'
+import type { CloseOutcome, RunCloseCheck, WatchTarget } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Every form the shell hosts; sweep this list rather than keep a copy. */
@@ -16,7 +16,7 @@ export interface PaletteSlice {
   /** The pull request the Watch form is for; a run's comes from paletteRunID. */
   paletteWatchTarget: WatchTarget | null
   /** A verb that closes a run with close warnings, held until the owner confirms. */
-  closeConfirmation: { check: RunCloseCheck; asked: string; command: Command } | null
+  closeConfirmation: { check: RunCloseCheck; asked: string; outcome: CloseOutcome; command: Command } | null
   /** Runs whose close check is in flight, so a second press does not check again. */
   closeChecking: Record<string, true>
   togglePalette: (open?: boolean) => void
@@ -24,7 +24,7 @@ export interface PaletteSlice {
   openForwardDialog: (target: string) => void
   openWatchDialog: (target: WatchTarget) => void
   closePaletteDialog: () => void
-  openCloseConfirmation: (confirmation: { check: RunCloseCheck; asked: string; command: Command }) => void
+  openCloseConfirmation: (confirmation: { check: RunCloseCheck; asked: string; outcome: CloseOutcome; command: Command }) => void
   dismissCloseConfirmation: () => void
   setCloseChecking: (runID: string, checking: boolean) => void
 }

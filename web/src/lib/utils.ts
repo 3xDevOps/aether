@@ -46,6 +46,9 @@ export function cn(...inputs: ClassValue[]) {
 export const focusRing =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
 
+/** For the control a dialog focuses when it opens: the ring shows though the keyboard did not move focus there. */
+export const focusRingShown = 'focus:outline-2 focus:outline-offset-2 focus:outline-accent focus:transition-none'
+
 export const focusRingInset =
   'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
 

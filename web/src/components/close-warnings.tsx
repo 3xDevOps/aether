@@ -11,12 +11,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { GitBranch, GitPullRequest, Hourglass, Lock, MessageSquare, Network, PackageX } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { RelativeTime } from '@/components/ui/relative-time'
+import { focusRingShown } from '@/lib/utils'
 import { closeChangedText, closeState, readCloseCheck } from '@/lib/close-check'
 import { useCommandRunner } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
-import type { CloseOutcome, CloseWarning, Run, RunCloseCheck } from '@/lib/types'
+import type { CloseOutcome, CloseWarning, CloseWarningKind, Run, RunCloseCheck } from '@/lib/types'
 import { useStore } from '@/store'
+import { useSelf } from '@/store/hooks'
 
 /** Undefined until the server answers. */
 export function useCloseCheck(runID: string | null, outcome?: CloseOutcome): RunCloseCheck | undefined {
@@ -35,19 +39,79 @@ export function useCloseCheck(runID: string | null, outcome?: CloseOutcome): Run
   return check
 }
 
+const order: CloseWarningKind[] = ['pull_request', 'unmerged_work', 'awaited', 'subsessions', 'messages', 'cleanup_pending', 'protected']
+
+const icons: Record<CloseWarningKind, typeof Lock> = {
+  pull_request: GitPullRequest,
+  unmerged_work: GitBranch,
+  awaited: Hourglass,
+  subsessions: Network,
+  messages: MessageSquare,
+  cleanup_pending: PackageX,
+  protected: Lock,
+}
+
+const byRisk = (a: CloseWarning, b: CloseWarning) => order.indexOf(a.kind) - order.indexOf(b.kind)
+
 /** onLeave closes whatever dialog shows the warnings before a session link navigates away. */
 export function CloseWarnings({ check, run, onLeave }: { check: RunCloseCheck; run: Run; onLeave: () => void }) {
-  const listed = check.warnings.filter((warning) => warning.kind !== 'cleanup_pending' || !retentionShows(run, warning))
+  const listed = check.warnings
+    .filter((warning) => !warning.subsession && (warning.kind !== 'cleanup_pending' || !retentionShows(run, warning)))
+    .sort(byRisk)
   return (
-    <div className="flex flex-col gap-2 text-ui-sm">
+    <div className="flex max-h-[min(50dvh,24rem)] flex-col gap-2 overflow-y-auto text-ui-sm">
       {check.error && <p role="alert" className="break-words text-state-failed">Could not check what closing affects: {check.error.message}</p>}
       {listed.length > 0 && (
-        <ul aria-label="What closing affects" className="flex list-disc flex-col gap-1 pl-5">
-          {listed.map((warning) => <li key={warning.kind + (warning.url ?? '')} className="break-words">{explain(warning, onLeave)}</li>)}
+        <ul aria-label="What closing affects" className="flex flex-col gap-1.5">
+          {listed.map((warning) => (
+            <Line key={warning.kind + (warning.url ?? '')} warning={warning}>
+              {warning.kind === 'subsessions'
+                ? <Subsessions ids={warning.run_ids ?? []} warnings={check.warnings} onLeave={onLeave} />
+                : <Explain warning={warning} run={run} onLeave={onLeave} />}
+            </Line>
+          ))}
         </ul>
       )}
       <RunRetention run={run} />
     </div>
+  )
+}
+
+function Line({ warning, children }: { warning: CloseWarning; children: ReactNode }) {
+  const Icon = icons[warning.kind]
+  return (
+    <li className="flex min-w-0 gap-2 break-words">
+      <Icon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-icon-faint" />
+      <div className="min-w-0">{children}</div>
+    </li>
+  )
+}
+
+function Subsessions({ ids, warnings, onLeave }: { ids: string[]; warnings: CloseWarning[]; onLeave: () => void }) {
+  const runs = useStore((s) => s.runs)
+  return (
+    <>
+      Closes with it:
+      <ul className="mt-1 flex flex-col gap-1">
+        {ids.map((id) => {
+          const own = warnings.filter((warning) => warning.subsession === id).sort(byRisk)
+          return (
+            <li key={id}>
+              <Runs ids={[id]} onLeave={onLeave} />
+              {own.length > 0 && (
+                <ul className="mt-1 flex flex-col gap-1 pl-3">
+                  {own.map((warning) => (
+                    <Line key={warning.kind + (warning.url ?? '')} warning={warning}>
+                      <Explain warning={warning} run={runs[id]} onLeave={onLeave} />
+                    </Line>
+                  ))}
+                </ul>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </>
   )
 }
 
@@ -56,25 +120,35 @@ function retentionShows(run: Run, warning: CloseWarning): boolean {
   return run.cleanup_error ? warning.detail === `Cleanup failed: ${run.cleanup_error}` : Boolean(run.cleanup_pending) && !warning.detail.startsWith('Cleanup failed')
 }
 
-function explain(warning: CloseWarning, onLeave: () => void): ReactNode {
+const instant = /(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/
+
+/** The server writes times as RFC 3339; show them relative, with the exact time on hover. */
+function WithTimes({ text }: { text: string }) {
+  return text.split(instant).map((part, i) => (i % 2 ? <RelativeTime key={i} at={part} /> : part))
+}
+
+function Explain({ warning, run, onLeave }: { warning: CloseWarning; run: Run | undefined; onLeave: () => void }) {
+  const self = useSelf()
   switch (warning.kind) {
     case 'pull_request':
       return (
         <>
-          {warning.detail}.{' '}
-          {warning.url && <a href={warning.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open the pull request</a>}
+          <WithTimes text={warning.detail} />.{' '}
+          {warning.url && <a href={warning.url} target="_blank" rel="noreferrer" className="whitespace-nowrap text-accent hover:underline">Open the pull request</a>}
         </>
       )
     case 'unmerged_work':
       return `${warning.detail}. The branch stays, but nothing merges it.`
     case 'messages':
-      return `${warning.detail}. Another session may expect it to answer.`
+      return warning.run_ids?.length
+        ? <>{warning.count} {warning.count === 1 ? 'message' : 'messages'} from <Runs ids={warning.run_ids} onLeave={onLeave} />, unanswered or from the last 30 minutes. They may expect it to answer.</>
+        : `${warning.detail}.`
     case 'awaited':
-      return warning.subsession
-        ? <>Subsession <Runs ids={[warning.subsession]} onLeave={onLeave} />: waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
-        : <>Waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
-    case 'subsessions':
-      return <>Closes with it: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />.</>
+      return <>Waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
+    case 'protected':
+      if (run && self.id === run.member_id) return 'Protected. You can still close it as its owner.'
+      if (self.role === 'admin') return 'Protected. You can still close it as an admin.'
+      return `${warning.detail}.`
     default:
       return `${warning.detail}.`
   }
@@ -113,16 +187,17 @@ export function CloseConfirmation() {
   return (
     <AlertDialog open onOpenChange={(open) => { if (!open) dismiss() }}>
       <AlertDialogContent className="max-w-[min(480px,calc(100%-2rem))]">
-        <AlertDialogHeader>
+        <AlertDialogHeader className="min-w-0">
           <AlertDialogTitle>Close this session anyway?</AlertDialogTitle>
+          <p className="truncate text-ui-sm font-medium" title={runLabel(run)}>{runLabel(run)}</p>
           <AlertDialogDescription>
-            &quot;{runLabel(run)}&quot; - {pending.command.label} closes the session.
+            {pending.command.label}: records it as {pending.outcome} and closes the session.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <CloseWarnings check={pending.check} run={run} onLeave={dismiss} />
         <AlertDialogFooter>
           {/* Radix AlertDialog focuses Cancel when the confirmation opens. */}
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel className={focusRingShown}>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => {
               dismiss()

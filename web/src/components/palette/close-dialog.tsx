@@ -19,6 +19,7 @@ import { closeCommand, useCommandRunner } from '@/lib/commands'
 import { errorSentence } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import { useReturnFocus } from '@/lib/hooks'
+import { focusRingShown } from '@/lib/utils'
 import { useStore } from '@/store'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
@@ -59,10 +60,15 @@ export function CloseDialog() {
   }
 
   const pending = late ? stillWaiting : 'Closing…'
+  const warned = closeWarned(check)
+  // With warnings no close looks like the safe default: the one that loses
+  // work is danger, the other secondary.
+  const risky: Outcome = check?.warnings.some((w) => w.kind === 'pull_request' || w.kind === 'unmerged_work') ? 'abandoned' : 'merged'
+  const variant = (outcome: Outcome) => (warned ? (outcome === risky ? 'danger' : 'secondary') : outcome === 'merged' ? 'primary' : 'secondary')
   const label = (outcome: Outcome, plain: string) => {
     if (closing === outcome) return pending
     if (!check) return 'Checking…'
-    return closeWarned(check, outcome) ? `Close anyway as ${outcome}` : plain
+    return warned ? `Close as ${outcome}` : plain
   }
 
   return (
@@ -77,9 +83,9 @@ export function CloseDialog() {
         className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Close this session?</DialogTitle>
+          {run && <p className="truncate text-ui-sm font-medium" title={runLabel(run)}>{runLabel(run)}</p>}
           <DialogDescription>
-            {run ? `"${runLabel(run)}" - ` : ''}The outcome is recorded and the session leaves the
-            board. Its branch stays.
+            The outcome is recorded and the session leaves the board. Its branch stays.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto px-3 py-3 sm:px-4">
@@ -92,14 +98,14 @@ export function CloseDialog() {
           )}
         </div>
         <DialogFooter className="border-t px-3 py-3 sm:flex-wrap sm:px-4">
-          <Button ref={cancel} variant="secondary" onClick={close}>
+          <Button ref={cancel} variant="secondary" className={focusRingShown} onClick={close}>
             Cancel
           </Button>
-          <Button variant="secondary" disabled={closing !== null || !check} onClick={() => void finish('abandoned')}>
+          <Button variant={variant('abandoned')} disabled={closing !== null || !check} onClick={() => void finish('abandoned')}>
             <Archive aria-hidden />
             {label('abandoned', 'Abandoned')}
           </Button>
-          <Button disabled={closing !== null || !check} onClick={() => void finish('merged')}>
+          <Button variant={variant('merged')} disabled={closing !== null || !check} onClick={() => void finish('merged')}>
             <GitMerge aria-hidden />
             {label('merged', 'Merged')}
           </Button>

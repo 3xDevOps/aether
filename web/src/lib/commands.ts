@@ -1026,7 +1026,7 @@ export function useCommandRunner(
           return
         }
         if (closeWarned(check, outcome)) {
-          openCloseConfirmation({ check, asked, command: { ...command, closes: undefined } })
+          openCloseConfirmation({ check, asked, outcome, command: { ...command, closes: undefined } })
           return
         }
       }

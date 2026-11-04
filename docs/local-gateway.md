@@ -818,14 +818,14 @@ member may call it; a session that does not exist answers with its own
 `error` and leaves the others unaffected. Each warning has a `kind`, a `detail`
 sentence and, where it applies, `url`, `count` and `run_ids`. A subsession that
 closes with the session adds its own `pull_request`, `unmerged_work` and
-`awaited` warnings, with `subsession` naming it:
+`awaited` warnings, with `subsession` naming it; their `detail` does not repeat the subsession:
 
 | `kind` | When |
 | --- | --- |
 | `protected` | The session is protected (`aether protect`). |
 | `pull_request` | A pull request recorded for it was neither merged nor closed when Aether last checked it; `url` links it. The check does not ask GitHub. |
 | `unmerged_work` | Its branch has commits past its base and no open pull request, or merged one, recorded for its own repository after Aether last recorded a commit. Recorded pull requests carry no commit, so the warning says the commits may not be merged. |
-| `messages` | Mail from other sessions that asks it something (not a reply) and it has not acknowledged, or any mail in the last 30 minutes from a session other than its parent and subsessions; `count`. |
+| `messages` | Mail from other sessions that asks it something (not a reply) and it has not acknowledged, or any mail in the last 30 minutes from a session other than its parent and subsessions; `count`, and the senders in `run_ids`. |
 | `awaited` | Live sessions wait on `run:<session-id>:finished`; `run_ids`. Closing wakes them with its outcome. |
 | `subsessions` | Attached subsessions not yet merged, abandoned, failed, interrupted or accepted, which close with it; `count`, `run_ids`. |
 | `cleanup_pending` | Its container cleanup is pending or failed; `detail` carries the error. |

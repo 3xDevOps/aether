@@ -35,11 +35,7 @@ export function ClearDoneConfirm({
             {n === 0 ? (
               'Archive acts on merged, abandoned, failed and interrupted sessions you may act on.'
             ) : (
-              <>
-                Archive hides these sessions from Finished and keeps their history until you
-                explicitly delete them. You can restore them at any time. It does not free
-                their containers; free them separately if you want the memory back now.
-              </>
+'Hides them from Finished. History stays; restore any time. Containers keep running; free them separately.'
             )}
           </DialogDescription>
         </DialogHeader>

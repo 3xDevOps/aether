@@ -73,28 +73,44 @@ describe('close dialog', () => {
     expect(status()).toBe('merged')
   })
 
-  it('lists what closing affects and says Close anyway, with Cancel focused', async () => {
+  it('lists what closing affects, riskiest first, and makes abandoning the danger, with Cancel focused and ringed', async () => {
     useStore.setState({ runs: { run_1: toRecord(run({ id: 'run_1', status: 'completed' })), run_2: toRecord(run({ id: 'run_2', title: 'Coordinator' })) } })
     vi.mocked(api.runCloseCheck).mockResolvedValueOnce([{ run_id: 'run_1', warnings: [
       { kind: 'pull_request', detail: 'Pull request acme/api#7 is open, not merged', url: 'https://github.com/acme/api/pull/7' },
       { kind: 'awaited', detail: 'Waiting for it to finish: run_2 (Coordinator)', run_ids: ['run_2'] },
     ] }])
     render(<CloseDialog />)
-    const merged = await screen.findByRole('button', { name: 'Close anyway as merged' })
-    expect(screen.getByRole('button', { name: 'Close anyway as abandoned' })).toBeTruthy()
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
+    const merged = await screen.findByRole('button', { name: 'Close as merged' })
+    const abandoned = screen.getByRole('button', { name: 'Close as abandoned' })
+    expect(abandoned.className).toContain('bg-state-failed')
+    expect(merged.className).not.toContain('bg-accent')
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    expect(document.activeElement).toBe(cancel)
+    expect(cancel.className).toContain('focus:outline-accent')
     const list = screen.getByRole('list', { name: 'What closing affects' })
-    expect(list.textContent).toContain('Pull request acme/api#7 is open, not merged.')
+    expect(list.textContent).toMatch(/^Pull request acme\/api#7 is open, not merged\..*Waiting for it to finish/)
     expect(screen.getByRole('link', { name: 'Open the pull request' }).getAttribute('href')).toBe('https://github.com/acme/api/pull/7')
     expect(list.textContent).toContain('Waiting for it to finish: Coordinator. Closing wakes them with its outcome.')
     fireEvent.click(merged)
     expect(api.runClose).toHaveBeenCalledWith('run_1', 'merged')
   })
 
+  it('makes the outcome that was primary the danger when no work is at risk', async () => {
+    vi.mocked(api.runCloseCheck).mockResolvedValueOnce([{ run_id: 'run_1', warnings: [{ kind: 'messages', detail: '1 message', count: 1 }] }])
+    render(<CloseDialog />)
+    expect((await screen.findByRole('button', { name: 'Close as merged' })).className).toContain('bg-state-failed')
+    expect(screen.getByRole('button', { name: 'Close as abandoned' }).className).not.toContain('bg-state-failed')
+  })
+
+  it('keeps the calm Merged and Abandoned without warnings', async () => {
+    render(<CloseDialog />)
+    expect((await screen.findByRole('button', { name: 'Merged' })).className).toContain('bg-accent')
+  })
+
   it('shows a failed check and still lets the owner close', async () => {
     vi.mocked(api.runCloseCheck).mockRejectedValueOnce(new Error('method not found: run.close_check'))
     render(<CloseDialog />)
-    await screen.findByRole('button', { name: 'Close anyway as merged' })
+    await screen.findByRole('button', { name: 'Close as merged' })
     expect(screen.getByRole('alert').textContent).toBe('Could not check what closing affects: method not found: run.close_check')
   })
 

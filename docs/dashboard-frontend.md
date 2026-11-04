@@ -2214,9 +2214,13 @@ palette, with Cancel initially focused. **Close session…** opens its own dialo
 which asks whether the work was merged or abandoned; a choice closes it and
 shows the outcome at once. The dialog reads `run.close_check` when it opens
 and lists the warnings with `CloseWarnings` (`src/components/close-warnings.tsx`),
-which links a pull request and names awaited sessions and subsessions; with
-any, the buttons read **Close anyway as merged** and **Close anyway as
-abandoned**, and Cancel holds the focus; closing as merged ignores
+which orders them by risk (pull request and unmerged work, waiting
+sessions, subsessions with their own warnings nested under each, mail,
+cleanup, protection), links the pull request and names sessions. With any,
+the buttons read **Close as merged** and **Close as abandoned**: abandoning
+is `danger` when a pull request or unmerged work is at risk, otherwise
+merging is, and the other is `secondary`. Cancel holds the focus with the
+ring drawn (`focusRingShown`); closing as merged ignores
 `unmerged_work`. A command with `closes` (Mark complete, outcome `completed`)
 is checked by the runner itself before it runs, once at a time per session
 (`closeChecking`): with warnings, or a check that failed, the runner opens

@@ -17,6 +17,7 @@ import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
 import { closeWarned } from '@/lib/close-check'
 import { errorSentence } from '@/lib/format'
+import { focusRingShown } from '@/lib/utils'
 import type { AuthMethod, SessionItem } from '@/lib/session-types'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunShells } from '@/routes/run/shells'
@@ -114,7 +115,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
           </AlertDialogHeader>
           {check ? <CloseWarnings check={check} run={run} onLeave={() => setConfirm(false)} /> : <p className="text-ui-sm text-muted">Checking what closing affects…</p>}
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep this session</AlertDialogCancel>
+            <AlertDialogCancel className={focusRingShown}>Keep this session</AlertDialogCancel>
             <AlertDialogAction disabled={!check} onClick={() => void act()}>
               {closeWarned(check, 'abandoned') ? 'Close anyway and start Standard' : 'Start a Standard session'}
             </AlertDialogAction>
