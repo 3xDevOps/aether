@@ -362,3 +362,30 @@ func TestCacheCleanupOperationsKeepIndependentDurableFailures(t *testing.T) {
 		t.Fatalf("data success cleared unrelated cause: %+v, %v", info, err)
 	}
 }
+
+// Removing an owner that is already gone changes nothing on disk: two
+// workers can share one key, and the second must not rewrite the metadata.
+func TestRemoveAbsentCacheOwnerWritesNothing(t *testing.T) {
+	manager := newCacheManager(t, nil)
+	if err := manager.AddCacheOwner("member", CachePoolTerminal, "updater"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RemoveCacheOwner("member", CachePoolTerminal, "updater"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(manager.CacheRoot(), "member", CachePoolTerminal, cacheMetadataName)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.RemoveCacheOwner("member", CachePoolTerminal, "updater"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("removing an absent owner rewrote the cache metadata")
+	}
+}
