@@ -73,7 +73,9 @@ type Config struct {
 	Client *http.Client
 	// Quiet overrides DefaultQuiet.
 	Quiet time.Duration
-	// Now replaces time.Now for the quiet period, for tests.
+	// Now replaces time.Now when the quiet period is read, for tests. The
+	// waits stay on real timers, which re-read Now when they fire, so a
+	// clock that jumps does not wake a waiting notice early.
 	Now func() time.Time
 }
 

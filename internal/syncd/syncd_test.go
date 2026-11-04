@@ -375,6 +375,11 @@ func TestRunExitsWhenExecutableIsReplaced(t *testing.T) {
 	}()
 	d, _, _ := newTestDaemon(t, "")
 	d.cfg.Server = ln.Addr().String()
+	// dial loads known hosts before it connects; the file only has to open.
+	d.cfg.KnownHostsPath = filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(d.cfg.KnownHostsPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	d.executable = func() (string, error) { return path, nil }
 	d.updatePoll = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
@@ -382,7 +387,13 @@ func TestRunExitsWhenExecutableIsReplaced(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- d.Run(ctx) }()
 
-	<-connected
+	select {
+	case <-connected:
+	case err := <-done:
+		t.Fatalf("Run = %v before it connected", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not connect")
+	}
 	next := path + ".new"
 	if err := os.WriteFile(next, []byte("v2"), 0o755); err != nil {
 		t.Fatal(err)
