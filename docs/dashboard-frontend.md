@@ -639,7 +639,7 @@ On a phone the strip shows only while someone else watches, another member
 or another of your tabs holds control, the session is not yours, or control,
 presence or the stream failed (`useSharedPresence`). Only the owner takes
 free control implicitly, by sending a message or changing a model, mode or
-effort option. What waits for control runs in the order it was asked, so an
+effort option. What waits for control runs in the order it was asked, each after the one before settles, so an
 option chosen before a send reaches the agent first. An option change that does not
 get control within 10 seconds says so at the composer. Details lists the people. A hidden tab bar removes
 `--phone-tabs-height`, so toasts fall back to the bottom safe area.

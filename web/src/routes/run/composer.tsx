@@ -504,7 +504,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const setOption = (option: ConfigOption, value: string) => new Promise<void>((resolve) => {
     control.withControl(() => {
       const lease = sessionLease(useStore, run.id)
-      void attempt(() => lease ? api.runACPSetOption(run.id, option.id, value, lease) : Promise.reject(new Error(optionUnsent))).then(resolve)
+      return attempt(() => lease ? api.runACPSetOption(run.id, option.id, value, lease) : Promise.reject(new Error(optionUnsent))).then(resolve)
     }, () => void attempt(() => Promise.reject(new Error(optionUnsent))).then(resolve))
   })
 

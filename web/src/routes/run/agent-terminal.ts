@@ -183,15 +183,15 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
   const holderConnected = useStore((s) => s.roomStatus[run.id]?.controller?.connected !== false)
   const free = run.member_id === self.id && holder === undefined
   const implicit = !agent.localControl && free && agent.steerable && !agent.controlUnavailable
-  // In order, so an option chosen before a send reaches the agent first.
-  const queued = useRef<{ act: () => void; lost?: () => void }[]>([])
+  // In order, each awaited: an option change marks the draft busy, so a send queued behind it would otherwise be skipped.
+  const queued = useRef<{ act: () => unknown; lost?: () => void }[]>([])
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     if (!agent.localControl || queued.current.length === 0) return
     const acts = queued.current
     queued.current = []
     clearTimeout(timer.current)
-    for (const { act } of acts) act()
+    void acts.reduce<Promise<unknown>>((done, { act }) => done.then(act, act), Promise.resolve())
   }, [agent.localControl])
   const drop = () => {
     const dropped = queued.current
@@ -202,8 +202,8 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
     clearTimeout(timer.current)
     drop()
   }, [])
-  /** Runs `act` once this tab holds control, taking free control first; `lost` hears that it never will. */
-  const withControl = (act: () => void, lost?: () => void) => {
+  /** Runs `act` once this tab holds control, taking free control first; `lost` hears that it never will. A queued act that returns a promise holds the next until it settles. */
+  const withControl = (act: () => unknown, lost?: () => void) => {
     if (agent.localControl) return act()
     if (!implicit) return lost?.()
     queued.current.push({ act, lost })
