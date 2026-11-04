@@ -23,7 +23,7 @@ test('auto-approval is turned on only after the warning and is stored on the ser
   await expect(scope).toContainText('Launching sessions, messaging and stopping your own sessions, saving your environment')
   await expect(scope).toContainText('Messaging or stopping another member’s session.')
   await expect(scope).toContainText('The assistant’s own shell and file tools')
-  expect(await settings({ suggestion: 'later' })).toEqual({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, preferences_enabled: true, temporary: false })
+  expect(await settings({ suggestion: 'later' })).toEqual({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, preferences_enabled: true, temporary: false, approval_chosen: true })
 
   await toggle.click()
   const dialog = page.getByRole('alertdialog', { name: 'Let the assistant act without asking?' })

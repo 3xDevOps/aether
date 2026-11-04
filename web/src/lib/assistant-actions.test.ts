@@ -1,5 +1,6 @@
 import { actionSummary, aetherTool, assistantView, launchLine, readSummary, type AssistantAction } from '@/lib/assistant-actions'
 import type { AssistantActionRecord } from '@/lib/assistant-types'
+import { stateLine } from '@/components/assistant/action-card'
 import type { SessionRow } from '@/store/session-rows'
 import { stepsBlock, type WorkItem } from '@/store/session-steps'
 
@@ -50,6 +51,16 @@ describe('assistantView', () => {
       ['done', 'auto-approved', undefined],
     ])
     expect(view.rows.map((row) => row.id)).toEqual(['ev:8'])
+  })
+
+  it('keeps the approval rule that passed a call once the call is done', () => {
+    const message = { id: '1:t1', name: 'mcp__aether__aether_message_session', status: 'done' as const, input: { run_id: 'r2' } }
+    const notice = (seq: number, action: AssistantActionRecord): SessionRow => ({ kind: 'event', id: `ev:${seq}`, at, text: action.summary })
+    const record = (over: Partial<AssistantActionRecord>): AssistantActionRecord => ({ id: 'a1', method: 'run.inject', summary: 'Message', target: { run_id: 'r2' }, outcome: 'auto_approved', approval: 'rule', rule_id: 'rule-7k2m', created_at: at, ...over })
+    const records = new Map([['ev:9', record({})], ['ev:10', record({ outcome: 'succeeded' })]])
+    const view = assistantView([block(message), ...[...records].map(([id, r]) => notice(Number(id.slice(3)), r))], [], { records, calls: new Map() })
+    expect(view.actions.map((a) => [a.state, a.approval])).toEqual([['done', 'rule rule-7k2m']])
+    expect(stateLine(view.actions[0]!, false)).toBe('Done · approved by your rule rule-7k2m')
   })
 
   it('keeps a block that holds no Aether call as it was, and drops one that held only calls', () => {

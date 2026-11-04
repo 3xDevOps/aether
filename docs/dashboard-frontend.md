@@ -652,13 +652,24 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   **N more**), or for `run.launch` a **What starts**
   list (`components/assistant/launch-summary.tsx`; the title then stops
   before the quoted task) of kind, workspace,
-  agent with model and mode, account (`Yours` or `<name>'s, shared with
-  you`), fallback, task, and how the member hears back, a
+  agent with model and mode, effort when set, permission tier (`default`
+  when unset), account (`Yours` or `<name>'s, shared with you`), fallback, task, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
-  `confirmations` frame stops listing it. While `auto_approve` is off a card
-  links **Skip these cards…** to Settings > Assistant; a card with
+  `confirmations` frame stops listing it. A card's footer is not sticky: the dock (65dvh with an empty
+  conversation, whose suggestion chips it hides, else 40dvh, 50dvh on tall
+  screens) scrolls the whole card, so its actions come after every row they
+  approve, and rows have no scroll of their own. A card with `rule` adds,
+  under `Or save a rule:`, a secondary button labeled with `rule.wording`
+  (`assistant.confirm` with `always: true`), marked with an accent left rule
+  and `You approved this kind three times in a row.` when `rule.suggested`,
+  and, while `auto_approve` is off,
+  **Approve everything from now on**: it approves the card, then sets the
+  store's `assistantConfirmAutoApprove`, which opens the panel's **Let the
+  assistant act without asking?** confirm (`AutoApproveConfirm` in
+  `components/assistant/approval-choice.tsx`). While `auto_approve` is off a
+  card without `rule` links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
@@ -679,7 +690,7 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `Withdrawn: the turn ended before you answered`, `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
   not, or `Not confirmed: check status before retrying` for an
-  `aether_pr_create` whose result says `write: "pending"`) with `approved by you` or `auto-approved`, and its time. A call
+  `aether_pr_create` whose result says `write: "pending"`) with `approved by you`, `auto-approved` or `approved by your rule <id>` (a record with `approval: "rule"` and its `rule_id`), and its time. A call
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
@@ -732,6 +743,17 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   actions**, which loads them as **Show earlier messages** does. Focus starts
   on the newest entry. Up, Down, Home and End move, and Enter opens the target
   and closes the popover.
+- **Setup question** (`ApprovalChoice` in
+  `components/assistant/approval-choice.tsx`): when the status has
+  `approval_chosen: false` and the state is not `failed` (a failed status
+  carries no stored settings; absent never asks), a notice above the composer
+  asks **How should your assistant act?** **Ask before acting** and **Act
+  without asking** call `assistant.settings` with `auto_approve` false or
+  true; the second shows the auto-approval warning under its button, so it
+  opens no dialog. It scrolls past 40% of the viewport height, and the
+  auto-approval suggestion waits until it is answered. The answer's settings
+  replace the status, which drops the notice, unless another member signed in
+  meanwhile; a refusal shows under the buttons.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a
@@ -6306,7 +6328,15 @@ Categories:
   without asking?** with the warning that the assistant will launch sessions,
   message and stop the member's sessions and save the environment on its own;
   turning it off does not ask. A refusal stays in the dialog or under the
-  row. **Change in Settings** in the assistant panel opens
+  row. **Approval rules** (`routes/settings/approval-rules.tsx`) lists
+  `assistant.rules`: each rule's wording, `From:` the card it came from,
+  when it was created and last used and how many times, `Inactive: <reason>`
+  when set, and **Revoke** (`assistant.rules.revoke`), which drops the row
+  once the server answers and reads the list again; with none it says **No rules yet**, and a failed
+  read shows `Couldn’t read your rules` with its error and **Try again**. A
+  muted line under the heading says rules work with auto-approval off; an
+  inactive rule's wording is muted with an `Inactive` badge. It reads again when a card saves a
+  rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
 - **Launch**, where the server offers `launch.defaults.get`: **Saved

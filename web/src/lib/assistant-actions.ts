@@ -7,7 +7,8 @@ import type { Route } from '@/store/ui'
 
 export type ActionState = 'approval' | 'running' | 'done' | 'unconfirmed' | 'failed' | 'declined' | 'expired' | 'withdrawn' | 'unfinished'
 
-export type Approval = 'approved' | 'auto-approved'
+/** How a call was allowed: by the member's click, by auto-approval, or by the approval rule named after `rule `. */
+export type Approval = 'approved' | 'auto-approved' | `rule ${string}`
 
 export interface ActionTarget {
   kind: 'run' | 'pr' | 'workspace' | 'environment' | 'watch' | 'preference' | 'link'
@@ -235,6 +236,7 @@ function callValues(call: SessionToolCall | undefined, entry: WorkItem): { input
 }
 
 function recordApproval(saved: AssistantActionRecord): Approval | undefined {
+  if (saved.approval === 'rule') return `rule ${saved.rule_id ?? ''}`
   if (saved.approval === 'card' || saved.outcome === 'approved') return 'approved'
   if (saved.approval === 'auto' || saved.outcome === 'auto_approved') return 'auto-approved'
   return undefined

@@ -212,7 +212,7 @@ import type {
   WorkspaceImportParams,
   WorkspaceImportResult,
 } from '@/lib/run-repository-types'
-import type { AssistantAccount, AssistantSettings, AssistantSettingsParams, AssistantStartParams, AssistantStatus, ViewContext } from '@/lib/assistant-types'
+import type { AssistantAccount, AssistantRule, AssistantSettings, AssistantSettingsParams, AssistantStartParams, AssistantStatus, ViewContext } from '@/lib/assistant-types'
 import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-types'
 
 const API_BASE = '/api/v1'
@@ -669,6 +669,10 @@ export const api = {
     call<unknown>('assistant.answer', { request_id: requestID, option_id: optionID, ...(values ? { values } : {}) }),
   assistantConfirm: (confirmationID: string, approve: boolean) =>
     call<unknown>('assistant.confirm', { confirmation_id: confirmationID, approve }),
+  assistantApproveAlways: (confirmationID: string) =>
+    call<{ rule?: AssistantRule }>('assistant.confirm', { confirmation_id: confirmationID, approve: true, always: true }),
+  assistantRules: () => call<{ rules: AssistantRule[] }>('assistant.rules', {}).then((r) => r.rules),
+  assistantRuleRevoke: (id: string) => call<unknown>('assistant.rules.revoke', { id }),
   assistantItem: (seq: number) => call<{ item: SessionItem }>('assistant.item', { seq }).then((r) => r.item),
   assistantReset: () => call<AssistantStatus>('assistant.reset', {}),
   assistantSettings: (params: AssistantSettingsParams = {}) => call<AssistantSettings>('assistant.settings', params),
