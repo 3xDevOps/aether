@@ -76,7 +76,7 @@ export function ClearDoneConfirm({
             <SectionLabel as="h3" className="flex items-center gap-1.5">Archiving <CountBadge>{n}</CountBadge></SectionLabel>
             <InsetList tabIndex={0} aria-label="Sessions to archive" className="max-h-48 overflow-y-auto">
               {names.map((run) => (
-                <li key={run.id} className="truncate px-3 py-1.5 text-ui">{runLabel(run)}</li>
+                <li key={run.id} className="shrink-0 truncate px-3 py-1.5 text-ui">{runLabel(run)}</li>
               ))}
             </InsetList>
             {n > shownNames && (
@@ -94,7 +94,7 @@ export function ClearDoneConfirm({
             </SectionLabel>
             <InsetList tabIndex={0} aria-label="Sessions kept" className="max-h-56 overflow-y-auto">
               {kept.map((run) => (
-                <li key={run.id} className="flex min-w-0 flex-col gap-1 px-3 py-2">
+                <li key={run.id} className="flex min-w-0 shrink-0 flex-col gap-1 px-3 py-2">
                   <span className="truncate text-ui text-muted">{runLabel(run)}</span>
                   <CloseWarningLines check={held!.get(run.id)!} run={run} onLeave={onCancel} />
                 </li>
