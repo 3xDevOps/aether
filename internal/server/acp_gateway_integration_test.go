@@ -230,9 +230,23 @@ func TestIntegrationEnhancedRunGateway(t *testing.T) {
 	}
 	next("the follow-up answer on the same stream", func() bool { return strings.Count(said.String(), "pong") == 2 })
 	waitTurns(ctx, t, env.srv, domain.RunID(runID), 3)
-	continued, err := env.srv.Store().GetRun(ctx, domain.RunID(runID))
-	if err != nil {
-		t.Fatal(err)
+	// The turn log can count the follow-up's end before the run row records
+	// it; until then the row still shows the reported failure. The follow-up
+	// ends without a report, and that end replaces the failure.
+	var continued *domain.Run
+	for {
+		var err error
+		if continued, err = env.srv.Store().GetRun(ctx, domain.RunID(runID)); err != nil {
+			t.Fatal(err)
+		}
+		if continued.Reason == "turn ended without a report" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("the follow-up's end never replaced the reported failure: %+v", continued)
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	if original.HarnessSessionID == "" || continued.HarnessSessionID != original.HarnessSessionID ||
 		continued.OutcomeUnseen || continued.FinishedAt != nil {
