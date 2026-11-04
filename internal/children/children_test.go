@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +26,10 @@ import (
 )
 
 type fakeRuns struct {
-	db       *store.DB
+	db *store.DB
+	// inflight counts launches still running: repairStarted can mark a
+	// child started once its row exists, before its launch has finished.
+	inflight atomic.Int32
 	mu       sync.Mutex
 	launched []domain.LaunchOptions
 	accounts []domain.MemberID
@@ -35,6 +39,8 @@ type fakeRuns struct {
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	f.inflight.Add(1)
+	defer f.inflight.Add(-1)
 	r := &domain.Run{ID: opts.ReservedRunID, WorkspaceID: ws, MemberID: member, AccountMemberID: account, Task: task, Harness: harness,
 		Mode: mode, Model: opts.Model, Status: domain.RunRunning, BaseCommit: opts.FromCommit}
 	if err := f.db.CreateRunWithID(ctx, r); err != nil {
@@ -287,7 +293,7 @@ func (h *harness) settle() {
 		if err != nil {
 			h.t.Fatal(err)
 		}
-		if len(launching) == 0 {
+		if len(launching) == 0 && h.runs.inflight.Load() == 0 {
 			h.svc.reconcile(h.ctx)
 			return
 		}
