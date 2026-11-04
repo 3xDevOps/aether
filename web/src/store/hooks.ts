@@ -55,13 +55,6 @@ export function useSidebarGroups(): SidebarGroup[] {
   return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }, devices), [workspace, mineOnly, ctx, devices])
 }
 
-export function useNeedsYouCount(workspace?: string): number {
-  const counts = useNeedsYouByWorkspace()
-  return workspace === undefined
-    ? Object.values(counts).reduce((total, n) => total + n, 0)
-    : counts[workspace] ?? 0
-}
-
 export function useNeedsYouByWorkspace(): Record<string, number> {
   const ctx = useStateContext()
   return useMemo(() => needsYouByWorkspace(ctx), [ctx])

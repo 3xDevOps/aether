@@ -1,26 +1,32 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { create } from 'zustand'
-import { api } from '@/lib/api'
+import { api, ApiError, codeMethodNotFound } from '@/lib/api'
 import { message } from '@/lib/format'
 import { needsYouConditions } from '@/lib/needs-you'
 import { groupLabel } from '@/lib/status'
 import type { AttentionItem } from '@/lib/types'
 import { sameIdentity, useStore } from '@/store'
+import { queuedSteers } from '@/store/collaboration'
 import { useCapability, useDeviceNeeds } from '@/store/hooks'
 import { byChange, type RunTree, type SidebarGroup } from '@/store/selectors'
 
 interface Attention {
   items: AttentionItem[] | null
   error?: string
+  /** The gateway answered method-not-found: a gateway that advertises every method may still lack this one. */
+  unsupported?: boolean
 }
 
 export const useAttention = create<Attention>(() => ({ items: null }))
 
 useStore.subscribe((state, previous) => {
-  if (state.identityKey !== previous.identityKey) useAttention.setState({ items: null, error: undefined })
+  if (state.identityKey !== previous.identityKey) useAttention.setState({ items: null, error: undefined, unsupported: false })
 })
 
-const rank = (item: AttentionItem) => needsYouConditions.findIndex((condition) => condition.id === item.kind)
+const rank = (item: AttentionItem) => {
+  const index = needsYouConditions.findIndex((condition) => condition.id === item.kind)
+  return index === -1 ? needsYouConditions.length : index
+}
 
 /** What asks something of the viewer, requests first and failures last; the server lists oldest first within a kind. */
 export function asking(items: AttentionItem[]): AttentionItem[] {
@@ -68,7 +74,11 @@ export function byAttention(groups: SidebarGroup[], items: AttentionItem[] | nul
   const order = new Map(asks.map((item, index) => [item.run_id, index]))
   const done = new Set(finished(items).map((item) => item.run_id))
   const at = (tree: RunTree) => Math.min(...[tree, ...tree.children].map((row) => order.get(row.run.id) ?? Number.MAX_SAFE_INTEGER))
-  const moved = needs.runs.filter((tree) => done.has(tree.run.id) && !order.has(tree.run.id) && tree.children.every((row) => !order.has(row.run.id)))
+  // A family moves when nothing in it asks and some member, the root or a subsession, is finished.
+  const moved = needs.runs.filter((tree) => {
+    const rows = [tree, ...tree.children]
+    return rows.every((row) => !order.has(row.run.id)) && rows.some((row) => done.has(row.run.id))
+  })
   const kept = needs.runs.filter((tree) => !moved.includes(tree)).sort((a, b) => at(a) - at(b))
   const review = groups.find((group) => group.key === 'review')
   const reviewRuns = [...moved, ...(review?.runs ?? [])].sort(byChange)
@@ -80,8 +90,10 @@ export function byAttention(groups: SidebarGroup[], items: AttentionItem[] | nul
 }
 
 let fetches = 0
+let inFlight: Promise<void> | null = null
+let again = false
 
-export async function refreshAttention() {
+async function read() {
   const attempt = ++fetches
   const same = sameIdentity()
   const current = () => attempt === fetches && same()
@@ -89,43 +101,61 @@ export async function refreshAttention() {
     const { items } = await api.attentionList()
     if (current()) useAttention.setState({ items, error: undefined })
   } catch (err) {
-    if (current()) useAttention.setState({ error: message(err) })
+    if (!current()) return
+    if (err instanceof ApiError && err.code === codeMethodNotFound) useAttention.setState({ unsupported: true })
+    else useAttention.setState({ error: message(err) })
   }
 }
 
+/** One read at a time; a call during a read asks for one more after it. */
+export function refreshAttention(): Promise<void> {
+  if (inFlight) {
+    again = true
+    return inFlight
+  }
+  inFlight = read().finally(() => {
+    inFlight = null
+    if (again) {
+      again = false
+      void refreshAttention()
+    }
+  })
+  return inFlight
+}
+
 // Every field the server's Needs you rows read: status_seq moves with status, state and reason;
-// requests, outcome flags, room messages, review and control move apart from it. A reconnect
-// retries a failed read.
-const changeKey = (s: ReturnType<typeof useStore.getState>) => JSON.stringify([
-  s.identityKey,
-  s.connection,
-  ...Object.values(s.runs).map((run) => [
-    run.id,
-    run.status_seq,
-    run.state,
-    run.review,
-    run.outcome_unseen,
-    run.unanswered_questions,
-    run.controller_member_id,
-    run.archived_at,
-    run.pending_inputs?.map((input) => input.id),
-    s.roomMessages[run.id]?.length,
-    s.roomStatus[run.id]?.queued_steers,
-  ]),
-])
+// requests, outcome flags, pause, room messages and their decisions, review and control move apart
+// from it. A reconnect retries a failed read.
+const changeKey = (s: ReturnType<typeof useStore.getState>) => {
+  let key = `${s.identityKey}|${s.connection}`
+  for (const run of Object.values(s.runs)) {
+    const messages = s.roomMessages[run.id]
+    key += `|${run.id}:${run.status_seq}:${run.state}:${run.review}:${run.outcome_unseen}:${run.unanswered_questions}:${run.controller_member_id}:${run.archived_at}:${s.pausedRuns[run.id] ?? run.paused}`
+    key += `:${run.pending_inputs?.map((input) => input.id).join(',')}:${messages && queuedSteers(messages).length}:${messages?.length}:${s.roomStatus[run.id]?.queued_steers}`
+  }
+  return key
+}
 
 /** A gateway older than attention.list has no Needs you page; the phone lands on the board. */
 export function useAttentionSupported(): boolean {
-  return useCapability().hasMethod('attention.list')
+  const unsupported = useAttention((s) => s.unsupported === true)
+  return useCapability().hasMethod('attention.list') && !unsupported
 }
 
 /** Keeps the list in step with the event feed. */
 export function useAttentionFeed() {
   const supported = useAttentionSupported()
   const key = useStore(changeKey)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A throttle, not a debounce: a busy event feed still reads at least every 250ms.
   useEffect(() => {
-    if (!supported) return
-    const timer = setTimeout(() => void refreshAttention(), 250)
-    return () => clearTimeout(timer)
+    if (!supported || timer.current) return
+    timer.current = setTimeout(() => {
+      timer.current = null
+      void refreshAttention()
+    }, 250)
   }, [key, supported])
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current)
+  }, [])
 }

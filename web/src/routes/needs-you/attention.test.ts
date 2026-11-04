@@ -8,7 +8,7 @@ const item = (run_id: string, kind: AttentionItem['kind']): AttentionItem =>
   ({ kind, run_id, workspace_id: 'ws', title: run_id, harness: 'claude', reason: '' })
 
 describe('byAttention', () => {
-  it('counts and orders Needs you as the server does, and moves a finished session to review', () => {
+  it('counts and orders Needs you by the attention list, and moves a finished session to review', () => {
     const groups: SidebarGroup[] = [
       { key: 'needs-you', label: 'Needs you', runs: [tree('failed'), tree('done'), tree('asks')], count: 3 },
       { key: 'working', label: 'Working', runs: [tree('busy')], count: 1 },
@@ -19,6 +19,12 @@ describe('byAttention', () => {
       ['review', 1, ['done']],
       ['working', 1, ['busy']],
     ])
+  })
+
+  it('moves a family whose only finished member is a subsession', () => {
+    const family = { run: { id: 'parent' }, children: [{ run: { id: 'child' } }] } as unknown as RunTree
+    const groups: SidebarGroup[] = [{ key: 'needs-you', label: 'Needs you', runs: [family], count: 1 }]
+    expect(byAttention(groups, [item('child', 'ready')], 0).map((group) => group.key)).toEqual(['review'])
   })
 
   it('keeps Needs you for a waiting device when no session asks', () => {

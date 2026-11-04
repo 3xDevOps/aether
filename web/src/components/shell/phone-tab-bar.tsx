@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
+import { assistantLabel, assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { Bell, Ellipsis, List, Plus, Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { canLaunch, launchBlocked } from '@/lib/commands'
@@ -25,7 +25,8 @@ function Tab({ label, icon, active, badge, dot, className, ...props }: Omit<Reac
     <li className="flex min-w-0 flex-1">
       <Button
         variant="ghost"
-        aria-current={active ? 'page' : undefined}
+        // A tab that opens a sheet says so with aria-expanded; only a page tab is the current page.
+        aria-current={active && props['aria-expanded'] === undefined ? 'page' : undefined}
         className={cn(
           focusRingInset,
           'relative h-auto min-h-14 min-w-0 flex-1 flex-col gap-0.5 px-0 text-ui-xs font-normal coarse:h-auto coarse:px-0 [&_svg:not([class*=size-])]:size-5',
@@ -51,22 +52,42 @@ function Tab({ label, icon, active, badge, dot, className, ...props }: Omit<Reac
 }
 
 // A terminal's own input is left out: hiding the bar would resize the PTY on every focus change.
-const typingTarget = 'input:not([type=checkbox], [type=radio], [type=button], [type=submit]), textarea:not(.xterm-helper-textarea), [contenteditable=true]'
+const typingTarget = 'input:is(:not([type]), [type=text], [type=search], [type=email], [type=url], [type=tel], [type=password], [type=number]), textarea:not(.xterm-helper-textarea), [contenteditable=true]'
 
-/** A text field has focus, so the soft keyboard is likely up and every pixel above it counts. */
-function useTyping(): boolean {
-  const [typing, setTyping] = useState(false)
+// Android's Back and iOS's Done close the keyboard without a blur, so focus alone does not say it is up.
+const keyboardHeight = 150
+
+/** A text field has focus and the visible viewport is a keyboard shorter than the tallest it has been at this width. */
+function useKeyboardUp(): boolean {
+  const [up, setUp] = useState(false)
   useEffect(() => {
+    const viewport = window.visualViewport
+    let full = { width: window.innerWidth, height: window.innerHeight }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const update = () => {
+      if (window.innerWidth !== full.width) full = { width: window.innerWidth, height: window.innerHeight }
+      full.height = Math.max(full.height, window.innerHeight)
+      const visible = viewport?.height ?? window.innerHeight
+      setUp(full.height - visible > keyboardHeight && document.activeElement?.matches(typingTarget) === true)
+    }
     // focusout lands on the body before the next focusin, so the check waits for both.
-    const update = () => setTimeout(() => setTyping(document.activeElement?.matches(typingTarget) === true))
-    document.addEventListener('focusin', update)
-    document.addEventListener('focusout', update)
+    const later = () => {
+      clearTimeout(timer)
+      timer = setTimeout(update)
+    }
+    document.addEventListener('focusin', later)
+    document.addEventListener('focusout', later)
+    viewport?.addEventListener('resize', update)
+    window.addEventListener('resize', update)
     return () => {
-      document.removeEventListener('focusin', update)
-      document.removeEventListener('focusout', update)
+      clearTimeout(timer)
+      document.removeEventListener('focusin', later)
+      document.removeEventListener('focusout', later)
+      viewport?.removeEventListener('resize', update)
+      window.removeEventListener('resize', update)
     }
   }, [])
-  return typing
+  return up
 }
 
 /** The phone's navigation, below 768px. Needs you is home; More holds what the desktop sidebar and header carry. */
@@ -80,7 +101,8 @@ export function PhoneTabBar() {
   const filledLaunch = useStore((s) => s.headerPrimaries === 0)
   const assistantOpen = useStore((s) => s.assistantOpen)
   const setAssistantOpen = useStore((s) => s.setAssistantOpen)
-  const assistantNotices = useStore((s) => assistantWaiting(s) + s.assistantNotices)
+  const assistantWaitingCount = useStore(assistantWaiting)
+  const assistantUpdates = useStore((s) => s.assistantNotices)
   const moreOpen = useStore((s) => s.sidebarDrawerOpen)
   const setMoreOpen = useStore((s) => s.setSidebarDrawerOpen)
   const asking = useAskingCount()
@@ -93,7 +115,7 @@ export function PhoneTabBar() {
   }
   const page = !assistantOpen && !moreOpen
   // A mouse and a hardware keyboard leave the screen alone, so only touch hides the bar.
-  const hidden = useTyping() && coarse
+  const hidden = useKeyboardUp() && coarse
   const bar = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     const element = bar.current
@@ -136,7 +158,8 @@ export function PhoneTabBar() {
             id={assistantTriggerID}
             label="Assistant"
             icon={<Sparkles />}
-            dot={assistantNotices > 0}
+            aria-label={assistantLabel(assistantWaitingCount, assistantUpdates)}
+            dot={assistantWaitingCount + assistantUpdates > 0}
             active={assistantOpen}
             aria-expanded={assistantOpen}
             aria-controls="assistant"

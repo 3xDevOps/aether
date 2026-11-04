@@ -518,18 +518,18 @@ are sentence-case 12px muted disclosure buttons with their count. The footer
 holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.
 
-Under 768px the header is one 48px row (`bg-chrome`): the view title in
-13/20 medium and **Search**. A `bg-chrome` tab bar along the bottom holds
-Needs you, Sessions, New, Assistant and More: 56px tall, a 20px icon in the
-same 28 × 44px box over a 12px label, muted at rest and accent when current,
-with a 2px accent bar along the top edge. Counts over 99 read 99+. The Needs you count is an
-amber chip with `text-canvas` figures, the one place amber fills a count,
+Under 768px the header is one 48px row (`bg-chrome`): the view title in 13/20
+medium and **Search**. A `bg-chrome` tab bar along the bottom holds Needs you,
+Sessions, New, Assistant and More: 56px tall, a 20px icon in the same 28 ×
+44px box over a 12px label, muted at rest and accent when current, with a 2px
+accent bar along the top edge. Counts over 99 read 99+. The Needs you count is
+an amber chip with `text-canvas` figures, the one place amber fills a count,
 because it is the needs-you signal. **New** is an accent pill unless the page
 has its own primary action, so the screen keeps one filled button. More opens
-as a bottom sheet. Content views draw
-`PaneHeader`: the title in `text-title`, one optional muted line under it,
-and actions on the right. A connection problem is a failed-tone `StateLine`,
-in the header on desktop and under the top bar on a phone.
+as a bottom sheet. Content views draw `PaneHeader`: the title in `text-title`,
+one optional muted line under it, and actions on the right. A connection
+problem is a failed-tone `StateLine`, in the header on desktop and under the
+top bar on a phone.
 
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with

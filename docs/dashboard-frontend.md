@@ -488,59 +488,70 @@ Below 768px (`mobileScreen` in `src/lib/breakpoints.ts`) the shell adds a
 bottom tab bar, `phone-tab-bar.tsx`, a `nav` named "Main navigation". Desktop
 is unchanged. The tabs are at least 44px square, and the bar pads itself by
 the bottom and side safe-area insets, so `main` does not pad the bottom on a
-phone. Its measured height sets `--phone-tabs-height`, which keeps toasts
-8px above it. On a touch screen, while a text field other than the terminal's
-has focus, the soft keyboard is likely up and the bar hides. With more than one
-workspace the header shows the active one's name, muted, after the title.
+phone. Its measured height sets `--phone-tabs-height`, which keeps toasts 8px
+above it. On a touch screen the bar hides while the soft keyboard is up: a
+text field other than the terminal's has focus and the visible viewport is
+more than 150px shorter than the tallest it has been at this width. Android's
+Back and iOS's Done close the keyboard without a blur, so focus alone would
+keep the bar hidden. With more than one workspace the header shows the active
+one's name, muted, after the title.
 
 | Tab | Opens |
 | --- | --- |
-| **Needs you** | the `needs-you` route, with the count of what asks you as a badge |
-| **Sessions** | the `sessions` route: the sidebar's session list, full width, regrouped by the same `attention.list` (`byAttention`): Needs you has the badge's count and order, and a session the server lists as finished moves to the review group, newest change first. A session only the dashboard's copy of the rule puts in Needs you stays listed, last, and is not counted. Current on a session, the board and All workspaces too |
-| **New** | the launch dialog; named **New session**, and hidden for a member who cannot launch |
-| **Assistant** | the assistant sheet, with the dot the desktop button shows |
-| **More** | a bottom sheet, a `dialog` named "More"; the tab is named **More pages**, apart from a session's **More** actions |
+| **Needs you** | the `needs-you` route; its badge counts what asks you |
+| **Sessions** | the `sessions` route: the sidebar's session list, full width; current on a session, the board and All workspaces too |
+| **New** | the launch dialog; named **New session**, hidden if you cannot launch |
+| **Assistant** | the assistant sheet, with the desktop button's dot and name |
+| **More** | a bottom sheet, a `dialog` named "More"; the tab is **More pages** |
+
+On a phone the Sessions list is regrouped by `attention.list` (`byAttention`
+in `src/routes/needs-you/attention.ts`): its Needs you group has the badge's
+count and order, and a session the server lists as finished moves to the
+review group, newest change first. A session only the dashboard's copy of the
+rule puts in Needs you stays listed, last, and is not counted.
 
 A phone that opens the dashboard with no `run` or `page` in the address lands
-on Needs you (`initialRoute` in `src/lib/url-state.ts`), or on onboarding on
-a first visit, as the board does on desktop. Every other link still opens its
+on Needs you (`initialRoute` in `src/lib/url-state.ts`), or on onboarding on a
+first visit, as the board does on desktop. Every other link still opens its
 own page. The board is in More, and on a phone its address carries
-`page=board`, so a reload stays on it. A gateway without `attention.list` has
-no Needs you tab, and its landing page redirects to the board. The Sessions
-route exists only on a phone; a wider window redirects it to the board, whose
+`page=board`, so a reload stays on it. A gateway without `attention.list`,
+whether it does not list the method or answers `-32601` for it, has no Needs
+you tab, and its landing page redirects to the board. The Sessions route
+exists only on a phone; a wider window redirects it to the board, whose
 sidebar has the same list.
 
 A phone screen has one filled button. A page whose own action is filled calls
 `useHeaderPrimary(shown)` (`src/store/hooks.ts`) while that action shows; the
 `ui` slice counts the holders in `headerPrimaries`, and while the count is
 above zero the **New** tab drops its filled pill. The holders are a session
-header with a primary action, Environment's **Open** or **Save
-environment**, onboarding, Files with a file open and the Changes view's
-**Publish…**.
+header with a primary action, Environment's **Open** or **Save environment**,
+onboarding, Files with a file open and the Changes view's **Publish…**.
 
-**More** holds the workspace switcher, whose amber counts come from `attention.list` too, every page the desktop header and
-sidebar link to (Board, Activity, Insights, Memory, Files, Environment,
-Agents, Templates, Members, Settings, Devices, Manage workspaces) in a list that scrolls,
-the update notice and the profile footer. A tap outside, Escape or any
-navigation closes it, and navigation moves focus to the new view's heading.
-`Mod+B` opens and closes it; every other shell key stands down while it is
-open.
+**More** holds the workspace switcher, whose amber counts come from
+`attention.list` too, every page the desktop header and sidebar link to
+(Board, Activity, Insights, Memory, Files, Environment, Agents, Templates,
+Members, Settings, Devices, Manage workspaces) in a list that scrolls, the
+update notice and the profile footer. A tap outside, Escape or any navigation
+closes it, and navigation moves focus to the new view's heading. `Mod+B` opens
+and closes it; every other shell key stands down while it is open.
 
 **Needs you** (`src/routes/needs-you/`) reads the server's `attention.list`
-([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)),
-not the dashboard's copy of the rule. It reads it again 250ms after any
-session's status, state, review, outcome flag, requests, room messages or
-controller change, after a reconnect, and each time the page opens. A
-different member or server clears the list. The badge counts the same list's
+([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), not
+the dashboard's copy of the rule. It reads it again within 250ms of any change
+to a session's status, state, review, outcome flag, pause, requests, room
+messages and their decisions, or controller, after a reconnect, and each time
+the page opens. One read runs at a time; a change during it asks for one more.
+A different member or server clears the list. The badge counts the same list's
 requests, plus the devices waiting for approval and the merge proposals to the
 viewer, as the sidebar's Needs you does; their board cards (`DeviceCard`,
-`MergeProposalCard`) sit above the session cards. Cards are ranked by kind in the order
-the server checks them (`needsYouConditions` in `src/lib/needs-you.ts`):
-permission, question, queued message, room question, disconnected, blocked,
-needs input, failed. Within a kind the server's order holds, oldest first.
-Each card is a `RequestCard`. Its title, at most two lines, opens the session's
-view the condition names; the request's detail is clamped to five lines with
-**Show more**. Then comes its inline answer:
+`MergeProposalCard`) sit above the session cards. Cards are ranked by kind in
+the order the server checks them (`needsYouConditions` in
+`src/lib/needs-you.ts`): permission, question, queued message, room question,
+disconnected, blocked, needs input, failed, and a kind this dashboard does not
+know last. Within a kind the server's order holds, oldest first. Each card is
+a `RequestCard`. Its title, at most two lines, opens the session's view the
+condition names; the request's detail is clamped to five lines with **Show
+more**. Then comes its inline answer:
 
 - A permission with `allow_once` and `reject_once` options shows **Deny** and
   **Approve** as two halves, the session's own `DecisionButtons`. Each sends
@@ -548,25 +559,29 @@ view the condition names; the request's detail is clamped to five lines with
   lands after the request changed decides nothing else. **Always** is not
   offered. A Standard session's permission has no options and opens the
   terminal instead.
-- An Enhanced session's question shows its form and its options, answered
-  the same way. A link question opens the session.
+- An Enhanced session's question shows its form and its options, answered the
+  same way. A link question opens the session.
 - A turn that ended asking (`needs input`, the condition's **Reply**) shows
   **Reply…**, which opens a focused text field; **Send** or `Mod+Enter` sends
   `run.inject`. The field scrolls into view above the keyboard, and the list
-  pads by `--keyboard-inset` for iOS, whose keyboard leaves the layout tall. A room question replies with
-  `run.room.post`, correlated to the question. A retry of the same text
-  reuses its idempotency key; a reply not sent or uncertain keeps its draft.
+  pads by `--keyboard-inset` for iOS, whose keyboard leaves the layout tall. A
+  room question replies with `run.room.post`, correlated to the question. A
+  retry of the same text reuses its idempotency key; a reply not sent or
+  uncertain keeps its draft.
 - Everything else has one button that opens the session.
 
 Setup notices the board shows, such as letting agents use Docker, sit above
 the cards. While the first read is in flight two skeleton cards show; a failed
 read is a failed-tone callout with the server's error and **Retry**, and the
-list and badge keep their last values.
-`already_answered` shows "Already answered: an earlier answer won". A refusal
-shows the server's error on the card, such as `-32003` while another member
-controls the session. Below the cards, **Finished: review the result** lists
-the `ready` items as plain rows. They never count toward the badge and have no
-Mark complete; opening one opens the session.
+list and badge keep their last values. `already_answered` shows "Already
+answered: an earlier answer won". Once the server takes an answer the card
+says **Answered** until the list drops the request, so a second tap is never
+sent. While another member controls the session, a permission or question card
+names them and offers only the session, because `run.input.respond` would
+refuse with `-32003`. Any other refusal shows the server's error on the card.
+Below the cards, **Finished: review the result** lists the `ready` items as
+plain rows. They never count toward the badge and have no Mark complete;
+opening one opens the session.
 
 ### Assistant panel
 
@@ -856,12 +871,14 @@ when a needs-you notification for the same session fired within five
 seconds. A phone gets the web push the server sends for the same notice.
 
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
-component mounted in one place at a time: the sidebar's **New session** row (a secondary
-icon button to its right, which keeps the workspace switcher's room), or the top bar's first row while the sidebar is hidden; under 768px the
-**Assistant** tab of the [phone tab bar](#phone-layout) replaces it; keeping it out of the top bar's row leaves that
-row to the header destinations), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
-**Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
-each onboarding step.
+component mounted in one place at a time: the sidebar's **New session** row (a
+secondary icon button to its right, which keeps the workspace switcher's
+room), or the top bar's first row while the sidebar is hidden; under 768px the
+**Assistant** tab of the [phone tab bar](#phone-layout) replaces it; keeping
+it out of the top bar's row leaves that row to the header destinations),
+`Mod+Shift+Space`, the palette's **Ask Aether**, a secondary **Ask Aether** in
+the board's empty states, and **Stuck? Ask Aether** under each onboarding
+step.
 
 ### Landmarks and headers
 
@@ -5781,24 +5798,23 @@ opens a dialog with two tabs:
   error and drops the preview, as does editing the code, so only a new
   **Preview** can propose.
 
-A proposal for the viewer to accept (`member.merge.pending` where the
-viewer minted the code) shows in Sign-ins, in the code tab, as a Needs you
-card and as a row in the sidebar's Needs you; **Review** and the row open
-Profile at Sign-ins. Profile is mounted by the app shell (`profileOpen` in
+A proposal for the viewer to accept (`member.merge.pending` where the viewer
+minted the code) shows in Sign-ins, in the code tab, as a Needs you card and
+as a row in the sidebar's Needs you; **Review** and the row open Profile at
+Sign-ins. Profile is mounted by the app shell (`profileOpen` in
 `store/ui.ts`), not the sidebar, so **Review** works with the sidebar
-collapsed or the phone's More sheet closed. It lists the proposer's sign-ins, the settings kept,
-what is discarded and the resulting role; **Accept and merge** (danger
-style) needs the same tick and sends `member.merge.accept` with the
-proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused
-accept clears the tick and re-reads the proposals, so a `refusal` the
-server now reports disables **Accept and merge**. A proposal the server
-could not plan shows only its `refusal` and **Cancel**, and the viewer's
-own open proposals show with **Cancel**. Every RPC error shows verbatim,
-as a toast when it arrives after its dialog or Profile closed, unless the
-signed-in member changed. After a merge
-the record shows in Sign-ins; **Merge history** lists `member.merge.list`
-with the discarded settings, custom agent definitions included, and the
-archive path.
+collapsed or the phone's More sheet closed. It lists the proposer's sign-ins,
+the settings kept, what is discarded and the resulting role; **Accept and
+merge** (danger style) needs the same tick and sends `member.merge.accept`
+with the proposal's digest, and **Cancel** sends `member.merge.cancel`. A
+refused accept clears the tick and re-reads the proposals, so a `refusal` the
+server now reports disables **Accept and merge**. A proposal the server could
+not plan shows only its `refusal` and **Cancel**, and the viewer's own open
+proposals show with **Cancel**. Every RPC error shows verbatim, as a toast
+when it arrives after its dialog or Profile closed, unless the signed-in
+member changed. After a merge the record shows in Sign-ins; **Merge history**
+lists `member.merge.list` with the discarded settings, custom agent
+definitions included, and the archive path.
 
 `member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
 `resolveMember` in `lib/member-name.ts` follow it, so an id history names
@@ -7358,25 +7374,26 @@ The touch shell is driven by the `mobile` project, which
 tab bar at 360px and 430px with no sideways scroll, Needs you as the landing
 page and its badge, and approves a permission and replies to a question from
 their cards; `shell-drawer.mobile.spec.ts` taps a session in the Sessions tab
-and finds it on screen with focus on its heading; `dialog-anchor.mobile.spec.ts` checks that a short
-dialog sits at the top rather than the middle, and that the launch form keeps
-its footer on screen on a viewport as short as a keyboard leaves;
-`toast-clearance.mobile.spec.ts` checks that a toast comes to rest 8px clear
-of the bottom edge; `home-screen.mobile.spec.ts` checks the manifest, icons
-and that the top bar clears a phone status bar and the tab bar shows; `run-views.mobile.spec.ts`
-protects a session from More and reads its changes; and `files-browser.mobile.spec.ts` opens a second file
-from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
-because its keyboard contract - `Mod+B` closing the drawer and the palette
-coming back once it is gone - needs a narrow window with a keyboard rather
-than a phone. `sign-ins-merge.spec.ts` gets a merge code
-as one member and previews it as another at phone width; both harness
-members have an SSH key, so it checks the server's refusal verbatim, and
-`src/routes/members/sign-ins.test.tsx` covers choosing, proposing and
-accepting. `board-card`, `run-switch`, `run-attach-retry`,
-`run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
-corresponding real UI transitions, gateway responses and terminal behavior.
-Run the full browser workflow with `make test-e2e`; its scenario inventory and
-setup details live in [testing.md](testing.md).
+and finds it on screen with focus on its heading;
+`dialog-anchor.mobile.spec.ts` checks that a short dialog sits at the top
+rather than the middle, and that the launch form keeps its footer on screen on
+a viewport as short as a keyboard leaves; `toast-clearance.mobile.spec.ts`
+checks that a toast comes to rest 8px clear of the bottom edge;
+`home-screen.mobile.spec.ts` checks the manifest, icons and that the top bar
+clears a phone status bar and the tab bar shows; `run-views.mobile.spec.ts`
+protects a session from More and reads its changes; and
+`files-browser.mobile.spec.ts` opens a second file from the tree sheet.
+`sidebar-drawer.spec.ts` stays on the desktop project because its keyboard
+contract - `Mod+B` closing the drawer and the palette coming back once it is
+gone - needs a narrow window with a keyboard rather than a phone.
+`sign-ins-merge.spec.ts` gets a merge code as one member and previews it as
+another at phone width; both harness members have an SSH key, so it checks the
+server's refusal verbatim, and `src/routes/members/sign-ins.test.tsx` covers
+choosing, proposing and accepting. `board-card`, `run-switch`,
+`run-attach-retry`, `run-provisioning`, `terminal-tools` and the onboarding
+scenarios cover the corresponding real UI transitions, gateway responses and
+terminal behavior. Run the full browser workflow with `make test-e2e`; its
+scenario inventory and setup details live in [testing.md](testing.md).
 
 `run-room.spec.ts` and `run-room.mobile.spec.ts` cover shared notes,
 moderated messages, explicit control transfer, the phone Details sheet and

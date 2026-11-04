@@ -23,6 +23,7 @@ import { useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { redirectRoute } from '@/lib/url-state'
+import { memberName } from '@/lib/member-name'
 import { needsYouConditions } from '@/lib/needs-you'
 import type { AttentionItem, RoomPostResult, RunInputRespondResult } from '@/lib/types'
 import { targetRoute } from '@/routes/board/card-action'
@@ -61,26 +62,39 @@ function settleMessage(result: RoomPostResult): boolean {
 }
 
 /** Approve and Deny answer this request by id, so a tap that lands after it changed decides nothing else. */
-function Decision({ item, onError }: { item: AttentionItem; onError: (error?: string) => void }) {
+const decisionOptions = (item: AttentionItem) => {
   const options = item.request?.options ?? []
   const allow = options.find((o) => o.kind === 'allow_once')
   const deny = options.find((o) => o.kind === 'reject_once')
-  if (!item.request || !allow || !deny) return null
-  const request = item.request
+  return allow && deny ? { allow, deny } : undefined
+}
+
+/** Shown once the server took an answer, until the list drops the request; a second tap could only be refused. */
+function Answered() {
+  return <p role="status" className="text-ui-sm text-muted">Answered</p>
+}
+
+function Decision({ item, onError }: { item: AttentionItem; onError: (error?: string) => void }) {
+  const [answered, setAnswered] = useState(false)
+  const { allow, deny } = decisionOptions(item)!
+  const request = item.request!
   const decide = async (approve: boolean) => {
     onError(undefined)
     try {
       settle(await api.runInputRespond(item.run_id, request.id, approve ? allow.id : deny.id))
+      setAnswered(true)
     } catch (err) {
       onError(message(err))
     }
   }
+  if (answered) return <Answered />
   return <div className="grid grid-cols-2 gap-2"><DecisionButtons decide={decide} /></div>
 }
 
 function Question({ item, onError }: { item: AttentionItem; onError: (error?: string) => void }) {
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [busy, setBusy] = useState<string | null>(null)
+  const [answered, setAnswered] = useState(false)
   const late = usePastDeadline(busy !== null)
   const request = item.request!
   // Only a permission with a tool call is drawn as pills.
@@ -97,12 +111,14 @@ function Question({ item, onError }: { item: AttentionItem; onError: (error?: st
     onError(undefined)
     try {
       settle(await api.runInputRespond(item.run_id, request.id, optionID, optionID === 'accept' ? values : undefined))
+      setAnswered(true)
     } catch (err) {
       onError(message(err))
     } finally {
       setBusy(null)
     }
   }
+  if (answered) return <Answered />
   return (
     <>
       {request.schema !== undefined && <FormFields schema={request.schema} values={values} onChange={setValues} />}
@@ -204,7 +220,7 @@ function Reply({ item, onError }: { item: AttentionItem; onError: (error?: strin
 }
 
 function inline(item: AttentionItem, replies: boolean) {
-  if (item.kind === 'permission') return item.request?.options?.length ? Decision : undefined
+  if (item.kind === 'permission') return decisionOptions(item) ? Decision : undefined
   if (item.kind === 'question') return item.request?.options?.length && !item.request.url ? Question : undefined
   if (item.kind === 'room-question') return item.message ? Reply : undefined
   if (item.kind === 'needs-input') return replies ? Reply : undefined
@@ -217,8 +233,14 @@ function AttentionCard({ item }: { item: AttentionItem }) {
   const [error, setError] = useState<string>()
   const condition = needsYouConditions.find((c) => c.id === item.kind)
   const action = run && condition?.action(run)
-  const Inline = inline(item, action?.kind === 'reply')
-  const detail = item.kind === 'permission' ? item.request?.title : item.message?.body ?? item.request?.title
+  const viewer = useStore((s) => s.info?.member.id)
+  // run.input.respond refuses while another member holds control: the request is theirs.
+  const holder = run?.controller_member_id && run.controller_member_id !== viewer ? run.controller_member_id : undefined
+  const holderName = useStore((s) => (holder ? memberName(s, holder) : undefined))
+  const answers = item.kind === 'permission' || item.kind === 'question'
+  const Inline = holder && answers ? undefined : inline(item, action?.kind === 'reply')
+  const raw = item.kind === 'permission' ? item.request?.title : item.message?.body ?? item.request?.title
+  const detail = raw && !item.reason.includes(raw) ? raw : undefined
   return (
     <li>
       <RequestCard
@@ -234,13 +256,14 @@ function AttentionCard({ item }: { item: AttentionItem }) {
         description={(
           <>
             <span className="text-text">{item.reason}</span>
-            {detail && detail !== item.reason && (
+            {detail && (
               <Clamped className="mt-1.5 max-h-[5lh]"><CodeBlock className="whitespace-pre-wrap">{detail}</CodeBlock></Clamped>
             )}
           </>
         )}
         footer={(
           <RequestFooter className="static">
+            {holder && answers && <p className="text-ui-sm text-muted">{holderName} controls this session, so the request is theirs to answer.</p>}
             {Inline ? <Inline key={item.request?.id ?? item.message?.id ?? item.kind} item={item} onError={setError} /> : (
               <RequestActions>
                 <RequestAction label={action && action.kind === 'open' ? action.label : 'Open'} onClick={open} />

@@ -8,7 +8,7 @@ import { useCapability, useSelfRole } from '@/store/hooks'
 
 export const assistantTriggerID = 'assistant-trigger'
 
-function label(waiting: number, updates: number): string {
+export function assistantLabel(waiting: number, updates: number): string {
   const parts = []
   if (waiting > 0) parts.push(`${waiting} ${waiting === 1 ? 'request' : 'requests'} waiting`)
   if (updates > 0) parts.push(`${updates} ${updates === 1 ? 'update' : 'updates'}`)
@@ -36,7 +36,7 @@ export function AssistantButton({ variant = 'ghost' }: { variant?: 'ghost' | 'se
         id={assistantTriggerID}
         variant={variant}
         size="icon"
-        label={label(waiting, updates)}
+        label={assistantLabel(waiting, updates)}
         hint={`Assistant · ${shortcutLabel('assistant')}`}
         aria-expanded={open}
         aria-controls="assistant"
