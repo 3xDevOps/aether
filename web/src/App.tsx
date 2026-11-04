@@ -48,7 +48,7 @@ export function App() {
   // The server enforces the floor; this only explains it, and it outranks
   // every other screen because the server refuses everything else.
   const gated = useStore((s) => s.updateRequired !== null || s.update?.client_update_required === true)
-  const tooOld = useStore(useShallow((s) => serverTooOld(s.update) ?? { client: '', server: '' }))
+  const tooOld = useStore(useShallow((s) => serverTooOld(s.update, s.info?.server_version) ?? { client: '', server: '' }))
   const [continued, setContinued] = useState(() => storedContinue())
   const pair = `${tooOld.client}/${tooOld.server}`
   const [handed, setHanded] = useState(handedLink)

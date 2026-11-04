@@ -954,7 +954,8 @@ export function connect(store: RootStore, client: Api = api): () => void {
         recordUnreachable(store, client, kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind, refusal?.approval_code, measuredAt(store, data))
         // A refused subscribe never goes live, so nothing else records this.
         // A dead token already recorded is more precise than a dead hop.
-        if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
+        // A painted snapshot stays on screen with the error written beside it.
+        if (!s.streamDead && (!s.hydrated || s.staleSince !== null)) s.setHydrated(s.hydrated, detail)
       },
       onUpgradeRequired: (required) => store.getState().setUpdateRequired(required),
       afterSeq: () => store.getState().lastSeq,
@@ -1016,7 +1017,8 @@ export function connect(store: RootStore, client: Api = api): () => void {
       store.getState().setConnection('offline')
       clearSnapshot()
       store.getState().setHydrated(true)
-      store.setState({ staleSince: null })
+      // The painted records belong to a server this gateway no longer links.
+      store.setState({ staleSince: null, info: null, identityKey: null, runs: {}, workspaces: {} })
       store.getState().setUnreachable(null)
       redirectRoute(store, { name: 'onboarding', params: {} })
       return

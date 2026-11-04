@@ -336,10 +336,15 @@ function core(version: string): string {
  * only clients older than itself, so this is not a refusal: it is the
  * reverse direction, where new client features have no server to serve them.
  */
-export function serverTooOld(update: UpdateStatus | null): { client: string; server: string } | null {
-  if (!update?.server_version) return null
+export function serverTooOld(
+  update: UpdateStatus | null,
+  serverVersion = '',
+): { client: string; server: string } | null {
+  // `server.info` is re-read on every reconnect; `update.check` only on its own poll.
+  const running = serverVersion || update?.server_version
+  if (!update || !running) return null
   const client = core(update.cli.version)
-  const server = core(update.server_version)
+  const server = core(running)
   if (!client || !server) return null
-  return (compareVersions(client, server) ?? 0) > 0 ? { client: update.cli.version, server: update.server_version } : null
+  return (compareVersions(client, server) ?? 0) > 0 ? { client: update.cli.version, server: running } : null
 }
