@@ -7,7 +7,7 @@ on:
   # Every other job waits until the pull request is ready for review; the
   # merge queue and pushes to main always run them.
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   merge_group:
 
 permissions:
