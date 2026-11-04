@@ -89,8 +89,8 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	out = append(out, work...)
 	if deps.Messages > 0 {
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages, RunIDs: runIDStrings(deps.Senders),
-			Detail: fmt.Sprintf("%d %s from %s, unanswered or from the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"),
-				s.runLabels(ctx, deps.Senders))})
+			Detail: fmt.Sprintf("%d %s from %s %s unanswered or arrived in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"),
+				s.runLabels(ctx, deps.Senders), plural(deps.Messages, "is", "are"))})
 	}
 	out = append(out, s.awaitedWarnings(ctx, deps.Awaiting)...)
 	if len(deps.Children) > 0 {
@@ -157,7 +157,7 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 	}
 	if outcome != domain.RunMerged && run.Status != domain.RunMerged && run.LastCommit != "" && run.LastCommit != run.BaseCommit && !open && !merged {
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningUnmergedWork,
-			Detail: "Commits on " + run.Branch + " may not be merged: no pull request recorded for it merged after its last commit"})
+			Detail: "Commits on " + run.Branch + " may not be merged: no merged pull request includes its last commit"})
 	}
 	return out, nil
 }

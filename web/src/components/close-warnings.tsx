@@ -79,7 +79,7 @@ export function CloseWarnings({ check, run, onLeave, className }: { check: RunCl
 function Lines({ warnings, run, onLeave, all }: { warnings: CloseWarning[]; run: Run | undefined; onLeave: () => void; all: CloseWarning[] }) {
   const prs = warnings.filter((warning) => warning.kind === 'pull_request' && warning.number && warning.url)
   return warnings.map((warning) => {
-    if (prs.length > 1 && prs.includes(warning)) {
+    if (prs.includes(warning)) {
       return warning === prs[0] ? <Line key="pull_requests" warning={warning}><PullRequests prs={prs} /></Line> : null
     }
     return (
@@ -94,17 +94,22 @@ function Lines({ warnings, run, onLeave, all }: { warnings: CloseWarning[]; run:
 
 function PullRequests({ prs }: { prs: CloseWarning[] }) {
   const oldest = prs.map((pr) => pr.observed_at).filter((at) => at !== undefined).sort()[0]
-  return (
-    <>
-      {prs.length} pull requests not merged when Aether last checked{oldest && <> (<RelativeTime at={oldest} />)</>}:{' '}
-      {prs.map((pr, i) => (
-        <span key={pr.url}>
-          {i > 0 && ' '}
-          <a href={pr.url} target="_blank" rel="noreferrer" className="whitespace-nowrap text-accent hover:underline">#{pr.number}</a>
-        </span>
-      ))}
-    </>
-  )
+  const checked = oldest ? <>when Aether last checked <RelativeTime at={oldest} /></> : 'when Aether last checked'
+  const links = prs.map((pr, i) => (
+    <span key={pr.url}>
+      {i > 0 && ', '}
+      <a href={pr.url} target="_blank" rel="noreferrer" className="whitespace-nowrap text-accent hover:underline">{prRef(pr)}</a>
+    </span>
+  ))
+  return prs.length === 1
+    ? <>Pull request {links} was open, not merged, {checked}.</>
+    : <>{prs.length} pull requests were open, not merged, {checked}: {links}.</>
+}
+
+/** owner/repo#n, read from the pull request's GitHub URL. */
+function prRef(pr: CloseWarning): string {
+  const [owner, repo] = new URL(pr.url!).pathname.split('/').slice(1, 3)
+  return `${owner}/${repo}#${pr.number}`
 }
 
 function Line({ warning, children }: { warning: CloseWarning; children: ReactNode }) {
@@ -164,10 +169,10 @@ function Explain({ warning, run, onLeave }: { warning: CloseWarning; run: Run | 
         </>
       )
     case 'unmerged_work':
-      return `${warning.detail}. The branch stays, but nothing merges it.`
+      return `${warning.detail}. The branch stays.`
     case 'messages':
       return warning.run_ids?.length
-        ? <>{warning.count} {warning.count === 1 ? 'message' : 'messages'} from <Runs ids={warning.run_ids} onLeave={onLeave} />, unanswered or from the last 30 minutes. They may expect it to answer.</>
+        ? <>{warning.count} {warning.count === 1 ? 'message' : 'messages'} from <Runs ids={warning.run_ids} onLeave={onLeave} /> {warning.count === 1 ? 'is' : 'are'} unanswered or arrived in the last 30 minutes.</>
         : `${warning.detail}.`
     case 'awaited':
       return <>Waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
@@ -175,6 +180,8 @@ function Explain({ warning, run, onLeave }: { warning: CloseWarning; run: Run | 
       if (run && self.id === run.member_id) return 'Protected. You can still close it as its owner.'
       if (self.role === 'admin') return 'Protected. You can still close it as an admin.'
       return `${warning.detail}.`
+    case 'cleanup_pending':
+      return `${warning.detail}. Cleanup keeps retrying after the close; the container may stay until it succeeds.`
     default:
       return `${warning.detail}.`
   }
@@ -220,7 +227,9 @@ export function CloseConfirmation() {
             {pending.command.label}: records it as {pending.outcome} and closes the session.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <CloseWarnings check={pending.check} run={run} onLeave={dismiss} className={warningScroll} />
+        <div className="-mx-4 border-y px-3 py-3 empty:hidden sm:px-4">
+          <CloseWarnings check={pending.check} run={run} onLeave={dismiss} className={warningScroll} />
+        </div>
         <AlertDialogFooter className="flex-col sm:flex-row">
           {/* Radix AlertDialog focuses Cancel when the confirmation opens. */}
           <AlertDialogCancel className={focusRingShown}>Cancel</AlertDialogCancel>
