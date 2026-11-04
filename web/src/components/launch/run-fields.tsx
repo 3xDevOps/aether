@@ -185,7 +185,6 @@ export function TaskField({ mode, task, onTask, autoFocus = false, shared = fals
   )
 }
 
-/** The chosen agent's mode, model and effort. */
 export function AgentOptions({ choice, onSetUp, onChoice, disabled = false }: {
   choice: ReturnType<typeof useAgentChoice>
   onSetUp: () => void

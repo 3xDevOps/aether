@@ -240,7 +240,8 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     agentList: null,
     setAgentList: (identity, agents) => set({ agentList: { identity, agents } }),
     setInfo: (info) => set({ info }),
-    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {} })),
+    // Text shared to the last member's launch form is not the next member's.
+    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {}, ...(s.identityKey !== identityKey && { paletteLaunchTask: '' }) })),
     setCapabilities: (capabilities) => set({ capabilities }),
     setConnection: (connection) => set({ connection }),
     noteSeq: (seq) =>
