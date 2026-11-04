@@ -251,6 +251,7 @@ test-scripts:
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-areas-test.sh
+	sh scripts/ci-reap-queue-runs-test.sh
 	sh scripts/ci-classify-desktop-test.sh
 	sh scripts/ci-classify-edge-test.sh
 	sh scripts/ci-classify-platform-test.sh
