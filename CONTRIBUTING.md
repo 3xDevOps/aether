@@ -180,9 +180,10 @@ Docker and git) for server work that touches containers, git or storage, and
 [docs/testing.md](docs/testing.md#which-suite-to-run) maps each kind of
 change (Go, dashboard, scripts, desktop, Android, edge) to its suite.
 
-CI runs on every pull request. One that changes only `docs/` or root-level
-`*.md` files runs the public audit and nothing else, and the edge image and
-Windows desktop jobs run only when their paths change
+CI runs on every pull request. A draft runs only the fast jobs, one that
+changes only `docs/` or root-level `*.md` files runs the public audit and
+nothing else, and the Windows, Android, arm64 and edge image jobs run only in
+the merge queue and on `main`
 ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
 Aether run, unset the session's `AETHER_*` variables before testing, or some
 tests fail
@@ -434,8 +435,7 @@ GRADLE=$(mktemp -d) && docker run --rm -u "$(id -u):$(id -g)" \
 ## Edge image
 
 `images/edge/Dockerfile` builds the edge's container image. CI builds and
-smoke-tests it on amd64 and arm64 when a pull request touches what the image
-contains, and always on `main`. [docs/testing.md](docs/testing.md#the-edge-image)
+smoke-tests it on amd64 and arm64 in the merge queue and on `main`. [docs/testing.md](docs/testing.md#the-edge-image)
 has the local check and how to force the CI jobs on a branch.
 
 ## Commits and pull requests

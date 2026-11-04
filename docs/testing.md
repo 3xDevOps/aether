@@ -572,8 +572,8 @@ only the release keys built into it.
 
 It refuses to start while a container named `aether-edge` exists, removes
 everything it creates, and takes about two minutes with warm caches. CI runs
-it in `edge-image.yml` on ready pull requests that change the edge, and in
-`release.yml` before a release publishes.
+it in `edge-image.yml` in the merge queue and on `main`, and in `release.yml`
+before a release publishes.
 
 ## Dashboard component tests
 
@@ -802,7 +802,7 @@ classification on a ready pull request runs every Linux job. A skipped job
 reports as skipped, not failed. `ci-classify-platform-test.sh` fails when
 `cmd/aether` starts importing a package the `client` mode does not list.
 
-To run the edge image jobs on a branch the classifier skips, with write access to the repository:
+To run the edge image jobs on a branch before it reaches the merge queue, with write access to the repository:
 
 ```sh
 gh workflow run edge-image.yml --ref <branch>
