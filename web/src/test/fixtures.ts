@@ -581,6 +581,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     assistantReset: vi.fn(async () => needsOverride('assistantReset')),
     assistantSettings: vi.fn(async () => ({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true })),
     assistantHistory: vi.fn(async () => needsOverride('assistantHistory')),
+    assistantAccount: vi.fn(async (agent: string) => ({ agent, state: 'unrecorded' as const })),
     runInputAnswer: vi.fn(async () => needsOverride('runInputAnswer')),
     runInputRespond: vi.fn(async () => needsOverride('runInputRespond')),
     attentionList: vi.fn(async () => ({ items: [] })),
@@ -590,8 +591,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runACPItem: vi.fn(async () => needsOverride('runACPItem')),
     runModeSwitch: vi.fn(async () => needsOverride('runModeSwitch')),
     runClose: vi.fn(async () => run({ status: 'merged' })),
-    runReview: vi.fn(async (runID: string, action: 'complete' | 'later') =>
-      run({ id: runID, status: action === 'complete' ? 'completed' : 'needs-attention', state: action === 'complete' ? '' : 'finished', review: action === 'complete' ? 'accepted' : 'later' })),
+    runReview: vi.fn(async (runID: string, action: 'complete' | 'later' | 'not-yet') =>
+      run({ id: runID, status: action === 'complete' ? 'completed' : 'needs-attention', state: action === 'complete' ? '' : 'finished', review: ({ complete: 'accepted', later: 'later', 'not-yet': '' } as const)[action] })),
     runHandoff: vi.fn(async () => ({})),
     runRoomList: vi.fn(async () => ({ messages: [] })),
     coordMessagesList: vi.fn(async () => ({ messages: [] })),

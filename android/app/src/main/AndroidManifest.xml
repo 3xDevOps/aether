@@ -41,6 +41,7 @@
              and every switch between light and dark. -->
         <activity
             android:name=".MainActivity"
+            android:theme="@style/Theme.Aether.Page"
             android:configChanges="density|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
