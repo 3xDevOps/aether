@@ -146,6 +146,10 @@ type notification struct {
 	Notice bool `json:"notice,omitempty"`
 }
 
+// heldCleared stands for the sink's message a hold cleared; no need has it
+// as its key.
+const heldCleared = "held|cleared"
+
 // clearedBody is what a device shows in place of a need that ended, and
 // clearedFinishedBody in place of a finished session's notice.
 const (
@@ -316,8 +320,13 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 	// service surely did not take it, so only such a device is cleared.
 	offered := map[[2]string]domain.MemberID{}
 	// shown is the need the sink last took, so one announced before and
-	// back after another is shown again.
+	// back after another is shown again. The sink was cleared when a hold
+	// took a need back, so one coming back is shown there again, though
+	// devices, already told, are not.
 	var shown string
+	if len(announced) > 0 {
+		shown = heldCleared
+	}
 	for {
 		run, n, held, err := s.read(ctx, id)
 		var wake <-chan time.Time
@@ -357,6 +366,9 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 				}
 			}
 			shown = ""
+			if held && len(announced) > 0 {
+				shown = heldCleared
+			}
 		}
 		if n != nil {
 			// A handed-off run's need is its new owner's alone. A former

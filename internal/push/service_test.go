@@ -959,6 +959,10 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 func TestASubsessionOutcomeFollowsItsParent(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	heard := &sink{heard: make(chan string, 64)}
+	h.sink = heard
+	_ = h.svc.Close()
+	h.start()
 	phone := h.subscribe(h.ada)
 	parent := h.run(h.ada, "Lead the migration", domain.LaunchACP)
 	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 subsession")
@@ -991,4 +995,12 @@ func TestASubsessionOutcomeFollowsItsParent(t *testing.T) {
 	// announced once already, so it is not pushed again.
 	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
 	phone.expectNone(t, testQuiet)
+	failure := fmt.Sprintf("%s needs %q, answered by %q", child.ID, "Agent reported failure, review the result", "")
+	for got := ""; got != failure; {
+		select {
+		case got = <-heard.heard:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the sink was not told the failure again, want %q", failure)
+		}
+	}
 }
