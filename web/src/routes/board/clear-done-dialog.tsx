@@ -44,7 +44,7 @@ export function ClearDoneConfirm({
           <DialogDescription>
             {n === 0 && !checking
               ? 'Archive acts on completed, merged, abandoned, failed and interrupted sessions you may act on.'
-              : 'Hides them from Finished. History stays; restore any time. Containers keep running; free them separately.'}
+              : 'Hides them from Finished. History stays; restore any time. Archiving does not free their retained containers.'}
           </DialogDescription>
         </DialogHeader>
         {plan.notAllowed > 0 && (
