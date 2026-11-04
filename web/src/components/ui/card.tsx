@@ -43,7 +43,7 @@ export function CardTitle({
         data-card-open
         aria-label={label}
         onClick={onOpen}
-        className={cn('line-clamp-2 cursor-pointer text-left break-words outline-none after:absolute after:inset-0 after:rounded-panel focus-visible:after:outline-2 focus-visible:after:-outline-offset-1 focus-visible:after:outline-accent', className)}
+        className={cn('line-clamp-2 cursor-pointer text-left break-words outline-none after:absolute after:inset-0 after:rounded-panel focus-visible:after:outline-2 focus-visible:after:-outline-offset-1 focus-visible:after:outline-focus', className)}
       >
         {children}
       </button>

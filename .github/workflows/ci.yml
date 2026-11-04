@@ -3,11 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-  # A draft pull request runs changes, audit, lint and build-and-test only.
-  # Every other job waits until the pull request is ready for review; the
-  # merge queue and pushes to main always run them.
+  # A pull request runs changes, audit, lint, build-and-test and dashboard
+  # only. The merge queue and pushes to main run every job.
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   merge_group:
 
 permissions:
@@ -17,12 +15,13 @@ permissions:
   pull-requests: read
 
 # A newer push to a pull request cancels that pull request's run in flight.
-# Pushes to main run to completion so every main commit keeps its own CI
-# verdict and cache write. The event name is in the group so a pull_request
+# Pushes to main and merge queue entries group by commit, so none cancels or
+# replaces another and every main commit keeps its own CI verdict and cache
+# write. The event name is in the group so a pull_request
 # run from this branch does not cancel the base branch's in-flight run of
 # the same workflow under the trigger this file replaces.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # GitHub-hosted runners are ephemeral, so untrusted pull request code does
@@ -42,9 +41,7 @@ jobs:
   # scripts/ci-classify-areas.sh sets go and web: a change confined to
   # docs/ and root-level markdown files skips both, one confined to web/
   # skips the Go jobs, and one that no dashboard input can see skips
-  # dashboard and dashboard-e2e. The edge, desktop, client, installer and
-  # release outputs follow the same rules with scripts/ci-classify-edge.sh,
-  # scripts/ci-classify-desktop.sh and scripts/ci-classify-platform.sh.
+  # dashboard.
   # Each classifier is the base revision's copy: a pull request can edit
   # its own, and that copy is not what this job runs. A rename is
   # classified by its old path as well as its new one, so a move into docs/
@@ -62,11 +59,6 @@ jobs:
     outputs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
-      edge: ${{ steps.classify.outputs.edge }}
-      desktop: ${{ steps.classify.outputs.desktop }}
-      client: ${{ steps.classify.outputs.client }}
-      installer: ${{ steps.classify.outputs.installer }}
-      release: ${{ steps.classify.outputs.release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,9 +66,6 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-areas.sh
-            scripts/ci-classify-desktop.sh
-            scripts/ci-classify-edge.sh
-            scripts/ci-classify-platform.sh
             scripts/ci-reap-queue-runs.sh
           sparse-checkout-cone-mode: false
       # The merge queue discards a group when an entry ahead of it leaves or
@@ -94,31 +83,17 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            printf '%s\n' go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
-            printf '%s\n' go=true web=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           for mode in go web; do
             if ! out=$(printf '%s\n' "$files" | sh scripts/ci-classify-areas.sh "$mode"); then
-              out=true
-            fi
-            echo "$mode=$out" >> "$GITHUB_OUTPUT"
-          done
-          if ! edge=$(printf '%s\n' "$files" | sh scripts/ci-classify-edge.sh); then
-            edge=true
-          fi
-          echo "edge=$edge" >> "$GITHUB_OUTPUT"
-          if ! desktop=$(printf '%s\n' "$files" | sh scripts/ci-classify-desktop.sh); then
-            desktop=true
-          fi
-          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
-          for mode in client installer release; do
-            if ! out=$(printf '%s\n' "$files" | sh scripts/ci-classify-platform.sh "$mode"); then
               out=true
             fi
             echo "$mode=$out" >> "$GITHUB_OUTPUT"
@@ -238,21 +213,18 @@ jobs:
         with:
           mode: save
 
-  # Three jobs hold every Docker suite on a pull request. Each builds only
-  # the images it uses, from the caches pushes to main write, and runs its
-  # steps even when an earlier one failed so one run reports every failure.
-  # Tests run as root, like an installed server. A pull request runs the
-  # server-rest, harness and agent suites without -race, which the unit suite
-  # already applies to the same packages; pushes to main and the merge queue
-  # run them with it. server-flows runs its server tests in two processes:
+  # Three jobs hold every amd64 Docker suite. Each builds only the images it
+  # uses, from the caches pushes to main write, and runs its steps even when
+  # an earlier one failed so one run reports every failure. Tests run as
+  # root, like an installed server. server-flows runs its server tests in two
+  # processes:
   # TestIntegrationServerUpdateRollsBackAndCommits hangs for 120 s when it
   # follows the chaos tests in one.
   # The browser image and the browser, runtime and server-rest suites that use
   # it.
   integration-server-rest:
     name: integration (server-rest, browser)
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -286,12 +258,10 @@ jobs:
           GOFLAGS: -v
           AETHER_BROWSER_TEST_IMAGE: aether/browser:test
           AETHER_BROWSER_IMAGE: aether/browser:test
-          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
           sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
             "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
             "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
-            "INTEGRATION_NORACE=$INTEGRATION_NORACE" \
             make test-integration INTEGRATION_PKGS=./internal/server \
               INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|EndToEnd|MultiMember|ServerUpdate)'
       - name: Exercise the real browser runtime
@@ -305,8 +275,7 @@ jobs:
   # daemon, because only that builder sees the standard image loaded here.
   integration-server-flows:
     name: integration (server-flows, smoke)
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -333,10 +302,9 @@ jobs:
       - name: Integration tests (real Docker, real git)
         env:
           GOFLAGS: -v
-          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
           for run in '^TestIntegration(Chaos|Coordination)' '^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'; do
-            sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" "INTEGRATION_NORACE=$INTEGRATION_NORACE" \
+            sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
               make test-integration INTEGRATION_PKGS=./internal/server INTEGRATION_RUN="$run" || status=1
           done
           exit "${status:-0}"
@@ -360,15 +328,13 @@ jobs:
           AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
           AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
-          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: make test-integration INTEGRATION_PKGS=./internal/harness
 
   # The scheduler and every other integration package, then the pinned agent
   # CLIs in real runs against a mock model.
   integration:
     name: integration (scheduler, rest, agents)
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -407,9 +373,7 @@ jobs:
         run: make agents-image AGENTS_BASE=aether-standard:ci
       - name: Real agents against a mock model (real Docker, real git)
         if: ${{ !cancelled() }}
-        env:
-          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "INTEGRATION_NORACE=$INTEGRATION_NORACE" make test-agents
+        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
 
   # Native arm64 builds and runs of the standard and browser images. Only a
   # push to main and a merge-queue entry pay for it: nothing here depends on
@@ -477,21 +441,16 @@ jobs:
           mode: save
           save-modules: 'true'
 
-  # A pull request runs the edge image build and smoke test only when
-  # scripts/ci-classify-edge.sh says a changed path can affect the image.
   # A workflow of its own so it can be started by hand on any branch.
   edge-image:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.edge == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     permissions:
       contents: read
     uses: ./.github/workflows/edge-image.yml
-    with:
-      full: ${{ github.event_name != 'pull_request' }}
 
   dashboard:
     needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -524,8 +483,7 @@ jobs:
   # gate and this one starts containers.
   dashboard-e2e:
     name: dashboard-e2e (${{ matrix.shard }}/2)
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -639,8 +597,7 @@ jobs:
   # The desktop shell is built the way users build it: `aether gui build`
   # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -727,11 +684,9 @@ jobs:
           key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
 
   # The packaging and launch check release.yml runs for each tag, on both
-  # Windows architectures, when scripts/ci-classify-desktop.sh says a
-  # changed path can affect the desktop app.
+  # Windows architectures.
   desktop-windows:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.desktop == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -754,11 +709,9 @@ jobs:
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
-  # design and internal/gitengine does not compile for Windows. Docs-only
-  # pull requests skip this job. changes does not choose the runner.
+  # design and internal/gitengine does not compile for Windows.
   windows:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -797,13 +750,11 @@ jobs:
   # Reuse the installer lanes so their verdict is part of CI and therefore
   # the exact-commit CI success required by release authorization.
   windows-install:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.installer == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     uses: ./.github/workflows/windows-install.yml
 
   release-build:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.release == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -852,8 +803,7 @@ jobs:
           retention-days: 7
 
   android:
-    needs: changes
-    if: ${{ !cancelled() && github.event.pull_request.draft != true && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     # A wedged Gradle daemon must not hold the runner for the six-hour default.
     timeout-minutes: 45
@@ -909,9 +859,10 @@ jobs:
   # run. It is signal, not a flake - the response is to submit the binary at
   # https://www.microsoft.com/en-us/wdsi/filesubmission as a developer false
   # positive, and to check what changed in the client's syscalls or embedded
-  # strings. See docs/install.md. Skipped when release-build is skipped.
+  # strings. See docs/install.md.
   windows-defender:
     needs: release-build
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -931,9 +882,7 @@ jobs:
 
   # The one required check on main, for pull requests and merge queue
   # entries. It fails when any job failed or was cancelled; a job its own
-  # rule skipped passes. A job missing from needs does not gate main. A
-  # draft run fails it too: a rerun keeps the draft payload, and a passing
-  # draft gate on the head commit would satisfy the required check.
+  # rule skipped passes. A job missing from needs does not gate main.
   ci-gate:
     name: CI gate
     if: ${{ always() }}
@@ -962,13 +911,8 @@ jobs:
       - name: Require every job to pass or be skipped by its rule
         env:
           NEEDS: ${{ toJSON(needs) }}
-          DRAFT: ${{ github.event.pull_request.draft == true }}
         run: |
           printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"'
-          if [ "$DRAFT" != false ]; then
-            echo "::error::Draft run: only the fast jobs ran. Mark the pull request ready for review (gh pr ready) to run the rest."
-            exit 1
-          fi
           bad=$(printf '%s' "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(" ")')
           if [ -n "$bad" ]; then
             echo "::error::Not passed: $bad"
