@@ -49,6 +49,15 @@ management.
 | Photos and videos | Photos | An image the member picks to paste into a terminal; on a phone the picker opens the gallery. It is the dashboard's only upload reachable from the phone: the onboarding profile import exists only on the local `aether gui` gateway |
 | Files and docs | Files and docs | The contents of files edited in the dashboard's Files editor |
 
+Declare one more type, **collected**, **not shared**, **optional** (only
+when the member presses the dashboard's mic), **processed ephemerally** (the
+server transcribes the clip in memory and keeps no audio,
+[docs/dictation.md](../../docs/dictation.md)), used for **App functionality**:
+
+| Category | Type | What it is |
+| --- | --- | --- |
+| Audio | Voice or sound recordings | A dictation clip the member records with the dashboard's mic, sent to their server to be turned into text |
+
 **Not shared** holds because of Play's user-initiated exemption,
 "Transferring user data to a third party based on a specific user-initiated
 action, where the user reasonably expects the data to be shared": the team or
@@ -59,7 +68,7 @@ tapped.
 Not collected, so leave unticked: Location, Financial info, Health and fitness, Messages (the app has no
 messaging feature; what a member writes goes to an agent, and is declared
 above as user-generated content that their teammates can also see), Videos,
-Audio, Calendar, Contacts, Web browsing, App info and performance (no crash
+Calendar, Contacts, Web browsing, App info and performance (no crash
 logs or diagnostics leave the phone).
 
 ## Edge mode
