@@ -75,7 +75,7 @@ test('Fix this on a failed run attaches the run and sends exactly what Inspect s
   await page.screenshot({ path: testInfo.outputPath('inspect-desktop.png') })
   await page.keyboard.press('Escape')
   // Radix returns focus to the trigger on a timer after the popover unmounts;
-  // an Enter sent before it lands clicks Inspect again instead of sending.
+  // focusing the composer before then loses focus to Inspect, so Enter reopens it.
   await expect(shared).toBeHidden()
   await expect(assistant.getByRole('button', { name: 'Inspect what is shared' })).toBeFocused()
 
