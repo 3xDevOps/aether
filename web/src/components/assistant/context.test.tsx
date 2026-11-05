@@ -109,7 +109,8 @@ describe('pinning the page a draft was started on', () => {
     await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
     expect(sent()?.route).toMatchObject({ name: 'run', run_id: login.id })
-  })
+    // Its typed keystrokes take over 5 s when the full suite loads the machine.
+  }, 15_000)
 
   it('sends the page moved to once the member picks it', async () => {
     const aside = await openPanel()
