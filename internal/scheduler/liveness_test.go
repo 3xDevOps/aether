@@ -34,7 +34,9 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 			sub := e.subscribe(t)
 			e.startStalls(t)
 			run := e.launchACP(t, tc.prompt)
-			e.waitStoreStatus(t, run.ID, domain.RunRunning)
+			// Running lasts only one grace before the stall parks it, too
+			// short to catch by polling the store on a loaded host.
+			waitStatusEvent(t, sub, run.ID, domain.RunRunning)
 			if tc.phase == "" {
 				time.Sleep(4 * grace)
 				r, err := e.db.GetRun(t.Context(), run.ID)
