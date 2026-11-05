@@ -4,13 +4,13 @@ import { MessageSquarePlus, X } from '@/components/icons'
 import { AssistantAccountCheck } from '@/components/assistant/account-check'
 import { ActionHistory } from '@/components/assistant/action-history'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
-import { AssistantRequestCard, cardsHeading, ConfirmationCard } from '@/components/assistant/cards'
+import { AssistantRequestCard, cardsHeading, ConfirmationCard, QueuedPrompt } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
 import { TemporaryChatToggle } from '@/components/assistant/temporary'
 import { AssistantFailed, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
 import { ApprovalChoice, AutoApproveConfirm } from '@/components/assistant/approval-choice'
 import { AssistantSheet, AutoApproveSuggestion } from '@/components/assistant/suggestion'
-import { assistantRows, Transcript } from '@/components/assistant/transcript'
+import { assistantRows, Transcript, unsent } from '@/components/assistant/transcript'
 import { Confirm } from '@/components/confirm'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -101,7 +101,8 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
   const { status, session, confirmations, running } = useAssistantState()
   const error = useStore((s) => s.assistantStatusError)
   const setDraft = useStore((s) => s.setAssistantDraft)
-  const hasRows = useMemo(() => (session ? assistantRows(session).length > 0 : false), [session])
+  const waitingPrompts = useStore((s) => unsent(s.assistantStatus?.queue ?? [], undefined).length > 0)
+  const hasRows = useMemo(() => (session ? assistantRows(session).length > 0 : false), [session]) || waitingPrompts
   const waiting = confirmations.length > 0 || (session?.pending.length ?? 0) > 0
 
   if (!status) {
@@ -124,9 +125,15 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
     </div>
   )
   if (status.state === 'setup') {
+    const prompts = unsent(status.queue ?? [], undefined)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {cards}
+        {prompts.length > 0 && (
+          <div className="flex max-h-[30%] min-h-0 shrink-0 flex-col gap-2 overflow-y-auto px-3 pt-3">
+            {prompts.map((entry) => <QueuedPrompt key={entry.id} entry={entry} />)}
+          </div>
+        )}
         <AutoApproveConfirm />
         <AssistantSetup status={status} />
       </div>

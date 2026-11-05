@@ -61,6 +61,7 @@ type AssistantSettings struct {
 // removes theirs.
 type AssistantStore interface {
 	AssistantCardStore
+	AssistantQueueStore
 	// GetAssistantSession returns ErrNotFound when the member has none.
 	GetAssistantSession(ctx context.Context, member domain.MemberID) (*AssistantSession, error)
 	// PutAssistantSession stores everything but the generation.

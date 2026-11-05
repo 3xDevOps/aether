@@ -411,15 +411,30 @@ func TestIntegrationAssistant(t *testing.T) {
 	frames.until(t, "the running status", func(f protocol.AssistantFrame) bool {
 		return f.Status != nil && f.Status.State == protocol.AssistantStateRunning
 	})
-	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "again", IdempotencyKey: "k-busy"}, nil); perr == nil || perr.Code != protocol.CodeInvalidState {
-		t.Fatalf("assistant.prompt during a turn = %v, want an invalid-state error", perr)
+	var queued protocol.AssistantPromptResult
+	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "again", IdempotencyKey: "k-busy", Door: "connector"}, &queued); perr != nil {
+		t.Fatalf("assistant.prompt during a turn: %v", perr)
+	}
+	if queued.Entry.State != protocol.AssistantQueueQueued || queued.Entry.Origin.Door != protocol.AssistantDoorDashboard {
+		t.Fatalf("prompt during a turn = %+v, want it queued from the dashboard whatever door the client named", queued.Entry)
 	}
 	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
 		t.Fatalf("assistant.cancel: %v", perr)
 	}
-	frames.until(t, "the idle status", func(f protocol.AssistantFrame) bool {
-		return f.Status != nil && f.Status.State == protocol.AssistantStateIdle
+	ended := frames.until(t, "the queued prompt's turn to end", func(f protocol.AssistantFrame) bool {
+		return f.Status != nil && slices.ContainsFunc(f.Status.Queue, func(e protocol.AssistantQueueEntry) bool {
+			return e.ID == queued.Entry.ID && e.State == protocol.AssistantQueueDone
+		})
 	})
+	if i := slices.IndexFunc(ended.Status.Queue, func(e protocol.AssistantQueueEntry) bool { return e.State == protocol.AssistantQueueFailed }); i < 0 ||
+		ended.Status.Queue[i].Error != "you stopped this turn" {
+		t.Fatalf("queue after Stop = %+v, want the stopped turn failed and the queued one run", ended.Status.Queue)
+	}
+	for deadline := time.Now().Add(10 * time.Second); env.status().State != protocol.AssistantStateIdle; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the assistant did not go idle after the queued turn")
+		}
+	}
 
 	sock := filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock")
 	conn, err := net.Dial("unix", sock)
@@ -784,27 +799,38 @@ func TestIntegrationAssistantKeyKept(t *testing.T) {
 	defer env.stop()
 	callerCtx, leave := context.WithCancel(ctx)
 	time.AfterFunc(300*time.Millisecond, leave)
-	err := env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door(""))
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("prompt of a caller that left = %v, want the cancellation", err)
+	if err := promptErr(env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door(""))); err != nil {
+		t.Fatalf("prompt of a caller that left = %v, want its entry", err)
 	}
-	if err := env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door("")); err != nil {
+	if err := promptErr(env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door(""))); err != nil {
 		t.Fatalf("retry of a dispatched prompt = %v, want it ignored", err)
 	}
-	var history protocol.RunACPHistoryResult
-	if perr := env.call(protocol.MethodAssistantHistory, protocol.AssistantHistoryParams{}, &history); perr != nil {
-		t.Fatal(perr)
+	// The first prompt is sent in the background after its caller left.
+	turns := func() int {
+		var history protocol.RunACPHistoryResult
+		if perr := env.call(protocol.MethodAssistantHistory, protocol.AssistantHistoryParams{}, &history); perr != nil {
+			t.Fatal(perr)
+		}
+		n := 0
+		for _, f := range history.Frames {
+			if strings.Contains(string(f.Item), `"turn_start"`) {
+				n++
+			}
+		}
+		return n
 	}
-	turns := 0
-	for _, f := range history.Frames {
-		if strings.Contains(string(f.Item), `"turn_start"`) {
-			turns++
+	for deadline := time.Now().Add(time.Minute); turns() == 0; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the prompt of a caller that left never started its turn")
 		}
 	}
-	if turns != 1 {
-		t.Fatalf("%d turns after the retry, want 1", turns)
+	time.Sleep(500 * time.Millisecond)
+	if n := turns(); n != 1 {
+		t.Fatalf("%d turns after the retry, want 1", n)
 	}
 	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
 		t.Fatal(perr)
 	}
 }
+
+func promptErr(_ assistant.Entry, err error) error { return err }

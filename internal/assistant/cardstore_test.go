@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"testing"
@@ -68,6 +69,96 @@ func (m *memStore) MoveAssistantCard(_ context.Context, member domain.MemberID, 
 	return false, nil
 }
 
+func (m *memStore) EnqueueAssistantPrompt(_ context.Context, e *store.AssistantQueueEntry, limit int) (store.AssistantQueueEntry, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	queued := 0
+	for _, held := range m.queue {
+		if held.MemberID != e.MemberID || held.Generation != e.Generation {
+			continue
+		}
+		if held.Key == e.Key && (held.State != protocol.AssistantQueueFailed || held.Sent) {
+			return held, false, nil
+		}
+		if held.State == protocol.AssistantQueueQueued {
+			queued++
+		}
+	}
+	if queued >= limit {
+		return store.AssistantQueueEntry{}, false, store.ErrAssistantQueueFull
+	}
+	e.Seq, e.State, e.CreatedAt = int64(len(m.queue)+1), protocol.AssistantQueueQueued, time.Now()
+	m.queue = append(m.queue, *e)
+	return *e, true, nil
+}
+
+func (m *memStore) AssistantQueueEntry(_ context.Context, member domain.MemberID, id string) (*store.AssistantQueueEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.queue {
+		if e.MemberID == member && e.ID == id {
+			return &e, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *memStore) AssistantQueue(_ context.Context, member domain.MemberID, states ...string) ([]store.AssistantQueueEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.AssistantQueueEntry
+	for _, e := range m.queue {
+		if (member == "" || e.MemberID == member) && (len(states) == 0 || slices.Contains(states, e.State)) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) MoveAssistantQueueEntry(_ context.Context, member domain.MemberID, id string, from []string, move store.AssistantQueueMove) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, e := range m.queue {
+		if e.MemberID != member || e.ID != id || !slices.Contains(from, e.State) {
+			continue
+		}
+		e.State = move.State
+		e.Error, e.Reply, e.MessageID = cmp.Or(move.Error, e.Error), cmp.Or(move.Reply, e.Reply), cmp.Or(move.MessageID, e.MessageID)
+		e.Sent = e.Sent || move.Sent
+		m.queue[i] = e
+		return true, nil
+	}
+	return false, nil
+}
+
+func (m *memStore) AddAssistantQueueCard(_ context.Context, member domain.MemberID, id, card string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, e := range m.queue {
+		if e.MemberID == member && e.ID == id && !slices.Contains(e.Cards, card) {
+			m.queue[i].Cards = append(slices.Clone(e.Cards), card)
+		}
+	}
+	return nil
+}
+
+func (m *memStore) DeleteUnsentAssistantQueueEntry(_ context.Context, member domain.MemberID, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.queue)
+	m.queue = slices.DeleteFunc(m.queue, func(e store.AssistantQueueEntry) bool {
+		return e.MemberID == member && e.ID == id && e.State == protocol.AssistantQueueFailed && !e.Sent
+	})
+	return len(m.queue) < n, nil
+}
+
+func (m *memStore) DeleteAssistantQueue(_ context.Context, member domain.MemberID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queue = slices.DeleteFunc(m.queue, func(e store.AssistantQueueEntry) bool { return e.MemberID == member })
+	return nil
+}
+
 // pendingCards waits until m has a pending card and returns those it has.
 func pendingCards(t *testing.T, svc *Service, m *member) []protocol.AssistantConfirmation {
 	t.Helper()
@@ -104,3 +195,5 @@ func pendingCount(t *testing.T, svc *Service, m *member) int {
 	}
 	return len(rows)
 }
+
+func promptErr(_ Entry, err error) error { return err }

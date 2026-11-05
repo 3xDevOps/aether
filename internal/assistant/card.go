@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,8 +50,10 @@ const parkedText = "Waiting for approval as card %s; the server runs it when the
 // ConnectorOrigin a connector's; no RPC param reaches ConnectorOrigin.
 type Origin struct {
 	protocol.AssistantOrigin
-	// Grant is the connector grant whose connector started the turn.
-	Grant string `json:"grant,omitempty"`
+	// Grant is the connector grant whose connector started the turn, and
+	// Scopes the scopes it holds.
+	Grant  string   `json:"grant,omitempty"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // Door is the origin of a prompt from an Aether client that names itself
@@ -62,9 +66,10 @@ func Door(door string) Origin {
 }
 
 // ConnectorOrigin is the origin of a prompt that connector connectorID of
-// client sent under grant.
-func ConnectorOrigin(client, connectorID, grant string) Origin {
-	return Origin{AssistantOrigin: protocol.AssistantOrigin{Door: protocol.AssistantDoorConnector, Client: client, ConnectorID: connectorID}, Grant: grant}
+// client sent under grant, which holds scopes.
+func ConnectorOrigin(client, connectorID, grant string, scopes []string) Origin {
+	return Origin{AssistantOrigin: protocol.AssistantOrigin{Door: protocol.AssistantDoorConnector, Client: client, ConnectorID: connectorID},
+		Grant: grant, Scopes: slices.Clone(scopes)}
 }
 
 func (o Origin) String() string {
@@ -78,6 +83,17 @@ func (o Origin) String() string {
 // nobody watches a connector turn in the panel.
 func (o Origin) parks() bool { return o.Door == protocol.AssistantDoorConnector }
 
+// Covers reports whether a turn from o may pass method without a card:
+// any Aether door, or a connector whose grant holds one of the scopes
+// method needs, which scopes names (no scope for a method no connector may
+// call).
+func (o Origin) Covers(method string, scopes func(method string) []string) bool {
+	if o.Door != protocol.AssistantDoorConnector {
+		return true
+	}
+	return scopes != nil && slices.ContainsFunc(scopes(method), func(s string) bool { return slices.Contains(o.Scopes, s) })
+}
+
 // Card is one of a member's approval cards and the origin of the turn that
 // raised it.
 type Card struct {
@@ -85,6 +101,28 @@ type Card struct {
 	Origin Origin
 	// Generation is the conversation the card belongs to.
 	Generation int64
+}
+
+// FullText is the card as a connector shows it to be decided by echo: the
+// summary, then every field the call sends, whole, one per line in name
+// order, and a template launch's task as its params render it.
+func (c Card) FullText() string {
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(c.Params, &fields)
+	var b strings.Builder
+	b.WriteString(c.Summary)
+	for _, name := range slices.Sorted(maps.Keys(fields)) {
+		value := string(fields[name])
+		var text string
+		if json.Unmarshal(fields[name], &text) == nil {
+			value = text
+		}
+		fmt.Fprintf(&b, "\n%s: %s", name, value)
+	}
+	if c.Task != "" {
+		fmt.Fprintf(&b, "\nrendered task: %s", c.Task)
+	}
+	return b.String()
 }
 
 // confirmations holds the calls waiting for one member's cards. changed
@@ -560,10 +598,14 @@ func (s *Service) runParked(m *member, id string, ready <-chan struct{}) {
 	_, _ = srv.Call(ctx, c.Method, c.Params)
 }
 
-// Resume picks the members' cards up after a restart: a call that was
-// running is failed, never run again; an approved card nothing started
-// runs once runs are recovered; a pending card expires on time.
+// Resume picks the members' queues and cards up after a restart: a turn or
+// a card's call that was running is marked interrupted or failed, never run
+// again; waiting prompts and approved cards nothing started run once runs
+// are recovered; a pending card expires on time.
 func (s *Service) Resume(ctx context.Context) error {
+	if err := s.resumeQueue(ctx); err != nil {
+		return err
+	}
 	rows, err := s.cfg.Store.AssistantCards(ctx, "", protocol.AssistantCardPending, protocol.AssistantCardApproved, protocol.AssistantCardRunning)
 	if err != nil {
 		return fmt.Errorf("assistant: list the open cards: %w", err)
@@ -609,13 +651,14 @@ func (s *Service) Resume(ctx context.Context) error {
 	return nil
 }
 
-// spawn runs f in the background unless the service is closing; Close
-// waits for it.
-func (s *Service) spawn(f func()) {
+// spawn runs f in the background unless the service is closing, and
+// reports whether it does; Close waits for it.
+func (s *Service) spawn(f func()) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
-		return
+		return false
 	}
 	s.wg.Go(f)
+	return true
 }

@@ -490,13 +490,14 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	s.assistant = assistant.New(assistant.Config{
-		Dir:         filepath.Join(cfg.DataDir, "assistant"),
-		Store:       s.db,
-		Runs:        s.sched,
-		Host:        s.sched,
-		Caller:      func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
-		Bus:         s.bus,
-		Preferences: preferences,
+		Dir:             filepath.Join(cfg.DataDir, "assistant"),
+		Store:           s.db,
+		Runs:            s.sched,
+		Host:            s.sched,
+		Caller:          func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
+		Bus:             s.bus,
+		Preferences:     preferences,
+		ConnectorScopes: sshd.ConnectorScopes,
 	})
 	sshCfg.Services.Assistant = s.assistant
 	sshCfg.Services.Preferences = preferences

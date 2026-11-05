@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -26,6 +28,7 @@ type memStore struct {
 	settingsReads int
 	rules         []store.AssistantRule
 	cards         []store.AssistantCard
+	queue         []store.AssistantQueueEntry
 }
 
 func newMemStore() *memStore {
@@ -194,25 +197,37 @@ func TestResolveNeverSwitchesUnasked(t *testing.T) {
 }
 
 func TestPromptKeyIsSharedByDuplicates(t *testing.T) {
-	s := New(Config{Store: newMemStore()})
-	s.cancel()
+	s := New(Config{Store: newMemStore(), Caller: func(domain.MemberID) tools.Caller { return noAgents{} }})
+	t.Cleanup(func() { _ = s.Close() })
 	m := s.member("m1")
 	m.op.Lock()
-	results := make(chan error, 2)
+	type result struct {
+		entry Entry
+		err   error
+	}
+	results := make(chan result, 2)
 	for range 2 {
-		go func() { results <- s.Prompt(t.Context(), "m1", "hi", "k", nil, Door("")) }()
+		go func() {
+			e, err := s.Prompt(t.Context(), "m1", "hi", "k", nil, Door(""))
+			results <- result{e, err}
+		}()
 	}
 	time.Sleep(50 * time.Millisecond)
 	m.op.Unlock()
+	var ids []string
 	for range 2 {
 		select {
-		case err := <-results:
-			if !errors.Is(err, ErrClosed) {
-				t.Fatalf("prompt = %v, want the first attempt's failure for both", err)
+		case r := <-results:
+			if r.err == nil || !strings.Contains(r.err.Error(), "agent list unavailable") {
+				t.Fatalf("prompt = %v, want the first attempt's failure for both", r.err)
 			}
+			ids = append(ids, r.entry.ID)
 		case <-time.After(5 * time.Second):
 			t.Fatal("a duplicate never returned")
 		}
+	}
+	if ids[0] == "" || ids[0] != ids[1] {
+		t.Fatalf("entries = %q, want one shared", ids)
 	}
 	if len(m.attempts) != 0 {
 		t.Fatalf("failed key kept: %v", m.attempts)
@@ -224,13 +239,14 @@ func TestPersistedPromptKeyIsIgnoredAfterRestart(t *testing.T) {
 	if err := db.AddAssistantPromptKey(t.Context(), "m1", 0, "k"); err != nil {
 		t.Fatal(err)
 	}
-	s := New(Config{Store: db})
-	s.cancel()
-	if err := s.Prompt(t.Context(), "m1", "hi", "k", nil, Door("")); err != nil {
-		t.Fatalf("a key accepted before the restart ran again: %v", err)
+	s := New(Config{Store: db, Caller: func(domain.MemberID) tools.Caller { return noAgents{} }})
+	t.Cleanup(func() { _ = s.Close() })
+	e, err := s.Prompt(t.Context(), "m1", "hi", "k", nil, Door(""))
+	if err != nil || e.State != protocol.AssistantQueueInterrupted || e.Error != errAlreadySent.Error() {
+		t.Fatalf("a key accepted before the restart = %+v, %v, want it not sent again", e, err)
 	}
-	if err := s.Prompt(t.Context(), "m1", "hi", "other", nil, Door("")); !errors.Is(err, ErrClosed) {
-		t.Fatalf("a new key = %v, want it to run", err)
+	if err := promptErr(s.Prompt(t.Context(), "m1", "hi", "other", nil, Door(""))); err == nil || !strings.Contains(err.Error(), "agent list unavailable") {
+		t.Fatalf("a new key = %v, want it to try to start the assistant", err)
 	}
 }
 
