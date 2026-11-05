@@ -82,18 +82,38 @@ runs:
       with:
         path: ${{ steps.npm.outputs.dir }}
         key: npm-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
-    # electron-builder fetches the Electron runtime and its Windows tools from
-    # GitHub on every cold run, and a 504 there fails the build. Saved like
-    # npm's cache. A release downloads afresh: electron-builder runs the
-    # unpacked Windows tools from its cache without re-hashing them.
+    # Electron's zip is checked against the seeded checksums below on every
+    # cache hit, so a release can use it too.
+    - name: Restore Electron's downloads
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/AppData/Local/electron/Cache
+        key: electron-zip-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+    # A release downloads the Windows tools afresh: electron-builder runs the
+    # unpacked tools from its cache without re-hashing them.
     - name: Restore electron-builder's downloads
       if: github.ref_type != 'tag'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
-        path: |
-          ~/AppData/Local/electron/Cache
-          ~/AppData/Local/electron-builder/Cache
-        key: electron-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+        path: ~/AppData/Local/electron-builder/Cache
+        key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+    # Without a seeded SHASUMS256.txt-<version> at the cache root, @electron/get
+    # fetches it from GitHub on every build, cache hit or not. electron's npm
+    # package ships the same hashes, verified by npm ci against the lockfile.
+    - name: Seed Electron's checksums
+      shell: bash
+      working-directory: ${{ steps.stamp.outputs.dir }}
+      run: |
+        node -e '
+          const fs = require("node:fs")
+          const path = require("node:path")
+          const { version } = require("./node_modules/electron/package.json")
+          const sums = require("./node_modules/electron/checksums.json")
+          const cache = path.join(process.env.LOCALAPPDATA, "electron", "Cache")
+          fs.mkdirSync(cache, { recursive: true })
+          fs.writeFileSync(path.join(cache, `SHASUMS256.txt-${version}`),
+            Object.entries(sums).map(([file, sum]) => `${sum} *${file}\n`).join(""))
+        '
     - name: Package the unpacked app
       id: package
       shell: bash
@@ -115,24 +135,34 @@ runs:
           exit 1
         fi
         echo "app=$BUILD/${apps[0]}" >> "$GITHUB_OUTPUT"
-    - name: Check for saved electron-builder downloads
+    - name: Check for saved Electron's downloads
       id: saved-electron
       if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
-        path: |
-          ~/AppData/Local/electron/Cache
-          ~/AppData/Local/electron-builder/Cache
-        key: electron-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+        path: ~/AppData/Local/electron/Cache
+        key: electron-zip-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
         lookup-only: true
-    - name: Save electron-builder's downloads
+    - name: Save Electron's downloads
       if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-electron.outputs.cache-hit != 'true'
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
-        path: |
-          ~/AppData/Local/electron/Cache
-          ~/AppData/Local/electron-builder/Cache
-        key: electron-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+        path: ~/AppData/Local/electron/Cache
+        key: electron-zip-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+    - name: Check for saved electron-builder's downloads
+      id: saved-electron-builder
+      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/AppData/Local/electron-builder/Cache
+        key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+        lookup-only: true
+    - name: Save electron-builder's downloads
+      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-electron-builder.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/AppData/Local/electron-builder/Cache
+        key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
     # The dashboard reads the shell's version from the package.json inside
     # app.asar; a shell that misreports it is flagged as out of date.
     - name: Check the packaged shell version
