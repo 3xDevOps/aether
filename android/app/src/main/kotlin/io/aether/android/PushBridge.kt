@@ -40,7 +40,16 @@ class PushBridge(private val activity: ComponentActivity) {
 
     private val permission =
         activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) PushRegistration.enable(activity) else send(PushState(PushKind.BLOCKED))
+            when {
+                granted -> PushRegistration.enable(activity)
+                // Only Don't allow: a dialog dismissed without a choice may be shown again.
+                else -> {
+                    if (activity.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+                        activity.markPushPermissionAsked()
+                    }
+                    send(PushState(PushKind.BLOCKED))
+                }
+            }
         }
 
     init {
@@ -102,7 +111,6 @@ class PushBridge(private val activity: ComponentActivity) {
                 ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
         if (needsPermission) {
-            activity.markPushPermissionAsked()
             permission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             PushRegistration.enable(activity)
