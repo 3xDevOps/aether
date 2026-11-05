@@ -7,10 +7,9 @@ type Badging = Navigator & { setAppBadge?: (count: number) => Promise<void>; cle
 
 let latest = 0
 
-/** Whether this browser can badge an app icon, and nothing else badges it. */
+// The desktop app badges its dock icon itself, from desktop/notify.js.
 export const badgeSupported = () => !desktopBridge() && 'setAppBadge' in navigator && 'clearAppBadge' in navigator
 
-/** Whether the app badge applies here: the browser can badge and this device holds a push subscription. */
 export function useBadging(): boolean {
   const [on, setOn] = useState(false)
   useEffect(() => {
@@ -31,7 +30,6 @@ export function useBadging(): boolean {
   return on
 }
 
-/** Sets the installed app's badge to count while this device has a push subscription, and clears it otherwise. Rejects when the browser refuses. */
 export async function syncAppBadge(count: number): Promise<void> {
   const nav: Badging = navigator
   if (desktopBridge() || !nav.setAppBadge || !nav.clearAppBadge) return
@@ -46,7 +44,7 @@ export async function syncAppBadge(count: number): Promise<void> {
   }
 }
 
-/** Renders nothing: the badge follows the Needs you count in any layout. The count is only fresh while an attention feed runs. */
+/** The Needs you count is only fresh while an attention feed runs. */
 export function AppBadge() {
   const count = useAskingCount()
   useEffect(() => {
