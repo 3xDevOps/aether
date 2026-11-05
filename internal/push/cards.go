@@ -93,30 +93,27 @@ func (s *Service) UseCards(cards Cards) { s.cards = cards }
 
 func cardTopic(id string) string { return "card:" + id }
 
-// restoreCards takes up the cards a server before this one pushed, and
-// withdraws the pushes of those decided since.
-func (s *Service) restoreCards(ctx context.Context) {
+// restoreCards takes up the cards a server before this one pushed, before
+// any event can announce one, and returns the members whose pushes may need
+// withdrawing.
+func (s *Service) restoreCards(ctx context.Context) []domain.MemberID {
 	if s.cards == nil {
-		return
+		return nil
 	}
 	pushed, err := s.store.PushedCards(ctx)
 	if err != nil {
 		slog.Warn("push: list the pushed cards", "error", err)
-		return
+		return nil
 	}
+	members := make([]domain.MemberID, 0, len(pushed))
 	for member, ids := range pushed {
-		lock, known := s.knownCards(member)
-		lock.Lock()
+		_, known := s.knownCards(member)
 		for _, id := range ids {
-			// A card this service announced before the restore read the
-			// store keeps the summary its push showed.
-			if _, ok := known[id]; !ok {
-				known[id] = announced{pushed: true}
-			}
+			known[id] = announced{pushed: true}
 		}
-		lock.Unlock()
-		s.cardsChanged(ctx, member)
+		members = append(members, member)
 	}
+	return members
 }
 
 // knownCards is member's lock and announced cards, which only its holder

@@ -72,27 +72,6 @@ func TestACardIsPushedWithItsIDAndWithdrawnWhenDecidedAnywhere(t *testing.T) {
 	phone.expect(t, notification{Title: cardDecidedTitle, Body: "Declined: Launch claude in api", Clear: true})
 }
 
-func TestARestoreAfterACardWasAnnouncedKeepsItsSummary(t *testing.T) {
-	t.Parallel()
-	h, cards := newCardHarness(t)
-	phone := h.subscribe(h.ada)
-	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Launch claude in api", CreatedAt: h.clock.now()})
-	h.cardsChanged(h.ada)
-	phone.expect(t, notification{Title: cardTitle, Body: "Launch claude in api", Card: "c1"})
-	deadline := time.Now().Add(10 * time.Second)
-	for pushed, _ := h.db.PushedCards(h.ctx); len(pushed[h.ada.ID]) != 1; pushed, _ = h.db.PushedCards(h.ctx) {
-		if time.Now().After(deadline) {
-			t.Fatal("the pushed card was never recorded")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	h.svc.restoreCards(h.ctx)
-	cards.set(h.ada.ID)
-	h.cardsChanged(h.ada)
-	phone.expect(t, notification{Title: cardDecidedTitle, Body: "Declined: Launch claude in api", Clear: true})
-}
-
 func TestACardPushOffersActionsOnlyWhenItShowsTheWholeCard(t *testing.T) {
 	t.Parallel()
 	h, cards := newCardHarness(t)

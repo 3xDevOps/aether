@@ -240,9 +240,14 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	s.sub, s.stop, s.started = sub, cancel, time.Now()
 	s.mu.Unlock()
+	restored := s.restoreCards(ctx)
 	s.wg.Go(func() { s.consume(loopCtx, sub) })
 	s.wg.Go(func() { s.digests(loopCtx) })
-	s.wg.Go(func() { s.restoreCards(loopCtx) })
+	s.wg.Go(func() {
+		for _, member := range restored {
+			s.cardsChanged(loopCtx, member)
+		}
+	})
 	return nil
 }
 
