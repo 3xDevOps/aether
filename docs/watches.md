@@ -154,10 +154,11 @@ the notice is recorded and updated in place as the push resolves:
 | `push` | `delivered` | At least one of your devices' push services took it. `detail` is the device count, such as `2 devices`, followed by the errors of the devices that did not take it. |
 | `push` | `no_destination` | No device had notifications turned on when the notice was recorded or sent. |
 | `push` | `disabled` | Push is off in your notification preferences, or Web Push is not configured on this server; `detail` says which. |
-| `push` | `held_quiet_hours` | Quiet hours hold it; `detail` says until when. |
+| `push` | `held_quiet_hours` | Quiet hours hold it for the digest sent when they end; `detail` says until when. |
+| `push` | `batched` | Your [notification level](#notification-levels) holds it for your next digest. |
 | `push` | `failed` | No device took it after 5 attempts with backoff; `detail` is the push service's error. Each attempt is counted before it is sent, so a server that stops mid-send retries it rather than sending it more than 5 times. |
-| `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or that `watch.update` stopped watching for (`detail` reads `You stopped watching for needs you`), or a push of a watch paused until it expired. |
-| `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a session's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. A watch's needs have a notification of their own, apart from the session's, so the session's own clears never replace them. Removing `needs_you` with `watch.update` withdraws its delivered pushes the same way, with `detail` `Withdrawn: You stopped watching for needs you`; every `watch.update` that leaves `needs_you` out does this, so retrying one whose cleanup failed finishes it. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a quiet-hours summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
+| `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or that `watch.update` stopped watching for (`detail` reads `You stopped watching for needs you`), a push of a watch paused until it expired, or a notice waiting for a digest whose need was resolved or whose watch you paused or deleted first (`detail` says which). |
+| `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a session's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. A watch's needs have a notification of their own, apart from the session's, so the session's own clears never replace them. Removing `needs_you` with `watch.update` withdraws its delivered pushes the same way, with `detail` `Withdrawn: You stopped watching for needs you`; every `watch.update` that leaves `needs_you` out does this, so retrying one whose cleanup failed finishes it. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a digest or a burst's summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
 | `push` | `skipped` | `detail` is `The session notification already sent it`: the session's own notification pushes this to you; see [No double pushes](#no-double-pushes). |
 | `assistant` | `pending`, `delivered`, `failed` | Only on watches whose `source` is `assistant`: the notice written into your assistant conversation. `failed` carries the error; `delivered` with a `detail` means it is in the conversation but its toast could not be raised. One still pending when the server stops is written after it starts again; one of a paused watch waits until you resume it. |
 | `relay` | `pending`, `delivered`, `cleared`, `failed` | One row per session in `relay_to`, named by `run_id`; see [Relaying notices](#relaying-notices). |
@@ -189,10 +190,13 @@ pushing, when you have a device to push to (with none it is
 
 - every `needs_you` notice;
 - `Agent reported done` while the result waits for your review, which the
-  session's notification announces as `Agent reported success, review the
-  result`. Once you chose **Later** or accepted it, the watch pushes it;
+  session's notification announces as `Finished: review the result`. Once
+  you chose **Review later** or accepted it, the watch pushes it. A
+  subsession's result is never the session's notification, so a watch you
+  set on a subsession pushes it;
 - `Failed: ...` while you have not opened the failed session, which the session's
-  notification announces as `Failed, review the result`.
+  notification announces as `Failed, review the result`, unless it is a
+  subsession's.
 
 Every other notice is pushed: the session closed as merged or abandoned, stopped,
 completed, its pull request merged or its checks finished. A watch on someone
@@ -265,16 +269,77 @@ finishes" needs no one polling:
 `notify.prefs.set` takes:
 
 ```json
-{"push": true, "quiet_hours": {"start": "22:00", "end": "07:00", "tz": "Europe/Berlin"}}
+{"push": true, "level": "batched", "digest": {"at": "09:00", "tz": "Europe/Berlin"},
+ "quiet_hours": {"start": "22:00", "end": "07:00", "tz": "Europe/Berlin"}}
 ```
 
-`push` sends watch notices to your Web Push devices; it defaults to `true`,
-and a `notify.prefs.set` that omits it keeps its current value.
-During quiet hours pushes are held, and when they end the held notices go out
-as one push. Changing or removing quiet hours applies to pushes already held.
-The hold is stored, so a server restart does not lose it.
-In-app notices are not affected. Omit `quiet_hours` to turn them off.
-`destinations.push_devices` in the result counts your subscribed devices.
+`push` sends watch notices to your Web Push devices; it defaults to `true`.
+`level` and `digest` are described in [Notification levels](#notification-levels).
+A `notify.prefs.set` that omits `push`, `level` or `digest` keeps its current
+value. `digest.tz` is an IANA zone; empty means UTC, and `Local` is refused
+because the server's zone is not yours. **Settings →
+Notifications** saves the browser's zone with the time.
+
+During quiet hours every push is held: watch notices and your own sessions'
+notifications alike. When they end, the held items go out in one digest at
+once, each line marked `Overnight:`, ahead of anything the level batched. The
+hold is stored, so a server restart does not lose it. Watch pushes a server
+from before levels held for quiet hours are sent again under these rules after
+the upgrade. Changing or removing quiet
+hours applies to pushes already held. In-app notices and the desktop app are not
+held. Omit `quiet_hours` to turn them off. `destinations.push_devices` in the
+result counts your subscribed devices.
+
+### Notification levels
+
+`level` decides which pushes go out at once and which wait for a digest:
+
+| `level` | Pushed at once | In a digest |
+| --- | --- | --- |
+| `blockers` (**Blockers now, the rest daily**) | What needs you: a session's [Needs you](failure-handling.md#needs-you) push and a watch's `needs_you` notice | Everything else, daily at `digest.at` (default `09:00`) |
+| `batched` (**Blockers now, the rest every half hour**, the default) | The same | Everything else, on the next half hour in `digest.tz` |
+| `all` (**Everything at once**) | Everything | Nothing |
+
+"Everything else" is a finished, failed or stopped session (a success to
+review, a failure you have not seen), a merge, checks, reviews and closed pull
+requests. Budget notifications to admins are always sent at once.
+
+A digest is one push, written by the server without a model. It replaces the
+previous digest on your devices and opens the dashboard:
+
+```text
+Aether · 2 need you · 1 failed · 3 done
+api  Fix login test: run the migration?  [Answer]
+api  Launch docs session: Permission requested  [Answer]
+web  Bump deps: Failed: checks failed (lint)  [Open]
+api  Rotate the staging keys: Agent reported done  [Review]
+api  Write docs: Completed  [Review]
++1 done
+```
+
+The title counts every item. At most 5 lines follow: what quiet hours held
+first, then what needs you, then failures, then the rest. Each line is the
+workspace, the title cut at 40 characters, the notice's text on one line, and
+the action. `+N <kind>` counts the items not shown. Agent text is plain text.
+
+Before a digest is sent, each item is checked again. A need that was answered,
+a result you opened or put off on any device, and a notice whose watch you
+paused or deleted are dropped; a digest left empty is not sent. A need of a paused
+session waits until it resumes. While you use a dashboard the digest waits, as
+other pushes do. When no device takes it, it is tried again every minute, 5
+times in all; each watch notice in it reads `pending` with the push service's
+error while it is tried again, then the result. A server that
+stops while it sends a digest can send that digest again after it starts. An
+item a source cannot read now, such as the need of a paused session, stays
+queued without making the digest due.
+
+Within 2 minutes after a push, further pushes join it: each replaces that
+notification with a summary, `3 need you` and one line per item, that opens
+the dashboard. It alerts only when it brings the first need; otherwise it
+replaces the notification quietly. A session counts once, whether its own
+push or a watch's notice about it joined. When a session in the summary stops
+needing you, its line goes and the summary is sent again quietly; once none
+needs you, it is replaced with `No longer needs you`.
 
 ## Methods
 

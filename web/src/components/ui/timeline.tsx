@@ -267,11 +267,14 @@ export function EventRow({
   tone = 'neutral',
   trailing,
   detail,
+  full,
   children,
 }: {
   tone?: Tone
   trailing?: React.ReactNode
   detail?: React.ReactNode
+  /** Shows the whole detail, which a failure's reason needs. */
+  full?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -281,7 +284,7 @@ export function EventRow({
         <span className={cn('min-w-0 flex-1 break-words', tone !== 'neutral' && 'text-text')}>{children}</span>
         {trailing !== undefined && <span className="shrink-0 pl-2 tabular-nums">{trailing}</span>}
       </div>
-      {detail && <div className={cn('line-clamp-4 max-h-[4lh] pl-6 break-words', typeof detail === 'string' && 'whitespace-pre-wrap')}>{detail}</div>}
+      {detail && <div className={cn('pl-6 break-words', !full && 'line-clamp-4 max-h-[4lh]', typeof detail === 'string' && 'whitespace-pre-wrap')}>{detail}</div>}
     </div>
   )
 }

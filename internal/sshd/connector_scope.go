@@ -47,6 +47,7 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodAccountUsage:      scopeRead,
 	protocol.MethodRunList:           scopeRead,
 	protocol.MethodRunGet:            scopeRead,
+	protocol.MethodRunCloseCheck:     scopeRead,
 	protocol.MethodRunACPHistory:     scopeRead,
 	protocol.MethodTerminalHistory:   scopeRead,
 	protocol.MethodRunGitLog:         scopeRead,
@@ -86,6 +87,7 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodWatchCreate:       scopeWrite,
 	protocol.MethodWatchUpdate:       scopeWrite,
 	protocol.MethodWatchDelete:       scopeWrite,
+	protocol.MethodAssistantAsk:      scopeWrite,
 	protocol.MethodRunKill:           scopeControl,
 	protocol.MethodRunClose:          scopeControl,
 	protocol.MethodRunPRCreate:       scopeControl,
@@ -93,6 +95,10 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodRunModeSwitch:     scopeControl,
 	protocol.MethodRunHandoff:        scopeControl,
 }
+
+// ConnectorScopes are the scopes, any one of which lets a connector call
+// method; none for a method no connector may call.
+func ConnectorScopes(method string) []string { return slices.Clone(connectorMethodScopes[method]) }
 
 // connectorScopeRefusal refuses method to a connector call whose grant
 // lacks the method's scope, and every unlisted method to any connector.

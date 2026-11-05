@@ -75,7 +75,7 @@ test('the first run completes', async ({ page, aether }) => {
   await page.getByRole('menuitem', { name: 'Close session…', exact: true }).click()
   const closeDialog = page.getByRole('dialog', { name: 'Close this session?' })
   await expect(closeDialog).toBeVisible()
-  await closeDialog.getByRole('button', { name: 'Merged', exact: true }).click()
+  await closeDialog.getByRole('button', { name: 'Close as merged', exact: true }).click()
   await expect(header).toContainText('Merged')
   await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('Last reasonClosed')
 })

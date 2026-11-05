@@ -85,8 +85,15 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 			}
 		}
 	}
+	// A finished run asks nothing of anyone, so it follows every row that does.
 	slices.SortStableFunc(items, func(a, b protocol.AttentionItem) int {
-		return cmp.Or(compareSince(a.Since, b.Since), cmp.Compare(a.RunID, b.RunID))
+		finished := func(it protocol.AttentionItem) int {
+			if it.Kind == protocol.AttentionKindReady {
+				return 1
+			}
+			return 0
+		}
+		return cmp.Or(cmp.Compare(finished(a), finished(b)), compareSince(a.Since, b.Since), cmp.Compare(a.RunID, b.RunID))
 	})
 	return protocol.AttentionListResult{Items: items}, nil
 }
@@ -381,12 +388,12 @@ var attentionRows = []attentionRow{
 		background: true,
 		completed:  true,
 		holds: func(r *attentionRun) bool {
-			return r.run.Review == domain.ReviewReady &&
+			return !r.run.OutcomeHeld() && r.run.Review == domain.ReviewReady &&
 				(r.run.Status == domain.RunCompleted || r.live() && r.run.Activity == domain.ActivityFinished)
 		},
 		resolvers: owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			item.Reason = "Your agent reports this task is finished"
+			item.Reason = "Finished: review the result"
 			if at := since(r.run.ReviewChangedAt); at != "" {
 				item.Since = at
 			}
@@ -395,8 +402,10 @@ var attentionRows = []attentionRow{
 	{
 		kind:       protocol.AttentionKindFailed,
 		background: true,
-		holds:      func(r *attentionRun) bool { return r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen },
-		resolvers:  owner,
+		holds: func(r *attentionRun) bool {
+			return !r.run.OutcomeHeld() && r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen
+		},
+		resolvers: owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
 			item.Reason = "Agent reported failure; review the result. Session remains open for follow-up."
 			if r.run.Reason != "" && r.run.Reason != "agent reported failure" {

@@ -531,7 +531,12 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
 
   useEffect(() => {
     return () => {
-      attachmentRef.current?.close()
+      const attachment = attachmentRef.current
+      attachment?.close()
+      // Only a lease this session may hold is worth reclaiming. Otherwise an
+      // occupied lease is another client's, and the next mount must mirror
+      // at once instead of retrying through the reconnect window.
+      if (attachment && !attachment.mayHoldControl()) clearControlSession(runID)
       setTerminal(runID, initialTerminal)
       attachmentRef.current = null
       writeRevisionRef.current++
@@ -543,7 +548,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         void Promise.resolve(replay.cancel?.(replay.generation)).catch(() => undefined)
       }
     }
-  }, [runID, setTerminal, terminal])
+  }, [clearControlSession, runID, setTerminal, terminal])
 
 
   useEffect(() => {

@@ -41,7 +41,7 @@ interface Reviewed {
   review?: string
 }
 
-test('a reported success waits in Needs you until answered, and the same run accepts a follow-up', async ({ page, aether }) => {
+test('a reported success waits in Finished, never Needs you, until answered, Not yet withdraws it, and the same run accepts a follow-up', async ({ page, aether }) => {
   const task = 'an agent that reports its own success'
   const { alice, run } = await launch(aether, task)
   const read = async () => (await alice.api.rpc<{ run: Reviewed }>('run.get', { run_id: run.id })).run
@@ -51,25 +51,26 @@ test('a reported success waits in Needs you until answered, and the same run acc
   const card = (column: string) =>
     page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
   const board = () => page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Board', exact: true }).click()
-  await expect(card('Needs you').getByRole('img', { name: 'Ready for review' })).toBeVisible({ timeout: 180_000 })
+  await expect(card('Finished').getByRole('img', { name: 'Finished: review' })).toBeVisible({ timeout: 180_000 })
+  await expect(card('Needs you')).toHaveCount(0)
   expect((await read()).review).toBe('ready')
 
   // Opening the run marks the outcome seen but leaves the question open.
-  await card('Needs you').click({ position: { x: 16, y: 12 } })
+  await card('Finished').click({ position: { x: 16, y: 12 } })
   await expect.poll(async () => (await read()).outcome_unseen ?? false).toBe(false)
   const prompt = page.getByRole('region', { name: 'Completion' })
-  await expect(prompt).toContainText('Your agent reports this task is finished. Mark it complete?')
+  await expect(prompt).toContainText('Your agent reports this task is finished. Mark complete?')
   await expect(prompt).toContainText('outcome review fixture')
   await board()
-  await expect(card('Needs you')).toBeVisible()
+  await expect(card('Finished')).toBeVisible()
 
-  await card('Needs you').click({ position: { x: 16, y: 12 } })
-  await prompt.getByRole('button', { name: 'Not yet' }).click()
-  await expect(prompt).toHaveCount(0)
+  await card('Finished').click({ position: { x: 16, y: 12 } })
+  await prompt.getByRole('button', { name: 'Review later' }).click()
+  await expect(prompt).toHaveText('Finished, kept for later ·Review now')
   await expect.poll(async () => (await read()).review).toBe('later')
   await board()
   await expect(card('Needs you')).toHaveCount(0)
-  await expect(card('Finished').getByRole('img', { name: 'Ready for review' })).toBeVisible()
+  await expect(card('Finished').getByRole('img', { name: 'Finished: review' })).toBeVisible()
 
   const before = await read()
   expect(before.status).toBe('needs-attention')
@@ -77,7 +78,14 @@ test('a reported success waits in Needs you until answered, and the same run acc
   expect(before.container_retained_until).toBeUndefined()
   await card('Finished').click({ position: { x: 16, y: 12 } })
   await page.getByRole('tab', { name: 'Chat', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Message the agent' }).fill('please check the retry path')
+  await prompt.getByRole('button', { name: 'Review now' }).click()
+  await prompt.getByRole('button', { name: 'Not yet' }).click()
+  await expect(prompt).toHaveCount(0)
+  await expect.poll(async () => (await read()).review ?? '').toBe('')
+  const composer = page.getByRole('textbox', { name: 'Message the agent' })
+  await expect(composer).toBeFocused()
+  await expect(composer).toHaveAttribute('placeholder', 'Say what is left to do')
+  await composer.fill('please check the retry path')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect.poll(async () => {
     const continued = await read()
@@ -95,8 +103,8 @@ test('Mark complete closes a reported success as completed', async ({ page, aeth
   await page.goto(alice.url)
   const card = (column: string) =>
     page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
-  await expect(card('Needs you')).toBeVisible({ timeout: 180_000 })
-  await card('Needs you').click({ position: { x: 16, y: 12 } })
+  await expect(card('Finished').getByRole('img', { name: 'Finished: review' })).toBeVisible({ timeout: 180_000 })
+  await card('Finished').click({ position: { x: 16, y: 12 } })
   const prompt = page.getByRole('region', { name: 'Completion' })
   await prompt.getByRole('button', { name: 'Mark complete' }).click()
   await expect(prompt).toHaveCount(0)
@@ -119,8 +127,8 @@ test('a completed run inside its grace relaunches from the composer and its grac
   await page.goto(alice.url)
   const card = (column: string) =>
     page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
-  await expect(card('Needs you')).toBeVisible({ timeout: 180_000 })
-  await card('Needs you').click({ position: { x: 16, y: 12 } })
+  await expect(card('Finished').getByRole('img', { name: 'Finished: review' })).toBeVisible({ timeout: 180_000 })
+  await card('Finished').click({ position: { x: 16, y: 12 } })
   await page.getByRole('region', { name: 'Completion' }).getByRole('button', { name: 'Mark complete' }).click()
   await expect.poll(async () => (await read()).status, { timeout: 60_000 }).toBe('completed')
   const closed = await read()

@@ -151,9 +151,11 @@ func (c *attachConn) sendOKLocked() {
 			return
 		}
 	}
+	// A client acts on the ack as soon as it reads it, so first must already
+	// be closed; c.mu keeps every other stream write behind the ack.
 	c.sent = true
-	c.writeErr = writeJSONLine(c.ch, c.ack)
 	close(c.first)
+	c.writeErr = writeJSONLine(c.ch, c.ack)
 }
 
 func (c *attachConn) setReplayLocked(n int) {

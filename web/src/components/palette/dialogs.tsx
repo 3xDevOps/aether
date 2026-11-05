@@ -3,6 +3,7 @@
 
 import { ClearDoneDialog, ReleaseFinishedDialog } from '@/components/palette/clear-done-dialog'
 import { CloseDialog } from '@/components/palette/close-dialog'
+import { CloseConfirmation } from '@/components/close-warnings'
 import { ForwardDialog } from '@/components/palette/forward-dialog'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { InjectDialog } from '@/components/palette/inject-dialog'
@@ -30,6 +31,7 @@ export function PaletteDialogs() {
       {dialog === 'clear-done' && <ClearDoneDialog />}
       {dialog === 'release-finished' && <ReleaseFinishedDialog />}
       {dialog === 'watch' && <WatchDialog />}
+      <CloseConfirmation />
     </>
   )
 }

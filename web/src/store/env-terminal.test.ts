@@ -23,6 +23,7 @@ function socket(): EnvTerminalSocket {
     setControl: vi.fn(),
     requestTakeover: vi.fn(() => false),
     isEnded: vi.fn(() => false),
+    mayHoldControl: vi.fn(() => false),
     close: vi.fn(),
   }
 }

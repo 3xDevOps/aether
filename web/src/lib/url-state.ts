@@ -1,3 +1,4 @@
+import { mobileScreen } from '@/lib/breakpoints'
 import { isRunView, runRoute } from '@/routes/run/views'
 import type { Route } from '@/store/ui'
 
@@ -24,7 +25,8 @@ export function routeQuery(route: Route): URLSearchParams {
     if (repo && view === 'changes') query.set('repo', repo)
     return query
   }
-  if (route.name === 'board') return query
+  // A phone's empty address opens Needs you, so its board needs a name.
+  if (route.name === 'board' && !window.matchMedia?.(mobileScreen).matches) return query
   query.set('page', route.name)
   const id = route.params[pageIDs[route.name] ?? '']
   if (id) query.set('id', id)
@@ -59,14 +61,45 @@ export function hrefFor(href: string, route: Route): string {
   return url.toString()
 }
 
+/** The route an address names here: a phone's empty address is Needs you, whether it loads or Back returns to it; the board stays one link away. */
+function addressedRoute(query: URLSearchParams): Route {
+  const route = routeFromQuery(query)
+  return route === boardRoute && window.matchMedia?.(mobileScreen).matches ? { name: 'needs-you', params: {} } : route
+}
+
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
+  keepSharedPrompt()
   if (handedLink()) return { name: 'onboarding', params: {} }
-  const route = routeFromQuery(new URLSearchParams(window.location.search))
+  const route = addressedRoute(new URLSearchParams(window.location.search))
   const hash = window.location.hash.slice(1)
   if (route.name !== 'settings' || route.params.section || !hash) return route
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
   return { name: 'settings', params: { section: hash } }
+}
+
+let shared: string | null = null
+
+/**
+ * Share to Aether opens `?new=1&prompt=<text>`. Both leave the address before
+ * any route is written, so neither Back nor a reload brings the text back;
+ * the text waits in memory for takeSharedPrompt. A `prompt` without `new=1`
+ * is dropped.
+ */
+function keepSharedPrompt() {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('new') && !url.searchParams.has('prompt')) return
+  if (url.searchParams.get('new') === '1') shared = url.searchParams.get('prompt') ?? ''
+  url.searchParams.delete('new')
+  url.searchParams.delete('prompt')
+  window.history.replaceState(window.history.state, '', url.toString())
+}
+
+/** The text shared at load, once. */
+export function takeSharedPrompt(): string | null {
+  const text = shared
+  shared = null
+  return text
 }
 
 export type HandedLink = { kind: 'join' | 'claim'; link: string }
@@ -135,8 +168,37 @@ function clearHandedFragment() {
  * ask for: back must not return to the address that was redirected away from.
  */
 export function redirectRoute(store: { setState: (state: { route: Route }) => void }, route: Route) {
-  window.history.replaceState(null, '', hrefFor(window.location.href, route))
+  window.history.replaceState(window.history.state, '', hrefFor(window.location.href, route))
   store.setState({ route })
+}
+
+interface EntryState {
+  /** How many entries the dashboard pushed in this tab below this one. */
+  depth?: number
+  /** The depth of the entry that opened the session this entry shows; later entries of the same session carry it on. */
+  entered?: number
+}
+
+const entryState = (): EntryState => (window.history.state as EntryState | null) ?? {}
+
+/** How many entries the dashboard pushed in this tab below the current one, so back stays in the app while it is above 0. */
+export function historyDepth(): number {
+  const { depth } = entryState()
+  return typeof depth === 'number' ? depth : 0
+}
+
+/** The depth at which the session on screen was opened, absent when a link or reload opened it with nothing of the app below. */
+export function sessionEntry(): number | undefined {
+  const { entered } = entryState()
+  return typeof entered === 'number' && entered > 0 ? entered : undefined
+}
+
+/** The state for an entry pushed above the current one, showing `route` after `previous`. */
+export function pushedEntry(route: Route, previous: Route): EntryState {
+  const depth = historyDepth() + 1
+  if (route.name !== 'run') return { depth }
+  const same = previous.name === 'run' && previous.params.runId === route.params.runId
+  return { depth, entered: same ? sessionEntry() ?? depth : depth }
 }
 
 interface RouteStore {
@@ -149,18 +211,18 @@ interface RouteStore {
  * history entry, and back or forward navigates to the entry's route.
  */
 export function bindRouteToUrl(store: RouteStore): () => void {
-  const sync = (route: Route, push: boolean) => {
+  const sync = (route: Route, previous?: Route) => {
     const next = hrefFor(window.location.href, route)
     if (next === window.location.href) return
-    if (push) window.history.pushState(null, '', next)
-    else window.history.replaceState(null, '', next)
+    if (previous) window.history.pushState(pushedEntry(route, previous), '', next)
+    else window.history.replaceState(window.history.state, '', next)
   }
-  sync(store.getState().route, false)
+  sync(store.getState().route)
   const stop = store.subscribe((state, previous) => {
-    if (state.route !== previous.route) sync(state.route, true)
+    if (state.route !== previous.route) sync(state.route, previous.route)
   })
   const pop = () => {
-    const route = routeFromQuery(new URLSearchParams(window.location.search))
+    const route = addressedRoute(new URLSearchParams(window.location.search))
     store.getState().navigate(route.name, route.params)
   }
   window.addEventListener('popstate', pop)

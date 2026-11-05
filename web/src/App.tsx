@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { useShallow } from 'zustand/react/shallow'
 import { ConnectionError } from '@/components/connection-error'
 import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
@@ -8,16 +9,21 @@ import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { UpdateChecks } from '@/components/update-checks'
+import { ServerTooOldBanner } from '@/components/server-too-old-banner'
 import { UpdateGate } from '@/components/update-gate'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
 import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
+import { serverTooOld } from '@/store/updates'
 
+// The phone tab bar's height includes the bottom inset.
 const toastOffset = {
-  bottom: 'calc(8px + env(safe-area-inset-bottom))',
+  bottom: 'calc(8px + var(--phone-tabs-height, env(safe-area-inset-bottom)))',
   right: 'calc(8px + env(safe-area-inset-right))',
 }
+
+const continueKey = 'aether.server-too-old-continued'
 
 export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
@@ -35,6 +41,15 @@ export function App() {
   // The server enforces the floor; this only explains it, and it outranks
   // every other screen because the server refuses everything else.
   const gated = useStore((s) => s.updateRequired !== null || s.update?.client_update_required === true)
+  const tooOld = useStore(useShallow((s) => serverTooOld(s.update, s.info?.server_version) ?? { client: '', server: '' }))
+  const [continued, setContinued] = useState(() => {
+    try {
+      return window.localStorage.getItem(continueKey)
+    } catch {
+      return null
+    }
+  })
+  const pair = `${tooOld.client}/${tooOld.server}`
   const [handed, setHanded] = useState(handedLink)
   useEffect(() => onHandedLink(setHanded), [])
   useEffect(() => onHandedLinkForgotten(() => setHanded(null)), [])
@@ -84,9 +99,9 @@ export function App() {
 
   useEffect(() => {
     if (!hydrationError || blocked || gated) return
-    // A dead token is not an unreachable server; its error already says how to recover.
+    // An unreachable server is the banner's line, with its Retry; only a dead
+    // token, whose error says how to recover, has no banner of its own.
     if (streamDead) toast.error(hydrationError)
-    else toast.error(`Could not reach the server: ${hydrationError}`)
   }, [hydrationError, streamDead, blocked, gated])
 
   const retry = useCallback(() => {
@@ -133,6 +148,20 @@ export function App() {
           ) : (
             <>
               <AppShell />
+              {tooOld.client && continued !== pair && (
+                <ServerTooOldBanner
+                  client={tooOld.client}
+                  server={tooOld.server}
+                  onContinue={() => {
+                    try {
+                      window.localStorage.setItem(continueKey, pair)
+                    } catch {
+                      // Storage that cannot be written only brings the warning back next load.
+                    }
+                    setContinued(pair)
+                  }}
+                />
+              )}
               {toaster}
             </>
           )}

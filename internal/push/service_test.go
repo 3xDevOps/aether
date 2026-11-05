@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/cost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -78,6 +79,7 @@ type harness struct {
 	bob   *domain.Member
 	keys  int
 	sink  Sink
+	clock clock
 
 	keyPath string
 }
@@ -130,7 +132,7 @@ func (h *harness) start() {
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet, Now: h.clock.now})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
 	}
@@ -142,6 +144,19 @@ func (h *harness) start() {
 	}
 	h.t.Cleanup(func() { _ = svc.Close() })
 	h.svc = svc
+}
+
+// level sets member's notification level.
+func (h *harness) level(member *domain.Member, level string) {
+	h.t.Helper()
+	prefs, err := h.db.GetNotifyPrefs(h.ctx, member.ID)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	prefs.Level = level
+	if err := h.db.PutNotifyPrefs(h.ctx, member.ID, prefs); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 func (h *harness) member(name string) *domain.Member {
@@ -383,6 +398,7 @@ func TestASinkShowsANeedAgainAfterARequestIsAnswered(t *testing.T) {
 func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	h.level(h.ada, protocol.NotifyAll)
 	phone := h.subscribe(h.ada)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
 	id := string(run.ID)
@@ -407,13 +423,13 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, OutcomeUnseen: true})
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported success, review the result", Run: id})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Finished: review the result", Run: id})
 	stamp, _, err := h.db.SetRunReview(h.ctx, run.ID, domain.ReviewAccepted, domain.ReviewReady)
 	if err != nil {
 		t.Fatalf("SetRunReview: %v", err)
 	}
 	h.publish(run, events.RunReviewPayload{Review: stamp.Review, StatusSeq: stamp.StatusSeq})
-	phone.expect(t, cleared)
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: clearedFinishedBody, Run: id, Clear: true})
 	if got := phone.urgency.Load(); got != urgencyNormal {
 		t.Errorf("cleared urgency = %v, want %s", got, urgencyNormal)
 	}
@@ -437,6 +453,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 func TestAnOpenedNeedIsNotPushedAgain(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	h.level(h.ada, protocol.NotifyAll)
 	phone := h.subscribe(h.ada)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
 	id := string(run.ID)
@@ -463,7 +480,7 @@ func TestAnOpenedNeedIsNotPushedAgain(t *testing.T) {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported success, review the result", Run: id})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Finished: review the result", Run: id})
 	if got := phone.urgency.Load(); got != urgencyNormal {
 		t.Errorf("finished urgency = %v, want %s", got, urgencyNormal)
 	}
@@ -813,8 +830,10 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	phone := h.subscribe(h.ada)
 	other := h.subscribe(h.bob)
 	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
-	h.svc.Active(h.ada.ID)
+	// The quiet window starts at Active, so the wait is measured from
+	// before it, not after.
 	started := time.Now()
+	h.svc.Active(h.ada.ID)
 
 	if err := h.svc.Notify(h.ctx, h.ada.ID, `Session "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
@@ -950,5 +969,50 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 	case got := <-heard.heard:
 		t.Fatalf("after a failed read the sink heard %q, want nothing", got)
 	case <-time.After(testQuiet):
+	}
+}
+
+// A subsession's failure is for its parent agent only: it is never pushed
+// or shown in the sink, whatever the parent does.
+func TestASubsessionOutcomeIsNeverPushed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	heard := &sink{heard: make(chan string, 64)}
+	h.sink = heard
+	_ = h.svc.Close()
+	h.start()
+	phone := h.subscribe(h.ada)
+	parent := h.run(h.ada, "Lead the migration", domain.LaunchACP)
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 subsession")
+	reserved, _, err := h.db.ReserveChild(h.ctx, &domain.ChildReservation{
+		ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: h.ws.ID,
+		OwnerID: h.ada.ID, AccountID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP, Task: "Port the schema",
+		IdempotencyKey: "child", RequestHash: "child",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := &domain.Run{ID: reserved.RunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "Port the schema", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	if err = h.db.CreateRunWithID(h.ctx, child); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.db.FinishRunReported(h.ctx, child.ID, domain.RunNeedsAttention, "agent reported failure", domain.ActivityFailed, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(child, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFailed, OutcomeUnseen: true})
+	h.status(parent, domain.RunNeedsAttention, domain.ActivityWaiting, "turn ended without a report")
+	h.status(parent, domain.RunCompleted, "", "agent reported success")
+	h.publish(child, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFailed, OutcomeUnseen: true})
+	phone.expectNone(t, testQuiet)
+	for {
+		select {
+		case got := <-heard.heard:
+			if strings.HasPrefix(got, string(child.ID)+" ") && got != string(child.ID)+" needs nothing" {
+				t.Fatalf("the sink heard the subsession's outcome: %s", got)
+			}
+		default:
+			return
+		}
 	}
 }

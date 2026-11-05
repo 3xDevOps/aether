@@ -16,7 +16,7 @@ import { getShellSocket, initialRunShellDock, shellEnded } from '@/store/termina
 
 /** Mirrors maxRunShells in internal/scheduler/run_shell.go. */
 const maxOwnShells = 4
-const limitReason = `People can run ${maxOwnShells} shells in a session; the agent’s are counted apart. Stop one to open another.`
+export const limitReason = `People can run ${maxOwnShells} shells in a session; the agent’s are counted apart. Stop one to open another.`
 
 export const shellPollMs = (visible: boolean) => (visible ? 2_000 : 10_000)
 

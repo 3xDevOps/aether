@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import type * as React from 'react'
 import { conflictChoiceID, ContextChips } from '@/components/assistant/context-chips'
+import { DictationButton } from '@/components/dictation/dictation-button'
+import { DictationNotice } from '@/components/dictation/dictation-notice'
+import { useDictationState } from '@/components/dictation/state'
 import { ArrowUp, Square } from '@/components/icons'
 import { TemporaryBanner } from '@/components/assistant/temporary'
+import { desktopBridge } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
@@ -23,6 +27,12 @@ function timedOut(err: unknown, method: string, ms: number): string {
   return err instanceof DOMException && err.name === 'TimeoutError' ? `${method} got no answer within ${ms / 1000} seconds` : message(err)
 }
 
+/** The Aether client the dashboard runs in, for the prompt's origin chip: the desktop app, or the Android app's WebView. It decides nothing. */
+function door(): 'desktop' | 'phone' | undefined {
+  if (desktopBridge()) return 'desktop'
+  return /Android/.test(navigator.userAgent) && /; wv\)/.test(navigator.userAgent) ? 'phone' : undefined
+}
+
 export function AssistantComposer({ textarea, running, dock }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
   running: boolean
@@ -36,6 +46,7 @@ export function AssistantComposer({ textarea, running, dock }: {
   const stopping = useStore((s) => s.assistantStopping)
   const error = useStore((s) => s.assistantError)
   const focus = useStore((s) => s.assistantFocus)
+  const dictating = useDictationState(textarea).active
 
   useEffect(() => {
     if (!focus) return
@@ -52,7 +63,7 @@ export function AssistantComposer({ textarea, running, dock }: {
   const send = async () => {
     const state = useStore.getState()
     const text = state.assistantDraft.trim()
-    if (!text || state.assistantSending || running) return
+    if (!text || state.assistantSending || dictating) return
     if (draftConflict(state)) {
       document.getElementById(conflictChoiceID)?.focus()
       return
@@ -88,7 +99,7 @@ export function AssistantComposer({ textarea, running, dock }: {
       }
       try {
         const context = assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext)
-        await api.assistantPrompt(text, attempt.key, context, AbortSignal.timeout(promptTimeout))
+        await api.assistantPrompt(text, attempt.key, context, door(), AbortSignal.timeout(promptTimeout))
       } finally {
         settlePromptKey(attempt.key)
       }
@@ -128,6 +139,7 @@ export function AssistantComposer({ textarea, running, dock }: {
         {dock}
         <TemporaryBanner />
         {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
+        <DictationNotice textarea={textarea} />
         <ContextChips textarea={textarea} />
         <div className={cn('overflow-hidden rounded-control border border-control bg-canvas', focused && 'outline-1 -outline-offset-1 outline-accent shadow-field-focus')}>
           <Textarea
@@ -137,7 +149,7 @@ export function AssistantComposer({ textarea, running, dock }: {
             rows={2}
             value={draft}
             readOnly={busy}
-            placeholder="Ask Aether"
+            placeholder={running ? 'Queue a prompt for after this turn' : 'Ask Aether'}
             className="resize-none [field-sizing:content] max-md:[--composer-lines:6.5rem]"
             style={{ maxHeight: 'var(--composer-lines, 10rem)' }}
             onFocus={() => setFocused(true)}
@@ -151,17 +163,17 @@ export function AssistantComposer({ textarea, running, dock }: {
           />
         </div>
         <div className="flex items-center justify-end gap-2">
-          {running ? (
-            <Button size="sm" variant="danger" disabled={stopping} onClick={() => void stop()}>
+          <DictationButton textarea={textarea} onInsert={setDraft} />
+          {running && (
+            <Button size="sm" variant="secondary" disabled={stopping} onClick={() => void stop()}>
               <Square className="fill-current" />
               {stopping ? 'Stopping…' : 'Stop'}
             </Button>
-          ) : (
-            <Button size="sm" disabled={busy || !draft.trim()} hint={coarse ? undefined : `Send (${shortcutLabel('composer-send')} or Enter)`} onClick={() => void send()}>
-              <ArrowUp />
-              {busy ? 'Sending…' : 'Send'}
-            </Button>
           )}
+          <Button size="sm" disabled={busy || !draft.trim() || dictating} hint={coarse ? undefined : `${running ? 'Queue' : 'Send'} (${shortcutLabel('composer-send')} or Enter)`} onClick={() => void send()}>
+            <ArrowUp />
+            {busy ? 'Sending…' : running ? 'Queue' : 'Send'}
+          </Button>
         </div>
       </div>
     </div>

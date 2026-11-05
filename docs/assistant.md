@@ -73,9 +73,9 @@ server upgrade pins a newer version.
 
 ## Open it
 
-- Select **Assistant** in the sidebar next to **New session**, in the top bar when
-  the sidebar is hidden, or in the phone toolbar. A dot on it means an action
-  waits for your approval.
+- Select **Assistant** in the sidebar next to **New session**, in the top bar
+  when the sidebar is hidden, or the **Assistant** tab on a phone. A dot on it
+  means an action waits for your approval.
 - Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
   a terminal has focus.
 - Run **Ask Aether** from the command palette.
@@ -105,6 +105,13 @@ it exits.
 Aether checks only that the sign-in file exists, not that it still works. When
 the sign-in expires or you want another account, use **Settings > Assistant >
 Sign-in > Sign in again**.
+
+After sign-in the panel asks once **How should your assistant act?**:
+**Ask before acting** (recommended) keeps [approval cards](#approve-an-action),
+and **Act without asking** turns on [auto-approval](#auto-approval), with its
+warning shown under the button. Either answer is stored with your settings;
+a member who already set auto-approval, from Settings or the CLI, or answered
+the suggestion to turn it on, is not asked.
 
 ### Same account as your sessions
 
@@ -256,7 +263,7 @@ Save your environment as a new image; new sessions and terminals start from it
 ```
 
 A launch card instead lists what starts: the kind, workspace, agent with model
-and mode, the account, the fallback when that account's usage runs out, the
+and mode, the effort when set, the permission tier, the account, the fallback when that account's usage runs out, the
 task, and how you hear back. Its title names the
 [permission tier](security.md#permission-tiers) when the launch sets one, from
 your request or your saved choices, as in `Launch claude (acp) in api,
@@ -286,10 +293,41 @@ assistant saves it with `aether_save_launch_defaults`, behind a card that
 spells out every saved choice; a choice for one launch is never saved. The
 launch dialog and **Settings → Launch** show the same choices.
 
-**Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
-turn or session fails the action with the reason, for example `run.kill was
-not approved: the member declined this action`. The assistant is told to report
-the failure and not retry. The assistant cannot approve for you.
+**Approve** runs it. **Decline** or no answer before the card expires fails
+the action with the reason, for example `run.kill was not approved: the member
+declined this action`. The assistant is told to report the failure and not
+retry. The assistant cannot approve for you.
+
+A card outlives the turn that raised it. The server stores it with the exact
+call, so it shows after a reload, on your phone or desktop, after a server
+restart and while the assistant itself needs sign-in, and any of them can
+decide it (`assistant.confirm`); the first decision wins, and a second gets
+`assistant: no such pending confirmation`.
+
+- A card from a turn you started in Aether keeps the call waiting for 10
+  minutes; approving it in that time hands the result to the assistant.
+  **Stop**, the turn ending or the tool call hanging up stops the wait but
+  leaves the card open until it expires.
+- A card from a connector turn (ChatGPT, Claude) does not wait: the call
+  returns `Waiting for approval as card <id>; ...` at once and the card stays
+  open for 24 hours. In a connector turn, a call the connector's scopes do not
+  cover always shows a card, even with auto-approval on.
+- The same call asked again while its card is open shares that card.
+- Approving a card whose call no longer waits makes the server run it with
+  the stored parameters, as you. It first builds the card again; when it
+  would read differently, for example the session changed owner or the
+  template changed, the card fails with what it reads now and nothing runs.
+  The outcome is written into the conversation; the assistant is not woken.
+- Each card runs at most once. A run cut off by a server restart is recorded
+  as `Failed: the server restarted while it ran; check before retrying`, and
+  is not run again.
+- **New conversation** withdraws every open card.
+
+The card's chip names a turn that did not come from the dashboard, such as
+**via ChatGPT** for a turn a connector started with
+[`aether_ask_assistant`](connectors.md#ask-your-assistant). That connector can
+also decide the card with `aether_decide_assistant_card`, by echoing its text. An approved card reads **Approved, running…** until its
+outcome is in the conversation.
 
 Every action is recorded in the transcript. The approval is written before the
 action runs; if it cannot be written, the action does not run. The outcome
@@ -300,9 +338,9 @@ follows when the call returns:
 | `Approved: <summary>` | You approved the card |
 | `Auto-approved: <summary>` | [Auto-approval](#auto-approval) passed it |
 | `Auto-approved by rule <id>: <summary>` | One of your [approval rules](#approval-rules) passed it |
-| `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer in 10 minutes, or the turn ended first. Nothing ran |
+| `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer before the card expired, or a new conversation withdrew it. Nothing ran |
 | `Done: <summary>` | It succeeded, with the session it launched |
-| `Failed: <summary>` | The server refused it, or the approval could not be read or counted, with the exact error. In the second case nothing ran |
+| `Failed: <summary>` | The server refused it, the card changed before it ran, the server restarted while it ran, or the approval could not be read or counted, with the exact error. In the last three cases nothing ran, or you check whether it did |
 
 Pausing and resuming are recorded as `Done` or `Failed` without an approval.
 Each record carries the target's session and workspace id, and the owner when the
@@ -312,15 +350,19 @@ flight instead of writing them into the new one.
 
 ## Approval rules
 
-A card that could become a rule also offers **Always approve** with the
+A card that could become a rule shows four buttons. The third is the
 server's wording of exactly what the rule covers:
 
 ```text
 Launch claude (acp) in api, no fallback: "Fix the flaky login test"
-  Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback
+  [Decline]  [Approve]
+  [Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task]
+  [Approve everything from now on]
 ```
 
-Clicking it approves the card and saves the rule. A later card with the same
+**Always approve …** approves the card and saves the rule. **Approve
+everything from now on** approves the card, then asks to confirm turning on
+[auto-approval](#auto-approval); it is not shown while auto-approval is on. A later card with the same
 key passes without asking and is recorded as `Auto-approved by rule <id>:
 <summary>`. A card of any other kind still asks. Rules are checked before
 [auto-approval](#auto-approval), are read on every call, and never expire.
@@ -351,23 +393,36 @@ Only you create rules, by clicking **Always approve** on a card in the
 Aether app. The assistant, its tool socket and connectors cannot create,
 list or revoke them.
 
-List and revoke them with `assistant.rules` and `assistant.rules.revoke`
-([protocol reference](local-gateway.md)). Each rule shows its wording, the
-card it came from, when it was created and last used, and how many cards it
-passed. A revoke applies to the next card. A rule whose workspace was
-removed, or whose teammate's account is no longer shared with you, stops
-passing cards and is listed as `Inactive: <reason>`. Merging two members
+**Settings → Assistant → Approval rules** lists each rule with its wording,
+the card it came from, when it was created and last used, and how many cards
+it passed. **Revoke** deletes it in one click and applies to the next card.
+The CLI does the same:
+
+```sh
+aether member assistant rules                    # list
+aether member assistant rules --revoke <rule-id>
+```
+
+```
+rule-7k2m9q4xbd  created 2026-11-03 14:02, 3 uses, last 2026-11-03 16:40
+  Always approve launches of Claude Code (Enhanced) in api on your account, permission default, for any task
+  from: Launch claude (acp) in api: "Fix the flaky login test"
+```
+
+A rule whose workspace was removed, or whose teammate's account is no
+longer shared with you, stops passing cards and is listed as `Inactive: <reason>`. Merging two members
 keeps the survivor's rules and does not move the absorbed member's.
 
 After you approve three cards of one kind in a row, the next card of that
-kind highlights **Always approve**.
+kind highlights **Always approve** and says `You approved this kind three
+times in a row.`
 
 ## See what it did
 
 Each action appears in the conversation as a card. The card names the action
 and its target ("Launched session on api with Claude Code", "Merged PR #42") and
-shows its state: running, done, failed, declined by you, expired after 10
-minutes unanswered, withdrawn when the turn ended first, or did not finish. A
+shows its state: running, done, failed, declined by you, expired unanswered,
+withdrawn by a new conversation, or did not finish. A
 call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the session,
 pull request or environment. A failure shows the server's error as is.
@@ -469,7 +524,36 @@ answer within 10 seconds, Stop shows `assistant.cancel got no answer within 10
 seconds` and can be pressed again. A message the server does not accept within
 60 seconds shows `assistant.prompt got no answer within 60 seconds` and stays
 in the box; **Send** retries it under the same idempotency key, so it runs at
-most once. While a turn runs you cannot send another prompt.
+most once.
+
+### The queue
+
+A message sent while a turn runs is queued: the button reads **Queue**, and
+the message shows at the end of the conversation, numbered under **N queued,
+run after this turn**, until its turn starts. Queued messages run in that
+order, each when the turn before it ends.
+**Stop** cancels only the running turn; the next queued message then runs.
+**Remove** takes a queued message off before it runs. At most 5 wait; a sixth
+fails with `assistant: 5 prompts are already queued; wait or remove one`.
+
+The queue is stored on the server, so it survives a reload and a restart. A
+turn the server lost to a restart is marked `Interrupted` with `the server
+restarted while this turn ran; it was not sent again`, and is not rerun; the
+waiting messages then run. A queued message that could not start shows
+**Not sent** with the server's error, above the queued ones; **Retry** puts
+its text back in the message box, once an agent is ready, and **Dismiss**
+removes it. Each queued message names the door it came from. **New conversation** deletes the
+queue with the conversation: waiting messages, and the stored text and
+replies of earlier ones.
+
+Every message records where it came from. A chip on each of the last 50
+names any door other than the dashboard: **from phone** for the Android app,
+**from desktop** for the desktop app, **from ChatGPT (connector)** for a
+connector. The server stamps the origin from
+the connection that carried the message; the Aether app only names which of
+its own clients it is, which labels the message and decides nothing. A
+connector origin is set only by the connector's own route, never by a request
+field.
 
 There is one conversation per member. It survives page reloads and server
 restarts. If the agent stops, the next prompt starts it again. **New
@@ -572,9 +656,12 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
 | `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
-| `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
+| `assistant: 5 prompts are already queued; wait or remove one` | Five messages already wait. **Remove** one, or wait for the running turn |
+| `the server restarted while this turn ran; it was not sent again` | The turn may have done part of its work. Check, then send it again |
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
-| `the member did not answer within 10m0s` | The card timed out. Ask again |
+| `the member did not answer before the card expired` | The card timed out. Ask again |
+| `The card changed after you approved it, so nothing was run.` followed by `You approved: ...` and `It now reads: ...` | The target changed while the card waited. Read the new text and ask again |
+| `the server restarted while it ran; check before retrying` | The call may or may not have taken effect. Check the session before you ask again |
 | `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
 | `the assistant is not configured on this server` | The server runs without the assistant |
 | `assistant: the server is shutting down` | Try again after the restart |

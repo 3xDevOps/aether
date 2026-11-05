@@ -95,7 +95,7 @@ func TestAllowlistAndMemberID(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeMethodNotFound || !strings.Contains(err.Error(), "run.launch") {
 		t.Fatalf("member.invitation.create: %v", err)
 	}
-	for _, method := range []string{protocol.MethodAssistantSettings, protocol.MethodAssistantConfirm, protocol.MethodMemoryRm} {
+	for _, method := range []string{protocol.MethodAssistantSettings, protocol.MethodAssistantConfirm, protocol.MethodAssistantQueueRemove, protocol.MethodMemoryRm} {
 		err = coordtransport.Call(t.Context(), sock, method, map[string]any{"auto_approve": true, "confirmation_id": "c", "approve": true}, nil)
 		if rpcCode(t, err) != protocol.CodeMethodNotFound {
 			t.Fatalf("%s on the tool socket: %v", method, err)
@@ -489,5 +489,22 @@ func TestTemplateLaunchRetryReplaysBeforeTheCard(t *testing.T) {
 	if perr != nil || !strings.Contains(string(got), "run-new") || len(cards) != 1 ||
 		!slices.Equal(caller.launches, []string{"k-done replay=true", "k-new replay=true", "k-new replay=true", "k-new replay=false"}) {
 		t.Fatalf("a new launch = %s, %v with %d cards, launches %v; want one card, then the launch", got, perr, len(cards), caller.launches)
+	}
+}
+
+// A member's own name reaches cards bare only when it cannot read as more
+// of the card.
+func TestAccountOfQuotesNamesThatAreNotPlain(t *testing.T) {
+	for name, want := range map[string]string{
+		"Grace":                                  "Grace's account",
+		"Dana O'Neill-Okafor Jr.":                "Dana O'Neill-Okafor Jr.'s account",
+		"Zoë 2":                                  "Zoë 2's account",
+		"Grace, no fallback; permission default": `"Grace, no fallback; permission default"'s account`,
+		"Grace\nApprove":                         `"Grace\nApprove"'s account`,
+		`Grace"`:                                 `"Grace\""'s account`,
+	} {
+		if got := AccountOf(name); got != want {
+			t.Errorf("AccountOf(%q) = %s, want %s", name, got, want)
+		}
 	}
 }

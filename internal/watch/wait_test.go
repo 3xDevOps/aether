@@ -615,7 +615,7 @@ func TestFailedChecksWakeWithTheFailingNames(t *testing.T) {
 		f.checks[shaOne] = append(f.checks[shaOne], fakeCheck{ID: 3, Name: "deploy", Status: "completed", Conclusion: "cancelled", Completed: "2026-10-27T00:01:00Z"})
 	})
 	h.clock.advance(2 * PRPollBusy)
-	h.eventually("the wake", func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
+	h.awaitWake(owner.ID)
 	w := h.only(owner.ID)
 	if w.Outcome != "failed" || w.Detail != "failing checks: lint" || w.Observed.Checks.Failed != 1 || w.Observed.Checks.Cancelled != 1 || w.HeadSHA != shaOne {
 		t.Fatalf("wait = %+v, want failed naming only lint, the cancelled deploy counted apart", w)
@@ -645,9 +645,35 @@ func TestRequiredChecksDecideAChecksWait(t *testing.T) {
 		f.checks[shaOne] = append(f.checks[shaOne], fakeCheck{ID: 2, Name: "build", Status: "completed", Conclusion: "success", Completed: "2026-10-27T00:02:00Z"})
 	})
 	h.clock.advance(2 * PRPollIdle)
-	h.eventually("the wake", func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
+	h.awaitWake(owner.ID)
 	if w := h.only(owner.ID); w.Outcome != "passed" || !strings.Contains(w.Summary, "(required checks)") {
 		t.Fatalf("wait = %+v, want passed on the required checks", w)
+	}
+}
+
+// A read of GitHub that spans a change counts as made when it began, so
+// the next poll reads the change rather than reusing that read.
+func TestAReadThatSpansAChangeIsNotReusedByTheNextPoll(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	gh.set(func(f *fakeGitHub) { f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "lint", Status: "in_progress"}} })
+	owner := h.run(h.ada, "Ship")
+	h.mustReport(owner, "pr:acme/app#7:checks")
+	held := &heldRequest{path: "/repos/acme/app/branches/main", gate: gate{arrived: make(chan struct{}), release: make(chan struct{})}}
+	gh.hold.Store(held)
+	h.clock.advance(2 * PRPollBusy)
+	select {
+	case <-held.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the poll never read the required checks")
+	}
+	gh.set(func(f *fakeGitHub) {
+		f.checks[shaOne][0] = fakeCheck{ID: 1, Name: "lint", Status: "completed", Conclusion: "failure", Completed: "2026-10-27T00:01:00Z"}
+	})
+	h.clock.advance(2 * PRPollBusy)
+	close(held.release)
+	h.awaitWake(owner.ID)
+	if w := h.only(owner.ID); w.Outcome != "failed" {
+		t.Fatalf("wait = %+v, want failed on the checks read by the next poll", w)
 	}
 }
 
@@ -886,7 +912,7 @@ func TestANamedCommitNeverSeenResolvesAsSuperseded(t *testing.T) {
 	owner := h.run(h.ada, "Pushed 2222")
 	h.mustReport(owner, "pr:acme/app#7:checks@"+shaTwo)
 	h.clock.advance(namedHeadGrace + PRPollIdle + PRPollIdle/5)
-	h.eventually("the wake", func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
+	h.awaitWake(owner.ID)
 	if w := h.only(owner.ID); w.Outcome != "superseded" {
 		t.Fatalf("wait = %+v, want superseded", w)
 	}
@@ -941,18 +967,14 @@ func TestAWakeStillDueIsNotPurged(t *testing.T) {
 	}
 }
 
-// awaitWake waits for run's one wake, moving the clock a poll at a time as
-// a pull request poll can read GitHub just before a change reaches it, and
-// says where its wait stands when none comes.
+// awaitWake waits for run's one wake from the poll the clock last made
+// due, and says where its wait stands when none comes.
 func (h *waitHarness) awaitWake(run domain.RunID) {
 	h.t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for i := 1; len(h.inbox.messages(run)) != 1; i++ {
+	for len(h.inbox.messages(run)) != 1 {
 		if time.Now().After(deadline) {
 			h.t.Fatalf("no wake for %s at %s; wait = %+v", run, h.clock.now().UTC().Format(time.RFC3339), h.waits(run))
-		}
-		if i%50 == 0 {
-			h.clock.advance(PRPollBusy + PRPollBusy/5)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

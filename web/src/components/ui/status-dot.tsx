@@ -13,6 +13,7 @@ export type Tone =
   | 'interrupted'
   | 'disconnected'
   | 'done'
+  | 'held'
   | 'closed'
   | 'paused'
   | 'neutral'
@@ -29,6 +30,7 @@ const classes: Record<Tone, { text: string; soft: string }> = {
   failed: { text: 'text-state-failed', soft: 'bg-state-failed-soft' },
   interrupted: { text: 'text-state-failed', soft: 'bg-state-failed-soft' },
   done: { text: 'text-state-done', soft: 'bg-state-done-soft' },
+  held: { text: 'text-icon-faint', soft: 'bg-chrome' },
   closed: { text: 'text-muted', soft: 'bg-chrome' },
   paused: { text: 'text-state-paused', soft: 'bg-state-paused-soft' },
   neutral: { text: 'text-muted', soft: 'bg-chrome' },
@@ -86,6 +88,12 @@ const shapes: Record<Tone, React.ReactNode> = {
     </>
   ),
   done: (
+    <>
+      <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M3.2 5.1 4.5 6.4 6.9 3.8" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  held: (
     <>
       <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" />
       <path d="M3.2 5.1 4.5 6.4 6.9 3.8" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />

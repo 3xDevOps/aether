@@ -8,7 +8,7 @@ import { prefersReducedMotion } from '@/lib/hooks'
 import { runLabel, stateWords } from '@/lib/status'
 import { cn, focusRingInset } from '@/lib/utils'
 import { ReplyComposer, cardAction } from '@/routes/board/card-action'
-import { ticks, xOf } from '@/routes/board/lanes/axis'
+import { type Tick, ticks, xOf } from '@/routes/board/lanes/axis'
 import { EdgeHits, EdgeStrokes, drawEdges, edgeShape, type EdgeAnchor } from '@/routes/board/lanes/connectors'
 import { laneEdges, type EdgesInput, type LaneEdge } from '@/routes/board/lanes/edges'
 import { EdgePopover, FamilyPopover, LaneConversations, LaneLinks, LanePopoverContent, RunPopover } from '@/routes/board/lanes/lane-popover'
@@ -31,6 +31,20 @@ const onlyOverlaps = new Set(['message'] as const)
 type Pop =
   | { kind: 'lane'; key: string; run?: string; x: number; y: number; h: number; at?: number; reply?: boolean }
   | { kind: 'edge'; edges: LaneEdge[]; x: number; y: number }
+
+/** An estimate of one axis character at text-ui-xs; tabular digits keep it close. */
+const tickCharWidth = 7
+
+function spaced(marks: Tick[], g: LaneGeometry): Tick[] {
+  let right = -Infinity
+  return marks.filter((tick) => {
+    const x = xOf(tick.t, g.window, g.width)
+    const half = (tick.label.length * tickCharWidth) / 2
+    if (x - half < right + 8) return false
+    right = x + half
+    return true
+  })
+}
 
 function treeLabel(lane: Lane, now: number): string {
   switch (lane.kind) {
@@ -456,7 +470,7 @@ export function LanesView(props: LanesViewProps) {
     popLane && { key: popLane.key, className: 'bg-selection' },
     !hoveredLane && !popLane && treeFocused && activeLane && activeLane.kind !== 'section' && { key: activeLane.key, className: 'bg-hover' },
   ].filter((item): item is { key: string; className: string } => Boolean(item))
-  const tickMarks = ticks(g.window, now)
+  const tickMarks = spaced(ticks(g.window, now), g)
   const popRun = popLane?.kind === 'run' ? popLane : undefined
   const totalWidth = g.labelWidth + g.width + trackGutter
 

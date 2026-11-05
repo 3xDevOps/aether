@@ -715,7 +715,7 @@ var (
 		"aether_pr_status", "aether_overlaps", "aether_memory_search", "search", "fetch", "aether_launch_options", "aether_changes", "aether_watches"}
 	writeTools = []string{"aether_launch_session", "aether_message_session", "aether_answer", "aether_pause_session",
 		"aether_resume_session", "aether_mark_reviewed", "aether_session_lifecycle", "aether_memory_add", "aether_memory_pin",
-		"aether_watch", "aether_unwatch"}
+		"aether_watch", "aether_unwatch", "aether_ask_assistant", "aether_decide_assistant_card"}
 	controlTools = []string{"aether_decide_approval", "aether_stop_session", "aether_handoff_session",
 		"aether_pr_create", "aether_pr_merge", "aether_switch_session_mode"}
 )

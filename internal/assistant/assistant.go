@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -68,6 +69,13 @@ type Config struct {
 	// Preferences are the members' private preferences the assistant reads
 	// and saves.
 	Preferences *preference.Service
+	// ConnectorScopes names the connector scopes, any one of which lets a
+	// connector call method; none for a method no connector may call.
+	ConnectorScopes func(method string) []string
+	// ConnectorGrant returns the scopes member's connector connectorID holds
+	// now, or why it no longer acts for them, such as a revocation. Nil keeps
+	// the scopes a connector turn's prompt was sent with.
+	ConnectorGrant func(ctx context.Context, member domain.MemberID, connectorID string) ([]string, error)
 }
 
 // Host is the scheduler's side of the assistant: its container and the
@@ -90,6 +98,8 @@ type Service struct {
 
 	mu      sync.Mutex
 	members map[domain.MemberID]*member
+	// closing refuses new background work; it is set under mu.
+	closing bool
 
 	watches Watches
 }
@@ -118,6 +128,8 @@ type member struct {
 	// removing refuses new sessions and view contexts while the member is
 	// being removed. It is written under both op and mu.
 	removing bool
+	// raising orders raising cards, so equal calls share one.
+	raising sync.Mutex
 	// settings orders changes to the member's settings with the calls they
 	// decide.
 	settings sync.Mutex
@@ -143,6 +155,15 @@ type member struct {
 	view       *protocol.AssistantViewContext
 	viewAt     time.Time
 	viewSource string
+	// origin is the origin of the prompt of the turn running or last run.
+	origin Origin
+	// running is the queue entry whose turn runs; once sent, sentOn is the
+	// session it went to and sentAfter the turn before it.
+	running   string
+	sentOn    *session
+	sentAfter int64
+	// queue serializes sending queued prompts.
+	queue sync.Mutex
 
 	wmu      sync.Mutex
 	watchers map[chan struct{}]struct{}
@@ -229,6 +250,7 @@ func (s *Service) logPath(id domain.MemberID) string {
 func (s *Service) Close() error {
 	s.cancel()
 	s.mu.Lock()
+	s.closing = true
 	members := make([]*member, 0, len(s.members))
 	for _, m := range s.members {
 		members = append(members, m)
@@ -296,10 +318,18 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	if err != nil {
 		return protocol.AssistantStatus{}, err
 	}
+	cards, err := s.openCards(ctx, id)
+	if err != nil {
+		return protocol.AssistantStatus{}, err
+	}
+	queue, err := s.queueOf(ctx, id, row.Generation)
+	if err != nil {
+		return protocol.AssistantStatus{}, err
+	}
 	status := protocol.AssistantStatus{
-		Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(),
+		Agents: agents, Error: failure, Confirmations: cards, Queue: queue,
 		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
-		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary,
+		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary, ApprovalChosen: settings.ApprovalChosen,
 	}
 	switch {
 	case live != nil:
@@ -448,18 +478,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: s.preferenceCaller(m, actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}), Confirm: s.approver(m), Member: string(m.id),
-		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
-	if s.watches != nil {
-		srv.Follow = func(ctx context.Context, run string) {
-			if _, followErr := s.watches.Follow(ctx, m.id, domain.RunID(run)); followErr != nil {
-				body := "Watching it failed: " + followErr.Error() + "\n\nYou will not be notified when it needs you or finishes."
-				if noteErr := s.note(ctx, m, acphost.Notice{Severity: "warning", Title: "Session " + run + " is not watched", Description: body}); noteErr != nil {
-					slog.Warn("assistant: watch the session", "run", run, "member", m.id, "error", errors.Join(followErr, noteErr))
-				}
-			}
-		}
-	}
+	srv := s.toolServer(m)
 	s.wg.Go(func() {
 		if serveErr := srv.Serve(sessCtx, ln); serveErr != nil {
 			slog.Warn("assistant: tool socket stopped", "member", m.id, "error", serveErr)
@@ -473,6 +492,24 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 	live.cancel = cancel
 	s.wg.Go(func() { s.watch(m, live) })
 	return live, nil
+}
+
+// toolServer is the member's tool socket server, which also runs the calls
+// of cards approved after their call stopped waiting.
+func (s *Service) toolServer(m *member) *tools.Server {
+	srv := &tools.Server{Caller: grantGate{Caller: s.preferenceCaller(m, actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}), s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
+		View: func() protocol.AssistantViewContextResult { return s.turnView(m) }}
+	if s.watches != nil {
+		srv.Follow = func(ctx context.Context, run string) {
+			if _, followErr := s.watches.Follow(ctx, m.id, domain.RunID(run)); followErr != nil {
+				body := "Watching it failed: " + followErr.Error() + "\n\nYou will not be notified when it needs you or finishes."
+				if noteErr := s.note(ctx, m, acphost.Notice{Severity: "warning", Title: "Session " + run + " is not watched", Description: body}); noteErr != nil {
+					slog.Warn("assistant: watch the session", "run", run, "member", m.id, "error", errors.Join(followErr, noteErr))
+				}
+			}
+		}
+	}
+	return srv
 }
 
 func (s *Service) openSession(ctx context.Context, m *member, agent string, launch scheduler.AssistantLaunch, row *store.AssistantSession) (*session, error) {
@@ -507,6 +544,8 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 	att := exec.Attachment()
 	stderr := &tail{max: stderrTail}
 	go func() { _, _ = io.Copy(stderr, att.Stderr()) }()
+	// The callback runs before Start returns; it learns its session then.
+	var own atomic.Pointer[acphost.Session]
 	acpSess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath: s.logPath(m.id),
 		Cwd:     scheduler.AssistantCwd,
@@ -515,13 +554,9 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 		}}},
 		SessionID: resume,
 		Logger:    slog.Default().With("assistant", m.id),
-		OnState: func(st acphost.TurnState) {
-			if !st.Working && st.Tasks == 0 {
-				m.confirms.cancelAll()
-			}
-			m.notify()
-		},
+		OnState:   s.onState(m, own.Load),
 	})
+	own.Store(acpSess)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("assistant: open the %s session%s: %w", agent, stderr.suffix(), err), stopExec(exec))
 	}
@@ -612,17 +647,20 @@ func (s *Service) listen(id domain.MemberID) (*net.UnixListener, error) {
 func (s *Service) watch(m *member, live *session) {
 	<-live.acp.Done()
 	live.cancel()
-	m.confirms.cancelAll()
 	if err := s.endExec(live, m.id); err != nil {
 		slog.Warn("assistant: the adapter may still run; the next start stops it", "member", m.id, "error", err)
 	}
 	m.mu.Lock()
-	if m.sess == live {
+	ended := m.sess == live
+	if ended {
 		m.sess = nil
 		m.signalLocked()
 	}
 	m.mu.Unlock()
 	close(live.ended)
+	if ended {
+		s.spawn(func() { s.sessionEnded(m, live) })
+	}
 }
 
 func (s *Service) stop(ctx context.Context, m *member) error {
@@ -673,6 +711,9 @@ func resolve(agents []protocol.AssistantAgent, requested, stored string) (string
 func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	m.reset.Lock()
 	defer m.reset.Unlock()
+	if err := s.dropQueue(ctx, m); err != nil {
+		return err
+	}
 	if err := s.stop(ctx, m); err != nil {
 		return err
 	}
@@ -681,6 +722,9 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 		return err
 	}
 	if err = s.stopStale(ctx, m, row); err != nil {
+		return err
+	}
+	if err = s.withdrawAll(ctx, m); err != nil {
 		return err
 	}
 	if err = s.cfg.Host.DiscardAssistantState(ctx, m.id); err != nil {
@@ -760,46 +804,17 @@ func (s *Service) Reset(ctx context.Context, id domain.MemberID) (protocol.Assis
 }
 
 type attempt struct {
-	done chan struct{}
-	err  error
-}
-
-// Prompt sends text to the assistant, starting it first when needed, unless a
-// turn is running. A key that is in flight or was accepted, even before a
-// restart, is not sent again: a duplicate waits for the first attempt and
-// returns its result.
-func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string, view *protocol.AssistantViewContext) error {
-	m := s.member(id)
-	a, first := m.begin(key)
-	if !first {
-		select {
-		case <-a.done:
-			return a.err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	conv := m.conversation()
-	if err := m.waitForNotes(ctx, conv); err != nil {
-		m.finish(key, a, err)
-		return err
-	}
-	m.share.RLock()
-	dispatched, err := s.send(ctx, m, conv, text, key, view)
-	m.share.RUnlock()
-	if err != nil && !dispatched {
-		m.finish(key, a, err)
-		return err
-	}
-	m.finish(key, a, nil)
-	return err
+	done  chan struct{}
+	entry Entry
+	err   error
 }
 
 // send dispatches text under m.op, so a reset cannot fall between the key
 // check, the dispatch and saving the key under the generation it ran in.
 // dispatched is true once the agent may have the prompt; its key then stays
 // reserved even if the caller left or saving it failed.
-func (s *Service) send(ctx context.Context, m *member, conv context.Context, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
+func (s *Service) send(ctx context.Context, m *member, conv context.Context, generation int64, text, key string, view *protocol.AssistantViewContext,
+	origin Origin) (dispatched bool, err error) {
 	m.op.Lock()
 	defer m.op.Unlock()
 	if conv.Err() != nil {
@@ -809,12 +824,15 @@ func (s *Service) send(ctx context.Context, m *member, conv context.Context, tex
 	if err != nil {
 		return false, err
 	}
+	if row.Generation != generation {
+		return false, errQueueReset
+	}
 	seen, err := s.cfg.Store.HasAssistantPromptKey(ctx, m.id, row.Generation, key)
 	if err != nil {
 		return false, fmt.Errorf("assistant: %w", err)
 	}
 	if seen {
-		return true, nil
+		return true, errAlreadySent
 	}
 	if view, err = s.sharedView(ctx, m, view); err != nil {
 		return false, err
@@ -853,12 +871,22 @@ func (s *Service) send(ctx context.Context, m *member, conv context.Context, tex
 		}
 		settle()
 	}
+	// The turn's calls raise cards from origin. A prompt refused because
+	// a turn runs gives the running turn its origin back.
+	m.mu.Lock()
+	previous := m.origin
+	m.origin = origin
+	m.mu.Unlock()
 	defer func() {
 		if !dispatched {
 			restore()
 			settle()
+			m.mu.Lock()
+			m.origin, m.sentOn = previous, nil
+			m.mu.Unlock()
 		}
 	}()
+	m.sending(live)
 	started, err := promptLive(ctx, live, text, view, notes, refused)
 	if errors.Is(err, acphost.ErrPromptUnsent) {
 		// The adapter died after ensure saw it alive and before the prompt
@@ -871,6 +899,7 @@ func (s *Service) send(ctx context.Context, m *member, conv context.Context, tex
 		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
 			return false, err
 		}
+		m.sending(live)
 		started, err = promptLive(ctx, live, text, view, notes, refused)
 	}
 	switch {
@@ -931,10 +960,10 @@ func (m *member) begin(key string) (*attempt, bool) {
 
 // finish records a's result. A failed key is forgotten, so the caller can
 // retry it. A reset in between has already dropped a.
-func (m *member) finish(key string, a *attempt, err error) {
+func (m *member) finish(key string, a *attempt, entry Entry, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	a.err = err
+	a.entry, a.err = entry, err
 	close(a.done)
 	if m.attempts[key] != a {
 		return
@@ -947,6 +976,17 @@ func (m *member) finish(key string, a *attempt, err error) {
 		delete(m.attempts, m.done[0])
 		m.done = m.done[1:]
 	}
+}
+
+// turn is the origin of the turn running or last run, and its queue entry
+// while it runs.
+func (m *member) turn() (Origin, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.origin.Door == "" {
+		return Door(protocol.AssistantDoorDashboard), m.running
+	}
+	return m.origin, m.running
 }
 
 func (s *Service) liveSession(id domain.MemberID) (*acphost.Session, error) {
@@ -962,8 +1002,12 @@ func (s *Service) Cancel(ctx context.Context, id domain.MemberID) error {
 	if err != nil {
 		return err
 	}
+	// Only the stopped turn's waits end: the next queued turn may start
+	// before Cancel returns.
+	m := s.member(id)
+	turn := m.turnNow()
 	err = sess.Cancel(ctx)
-	s.member(id).confirms.cancelAll()
+	m.confirms.release(turn)
 	return err
 }
 
@@ -973,10 +1017,6 @@ func (s *Service) Answer(id domain.MemberID, requestID, optionID string, values 
 		return err
 	}
 	return sess.Answer(requestID, optionID, values)
-}
-
-func (s *Service) Confirm(id domain.MemberID, confirmationID string, approve bool) error {
-	return s.member(id).confirms.decide(confirmationID, approve)
 }
 
 type tail struct {

@@ -9,6 +9,7 @@ import { copyTerminalText } from '@/lib/term-clipboard'
 import { defaultTerminalFontSize, terminalZoomKey } from '@/lib/term-font'
 import type { TerminalHistoryLine } from '@/lib/types'
 import { useStore } from '@/store'
+import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import type { HistoryAnchor, HistoryCache, SavedHistoryView } from './history-cache'
 
 const padding = 8
@@ -76,7 +77,9 @@ export function TerminalHistory({
   const [match, setMatch] = useState<number | null>(null)
   const [viewport, setViewport] = useState<Viewport>({ top: 0, left: 0, height: 0, width: 0 })
   const [windowStart, setWindowStart] = useState<number | null>(null)
-  const fontSize = useStore((state) => state.terminalFontSize)
+  const chosenSize = useStore((state) => state.terminalFontSize)
+  const fitWidth = useStore((state) => state.terminalFitWidth)
+  const phone = useMediaQuery(phoneScreen)
   const scroller = useRef<HTMLDivElement>(null)
   const anchor = useRef<HistoryAnchor>({ row: 0, offset: 0, left: 0 })
   const lastTop = useRef(0)
@@ -96,6 +99,9 @@ export function TerminalHistory({
   const scrollbarPointer = useRef<number | null>(null)
   const pendingCapture = useRef<PendingCapture | null>(null)
   const terminal = controller.terminal
+  // A phone fitted to width drew the screen at the size that fits it, and the
+  // history keeps that size rather than the chosen one.
+  const fontSize = phone && fitWidth && frozen ? frozen.fontSize : chosenSize
   const scale = frozen ? fontSize / frozen.fontSize : 1
   const cellHeight = frozen ? frozen.cellHeight * scale : 1
   const cellWidth = frozen ? frozen.cellWidth * scale : 1

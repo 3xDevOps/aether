@@ -494,13 +494,17 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	s.assistant = assistant.New(assistant.Config{
-		Dir:         filepath.Join(cfg.DataDir, "assistant"),
-		Store:       s.db,
-		Runs:        s.sched,
-		Host:        s.sched,
-		Caller:      func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
-		Bus:         s.bus,
-		Preferences: preferences,
+		Dir:             filepath.Join(cfg.DataDir, "assistant"),
+		Store:           s.db,
+		Runs:            s.sched,
+		Host:            s.sched,
+		Caller:          func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
+		Bus:             s.bus,
+		Preferences:     preferences,
+		ConnectorScopes: sshd.ConnectorScopes,
+		ConnectorGrant: func(ctx context.Context, member domain.MemberID, id string) ([]string, error) {
+			return s.ssh.ConnectorGrantScopes(ctx, member, id)
+		},
 	})
 	sshCfg.Services.Assistant = s.assistant
 	sshCfg.Services.Preferences = preferences
@@ -699,6 +703,9 @@ func (s *Server) Run(ctx context.Context) error {
 		return errors.Join(fmt.Errorf("server: adapter manager: %w", err), s.Close())
 	}
 	if err := s.startServices(ctx); err != nil {
+		return errors.Join(err, s.Close())
+	}
+	if err := s.assistant.Resume(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
 	if s.egress != nil {

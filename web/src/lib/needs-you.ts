@@ -37,7 +37,6 @@ export type NeedsYouID =
   | 'disconnected'
   | 'blocked'
   | 'needs-input'
-  | 'ready'
   | 'failed'
 
 export interface PrimaryAction {
@@ -48,7 +47,7 @@ export interface PrimaryAction {
 export const openAction: PrimaryAction = { kind: 'open', label: 'Open' }
 
 /** How a row in Needs you is labelled: a request, or a run that needs intervention. */
-export type AttentionState = 'needs-you' | 'ready' | 'failed' | 'disconnected'
+export type AttentionState = 'needs-you' | 'failed' | 'disconnected'
 
 export interface NeedsYouCondition {
   id: NeedsYouID
@@ -115,7 +114,7 @@ export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen' | 'sta
     (run.status === 'completed' || run.status === 'failed' || run.state === 'finished' || run.state === 'failed')
 }
 
-/** A reported success the owner has not answered, or answered Not yet. */
+/** A reported success the owner has not answered, or put off for later. */
 export function awaitsCompletion(run: Pick<Run, 'status' | 'state' | 'review'>): boolean {
   return (run.review === 'ready' || run.review === 'later') &&
     (run.status === 'completed' || (isLive(run) && run.state === 'finished'))
@@ -123,6 +122,11 @@ export function awaitsCompletion(run: Pick<Run, 'status' | 'state' | 'review'>):
 
 export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>): boolean {
   return !isTerminal(run.status) && (ctx.pausedRuns[run.id] ?? run.paused) === true
+}
+
+/** A subsession's reported outcome is for its parent agent only, never a person; a detached one is a session of its own. Mirrors domain.Run.OutcomeHeld. */
+export function outcomeHeld(run: Pick<Run, 'parent_run_id' | 'detached'>): boolean {
+  return Boolean(run.parent_run_id) && run.detached !== true
 }
 
 // Room status loads only while the run is open; an older gateway's snapshot has no controller.
@@ -265,24 +269,11 @@ export const needsYouConditions: NeedsYouCondition[] = [
       (asks(run) || turnCutShort(run) || waitBroken(run)) && run.mode !== 'headless' ? { kind: 'reply', label: 'Reply' } : openAction,
   }),
   condition({
-    id: 'ready',
-    state: 'ready',
-    target: 'run',
-    background: true,
-    completed: true,
-    // Leaves Needs you only on Mark complete or Not yet; opening the run does not answer it.
-    holds: (run) => run.review === 'ready' && awaitsCompletion(run),
-    resolvers: (run) => [run.member_id],
-    reason: () => 'Your agent reports this task is finished',
-    action: () => ({ kind: 'open', label: 'Review' }),
-    since: (run) => run.review_changed_at,
-  }),
-  condition({
     id: 'failed',
     state: 'failed',
     target: 'changes',
     background: true,
-    holds: (run) => run.state === 'failed' && run.outcome_unseen === true,
+    holds: (run) => run.state === 'failed' && run.outcome_unseen === true && !outcomeHeld(run),
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
     reason: (run) =>

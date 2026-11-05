@@ -8,13 +8,13 @@ import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
 import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
-import { isArchivable, type RunRecord } from '@/store/runs'
+import { isTerminal, type RunRecord } from '@/store/runs'
 import { listedRuns, runGroups, runRows, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
 
 export type BoardCard = RunTree
 
 export interface BoardColumn {
-  key: Exclude<RunGroup, 'review'>
+  key: RunGroup
   label: string
   cards: BoardCard[]
 }
@@ -33,7 +33,7 @@ function archivedRows(s: RunsInput): RunRow[] {
   for (const run of Object.values(s.ctx.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
     if (s.mineOnly && run.member_id !== s.ctx.viewerID) continue
-    if (!run.archived_at || !isArchivable(run.status)) continue
+    if (!run.archived_at || !isTerminal(run.status)) continue
     const shown = presentRun(run, s.ctx)
     rows.push({
       run,
@@ -50,7 +50,7 @@ function archivedRows(s: RunsInput): RunRow[] {
 
 export function board(s: RunsInput): BoardData {
   const groups = runGroups(s)
-  // Ready for review heads Finished: the work is done, and only the owner's answer is left.
+  // Finished: review heads Finished: the work is done, and only the owner's answer is left.
   const cards = { ...groups, finished: [...groups.review, ...groups.finished] }
   return {
     columns: (['needs-you', 'working', 'finished'] as const).map((key) => ({

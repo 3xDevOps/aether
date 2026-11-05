@@ -2478,6 +2478,89 @@ CREATE UNIQUE INDEX idx_assistant_rules_key ON assistant_rules(member_id, method
 ALTER TABLE assistant_settings ADD COLUMN rule_streak_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE assistant_settings ADD COLUMN rule_streak INTEGER NOT NULL DEFAULT 0;
 `,
+	// v103: approval_chosen records that the member chose how the assistant
+	// acts, so the dashboard asks once. Turning auto-approval on or answering
+	// the suggestion to was a choice.
+	`
+ALTER TABLE assistant_settings ADD COLUMN approval_chosen INTEGER NOT NULL DEFAULT 0;
+UPDATE assistant_settings SET approval_chosen = 1 WHERE auto_approve = 1 OR suggest_off = 1 OR suggest_snoozes > 0;
+`,
+	// v104: assistant approval cards outlive the turn that raised them. A
+	// card holds the exact call it approves and the conversation generation
+	// it belongs to; state 'running' is the claim taken before that call
+	// runs, so it runs at most once.
+	`
+CREATE TABLE assistant_cards (
+	id          TEXT PRIMARY KEY,
+	member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	generation  INTEGER NOT NULL,
+	method      TEXT NOT NULL,
+	params      TEXT NOT NULL,
+	card        TEXT NOT NULL,
+	origin      TEXT NOT NULL,
+	state       TEXT NOT NULL,
+	action_id   TEXT NOT NULL DEFAULT '',
+	result      TEXT NOT NULL DEFAULT '',
+	error       TEXT NOT NULL DEFAULT '',
+	shown_at    INTEGER NOT NULL DEFAULT 0,
+	decided_at  INTEGER NOT NULL DEFAULT 0,
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	updated_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_assistant_cards_member ON assistant_cards(member_id, created_at);
+CREATE INDEX idx_assistant_cards_open ON assistant_cards(state) WHERE state IN ('pending', 'approved', 'running');
+`,
+	// v105: each member's assistant prompt queue, in seq order. A key names
+	// one entry per conversation; one that failed before it was sent frees
+	// it.
+	`
+CREATE TABLE assistant_queue (
+	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+	id         TEXT NOT NULL UNIQUE,
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	generation INTEGER NOT NULL,
+	key        TEXT NOT NULL,
+	text       TEXT NOT NULL,
+	view       TEXT NOT NULL,
+	origin     TEXT NOT NULL,
+	state      TEXT NOT NULL,
+	error      TEXT NOT NULL DEFAULT '',
+	reply      TEXT NOT NULL DEFAULT '',
+	message_id TEXT NOT NULL DEFAULT '',
+	cards      TEXT NOT NULL DEFAULT '',
+	sent       INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_assistant_queue_key ON assistant_queue(member_id, generation, key) WHERE state <> 'failed' OR sent = 1;
+CREATE INDEX idx_assistant_queue_member ON assistant_queue(member_id, state, seq);
+`,
+	// v106: how often a member is notified, and the digest the server
+	// writes for what it does not push at once: one row per item waiting
+	// for the member's next digest, overnight when quiet hours held it.
+	// Quiet hours now hand watch pushes to the digest, so the watch's own
+	// held state goes.
+	`
+ALTER TABLE notify_prefs ADD COLUMN level TEXT NOT NULL DEFAULT 'batched' CHECK (level IN ('blockers', 'batched', 'all'));
+ALTER TABLE notify_prefs ADD COLUMN digest_at TEXT NOT NULL DEFAULT '09:00';
+ALTER TABLE notify_prefs ADD COLUMN digest_tz TEXT NOT NULL DEFAULT '';
+CREATE TABLE push_digest (
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	source     TEXT NOT NULL,
+	key        TEXT NOT NULL,
+	kind       TEXT NOT NULL,
+	workspace  TEXT NOT NULL DEFAULT '',
+	title      TEXT NOT NULL,
+	body       TEXT NOT NULL DEFAULT '',
+	url        TEXT NOT NULL DEFAULT '',
+	run_id     TEXT NOT NULL DEFAULT '',
+	overnight  INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (member_id, source, key)
+);
+UPDATE watch_notifications SET push_state = 'pending', push_next_at = 0 WHERE push_state = 'held';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

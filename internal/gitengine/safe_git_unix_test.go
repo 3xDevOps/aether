@@ -107,3 +107,30 @@ func TestCheckoutMetadataReadsAreBounded(t *testing.T) {
 		t.Fatal("oversized checkout exclude was accepted")
 	}
 }
+
+// Git 2.44 and later write a new repository's config before its HEAD, so a
+// reader racing an init, or a store whose init was killed, sees config alone.
+func TestCheckoutHeadCompletesAStoreWithConfigButNoHEAD(t *testing.T) {
+	e := newUnitEngine(t)
+	seedEvidenceWorkspace(t, e, "ws-init")
+	ctx := t.Context()
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws-init", "run-init", "main", "half init", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := e.checkoutHead(ctx, "run-init", checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := e.snapshotStorePath("run-init")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(filepath.Join(store, "HEAD")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.checkoutHead(ctx, "run-init", checkout)
+	if err != nil || got != want {
+		t.Fatalf("checkout HEAD with a half-initialized store = %q, %v; want %q", got, err, want)
+	}
+}

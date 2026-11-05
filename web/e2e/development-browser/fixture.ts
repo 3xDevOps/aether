@@ -88,10 +88,18 @@ export async function launchBrowserFixture(aether: Aether): Promise<BrowserFixtu
   }
 }
 
-/** The Browser tab is there before any browser has started, with the address bar ready. */
+/** Shows the Browser view: a tab on a wide screen, an item of the session's More on a phone, which then adds the tab. */
+export async function showBrowser(page: Page): Promise<void> {
+  const tab = page.getByRole('tab', { name: 'Browser', exact: true })
+  if ((page.viewportSize()?.width ?? 0) >= 768 || await tab.isVisible()) return tab.click()
+  await page.getByRole('button', { name: 'More', exact: true }).first().click()
+  await page.getByRole('menuitem', { name: 'Browser', exact: true }).click()
+}
+
+/** The Browser view is there before any browser has started, with the address bar ready. */
 export async function openBrowserPane(page: Page, fixture: BrowserFixture): Promise<void> {
   await page.goto(`${fixture.member.url}&run=${fixture.runID}`)
-  await page.getByRole('tab', { name: 'Browser', exact: true }).click()
+  await showBrowser(page)
   await expect(page.getByRole('heading', { name: 'Open a page', exact: true })).toBeVisible()
   await expect(addressBar(page)).toBeEnabled()
 }

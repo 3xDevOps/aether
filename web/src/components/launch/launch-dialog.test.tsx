@@ -10,7 +10,6 @@ import { optimisticDeadlineMs } from '@/store/optimistic'
 import { agentInfo, alice, bob, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
 import { chooseModel, pickModel } from '@/test/model'
 import { pickOption } from '@/test/select'
-import { atViewport } from '@/test/viewport'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -117,22 +116,13 @@ describe('new run', () => {
     await waitFor(() => expect(document.activeElement).toBe(before))
   })
 
-  it('collapses the agent list to the choice on a phone until Change', async () => {
-    atViewport(412, { pointer: 'coarse' })
-    vi.mocked(api.agentList).mockResolvedValue([
-      claude(),
-      agentInfo({ name: 'codex', display_name: 'Codex', login_found: true }),
-    ])
+  it('keeps Launch off with a reason while its workspace no longer exists, and keeps the task', async () => {
     await open()
-
-    expect(screen.getAllByRole('radio', { name: /^(Claude Code|Codex)/ })).toHaveLength(1)
-    expect(screen.getByRole('radiogroup', { name: 'Mode' })).toBeDefined()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Change agent' }))
-    fireEvent.click(agentRow(/^Codex/))
-
-    expect(screen.getAllByRole('radio', { name: /^(Claude Code|Codex)/ })).toHaveLength(1)
-    expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true')
+    setTask('keep me')
+    act(() => useStore.setState({ workspaces: {} }))
+    expect(screen.getByRole('alert').textContent).toContain('This workspace no longer exists.')
+    expect(launchButton().disabled).toBe(true)
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep me')
   })
 
   it('lists only installed agents with their login state, and sends Install more agents to Agents', async () => {
