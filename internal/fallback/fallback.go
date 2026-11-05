@@ -147,6 +147,18 @@ func MeasureNext(ctx context.Context, st store.Store, usage QuotaReader, launche
 	return measured, nil
 }
 
+// MeasureAway reads the usage Select decides on for a running run that must
+// leave current, whose owner revoked the share it ran on: current counts as
+// exhausted, and a candidate whose usage cannot be read is Unknown for every
+// agent, so the run moves wherever its agent can run rather than stop.
+func MeasureAway(ctx context.Context, st store.Store, usage QuotaReader, launcher, current domain.MemberID, harness string, policy domain.AccountFallback) (Measured, error) {
+	measured := Measured{current: 100}
+	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured, true); err != nil {
+		return nil, err
+	}
+	return measured, nil
+}
+
 func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, launcher domain.MemberID, harness string, policy domain.AccountFallback, measured Measured, unknown bool) error {
 	candidates, err := candidates(ctx, st, launcher, policy)
 	if err != nil {
