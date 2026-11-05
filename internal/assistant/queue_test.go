@@ -330,3 +330,40 @@ func TestARemovedPromptKeepsItsKey(t *testing.T) {
 		t.Fatalf("the removed prompt's key after a restart = %+v, %v, %v, want its removed entry", held, created, err)
 	}
 }
+
+func TestAFailedPromptAndItsRetryCanBothBeDismissed(t *testing.T) {
+	w := newQueueWorld(t)
+	add := func(id string) {
+		t.Helper()
+		if _, created, err := w.db.EnqueueAssistantPrompt(t.Context(), &store.AssistantQueueEntry{ID: id, MemberID: w.member, Key: "k1",
+			Text: "deploy status?", Origin: `{"door":"dashboard"}`}, maxQueued); err != nil || !created {
+			t.Fatalf("enqueue %s = %v, %v", id, created, err)
+		}
+		for _, to := range []string{protocol.AssistantQueueRunning, protocol.AssistantQueueFailed} {
+			from := map[string]string{protocol.AssistantQueueRunning: protocol.AssistantQueueQueued, protocol.AssistantQueueFailed: protocol.AssistantQueueRunning}[to]
+			if ok, err := w.db.MoveAssistantQueueEntry(t.Context(), w.member, id, []string{from}, store.AssistantQueueMove{State: to, Error: "no agent"}); err != nil || !ok {
+				t.Fatalf("move %s to %s = %v, %v", id, to, ok, err)
+			}
+		}
+	}
+	add("turn-first")
+	add("turn-retry")
+	for _, id := range []string{"turn-first", "turn-retry"} {
+		if err := w.svc.RemoveQueued(t.Context(), w.member, id); err != nil {
+			t.Fatalf("dismiss %s = %v", id, err)
+		}
+	}
+}
+
+func TestAnEntryListsEachCardOnce(t *testing.T) {
+	w := newQueueWorld(t)
+	e := w.prompt(acpmock.PromptWait, "k0")
+	for range 2 {
+		if err := w.db.AddAssistantQueueCard(t.Context(), w.member, e.ID, "CARD1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := w.svc.Entry(t.Context(), w.member, e.ID); err != nil || !slices.Equal(got.Cards, []string{"CARD1"}) {
+		t.Fatalf("cards = %v, %v, want one", got.Cards, err)
+	}
+}

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -999,8 +998,12 @@ func (s *Service) Cancel(ctx context.Context, id domain.MemberID) error {
 	if err != nil {
 		return err
 	}
+	// Only the stopped turn's waits end: the next queued turn may start
+	// before Cancel returns.
+	m := s.member(id)
+	turn := m.turnNow()
 	err = sess.Cancel(ctx)
-	s.member(id).confirms.release(math.MaxInt64)
+	m.confirms.release(turn)
 	return err
 }
 

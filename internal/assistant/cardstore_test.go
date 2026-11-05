@@ -135,11 +135,21 @@ func (m *memStore) AddAssistantQueueCard(_ context.Context, member domain.Member
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, e := range m.queue {
-		if e.MemberID == member && e.ID == id {
+		if e.MemberID == member && e.ID == id && !slices.Contains(e.Cards, card) {
 			m.queue[i].Cards = append(slices.Clone(e.Cards), card)
 		}
 	}
 	return nil
+}
+
+func (m *memStore) DeleteUnsentAssistantQueueEntry(_ context.Context, member domain.MemberID, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.queue)
+	m.queue = slices.DeleteFunc(m.queue, func(e store.AssistantQueueEntry) bool {
+		return e.MemberID == member && e.ID == id && e.State == protocol.AssistantQueueFailed && !e.Sent
+	})
+	return len(m.queue) < n, nil
 }
 
 func (m *memStore) DeleteAssistantQueue(_ context.Context, member domain.MemberID) error {

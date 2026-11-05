@@ -98,7 +98,11 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 		return a.entry, nil
 	}
 	entry, err := s.enqueue(ctx, m, text, key, view, origin)
-	if err == nil && entry.State == protocol.AssistantQueueQueued {
+	m.mu.Lock()
+	behind := m.running != ""
+	m.mu.Unlock()
+	// Behind a running entry it waits for that turn, not for this call.
+	if err == nil && entry.State == protocol.AssistantQueueQueued && !behind {
 		done, want := make(chan error, 1), entry.ID
 		if !s.spawn(func() { done <- s.advance(s.ctx, m, want) }) {
 			err = ErrClosed
@@ -196,7 +200,13 @@ func (s *Service) advance(ctx context.Context, m *member, want string) error {
 		m.notify()
 		dispatched, err := s.dispatch(ctx, m, next)
 		switch {
-		case err == nil, dispatched:
+		case err == nil:
+			return wantErr
+		case dispatched:
+			// Sent, but its key could not be saved: the caller hears why.
+			if next.ID == want {
+				wantErr = errors.Join(wantErr, err)
+			}
 			return wantErr
 		case errors.Is(err, ErrTurnRunning), s.ctx.Err() != nil:
 			// The agent works on its own, and that turn's end sends it, or
@@ -255,17 +265,27 @@ func (m *member) sending(live *session) {
 // running; later calls outside a queued turn raise cards from the
 // dashboard.
 func (s *Service) endEntry(m *member, id, state string, move store.AssistantQueueMove) {
+	move.State = state
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// Written before the entry stops counting as running. A write that keeps
+	// failing leaves the row running, which the next start marks
+	// interrupted; the queue moves on meanwhile.
+	var err error
+	for attempt := range 3 {
+		if _, err = s.cfg.Store.MoveAssistantQueueEntry(ctx, m.id, id, []string{protocol.AssistantQueueRunning}, move); err == nil || ctx.Err() != nil {
+			break
+		}
+		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+	}
+	if err != nil {
+		slog.Warn("assistant: record the queued prompt's end", "member", m.id, "entry", id, "state", state, "error", err)
+	}
 	m.mu.Lock()
 	if m.running == id {
 		m.running, m.sentOn, m.origin = "", nil, Origin{}
 	}
 	m.mu.Unlock()
-	move.State = state
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if _, err := s.cfg.Store.MoveAssistantQueueEntry(ctx, m.id, id, []string{protocol.AssistantQueueRunning}, move); err != nil {
-		slog.Warn("assistant: record the queued prompt's end", "member", m.id, "entry", id, "state", state, "error", err)
-	}
 	m.notify()
 }
 
@@ -356,6 +376,13 @@ func (s *Service) turnReply(id domain.MemberID) (messageID, reply string, err er
 		}
 		before = page.Items[0].Seq
 	}
+	// The turn's start is further back than the scan reads: its end names
+	// the turn, and its last message is in what was read.
+	for i := len(items) - 1; i >= 0; i-- {
+		if it := items[i]; it.Kind == acphost.KindTurnEnd && !it.Autonomous {
+			return turnText(items, it.Turn)
+		}
+	}
 	return "", "", nil
 }
 
@@ -407,19 +434,27 @@ func (s *Service) queueOf(ctx context.Context, id domain.MemberID, generation in
 		}
 		if row.State == protocol.AssistantQueueQueued || row.State == protocol.AssistantQueueRunning {
 			open = append(open, e.AssistantQueueEntry)
-		} else {
-			ended = append(ended, e.AssistantQueueEntry)
+			continue
 		}
+		// A prompt in the transcript needs only its door here, not its text.
+		if e.MessageID != "" {
+			e.Text = ""
+		}
+		ended = append(ended, e.AssistantQueueEntry)
 	}
-	return append(open, ended...), nil
+	return append(open, ended[max(0, len(ended)-store.AssistantQueueKept):]...), nil
 }
 
 // RemoveQueued takes a queued prompt off the member's queue before it runs,
-// or dismisses one that failed or was interrupted.
+// or dismisses one that failed or was interrupted. A failure that never
+// reached the agent is deleted, since its key may already name a retry.
 func (s *Service) RemoveQueued(ctx context.Context, member domain.MemberID, id string) error {
-	ok, err := s.cfg.Store.MoveAssistantQueueEntry(ctx, member, id,
-		[]string{protocol.AssistantQueueQueued, protocol.AssistantQueueFailed, protocol.AssistantQueueInterrupted},
-		store.AssistantQueueMove{State: protocol.AssistantQueueRemoved})
+	ok, err := s.cfg.Store.DeleteUnsentAssistantQueueEntry(ctx, member, id)
+	if err == nil && !ok {
+		ok, err = s.cfg.Store.MoveAssistantQueueEntry(ctx, member, id,
+			[]string{protocol.AssistantQueueQueued, protocol.AssistantQueueFailed, protocol.AssistantQueueInterrupted},
+			store.AssistantQueueMove{State: protocol.AssistantQueueRemoved})
+	}
 	if err != nil {
 		return fmt.Errorf("assistant: remove queued prompt %s: %w", id, err)
 	}

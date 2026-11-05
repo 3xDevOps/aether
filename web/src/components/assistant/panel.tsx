@@ -130,7 +130,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       <div className="flex min-h-0 flex-1 flex-col">
         {cards}
         {prompts.length > 0 && (
-          <div className="flex shrink-0 flex-col gap-2 px-3 pt-3">
+          <div className="flex max-h-[30%] min-h-0 shrink-0 flex-col gap-2 overflow-y-auto px-3 pt-3">
             {prompts.map((entry) => <QueuedPrompt key={entry.id} entry={entry} />)}
           </div>
         )}

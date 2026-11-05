@@ -431,6 +431,7 @@ describe('queue', () => {
     await waitFor(() => expect(document.activeElement).toBe(within(failed).getByRole('button', { name: 'Retry: and lint' })))
     await userEvent.click(within(failed).getByRole('button', { name: 'Retry: and lint' }))
     await waitFor(() => expect(useStore.getState().assistantDraft).toBe('and lint'))
+    expect(useStore.getState().assistantAttempt).toBeNull()
   })
 
   it('shows a prompt queued before the conversation has any message', async () => {

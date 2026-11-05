@@ -104,7 +104,13 @@ export function QueuedPrompt({ entry, position, next }: { entry: AssistantQueueE
         <span className="ml-auto flex gap-1">
           {!queued && (
             <Button size="sm" variant="secondary" className={action} disabled={busy !== null || noAgent} hint={noAgent ? 'Sign in for the assistant first' : undefined} aria-label={`Retry: ${entry.text}`}
-              onClick={() => remove('retry', () => useStore.getState().setAssistantDraft(entry.text))}>
+              onClick={() => remove('retry', () => {
+                // A fresh key: the failed one's key would return the dismissed entry.
+                const state = useStore.getState()
+                const typed = state.assistantDraft.trimEnd()
+                state.setAssistantAttempt(null)
+                state.setAssistantDraft(typed ? `${typed}\n\n${entry.text}` : entry.text)
+              })}>
               {busy === 'retry' ? 'Retrying…' : 'Retry'}
             </Button>
           )}

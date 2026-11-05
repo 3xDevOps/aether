@@ -77,6 +77,21 @@ type AssistantQueueStore interface {
 	AddAssistantQueueCard(ctx context.Context, member domain.MemberID, id, card string) error
 	// DeleteAssistantQueue deletes all of member's entries.
 	DeleteAssistantQueue(ctx context.Context, member domain.MemberID) error
+	// DeleteUnsentAssistantQueueEntry deletes entry id if it failed before
+	// it was sent, and reports whether it did.
+	DeleteUnsentAssistantQueueEntry(ctx context.Context, member domain.MemberID, id string) (bool, error)
+}
+
+func (d *DB) DeleteUnsentAssistantQueueEntry(ctx context.Context, member domain.MemberID, id string) (bool, error) {
+	res, err := d.db.ExecContext(ctx, `DELETE FROM assistant_queue WHERE member_id = ? AND id = ? AND state = 'failed' AND sent = 0`, member, id)
+	if err != nil {
+		return false, fmt.Errorf("store: delete the assistant queue entry: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: delete the assistant queue entry: %w", err)
+	}
+	return n == 1, nil
 }
 
 func (d *DB) DeleteAssistantQueue(ctx context.Context, member domain.MemberID) error {
@@ -207,8 +222,9 @@ func (d *DB) MoveAssistantQueueEntry(ctx context.Context, member domain.MemberID
 
 func (d *DB) AddAssistantQueueCard(ctx context.Context, member domain.MemberID, id, card string) error {
 	if _, err := d.db.ExecContext(ctx,
-		`UPDATE assistant_queue SET cards = TRIM(cards || ' ' || ?), updated_at = ? WHERE member_id = ? AND id = ?`,
-		card, time.Now().UnixMilli(), member, id); err != nil {
+		`UPDATE assistant_queue SET cards = TRIM(cards || ' ' || ?), updated_at = ?
+		 WHERE member_id = ? AND id = ? AND (' ' || cards || ' ') NOT LIKE '% ' || ? || ' %'`,
+		card, time.Now().UnixMilli(), member, id, card); err != nil {
 		return fmt.Errorf("store: add the assistant queue entry's card: %w", err)
 	}
 	return nil
