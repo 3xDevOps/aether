@@ -1752,6 +1752,43 @@ describe('connectAttach', () => {
     })
   })
 
+  describe('mayHoldControl', () => {
+    it('is true while a write header has no answer', () => {
+      write = true
+      const a = attach()
+      expect(a.mayHoldControl()).toBe(false)
+      StubSocket.last().onopen?.()
+      expect(a.mayHoldControl()).toBe(true)
+    })
+
+    it('is false after a conflict refuses the write ask', () => {
+      write = true
+      const a = attach()
+      StubSocket.last().onopen?.()
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: false, code: codeConflict, error: 'occupied', control_generation: 3 }),
+      })
+      expect(a.mayHoldControl()).toBe(false)
+    })
+
+    it('is true while a write control request is pending', () => {
+      const a = attach()
+      StubSocket.last().onopen?.()
+      ack({ has_control: false })
+      expect(a.mayHoldControl()).toBe(false)
+      a.setControl(true)
+      expect(a.mayHoldControl()).toBe(true)
+    })
+
+    it('is true while a takeover is requested', () => {
+      const a = attach()
+      StubSocket.last().onopen?.()
+      ack({ has_control: false })
+      expect(a.requestTakeover('start', 'takeover-1')).toBe(true)
+      expect(a.mayHoldControl()).toBe(true)
+    })
+  })
+
   it('backs off after a dropped socket and resends the geometry', () => {
     const a = attach()
     StubSocket.last().onopen?.()

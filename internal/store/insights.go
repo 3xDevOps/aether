@@ -774,7 +774,7 @@ func scanMemberOutcomes(ctx context.Context, tx *sql.Tx, query string, args []an
 // recording transitions and PRs.
 func insightsLive(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	rows, err := tx.QueryContext(ctx, runSnapshotQuery(`runs.id IN (SELECT r.id FROM runs r WHERE `+q.ownerScope()+`
-		AND (r.status IN ('running', 'needs-attention') OR r.status = 'completed' AND r.review = 'ready'))`), args...)
+		AND r.status IN ('running', 'needs-attention'))`), args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: needs you: %w", err)
 	}

@@ -11,6 +11,7 @@ import { capability } from '@/store/hooks'
 import { memberName } from '@/lib/member-name'
 import { addMergeProposal, dropMergeProposal, loadMergeProposals } from '@/store/members'
 import { stateContextOf } from '@/store/selectors'
+import { saveSnapshot } from '@/lib/snapshot-cache'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
   alice,
@@ -95,6 +96,30 @@ describe('hydrate', () => {
     expect(Object.keys(s.workspaces)).toHaveLength(2)
     expect(Object.keys(s.members)).toHaveLength(2)
     expect(s.runs.run_1.status).toBe('running')
+  })
+  it('clears a painted snapshot when the server now refuses this member', async () => {
+    const store = createRootStore()
+    store.setState({ hydrated: true, staleSince: Date.now() })
+    window.localStorage.setItem(`aether.snapshot.v1:${window.location.origin}`, '{}')
+    await hydrate(store, fakeApi({ serverInfo: vi.fn(async () => { throw new ApiError(403, 'server.info: not a member') }) }))
+
+    expect(store.getState().hydrated).toBe(false)
+    expect(store.getState().staleSince).toBeNull()
+    expect(window.localStorage.getItem(`aether.snapshot.v1:${window.location.origin}`)).toBeNull()
+  })
+  it('clears the saved snapshot on a refusal after a live load and saves nothing until the next one', async () => {
+    const key = `aether.snapshot.v1:${window.location.origin}`
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    expect(window.localStorage.getItem(key)).not.toBeNull()
+
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => { throw new ApiError(403, 'run.list: not a member') }) }))
+    expect(window.localStorage.getItem(key)).toBeNull()
+    saveSnapshot(store)
+    expect(window.localStorage.getItem(key)).toBeNull()
+
+    await hydrate(store, fakeApi())
+    expect(window.localStorage.getItem(key)).not.toBeNull()
   })
   it('hydrates server-computed unanswered question counts with the run snapshot', async () => {
     const store = createRootStore()

@@ -355,6 +355,34 @@ func (r *cacheImageRuntime) ImageUser(context.Context, string) (string, error) {
 	return r.user, nil
 }
 
+// slowWaitRuntime answers Wait later than a busy Docker daemon would.
+type slowWaitRuntime struct{ *cacheImageRuntime }
+
+func (r slowWaitRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
+	select {
+	case <-time.After(100 * time.Millisecond):
+	case <-ctx.Done():
+		return runtime.ExitStatus{}, ctx.Err()
+	}
+	return r.cacheImageRuntime.Wait(ctx, id)
+}
+
+func TestSlowRuntimeDoesNotKeepAStoppedTerminalsCache(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.sched.cfg.Runtime = slowWaitRuntime{&cacheImageRuntime{fakeRuntime: e.rt}}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	terminal := writeCacheFixture(t, e, e.member.ID, "terminal", 4096)
+	e.sched.sweepCaches(t.Context(), true)
+	requireCacheExists(t, terminal, true)
+	if err := e.sched.StopTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.sweepCaches(t.Context(), true)
+	requireCacheExists(t, terminal, false)
+}
+
 type cacheConfigReadFailure struct{ store.Store }
 
 func (s cacheConfigReadFailure) ListWorkspaces(context.Context) ([]*domain.Workspace, error) {

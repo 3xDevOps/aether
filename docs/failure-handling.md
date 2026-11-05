@@ -54,7 +54,7 @@ A live session carries a state that says what it is doing. The dashboard and
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
 | `waiting` | Turn ended, or Stale wait for a stale wait (`aether sessions`: Waiting) | The turn ended with no report (`turn ended without a report`), the session stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
-| `finished` | Ready for review | An interactive session reported `success`. |
+| `finished` | Finished: review | An interactive session reported `success`. Asks nothing of you. |
 | `failed` | Failed | The session reported `failure`, or its turn failed. |
 | `disconnected` | Disconnected | The Enhanced session failed or ended while the session is open. |
 
@@ -131,24 +131,79 @@ An agent's `blocked` report reads `blocked: <summary>`, and its question reads
 ### Review
 
 A reported success puts the session up for review. The session page asks **Your agent
-reports this task is finished. Mark it complete?**
+reports this task is finished. Mark complete?**
 
 - **Mark complete** closes a live session as `completed`: it commits, publishes
   the branch and keeps the container like **Close**.
-- **Not yet** keeps the session open and takes it out of **Needs you**.
+- **Not yet** says the work is not finished: the session leaves review and
+  reads **Answered**, "Not finished yet". Once the server
+  accepts it, the session's Chat view opens with the composer focused so you
+  can say what is left.
+- **Review later** keeps the session open and in review without a new
+  notification; the prompt folds to one line, "Finished, kept for later",
+  with **Review now** to open it again.
 
 Any new turn clears the review, and a later success report asks again.
+
+### Before a close
+
+Closing a session that others still depend on asks first. **Close session…**,
+**Mark complete**, **Open in Standard** and `aether close` read
+`run.close_check` ([local-gateway.md](local-gateway.md#independent-execution-and-input-state))
+and list what the close affects: protection, an open pull request, commits that
+may not be merged, mail from other sessions, sessions waiting for this one to
+finish, subsessions that close with it and what closing each of those affects,
+and pending cleanup. With any of these closing turns into a danger button
+(**Close as abandoned**, or **Close anyway** for Mark complete) and Cancel
+holds the focus. A check that fails shows its error and
+still lets you close. Closing as merged skips the unmerged-commits warning:
+you are saying the work is merged.
+
+`aether close` prints the warnings to stderr and asks `Close anyway? [y/N]` on
+a terminal; `--force` skips the question. Without a terminal it prints them
+and closes, so scripts keep working. A failed check prints its error. On a
+terminal it then asks too, unless the server is older than the CLI and has no
+check; there the close goes ahead:
+
+```
+Before closing run-d6ay38tj8j:
+  pull_request: Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z
+    https://github.com/acme/api/pull/7
+Close anyway? [y/N]:
+```
 
 ### Needs you
 
 One rule decides whether a session needs a person. The **Needs you** list,
-`aether sessions --needs-you`, `aether wait` (exit 3, except that a success ready
-for review exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of sessions that need
+`aether sessions --needs-you`, `aether wait` (exit 3, except that a finished
+success exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of sessions that need
 you, `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
 notifications and the assistant's notices all use it. The session status
 `needs-attention` alone does not: it means the agent is parked, which includes
 waiting on agents, CI or a process and a reported success.
+
+A reported success is never a need. While its `review` is `ready` or `later`
+the session shows in **Finished: review**, its own group with its own
+count below Needs you, and the label `Finished: review` in the dashboard and
+`aether sessions`. `attention.list` still returns it, as kind `ready` with the
+reason `Finished: review the result`, after every item that asks something.
+
+Only a top-level session can be Needs you or Finished: review. An attached
+[subsession](teams.md#subsessions)'s reported success or failure is for its
+parent agent only, which hears of it through its wait on the subsession: it
+never counts as Needs you or Finished: review, never notifies and never moves
+the family, whether the parent is working, waiting, stopped, paused or
+ended. The parent carries the family: what surfaces is the parent's own
+state. A subsession's requests of a person (a permission, question,
+`needs-input`, `blocked`, a disconnect) still surface, listed with its
+parent. A detached subsession is a session of its own and follows the rules
+above. A subsession has no **Mark complete** of its own; it finishes by
+reporting to its parent. A watch someone asked for on a subsession still
+hears of its finish; the assistant's own follow of a session it launched or
+messaged does not. The dashboard reads a subsession's success as "Finished:
+reported to its parent" in a muted check, and `aether sessions` as
+`Finished: reported to its parent`.
 
 | Session | Needs you | Notifies |
 | --- | --- | --- |
@@ -156,16 +211,16 @@ waiting on agents, CI or a process and a reported success.
 | `disconnected` | Yes | Once. |
 | `failed`, result not yet seen by the owner | Yes, while the session is live | Once: `Failed, review the result`. |
 | `failed`, result seen | No | No. |
-| Review ready, live or `completed` | Yes | Once per success: `Agent reported success, review the result`, at normal urgency. |
-| Review marked **Not yet** or complete | No | No. |
+| Review ready, live or `completed` | No: Finished: review | Once per success, quietly: `Finished: review the result`, at normal urgency, never in the desktop badge. |
+| Review marked **Review later**, **Not yet** or complete | No | No. |
 | A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |
 | Any state while the session is paused | No | Checked again on resume. |
 
 A need is announced once: opening the session or restarting the server does not
 repeat it. When it ends, or the session is handed to another member, each
-browser that showed it gets a silent `No longer needs you` in place of the
-notification, and the desktop app closes its own. A server restart forgets
+browser that showed it gets a silent `No longer needs you` (`No longer
+awaiting review` for a finished session) in place of the notification, and the desktop app closes its own. A server restart forgets
 which browsers showed a need, so one announced before it is not replaced.
 
 ## Recover from disk pressure
@@ -211,7 +266,7 @@ is still there. To free space yourself:
 | `aether.db` | Deleting runs or the workspace. |
 | `repos/` | Nothing. Every push and session branch is kept. |
 
-Archiving a session (**Archive closed sessions…** or `aether archive <session-id>`) only
+Archiving a session (**Archive finished sessions…** or `aether archive <session-id>`) only
 hides it and frees nothing.
 
 `scheduler: host capacity unavailable: ...` means Aether could not measure a
@@ -359,6 +414,7 @@ login shell stay up.
 | The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Chat view. |
 | The agent's process exits | The turn in flight shows **Turn interrupted**; **Disconnected**, `enhanced session ended: the agent's ACP server exited with code <n>`, with `; stderr: <tail>` when it printed any. | **Retry Enhanced**. |
 | The agent drops its conversation but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent conversation lost** while Aether restores the conversation. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
+| The agent refuses a turn with `Authentication required` | **Agent signed out** while Aether restarts the agent in its container. Refused again within 5 minutes: `enhanced turn failed: ... Authentication required ...: start a new session`. | Send the refused message again. After a second refusal, start a new session: its container mounts the current login. |
 | The server restarts mid-turn | The turn keeps running in the adopted conversation; a message queued behind it is sent again unless the agent already had it. | Nothing. |
 | The server restarts and cannot reattach to the agent's keeper, or the session's container predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |

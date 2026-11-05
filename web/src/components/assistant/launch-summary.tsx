@@ -60,6 +60,8 @@ function launchRows(s: RootState, method: string, params: unknown, defaults?: As
     ['Kind', 'Session: one agent on one task'],
     ['Workspace', [workspace, ...extras].filter(Boolean).map((id) => s.workspaces[id!]?.name ?? id).join(', ')],
     ['Agent', agentLine(s, p)],
+    ['Effort', str(p.effort) ?? ''],
+    ['Permission', str(p.permission) ?? 'default'],
     ['Account', owner ? `${owner}'s account, shared with you` : 'Yours'],
     ['Fallback', fallbackLine(s, p)],
   ]

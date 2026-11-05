@@ -46,7 +46,6 @@ type ChildStore interface {
 	IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, error)
 	// SetChildState moves a reservation from one of from to to.
 	SetChildState(ctx context.Context, run domain.RunID, to domain.ChildState, errText string, from ...domain.ChildState) error
-	DetachChild(ctx context.Context, run domain.RunID) error
 	// MarkChildEndNotified reports whether this call set the flag.
 	MarkChildEndNotified(ctx context.Context, run domain.RunID) (bool, error)
 	// UnfinishedChildren counts parent's attached children still queued,
@@ -323,14 +322,6 @@ func repeatPlaceholders(n int) string {
 		out += ", ?"
 	}
 	return out
-}
-
-func (d *DB) DetachChild(ctx context.Context, run domain.RunID) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx, `UPDATE run_children SET detached = 1 WHERE run_id = ?`, run))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("store: detach subsession: %w", err)
-	}
-	return err
 }
 
 func (d *DB) MarkChildEndNotified(ctx context.Context, run domain.RunID) (bool, error) {

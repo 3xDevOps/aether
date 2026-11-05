@@ -218,7 +218,7 @@ them. A connector lists only the tools of its scopes, and `aether mcp` shows
 each connector's scopes.
 
 The server also checks the scope of every call a connector makes, whatever the
-member's role. Reads such as `run.get`, `workspace.timeline`, `member.list`,
+member's role. Reads such as `run.get`, `run.close_check`, `workspace.timeline`, `member.list`,
 `memory.show`, `template.list`, `changes.list` and
 `launch.defaults.get` need `read`; `run.launch`, `template.launch`,
 `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
@@ -262,7 +262,7 @@ The connector has these tools and no others:
 | `aether_watches` | Your [watches](watches.md), each with its state, conditions and last notice; with `watch_id`, one watch with its 10 newest notices and where each was delivered | `read` |
 | `aether_launch_session` | Start a session, from a task or a saved [template](teams.md#task-templates-and-schedules), on any account you may use, with a fallback policy and extra repositories | `write` |
 | `aether_message_session`, `aether_answer` | Message a session; answer an agent's or a teammate's question | `write` |
-| `aether_pause_session`, `aether_resume_session`, `aether_mark_reviewed` | Pause or resume a session; accept a reported success, which closes the session, or put it off | `write` |
+| `aether_pause_session`, `aether_resume_session`, `aether_mark_reviewed` | Pause or resume a session; accept a reported success, which closes the session, put it off, or say the work is not finished | `write` |
 | `aether_session_lifecycle` | Relaunch a stopped session, protect or unprotect it, archive or restore it | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
 | `aether_watch`, `aether_unwatch` | Watch a session (`run_id`) or pull request (`pr`: `owner/name#7` or its GitHub URL) for `conditions`, optionally relaying each notice into up to 4 sessions (`relay_to`), or with `watch_id` change its conditions, `relay_to` or `expires_at`, or pause or resume it; delete a watch and its notices | `write` |
@@ -509,7 +509,16 @@ says to call again without `cursor`.
 
 `aether_mark_reviewed` completes only a session whose agent reported success and
 awaits your review; to end any other session, use `aether_stop_session` under
-`control`. A message to your own session that no one
+`control`. Both read `run.close_check` before they act, and so does a stop
+without `outcome`, since a stop also ends the session and settles its
+subsessions: one with warnings fails with `closing session <id> has warnings
+(<kinds>), listed under untrusted.warnings; ...` until the call repeats with
+`acknowledge: true`, so the assistant shows you what each stop or close
+affects first. `acknowledge` is the caller's word that it showed them; the
+server does not tie it to the warnings it returned. The warnings sit under
+`untrusted` because they quote session titles agents wrote. The dashboard
+assistant's close card lists the same warnings
+([failure-handling.md](failure-handling.md#before-a-close)). A message to your own session that no one
 controls in the dashboard, or to a session you control, reaches the agent at once. Any other message waits
 about 45 seconds for the member in control to approve it. `aether_decide_approval` allows
 or denies a permission request once; it never picks an "always" option, so it

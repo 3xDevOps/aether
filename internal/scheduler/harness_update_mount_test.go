@@ -100,8 +100,19 @@ func TestHarnessUpdateDefaultBinaryAcrossProcesses(t *testing.T) {
 		}
 	}
 	agent := filepath.Join(home, ".local", "bin", "agent")
-	if err = os.WriteFile(agent, []byte(fmt.Sprintf("#!/bin/sh\ncat %q\n", filepath.Join(installed, "version"))), 0o755); err != nil {
+	script := filepath.Join(t.TempDir(), "agent")
+	if err = os.WriteFile(script, []byte(fmt.Sprintf("#!/bin/sh\ncat %q\n", filepath.Join(installed, "version"))), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	// A child forked by a parallel test inherits any fd this process has
+	// open for writing until it execs, and exec of that inode fails with
+	// ETXTBSY meanwhile (golang/go#22315). cp writes a fresh inode in
+	// its own process instead.
+	if err = os.Remove(agent); err != nil {
+		t.Fatal(err)
+	}
+	if out, cpErr := exec.CommandContext(t.Context(), "cp", script, agent).CombinedOutput(); cpErr != nil {
+		t.Fatalf("install agent: %v: %s", cpErr, out)
 	}
 	version := func(want string) {
 		t.Helper()

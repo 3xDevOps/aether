@@ -65,12 +65,19 @@ func (f *actionServer) ran(method string) bool {
 // serveTools serves m's tool socket as a live session does.
 func serveTools(t *testing.T, svc *Service, m *member) (string, *actionServer) {
 	t.Helper()
+	fake := &actionServer{}
+	return serveCaller(t, svc, m, fake), fake
+}
+
+// serveCaller serves m's tool socket with fake as the server it calls.
+func serveCaller(t *testing.T, svc *Service, m *member, fake tools.Caller) string {
+	t.Helper()
 	sock := filepath.Join(t.TempDir(), "a.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := &actionServer{}
+	svc.cfg.Caller = func(domain.MemberID) tools.Caller { return fake }
 	srv := &tools.Server{Caller: actionCaller{Caller: fake, s: svc, m: m}, Confirm: svc.approver(m), Member: string(m.id)}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -81,7 +88,7 @@ func serveTools(t *testing.T, svc *Service, m *member) (string, *actionServer) {
 			t.Errorf("Serve: %v", err)
 		}
 	})
-	return sock, fake
+	return sock
 }
 
 // actions reads the action records in m's transcript, grouped by action in
@@ -129,21 +136,12 @@ func outcomes(records []protocol.AssistantAction) []string {
 
 // callTool makes a tool call and, when answer is set, answers the card it
 // shows with approve.
-func callTool(t *testing.T, sock string, m *member, method string, params any, answer, approve bool) error {
+func callTool(t *testing.T, svc *Service, sock string, m *member, method string, params any, answer, approve bool) error {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- coordtransport.Call(t.Context(), sock, method, params, nil) }()
 	if answer {
-		deadline := time.Now().Add(5 * time.Second)
-		for len(m.confirms.snapshot()) == 0 {
-			if time.Now().After(deadline) {
-				t.Fatal("no card was shown")
-			}
-			time.Sleep(time.Millisecond)
-		}
-		if err := m.confirms.decide(m.confirms.snapshot()[0].ID, approve); err != nil {
-			t.Fatal(err)
-		}
+		decideFirst(t, svc, m, approve)
 	}
 	return wait(t, done)
 }
@@ -160,7 +158,7 @@ func TestApprovedLaunchRecordsApprovalThenTheLaunchedRun(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, _ := serveTools(t, svc, m)
 	launch := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix the login redirect"}
-	if err := callTool(t, sock, m, protocol.MethodRunLaunch, launch, true, true); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunLaunch, launch, true, true); err != nil {
 		t.Fatal(err)
 	}
 	got := actions(t, svc, m)
@@ -182,7 +180,7 @@ func TestAutoApprovedCallIsRecordedBeforeAndAfter(t *testing.T) {
 	svc, m, db := newActionService(t)
 	db.settings["m1"] = store.AssistantSettings{AutoApprove: true}
 	sock, _ := serveTools(t, svc, m)
-	if err := callTool(t, sock, m, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "rerun the tests", IdempotencyKey: "key-1"}, false, false); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "rerun the tests", IdempotencyKey: "key-1"}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got := actions(t, svc, m)
@@ -198,22 +196,22 @@ func TestRefusedCardsAreRecordedAndNeverRun(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, fake := serveTools(t, svc, m)
 	stop := protocol.RunIDParams{RunID: "run-1"}
-	if err := callTool(t, sock, m, protocol.MethodRunKill, stop, true, false); err == nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunKill, stop, true, false); err == nil {
 		t.Fatal("a declined stop returned no error")
 	}
 
 	m.confirms.ttl = 20 * time.Millisecond
-	if err := callTool(t, sock, m, protocol.MethodRunKill, stop, false, false); err == nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunKill, stop, false, false); err == nil {
 		t.Fatal("an expired stop returned no error")
 	}
 	m.confirms.ttl = confirmTTL
 
 	done := make(chan error, 1)
 	go func() { done <- coordtransport.Call(t.Context(), sock, protocol.MethodEnvSave, nil, nil) }()
-	for len(m.confirms.snapshot()) == 0 {
-		time.Sleep(time.Millisecond)
+	pendingCards(t, svc, m)
+	if err := svc.withdrawAll(t.Context(), m); err != nil {
+		t.Fatal(err)
 	}
-	m.confirms.cancelAll()
 	if err := wait(t, done); err == nil {
 		t.Fatal("a withdrawn save returned no error")
 	}
@@ -222,7 +220,7 @@ func TestRefusedCardsAreRecordedAndNeverRun(t *testing.T) {
 		t.Fatal("a refused call ran")
 	}
 	got := actions(t, svc, m)
-	want := []string{protocol.AssistantActionDeclined, protocol.AssistantActionExpired, protocol.AssistantActionWithdrawn}
+	want := []string{protocol.AssistantActionDeclined, protocol.AssistantActionExpired}
 	if len(got) != len(want) {
 		t.Fatalf("records = %+v, want %v", got, want)
 	}
@@ -240,7 +238,7 @@ func TestRefusedCardsAreRecordedAndNeverRun(t *testing.T) {
 func TestFailedCallRecordsTheServersError(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, _ := serveTools(t, svc, m)
-	err := callTool(t, sock, m, protocol.MethodRunKill, protocol.RunIDParams{RunID: "run-1"}, true, true)
+	err := callTool(t, svc, sock, m, protocol.MethodRunKill, protocol.RunIDParams{RunID: "run-1"}, true, true)
 	const want = "session run-1 is not live: it finished at 12:04"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("the failed stop = %v, want the server's error", err)
@@ -257,10 +255,10 @@ func TestFailedCallRecordsTheServersError(t *testing.T) {
 func TestReversibleCallIsRecordedWithoutApproval(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, _ := serveTools(t, svc, m)
-	if err := callTool(t, sock, m, protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-1"}, false, false); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-1"}, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := callTool(t, sock, m, protocol.MethodRunGet, protocol.RunIDParams{RunID: "run-1"}, false, false); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunGet, protocol.RunIDParams{RunID: "run-1"}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got := actions(t, svc, m)
@@ -274,10 +272,10 @@ func TestReversibleCallIsRecordedWithoutApproval(t *testing.T) {
 	// A watch only notifies the member, so creating or pausing one asks
 	// nothing either.
 	create := protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"}, Source: protocol.WatchSourceAssistant}
-	if err := callTool(t, sock, m, protocol.MethodWatchCreate, create, false, false); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodWatchCreate, create, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := callTool(t, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-1", Paused: new(true)}, false, false); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-1", Paused: new(true)}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got = actions(t, svc, m)
@@ -294,7 +292,7 @@ func TestAWatchThatRelaysIntoSessionsAsksFirst(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, _ := serveTools(t, svc, m)
 	create := protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"}, RelayTo: []string{"run-1"}}
-	if err := callTool(t, sock, m, protocol.MethodWatchCreate, create, true, false); err == nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodWatchCreate, create, true, false); err == nil {
 		t.Fatal("a refused relay watch was created")
 	}
 	got := actions(t, svc, m)
@@ -304,7 +302,7 @@ func TestAWatchThatRelaysIntoSessionsAsksFirst(t *testing.T) {
 	}
 
 	// Resuming a watch that relays starts writing into its sessions again.
-	if err := callTool(t, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-relay", Paused: new(false)}, true, false); err == nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-relay", Paused: new(false)}, true, false); err == nil {
 		t.Fatal("a refused resume of a relaying watch ran")
 	}
 	got = actions(t, svc, m)
@@ -349,7 +347,7 @@ func TestCreatedNamesOnlyNewIDs(t *testing.T) {
 func TestReversibleCallOnAnotherMembersRunNamesTheOwner(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, _ := serveTools(t, svc, m)
-	if err := callTool(t, sock, m, protocol.MethodRunResume, protocol.RunIDParams{RunID: "run-2"}, false, false); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunResume, protocol.RunIDParams{RunID: "run-2"}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got := actions(t, svc, m)
@@ -361,7 +359,7 @@ func TestReversibleCallOnAnotherMembersRunNamesTheOwner(t *testing.T) {
 func TestReversibleCallWhoseOwnerCannotBeReadFailsWithoutRunning(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, fake := serveTools(t, svc, m)
-	err := callTool(t, sock, m, protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-gone"}, false, false)
+	err := callTool(t, svc, sock, m, protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-gone"}, false, false)
 	if err == nil || !strings.Contains(err.Error(), "look up the owner of session run-gone: session run-gone not found") {
 		t.Fatalf("pause = %v, want the owner lookup's error", err)
 	}
@@ -403,11 +401,16 @@ func TestAnApprovalThatCannotBeReadOrCountedIsRecordedAsFailed(t *testing.T) {
 	stop := protocol.RunIDParams{RunID: "run-1"}
 
 	db.write = errors.New("database is locked")
-	if err := callTool(t, sock, m, protocol.MethodRunKill, stop, true, true); err == nil || !strings.Contains(err.Error(), "database is locked") {
+	done := make(chan error, 1)
+	go func() { done <- coordtransport.Call(t.Context(), sock, protocol.MethodRunKill, stop, nil) }()
+	if err := svc.Confirm(t.Context(), m.id, pendingCards(t, svc, m)[0].ID, true); err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("approving a card that cannot be counted = %v, want the store's error", err)
+	}
+	if err := wait(t, done); err == nil || !strings.Contains(err.Error(), "database is locked") {
 		t.Fatalf("a stop whose approval was not counted = %v, want the store's error", err)
 	}
 	db.write, db.read = nil, errors.New("disk I/O error")
-	if err := callTool(t, sock, m, protocol.MethodRunKill, stop, false, false); err == nil || !strings.Contains(err.Error(), "disk I/O error") {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunKill, stop, false, false); err == nil || !strings.Contains(err.Error(), "disk I/O error") {
 		t.Fatalf("a stop whose setting was not read = %v, want the store's error", err)
 	}
 	if fake.ran(protocol.MethodRunKill) {
@@ -485,16 +488,13 @@ func TestRecordsOfADiscardedConversationAreDropped(t *testing.T) {
 	go func() {
 		done <- svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session run-1", CreatedAt: time.Now()})
 	}()
-	for len(m.confirms.snapshot()) == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	pendingCards(t, svc, m)
 	m.op.Lock()
 	err := svc.resetLocked(t.Context(), m)
 	m.op.Unlock()
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.confirms.cancelAll()
 	if err := wait(t, done); !errors.Is(err, errSessionEnded) {
 		t.Fatalf("withdrawn card = %v, want only the withdrawal", err)
 	}

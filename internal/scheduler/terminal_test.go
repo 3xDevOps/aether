@@ -804,7 +804,10 @@ func TestSuperviseTerminalMissingContainerPrunesState(t *testing.T) {
 
 func TestExitedTerminalCleanupRetainsStateForRetry(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	// The retry's adoption probe goes through a scripted Wait that a helper
+	// goroutine answers. A probe deadline it can miss under load reads the
+	// stopped container as running.
+	e := newTestEnv(t, func(cfg *Config) { cfg.ExitProbeTimeout = waitTimeout })
 	waitRuntime := newScriptedWaitRuntime(e.rt)
 	e.sched.cfg.Runtime = waitRuntime
 	failingStore := &failingPutTerminalStore{

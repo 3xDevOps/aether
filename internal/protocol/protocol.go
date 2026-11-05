@@ -128,7 +128,8 @@ const (
 	MethodRunSeen = "run.seen"
 	// MethodRunReview records what the owner did with a reported success:
 	// complete accepts it, closing a live run as completed; later puts it
-	// off (Kill-gated, like run.close).
+	// off; not-yet withdraws it from review until the agent reports success
+	// again (Kill-gated, like run.close).
 	MethodRunReview = "run.review"
 	// MethodSyncConflict notifies both affected members via the event feed
 	// (Steer-gated, like the sync bridge).

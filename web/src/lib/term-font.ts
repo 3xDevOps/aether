@@ -32,10 +32,11 @@ const faces = [`12px "JetBrainsMono NFM"`, `bold 12px "JetBrainsMono NFM"`]
  * caches glyph metrics synchronously at `Terminal.open`, so opening before
  * the font arrives would bake fallback metrics in for the terminal's whole
  * life. A hung load opens anyway after a bounded wait: a terminal with
- * fallback glyphs beats no terminal. Returns a cancel function; a cancelled
- * wait never opens.
+ * fallback glyphs beats no terminal. If a face loads after that, `refit`
+ * runs so the terminal can re-measure its cell. Returns a cancel function; a
+ * cancelled wait never opens or refits.
  */
-export function whenTerminalFontReady(open: () => void): () => void {
+export function whenTerminalFontReady(open: () => void, refit: () => void): () => void {
   const fonts = document.fonts
   // Not FontFaceSet.check: Chromium answers true for a face that has never
   // loaded, which opened terminals on fallback metrics.
@@ -45,14 +46,20 @@ export function whenTerminalFontReady(open: () => void): () => void {
     return () => {}
   }
   let cancelled = false
-  const { promise: expired, resolve: expire } = Promise.withResolvers<void>()
-  const timer = setTimeout(expire, loadTimeoutMs)
-  const loading = Promise.all(faces.map((face) => fonts.load(face, sampleGlyph))).catch(() => {
-    // A failed fetch falls back to platform glyphs, not a dead pane.
-  })
-  void Promise.race([loading, expired]).then(() => {
+  let opened = false
+  const openOnce = () => {
+    if (opened || cancelled) return
+    opened = true
     clearTimeout(timer)
-    if (!cancelled) open()
+    open()
+  }
+  const timer = setTimeout(openOnce, loadTimeoutMs)
+  // A failed face falls back to platform glyphs, not a dead pane, but must
+  // not open the terminal while the other face is still arriving.
+  void Promise.allSettled(faces.map((face) => fonts.load(face, sampleGlyph))).then((results) => {
+    if (cancelled) return
+    if (!opened) openOnce()
+    else if (results.some((result) => result.status === 'fulfilled')) refit()
   })
   return () => {
     cancelled = true
@@ -68,6 +75,14 @@ export function whenTerminalFontReady(open: () => void): () => void {
 export const minTerminalFontSize = 8
 export const maxTerminalFontSize = 32
 export const defaultTerminalFontSize = 12
+
+/**
+ * How small fitting a grid to a phone's width may draw it. A phone packs two
+ * to three device pixels into each CSS pixel, so text below the zoom range
+ * stays legible there, and 80 columns fit a 360px screen at 7px. A wider
+ * grid pans instead.
+ */
+export const minFitTerminalFontSize = 7
 
 /** Snaps any candidate zoom level into the supported range. */
 export function clampTerminalFontSize(px: number): number {

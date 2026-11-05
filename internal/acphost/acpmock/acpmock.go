@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -137,6 +138,9 @@ type Fixture struct {
 	List []json.RawMessage `json:"list"`
 	// RefusePrompts makes the agent refuse every prompt with authRequired.
 	RefusePrompts bool `json:"-"`
+	// RefuseNext, shared by every agent given the fixture, makes them
+	// refuse that many prompts with authRequired, then accept.
+	RefuseNext *atomic.Int32 `json:"-"`
 }
 
 func Load(name string) (Fixture, error) {
@@ -380,7 +384,7 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	cancelTurn := a.cancelTurn
 	a.mu.Unlock()
 	defer cancelTurn()
-	if a.fix.RefusePrompts {
+	if a.fix.RefusePrompts || (a.fix.RefuseNext != nil && a.fix.RefuseNext.Add(-1) >= 0) {
 		return nil, acp.NewAuthRequired(nil)
 	}
 	switch text {

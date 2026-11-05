@@ -73,9 +73,9 @@ server upgrade pins a newer version.
 
 ## Open it
 
-- Select **Assistant** in the sidebar next to **New session**, in the top bar when
-  the sidebar is hidden, or in the phone toolbar. A dot on it means an action
-  waits for your approval.
+- Select **Assistant** in the sidebar next to **New session**, in the top bar
+  when the sidebar is hidden, or the **Assistant** tab on a phone. A dot on it
+  means an action waits for your approval.
 - Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
   a terminal has focus.
 - Run **Ask Aether** from the command palette.
@@ -105,6 +105,42 @@ it exits.
 Aether checks only that the sign-in file exists, not that it still works. When
 the sign-in expires or you want another account, use **Settings > Assistant >
 Sign-in > Sign in again**.
+
+After sign-in the panel asks once **How should your assistant act?**:
+**Ask before acting** (recommended) keeps [approval cards](#approve-an-action),
+and **Act without asking** turns on [auto-approval](#auto-approval), with its
+warning shown under the button. Either answer is stored with your settings;
+a member who already set auto-approval, from Settings or the CLI, or answered
+the suggestion to turn it on, is not asked.
+
+### Same account as your sessions
+
+Once the first start has recorded the assistant's account, the panel's empty
+conversation and **Settings > Assistant > Sign-in** compare it with the login
+your sessions use: `~/.claude/.credentials.json` and `~/.codex/auth.json` in
+your environment's home (`assistant.account`). For Claude Code the server sends
+that file's access token to the profile endpoint the start uses and compares
+the account and organization; for Codex it reads the ChatGPT account from the
+file's token claims, with no network call. The line reads one of:
+
+- `Same Claude account as your sessions`, with the email when the profile
+  names one.
+- `Your sessions use another Claude account (account <uuid>, organization <uuid>, <email>)`,
+  or for Codex `(ChatGPT account <id>)` or `(an API key)`. Codex compares the
+  ChatGPT account only; the API key a ChatGPT login holds is its own.
+- `Can't compare: your environment's Claude token is expired. Start a session to refresh it`.
+  Codex has no such case, because its claims are read without the vendor.
+- `Can't compare with your sessions' <vendor> account: <error>`, for example
+  `your environment has no ~/.codex/auth.json`, or the profile endpoint's
+  answer.
+
+The check only reads the file. It never refreshes, writes, or locks it, and the
+refresh token stays where it is. The result is information only: it gates no
+start, and the assistant's own recorded account stays the one every start
+checks. Your sessions can rewrite the environment's login, so a match says only
+what the file holds now. A session on a
+[shared account](security.md#account-sharing) uses the owner's login instead of
+yours; the check reads yours.
 
 The first conversation uses the first ready agent, Claude Code before Codex. A
 conversation keeps its agent, because another agent cannot continue it. If that
@@ -227,11 +263,11 @@ Save your environment as a new image; new sessions and terminals start from it
 ```
 
 A launch card instead lists what starts: the kind, workspace, agent with model
-and mode, the account, the fallback when that account's usage runs out, the
+and mode, the effort when set, the permission tier, the account, the fallback when that account's usage runs out, the
 task, and how you hear back. Its title names the
 [permission tier](security.md#permission-tiers) when the launch sets one, from
 your request or your saved choices, as in `Launch claude (acp) in api,
-permission root`. A template launch's card shows the whole task its
+permission root`, and the model and effort when the launch sets them. A template launch's card shows the whole task its
 parameters fill in. When the assistant gives a one-line reason for a launch,
 the card shows it as a **Reason** row above the rest. The assistant fills what you did not say from
 your [saved launch choices](teams.md#saved-launch-choices): **From your saved
@@ -257,10 +293,33 @@ assistant saves it with `aether_save_launch_defaults`, behind a card that
 spells out every saved choice; a choice for one launch is never saved. The
 launch dialog and **Settings → Launch** show the same choices.
 
-**Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
-turn or session fails the action with the reason, for example `run.kill was
-not approved: the member declined this action`. The assistant is told to report
-the failure and not retry. The assistant cannot approve for you.
+**Approve** runs it. **Decline** or no answer before the card expires fails
+the action with the reason, for example `run.kill was not approved: the member
+declined this action`. The assistant is told to report the failure and not
+retry. The assistant cannot approve for you.
+
+A card outlives the turn that raised it. The server stores it with the exact
+call, so it shows after a reload, on your phone or desktop, after a server
+restart and while the assistant itself needs sign-in, and any of them can
+decide it (`assistant.confirm`); the first decision wins, and a second gets
+`assistant: no such pending confirmation`.
+
+- The call waits for the card for 10 minutes; approving it in that time
+  hands the result to the assistant. **Stop**, the turn ending or the tool
+  call hanging up stops the wait but leaves the card open until it expires.
+- The same call asked again while its card is open shares that card.
+- Approving a card whose call no longer waits makes the server run it with
+  the stored parameters, as you. It first builds the card again; when it
+  would read differently, for example the session changed owner or the
+  template changed, the card fails with what it reads now and nothing runs.
+  The outcome is written into the conversation; the assistant is not woken.
+- Each card runs at most once. A run cut off by a server restart is recorded
+  as `Failed: the server restarted while it ran; check before retrying`, and
+  is not run again.
+- **New conversation** withdraws every open card.
+
+An approved card reads **Approved, running…** until its outcome is in the
+conversation.
 
 Every action is recorded in the transcript. The approval is written before the
 action runs; if it cannot be written, the action does not run. The outcome
@@ -270,9 +329,10 @@ follows when the call returns:
 | --- | --- |
 | `Approved: <summary>` | You approved the card |
 | `Auto-approved: <summary>` | [Auto-approval](#auto-approval) passed it |
-| `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer in 10 minutes, or the turn ended first. Nothing ran |
+| `Auto-approved by rule <id>: <summary>` | One of your [approval rules](#approval-rules) passed it |
+| `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer before the card expired, or a new conversation withdrew it. Nothing ran |
 | `Done: <summary>` | It succeeded, with the session it launched |
-| `Failed: <summary>` | The server refused it, or the approval could not be read or counted, with the exact error. In the second case nothing ran |
+| `Failed: <summary>` | The server refused it, the card changed before it ran, the server restarted while it ran, or the approval could not be read or counted, with the exact error. In the last three cases nothing ran, or you check whether it did |
 
 Pausing and resuming are recorded as `Done` or `Failed` without an approval.
 Each record carries the target's session and workspace id, and the owner when the
@@ -280,12 +340,81 @@ session is another member's; the [protocol reference](local-gateway.md) gives th
 fields. Resetting the conversation drops the records of actions still in
 flight instead of writing them into the new one.
 
+## Approval rules
+
+A card that could become a rule shows four buttons. The third is the
+server's wording of exactly what the rule covers:
+
+```text
+Launch claude (acp) in api, no fallback: "Fix the flaky login test"
+  [Decline]  [Approve]
+  [Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task]
+  [Approve everything from now on]
+```
+
+**Always approve …** approves the card and saves the rule. **Approve
+everything from now on** approves the card, then asks to confirm turning on
+[auto-approval](#auto-approval); it is not shown while auto-approval is on. A later card with the same
+key passes without asking and is recorded as `Auto-approved by rule <id>:
+<summary>`. A card of any other kind still asks. Rules are checked before
+[auto-approval](#auto-approval), are read on every call, and never expire.
+
+| Card | The rule's key |
+| --- | --- |
+| `run.launch` | workspace, agent, account (yours or one named teammate's), mode, model, effort, permission tier, and whether fallback is off |
+| `run.inject`, `run.kill` | workspace, your own sessions only |
+| `env.save` | your environment |
+
+The key is built by the server from the card's parameters, never from the
+task, the message or the assistant's reason, which a rule does not limit.
+An empty mode, model or effort is part of the key: the rule covers only
+launches that leave it to the agent's default.
+
+These cards never offer a rule, and a rule never passes them:
+
+- Messaging or stopping another member's session.
+- A launch with automatic [usage fallback](teams.md#usage-fallback) while
+  any account is shared with you, or with a fallback order, extra
+  repositories, a subsession setting or resource limits.
+- A card whose text holds one of your saved [preferences](#preferences).
+- Everything auto-approval does not cover: template launches, merges,
+  closes, handoffs, memory notes and pins, forgetting a preference, saving
+  launch choices, and answering a session's question.
+
+Only you create rules, by clicking **Always approve** on a card in the
+Aether app. The assistant, its tool socket and connectors cannot create,
+list or revoke them.
+
+**Settings → Assistant → Approval rules** lists each rule with its wording,
+the card it came from, when it was created and last used, and how many cards
+it passed. **Revoke** deletes it in one click and applies to the next card.
+The CLI does the same:
+
+```sh
+aether member assistant rules                    # list
+aether member assistant rules --revoke <rule-id>
+```
+
+```
+rule-7k2m9q4xbd  created 2026-11-03 14:02, 3 uses, last 2026-11-03 16:40
+  Always approve launches of Claude Code (Enhanced) in api on your account, permission default, for any task
+  from: Launch claude (acp) in api: "Fix the flaky login test"
+```
+
+A rule whose workspace was removed, or whose teammate's account is no
+longer shared with you, stops passing cards and is listed as `Inactive: <reason>`. Merging two members
+keeps the survivor's rules and does not move the absorbed member's.
+
+After you approve three cards of one kind in a row, the next card of that
+kind highlights **Always approve** and says `You approved this kind three
+times in a row.`
+
 ## See what it did
 
 Each action appears in the conversation as a card. The card names the action
 and its target ("Launched session on api with Claude Code", "Merged PR #42") and
-shows its state: running, done, failed, declined by you, expired after 10
-minutes unanswered, withdrawn when the turn ended first, or did not finish. A
+shows its state: running, done, failed, declined by you, expired unanswered,
+withdrawn by a new conversation, or did not finish. A
 call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the session,
 pull request or environment. A failure shows the server's error as is.
@@ -340,8 +469,10 @@ not covered   the assistant's own shell and file tools, which never ask
 > call the assistant's tools and gets the same pass. See
 > [security.md](security.md#the-assistant).
 
-After you approve three cards in a row that auto-approval would have passed, the
-panel offers **Skip approval cards for the assistant?** when it is idle.
+After you approve three cards in a row that auto-approval would have passed,
+not all of one kind, the panel offers **Skip approval cards for the
+assistant?** when it is idle. Three of one kind highlight that kind's
+[rule](#approval-rules) instead.
 **Turn on auto-approval** turns it on. **Not now** asks again in 7 days, then 30,
 then never. **Don't suggest again** stops it.
 
@@ -490,7 +621,9 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
-| `the member did not answer within 10m0s` | The card timed out. Ask again |
+| `the member did not answer before the card expired` | The card timed out. Ask again |
+| `The card changed after you approved it, so nothing was run.` followed by `You approved: ...` and `It now reads: ...` | The target changed while the card waited. Read the new text and ask again |
+| `the server restarted while it ran; check before retrying` | The call may or may not have taken effect. Check the session before you ask again |
 | `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
 | `the assistant is not configured on this server` | The server runs without the assistant |
 | `assistant: the server is shutting down` | Try again after the restart |

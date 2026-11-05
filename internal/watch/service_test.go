@@ -853,9 +853,14 @@ func TestAStartCheckWhoseRetryCannotBeSavedIsRetried(t *testing.T) {
 	// service must remember it.
 	st.fail.Store(false)
 	// A check already failing as saves resume can save its retry after
-	// all; past its backoff, that one is due too.
+	// all, possibly after the clock moved; move it past that retry too.
 	h.clock.advance(maxBackoff)
-	h.eventually("the need missed while down", func() bool { return len(h.notices(w.ID)) == 1 })
+	h.eventually("the need missed while down", func() bool {
+		if next := h.watchState(w.ID).NextCheckAt; next != nil && next.After(h.clock.now()) {
+			h.clock.advance(next.Sub(h.clock.now()))
+		}
+		return len(h.notices(w.ID)) == 1
+	})
 }
 
 func TestChecksBeforeRecoveryWaitForIt(t *testing.T) {

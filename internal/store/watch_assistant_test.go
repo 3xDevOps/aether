@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -16,22 +14,8 @@ func TestAssistantFollowsMigrateToWatches(t *testing.T) {
 	t.Parallel()
 	previous := 89
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
-	if err != nil {
-		t.Fatalf("open raw: %v", err)
-	}
-	if _, err = raw.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
-	for v := 1; v <= previous; v++ {
-		if _, err = raw.Exec(migrations[v-1]); err != nil {
-			t.Fatalf("apply v%d: %v", v, err)
-		}
-		if _, err = raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, v); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err = raw.Exec(`
+	raw := openLegacy(t, path, previous)
+	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, color, role, created_at) VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
 		INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin) VALUES ('w1', 'proj', 1, '{}', 'main', '', '');
 		INSERT INTO runs (id, workspace_id, member_id, account_member_id, task, harness, mode, status, reason, activity, branch, worktree, created_at, review, review_changed_at, status_changed_at)
@@ -51,7 +35,7 @@ func TestAssistantFollowsMigrateToWatches(t *testing.T) {
 	`, testKey(t, "")); err != nil {
 		t.Fatalf("seed rows: %v", err)
 	}
-	if err = raw.Close(); err != nil {
+	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
 

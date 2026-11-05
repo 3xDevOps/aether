@@ -38,7 +38,9 @@ test('a member adds, edits and forgets a preference that a teammate never sees',
   await box.fill('Prefer JSON output please')
   await shot(page, 'memory-edit-desktop')
   await row.getByRole('button', { name: 'Save' }).click()
-  await expect(list.getByText('Prefer JSON output please')).toBeVisible()
+  // The editor's textarea holds the draft as text, so only its closing says the server saved it.
+  await expect(box).toBeHidden()
+  await expect(row).toContainText('Prefer JSON output please')
 
   const { preferences } = await alice.api.rpc<{ preferences: { id: string; text: string }[] }>('preference.list', {})
   expect(preferences.map((p) => p.text)).toEqual(['Prefer JSON output please'])

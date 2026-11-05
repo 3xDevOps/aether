@@ -32,6 +32,10 @@ func TestRenderRuns(t *testing.T) {
 		{ID: "r13", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no token", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Blocked", Task: "task thirteen"},
 		{ID: "r14", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no key", Paused: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Paused", Task: "task fourteen"},
 		{ID: "r15", Status: "needs-attention", Activity: "answered", Reason: "explained the retry policy", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Q&A", Task: "task fifteen"},
+		{ID: "r16", Status: "needs-attention", Activity: "waiting-tools", ACP: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Build", Task: "task sixteen"},
+		{ID: "r17", Status: "needs-attention", Activity: "waiting-ci", ACP: true, ParentRunID: "r4", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Sub", Task: "task seventeen"},
+		{ID: "r18", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true, ParentRunID: "r4", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Held", Task: "task eighteen"},
+		{ID: "r19", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true, ParentRunID: "r4", Detached: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Detached", Task: "task nineteen"},
 		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
 	}
@@ -53,19 +57,23 @@ func TestRenderRuns(t *testing.T) {
 				"r4   Waiting for agents               claude  m1      m1                            Integrate  task four\n" +
 				"r6   Failed                           claude  m1      m1                            Parked     task six\n" +
 				"r7   Failed                           claude  m1      m1                            Ended      task seven\n" +
-				"r8   Ready for review                 claude  m1      m1                            Done       task eight\n" +
-				"r9   Ready for review                 claude  m1      m1                            Later      task nine\n" +
+				"r8   Finished: review                 claude  m1      m1                            Done       task eight\n" +
+				"r9   Finished: review                 claude  m1      m1                            Later      task nine\n" +
 				"r10  Waiting for CI (status unknown)  claude  m1      m1                            CI         task ten\n" +
 				"r11  Waiting                          claude  m1      m1                            Legacy     task eleven\n" +
 				"r12  Waiting                          claude  m1      m1                            Parked     task twelve\n" +
 				"r13  Needs you                        claude  m1      m1                            Blocked    task thirteen\n" +
 				"r14  Needs you                        claude  m1      m1                            Paused     task fourteen\n" +
-				"r15  Answered                         claude  m1      m1                            Q&A        task fifteen\n",
+				"r15  Answered                         claude  m1      m1                            Q&A        task fifteen\n" +
+				"r16  Waiting for process              claude  m1      m1                            Build      task sixteen\n" +
+				"r17  Waiting for CI                   claude  m1      m1                            Sub        task seventeen\n" +
+				"r18  Failed                           claude  m1      m1                            Held       task eighteen\n" +
+				"r19  Failed                           claude  m1      m1                            Detached   task nineteen\n",
 		},
 		{
-			name:     "--needs-you hides archived, waiting, worker, ended and put off runs",
+			name:     "--needs-you hides archived, waiting, worker, ended, finished and held subsession runs",
 			needsYou: true,
-			wantIDs:  []string{"r2", "r6", "r8", "r13"},
+			wantIDs:  []string{"r2", "r6", "r13", "r19"},
 		},
 		{
 			name:     "--archived shows only archived sessions",
@@ -222,5 +230,19 @@ func TestLatestReportCostsOneCallForARunThatNeverReported(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, []string{"r1", "r2"}) {
 		t.Fatalf("timeline calls = %v, want one per session", calls)
+	}
+}
+
+func TestASubsessionOutcomeReadsAsItsParents(t *testing.T) {
+	done := protocol.Run{ID: "lead", ParentRunID: "root", Status: "needs-attention", Activity: "finished", Review: "ready"}
+	if got := displayStatus(done); got != "Finished: reported to its parent" {
+		t.Errorf("a subsession's success = %q", got)
+	}
+	top := protocol.Run{ID: "top", Status: "needs-attention", Activity: "finished", Review: "ready"}
+	if got := displayStatus(top); got != "Finished: review" {
+		t.Errorf("a top-level success = %q", got)
+	}
+	if needsYou(protocol.Run{ID: "leaf", ParentRunID: "lead", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true}) {
+		t.Error("a subsession's failure needs someone")
 	}
 }

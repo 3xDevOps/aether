@@ -287,6 +287,14 @@ function Wait-Relaunch([string]$Desktop, [int]$OldId, [int]$TimeoutSec = 240) {
     throw "The updated desktop app was not started within ${TimeoutSec}s."
 }
 
+# Get-Held opens process Id and keeps the handle, so Windows cannot hand its
+# id to another process before an exit check reads it.
+function Get-Held([int]$Id) {
+    $process = Get-Process -Id $Id
+    $null = $process.Handle
+    return $process
+}
+
 function Get-LastError {
     $files = @(Get-ChildItem -Recurse -Force -LiteralPath $env:LOCALAPPDATA -Filter last-error.txt -ErrorAction SilentlyContinue)
     return ($files | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n"
@@ -548,6 +556,7 @@ exit 1
     $app = Start-App $shortcut $desktop $electron $port
     $appId = $app.Id
     $sidecarId = Wait-Sidecar $app $installed
+    $sidecar = Get-Held $sidecarId
     Write-Host "The old desktop (pid $appId) runs its sidecar (pid $sidecarId) from the old CLI."
     $probe = Invoke-App 'probe' $port
     Assert ($probe.Code -eq 0) 'the old dashboard answers through the running app'
@@ -557,8 +566,8 @@ exit 1
 
     $relaunched = Wait-Relaunch $desktop $appId
     Write-Host "ok: a new desktop process (pid $($relaunched.Id)) was started from the app directory"
-    Assert ((Get-Process -Id $appId -ErrorAction SilentlyContinue) -eq $null) 'the old desktop process exited'
-    Assert ((Get-Process -Id $sidecarId -ErrorAction SilentlyContinue) -eq $null) 'the old sidecar exited'
+    Assert ($app.WaitForExit(30000)) 'the old desktop process exited'
+    Assert ($sidecar.WaitForExit(30000)) 'the old sidecar exited'
     Assert ((Get-Content -Raw -LiteralPath (Join-Path $appDir 'new-release-marker.txt')).Trim() -eq $NewVersion) 'the app directory holds the new release'
     Assert ((Get-Hash $installed) -eq $newHash) 'the CLI the app runs is the new build'
     Assert (-not (Get-LastError)) 'no desktop build error was recorded'
@@ -588,6 +597,7 @@ exit 1
     $port = Get-FreePort
     $app = Start-App $desktop $desktop $electron $port
     $sidecarId = Wait-Sidecar $app $installed
+    $sidecar = Get-Held $sidecarId
     $terminal = Invoke-Native $installed @('update') 600
     Assert ((Get-Hash $installed) -eq $newHash) 'the terminal update replaced aether.exe while the app ran from it'
     Assert (Test-Path -LiteralPath "$installed.old") 'the running sidecar image was renamed to aether.exe.old'
@@ -599,7 +609,7 @@ exit 1
     $probe = Invoke-App 'probe' $port
     Assert ($probe.Code -eq 0) 'the old sidecar still serves the dashboard from aether.exe.old'
     Stop-App $app
-    Assert ((Get-Process -Id $sidecarId -ErrorAction SilentlyContinue) -eq $null) 'the old sidecar exited with the app'
+    Assert ($sidecar.WaitForExit(30000)) 'the old sidecar exited with the app'
     $rebuild = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $newZip + '"')) 600
     Assert ($rebuild.Code -eq 0 -and (Test-Path -LiteralPath (Join-Path $appDir 'new-release-marker.txt'))) 'the rebuild the message names installs the new app once the app is closed'
     $app = Start-App $desktop $desktop $electron (Get-FreePort)

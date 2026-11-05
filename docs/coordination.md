@@ -210,12 +210,19 @@ also enforces these bounds:
   refilling at one request per second. Malformed envelopes and unknown methods
   consume this budget too;
 - valid `coord.hook.status` and `run.report` envelopes each use their own
-  per-session budget with the same limits. Native inbox observations and lifecycle
-  reports cannot spend foreground orchestration allowance or each other's
-  allowance; reconnecting does not reset any budget. Malformed envelopes and
-  unknown methods still spend the ordinary budget. Admission happens before
-  method-specific work, so repeated lifecycle reports remain bounded even
-  when the scheduler has no state change to persist;
+  per-session budget with the same limits, and a `run.report` that decides the
+  run's state uses a third: one whose `state` is `waiting` (the agent's turn end),
+  one with `turn_start` (a prompt starting a turn), one whose `input_updates` open,
+  close or clear a question (a full `replace` snapshot, which pi and omp send with
+  every heartbeat, does not count), or a `working` one whose reason is
+  `working in background` (a turn end that waits on background tasks).
+  Native inbox observations and lifecycle reports cannot spend foreground
+  orchestration allowance or each other's allowance, and the reports a harness
+  sends for every tool use cannot spend the allowance those reports need;
+  reconnecting does not reset any budget.
+  Malformed envelopes and unknown methods still spend the ordinary budget.
+  Admission happens before method-specific work, so repeated lifecycle reports
+  remain bounded even when the scheduler has no state change to persist;
 - `wait_seconds` is a server-side wait from 0 through 30 seconds;
 - each session socket accepts at most 16 concurrent connections, and inactive
   connections are reaped after five minutes;
@@ -606,7 +613,7 @@ Write your reply to the person as message text before the report; neither your t
 - waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you. Waiting on a PR, its checks or another session? Add --until (until in aether_report; conditions in report --help) and the server wakes you when one resolves. Nothing else wakes you when CI or a process finishes; never ask people to message you when it lands. Not while aether_status shows protected: mail never wakes a protected session, so wait in your turn.
 - needs-input: only a question a human must answer; the reply comes as your next prompt.
 - blocked: a human must act, such as missing access or a broken environment; not a way to wait.
-- success | failure: the work you own is verified done or cannot be done; the session stays open for follow-up. Success shows the session as Ready for review until the user marks it complete or later.
+- success | failure: the work you own is verified done or cannot be done; the session stays open for follow-up. Success shows the session as Finished: review until the user marks it complete or later.
 Never ask the human in prose and stop; use needs-input.
 Never report while still working, and report only what you verified.
 Subagents and spawned workflows never report; they return their results to the agent that started them.
@@ -1283,8 +1290,11 @@ person closes a parent (merged, abandoned, or completed and accepted), the
 server closes its subsessions the same way: finished ones are relabeled, working
 ones are stopped first, and queued ones are cancelled. When a parent ends
 otherwise (failed, killed, interrupted or deleted), working subsessions are
-stopped and queued ones cancelled; a subsession that already reported its result is
-detached instead and stays for review. Their own subsessions follow. Pausing a
+stopped and queued ones cancelled, and so is a subsession that already reported
+its result. Under a parent that completed but is not yet accepted, such a
+subsession stays under the parent and closes with it. A subsession's result is for its parent
+alone, never shown to a person as needing review
+([failure-handling.md](failure-handling.md#needs-you)). Their own subsessions follow. Pausing a
 parent does not pause its subsessions.
 
 Refusals name the cause: subsessions off for the owner, a Background parent
@@ -1340,8 +1350,8 @@ What a report does depends on the session:
 - **Interactive session** (`tui` or `acp`). At turn end,
   with no permission or question request open, success or failure records
   `needs-attention` with the reason `agent reported success` or
-  `agent reported failure`. A success shows **Ready for review** and counts
-  as **Needs you** until the owner marks it complete or later
+  `agent reported failure`. A success shows **Finished: review** until the
+  owner marks it complete, and never counts as **Needs you**
   ([review](failure-handling.md#review)); a failure shows **Failed**. The
   composer, native terminal, container and Enhanced agent remain
   live. The next working turn clears the shown outcome and the review. A report received after turn end is shown immediately. Without a
@@ -1358,7 +1368,7 @@ What a report does depends on the session:
   the work (`aether:` for success, `wip:` for failure), publishes the session
   branch, records `completed` or `failed`, and cleans up its container.
   A Close or Kill that lands first wins. A session completed by its success
-  report shows **Ready for review** until the owner marks it complete or
+  report shows **Finished: review** until the owner marks it complete or
   later.
 - **Blocked report.** The summary becomes `blocked: <summary>` at turn end,
   or when an agent without a status reporter stalls. It does not interrupt

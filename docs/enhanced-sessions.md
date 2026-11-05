@@ -204,7 +204,7 @@ Standard session whose agent reports its turns. The reason tells you how it ende
 | Reason | State | Cause |
 | --- | --- | --- |
 | `turn ended without a report` | `waiting` | The turn ended normally with no outcome report |
-| `agent reported success` | `finished` | The session shows **Ready for review** ([failure-handling.md](failure-handling.md#review)) |
+| `agent reported success` | `finished` | The session shows **Finished: review** ([failure-handling.md](failure-handling.md#review)) |
 | `needs input: <question>` | `needs-you` | The agent ran `aether-internal report --outcome needs-input` and ended its turn |
 | `blocked: <summary>` | `needs-you` | The agent reported an external blocker |
 | the summary of a `waiting` report | `waiting-agents`, `waiting-ci` or `waiting-tools` | The agent waits on its own agents, CI or a process |
@@ -347,6 +347,16 @@ restores the conversation in a fresh adapter as above. Send the failed message
 again. If the agent loses the conversation again within 5 minutes, Aether stops the
 adapter and the session parks with
 `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`.
+
+If the agent refuses a turn with `Authentication required`, Aether shows
+**Agent signed out**, restarts the adapter in the same container so it reads the
+account's login again, and restores the conversation. Send the refused message
+again; agent mail is offered again by itself. A session whose agent reported an
+outcome that is still waiting for its turn to end is not restarted. If the
+restarted agent refuses again within 5 minutes, the session parks with
+`enhanced turn failed: ... Authentication required ...; restarting the agent did not restore its sign-in, ...: start a new session`.
+That container's copy of the login is stale or unreadable; a new session's
+container mounts the current one.
 
 If the adapter fails to start or exits, the container and login shell stay
 available. The log shows the real error and the end of the adapter's stderr, and

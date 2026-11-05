@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"sync"
@@ -23,10 +24,61 @@ type memStore struct {
 	settings map[domain.MemberID]store.AssistantSettings
 	// settingsReads counts AssistantSettings calls.
 	settingsReads int
+	rules         []store.AssistantRule
+	cards         []store.AssistantCard
 }
 
 func newMemStore() *memStore {
 	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, settings: map[domain.MemberID]store.AssistantSettings{}}
+}
+
+func (m *memStore) AssistantRules(_ context.Context, id domain.MemberID) ([]store.AssistantRule, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.AssistantRule
+	for _, r := range m.rules {
+		if r.MemberID == id {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) AddAssistantRule(_ context.Context, id domain.MemberID, key store.AssistantRuleKey, wording, summary string) (store.AssistantRule, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.rules {
+		if r.MemberID == id && r.Key == key {
+			return r, nil
+		}
+	}
+	r := store.AssistantRule{ID: fmt.Sprintf("rule-%d", len(m.rules)+1), MemberID: id, Key: key, Wording: wording, Summary: summary, CreatedAt: time.Now().UTC()}
+	m.rules = append(m.rules, r)
+	return r, nil
+}
+
+func (m *memStore) DeleteAssistantRule(_ context.Context, id domain.MemberID, rule string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.rules)
+	m.rules = slices.DeleteFunc(m.rules, func(r store.AssistantRule) bool { return r.MemberID == id && r.ID == rule })
+	if len(m.rules) == n {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (m *memStore) UseAssistantRule(_ context.Context, id domain.MemberID, rule string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, r := range m.rules {
+		if r.MemberID == id && r.ID == rule {
+			m.rules[i].Uses++
+			m.rules[i].LastUsedAt = time.Now().UTC()
+			return nil
+		}
+	}
+	return store.ErrNotFound
 }
 
 func (m *memStore) AssistantSettings(_ context.Context, id domain.MemberID) (store.AssistantSettings, error) {
@@ -148,7 +200,7 @@ func TestPromptKeyIsSharedByDuplicates(t *testing.T) {
 	m.op.Lock()
 	results := make(chan error, 2)
 	for range 2 {
-		go func() { results <- s.Prompt(t.Context(), "m1", "hi", "k", nil) }()
+		go func() { results <- s.Prompt(t.Context(), "m1", "hi", "k", nil, Door("")) }()
 	}
 	time.Sleep(50 * time.Millisecond)
 	m.op.Unlock()
@@ -174,10 +226,10 @@ func TestPersistedPromptKeyIsIgnoredAfterRestart(t *testing.T) {
 	}
 	s := New(Config{Store: db})
 	s.cancel()
-	if err := s.Prompt(t.Context(), "m1", "hi", "k", nil); err != nil {
+	if err := s.Prompt(t.Context(), "m1", "hi", "k", nil, Door("")); err != nil {
 		t.Fatalf("a key accepted before the restart ran again: %v", err)
 	}
-	if err := s.Prompt(t.Context(), "m1", "hi", "other", nil); !errors.Is(err, ErrClosed) {
+	if err := s.Prompt(t.Context(), "m1", "hi", "other", nil, Door("")); !errors.Is(err, ErrClosed) {
 		t.Fatalf("a new key = %v, want it to run", err)
 	}
 }

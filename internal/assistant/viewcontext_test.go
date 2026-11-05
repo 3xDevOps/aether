@@ -127,7 +127,7 @@ func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 
 	first := view("run-a", t0)
 	m.holdView(first, viewFromNavigation, t0)
-	if err := s.Prompt(ctx, "m1", "fix this", "k0", view("run-b", t0.Add(2*time.Second))); err == nil || !strings.Contains(err.Error(), "agent list unavailable") {
+	if err := s.Prompt(ctx, "m1", "fix this", "k0", view("run-b", t0.Add(2*time.Second)), Door("")); err == nil || !strings.Contains(err.Error(), "agent list unavailable") {
 		t.Fatalf("Prompt = %v, want the failed session start", err)
 	}
 	if got := held(t0); got.ViewContext != first || got.Source != viewFromNavigation {
@@ -158,7 +158,7 @@ func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 	m.mu.Unlock()
 
 	prompt := view("run-b", t0.Add(2*time.Second))
-	if err := s.Prompt(ctx, "m1", "fix this", "k1", prompt); err != nil {
+	if err := s.Prompt(ctx, "m1", "fix this", "k1", prompt, Door("")); err != nil {
 		t.Fatal(err)
 	}
 	sent := time.Now()
@@ -183,7 +183,7 @@ func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 		t.Fatalf("held after a slow device's update past the race = %+v, want it", got.ViewContext.Route)
 	}
 
-	if err := s.Prompt(ctx, "m1", "fix this", "k1", view("run-old", t0)); err != nil {
+	if err := s.Prompt(ctx, "m1", "fix this", "k1", view("run-old", t0), Door("")); err != nil {
 		t.Fatalf("a prompt sent before = %v, want it skipped", err)
 	}
 	if got := held(sent); got.ViewContext != slow {

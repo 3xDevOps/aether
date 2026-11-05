@@ -13,6 +13,18 @@ export interface AssistantAgent {
   reason?: string
 }
 
+export type AssistantAccountState = 'unrecorded' | 'same' | 'other' | 'expired' | 'error'
+
+/** How an agent's assistant sign-in compares with the login in the member's environment. Information only. */
+export interface AssistantAccount {
+  agent: string
+  state: AssistantAccountState
+  /** The environment's account, when `state` is `other`. */
+  environment?: string
+  email?: string
+  error?: string
+}
+
 export interface AssistantConfirmation {
   id: string
   method: string
@@ -29,6 +41,41 @@ export interface AssistantConfirmation {
   task?: string
   /** What the member's saved launch defaults filled into a launch, each saved choice it skipped and each it could not check, with the reason. */
   defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[]; unchecked?: { field: string; reason: string }[] }
+  /** The approval rule approving with always saves, in the server's wording; absent when the card cannot become one. */
+  rule?: AssistantRuleOffer
+  /** Pending until decided; approved and running cards stay listed until their call's outcome is in the transcript. Absent from a server without durable cards. */
+  state?: 'pending' | 'approved' | 'running'
+  /** When an approved or running card was decided. */
+  decided_at?: string
+  /** Where the prompt of the turn that raised the card came from. */
+  origin?: AssistantOrigin
+}
+
+/** Where a turn's prompt came from, stamped by the server. */
+export interface AssistantOrigin {
+  door: 'dashboard' | 'phone' | 'desktop' | 'connector'
+  client?: string
+  connector_id?: string
+}
+
+export interface AssistantRuleOffer {
+  wording: string
+  /** The member approved three cards of this kind by hand in a row. */
+  suggested?: boolean
+}
+
+/** One of the member's approval rules (`assistant.rules`). */
+export interface AssistantRule {
+  id: string
+  method: string
+  wording: string
+  /** The card the rule came from. */
+  summary: string
+  created_at: string
+  last_used_at?: string
+  uses: number
+  /** Why the rule no longer passes cards, such as its workspace being removed. */
+  inactive?: string
 }
 
 export interface AssistantActionTarget {
@@ -49,7 +96,9 @@ export interface AssistantActionRecord {
   target: AssistantActionTarget
   outcome: 'approved' | 'auto_approved' | 'declined' | 'expired' | 'withdrawn' | 'failed' | 'succeeded'
   /** How it passed; absent for a call that never asks, such as a pause. */
-  approval?: 'card' | 'auto'
+  approval?: 'card' | 'auto' | 'rule'
+  /** The approval rule that passed it. */
+  rule_id?: string
   confirmation_id?: string
   /** The call's idempotency key, when its method takes one. */
   idempotency_key?: string
@@ -77,6 +126,8 @@ export interface AssistantStatus {
   /** Temporary chat: the assistant neither uses nor saves preferences, and the chat is discarded on New conversation. Absent from a server without it. */
   temporary?: boolean
   preferences_enabled?: boolean
+  /** The member chose whether the assistant asks before acting; absent from a server without it. */
+  approval_chosen?: boolean
 }
 
 export interface AssistantSettings {
@@ -88,6 +139,7 @@ export interface AssistantSettings {
   /** Use the member's private preferences in the assistant; absent reads as on. */
   preferences_enabled?: boolean
   temporary?: boolean
+  approval_chosen?: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */

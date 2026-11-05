@@ -388,14 +388,32 @@ func hinted(err error, next string) error {
 func failed(err error) *mcp.CallToolResult {
 	res := &mcp.CallToolResult{}
 	code := protocol.CodeInternal
-	var perr *protocol.Error
+	var (
+		perr  *protocol.Error
+		uerr  *untrustedError
+		mixed = errors.As(err, &uerr)
+	)
 	if errors.As(err, &perr) {
 		err, code = errors.New(perr.Message), perr.Code
 	}
 	res.SetError(err)
+	if mixed {
+		b, _ := json.Marshal(map[string]any{"untrusted": uerr.untrusted})
+		res.Content = []mcp.Content{&mcp.TextContent{Text: err.Error() + "\n" + string(b)}}
+	}
 	res.Meta = mcp.Meta{MetaErrorCode: code}
 	return res
 }
+
+// untrustedError is a failure whose details include text other agents
+// wrote; they are returned beside the message under untrusted, never in it.
+type untrustedError struct {
+	err       *protocol.Error
+	untrusted any
+}
+
+func (e *untrustedError) Error() string { return e.err.Error() }
+func (e *untrustedError) Unwrap() error { return e.err }
 
 // retryable adds to a write's failure the key that repeats it safely when
 // the failure leaves unknown whether it happened.

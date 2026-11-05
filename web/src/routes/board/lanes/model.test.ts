@@ -153,7 +153,7 @@ describe('buildLanes', () => {
       'Needs you', 'family', ['parent', 3], ['c1', 3], ['c2', 3], ['g1', 3],
     ])
     const header = lanes.find((l): l is FamilyLane => l.kind === 'family')!
-    expect(header).toMatchObject({ open: true, parentID: 'parent', detail: '3 subsessions · 1 needs you · 1 working · 1 done' })
+    expect(header).toMatchObject({ open: true, parentID: 'parent', detail: '3 subsessions · 1 needs you · 1 working · 1 finished' })
     const folded = buildLanes(input(ctx, { open: new Map([[header.key, false]]) })).lanes
     expect(folded.filter((l) => l.kind === 'run').map((l) => (l as RunLane).card.run.id)).toEqual(['g1'])
   })
@@ -164,8 +164,19 @@ describe('buildLanes', () => {
       run({ id: 'c1', parent_run_id: 'parent', status: 'completed', state: undefined, created_at: at(10), finished_at: at(20) }),
     ])
     const { lanes } = buildLanes(input(ctx))
-    expect(lanes.find((l): l is FamilyLane => l.kind === 'family')).toMatchObject({ open: false })
+    expect(lanes.find((l): l is FamilyLane => l.kind === 'family')).toMatchObject({ open: false, detail: '1 subsession · 1 finished' })
     expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['parent'])
+  })
+
+  it('keeps a detached subsession awaiting review visible in a folded family once its parent ended', () => {
+    const ctx = ctxOf([
+      run({ id: 'parent', status: 'merged', state: undefined, created_at: at(5), started_at: at(5), finished_at: at(40) }),
+      run({ id: 'c1', parent_run_id: 'parent', detached: true, status: 'completed', state: undefined, review: 'ready', created_at: at(10), finished_at: at(20) }),
+      run({ id: 'c2', parent_run_id: 'parent', status: 'completed', state: undefined, created_at: at(10), finished_at: at(20) }),
+    ])
+    const { lanes } = buildLanes(input(ctx, { open: new Map([['section:review', true], ['section:finished', true]]) }))
+    expect(lanes.find((l): l is FamilyLane => l.kind === 'family')).toMatchObject({ open: false })
+    expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['c1'])
   })
 
   it('keeps a failure that ended as it started visible on the Finished strip', () => {
@@ -177,10 +188,11 @@ describe('buildLanes', () => {
     expect(summary?.kind === 'summary' && summary.strip.map((s) => s.tone)).toEqual(['done', 'failed', 'done'])
   })
 
-  it('colours a completed run awaiting review by its completion, while it reads Ready for review', () => {
+  it('colours a completed run awaiting review by its completion, while it reads Finished: review, never Needs you', () => {
     const ctx = ctxOf([run({ id: 'done', status: 'completed', state: undefined, review: 'ready', created_at: at(10), started_at: at(10), finished_at: at(40) })])
     const lane = buildLanes(input(ctx)).lanes.find((l): l is RunLane => l.kind === 'run')!
     expect(lane.card.state).toBe('ready')
+    expect(lane.card.group).toBe('review')
     expect(lane.outcome).toBe('completed')
     expect(segmentTone(lane.segments[0].state, lane.outcome)).toBe('done')
   })
@@ -340,7 +352,11 @@ describe('live mail', () => {
     const [down, out] = liveShapes(addLiveMail([], [arrival('a', 'b', 0), { ...arrival('a', '', 1), to: { lane: '', run: 'elsewhere' } }]), drawn, anchors, g, { top: 0, bottom: 400 }, now)
     expect(down.offscreen).toEqual({ end: 'to', edge: 'bottom' })
     expect(down.y2).toBeGreaterThan(down.y1)
+    expect([down.x, down.bow]).toEqual([g.width - 28, 56])
     expect([out.stub, out.offscreen]).toEqual(['out', undefined])
+    expect([out.x, out.bow]).toEqual([g.width - 28 - 16, 0])
+    const [adjacent] = liveShapes(addLiveMail([], [arrival('a', 'b', 0)]), drawn, new Map([['a', { top: 0, height: 36, half: 12 }], ['b', { top: 36, height: 36, half: 12 }]]), g, { top: 0, bottom: 400 }, now)
+    expect(adjacent.bow).toBe(0)
     const [up, stub] = liveShapes(addLiveMail([], [arrival('b', 'a', 0), { ...arrival('', 'a', 1), from: { lane: '', run: 'elsewhere' } }]), drawn, anchors, g, { top: 600, bottom: 1000 }, now)
     expect(up.offscreen).toEqual({ end: 'to', edge: 'top' })
     expect([stub.stub, stub.offscreen]).toEqual(['in', { end: 'to', edge: 'top' }])

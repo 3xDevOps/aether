@@ -5,28 +5,83 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
+
+// legacyImages holds the database file at each schema version openLegacy
+// has built. Replaying migrations costs seconds under the race detector,
+// so each version is built once per test binary, starting from the
+// highest version below it already built.
+var legacyImages struct {
+	sync.Mutex
+	byVersion map[int][]byte
+}
 
 // openLegacy builds a database at the given schema version by applying the
 // first n migrations by hand, so a test can seed rows in the old shape and
 // then let Open run the migration under test.
 func openLegacy(t *testing.T, path string, n int) *sql.DB {
 	t.Helper()
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
+	if err := os.WriteFile(path, legacyImage(t, n), 0o600); err != nil {
+		t.Fatalf("copy v%d database: %v", n, err)
+	}
+	raw, err := openRaw(path)
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}
-	if _, err := raw.Exec(`CREATE TABLE schema_migrations (
-		version    INTEGER PRIMARY KEY,
-		applied_at INTEGER NOT NULL
-	)`); err != nil {
-		t.Fatalf("create schema_migrations: %v", err)
+	return raw
+}
+
+func openRaw(path string) (*sql.DB, error) {
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
+	if err != nil {
+		return nil, err
 	}
-	for i := range n {
+	if err := raw.Ping(); err != nil {
+		_ = raw.Close()
+		return nil, err
+	}
+	return raw, nil
+}
+
+func legacyImage(t *testing.T, n int) []byte {
+	t.Helper()
+	legacyImages.Lock()
+	defer legacyImages.Unlock()
+	if image, ok := legacyImages.byVersion[n]; ok {
+		return image
+	}
+	from := 0
+	for v := range legacyImages.byVersion {
+		if v < n && v > from {
+			from = v
+		}
+	}
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	if from > 0 {
+		if err := os.WriteFile(path, legacyImages.byVersion[from], 0o600); err != nil {
+			t.Fatalf("copy v%d database: %v", from, err)
+		}
+	}
+	raw, openErr := openRaw(path)
+	if openErr != nil {
+		t.Fatalf("open raw: %v", openErr)
+	}
+	defer func() { _ = raw.Close() }()
+	if from == 0 {
+		if _, err := raw.Exec(`CREATE TABLE schema_migrations (
+			version    INTEGER PRIMARY KEY,
+			applied_at INTEGER NOT NULL
+		)`); err != nil {
+			t.Fatalf("create schema_migrations: %v", err)
+		}
+	}
+	for i := from; i < n; i++ {
 		if _, err := raw.Exec(migrations[i]); err != nil {
 			t.Fatalf("apply v%d: %v", i+1, err)
 		}
@@ -34,7 +89,20 @@ func openLegacy(t *testing.T, path string, n int) *sql.DB {
 			t.Fatalf("record v%d: %v", i+1, err)
 		}
 	}
-	return raw
+	// Closing the last connection leaves the whole database in the main
+	// file: these raw connections keep SQLite's default rollback journal.
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close v%d database: %v", n, err)
+	}
+	image, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read v%d database: %v", n, err)
+	}
+	if legacyImages.byVersion == nil {
+		legacyImages.byVersion = map[int][]byte{}
+	}
+	legacyImages.byVersion[n] = image
+	return image
 }
 
 // TestSessionCollapseMigrationRehomesEveryRow pins the session-to-workspace

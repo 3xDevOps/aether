@@ -2,18 +2,12 @@ name: Edge image
 
 # Builds images/edge/Dockerfile on both architectures it ships for and runs
 # scripts/edge-image-smoke.sh on each, natively, and qualifies an upgrade
-# from the previous release with make test-edge-upgrade. ci.yml calls it when
-# scripts/ci-classify-edge.sh says a pull request can change the image, and
-# skips the upgrade on a pull request: the merge queue and main run it;
-# `gh workflow run edge-image.yml --ref <branch>` forces it for any branch.
+# from the previous release with make test-edge-upgrade. ci.yml calls it in
+# the merge queue and on pushes to main;
+# `gh workflow run edge-image.yml --ref <branch>` runs it for any branch.
 # It pushes nothing and holds no credential beyond a read-only token.
 on:
   workflow_call:
-    inputs:
-      full:
-        description: Also qualify the upgrade from the previous release
-        type: boolean
-        default: true
   workflow_dispatch:
     inputs:
       ref:
@@ -47,7 +41,17 @@ jobs:
       - name: Read the short commit
         id: commit
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      # Inline, not ./.github/actions/docker-mirror: ref may predate it.
+      - name: Point the Docker daemon at a Docker Hub mirror
+        run: |
+          current=$(sudo cat /etc/docker/daemon.json 2>/dev/null || printf '{}')
+          printf '%s' "$current" | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json >/dev/null
+          sudo systemctl restart docker
       - uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build the edge image
         uses: docker/build-push-action@v6
         with:
@@ -62,7 +66,6 @@ jobs:
         run: sh scripts/edge-image-smoke.sh aether-edge:ci
 
   upgrade:
-    if: ${{ inputs.full != false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -75,5 +78,11 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # Inline, not ./.github/actions/docker-mirror: ref may predate it.
+      - name: Point the Docker daemon at a Docker Hub mirror
+        run: |
+          current=$(sudo cat /etc/docker/daemon.json 2>/dev/null || printf '{}')
+          printf '%s' "$current" | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json >/dev/null
+          sudo systemctl restart docker
       - name: Qualify an edge upgrade
         run: sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade

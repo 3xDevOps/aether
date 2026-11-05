@@ -29,10 +29,11 @@ credentials out of the report.
 | [Account sharing](#account-sharing) | A recipient's session gets your agent login, not your home. | The recipient's session can copy, overwrite or log out your login. Revoking does not stop running sessions. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Sessions sign through an agent and cannot copy the key. | Any of your sessions can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every session of the workspace reads them, and anyone who can launch or message a session can make it print one. |
-| [Assistant](#the-assistant) | Its own container, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
+| [Assistant](#the-assistant) | Its own container, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click, and an approval rule removes it for one kind of action. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the session. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the session can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Dashboard gateways](#the-dashboard-gateways) | `aether gui` listens on loopback with a per-process token. The server's dashboard is tailnet-only HTTPS with per-request identity. | Any process on the server host that connects to the host's own tailnet address is served as the node's owner. |
+| [Dictation](#dictation) | The speech-to-text engine runs in a container with no network, no capabilities and a memory cap, reachable only through a `0600` Unix socket. Only approved members call it, never connectors, one clip at a time. Audio stays in memory. | The engine and model are third-party binaries, checked only against pinned SHA-256 sums. |
 | [Push notifications](#push-notifications) | The server posts only to public HTTPS endpoints, and the payload is encrypted to your browser. | A notice shows run text (title and reason) on your device. |
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
 | [SSH into a session and port forwarding](#ssh-into-a-session) | Same admission as a session shell. Forwards reach only the session's own loopback. | Sessions are not recorded. Attaching an editor lets the session's agent reach your computer through the editor. |
@@ -417,17 +418,36 @@ permissions, and it uses the account you signed it in to.
   **New conversation**.
 - The assistant does not start when the server cannot reach the vendor's
   sign-in service.
+- The [same-account check](assistant.md#same-account-as-your-sessions) reads
+  your environment's login read-only and sends only its Claude access token
+  to the profile endpoint. It is information only and gates nothing.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a session and saving your environment wait for you to
-  approve a card. An unanswered card fails after 10 minutes.
+  approve a card. An unanswered card expires after 10 minutes. Only your own
+  Aether devices decide a card
+  (`assistant.confirm`), never the assistant's tool socket. A card approved
+  after its turn ended runs on the server as you, at most once, and only if it
+  still reads as the card you approved.
 - **Let the assistant act without asking** (auto-approve, off by default)
   skips the card for your own sessions. Messaging or stopping another member's session
   always asks. The assistant cannot turn auto-approve on or approve a card
   itself.
+- An [approval rule](assistant.md#approval-rules) skips the card for one
+  kind of action: launches of one agent, mode, model and permission tier in
+  one workspace on one account, messages or stops of your own sessions in one
+  workspace, or saving your environment. The server builds the rule from the
+  card's typed parameters, never from text the assistant or a session wrote,
+  and checks it on every call. Only your click on a card creates one;
+  `assistant.rules` and `assistant.rules.revoke` refuse the assistant's own
+  calls and connectors, and its tool socket serves none of them. A rule does
+  not limit the task or message: a steered assistant can launch any task
+  with the agent a rule covers, or send any message to your own sessions in
+  its workspace. Rules never expire; revoke one you no longer use.
 - Its shell and file tools never ask, inside its own container.
-- Transcripts it reads can carry injected instructions. With auto-approve off,
-  a steered assistant still needs your click. With it on, a steered assistant
-  can launch, message and stop your sessions.
+- Transcripts it reads can carry injected instructions. With auto-approve off
+  and no rules, a steered assistant still needs your click. With it on, a
+  steered assistant can launch, message and stop your sessions; with a rule,
+  it can do what the rule covers.
 
 Every write call the assistant makes, such as a launch, message, pause or stop,
 is recorded in the [audit history](connectors.md#audit-history) as `assistant`.
@@ -516,7 +536,11 @@ The [Android app](install.md#android-app) is a WebView locked to one HTTPS
 origin. It refuses `http://` addresses and certificate errors, opens other
 sites in the phone's browser, stays out of cloud backup and holds no
 credential. Safe Browsing is off because it only loads your server and the
-phone's browser checks every other link ([privacy.md](privacy.md)).
+phone's browser checks every other link ([privacy.md](privacy.md)). It holds
+the `RECORD_AUDIO` permission and grants the microphone only to the
+dashboard's origin, when you press the dashboard's mic button; every other
+origin and every other WebView permission request is denied. The audio goes to
+your Aether server for transcription and the app does not store it.
 
 ### Push notifications
 
@@ -546,6 +570,24 @@ so of what it commits and publishes, unless the repository ignores it. Files
 lists ignored files too, and anyone who can view the session can read any file in
 its checkout, a `.env` included. Keep a value viewers must not see as a
 workspace secret and out of files.
+
+### Dictation
+
+`sudo aether-server dictation install` downloads sherpa-onnx's prebuilt engine
+and an ONNX model from the sherpa-onnx GitHub releases and accepts only files
+matching the SHA-256 sums pinned in `aether-server`, and pulls the engine's
+image by digest ([dictation.md](dictation.md#install)). The engine has no
+authentication and listens on every interface, so its container has no
+network: nothing reaches it, sessions included, but the server through
+`<data-dir>/dictation/sock/engine.sock`, mode `0600` in a `0700` directory. The
+container runs as uid 65534 with a read-only root, every capability dropped,
+`no-new-privileges`, the engine and model mounted read-only, at most 4 CPUs,
+2.5 GiB of memory and 256 processes, and the engine at nice 10
+([dictation.md](dictation.md#the-engine-container)). `dictation.transcribe`
+takes any approved member's clip; pending members, connectors and the assistant
+are refused, and the server queues at most four clips behind the one it
+transcribes, one per member, so dictation takes no more than one engine's CPU
+from sessions.
 
 ## Agent configuration and Files
 

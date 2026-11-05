@@ -2450,6 +2450,67 @@ ALTER TABLE watch_deliveries ADD COLUMN next_at INTEGER;
 CREATE UNIQUE INDEX idx_watch_deliveries_relay ON watch_deliveries(notification_id, run_id) WHERE channel = 'relay';
 CREATE INDEX idx_watch_deliveries_relay_due ON watch_deliveries(next_at) WHERE channel = 'relay' AND next_at IS NOT NULL;
 `,
+	// v102: a member's assistant approval rules, each passing the cards
+	// whose typed key fields equal its own. workspace_id and
+	// account_member_id carry no foreign key: a rule whose workspace or
+	// account is gone stays listed as inactive. rule_streak_key and
+	// rule_streak count the cards of one rule key approved in a row.
+	`
+CREATE TABLE assistant_rules (
+	id                TEXT PRIMARY KEY,
+	member_id         TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	method            TEXT NOT NULL,
+	workspace_id      TEXT NOT NULL DEFAULT '',
+	agent             TEXT NOT NULL DEFAULT '',
+	account_member_id TEXT NOT NULL DEFAULT '',
+	mode              TEXT NOT NULL DEFAULT '',
+	model             TEXT NOT NULL DEFAULT '',
+	effort            TEXT NOT NULL DEFAULT '',
+	permission        TEXT NOT NULL DEFAULT '',
+	no_fallback       INTEGER NOT NULL DEFAULT 0,
+	wording           TEXT NOT NULL,
+	summary           TEXT NOT NULL,
+	created_at        INTEGER NOT NULL,
+	last_used_at      INTEGER,
+	uses              INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX idx_assistant_rules_key ON assistant_rules(member_id, method, workspace_id, agent, account_member_id, mode, model, effort, permission, no_fallback);
+ALTER TABLE assistant_settings ADD COLUMN rule_streak_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE assistant_settings ADD COLUMN rule_streak INTEGER NOT NULL DEFAULT 0;
+`,
+	// v103: approval_chosen records that the member chose how the assistant
+	// acts, so the dashboard asks once. Turning auto-approval on or answering
+	// the suggestion to was a choice.
+	`
+ALTER TABLE assistant_settings ADD COLUMN approval_chosen INTEGER NOT NULL DEFAULT 0;
+UPDATE assistant_settings SET approval_chosen = 1 WHERE auto_approve = 1 OR suggest_off = 1 OR suggest_snoozes > 0;
+`,
+	// v104: assistant approval cards outlive the turn that raised them. A
+	// card holds the exact call it approves and the conversation generation
+	// it belongs to; state 'running' is the claim taken before that call
+	// runs, so it runs at most once.
+	`
+CREATE TABLE assistant_cards (
+	id          TEXT PRIMARY KEY,
+	member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	generation  INTEGER NOT NULL,
+	method      TEXT NOT NULL,
+	params      TEXT NOT NULL,
+	card        TEXT NOT NULL,
+	origin      TEXT NOT NULL,
+	state       TEXT NOT NULL,
+	action_id   TEXT NOT NULL DEFAULT '',
+	result      TEXT NOT NULL DEFAULT '',
+	error       TEXT NOT NULL DEFAULT '',
+	shown_at    INTEGER NOT NULL DEFAULT 0,
+	decided_at  INTEGER NOT NULL DEFAULT 0,
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	updated_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_assistant_cards_member ON assistant_cards(member_id, created_at);
+CREATE INDEX idx_assistant_cards_open ON assistant_cards(state) WHERE state IN ('pending', 'approved', 'running');
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

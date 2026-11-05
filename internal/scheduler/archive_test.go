@@ -36,7 +36,7 @@ func TestSetArchivedRefusedOnNonFinal(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
-	for _, status := range []domain.RunStatus{domain.RunRunning, domain.RunCompleted} {
+	for _, status := range []domain.RunStatus{domain.RunRunning, domain.RunNeedsAttention} {
 		r := createStatusRun(t, e, status)
 		_, err := e.sched.SetArchived(ctx, r.ID, e.member.ID, true)
 		if !errors.Is(err, ErrInvalidTransition) {
@@ -52,6 +52,19 @@ func TestSetArchivedRefusedOnNonFinal(t *testing.T) {
 		if fresh.ArchivedAt != nil {
 			t.Fatalf("refused archive set archived_at anyway: %v", fresh.ArchivedAt)
 		}
+	}
+}
+
+func TestSetArchivedAcceptsCompleted(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	r := createStatusRun(t, e, domain.RunCompleted)
+	got, err := e.sched.SetArchived(t.Context(), r.ID, e.member.ID, true)
+	if err != nil {
+		t.Fatalf("SetArchived on a completed run: %v", err)
+	}
+	if got.ArchivedAt == nil {
+		t.Fatal("completed run not archived")
 	}
 }
 

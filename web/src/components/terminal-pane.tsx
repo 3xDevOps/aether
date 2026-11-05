@@ -21,16 +21,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { type TerminalImageController, useTerminalImage } from '@/components/terminal-image'
-import { TerminalKeys } from '@/components/terminal-keys'
+import { TerminalKeys, useTextSizeStepper } from '@/components/terminal-keys'
 import { ControlMatrix, type ControlAppearance } from '@/components/control-matrix'
+import { type TerminalFit, useTerminalFit } from '@/components/terminal-fit'
 import { useTerminalPan } from '@/components/terminal-pan'
 import { coarsePointer, phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { copyScreen, copySelection } from '@/lib/term-clipboard'
-import {
-  defaultTerminalFontSize,
-  maxTerminalFontSize,
-  minTerminalFontSize,
-} from '@/lib/term-font'
+import { defaultTerminalFontSize, maxTerminalFontSize, minTerminalFontSize } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 
@@ -52,11 +49,15 @@ const afterClose = (action: () => void) => () => window.setTimeout(action)
 function TerminalTools({
   controller,
   image,
+  phone,
+  fit,
   readingSurface,
   onCaptures,
 }: {
   controller: XtermController
   image: TerminalImageController
+  phone: boolean
+  fit: TerminalFit
   readingSurface?: React.RefObject<TerminalReadSurface | null>
   onCaptures?: (returnTo: HTMLElement | null) => void
 }) {
@@ -64,14 +65,21 @@ function TerminalTools({
   const terminal = controller.terminal
   const fontSize = useStore((state) => state.terminalFontSize)
   const setFontSize = useStore((state) => state.setTerminalFontSize)
+  const stepper = useTextSizeStepper(fit)
 
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button ref={trigger} variant="ghost" size="sm" aria-label="Terminal tools">
-          <SlidersHorizontal />
-          Tools
-        </Button>
+        {phone ? (
+          <Button ref={trigger} variant="ghost" size="icon" label="Terminal tools">
+            <SlidersHorizontal />
+          </Button>
+        ) : (
+          <Button ref={trigger} variant="ghost" size="sm" aria-label="Terminal tools">
+            <SlidersHorizontal />
+            Tools
+          </Button>
+        )}
       </MenuTrigger>
       <MenuContent align="start" className="md:w-60">
         <MenuItem onSelect={() => controller.setFindOpen(true)}>
@@ -80,22 +88,42 @@ function TerminalTools({
           <span className="ml-auto text-ui-sm text-muted">Ctrl+Shift+F</span>
         </MenuItem>
         <MenuSeparator />
-        <MenuLabel>Text size {fontSize}px</MenuLabel>
-        <MenuItem disabled={!terminal || fontSize <= minTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize - 1) }}>
-          <Minus />
-          Smaller text
-          <span className="ml-auto text-ui-sm text-muted">Ctrl+-</span>
-        </MenuItem>
-        <MenuItem disabled={!terminal || fontSize >= maxTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize + 1) }}>
-          <Plus />
-          Larger text
-          <span className="ml-auto text-ui-sm text-muted">Ctrl+=</span>
-        </MenuItem>
-        <MenuItem disabled={!terminal || fontSize === defaultTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(defaultTerminalFontSize) }}>
-          <RotateCcw />
-          Reset text size
-          <span className="ml-auto text-ui-sm text-muted">Ctrl+0</span>
-        </MenuItem>
+        {phone ? (
+          <>
+            <MenuLabel>Text size {stepper.size}{stepper.fitWidth && ', fitted to width'}</MenuLabel>
+            <MenuItem disabled={!terminal || !stepper.canSmaller} onSelect={(event) => { stay(event); stepper.smaller() }}>
+              <Minus />
+              Smaller text
+            </MenuItem>
+            <MenuItem disabled={!terminal || !stepper.canLarger} onSelect={(event) => { stay(event); stepper.larger() }}>
+              <Plus />
+              Larger text
+            </MenuItem>
+            <MenuItem disabled={!terminal || stepper.fitWidth} onSelect={(event) => { stay(event); stepper.fit() }}>
+              <RotateCcw />
+              Fit to width
+            </MenuItem>
+          </>
+        ) : (
+          <>
+            <MenuLabel>Text size {fontSize}px</MenuLabel>
+            <MenuItem disabled={!terminal || fontSize <= minTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize - 1) }}>
+              <Minus />
+              Smaller text
+              <span className="ml-auto text-ui-sm text-muted">Ctrl+-</span>
+            </MenuItem>
+            <MenuItem disabled={!terminal || fontSize >= maxTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize + 1) }}>
+              <Plus />
+              Larger text
+              <span className="ml-auto text-ui-sm text-muted">Ctrl+=</span>
+            </MenuItem>
+            <MenuItem disabled={!terminal || fontSize === defaultTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(defaultTerminalFontSize) }}>
+              <RotateCcw />
+              Reset text size
+              <span className="ml-auto text-ui-sm text-muted">Ctrl+0</span>
+            </MenuItem>
+          </>
+        )}
         <MenuSeparator />
         <MenuItem
           disabled={!terminal}
@@ -284,13 +312,14 @@ export function TerminalPane({
   const coarse = useMediaQuery(coarsePointer)
   const phone = useMediaQuery(phoneScreen)
   useTerminalPan(controller.terminal, phone && !replaying && !readingSurface)
-  // A Ctrl left armed after losing write access would turn the next typed
-  // character into a control code nobody pressed.
-  const armCtrl = controller.armCtrl
+  const fit = useTerminalFit(controller.terminal, phone)
+  // A modifier left armed after losing write access would turn the next
+  // typed character into a control code nobody pressed.
+  const clearModifiers = controller.clearModifiers
   const terminal = controller.terminal
   useEffect(() => {
-    if (!writable || readingSurface) armCtrl(false)
-  }, [armCtrl, readingSurface, writable])
+    if (!writable || readingSurface) clearModifiers()
+  }, [clearModifiers, readingSurface, writable])
   useLayoutEffect(() => {
     if (!terminal) return
     // Authority and replay still suppress all input. Reading only blocks DOM
@@ -346,7 +375,7 @@ export function TerminalPane({
           ) : (
             <>
               {tabs}
-              <TerminalTools controller={controller} image={image} readingSurface={readingSurface} onCaptures={onCaptures} />
+              <TerminalTools controller={controller} image={image} phone={phone} fit={fit} readingSurface={readingSurface} onCaptures={onCaptures} />
             </>
           )}
         </div>
@@ -374,7 +403,7 @@ export function TerminalPane({
       />
         {surface}
       </div>
-      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} />}
+      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} fit={phone ? fit : undefined} />}
       {children}
       {replaying && !readingSurface && (
         <div

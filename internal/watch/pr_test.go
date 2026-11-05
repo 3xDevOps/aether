@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,6 +73,13 @@ type fakeGitHub struct {
 	limitUntil  time.Time
 	requests    []string
 	conditional int
+	// hold, while set, holds the next request for its path until released.
+	hold atomic.Pointer[heldRequest]
+}
+
+type heldRequest struct {
+	path string
+	gate
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
@@ -97,6 +105,10 @@ type roundTripper func(*http.Request) (*http.Response, error)
 func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
+	if h := f.hold.Load(); h != nil && strings.HasPrefix(r.URL.RequestURI(), h.path) && f.hold.CompareAndSwap(h, nil) {
+		h.arrived <- struct{}{}
+		<-h.release
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	path := r.URL.RequestURI()

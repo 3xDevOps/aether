@@ -58,7 +58,13 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   const condition = useStore((s) => needsYou(run, stateContextOf(s, now)))
   const room = useStore((s) => s.roomMessages[run.id])
   const selfID = useStore((s) => s.info?.member.id)
-  if (!condition) return null
+  const shown = useRunPresentation(run)
+  // A finished run asks nothing of anyone, so Review is not a needs-you action.
+  if (!condition) {
+    return shown.state === 'ready' && run.member_id === selfID && view !== 'changes'
+      ? { label: 'Review', act: () => nav.go('changes') }
+      : null
+  }
 
   const action = condition.action(run)
   const openTerminal = (): FrameAction | null =>

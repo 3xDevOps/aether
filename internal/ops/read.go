@@ -255,7 +255,9 @@ func listRuns(ctx context.Context, c calls, in connectorListRunsInput) (string, 
 	}
 	waiting := map[string]string{}
 	for _, it := range items {
-		waiting[it.RunID] = attentionLabel(it.Kind)
+		if it.Kind != protocol.AttentionKindReady {
+			waiting[it.RunID] = attentionLabel(it.Kind)
+		}
 	}
 	words := strings.Fields(strings.ToLower(in.Query))
 	slices.SortStableFunc(res.Runs, func(a, b protocol.Run) int { return strings.Compare(b.CreatedAt, a.CreatedAt) })
@@ -431,7 +433,9 @@ func getRun(ctx context.Context, c calls, in getRunInput) (string, any, error) {
 	}
 	for _, it := range items {
 		if it.RunID == r.ID {
-			out["needs_you"] = attentionRowOf(it, l)
+			if it.Kind != protocol.AttentionKindReady {
+				out["needs_you"] = attentionRowOf(it, l)
+			}
 			summary += " " + attentionLabel(it.Kind) + "."
 		}
 	}
