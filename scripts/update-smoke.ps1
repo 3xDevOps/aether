@@ -66,6 +66,10 @@ function Invoke-Native([string]$Exe, [string[]]$Arguments, [int]$TimeoutSec = 30
     $null = $p.Handle
     if (-not $p.WaitForExit($TimeoutSec * 1000)) {
         & "$env:SystemRoot\System32\taskkill.exe" /PID $p.Id /T /F | Out-Null
+        $null = $p.WaitForExit(10000)
+        Write-Host "> $Exe $Arguments (killed after ${TimeoutSec}s)"
+        Write-Host (Get-Content -Raw -LiteralPath "$stem.out")
+        Write-Host (Get-Content -Raw -LiteralPath "$stem.err")
         throw "$Exe $Arguments did not finish in ${TimeoutSec}s"
     }
     $p.WaitForExit()
@@ -636,7 +640,17 @@ exit 1
     $oldShellDir = Join-Path $root 'old-shell'
     New-Item -ItemType Directory -Path $oldShellDir -Force | Out-Null
     $oldShellZip = Join-Path $oldShellDir "aether-desktop-windows-$Arch.zip"
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$OldShellTag/aether-desktop-windows-$Arch.zip" -OutFile $oldShellZip
+    # GitHub's release downloads answer 5xx now and then.
+    for ($try = 1; ; $try++) {
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$OldShellTag/aether-desktop-windows-$Arch.zip" -OutFile $oldShellZip
+            break
+        } catch {
+            if ($try -eq 3) { throw }
+            Write-Host "downloading the $OldShellTag shell failed (try $try of 3): $($_.Exception.Message)"
+            Start-Sleep -Seconds (30 * $try)
+        }
+    }
     $installed = New-Sandbox 'oldshell'
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
     $appDir = Split-Path -Parent $desktop
