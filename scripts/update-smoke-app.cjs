@@ -6,8 +6,7 @@ const [mode, endpoint] = process.argv.slice(3)
 const started = Date.now()
 const log = (line) => console.error(`[${((Date.now() - started) / 1000).toFixed(1)}s] ${line}`)
 
-// page.evaluate takes no timeout, so every wait is raced against one that
-// names it.
+// page.evaluate takes no timeout.
 function bounded(what, ms, promise) {
   let timer
   const timeout = new Promise((_, reject) => {
@@ -17,10 +16,8 @@ function bounded(what, ms, promise) {
 }
 
 let browser
-let page
+let origin
 
-// Tells the hypotheses for a hang apart: the browser process not answering
-// CDP, the gateway not answering, or the page gone elsewhere.
 async function explain() {
   if (!browser) return
   const cdp = await bounded('CDP Browser.getVersion', 10000, browser.newBrowserCDPSession().then((s) => s.send('Browser.getVersion')))
@@ -28,8 +25,7 @@ async function explain() {
   log(`the browser process over CDP: ${cdp}`)
   const pages = browser.contexts().flatMap((context) => context.pages().map((p) => p.url().replace(/\?.*/, '')))
   log(`pages: ${JSON.stringify(pages)}`)
-  if (!page) return
-  const origin = new URL(page.url()).origin
+  if (!origin) return
   const direct = await fetch(origin + '/', { signal: AbortSignal.timeout(10000) })
     .then((response) => `HTTP ${response.status}`, (error) => `${error.name}: ${error.message}`)
   log(`GET ${origin}/ from outside the browser: ${direct}`)
@@ -39,11 +35,12 @@ async function explain() {
   browser = await chromium.connectOverCDP(endpoint, { timeout: 30000 })
   log('connected over CDP')
   const context = browser.contexts()[0]
-  page = context.pages()[0] || (await context.waitForEvent('page', { timeout: 30000 }))
+  const page = context.pages()[0] || (await context.waitForEvent('page', { timeout: 30000 }))
   page.on('framenavigated', (frame) => frame === page.mainFrame() && log(`navigated to ${frame.url().replace(/\?.*/, '')}`))
   page.on('crash', () => log('the page crashed'))
   await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45000 })
   log(`loaded ${page.url().replace(/\?.*/, '')}`)
+  origin = new URL(page.url()).origin
   if (mode === 'probe') {
     await bounded('page.evaluate(document.readyState)', 15000, page.evaluate(() => document.readyState))
     // The page's own deadline says whether fetch hung; the outer one
@@ -59,10 +56,7 @@ async function explain() {
       ),
     )
     console.log(JSON.stringify({ url: page.url().replace(/\?.*/, ''), status }))
-    if (status !== 200) {
-      await explain()
-      process.exitCode = 1
-    }
+    if (status !== 200) throw new Error(`the probe got ${status}`)
   } else {
     await page.getByRole('button', { name: /^Update$/ }).click({ timeout: 90000 })
     const button = page.getByRole('button', { name: 'Update now' })
