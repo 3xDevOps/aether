@@ -48,7 +48,7 @@ func TestRefreshLoginHoldsOneRefresherAtATime(t *testing.T) {
 			t.Fatalf("%s: second RefreshLogin = %v, called %v; want ErrLoginLockHeld before any refresh", tc.rel, err, called)
 		}
 		close(release)
-		if err := <-done; err != nil {
+		if err = <-done; err != nil {
 			t.Fatalf("%s: first RefreshLogin: %v", tc.rel, err)
 		}
 		err = manager.RefreshLogin("owner", tc.rel, tc.lock, func(old []byte) ([]byte, error) {
