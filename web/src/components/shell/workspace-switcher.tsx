@@ -17,13 +17,15 @@ function needsYouLabel(count: number): string {
   return `${count} ${count === 1 ? 'session needs' : 'sessions need'} you`
 }
 
-export function WorkspaceSwitcher() {
+/** `needsYou` replaces the dashboard's own per-workspace counts, as the phone's More sheet does with the server's. */
+export function WorkspaceSwitcher({ needsYou }: { needsYou?: Record<string, number> } = {}) {
   const workspaces = useStore((s) => s.workspaces)
   const active = useStore((s) => s.activeWorkspace)
   const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
   const navigate = useStore((s) => s.navigate)
   const caps = useCapability()
-  const counts = useNeedsYouByWorkspace()
+  const own = useNeedsYouByWorkspace()
+  const counts = needsYou ?? own
   const list = Object.values(workspaces).sort((a, b) => a.name.localeCompare(b.name))
   const current = workspaces[active]
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0)

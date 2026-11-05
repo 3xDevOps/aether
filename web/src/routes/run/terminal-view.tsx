@@ -1,20 +1,29 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { LoaderCircle } from '@/components/icons'
 import { connectionLabel } from '@/components/shell/connection'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { useIsMobile } from '@/lib/breakpoints'
+import { useMediaQuery } from '@/lib/hooks'
 import { isRetainedRun } from '@/lib/commands'
+import { message } from '@/lib/format'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { usePresenceSummary } from '@/routes/run/multiplayer-controls'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
-import { StopShellDialog, terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
+import { limitReason, StopShellDialog, terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
 import { TerminalHistory } from '@/routes/terminal/history'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+import { shellEnded } from '@/store/terminal'
+import type { DevTerminal } from '@/lib/development-types'
 import type { RunRecord } from '@/store/runs'
 
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const summary = usePresenceSummary(run, agent)
+  // "Nobody controls" would truncate beside Take control at 360px.
+  const narrow = useMediaQuery('(max-width: 399px)')
   const { state } = agent.session
   const ended = endedStatuses.includes(run.status)
   const showConnection = !agent.starting && !ended && state.connection !== 'live'
@@ -22,7 +31,11 @@ function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
     <div role="group" aria-label="Session presence" className="control-matrix-clear flex min-w-0 items-center gap-2">
       {ended && <span className="shrink-0 text-ui-sm text-muted">{isRetainedRun(run) ? 'Container stopped' : 'Container removed'} · read-only</span>}
       {showConnection && <span className="shrink-0 text-ui-sm text-state-needs-you">{connectionLabel[state.connection]}</span>}
-      {agent.steerable && <span className="min-w-0 truncate text-ui-sm text-muted">{summary}</span>}
+      {agent.steerable && (
+        <span className="min-w-0 truncate text-ui-sm text-muted">
+          {narrow ? summary.replace(/^Nobody controls/, 'No one') : summary}
+        </span>
+      )}
       {agent.steerable && (
         <ControlButton
           ownsControl={agent.localControl}
@@ -59,6 +72,60 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   )
 }
 
+/**
+ * On a phone an Enhanced session has no agent terminal to land on, so the
+ * first time its Terminal tab is viewed it shows a running shell a person
+ * started and has not hidden. It never starts one: viewing a tab must not
+ * start a process or take a lease.
+ */
+function useRunningShellOnPhone(shells: RunShells, wanted: boolean) {
+  const mobile = useIsMobile()
+  const asked = useRef(false)
+  const [failed, setFailed] = useState(false)
+  const [waiting, setWaiting] = useState<{ from: DevTerminal[] | undefined } | null>(null)
+  const { runID, visible, canOpen, refresh, show, setError } = shells
+  const terminals = useStore((state) => state.shellDocks[runID]?.terminals)
+  const showRunning = useCallback(() => {
+    const dock = useStore.getState().shellDocks[runID]
+    if (!dock || dock.shellShown) return
+    const mine = dock.terminals.filter((terminal) =>
+      dock.tabs.includes(terminal.terminal_id) && terminal.started_by === 'member' && !shellEnded(terminal))
+    // A shell reads unavailable until it reattaches after a reload, so a running one only wins a tie.
+    const running = mine.find((terminal) => terminal.process.state === 'running') ?? mine[0]
+    if (running) show(running.terminal_id)
+  }, [runID, show])
+  useEffect(() => {
+    if (!mobile || !wanted || !visible || !canOpen || asked.current || failed) return
+    asked.current = true
+    void (async () => {
+      const before = useStore.getState().shellDocks[runID]?.terminals
+      // refresh() drops a list that an Open shell or a newer poll overtook,
+      // so the shell it started is never synced away.
+      try {
+        await refresh()
+      } catch (cause) {
+        setError(message(cause))
+        setFailed(true)
+        return
+      }
+      showRunning()
+      // A newer poll syncs the list instead; the effect below picks it up.
+      const after = useStore.getState().shellDocks[runID]?.terminals
+      if (after === before) setWaiting({ from: after })
+    })()
+  }, [canOpen, failed, mobile, refresh, runID, setError, showRunning, visible, wanted])
+  useEffect(() => {
+    if (!waiting || terminals === waiting.from) return
+    setWaiting(null)
+    showRunning()
+  }, [waiting, terminals, showRunning])
+  return failed ? () => {
+    asked.current = false
+    setError(null)
+    setFailed(false)
+  } : undefined
+}
+
 export function TerminalView({ run, agent, shells, onCaptures }: {
   run: RunRecord
   agent: AgentTerminal
@@ -70,11 +137,16 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
   const tabbed = shells.canOpen && shells.dock.tabs.length > 0
   const { controller, session, takeover } = agent
   const { state, replaying, controlMetadata } = session
+  const retryShellList = useRunningShellOnPhone(shells, !agent.hasAgentTerminal && !shellShown)
+  const mobile = useIsMobile()
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {shells.error && (
-        <p role="alert" className="shrink-0 border-b border-seam px-3 py-1 text-ui-sm text-state-failed">{shells.error}</p>
+        <div className="flex shrink-0 items-center gap-2 border-b border-seam px-3 py-1">
+          <p role="alert" className="min-w-0 flex-1 text-ui-sm text-state-failed">{shells.error}</p>
+          {retryShellList && <Button size="sm" variant="ghost" onClick={retryShellList}>Retry</Button>}
+        </div>
       )}
       <div className="relative min-h-0 flex-1">
       {shellShown && (
@@ -130,7 +202,18 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
           <div role="toolbar" aria-label="Terminal toolbar" className="flex h-8 shrink-0 items-center gap-1 border-b border-seam bg-chrome px-1 coarse:h-11">
             {tabs}
           </div>
-          <EmptyState title="No agent terminal">
+          <EmptyState
+            title="No agent terminal"
+            action={mobile && shells.canOpen && (
+              <div className="flex flex-col items-center gap-2">
+                <Button disabled={!shells.canAdd} onClick={() => void shells.open()}>
+                  {shells.busy && <LoaderCircle aria-hidden className="animate-spin motion-reduce:animate-none" />}
+                  Open shell
+                </Button>
+                {shells.atLimit && <p className="max-w-80 text-ui-sm text-muted">{limitReason}</p>}
+              </div>
+            )}
+          >
             An Enhanced session talks to its agent in the Chat view. Open a shell to work in the session’s container.
           </EmptyState>
         </div>

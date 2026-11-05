@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type * as React from 'react'
+import { DictationButton } from '@/components/dictation/dictation-button'
+import { DictationNotice } from '@/components/dictation/dictation-notice'
 import { AgentPicker, customAgent, launchable } from '@/components/launch/agent-picker'
 import { EffortPicker } from '@/components/launch/effort-picker'
 import { ModeControl } from '@/components/launch/mode-control'
@@ -140,7 +143,7 @@ export function RunFields({
           ? 'Required. A Background session starts with this task and takes no input.'
           : 'Optional. Leave it blank to open the agent with no prompt.'}
       >
-        <Textarea className="max-h-48 [field-sizing:content]" autoFocus={autoFocus} required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
+        <TaskBox autoFocus={autoFocus} required={mode === 'headless'} value={task} onTask={onTask} />
       </FormField>
       {agents === null ? (
         <p className="text-ui-sm text-muted">Loading agents…</p>
@@ -160,6 +163,20 @@ export function RunFields({
       {harness && <ModelField harness={harness} accountMemberID={choice.accountMemberID} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />}
       {choice.effortLevels.length > 0 && <EffortField levels={choice.effortLevels} value={choice.effort} onChange={(next) => { onChoice?.(); choice.setEffort(next) }} disabled={disabled} />}
     </>
+  )
+}
+
+/** Takes the id and descriptions FormField gives its child, so the label still names the textarea above the mic. */
+function TaskBox({ onTask, ...props }: React.ComponentProps<'textarea'> & { value: string; onTask: (task: string) => void }) {
+  const textarea = useRef<HTMLTextAreaElement>(null)
+  return (
+    <div className="flex flex-col gap-1">
+      <Textarea ref={textarea} className="max-h-48 [field-sizing:content]" rows={3} placeholder="What should the agent do?" onChange={(event) => onTask(event.target.value)} {...props} />
+      <DictationNotice textarea={textarea} />
+      <div className="flex justify-end empty:hidden">
+        <DictationButton textarea={textarea} onInsert={onTask} />
+      </div>
+    </div>
   )
 }
 

@@ -103,6 +103,7 @@ const persistedUi = (s: RootState) => ({
   browserBeside: s.browserBeside,
   browserBesideWidth: s.browserBesideWidth,
   terminalFontSize: s.terminalFontSize,
+  terminalFitWidth: s.terminalFitWidth,
   singleKeyShortcuts: s.singleKeyShortcuts,
   diffWrap: s.diffWrap,
   activeWorkspace: s.activeWorkspace,
@@ -240,6 +241,7 @@ export function createRootStore() {
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
+            terminalFitWidth: stored.terminalFitWidth !== false,
           }
         },
         partialize: persistedUi,

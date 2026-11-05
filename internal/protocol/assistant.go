@@ -187,6 +187,9 @@ type AssistantStatus struct {
 	// SuggestAutoApprove means the member approved enough cards by hand
 	// that the dashboard may suggest turning auto-approval on.
 	SuggestAutoApprove bool `json:"suggest_auto_approve"`
+	// ApprovalChosen means the member chose whether the assistant asks
+	// before acting: they set auto_approve, or answered the suggestion.
+	ApprovalChosen bool `json:"approval_chosen"`
 }
 
 // Answers to the suggestion to turn auto-approval on.
@@ -221,6 +224,7 @@ type AssistantSettings struct {
 	ShareView          bool `json:"share_view"`
 	PreferencesEnabled bool `json:"preferences_enabled"`
 	Temporary          bool `json:"temporary"`
+	ApprovalChosen     bool `json:"approval_chosen"`
 }
 
 type AssistantStartParams struct {

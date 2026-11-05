@@ -553,7 +553,11 @@ in. Nothing is stored that you would need to delete.
 `INTERNET` lets the app reach your server, or in Edge mode the edge.
 `ACCESS_NETWORK_STATE` lets Edge mode read the active network's DNS servers,
 because Go's resolver finds no `/etc/resolv.conf` on Android; the app reads
-no other network state. The androidx library
+no other network state. `RECORD_AUDIO` lets the dashboard's mic button record
+for dictation. The app asks for it only the first time the page requests the
+microphone, grants it only to the dashboard's origin, and records only while
+you use the button. The app does not store the audio; the server's handling
+is under [Dictation](#dictation). The androidx library
 adds one signature-level permission the app defines for its own receivers,
 which no other app can hold and which grants nothing.
 

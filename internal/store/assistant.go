@@ -52,6 +52,9 @@ type AssistantSettings struct {
 	// hand in a row.
 	RuleStreakKey string
 	RuleStreak    int
+	// ApprovalChosen means the member chose whether the assistant asks
+	// before acting.
+	ApprovalChosen bool
 }
 
 // AssistantStore persists each member's assistant session. Removing a member
@@ -206,10 +209,11 @@ func (d *DB) AssistantSettings(ctx context.Context, member domain.MemberID) (Ass
 	var settings AssistantSettings
 	var until int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled, rule_streak_key, rule_streak
+		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled, rule_streak_key, rule_streak,
+		   approval_chosen
 		 FROM assistant_settings WHERE member_id = ?`, member).
 		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest, &settings.ShareView, &settings.PreferencesEnabled,
-			&settings.RuleStreakKey, &settings.RuleStreak)
+			&settings.RuleStreakKey, &settings.RuleStreak, &settings.ApprovalChosen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AssistantSettings{ShareView: true, PreferencesEnabled: true}, nil
 	}
@@ -229,15 +233,16 @@ func (d *DB) PutAssistantSettings(ctx context.Context, member domain.MemberID, s
 	}
 	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled,
-		   rule_streak_key, rule_streak, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+		   rule_streak_key, rule_streak, approval_chosen, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
 		 ON CONFLICT(member_id) DO UPDATE SET auto_approve = excluded.auto_approve,
 		   manual_approvals = excluded.manual_approvals, suggest_snoozes = excluded.suggest_snoozes,
 		   suggest_after = excluded.suggest_after, suggest_off = excluded.suggest_off,
 		   share_view = excluded.share_view, preferences_enabled = excluded.preferences_enabled,
-		   rule_streak_key = excluded.rule_streak_key, rule_streak = excluded.rule_streak, updated_at = excluded.updated_at`,
+		   rule_streak_key = excluded.rule_streak_key, rule_streak = excluded.rule_streak,
+		   approval_chosen = excluded.approval_chosen, updated_at = excluded.updated_at`,
 		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest, settings.ShareView, settings.PreferencesEnabled,
-		settings.RuleStreakKey, settings.RuleStreak)
+		settings.RuleStreakKey, settings.RuleStreak, settings.ApprovalChosen)
 	if err != nil {
 		return fmt.Errorf("store: put assistant settings: %w", mapConstraint(err, ErrNotFound))
 	}

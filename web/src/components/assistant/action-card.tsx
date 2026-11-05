@@ -70,7 +70,9 @@ const quiet = new Set<ActionState>(['declined', 'expired', 'withdrawn'])
 export function stateLine(action: AssistantAction, background: boolean): string {
   return [
     background ? 'Working in the background' : actionStateWord[action.state],
-    action.approval === 'approved' ? 'approved by you' : action.approval === 'auto-approved' ? 'auto-approved' : undefined,
+    action.approval === 'approved' ? 'approved by you'
+      : action.approval === 'auto-approved' ? 'auto-approved'
+        : action.approval?.startsWith('rule ') ? `approved by your rule ${action.approval.slice(5)}`.trim() : undefined,
   ].filter(Boolean).join(' · ')
 }
 
