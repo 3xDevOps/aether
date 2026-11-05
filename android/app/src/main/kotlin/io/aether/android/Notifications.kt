@@ -256,6 +256,10 @@ class DeclineReceiver : BroadcastReceiver() {
             builder(app, PushChannel.NEEDS_YOU, title, body, public = R.string.push_public_card)
                 .setAutoCancel(true)
                 .setContentIntent(openIntent(app, tag, path))
+        // A summary that took the tag meanwhile stays.
+        manager.activeNotifications
+            .firstOrNull { it.tag == tag && it.id == ID && it.notification.extras.getString(EXTRA_CARD) == card }
+            ?.let { manager.cancel(tag, ID) }
         // Not kept: a clear for the card may replace it, and it goes by
         // itself if the receiver dies before the outcome.
         // Under its own id, so its timeout cannot take the outcome with it.
