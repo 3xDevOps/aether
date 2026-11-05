@@ -66,6 +66,10 @@ function Invoke-Native([string]$Exe, [string[]]$Arguments, [int]$TimeoutSec = 30
     $null = $p.Handle
     if (-not $p.WaitForExit($TimeoutSec * 1000)) {
         & "$env:SystemRoot\System32\taskkill.exe" /PID $p.Id /T /F | Out-Null
+        $null = $p.WaitForExit(10000)
+        Write-Host "> $Exe $Arguments (killed after ${TimeoutSec}s)"
+        Write-Host (Get-Content -Raw -LiteralPath "$stem.out")
+        Write-Host (Get-Content -Raw -LiteralPath "$stem.err")
         throw "$Exe $Arguments did not finish in ${TimeoutSec}s"
     }
     $p.WaitForExit()
