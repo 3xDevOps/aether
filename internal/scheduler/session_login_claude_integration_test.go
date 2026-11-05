@@ -195,6 +195,8 @@ func TestIntegrationSessionLoginRealClaudeCode(t *testing.T) {
 		}
 	}
 	network := "aether-test-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+	// A run killed by its timeout skips its cleanups and leaves the network.
+	_ = exec.Command("docker", "network", "rm", network).Run()
 	if out, err := exec.Command("docker", "network", "create", "--internal", network).CombinedOutput(); err != nil {
 		t.Fatalf("docker network create: %v: %s", err, out)
 	}
