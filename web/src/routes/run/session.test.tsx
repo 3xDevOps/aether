@@ -186,6 +186,53 @@ describe('the Enhanced session view', () => {
     expect(within(log).queryByText('Check the module first.')).toBeNull()
   })
 
+  describe('after input on an earlier block and a scroll away from the end', () => {
+    async function scrolledAfter(input: (header: HTMLElement) => Promise<void>) {
+      SizedObserver.viewport = 120
+      open()
+      const session = acpSocket().open({}, [
+        item('turn_start', 1),
+        say(1, 'user', 'Round the totals'),
+        tool(1, 'x1', 'execute', 'npm test', 'completed'),
+        ...['All green.', 'Totals round to cents.', 'Nothing else changed.'].map((text) => say(1, 'assistant', text)),
+        item('turn_end', 1, { stop_reason: 'end_turn' }),
+        item('turn_start', 2),
+        say(2, 'user', 'Now the build'),
+        tool(2, 'b1', 'execute', 'npm run build', 'in_progress'),
+      ])
+      const log = await screen.findByRole('log', { name: 'Chat' })
+      // jsdom has no scrollHeight; eight 24px rows under a 120px viewport end at 72.
+      log.scrollTop = 72
+      fireEvent.scroll(log)
+      const live = await within(log).findByRole('button', { name: /^Running npm run build, Ran 1 command/ })
+      expect(live.getAttribute('aria-expanded')).toBe('true')
+      await input(within(log).getByRole('button', { name: /^Ran 1 command/ }))
+      log.scrollTop = 0
+      fireEvent.scroll(log)
+      session.items(tool(2, 'b1', 'execute', 'npm run build', 'completed'), item('turn_end', 2, { stop_reason: 'end_turn' }))
+      await waitFor(() => expect(within(log).getAllByRole('button', { name: /^Ran 1 command/ })).toHaveLength(2))
+      return within(log).getAllByRole('button', { name: /^Ran 1 command/ })[1]!
+    }
+
+    it.each([
+      ['Enter', async (header: HTMLElement) => {
+        act(() => header.focus())
+        await userEvent.keyboard('{Enter}')
+      }],
+      ['a click', (header: HTMLElement) => userEvent.click(header)],
+    ])('shuts the finished turn\'s block when %s opened the earlier one', async (_, input) => {
+      expect((await scrolledAfter(input)).getAttribute('aria-expanded')).toBe('false')
+    })
+
+    it('holds the finished turn\'s block open when Tab moved focus first', async () => {
+      const block = await scrolledAfter(async (header) => {
+        act(() => header.focus())
+        await userEvent.tab()
+      })
+      expect(block.getAttribute('aria-expanded')).toBe('true')
+    })
+  })
+
   it('folds a block over 40 steps to its first and last steps until asked', async () => {
     open()
     acpSocket().open({}, [

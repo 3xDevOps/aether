@@ -33,7 +33,8 @@ test('a launch card shows every row it covers before Always approve, inside the 
   const sheet = page.getByRole('dialog', { name: 'Assistant' })
   const always = sheet.getByRole('button', { name: wording })
   await expect(always).toBeVisible()
-  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'))
+  // Only the sheet's own slide moves its box; the card's expiry bar inside it re-transitions every second.
+  await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
 
   const box = (await sheet.boundingBox())!
   expect(box.x).toBeGreaterThanOrEqual(0)
