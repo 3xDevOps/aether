@@ -183,22 +183,32 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
   const holderConnected = useStore((s) => s.roomStatus[run.id]?.controller?.connected !== false)
   const free = run.member_id === self.id && holder === undefined
   const implicit = !agent.localControl && free && agent.steerable && !agent.controlUnavailable
-  const queued = useRef<(() => void) | null>(null)
+  // In order, each awaited: an option change marks the draft busy, so a send queued behind it would otherwise be skipped.
+  const queued = useRef<{ act: () => unknown; lost?: () => void }[]>([])
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
-    if (!agent.localControl || !queued.current) return
-    const act = queued.current
-    queued.current = null
+    if (!agent.localControl || queued.current.length === 0) return
+    const acts = queued.current
+    queued.current = []
     clearTimeout(timer.current)
-    act()
+    void acts.reduce<Promise<unknown>>((done, { act }) => done.then(act, act), Promise.resolve())
   }, [agent.localControl])
-  useEffect(() => () => clearTimeout(timer.current), [])
-  const withControl = (act: () => void) => {
-    if (agent.localControl) return act()
-    if (!implicit) return
-    queued.current = act
+  const drop = () => {
+    const dropped = queued.current
+    queued.current = []
+    for (const { lost } of dropped) lost?.()
+  }
+  useEffect(() => () => {
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => { queued.current = null }, implicitControlWindowMs)
+    drop()
+  }, [])
+  /** Runs `act` once this tab holds control, taking free control first; `lost` hears that it never will. A queued act that returns a promise holds the next until it settles. */
+  const withControl = (act: () => unknown, lost?: () => void) => {
+    if (agent.localControl) return act()
+    if (!implicit) return lost?.()
+    queued.current.push({ act, lost })
+    clearTimeout(timer.current)
+    timer.current = setTimeout(drop, implicitControlWindowMs)
     agent.session.takeControl()
   }
   const canAct = agent.localControl || implicit

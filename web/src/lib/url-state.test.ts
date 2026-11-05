@@ -1,6 +1,7 @@
 import { act } from '@testing-library/react'
-import { bindRouteToUrl, hrefFor, redirectRoute, routeFromQuery, routeQuery } from '@/lib/url-state'
+import { bindRouteToUrl, historyDepth, hrefFor, redirectRoute, routeFromQuery, routeQuery, sessionEntry } from '@/lib/url-state'
 import { createRootStore } from '@/store'
+import { atViewport } from '@/test/viewport'
 import type { Route } from '@/store/ui'
 
 const query = (route: Route) => routeQuery(route).toString()
@@ -42,6 +43,39 @@ describe('route in the query string', () => {
 })
 
 describe('bindRouteToUrl', () => {
+  it('reads a phone\'s bare address as Needs you when Back returns to it, as on load', () => {
+    atViewport(390, { pointer: 'coarse' })
+    window.history.replaceState(null, '', '/')
+    const store = createRootStore()
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+    window.history.replaceState(null, '', '/')
+
+    act(() => store.getState().navigate('run', { runId: 'run_1' }))
+    act(() => {
+      window.history.back()
+    })
+    return vi.waitFor(() => expect(store.getState().route).toEqual({ name: 'needs-you', params: {} }))
+  })
+
+  it('remembers where a session was opened across its own entries, for a phone\'s Back', () => {
+    const store = createRootStore()
+    store.setState({ route: { name: 'needs-you', params: {} } })
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+    expect(sessionEntry()).toBeUndefined()
+
+    act(() => store.getState().navigate('run', { runId: 'run_1' }))
+    act(() => redirectRoute(store, { name: 'run', params: { runId: 'run_1', view: 'terminal' } }))
+    act(() => store.getState().navigate('run', { runId: 'run_1', view: 'session', agent: 'toolu_1' }))
+    expect([historyDepth(), sessionEntry()]).toEqual([2, 1])
+
+    act(() => store.getState().navigate('run', { runId: 'run_2' }))
+    expect([historyDepth(), sessionEntry()]).toEqual([3, 3])
+    act(() => store.getState().navigate('settings'))
+    expect([historyDepth(), sessionEntry()]).toEqual([4, undefined])
+  })
+
   it('starts the store on the address, pushes each navigation and follows back', () => {
     window.history.replaceState(null, '', '/?run=run_1&view=changes')
     const store = createRootStore()

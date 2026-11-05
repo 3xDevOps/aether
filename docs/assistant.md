@@ -324,7 +324,9 @@ decide it (`assistant.confirm`); the first decision wins, and a second gets
 - **New conversation** withdraws every open card.
 
 The card's chip names a turn that did not come from the dashboard, such as
-**via ChatGPT**. An approved card reads **Approved, running…** until its
+**via ChatGPT** for a turn a connector started with
+[`aether_ask_assistant`](connectors.md#ask-your-assistant). That connector can
+also decide the card with `aether_decide_assistant_card`, by echoing its text. An approved card reads **Approved, running…** until its
 outcome is in the conversation.
 
 Every action is recorded in the transcript. The approval is written before the

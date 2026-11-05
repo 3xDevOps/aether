@@ -57,9 +57,14 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 		conv := m.conversation()
 		origin, entry := m.turn()
 		var passed bool
-		var err error
-		// In a connector turn, nothing its grant's scopes do not cover
-		// passes without a card: neither a rule nor auto-approval.
+		// In a connector turn, nothing its grant's scopes, as they are now,
+		// do not cover passes without a card: neither a rule nor
+		// auto-approval.
+		origin, err := s.liveOrigin(ctx, m.id, origin)
+		if err != nil {
+			slog.Warn("assistant: no pass for a call of a connector turn", "member", m.id, "method", c.Method, "error", err)
+			origin.Scopes, err = nil, nil
+		}
 		if origin.Covers(c.Method, s.cfg.ConnectorScopes) {
 			passed, err = s.approveByRule(ctx, conv, m, &c)
 			if !passed && err == nil {

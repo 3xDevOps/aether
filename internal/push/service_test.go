@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/cost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -143,6 +144,19 @@ func (h *harness) start() {
 	}
 	h.t.Cleanup(func() { _ = svc.Close() })
 	h.svc = svc
+}
+
+// level sets member's notification level.
+func (h *harness) level(member *domain.Member, level string) {
+	h.t.Helper()
+	prefs, err := h.db.GetNotifyPrefs(h.ctx, member.ID)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	prefs.Level = level
+	if err := h.db.PutNotifyPrefs(h.ctx, member.ID, prefs); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 func (h *harness) member(name string) *domain.Member {
@@ -384,6 +398,7 @@ func TestASinkShowsANeedAgainAfterARequestIsAnswered(t *testing.T) {
 func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	h.level(h.ada, protocol.NotifyAll)
 	phone := h.subscribe(h.ada)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
 	id := string(run.ID)
@@ -438,6 +453,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 func TestAnOpenedNeedIsNotPushedAgain(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	h.level(h.ada, protocol.NotifyAll)
 	phone := h.subscribe(h.ada)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
 	id := string(run.ID)

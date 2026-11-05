@@ -94,8 +94,10 @@ test('a phone opens Run details as a sheet without resizing the run PTY', async 
     const viewport = page.viewportSize()
     expect(viewport).not.toBeNull()
     const beforeOpen = await sessionGeometry()
-    const opener = page.getByRole('button', { name: 'Show details', exact: true })
+    // A phone lists Details under the session's More, which keeps focus when the sheet closes.
+    const opener = page.getByRole('button', { name: 'More', exact: true })
     await opener.tap()
+    await page.getByRole('menuitem', { name: 'Session details' }).tap()
     const details = page.getByRole('dialog', { name: 'Session details' })
     await expect(details).toBeVisible()
     await expect.poll(async () => {
@@ -228,11 +230,8 @@ test('incoming control decisions stay usable over Run details and Captures', asy
       await page.setViewportSize({ width, height: 844 })
       await expect(page.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
       const room = surface === 'Details'
-      if (room) await page.getByRole('button', { name: 'Show details', exact: true }).tap()
-      else {
-        await page.getByRole('button', { name: 'More', exact: true }).tap()
-        await page.getByRole('menuitem', { name: 'Captures…' }).tap()
-      }
+      await page.getByRole('button', { name: 'More', exact: true }).tap()
+      await page.getByRole('menuitem', { name: room ? 'Session details' : 'Captures…' }).tap()
       const panel = page.getByRole('dialog', { name: room ? 'Session details' : 'Captures', exact: true })
       await expect(panel).toBeVisible()
       if (room) await panel.getByRole('textbox', { name: 'Add a note' }).fill('Keep this interrupted draft')

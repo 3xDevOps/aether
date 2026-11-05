@@ -54,10 +54,13 @@ test('a phone protects a run from More and reads its changes', async ({
   const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
-  // Browser is offered before any browser has started for the run.
+  // Browser is offered under More before any browser has started for the
+  // run, and joins the tabs while it shows.
+  await actions.tap()
+  await menu.getByRole('menuitem', { name: 'Browser' }).tap()
   for (const name of ['Browser', 'Chat', 'Changes']) {
     const tab = page.getByRole('tab', { name, exact: true })
-    await tab.tap()
+    if (name !== 'Browser') await tab.tap()
     await expect(tab).toHaveAttribute('aria-selected', 'true')
     await expect.poll(() => tab.evaluate((element) => {
       const strip = element.closest('[role="tablist"]')!.getBoundingClientRect()

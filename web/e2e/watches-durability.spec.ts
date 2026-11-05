@@ -155,7 +155,7 @@ test('quiet hours hold a push and release it, and a removed member hears nothing
   await page.getByLabel('From').fill(hhmm(new Date(now.getTime() - 60 * 60_000)))
   await page.getByLabel('Until').fill(hhmm(new Date(now.getTime() + 2 * 60_000)))
   await page.getByLabel('Time zone').fill('UTC')
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByRole('button', { name: 'Save quiet hours' }).click()
   await expect.poll(async () => (await bob.api.rpc<{ quiet_hours?: { tz: string } }>('notify.prefs.get')).quiet_hours?.tz).toBe('UTC')
   await testInfo.attach('quiet hours', { body: await page.screenshot(), contentType: 'image/png' })
 

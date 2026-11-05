@@ -37,6 +37,18 @@ export function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string
   return stale ? `${who} (last known)` : who
 }
 
+/** Someone else watches, another member or tab holds control, or control or presence failed: what a phone keeps the strip for. */
+export function useSharedPresence(run: RunRecord, agent: AgentTerminal): boolean {
+  const self = useSelf()
+  const status = useStore((s) => s.roomStatus[run.id])
+  const presenceError = useStore((s) => s.roomStatusError[run.id])
+  const session = useStore((s) => s.acpSessions[run.id])
+  if (presenceError || session?.controlError || session?.takeoverError || session?.streamError) return true
+  // Only the owner takes free control implicitly; anyone else needs the strip's button.
+  if (!agent.localControl && (status?.controller || run.member_id !== self.id)) return true
+  return status?.watchers.some((id) => id !== self.id) ?? false
+}
+
 export function MultiplayerControls({ run, agent, onPeople }: {
   run: RunRecord
   agent: AgentTerminal

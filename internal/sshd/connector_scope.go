@@ -87,6 +87,7 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodWatchCreate:       scopeWrite,
 	protocol.MethodWatchUpdate:       scopeWrite,
 	protocol.MethodWatchDelete:       scopeWrite,
+	protocol.MethodAssistantAsk:      scopeWrite,
 	protocol.MethodRunKill:           scopeControl,
 	protocol.MethodRunClose:          scopeControl,
 	protocol.MethodRunPRCreate:       scopeControl,

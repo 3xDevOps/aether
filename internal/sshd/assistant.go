@@ -43,6 +43,10 @@ type AssistantService interface {
 	SetShareView(ctx context.Context, member domain.MemberID, on bool) error
 	SignIn(ctx context.Context, member domain.MemberID, start func(context.Context) error) error
 	Account(ctx context.Context, member domain.MemberID, agent string) (protocol.AssistantAccount, error)
+	Entry(ctx context.Context, member domain.MemberID, id string) (assistant.Entry, error)
+	GrantTurn(ctx context.Context, member domain.MemberID, grant, text string, since time.Time) (assistant.Entry, bool, error)
+	GrantCard(ctx context.Context, member domain.MemberID, grant, id string) (assistant.ConnectorCard, error)
+	ConnectorReply(ctx context.Context, member domain.MemberID, reply string) (string, error)
 }
 
 func init() {
