@@ -115,9 +115,10 @@ func (s *Service) unjoin(ctx context.Context, key string, only domain.MemberID) 
 			}
 			updates = append(updates, update{member, out})
 		}
-		// A burst still inside its window keeps gathering pushes.
+		// A burst still inside its window keeps gathering pushes, unless
+		// it has no item left, whose tag a next push must not reuse.
 		s.bursts[member] = slices.DeleteFunc(bursts, func(b *burst) bool {
-			return !now.Before(b.start.Add(burstWindow)) && !slices.ContainsFunc(b.keys, func(k string) bool { return b.needs[k] })
+			return len(b.keys) == 0 || !now.Before(b.start.Add(burstWindow)) && !slices.ContainsFunc(b.keys, func(k string) bool { return b.needs[k] })
 		})
 		if len(s.bursts[member]) == 0 {
 			delete(s.bursts, member)

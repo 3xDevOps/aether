@@ -214,7 +214,7 @@ func New(cfg Config) (*Service, error) {
 		notices:   map[budgetKey]chan budgetDue{},
 		bursts:    map[domain.MemberID][]*burst{},
 
-		cardPushes: cardPushes{cards: map[domain.MemberID]map[string]announced{}, held: map[domain.MemberID]bool{}},
+		cardPushes: cardPushes{cards: map[domain.MemberID]map[string]announced{}, held: map[domain.MemberID]bool{}, members: map[domain.MemberID]*sync.Mutex{}},
 
 		digestRetry:    map[domain.MemberID]time.Time{},
 		digestAttempts: map[domain.MemberID]int{},

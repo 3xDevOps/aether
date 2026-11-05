@@ -266,9 +266,14 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 // digestPayload is the digest of items as one push message: lines that
 // would not fit it go into the count of the rest.
 func digestPayload(items []*store.DigestItem) ([]byte, error) {
+	// A digest holding a card opens the assistant panel, where it waits.
+	link := "/"
+	if slices.ContainsFunc(items, func(item *store.DigestItem) bool { return item.Kind == KindCard }) {
+		link = CardLink
+	}
 	for lines := digestLines; ; lines-- {
 		title, body := digestText(items, lines)
-		payload, err := json.Marshal(message{notification: notification{Title: title, Body: body, Notice: true}, URL: "/", Tag: "digest"})
+		payload, err := json.Marshal(message{notification: notification{Title: title, Body: body, Notice: true}, URL: link, Tag: "digest"})
 		if err != nil {
 			return nil, fmt.Errorf("push: encode a digest: %w", err)
 		}

@@ -78,12 +78,15 @@ func cardBody(c Card) string {
 	return string(cut) + rest
 }
 
-// cardPushes is, per member, the cards announced. held marks a member
-// whose new cards wait for them to leave the dashboard.
+// cardPushes is, per member, the cards announced, and a lock that keeps
+// that member's card pushes in order without holding up other members'.
+// held marks a member whose new cards wait for them to leave the
+// dashboard. mu guards the maps themselves.
 type cardPushes struct {
-	mu    sync.Mutex
-	cards map[domain.MemberID]map[string]announced
-	held  map[domain.MemberID]bool
+	mu      sync.Mutex
+	cards   map[domain.MemberID]map[string]announced
+	held    map[domain.MemberID]bool
+	members map[domain.MemberID]*sync.Mutex
 }
 
 // UseCards announces members' assistant cards to their devices. Call it
@@ -103,27 +106,27 @@ func (s *Service) restoreCards(ctx context.Context) {
 		slog.Warn("push: list the pushed cards", "error", err)
 		return
 	}
-	s.cardPushes.mu.Lock()
 	for member, ids := range pushed {
-		known := s.knownCards(member)
+		lock, known := s.knownCards(member)
+		lock.Lock()
 		for _, id := range ids {
 			known[id] = announced{pushed: true}
 		}
-	}
-	s.cardPushes.mu.Unlock()
-	for member := range pushed {
+		lock.Unlock()
 		s.cardsChanged(ctx, member)
 	}
 }
 
-// knownCards is member's announced cards. cardPushes.mu is held.
-func (s *Service) knownCards(member domain.MemberID) map[string]announced {
-	known := s.cardPushes.cards[member]
-	if known == nil {
-		known = map[string]announced{}
-		s.cardPushes.cards[member] = known
+// knownCards is member's lock and announced cards, which only its holder
+// reads or changes.
+func (s *Service) knownCards(member domain.MemberID) (*sync.Mutex, map[string]announced) {
+	s.cardPushes.mu.Lock()
+	defer s.cardPushes.mu.Unlock()
+	if s.cardPushes.members[member] == nil {
+		s.cardPushes.members[member] = &sync.Mutex{}
+		s.cardPushes.cards[member] = map[string]announced{}
 	}
-	return known
+	return s.cardPushes.members[member], s.cardPushes.cards[member]
 }
 
 // cardsChanged withdraws the pushes of member's cards decided, expired or
@@ -134,14 +137,14 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 	if s.cards == nil {
 		return
 	}
-	s.cardPushes.mu.Lock()
-	defer s.cardPushes.mu.Unlock()
+	lock, known := s.knownCards(member)
+	lock.Lock()
+	defer lock.Unlock()
 	pending, err := s.cards.PendingCards(ctx, member)
 	if err != nil {
 		slog.Warn("push: read the assistant's cards", "member", member, "error", err)
 		return
 	}
-	known := s.knownCards(member)
 	for id, a := range known {
 		if slices.ContainsFunc(pending, func(c Card) bool { return c.ID == id }) {
 			continue
@@ -161,8 +164,11 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		delete(known, id)
 	}
 	if wait := s.freeAt(member).Sub(s.now()); wait > 0 {
-		if !s.cardPushes.held[member] {
-			s.cardPushes.held[member] = true
+		s.cardPushes.mu.Lock()
+		wasHeld := s.cardPushes.held[member]
+		s.cardPushes.held[member] = true
+		s.cardPushes.mu.Unlock()
+		if !wasHeld {
 			time.AfterFunc(wait, func() {
 				s.cardPushes.mu.Lock()
 				delete(s.cardPushes.held, member)
@@ -227,7 +233,14 @@ func (s *Service) announceCard(ctx context.Context, member domain.MemberID, c Ca
 	if err != nil {
 		return false, err
 	}
-	if route := RouteOf(prefs, KindCard, s.now()); route != RouteNow {
+	// As for a session's need: routed as of when the card was raised and as
+	// of now, the later route winning.
+	now := s.now()
+	route := RouteOf(prefs, KindCard, now)
+	if c.CreatedAt.Before(now) {
+		route = max(route, RouteOf(prefs, KindCard, c.CreatedAt))
+	}
+	if route != RouteNow {
 		return false, s.Queue(ctx, &store.DigestItem{
 			MemberID: member, Source: cardSource, Key: c.ID, Kind: KindCard, Title: cardTitle, Body: c.Summary,
 			URL: cardLink(c.ID), Overnight: route == RouteOvernight, CreatedAt: s.now(),

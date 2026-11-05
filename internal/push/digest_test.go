@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -474,5 +475,30 @@ func TestAnUnrelatedNeedEndingKeepsABurstInsideItsWindow(t *testing.T) {
 	defer h.svc.mu.Unlock()
 	if n := len(h.svc.bursts[h.ada.ID]); n != 1 {
 		t.Fatalf("member keeps %d bursts, want the one still inside its window", n)
+	}
+}
+
+func TestADigestHoldingACardOpensTheAssistantPanel(t *testing.T) {
+	t.Parallel()
+	payload, err := digestPayload([]*store.DigestItem{{Kind: KindCard, Title: cardTitle, Body: "Stop run-8x2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m message
+	if err = json.Unmarshal(payload, &m); err != nil || m.URL != CardLink {
+		t.Fatalf("digest opens %q, %v; want the assistant panel", m.URL, err)
+	}
+}
+
+func TestAnEmptiedBurstGivesItsTagUp(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if _, err := h.svc.join(h.ada.ID, "card:a", "card:a", "topic-a", cardTitle, "Stop run-8x2", true, true); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.unjoin(h.ctx, "card:a", "")
+	sum, err := h.svc.join(h.ada.ID, "card:b", "card:b", "topic-b", cardTitle, "Stop run-9y3", true, true)
+	if err != nil || sum != nil {
+		t.Fatalf("join = %v, %v; want card b's own notification, not a summary under a's tag", sum, err)
 	}
 }

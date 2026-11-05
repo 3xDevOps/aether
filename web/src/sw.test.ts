@@ -112,6 +112,13 @@ describe('service worker', () => {
     expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant card', expect.objectContaining({ body: 'Not decided: offline', requireInteraction: true }))
   })
 
+  it('titles a card decided elsewhere as the server does', async () => {
+    const shown = [{ tag: 'card:c1', title: 'Assistant asks for approval', body: 'Stop run-8x2', data: { card: 'c1' } }]
+    const { self, dispatch } = worker([], shown)
+    await dispatch('push', { data: { json: () => ({ title: 'Assistant card', body: 'Approved: Stop run-8x2', tag: 'card:c1', clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant card', expect.objectContaining({ body: 'Approved: Stop run-8x2', silent: true }))
+  })
+
   it('keeps the outcome this device decided when the server withdraws the card', async () => {
     const shown = [{ tag: 'card:c1', title: 'Assistant asks for approval', body: 'Declined', data: { decided: true } }]
     const { self, dispatch } = worker([], shown)

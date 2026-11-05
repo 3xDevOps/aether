@@ -35,7 +35,9 @@ async function display(message) {
     const notice = current?.data?.notice === true || current?.data?.decided === true
     // An error a decision met stays until it is read.
     const persist = current?.data?.persist === true
-    await self.registration.showNotification(current?.title || message.title || 'Aether', {
+    // A card's notification says how it ended under the server's title.
+    const ended = !notice && String(cleared).startsWith('card:') ? message.title : undefined
+    await self.registration.showNotification(ended || current?.title || message.title || 'Aether', {
       body: notice ? current.body : message.body,
       tag: cleared,
       silent: true,

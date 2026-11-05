@@ -176,3 +176,26 @@ func TestDecidingACardThatASummaryTookOverUpdatesTheSummary(t *testing.T) {
 	phone.expect(t, notification{Title: "1 thing needs you", Body: "Assistant asks for approval: Stop run-9y3", Quiet: true})
 	phone.expectNone(t, testQuiet)
 }
+
+func TestACardFromQuietHoursHeldByTheDashboardStaysOvernight(t *testing.T) {
+	t.Parallel()
+	h, cards := newCardHarness(t)
+	phone := h.subscribe(h.ada)
+	now := h.clock.now().UTC()
+	if err := h.db.PutNotifyPrefs(h.ctx, h.ada.ID, store.NotifyPrefs{
+		Push: true, Level: protocol.NotifyBatched, DigestAt: "09:00",
+		QuietStart: now.Add(-time.Hour).Format("15:04"), QuietEnd: now.Add(time.Hour).Format("15:04"), QuietTZ: "UTC",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.Active(h.ada.ID)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: now})
+	h.cardsChanged(h.ada)
+	// Quiet hours end while the dashboard still holds the card.
+	h.clock.advance(time.Hour + time.Minute)
+	h.eventuallyQueued(h.ada, 1)
+	phone.expectNone(t, testQuiet)
+	if item := h.digestItems(h.ada)[0]; !item.Overnight {
+		t.Fatalf("item = %+v, want it in the digest quiet hours end with", *item)
+	}
+}
