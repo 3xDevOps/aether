@@ -577,7 +577,7 @@ func TestSessionLoginPumpFollowsSignOutAndRevokeDuringRefresh(t *testing.T) {
 	if got := readFile(t, codexFile); got != "{}" {
 		t.Fatalf("copy after the owner switched to an API key = %s, want signed out", got)
 	}
-	if err := os.Remove(e.ownerFile(codexLogin)); err != nil {
+	if err = os.Remove(e.ownerFile(codexLogin)); err != nil {
 		t.Fatal(err)
 	}
 	e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-1", "grace~1", in))
