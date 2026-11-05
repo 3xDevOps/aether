@@ -108,7 +108,11 @@ func (s *Service) restoreCards(ctx context.Context) {
 		lock, known := s.knownCards(member)
 		lock.Lock()
 		for _, id := range ids {
-			known[id] = announced{pushed: true}
+			// A card this service announced before the restore read the
+			// store keeps the summary its push showed.
+			if _, ok := known[id]; !ok {
+				known[id] = announced{pushed: true}
+			}
 		}
 		lock.Unlock()
 		s.cardsChanged(ctx, member)
