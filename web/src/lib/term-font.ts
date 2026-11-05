@@ -47,9 +47,9 @@ export function whenTerminalFontReady(open: () => void): () => void {
   let cancelled = false
   const { promise: expired, resolve: expire } = Promise.withResolvers<void>()
   const timer = setTimeout(expire, loadTimeoutMs)
-  const loading = Promise.all(faces.map((face) => fonts.load(face, sampleGlyph))).catch(() => {
-    // A failed fetch falls back to platform glyphs, not a dead pane.
-  })
+  // A failed face falls back to platform glyphs, not a dead pane, but must
+  // not open the terminal while the other face is still arriving.
+  const loading = Promise.allSettled(faces.map((face) => fonts.load(face, sampleGlyph)))
   void Promise.race([loading, expired]).then(() => {
     clearTimeout(timer)
     if (!cancelled) open()

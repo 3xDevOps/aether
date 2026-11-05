@@ -88,6 +88,22 @@ describe('whenTerminalFontReady', () => {
     expect(opened).toBe(true)
   })
 
+  it('waits for the regular face when the bold face fails first', async () => {
+    vi.useFakeTimers()
+    const { promise: regular, resolve } = Promise.withResolvers<void>()
+    stubFonts(fontSet('unloaded', 'unloaded', (face: string) =>
+      face.startsWith('bold') ? Promise.reject(new Error('net::ERR_NETWORK_CHANGED')) : regular))
+    let opened = false
+    whenTerminalFontReady(() => {
+      opened = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(opened).toBe(false)
+    resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(opened).toBe(true)
+  })
+
   it('opens after the timeout when the load hangs', async () => {
     vi.useFakeTimers()
     stubFonts(fontSet('unloaded', 'unloaded', () => new Promise(() => {})))
