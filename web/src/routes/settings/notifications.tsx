@@ -24,7 +24,7 @@ function Guide({ page = 'networking', to, children }: { page?: string; to?: stri
 
 const hosted = <Guide to="the-dashboard">the dashboard your server hosts</Guide>
 
-function help(state: PushState | null): ReactNode {
+function help(state: PushState | null, hinted = false): ReactNode {
   if (!state) return 'Reading this device…'
   if (state.kind === 'blocked') {
     return 'This browser blocks notifications from this dashboard. Allow them in its site settings, then reload.'
@@ -38,6 +38,7 @@ function help(state: PushState | null): ReactNode {
     case 'gateway':
       return <><Code>aether gui</Code> serves this dashboard from your computer, where a notification could not open it later. Open {hosted} on the device and turn this on there.</>
     case 'home-screen':
+      if (hinted) return 'On iPhone and iPad, only the home-screen app gets notifications.'
       return <>On iPhone and iPad, notifications reach Aether only when it is opened from the home screen. <Guide to="add-it-to-your-home-screen">Add it to your home screen</Guide>, open it from there and turn this on.</>
     case 'browser':
       return <>This browser cannot receive push notifications. On a phone, open this dashboard in Chrome or Safari and <Guide to="add-it-to-your-home-screen">add it to your home screen</Guide>.</>
@@ -124,21 +125,31 @@ export function NotificationSections({ client }: { client: Api }) {
 
 const installHintKey = 'aether.ios-install-hint.dismissed'
 
-function InstallHint() {
-  const [dismissed, setDismissed] = useState(() => window.localStorage.getItem(installHintKey) === '1')
-  if (dismissed) return null
+function hintDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(installHintKey) === '1'
+  } catch {
+    return false
+  }
+}
+
+function InstallHint({ onDismiss }: { onDismiss: () => void }) {
   return (
     <Callout
-      tone="ended"
+      tone="review"
       title="Install Aether to get notifications"
       actions={(
-        <Button size="sm" variant="secondary" onClick={() => {
-          window.localStorage.setItem(installHintKey, '1')
-          setDismissed(true)
+        <Button size="sm" variant="secondary" className="coarse:h-11" onClick={() => {
+          try {
+            window.localStorage.setItem(installHintKey, '1')
+          } catch {
+            // Storage that cannot be written only brings the hint back next load.
+          }
+          onDismiss()
         }}>Dismiss</Button>
       )}
     >
-      In Safari, tap Share, then Add to Home Screen. Open Aether from the new icon and turn this on there. Needs iOS 16.4 or later.
+      Needs iOS 16.4 or later. In Safari, tap <b>Share</b> (the square with an arrow; under ⋯ if hidden), then <b>Add to Home Screen</b>. Chrome on iOS can add it too. Open Aether from the new icon and turn this on there.
     </Callout>
   )
 }
@@ -149,6 +160,7 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dismissed, setDismissed] = useState(hintDismissed)
 
   useEffect(() => {
     let live = true
@@ -189,13 +201,14 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
   )
 
   const on = state?.kind === 'on'
+  const install = state?.kind === 'unsupported' && state.why === 'home-screen'
   return (
     <SettingsSection title="Push notifications" id="push" scope="This device">
       <SettingRow
         label="Notify this device when a session needs me"
-        labelFor="settings-push"
-        help={help(state)}
-        control={state?.kind === 'unsupported' && state.why === 'home-screen' ? undefined : (
+        labelFor={install ? undefined : 'settings-push'}
+        help={help(state, install && !dismissed)}
+        control={install ? undefined : (
           <Checkbox
             id="settings-push"
             checked={on}
@@ -204,7 +217,11 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
           />
         )}
       >
-        {state?.kind === 'unsupported' && state.why === 'home-screen' && <InstallHint />}
+        {install && !dismissed && <InstallHint onDismiss={() => {
+          setDismissed(true)
+          // The callout holding focus is gone: land on the guide link its absence brings back.
+          requestAnimationFrame(() => document.querySelector<HTMLElement>('#push a[href*="networking.md"]')?.focus())
+        }} />}
         {on && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <Button size="sm" variant="secondary" disabled={busy} onClick={test}>Send test notification</Button>

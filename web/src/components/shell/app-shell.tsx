@@ -11,7 +11,7 @@ import { StaleBanner } from '@/components/shell/stale-banner'
 import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
 import { UpdateCenter } from '@/components/update-banner'
-import { useAppBadge } from '@/lib/app-badge'
+import { AppBadge } from '@/lib/app-badge'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useAttentionFeed } from '@/routes/needs-you/attention'
 import { ProfileDialog } from '@/routes/members/personal'
@@ -22,7 +22,6 @@ export function AppShell() {
   useNavShortcuts()
   useTeamRefresh()
   useSharedPrompt()
-  useAppBadge()
   const profileOpen = useStore((s) => s.profileOpen)
   const setProfileOpen = useStore((s) => s.setProfileOpen)
   const mobile = useIsMobile()
@@ -58,6 +57,7 @@ export function AppShell() {
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
       <UpdateCenter />
       <ConnectionAnnouncer />
+      <AppBadge />
     </div>
   )
 }

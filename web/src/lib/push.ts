@@ -15,6 +15,9 @@ export type PushState =
 
 const worker = '/sw.js'
 
+/** Fired on window when this device subscribes or unsubscribes. */
+export const pushChanged = 'aether:push-changed'
+
 /** iOS and iPadOS offer push only to a dashboard opened from the home screen. */
 export function needsHomeScreen(): boolean {
   const apple =
@@ -75,6 +78,7 @@ export async function enablePush(client: Api): Promise<PushState> {
   }
   current ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
   await client.pushSubscribe(current.toJSON())
+  window.dispatchEvent(new Event(pushChanged))
   return { kind: 'on' }
 }
 
@@ -86,6 +90,7 @@ export async function disablePush(client: Api): Promise<PushState> {
     })
     await current.unsubscribe()
   }
+  window.dispatchEvent(new Event(pushChanged))
   return { kind: 'off' }
 }
 

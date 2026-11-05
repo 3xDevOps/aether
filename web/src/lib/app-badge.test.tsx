@@ -1,0 +1,78 @@
+import { act, render } from '@testing-library/react'
+import { AppBadge, syncAppBadge } from '@/lib/app-badge'
+import { pushChanged } from '@/lib/push'
+import { useAttention, useAttentionFeed } from '@/routes/needs-you/attention'
+import type { AttentionItem } from '@/lib/types'
+
+vi.mock('@/routes/needs-you/attention', async (original) => ({
+  ...(await original<typeof import('@/routes/needs-you/attention')>()),
+  useAttentionFeed: vi.fn(),
+}))
+
+function badging(subscribed: boolean) {
+  const nav = {
+    setAppBadge: vi.fn(async () => {}),
+    clearAppBadge: vi.fn(async () => {}),
+    serviceWorker: { getRegistration: async () => ({ pushManager: { getSubscription: async () => (subscribed ? {} : null) } }) },
+    subscribed,
+  }
+  vi.stubGlobal('navigator', nav)
+  return nav
+}
+
+const asks = (n: number): AttentionItem[] =>
+  Array.from({ length: n }, (_, i) => ({ kind: 'permission', run_id: `r${i}`, workspace_id: 'w', title: 't', harness: 'claude', reason: '' }) as AttentionItem)
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  useAttention.setState({ items: null })
+})
+
+describe('syncAppBadge', () => {
+  it('shows the Needs you count while push is on', async () => {
+    const nav = badging(true)
+    await syncAppBadge(3)
+    expect(nav.setAppBadge).toHaveBeenCalledWith(3)
+    await syncAppBadge(0)
+    expect(nav.clearAppBadge).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the badge without a push subscription, and does nothing without the API', async () => {
+    const nav = badging(false)
+    await syncAppBadge(3)
+    expect(nav.setAppBadge).not.toHaveBeenCalled()
+    expect(nav.clearAppBadge).toHaveBeenCalledTimes(1)
+    vi.stubGlobal('navigator', {})
+    await expect(syncAppBadge(3)).resolves.toBeUndefined()
+  })
+
+  it('reports a failure instead of swallowing it', async () => {
+    const nav = badging(true)
+    nav.setAppBadge.mockRejectedValue(new Error('denied'))
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await syncAppBadge(1)
+    expect(report).toHaveBeenCalledWith('Could not set the app badge:', expect.any(Error))
+    report.mockRestore()
+  })
+})
+
+describe('AppBadge', () => {
+  it('follows the Needs you count in any layout, re-syncs when push changes, and clears on unmount', async () => {
+    const nav = badging(true)
+    useAttention.setState({ items: asks(2) })
+    const view = render(<AppBadge />)
+    expect(useAttentionFeed).toHaveBeenCalled()
+    await vi.waitFor(() => expect(nav.setAppBadge).toHaveBeenLastCalledWith(2))
+
+    act(() => useAttention.setState({ items: asks(3) }))
+    await vi.waitFor(() => expect(nav.setAppBadge).toHaveBeenLastCalledWith(3))
+
+    nav.subscribed = false
+    nav.serviceWorker.getRegistration = async () => ({ pushManager: { getSubscription: async () => null } })
+    act(() => void window.dispatchEvent(new Event(pushChanged)))
+    await vi.waitFor(() => expect(nav.clearAppBadge).toHaveBeenCalledTimes(1))
+
+    view.unmount()
+    await vi.waitFor(() => expect(nav.clearAppBadge).toHaveBeenCalledTimes(2))
+  })
+})

@@ -306,12 +306,15 @@ with details behind a popover.
 
 `src/components/shell/` is the shell: a branded navigation header above one
 sidebar and one content area, with the desktop window bar above them in the
-desktop app. `AppShell` (`app-shell.tsx`) mounts it once (it also runs `useAppBadge`, which sets the installed app's icon badge to the Needs you count while push is on), together
+desktop app. `AppShell` (`app-shell.tsx`) mounts it once, together
 with the shell-wide hosts: the command palette, the dialogs the store opens
 (`components/palette/dialogs.tsx`: launch, message, forward, close, archive
 and free), the shortcuts dialog, the updates dialog (`UpdateCenter`), the
-connection announcer, the shell keys (`useNavShortcuts`) and the team
-refresh (`useTeamRefresh`).
+connection announcer, the shell keys (`useNavShortcuts`), the team
+refresh (`useTeamRefresh`) and `AppBadge` (`lib/app-badge.ts`), which sets the
+installed app's icon badge to the Needs you count while push is on, in any
+layout, and clears it when the shell unmounts. It does nothing in the desktop
+app, which badges itself.
 
 ### Sidebar
 

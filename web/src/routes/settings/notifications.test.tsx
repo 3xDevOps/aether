@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
 import type { SlackStatusResult } from '@/lib/types'
@@ -29,6 +29,7 @@ const toggle = () => screen.getByRole('checkbox', { name: label })
 
 describe('notification settings', () => {
   beforeEach(() => vi.resetAllMocks())
+  afterEach(() => window.localStorage.clear())
 
   it('reads this device through the gateway that serves the dashboard', async () => {
     const client = show({ kind: 'off' })
@@ -44,7 +45,7 @@ describe('notification settings', () => {
     [{ kind: 'blocked' }, 'This browser blocks notifications from this dashboard.', undefined],
     [{ kind: 'unsupported', why: 'desktop' }, 'The desktop app notifies you itself while it is open.', '#the-dashboard'],
     [{ kind: 'unsupported', why: 'gateway' }, 'serves this dashboard from your computer', '#the-dashboard'],
-    [{ kind: 'unsupported', why: 'home-screen' }, 'On iPhone and iPad, notifications reach Aether only when it is opened from the home screen.', '#add-it-to-your-home-screen'],
+    [{ kind: 'unsupported', why: 'home-screen' }, 'On iPhone and iPad, only the home-screen app gets notifications.', undefined],
     [{ kind: 'unsupported', why: 'browser' }, 'This browser cannot receive push notifications.', '#add-it-to-your-home-screen'],
   ] as [PushState, string, string | undefined][])('says why it cannot be turned on: %j', async (state, reason, anchor) => {
     show(state)
@@ -52,9 +53,6 @@ describe('notification settings', () => {
     if (state.kind === 'unsupported' && state.why === 'home-screen') {
       expect(screen.queryByRole('checkbox', { name: label })).toBeNull()
       expect(screen.getByText('Install Aether to get notifications')).toBeDefined()
-      await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-      expect(screen.queryByText('Install Aether to get notifications')).toBeNull()
-      window.localStorage.clear()
     } else {
       expect(toggle()).toHaveProperty('disabled', true)
       expect(toggle().getAttribute('aria-checked')).toBe('false')
@@ -63,6 +61,15 @@ describe('notification settings', () => {
     expect(link?.getAttribute('href')).toBe(
       anchor && `https://github.com/3xDevOps/Aether/blob/main/docs/networking.md${anchor}`,
     )
+  })
+
+  it('keeps the install hint dismissed across a remount', async () => {
+    show({ kind: 'unsupported', why: 'home-screen' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+    cleanup()
+    show({ kind: 'unsupported', why: 'home-screen' })
+    expect(await screen.findByText('On iPhone and iPad, notifications reach Aether only when it is opened from the home screen.', { exact: false })).toBeDefined()
+    expect(screen.queryByText('Install Aether to get notifications')).toBeNull()
   })
 
   it('turns on, sends a test, and turns off', async () => {
