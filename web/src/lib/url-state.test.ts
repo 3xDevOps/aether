@@ -125,3 +125,16 @@ describe('bindRouteToUrl', () => {
     })
   })
 })
+
+describe('an address the desktop app moves to', () => {
+  it('is seen with its query before the route rewrites it', () => {
+    const store = createRootStore()
+    const seen: string[] = []
+    const stop = bindRouteToUrl(store, (query) => seen.push(query.toString()))
+    window.history.pushState(null, '', '/?assistant=1&card=c1')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    stop()
+    window.history.replaceState(null, '', '/')
+    expect(seen).toEqual(['assistant=1&card=c1'])
+  })
+})

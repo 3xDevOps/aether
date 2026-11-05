@@ -210,7 +210,8 @@ interface RouteStore {
  * Keeps the address bar and the store's route in step: a navigation pushes a
  * history entry, and back or forward navigates to the entry's route.
  */
-export function bindRouteToUrl(store: RouteStore): () => void {
+/** onAddress sees each address the browser moves to, before the route rewrites it. */
+export function bindRouteToUrl(store: RouteStore, onAddress?: (query: URLSearchParams) => void): () => void {
   const sync = (route: Route, previous?: Route) => {
     const next = hrefFor(window.location.href, route)
     if (next === window.location.href) return
@@ -222,7 +223,9 @@ export function bindRouteToUrl(store: RouteStore): () => void {
     if (state.route !== previous.route) sync(state.route, previous.route)
   })
   const pop = () => {
-    const route = addressedRoute(new URLSearchParams(window.location.search))
+    const query = new URLSearchParams(window.location.search)
+    onAddress?.(query)
+    const route = addressedRoute(query)
     store.getState().navigate(route.name, route.params)
   }
   window.addEventListener('popstate', pop)
