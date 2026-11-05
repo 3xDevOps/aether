@@ -281,7 +281,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         forceMount
         // The panel stays open while the view behind it is used; only Escape and its own buttons close it.
         onInteractOutside={(event) => event.preventDefault()}
-        className={cn(surface, 'relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-none border-y-0 border-l-0 p-4 pt-[calc(1rem+var(--safe-top))] shadow-dialog outline-none')}
+        className={cn(surface, 'relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-none border-y-0 border-l-0 p-4 pt-[calc(1rem+var(--safe-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-dialog outline-none')}
       >
         <DialogHeader>
           <DialogTitle>New session</DialogTitle>

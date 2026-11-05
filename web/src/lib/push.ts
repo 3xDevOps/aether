@@ -16,11 +16,13 @@ export type PushState =
 const worker = '/sw.js'
 
 /** iOS and iPadOS offer push only to a dashboard opened from the home screen. */
-function needsHomeScreen(): boolean {
+export function needsHomeScreen(): boolean {
   const apple =
     /iPhone|iPad|iPod/.test(navigator.userAgent) ||
     (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1)
-  return apple && !window.matchMedia('(display-mode: standalone)').matches
+  // Safari sets navigator.standalone for a home-screen app; display-mode is the standard spelling.
+  const installed = (navigator as { standalone?: boolean }).standalone === true || window.matchMedia('(display-mode: standalone)').matches
+  return apple && !installed
 }
 
 async function subscription(): Promise<PushSubscription | null> {

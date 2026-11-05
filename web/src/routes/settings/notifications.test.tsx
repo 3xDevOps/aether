@@ -49,8 +49,16 @@ describe('notification settings', () => {
   ] as [PushState, string, string | undefined][])('says why it cannot be turned on: %j', async (state, reason, anchor) => {
     show(state)
     expect(await screen.findByText(reason, { exact: false })).toBeDefined()
-    expect(toggle()).toHaveProperty('disabled', true)
-    expect(toggle().getAttribute('aria-checked')).toBe('false')
+    if (state.kind === 'unsupported' && state.why === 'home-screen') {
+      expect(screen.queryByRole('checkbox', { name: label })).toBeNull()
+      expect(screen.getByText('Install Aether to get notifications')).toBeDefined()
+      await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByText('Install Aether to get notifications')).toBeNull()
+      window.localStorage.clear()
+    } else {
+      expect(toggle()).toHaveProperty('disabled', true)
+      expect(toggle().getAttribute('aria-checked')).toBe('false')
+    }
     const link = screen.queryAllByRole('link').find((a) => a.getAttribute('href')?.includes('networking.md'))
     expect(link?.getAttribute('href')).toBe(
       anchor && `https://github.com/3xDevOps/Aether/blob/main/docs/networking.md${anchor}`,

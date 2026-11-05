@@ -122,6 +122,27 @@ export function NotificationSections({ client }: { client: Api }) {
   )
 }
 
+const installHintKey = 'aether.ios-install-hint.dismissed'
+
+function InstallHint() {
+  const [dismissed, setDismissed] = useState(() => window.localStorage.getItem(installHintKey) === '1')
+  if (dismissed) return null
+  return (
+    <Callout
+      tone="ended"
+      title="Install Aether to get notifications"
+      actions={(
+        <Button size="sm" variant="secondary" onClick={() => {
+          window.localStorage.setItem(installHintKey, '1')
+          setDismissed(true)
+        }}>Dismiss</Button>
+      )}
+    >
+      In Safari, tap Share, then Add to Home Screen. Open Aether from the new icon and turn this on there. Needs iOS 16.4 or later.
+    </Callout>
+  )
+}
+
 export function PushSection({ client, onSubscriptionChange }: { client: Api; onSubscriptionChange?: () => void }) {
   const gateway = useStore((s) => s.capabilities?.gateway)
   const [state, setState] = useState<PushState | null>(null)
@@ -174,7 +195,7 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
         label="Notify this device when a session needs me"
         labelFor="settings-push"
         help={help(state)}
-        control={(
+        control={state?.kind === 'unsupported' && state.why === 'home-screen' ? undefined : (
           <Checkbox
             id="settings-push"
             checked={on}
@@ -183,6 +204,7 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
           />
         )}
       >
+        {state?.kind === 'unsupported' && state.why === 'home-screen' && <InstallHint />}
         {on && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <Button size="sm" variant="secondary" disabled={busy} onClick={test}>Send test notification</Button>

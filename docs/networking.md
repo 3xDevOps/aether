@@ -271,6 +271,19 @@ A phone can keep the dashboard as an app that opens full screen.
 - On an iPhone, open the server URL in Safari and pick **Share → Add to Home
   Screen**.
 
+On iOS, Web Push works only for the installed app, and has these limits:
+
+- iOS 16.4 or later, and the app opened from the home-screen icon. In a Safari
+  tab **Settings → Push notifications** shows install steps instead of the
+  switch; **Dismiss** hides them on that browser.
+- The permission prompt appears when you turn the switch on, because iOS asks
+  only after a tap.
+- The icon badge shows the **Needs you** count while the app is open and push
+  is on, and clears at 0. The push carries no count, so a closed app keeps the
+  last badge until you open it.
+- iOS can drop a subscription it has not seen used for a long time. Turn the
+  switch off and on again if **Send test notification** stops arriving.
+
 Install the server URL, not an `aether gui` one. An `aether gui` URL carries a
 per-process token that the home-screen icon drops, so the app opens
 unauthenticated. There is no offline mode: away from the tailnet the app shows
