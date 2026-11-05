@@ -160,9 +160,15 @@ class NavigationTest {
             openPathScript("https://h.ts.net/?page=board", "/?assistant=1&card=ABC_1-z"),
         )
         assertEquals(
-            "history.pushState(null, '', '/?run=run-7k2m9q4xbd&token=t0K'); $push",
+            "history.pushState(null, '', '/?token=t0K&run=run-7k2m9q4xbd'); $push",
             openPathScript("http://127.0.0.1:4000/?token=t0K&page=board", "/?run=run-7k2m9q4xbd"),
         )
+        // A token in a path another app sent never reaches the address.
+        assertEquals(
+            "history.pushState(null, '', '/?token=t0K&run=r'); $push",
+            openPathScript("http://127.0.0.1:4000/?token=t0K", "/?token=x&run=r&token=y"),
+        )
+        assertEquals("history.pushState(null, '', '/?run=r'); $push", openPathScript("https://h.ts.net/", "/?token=x&run=r"))
         assertEquals("history.pushState(null, '', '/'); $push", openPathScript("https://h.ts.net/", "/"))
         // Nothing that could close the string literal or the call reaches the script.
         for (path in listOf("/?a='-alert(1)-'", "/?a=\"x\"", "/?a=<b>", "/?a=)", "/x", "?a=1", "/?a=b c")) {

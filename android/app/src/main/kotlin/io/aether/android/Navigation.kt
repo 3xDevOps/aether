@@ -141,7 +141,10 @@ fun routeHomeScript(url: String?): String {
  */
 fun openPathScript(url: String?, path: String): String? {
     if (!isDashboardPath(path) || !path.matches(Regex("/(\\?[A-Za-z0-9%._~&=+,:@!*-]*)?"))) return null
-    val query = listOfNotNull(path.removePrefix("/").removePrefix("?").takeIf { it.isNotEmpty() }, gatewayToken(url))
+    // The dashboard keeps the first token it reads, and another app can
+    // send a path: the gateway's own goes first and the path's are dropped.
+    val params = path.removePrefix("/").removePrefix("?").split('&').filter { it.isNotEmpty() && !it.startsWith("token=") }
+    val query = listOfNotNull(gatewayToken(url)) + params
     val address = if (query.isEmpty()) "/" else "/?" + query.joinToString("&")
     return "history.pushState(null, '', '$address'); dispatchEvent(new PopStateEvent('popstate'))"
 }
