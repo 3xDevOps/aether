@@ -27,6 +27,14 @@ request ([What an edge stores](#what-an-edge-stores)).
   phone's current network, which the app reads (permission
   `ACCESS_NETWORK_STATE`) and rewrites when the network changes. Nothing else
   the app writes is its own.
+- **With notifications on, the push registration**, in the app's private
+  storage: the distributor's address for this phone, the two Web Push keys,
+  and the last error registering. The UnifiedPush connector library keeps
+  the private key in its own database, encrypted (AES-GCM) with a key held
+  in the Android Keystore. Showing notifications needs the
+  `POST_NOTIFICATIONS` permission, which Android asks for when you turn them
+  on; the connector adds `WAKE_LOCK`, to finish handling a message while the
+  phone sleeps.
 - **The WebView's ordinary cache** of the dashboard's files (none in Edge
   mode, which turns it off), and the
   dashboard's own local record of how you use it. That record holds how the
@@ -187,10 +195,8 @@ and revoke GitHub authorization, see
 ## Push notifications
 
 Off until you turn on **Notify this device when a session needs me** in the
-dashboard's Settings, in a browser or in the dashboard added to a home screen
-([networking.md](networking.md#notifications)). The Android app cannot
-receive them, so it never registers with a push service; the one thing in
-this section it does send is the last paragraph's report to your server.
+dashboard's Settings, in a browser, in the dashboard added to a home screen,
+or in the Android app ([networking.md](networking.md#notifications)).
 
 Turning it on makes that browser register with its vendor's push service -
 Google's for Chrome, Mozilla's for Firefox, Apple's for Safari, Microsoft's
@@ -226,6 +232,17 @@ push service receives:
   that a newer notification for a session replaces an undelivered older one.
 
 The push service relays the message to your browser under its own policy.
+
+In the Android app, turning it on registers the app with the UnifiedPush
+distributor app you installed, such as ntfy. The distributor's server issues
+the address; the app generates the two keys, keeps the private one on the
+phone, and sends the address and the public keys to your server, the
+same three values as above. The distributor and its server receive what a
+push service does, listed above, and relay it to the app; they cannot read
+the notification. ntfy's policy covers what ntfy.sh keeps. Turning it off
+tells your server to remove the values and the distributor to drop the
+registration. The app sends a declined assistant card's ID and the decision
+to your server, as the dashboard does.
 **Send test notification** sends the same request with the text
 `Notifications work on this device.` and no session.
 

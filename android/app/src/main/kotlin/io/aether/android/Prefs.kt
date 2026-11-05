@@ -14,6 +14,13 @@ private const val UPDATE_ANSWERED_AT = "update_answered_at"
 private const val UPDATE_CHECK = "update_check"
 private const val UPDATE_BEHIND_SINCE = "update_behind_since"
 private const val UPDATE_DISMISSED = "update_dismissed"
+private const val PUSH_ENDPOINT = "push_endpoint"
+private const val PUSH_P256DH = "push_p256dh"
+private const val PUSH_AUTH = "push_auth"
+private const val PUSH_SYNCED = "push_synced"
+private const val PUSH_ERROR = "push_error"
+private const val PUSH_SERVER = "push_server"
+private const val PUSH_PERMISSION_ASKED = "push_permission_asked"
 
 /** How the shell reaches a server. */
 enum class ConnectionMode(val stored: String) {
@@ -97,6 +104,64 @@ fun Context.storeUpdate(update: StoredUpdate) {
         .putString(UPDATE_DISMISSED, update.dismissed)
         .putLong(UPDATE_FAILURE_DISMISSED_AT, update.failureDismissedAt)
         .apply()
+}
+
+/**
+ * This phone's UnifiedPush registration: the distributor's endpoint and the
+ * Web Push public keys the server encrypts to, which are not secret (the
+ * private key stays in the connector's own store). [synced] is whether
+ * [server], the connection from [pushServer], has them; [error] is why the
+ * last attempt failed, in its own words.
+ */
+data class StoredPush(
+    val endpoint: String?,
+    val p256dh: String?,
+    val auth: String?,
+    val synced: Boolean,
+    val error: String?,
+    val server: String? = null,
+)
+
+fun Context.storedPush(): StoredPush {
+    val prefs = prefs()
+    return StoredPush(
+        endpoint = prefs.getString(PUSH_ENDPOINT, null),
+        p256dh = prefs.getString(PUSH_P256DH, null),
+        auth = prefs.getString(PUSH_AUTH, null),
+        synced = prefs.getBoolean(PUSH_SYNCED, false),
+        error = prefs.getString(PUSH_ERROR, null),
+        server = prefs.getString(PUSH_SERVER, null),
+    )
+}
+
+fun Context.storePush(push: StoredPush) {
+    prefs()
+        .edit()
+        .putString(PUSH_ENDPOINT, push.endpoint)
+        .putString(PUSH_P256DH, push.p256dh)
+        .putString(PUSH_AUTH, push.auth)
+        .putBoolean(PUSH_SYNCED, push.synced)
+        .putString(PUSH_ERROR, push.error)
+        .putString(PUSH_SERVER, push.server)
+        .commit()
+}
+
+/**
+ * The connection a push registration was handed to: the tailnet dashboard's
+ * address, or Aether Edge. Choosing another under Connection subscribes again.
+ */
+fun Context.pushServer(): String? =
+    when (connectionMode()) {
+        ConnectionMode.TAILSCALE -> storedDashboardUrl()
+        ConnectionMode.EDGE -> "edge"
+        null -> null
+    }
+
+/** Whether Android's notification permission dialog was ever launched. */
+fun Context.pushPermissionAsked(): Boolean = prefs().getBoolean(PUSH_PERMISSION_ASKED, false)
+
+fun Context.markPushPermissionAsked() {
+    prefs().edit().putBoolean(PUSH_PERMISSION_ASKED, true).commit()
 }
 
 private fun Context.prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)

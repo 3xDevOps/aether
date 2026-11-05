@@ -296,7 +296,12 @@ check for updates, long-press the app icon and choose **Connection**.
 **Share** text or a link to Aether's **New session** from any app and the
 dashboard opens a new session with it as the prompt, cut to 8000 characters;
 nothing starts until you send it. Back walks the dashboard's history, returns
-to its home from a page a share opened, and leaves the app only from home.
+to its home from a page a share or notification opened, and leaves the app
+only from home.
+
+To get notifications on the phone, install a UnifiedPush distributor such as
+ntfy, then turn on **Notify this device when a session needs me** in the
+dashboard's Settings ([networking.md](networking.md#in-the-android-app)).
 
 About once an hour, when you bring it to the front, the app checks for a
 release and shows a banner. **Download update** fetches the new APK; open it
@@ -762,10 +767,9 @@ to your originals, holding local edits from when it paused.
   ([Windows Defender and SmartScreen](#windows-defender-and-smartscreen)).
 - The Windows install script, and the install script without OpenSSL 3, do
   not check the release signature.
-- The Android app is not on Google Play, shows no push notifications (add the
-  dashboard to the home screen from Chrome for those,
-  [networking.md](networking.md#add-it-to-your-home-screen)) and has no port
-  forwarding. Join and claim links open only in **Aether Edge** mode.
+- The Android app is not on Google Play, needs a UnifiedPush distributor for
+  notifications ([networking.md](networking.md#in-the-android-app)) and has
+  no port forwarding. Join and claim links open only in **Aether Edge** mode.
 - On Linux the desktop app runs Electron with `--no-sandbox`; the dashboard
   page still has no Node.js access.
 

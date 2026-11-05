@@ -61,6 +61,7 @@ afterEach(() => {
   vi.useRealTimers()
   Reflect.deleteProperty(navigator, 'serviceWorker')
   Reflect.deleteProperty(window, 'aetherDesktop')
+  Reflect.deleteProperty(window, 'AetherAndroid')
 })
 
 describe('needsHomeScreen', () => {
@@ -184,6 +185,45 @@ describe('disablePush and testPush', () => {
     const api = fakeApi()
     await testPush(api)
     expect(api.pushTest).toHaveBeenCalledWith(endpoint)
+  })
+})
+
+describe('in the Android app', () => {
+  /** The app's bridge: it answers each op with the states listed for it, the last settled. */
+  function app(answers: Record<string, object[]>) {
+    const sent: string[] = []
+    const bridge = Object.assign(new EventTarget(), {
+      postMessage: (message: string) => {
+        const { op } = JSON.parse(message) as { op: string }
+        sent.push(op)
+        for (const state of answers[op] ?? []) {
+          setTimeout(() => bridge.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(state) })))
+        }
+      },
+    })
+    Object.assign(window, { AetherAndroid: bridge })
+    return sent
+  }
+
+  it('asks the app, on the Edge gateway too, and names a missing distributor', async () => {
+    const client = fakeApi()
+    app({ state: [{ kind: 'no-distributor' }] })
+    expect(await readPush(client, 'local')).toEqual({ kind: 'unsupported', why: 'distributor' })
+    expect(client.pushStatus).not.toHaveBeenCalled()
+  })
+
+  it('waits past pending for the outcome, and shows the reason it failed', async () => {
+    const sent = app({ enable: [{ kind: 'pending' }, { kind: 'on', endpoint }], state: [{ kind: 'on', endpoint }] })
+    const api = fakeApi()
+    expect(await enablePush(api)).toEqual({ kind: 'on' })
+    await testPush(api)
+    expect(api.pushTest).toHaveBeenCalledWith(endpoint)
+    expect(sent).toEqual(['enable', 'state'])
+
+    const refused = 'The server did not take this phone\'s push endpoint: HTTP 503'
+    app({ enable: [{ kind: 'pending' }, { kind: 'off', error: refused }] })
+    expect(await enablePush(api)).toEqual({ kind: 'off', error: refused })
+    expect(api.pushSubscribe).not.toHaveBeenCalled()
   })
 })
 

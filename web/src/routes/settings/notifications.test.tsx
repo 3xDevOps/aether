@@ -12,6 +12,7 @@ vi.mock('@/lib/push', () => ({
   enablePush: vi.fn(),
   disablePush: vi.fn(),
   testPush: vi.fn(),
+  watchAndroidPushState: () => () => {},
 }))
 
 const label = 'Notify this device when a session needs me'
