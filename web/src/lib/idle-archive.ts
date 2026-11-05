@@ -5,6 +5,7 @@ import { allowed } from '@/lib/permissions'
 import type { Member, RunCloseCheck } from '@/lib/types'
 import type { Capability } from '@/store/hooks'
 import { unfinishedChildren } from '@/store/children'
+import { queuedSteers } from '@/store/collaboration'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
 /** How long a live session must sit idle and done before bulk archive offers to close it. */
@@ -60,7 +61,6 @@ export function archiveState(run: RunRecord, paused: boolean | undefined): strin
   return `${closeState(run)}|${paused ? 'paused' : ''}|${run.pending_inputs?.length ?? 0}`
 }
 
-/** Splits the done sessions by how long their check says they have been idle. */
 export function idleRows(done: IdleCandidate[], checks: Map<string, RunCloseCheck>, now: number): { idle: IdleRow[]; recent: IdleCandidate[] } {
   const out: { idle: IdleRow[]; recent: IdleCandidate[] } = { idle: [], recent: [] }
   for (const candidate of done) {
@@ -101,10 +101,12 @@ function compactSpan(ms: number): string {
 /** What keeps a live session from counting as done, in the words its row shows; undefined when it is done. */
 function holds(run: RunRecord, ctx: StateContext): string | undefined {
   const parent = run.parent_run_id && !run.detached ? ctx.runs[run.parent_run_id] : undefined
-  if (parent && !isTerminal(parent.status)) return 'its parent session is still open'
+  // A completed parent not yet accepted keeps its attached children to close with it.
+  if (parent && (!isTerminal(parent.status) || (parent.status === 'completed' && parent.review !== 'accepted'))) return 'its parent session is still open'
   if (needsYou(run, ctx)) return 'needs you'
   // needsYou asks about the viewer; a question to a teammate who owns the run counts too.
   if (run.unanswered_questions) return 'a question is waiting for its owner'
+  if (queuedSteers(ctx.roomMessages[run.id] ?? []).length > 0 || (ctx.roomStatus[run.id]?.queued_steers ?? 0) > 0) return 'a queued message waits to reach its agent'
   if (ctx.pausedRuns[run.id]) return 'paused'
   if (run.pending_inputs?.length) return 'a request is pending'
   if (unfinishedChildren(ctx.runs, run).length > 0) return 'subsessions still running'

@@ -62,7 +62,6 @@ export function ClearDoneConfirm({
   const n = archived.length + closing
   const checking = held === undefined || idle === undefined
   const names = allNames ? archived : archived.slice(0, shownNames)
-  const sessions = (count: number) => `${count} ${count === 1 ? 'session' : 'sessions'}`
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
       <DialogContent
@@ -79,7 +78,7 @@ export function ClearDoneConfirm({
               : n === 0
                 ? rows.length > 0 ? 'Choose idle sessions to close and archive' : 'Nothing to archive'
                 : closing > 0
-                  ? `Archive ${sessions(n)}, closing ${closing} first?`
+                  ? `Archive ${n} ${n === 1 ? 'session' : 'sessions'}, closing ${closing} first?`
                   : `Archive ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>

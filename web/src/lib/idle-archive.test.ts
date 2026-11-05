@@ -41,7 +41,10 @@ describe('idle archive plan', () => {
       parent,
       live('child', { state: 'answered', parent_run_id: 'parent' }),
       live('detached', { state: 'answered', parent_run_id: 'parent', detached: true }),
-    ], { pausedRuns: { paused: true } })
+      live('steered', { state: 'answered' }),
+      { ...live('done-parent', { status: 'completed', review: 'ready' }) },
+      live('waiting-child', { state: 'answered', parent_run_id: 'done-parent' }),
+    ], { pausedRuns: { paused: true }, roomStatus: { steered: { queued_steers: 1 } as never } })
     expect(reasons(got.excluded)).toMatchObject({
       parent: 'subsessions still running',
       ci: 'waiting on CI',
@@ -52,6 +55,8 @@ describe('idle archive plan', () => {
       paused: 'paused',
       'asked-owner': 'a question is waiting for its owner',
       child: 'its parent session is still open',
+      steered: 'a queued message waits to reach its agent',
+      'waiting-child': 'its parent session is still open',
     })
     expect(reasons(got.done)).toEqual({ detached: 'replied' })
   })
