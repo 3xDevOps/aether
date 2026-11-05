@@ -46,6 +46,9 @@ import java.util.concurrent.Executors
 
 private const val TAG = "aether"
 
+// The dashboard routes on popstate (web/src/lib/url-state.ts); replacing the
+// entry leaves nothing behind home for back to walk into.
+
 // Not the main thread: a WebView waiting on a hung renderer can be blocking
 // it. One for the process, never shut down, since WebView may deliver to it
 // after any one window is gone.
@@ -137,15 +140,26 @@ class MainActivity : ComponentActivity() {
     private var clearHistoryOnLoad = false
 
     /**
-     * Back walks the dashboard's own history and then leaves the app running:
-     * finishing would drop the terminal's scrollback on the way to the home
-     * screen. Where the platform does that itself the callback stands down at
-     * the root, so the predictive back-to-home animation runs.
+     * Back walks the dashboard's own history, then goes to the dashboard's
+     * home from a page opened with nothing behind it - a share,
+     * a link - and only from home leaves the app running: finishing
+     * would drop the terminal's scrollback on the way to the home screen.
+     * Where the platform does that itself the callback stands down at home,
+     * so the predictive back-to-home animation runs.
+     *
+     * Home is reached the way the dashboard's own back button would, by
+     * routing in the page: a reload would lose what the page holds, such as
+     * a shared prompt's unsent draft.
      */
     private val back =
         object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (gate?.isShown != true && web.canGoBack()) web.goBack() else moveTaskToBack(true)
+                when {
+                    gate?.isShown == true -> moveTaskToBack(true)
+                    web.canGoBack() -> web.goBack()
+                    !atDashboardHome(web.url) -> web.evaluateJavascript(routeHomeScript(web.url), null)
+                    else -> moveTaskToBack(true)
+                }
             }
         }
 
@@ -730,7 +744,7 @@ class MainActivity : ComponentActivity() {
         if (raw != null && isEdgeOnlyLink(raw)) {
             Toast.makeText(this, R.string.join_needs_edge, Toast.LENGTH_LONG).show()
         }
-        val link = raw?.let { deepLinkUrl(base, it) }
+        val link = raw?.let { deepLinkUrl(base, it) } ?: intentPath(intent)?.let { dashboardAt(base, it) }
         if (link != null) {
             loaded = base
             web.loadUrl(link)
@@ -747,7 +761,7 @@ class MainActivity : ComponentActivity() {
      * it prints one. A link that names something to open is held until then.
      */
     private fun openEdge(intent: Intent?) {
-        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix)
+        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix) ?: intentPath(intent)?.let(::edgeSuffix)
         val url = gatewayUrl
         when {
             gateway?.isActive != true -> {
@@ -815,8 +829,36 @@ class MainActivity : ComponentActivity() {
      * WebView actually has, wherever that history changes.
      */
     private fun syncBackCallback() {
-        if (platformBackgroundsUs) back.isEnabled = gate?.isShown != true && web.canGoBack()
+        if (platformBackgroundsUs) {
+            back.isEnabled = gate?.isShown != true && (web.canGoBack() || !atDashboardHome(web.url))
+        }
     }
+
+    /**
+     * The dashboard path a share opens, or null for any
+     * other intent. Another app can send one: a share only ever prefills a
+     * prompt, and extras filled with a class this app lacks are no path at
+     * all.
+     */
+    private fun intentPath(intent: Intent?): String? =
+        try {
+            when (intent?.action) {
+                Intent.ACTION_SEND -> {
+                    val text =
+                        sharedText(
+                            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+                            intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString(),
+                        )
+                    if ((text?.let(::sharedLength) ?: 0) > MAX_SHARED_CHARS) {
+                        Toast.makeText(this, getString(R.string.share_cut, MAX_SHARED_CHARS), Toast.LENGTH_LONG).show()
+                    }
+                    sharePath(text)
+                }
+                else -> null
+            }
+        } catch (_: RuntimeException) {
+            null
+        }
 
     private fun openSetup() {
         startActivity(Intent(this, SetupActivity::class.java))

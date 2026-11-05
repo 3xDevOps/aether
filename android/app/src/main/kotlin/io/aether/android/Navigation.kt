@@ -95,3 +95,44 @@ fun popupNavigation(url: String, scheme: String?): Navigation =
         navigationFor(null, url, scheme, mainFrame = true) == Navigation.EXTERNAL -> Navigation.EXTERNAL
         else -> Navigation.DROP
     }
+
+/**
+ * Whether [url] is the dashboard's home: the root with no route in its
+ * query. The Edge gateway's `token` is not a route, and onboarding is home
+ * until a server is linked: the dashboard sends the root there. Back leaves
+ * the app only from here; from any other page with no history behind it,
+ * back goes home first.
+ */
+fun atDashboardHome(url: String?): Boolean {
+    val uri =
+        try {
+            URI(url ?: return true)
+        } catch (_: URISyntaxException) {
+            return true
+        }
+    if (uri.scheme != "http" && uri.scheme != "https") return true
+    if (uri.rawPath != "/" && !uri.rawPath.isNullOrEmpty()) return false
+    val query = uri.rawQuery ?: return true
+    return query.split('&').all { it.isEmpty() || it.startsWith("token=") || it == "page=onboarding" || it == "page=needs-you" }
+}
+
+/**
+ * The script that routes the dashboard home inside the page, keeping the
+ * Edge gateway's `token`: the dashboard saves it from the address, so
+ * dropping it before that runs leaves the first API call unauthorized.
+ * Home is the address the dashboard keeps as it is: `/` for the board, and
+ * `/?page=needs-you` on a phone, where an empty address would be rewritten
+ * to `?page=board` and Back would never reach the end of the history.
+ */
+fun routeHomeScript(url: String?): String {
+    val token =
+        try {
+            URI(url ?: "").rawQuery?.split('&')?.firstOrNull { it.startsWith("token=") }
+        } catch (_: URISyntaxException) {
+            null
+        }?.takeIf { it.matches(Regex("token=[A-Za-z0-9%._~-]*")) }
+    val phone = "matchMedia('(max-width: 767px)').matches"
+    val query = listOfNotNull(token).joinToString("&")
+    val home = "$phone ? '/?page=needs-you${if (query.isEmpty()) "" else "&$query"}' : '/${if (query.isEmpty()) "" else "?$query"}'"
+    return "history.replaceState(history.state, '', $home); dispatchEvent(new PopStateEvent('popstate'))"
+}
