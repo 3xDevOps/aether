@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -184,14 +185,23 @@ func (s *Scheduler) writeSessionLogin(run domain.RunID, account domain.MemberID,
 	s.sessionLoginWrite.Lock()
 	defer s.sessionLoginWrite.Unlock()
 	file := s.sessionLoginPath(run, account, agent)
+	if err := writeRunFile(file, login, user); err != nil {
+		return "", fmt.Errorf("scheduler: write the session login: %w", err)
+	}
+	return file, nil
+}
+
+// writeRunFile writes data to file, mode 0600 and owned by the run's user,
+// creating its directories.
+func writeRunFile(file string, data []byte, user string) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
-		return "", fmt.Errorf("scheduler: create the session login directory: %w", err)
+		return err
 	}
 	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", fmt.Errorf("scheduler: write the session login: %w", err)
+		return err
 	}
-	_, err = f.Write(login)
+	_, err = f.Write(data)
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
@@ -201,10 +211,48 @@ func (s *Scheduler) writeSessionLogin(run domain.RunID, account domain.MemberID,
 			err = os.Chown(file, uid, gid)
 		}
 	}
-	if err != nil {
-		return "", fmt.Errorf("scheduler: write the session login: %w", err)
+	return err
+}
+
+// accountStateMounts mounts, over each of the profile's AccountState files in
+// the launcher's home, run's own copy without the keys that name the
+// launcher's account. The copy lives beside run's login copies, read-write
+// for the CLI, so what the session changes there stays in the session.
+func (s *Scheduler) accountStateMounts(run *domain.Run, launcher domain.MemberID, profile harness.Profile, home, user string) ([]runtime.Mount, error) {
+	var mounts []runtime.Mount
+	for _, rel := range slices.Sorted(maps.Keys(profile.AccountState)) {
+		data, err := s.cfg.Homes.ReadBorrowedState(launcher, rel)
+		if err != nil && !errors.Is(err, memberhome.ErrBorrowedStateTooLarge) {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+		// A file Aether cannot read as a JSON object gives the session only
+		// the state it borrows: the account must not reach it.
+		state := map[string]json.RawMessage{}
+		if json.Unmarshal(data, &state) != nil || state == nil {
+			state = map[string]json.RawMessage{}
+		}
+		for _, key := range profile.AccountState[rel] {
+			delete(state, key)
+		}
+		for key, value := range profile.BorrowedState[rel] {
+			if state[key], err = json.Marshal(value); err != nil {
+				return nil, fmt.Errorf("scheduler: copy ~/%s: %w", rel, err)
+			}
+		}
+		out, err := json.Marshal(state)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: copy ~/%s: %w", rel, err)
+		}
+		file := filepath.Join(s.sessionLoginRoot(), string(run.ID), string(run.AccountMemberID), path.Base(rel))
+		if err := writeRunFile(file, out, user); err != nil {
+			return nil, fmt.Errorf("scheduler: write the session's ~/%s: %w", rel, err)
+		}
+		if err := s.cfg.Homes.PrepareLoginMountpoint(launcher, rel, false); err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+		mounts = append(mounts, runtime.Mount{HostPath: file, ContainerPath: path.Join(home, rel), CheckInode: true})
 	}
-	return file, nil
+	return mounts, nil
 }
 
 // rewriteSessionLogin writes login over run's copy when the copy holds

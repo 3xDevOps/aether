@@ -147,13 +147,14 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 	e := newShareEnv(t, nil)
 	writeHomeFiles(t, e.ownerHome, append([]string{".claude/.credentials.json", ".omp/agent/agent.db"}, ownerState...)...)
 	// Ada's own Claude and Gemini logins stay pinned except where the
-	// borrowed login takes the Claude one's place.
+	// borrowed login takes the Claude one's place, and claude gets its own
+	// ~/.claude.json without Ada's account.
 	for _, tc := range []struct {
 		harness, login string
 		dir            bool
 		mounts         int
 	}{
-		{"claude", ".claude/.credentials.json", false, 5},
+		{"claude", ".claude/.credentials.json", false, 6},
 		{"omp", ".omp/agent", true, 6},
 	} {
 		run, err := e.launch(t, tc.harness)
@@ -169,7 +170,7 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 			t.Fatalf("%s: image = %q, want the launcher's %q", tc.harness, spec.Image, launcherImage)
 		}
 		if len(spec.Mounts) != tc.mounts {
-			t.Fatalf("%s: mounts = %+v, want launcher's home/cache/scratch, its pins and one borrowed login", tc.harness, spec.Mounts)
+			t.Fatalf("%s: mounts = %+v, want launcher's home/cache/scratch, its pins, one borrowed login and claude's state copy", tc.harness, spec.Mounts)
 		}
 		if home := spec.Mounts[0]; home != (runtime.Mount{HostPath: e.adaHome, ContainerPath: "/root"}) {
 			t.Fatalf("%s: home mount = %+v, want the launcher's home %q at /root", tc.harness, home, e.adaHome)

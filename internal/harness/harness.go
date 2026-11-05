@@ -306,6 +306,11 @@ type Profile struct {
 	// sets in the launcher's copy when absent, so the CLI starts signed in
 	// instead of running first-time setup.
 	BorrowedState map[string]map[string]any
+	// AccountState maps a home-relative JSON file to its keys that describe
+	// the account the CLI is signed in to. A launch on another member's
+	// account mounts its own copy of the file without them, so the session
+	// neither shows nor sends the launcher's account.
+	AccountState map[string][]string
 	// PinnedLogins are the login files the CLI replaces by rename. Each is
 	// mounted in place in the owner's own containers too; the rename then
 	// fails with EBUSY and the CLI falls back to rewriting the shared inode.
@@ -436,6 +441,10 @@ var profiles = map[string]Profile{
 		// Claude Code runs its setup wizard, whose sign-in step ignores an
 		// existing login, until ~/.claude.json says setup is complete.
 		BorrowedState: map[string]map[string]any{".claude.json": {"hasCompletedOnboarding": true}},
+		// Claude Code caches the signed-in profile here for a day and shows
+		// it in `claude auth status`; without it, it fetches the profile of
+		// the login it holds.
+		AccountState: map[string][]string{".claude.json": {"oauthAccount"}},
 		// Claude Code writes the login to a temporary file and renames it
 		// over the old one, and rewrites it in place only when that rename
 		// fails with EXDEV, EPERM, EEXIST or EBUSY.

@@ -142,6 +142,43 @@ const maxBorrowedStateBytes = 4 << 20
 // and the launch goes on: the CLI owns it and recovers from it in its own
 // way. Two launches creating the file at once both succeed: the loser of the
 // exclusive create re-reads what the winner wrote.
+// ErrBorrowedStateTooLarge means a state file is larger than Aether reads.
+var ErrBorrowedStateTooLarge = errors.New("larger than Aether reads")
+
+// ReadBorrowedState returns the JSON file rel in member's home, or nil when
+// it is missing. Like MarkBorrowedState, it refuses a symlink at any
+// component.
+func (m *Manager) ReadBorrowedState(member domain.MemberID, rel string) ([]byte, error) {
+	home, err := m.openHome(member)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = home.Close() }()
+	parent, leaf, err := openLoginParent(home, rel)
+	if err != nil {
+		return nil, fmt.Errorf("memberhome: read %s in %q: %w", rel, member, err)
+	}
+	defer func() { _ = parent.Close() }()
+	f, info, err := openRegular(parent, leaf)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err == nil && info.Size() > maxBorrowedStateBytes {
+		err = ErrBorrowedStateTooLarge
+	}
+	var data []byte
+	if err == nil {
+		data, err = io.ReadAll(io.LimitReader(f, maxBorrowedStateBytes))
+	}
+	if f != nil {
+		_ = f.Close()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memberhome: read %s in %q: %w", rel, member, err)
+	}
+	return data, nil
+}
+
 func (m *Manager) MarkBorrowedState(member domain.MemberID, rel string, keys map[string]any) error {
 	home, err := m.openHome(member)
 	if err != nil {

@@ -244,6 +244,14 @@ they have no installation of the agent in their own `~/.local/bin`, they also
 get yours, read-only, with your whole `~/.local/bin` on their `PATH` after
 their own entries.
 
+Claude Code also caches the account it is signed in to as `oauthAccount` in
+`~/.claude.json` and shows it in `claude auth status`. A `claude` session on
+your account therefore mounts its own copy of their `~/.claude.json`,
+`<data-dir>/scheduler/logins/<session-id>/<your-member-id>/.claude.json`,
+without `oauthAccount`, so it never shows or sends their account; Claude Code
+fetches your profile with your login instead. What the session changes in
+that file stays in the session.
+
 - Root in their session can copy your login file. The refresh token in it
   outlives a revoke and keeps working until you log out and in again.
 - Their session can end or replace your login. Measured with Claude Code

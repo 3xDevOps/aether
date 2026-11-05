@@ -77,8 +77,9 @@ func (e *shareEnv) assertLoginMounts(t *testing.T, spec runtime.Spec, pool strin
 	if got, ok := mountFor(spec, "/root"); !ok || got != home || spec.Env["HOME"] != "/root" {
 		t.Fatalf("launcher HOME = %+v, %q; want %+v", got, spec.Env["HOME"], home)
 	}
-	if got := subpathMounts(spec); !slices.Equal(got, pins) {
-		t.Fatalf("protected login mounts = %+v, want %+v", got, pins)
+	want := slices.DeleteFunc(slices.Clone(pins), func(m runtime.Mount) bool { return m.Subpath == "" })
+	if got := subpathMounts(spec); !slices.Equal(got, want) {
+		t.Fatalf("protected login mounts = %+v, want %+v", got, want)
 	}
 	cache := runtime.Mount{
 		HostPath:      filepath.Join(e.cfg.Homes.CacheRoot(), string(e.member.ID), pool, "data"),
@@ -188,7 +189,8 @@ func TestSharerOnAnotherAccountPrefersForeignLogin(t *testing.T) {
 		t.Fatalf("claude Launch: %v", err)
 	}
 	foreign := runtime.Mount{HostPath: e.ownerHome, Subpath: claudeLogin, ContainerPath: "/root/" + claudeLogin}
-	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", foreign, e.pin(geminiLogin))
+	state := runtime.Mount{HostPath: filepath.Join(e.sched.sessionLoginRoot(), string(run.ID), string(e.owner.ID), ".claude.json"), ContainerPath: "/root/.claude.json", CheckInode: true}
+	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", foreign, state, e.pin(geminiLogin))
 
 	run, err = e.launch(t, "codex")
 	if err != nil {

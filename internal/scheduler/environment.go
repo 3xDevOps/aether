@@ -197,7 +197,12 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				return nil, err
 			}
 			if len(logins) > 0 {
+				state, stateErr := s.accountStateMounts(run, member.ID, profile, home, user)
+				if stateErr != nil {
+					return nil, stateErr
+				}
 				plan.Mounts = append(plan.Mounts, logins...)
+				plan.Mounts = append(plan.Mounts, state...)
 				plan.LoginMember = run.AccountMemberID
 			}
 			install, err := s.installMounts(member.ID, run.AccountMemberID, profile, home)

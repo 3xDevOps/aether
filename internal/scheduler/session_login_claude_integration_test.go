@@ -235,7 +235,10 @@ func TestIntegrationSessionLoginRealClaudeCode(t *testing.T) {
 	}
 	later := time.Now().Add(8 * time.Hour)
 	seedHome(t, ownerHome, map[string]string{claudeLogin: claudeOwnerLogin("fake-grace-access-1", "fake-grace-refresh-1", later)})
-	seedHome(t, adaHome, map[string]string{claudeLogin: claudeOwnerLogin("fake-ada-access-1", "fake-ada-refresh-1", later)})
+	seedHome(t, adaHome, map[string]string{
+		claudeLogin:    claudeOwnerLogin("fake-ada-access-1", "fake-ada-refresh-1", later),
+		".claude.json": adaClaudeState,
+	})
 	data, err := os.ReadFile(bin)
 	if err != nil {
 		t.Fatal(err)
@@ -253,6 +256,17 @@ func TestIntegrationSessionLoginRealClaudeCode(t *testing.T) {
 	}
 	if code, out := shared.sh(t, "/root/.local/bin/claude --version"); code != 0 || !strings.HasPrefix(out, claudeCodeVersion+" ") {
 		t.Fatalf("claude --version = exit %d, %q; want %s", code, out, claudeCodeVersion)
+	}
+	// Ada's cached account stays out of the session, and the CLI saves its
+	// state into the session's own ~/.claude.json.
+	if _, out := shared.sh(t, "/root/.local/bin/claude auth status --json"); strings.Contains(out, "ada@example.com") {
+		t.Fatalf("claude auth status in a session on Grace's account names Ada: %s", out)
+	}
+	if _, out := shared.sh(t, "grep -c -e oauthAccount -e ada@example.com /root/.claude.json; grep -c -E '\"theme\": *\"dark\"' /root/.claude.json"); out != "0\n1\n" {
+		t.Fatalf("the session's ~/.claude.json matches oauthAccount and theme %q; want Ada's state without her account", out)
+	}
+	if got := readFile(t, filepath.Join(adaHome, ".claude.json")); !strings.Contains(got, "ada@example.com") {
+		t.Fatalf("Ada's own ~/.claude.json lost her account: %s", got)
 	}
 	if code, out := shared.sh(t, "timeout 3 bash -c 'echo > /dev/tcp/1.1.1.1/443'"); code == 0 {
 		t.Fatalf("the session reached 1.1.1.1 from the internal network: %s", out)

@@ -76,7 +76,9 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, hom
 	lock.Lock()
 	defer lock.Unlock()
 	for _, m := range mounts {
-		if m.ReadOnly || m.Subpath != "" {
+		// A checked bind is a file the scheduler wrote for this run, already
+		// owned by user.
+		if m.ReadOnly || m.Subpath != "" || m.CheckInode {
 			continue
 		}
 		if err := chownTree(m.HostPath, uid, gid, nil); err != nil {

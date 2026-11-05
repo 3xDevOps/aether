@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -227,8 +228,8 @@ func TestSharedLaunchKeepsTheOwnersLoginOtherwise(t *testing.T) {
 		if got, ok := mountFor(spec, want.ContainerPath); !ok || got != want {
 			t.Fatalf("%s: login mount = %+v, want the owner's %+v", tc.name, got, want)
 		}
-		if _, err := os.Stat(filepath.Join(e.sched.sessionLoginRoot(), string(run.ID))); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("%s: session login directory = %v, want none", tc.name, err)
+		if _, err := os.Stat(filepath.Join(e.sched.sessionLoginRoot(), string(run.ID), string(e.owner.ID), path.Base(tc.rel))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s: session login copy = %v, want none", tc.name, err)
 		}
 		if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.SessionLogin != "" || sc.LoginMember != string(e.owner.ID) {
 			t.Fatalf("%s: sidecar = %+v, %v", tc.name, sc, err)
@@ -676,5 +677,56 @@ func TestSessionLoginLaunchRechecksTheShareAfterRefresh(t *testing.T) {
 	run, err := e.launch(t, "claude")
 	if err == nil || !strings.Contains(err.Error(), "no longer shares their account") || run != nil || e.containerCount() != 0 {
 		t.Fatalf("Launch revoked during its refresh = %+v, %v; want refused with no container", run, err)
+	}
+}
+
+// adaClaudeState is Ada's own Claude Code state: the account she is signed
+// in to and state of her own that a session may keep.
+const adaClaudeState = `{"oauthAccount":{"emailAddress":"ada@example.com","accountUuid":"acct-ada","organizationUuid":"org-ada"},"projects":{"/w":{"allowedTools":[]}},"theme":"dark","hasCompletedOnboarding":true}`
+
+// A claude session on another member's account gets its own copy of the
+// launcher's ~/.claude.json without the account the launcher is signed in
+// to, so Claude Code neither shows nor uses the launcher's identity and
+// fetches the account owner's from the login it holds. The launcher's file
+// keeps everything; a session on the launcher's own account mounts nothing.
+func TestSharedClaudeSessionDropsTheLaunchersAccount(t *testing.T) {
+	t.Parallel()
+	for _, listed := range []bool{true, false} {
+		e := newSessionLoginEnv(t)
+		if !listed {
+			e.sched.cfg.SessionLoginAccounts = nil
+		}
+		e.writeOwner(t, claudeLogin, claudeOwnerLogin("access-grace", "grace~1", time.Now().Add(8*time.Hour)))
+		adaState := filepath.Join(e.adaHome, ".claude.json")
+		if err := os.WriteFile(adaState, []byte(adaClaudeState), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run, err := e.launch(t, "claude")
+		if err != nil {
+			t.Fatalf("listed %v: Launch: %v", listed, err)
+		}
+		got, ok := mountFor(e.rt.byName(string(run.ID)).spec, "/root/.claude.json")
+		want := runtime.Mount{HostPath: filepath.Join(e.sched.sessionLoginRoot(), string(run.ID), string(e.owner.ID), ".claude.json"), ContainerPath: "/root/.claude.json", CheckInode: true}
+		if !ok || got != want {
+			t.Fatalf("listed %v: ~/.claude.json mount = %+v, %v; want %+v", listed, got, ok, want)
+		}
+		var state map[string]any
+		if err = json.Unmarshal([]byte(readFile(t, got.HostPath)), &state); err != nil {
+			t.Fatal(err)
+		}
+		if _, leaked := state["oauthAccount"]; leaked || state["theme"] != "dark" || state["projects"] == nil || state["hasCompletedOnboarding"] != true {
+			t.Fatalf("listed %v: session's ~/.claude.json = %v; want Ada's state without oauthAccount", listed, state)
+		}
+		if got := readFile(t, adaState); got != adaClaudeState {
+			t.Fatalf("listed %v: Ada's own ~/.claude.json changed to %s", listed, got)
+		}
+
+		own, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "own", "claude", domain.LaunchTUI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m, ok := mountFor(e.rt.byName(string(own.ID)).spec, "/root/.claude.json"); ok {
+			t.Fatalf("listed %v: own-account session mounts %+v over ~/.claude.json", listed, m)
+		}
 	}
 }
