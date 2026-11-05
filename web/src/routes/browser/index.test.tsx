@@ -429,6 +429,20 @@ describe('the address bar', () => {
     expect(document.activeElement).toBe(back)
   })
 
+  it('leaves focus where it went in the frame before the page would take it', async () => {
+    render(<BrowserView {...shared} runID="run_1" />)
+    await ready()
+    const frames: FrameRequestCallback[] = []
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback))
+    submit('next.test')
+    await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://next.test' })))
+    await waitFor(() => expect(document.activeElement).not.toBe(address()))
+    const back = screen.getByRole('button', { name: 'Back' })
+    act(() => back.focus())
+    act(() => { for (const frame of frames.splice(0)) frame(0) })
+    expect(document.activeElement).toBe(back)
+  })
+
   it('opens an address handed over by a terminal link', async () => {
     render(<BrowserView {...shared} runID="run_1" />)
     await ready()
