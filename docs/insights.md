@@ -19,7 +19,7 @@ chart. Below them:
 | Section | What it shows |
 | --- | --- |
 | Sessions completed | How many ended, plus how many failed or were abandoned |
-| Success rate | Share of finished sessions that merged a pull request |
+| Success rate | Share of finished sessions that merged a pull request or that you marked done |
 | Total tokens used | Tokens across all sessions, and the agent that used the most |
 | Finished work | Your sessions that ended in the last 7 days, newest first, up to 50 |
 | Last 26 weeks | A heatmap of how many sessions were active each day |

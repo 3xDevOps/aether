@@ -150,7 +150,7 @@ type InsightsMemberOutcomes struct {
 }
 
 // InsightsSuccess counts finished runs and those among them with a merged
-// pull request.
+// pull request or accepted by the owner.
 type InsightsSuccess struct {
 	RunsSucceeded, RunsFinished int
 }
@@ -691,10 +691,10 @@ func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 }
 
 // insightsSuccess counts the runs that finished in the range and those with
-// a merged pull request.
+// a merged pull request or that the owner accepted as done.
 func insightsSuccess(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*), COUNT(*) FILTER (WHERE r.status = 'merged' OR EXISTS (
+		SELECT COUNT(*), COUNT(*) FILTER (WHERE r.status = 'merged' OR r.review = 'accepted' OR EXISTS (
 			SELECT 1 FROM run_pull_requests p WHERE p.run_id = r.id AND p.state = 'merged'))
 		FROM runs r WHERE `+q.ownerScope()+` AND `+insightsFinishedIn, args...,
 	).Scan(&out.Success.RunsFinished, &out.Success.RunsSucceeded)
