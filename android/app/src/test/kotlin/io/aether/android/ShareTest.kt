@@ -41,4 +41,12 @@ class ShareTest {
         assertFalse(atDashboardHome("https://h.ts.net/?run=r"))
         assertFalse(atDashboardHome("http://127.0.0.1:4000/?token=abc&page=workspace"))
     }
+
+    @Test
+    fun routingHomeKeepsTheGatewayToken() {
+        assertTrue(routeHomeScript("http://127.0.0.1:4000/?token=ab-1&new=1&prompt=x").contains("'/?token=ab-1'"))
+        assertTrue(routeHomeScript("https://h.ts.net/?run=r").contains("'/'"))
+        assertTrue(routeHomeScript("http://127.0.0.1:4000/?token=a'b").contains("'/'"))
+        assertTrue(routeHomeScript(null).contains("'/'"))
+    }
 }

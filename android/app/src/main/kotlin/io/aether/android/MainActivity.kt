@@ -48,7 +48,6 @@ private const val TAG = "aether"
 
 // The dashboard routes on popstate (web/src/lib/url-state.ts); replacing the
 // entry leaves nothing behind home for back to walk into.
-private const val ROUTE_HOME = "history.replaceState(history.state, '', '/'); dispatchEvent(new PopStateEvent('popstate'))"
 
 // Not the main thread: a WebView waiting on a hung renderer can be blocking
 // it. One for the process, never shut down, since WebView may deliver to it
@@ -158,7 +157,7 @@ class MainActivity : ComponentActivity() {
                 when {
                     gate?.isShown == true -> moveTaskToBack(true)
                     web.canGoBack() -> web.goBack()
-                    !atDashboardHome(web.url) -> web.evaluateJavascript(ROUTE_HOME, null)
+                    !atDashboardHome(web.url) -> web.evaluateJavascript(routeHomeScript(web.url), null)
                     else -> moveTaskToBack(true)
                 }
             }
