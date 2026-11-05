@@ -123,6 +123,10 @@ export function watchPush(store: RootStore, client: Api): () => void {
       const route = routeFromQuery(url.searchParams)
       window.history.pushState(pushedEntry(route, store.getState().route), '', url)
       store.getState().navigate(route.name, route.params)
+      if (url.searchParams.has('assistant')) {
+        store.getState().setAssistantOpen(true)
+        store.getState().setAssistantCard(url.searchParams.get('card'))
+      }
       return
     }
     if (data?.type === 'aether:open-workspace' && typeof data.workspace === 'string') {

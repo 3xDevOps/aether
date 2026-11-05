@@ -330,8 +330,8 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
           onValueChange={(next) => prefs && save({ level: next as NotifyLevel, quiet_hours: prefs.quiet_hours }, 'level')}
         >
           {([
-            { level: 'blockers', label: 'Blockers now, the rest daily', help: `Needs you at once, except during quiet hours; ${later} in one digest daily at ${savedDigest.at}.` },
-            { level: 'batched', label: 'Blockers now, the rest every half hour', help: `Needs you at once, except during quiet hours; ${later} in a digest on each half hour.` },
+            { level: 'blockers', label: 'Blockers now, the rest daily', help: `Needs you and assistant cards at once, except during quiet hours; ${later} in one digest daily at ${savedDigest.at}.` },
+            { level: 'batched', label: 'Blockers now, the rest every half hour', help: `Needs you and assistant cards at once, except during quiet hours; ${later} in a digest on each half hour.` },
             { level: 'all', label: 'Everything at once', help: 'Every push as it happens, except during quiet hours.' },
           ] satisfies { level: NotifyLevel; label: string; help: string }[]).map((l) => (
             <label key={l.level} className="flex min-w-0 cursor-pointer items-start gap-2 py-1 coarse:min-h-11">

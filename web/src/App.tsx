@@ -90,7 +90,12 @@ export function App() {
   }, [])
 
   useEffect(() => connect(useStore), [attempt, epoch])
-  useEffect(() => bindRouteToUrl(useStore), [])
+  // The desktop app opens a card's notification by changing the address in place.
+  useEffect(() => bindRouteToUrl(useStore, (query) => {
+    if (!query.has('assistant')) return
+    useStore.getState().setAssistantOpen(true)
+    useStore.getState().setAssistantCard(query.get('card'))
+  }), [])
 
   // An in-app update restarts the gateway on purpose, so it is not a total failure.
   // A handed link's Connect step talks only to the local gateway, so a saved

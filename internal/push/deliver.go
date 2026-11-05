@@ -1,9 +1,11 @@
 package push
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -34,6 +36,7 @@ type Message struct {
 	Urgent           bool
 	Notice           bool
 	Clear            bool
+	Card             string
 }
 
 type message struct {
@@ -45,9 +48,9 @@ type message struct {
 // Deliver does not wait for member to leave a dashboard. No result means
 // member has no device.
 func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message) ([]DeviceResult, error) {
-	n := notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice}
+	n := notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice, Card: m.Card}
 	if m.Clear {
-		n.Body, n.Clear = clearedBody, true
+		n.Body, n.Clear = cmp.Or(n.Body, clearedBody), true
 	}
 	payload, err := json.Marshal(message{notification: n, URL: m.URL, Tag: m.Topic})
 	if err != nil {
@@ -74,7 +77,7 @@ func (s *Service) Push(ctx context.Context, member domain.MemberID, m Message, n
 	if need && m.Run != "" {
 		key = string(m.Run)
 	}
-	sum, err := s.join(member, key, m.Topic, topicOf(m.Topic), m.Title, m.Body, need)
+	sum, err := s.join(member, key, m.Topic, topicOf(m.Topic), m.Title, m.Body, need, strings.HasPrefix(m.Topic, "card:"))
 	if err != nil {
 		return nil, false, err
 	}

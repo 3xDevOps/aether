@@ -20,7 +20,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { StateLine } from '@/components/ui/status-dot'
 import type { Tone } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
-import type { AssistantState } from '@/lib/assistant-types'
+import { transcriptFacts } from '@/lib/assistant-actions'
+import type { AssistantActionRecord, AssistantConfirmation, AssistantState } from '@/lib/assistant-types'
 import { minReadableWidth, useIsMobile } from '@/lib/breakpoints'
 import { useDrag } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
@@ -82,6 +83,51 @@ function useAnnouncement(agentName: string): string {
   return text
 }
 
+/** A card a tapped notification named: brought into view, outlined and focused once. */
+function NotifiedCard({ confirmation }: { confirmation: AssistantConfirmation }) {
+  const notified = useStore((s) => s.assistantCard === confirmation.id)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!notified) return
+    // After the panel's own opening focus, which would otherwise take it.
+    const frame = requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ block: 'nearest' })
+      ref.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [notified])
+  return (
+    <div
+      ref={ref}
+      tabIndex={notified ? -1 : undefined}
+      aria-label={notified ? `From your notification: ${confirmation.summary}. Approve or decline below.` : undefined}
+      className={cn('rounded-panel', notified && 'outline-2 outline-offset-2 outline-accent')}
+      onBlur={(event) => notified && !event.currentTarget.contains(event.relatedTarget) && useStore.getState().setAssistantCard(null)}
+    >
+      <ConfirmationCard confirmation={confirmation} />
+    </div>
+  )
+}
+
+const decidedWords: Record<AssistantActionRecord['outcome'], string> = {
+  approved: 'was approved', auto_approved: 'was approved', succeeded: 'was approved and ran', failed: 'was approved, and its call failed',
+  declined: 'was declined', expired: 'expired', withdrawn: 'was withdrawn',
+}
+
+/** Says what became of the card a tapped notification named, once it no longer waits. */
+function DecidedCard() {
+  const card = useStore((s) => s.assistantCard)
+  const open = useStore((s) => s.assistantConfirmations.some((c) => c.id === card))
+  const turns = useStore((s) => s.acpSessions.assistant?.turns)
+  if (!card || open) return null
+  const record = [...transcriptFacts(turns).records.values()].filter((r) => r.confirmation_id === card).at(-1)
+  return (
+    <Callout tone="neutral" role="status" className="mx-3 mt-3 shrink-0" actions={<Button size="sm" variant="secondary" onClick={() => useStore.getState().setAssistantCard(null)}>Dismiss</Button>}>
+      {record ? `The card from your notification ${decidedWords[record.outcome]}: ${record.summary}` : 'The card from your notification no longer waits for you: it was decided, expired or withdrawn.'}
+    </Callout>
+  )
+}
+
 function AutoApproveLine() {
   const navigate = useStore((s) => s.navigate)
   const sheet = useContext(AssistantSheet)
@@ -121,13 +167,14 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
     // Grows with its cards, but leaves sign-in or the conversation below it room.
     <div className="flex max-h-[70%] min-h-0 shrink-0 flex-col gap-2 overflow-y-auto px-3 pt-3">
       <p className="text-ui-xs text-muted">{cardsHeading(confirmations)}</p>
-      {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
+      {confirmations.map((confirmation) => <NotifiedCard key={confirmation.id} confirmation={confirmation} />)}
     </div>
   )
   if (status.state === 'setup') {
     const prompts = unsent(status.queue ?? [], undefined)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
+        <DecidedCard />
         {cards}
         {prompts.length > 0 && (
           <div className="flex max-h-[30%] min-h-0 shrink-0 flex-col gap-2 overflow-y-auto px-3 pt-3">
@@ -144,6 +191,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
   const connection = session && connectionWord[session.stream]
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <DecidedCard />
       {failed && <AssistantFailed error={status.error} />}
       {failed && cards}
       {session?.stream === 'refused' && (
@@ -185,7 +233,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
           dock={waiting && (
             <div className={cn('flex flex-col gap-2 overflow-y-auto', hasRows ? 'max-h-[40dvh] [@media(min-height:50rem)]:max-h-[50dvh]' : 'max-h-[65dvh]')}>
               {confirmations.length > 1 && <p className="text-ui-xs text-muted">{cardsHeading(confirmations)}</p>}
-              {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
+              {confirmations.map((confirmation) => <NotifiedCard key={confirmation.id} confirmation={confirmation} />)}
               {session?.pending.map((request) => <AssistantRequestCard key={request.id} request={request} />)}
             </div>
           )}

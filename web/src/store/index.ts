@@ -4,7 +4,7 @@ import { clampTerminalFontSize } from '@/lib/term-font'
 import { batched } from '@/store/batch'
 import { createAgentModelsSlice, type AgentModelsSlice } from '@/store/agent-models'
 import { createCollaborationSlice, type CollaborationSlice } from '@/store/collaboration'
-import { createAssistantSlice, clampAssistantWidth, onPhone, type AssistantSlice } from '@/store/assistant'
+import { createAssistantSlice, clampAssistantWidth, onPhone, openedForACard, type AssistantSlice } from '@/store/assistant'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
 import { createDevicesSlice, type DevicesSlice } from '@/store/devices'
@@ -238,7 +238,8 @@ export function createRootStore() {
             laneHidden: normalizeLaneHidden(stored.laneHidden),
             sessionsLanes: stored.sessionsLanes === true,
             sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
-            assistantOpen: stored.assistantOpen === true && !onPhone(),
+            // A card's notification opens the panel whatever was stored.
+            assistantOpen: openedForACard() || (stored.assistantOpen === true && !onPhone()),
             assistantWidth: clampAssistantWidth(Number(stored.assistantWidth) || current.assistantWidth),
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
