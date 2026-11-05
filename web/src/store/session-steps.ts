@@ -37,7 +37,7 @@ export type Step =
   | { kind: 'plan'; id: string; at: string; entries: PlanEntry[] }
   | { kind: 'subagents'; id: string; at: string; ids: string[] }
   | { kind: 'answered'; id: string; at: string; request: SessionRequest; command?: string }
-  | { kind: 'event'; id: string; at: string; text: string; detail?: string; tone?: Tone }
+  | { kind: 'event'; id: string; at: string; text: string; detail?: string; tone?: Tone; full?: true }
 
 export type StepsRow = Extract<SessionRow, { kind: 'steps' }>
 
@@ -137,7 +137,7 @@ export function stepsBlock(id: string, steps: Step[], start: string, current = f
 
 export function asRow(step: Step): SessionRow {
   if (step.kind === 'narration') return { kind: 'assistant', id: step.id, at: step.at, text: step.text, streaming: step.streaming }
-  if (step.kind === 'event') return { kind: 'event', id: step.id, at: step.at, text: step.text, detail: step.detail, tone: step.tone }
+  if (step.kind === 'event') return { kind: 'event', id: step.id, at: step.at, text: step.text, detail: step.detail, tone: step.tone, ...(step.full ? { full: step.full } : {}) }
   throw new Error(`a ${step.kind} step belongs in a block`)
 }
 

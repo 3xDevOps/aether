@@ -2,33 +2,20 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
-
-// ask starts a confirmation and returns once the registry lists it.
-func ask(t *testing.T, r *confirmations, ctx context.Context) (protocol.AssistantConfirmation, <-chan error) {
-	t.Helper()
-	done := make(chan error, 1)
-	go func() {
-		done <- r.confirm(ctx, &protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1"})
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if set := r.snapshot(); len(set) == 1 {
-			return set[0], done
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("the confirmation was never listed")
-	return protocol.AssistantConfirmation{}, nil
-}
 
 func wait(t *testing.T, done <-chan error) error {
 	t.Helper()
@@ -41,64 +28,119 @@ func wait(t *testing.T, done <-chan error) error {
 	}
 }
 
+func newCardService(t *testing.T) (*Service, *member) {
+	t.Helper()
+	svc := New(Config{Dir: t.TempDir(), Store: newMemStore(), Caller: func(domain.MemberID) tools.Caller { return &actionServer{} }})
+	t.Cleanup(func() { _ = svc.Close() })
+	return svc, svc.member("m1")
+}
+
+func askCard(svc *Service, m *member, ctx context.Context) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.approver(m)(ctx, protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1"})
+	}()
+	return done
+}
+
 func TestConfirmationFilledAndApproved(t *testing.T) {
-	r := newConfirmations(func() {})
-	c, done := ask(t, r, t.Context())
-	if c.ID == "" || c.CreatedAt.IsZero() || c.ExpiresAt.Sub(c.CreatedAt) != confirmTTL {
-		t.Fatalf("confirmation = %+v, want an id and a %s expiry", c, confirmTTL)
+	svc, m := newCardService(t)
+	done := askCard(svc, m, t.Context())
+	c := pendingCards(t, svc, m)[0]
+	if c.ID == "" || c.CreatedAt.IsZero() || c.ExpiresAt.Sub(c.CreatedAt) != confirmTTL || c.Origin.Door != protocol.AssistantDoorDashboard {
+		t.Fatalf("confirmation = %+v, want an id, a %s expiry and the dashboard origin", c, confirmTTL)
 	}
-	if err := r.decide(c.ID, true); err != nil {
+	if err := svc.Confirm(t.Context(), m.id, c.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := wait(t, done); err != nil {
 		t.Fatalf("approved confirmation returned %v", err)
 	}
-	if got := r.snapshot(); len(got) != 0 {
-		t.Fatalf("pending after approval = %+v", got)
-	}
-	if err := r.decide(c.ID, true); !errors.Is(err, ErrNoConfirmation) {
+	if err := svc.Confirm(t.Context(), m.id, c.ID, true); !errors.Is(err, ErrNoConfirmation) {
 		t.Fatalf("second answer = %v, want ErrNoConfirmation", err)
+	}
+	if card, err := svc.Card(t.Context(), m.id, c.ID); err != nil || card.State != protocol.AssistantCardRunning {
+		t.Fatalf("card after approval = %+v, %v, want running until the call's outcome", card, err)
 	}
 }
 
 func TestConfirmationDeclined(t *testing.T) {
-	r := newConfirmations(func() {})
-	c, done := ask(t, r, t.Context())
-	if err := r.decide(c.ID, false); err != nil {
-		t.Fatal(err)
-	}
+	svc, m := newCardService(t)
+	done := askCard(svc, m, t.Context())
+	decideFirst(t, svc, m, false)
 	if err := wait(t, done); err == nil || !strings.Contains(err.Error(), "declined") {
 		t.Fatalf("declined confirmation returned %v, want a decline", err)
+	}
+	if n := pendingCount(t, svc, m); n != 0 {
+		t.Fatalf("%d cards open after a decline", n)
 	}
 }
 
 func TestConfirmationExpires(t *testing.T) {
-	r := newConfirmations(func() {})
-	r.ttl = 20 * time.Millisecond
-	c, done := ask(t, r, t.Context())
+	svc, m := newCardService(t)
+	m.confirms.ttl = 20 * time.Millisecond
+	done := askCard(svc, m, t.Context())
 	if err := wait(t, done); !errors.Is(err, errExpired) {
 		t.Fatalf("expired confirmation returned %v", err)
 	}
-	if err := r.decide(c.ID, true); !errors.Is(err, ErrNoConfirmation) {
+	rows, _ := svc.cfg.Store.AssistantCards(t.Context(), m.id)
+	if len(rows) != 1 || rows[0].State != protocol.AssistantCardExpired {
+		t.Fatalf("cards = %+v, want one expired", rows)
+	}
+	if err := svc.Confirm(t.Context(), m.id, rows[0].ID, true); !errors.Is(err, ErrNoConfirmation) {
 		t.Fatalf("answer after expiry = %v, want ErrNoConfirmation", err)
+	}
+	if b, _ := os.ReadFile(svc.logPath("m1")); !strings.Contains(string(b), `"title":"Expired: Stop session r1"`) {
+		t.Fatalf("transcript = %q, want the expiry", b)
 	}
 }
 
-func TestConfirmationSessionEndAndContext(t *testing.T) {
-	r := newConfirmations(func() {})
-	_, done := ask(t, r, t.Context())
-	r.cancelAll()
+func TestConfirmationOutlivesItsCallUntilAReset(t *testing.T) {
+	svc, m := newCardService(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := askCard(svc, m, ctx)
+	pendingCards(t, svc, m)
+	cancel()
+	if err := wait(t, done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("call whose caller left = %v, want its context's end", err)
+	}
+	if n := pendingCount(t, svc, m); n != 1 {
+		t.Fatalf("%d cards open after the call stopped waiting, want it kept", n)
+	}
+	other := make(chan error, 1)
+	go func() {
+		other <- svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r2", Params: json.RawMessage(`{"run_id":"r2"}`)})
+	}()
+	done = other
+	for pendingCount(t, svc, m) < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	if err := svc.withdrawAll(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
 	if err := wait(t, done); !errors.Is(err, errSessionEnded) {
 		t.Fatalf("confirmation after a reset returned %v", err)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	_, done = ask(t, r, ctx)
-	cancel()
-	if err := wait(t, done); !errors.Is(err, context.Canceled) {
-		t.Fatalf("confirmation with a cancelled context returned %v", err)
+	if n := pendingCount(t, svc, m); n != 0 {
+		t.Fatalf("%d cards open after a reset", n)
 	}
-	if got := r.snapshot(); len(got) != 0 {
-		t.Fatalf("pending after both = %+v", got)
+}
+
+func TestConnectorTurnCardParks(t *testing.T) {
+	svc, m := newCardService(t)
+	m.origin = ConnectorOrigin("ChatGPT", "con-1", "grant-1")
+	err := wait(t, askCard(svc, m, t.Context()))
+	c := pendingCards(t, svc, m)[0]
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Message != fmt.Sprintf(parkedText, c.ID) {
+		t.Fatalf("connector turn's call = %v, want it parked as card %s", err, c.ID)
+	}
+	card, err := svc.Card(t.Context(), m.id, c.ID)
+	if err != nil || c.ExpiresAt.Sub(c.CreatedAt) != parkTTL || card.Origin.Grant != "grant-1" || card.Origin.String() != "connector:ChatGPT con-1" {
+		t.Fatalf("parked card = %+v, %v, want 24 hours and the connector's origin", card, err)
+	}
+	if raw, _ := json.Marshal(c); strings.Contains(string(raw), "grant-1") {
+		t.Fatalf("card on the wire = %s, want no grant", raw)
 	}
 }
 
@@ -107,16 +149,7 @@ func answerCard(t *testing.T, svc *Service, m *member, c protocol.AssistantConfi
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- svc.approver(m)(t.Context(), c) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(m.confirms.snapshot()) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("no card was shown")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if err := m.confirms.decide(m.confirms.snapshot()[0].ID, yes); err != nil {
-		t.Fatal(err)
-	}
+	decideFirst(t, svc, m, yes)
 	return wait(t, done)
 }
 
@@ -146,7 +179,7 @@ func TestApproverPassesWithoutACardOnlyWhileAutoApprovalIsOn(t *testing.T) {
 	if err := approve(t.Context(), c); err != nil {
 		t.Fatalf("auto-approved call = %v", err)
 	}
-	if n := len(m.confirms.snapshot()); n != 0 {
+	if n := pendingCount(t, svc, m); n != 0 {
 		t.Fatalf("%d cards shown while auto-approval is on", n)
 	}
 	log := transcript()
@@ -282,28 +315,38 @@ func TestSuggestionFollowsManualApprovals(t *testing.T) {
 	if suggested() {
 		t.Fatal("suggested after a timeout and two approvals")
 	}
-	withdraw := func(end func(cancel context.CancelFunc)) error {
+	withdraw := func() error {
 		t.Helper()
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
 		done := make(chan error, 1)
-		go func() { done <- svc.approver(m)(ctx, c) }()
-		for len(m.confirms.snapshot()) == 0 {
-			time.Sleep(time.Millisecond)
+		go func() { done <- svc.approver(m)(t.Context(), c) }()
+		pendingCards(t, svc, m)
+		if err := svc.withdrawAll(t.Context(), m); err != nil {
+			t.Fatal(err)
 		}
-		end(cancel)
 		return wait(t, done)
 	}
-	if err := withdraw(func(context.CancelFunc) { m.confirms.cancelAll() }); !errors.Is(err, errSessionEnded) || st.settings["m1"].Approvals != 0 {
-		t.Fatalf("card withdrawn by the session's end = %v, approvals %d, want reset", err, st.settings["m1"].Approvals)
+	if err := withdraw(); !errors.Is(err, errSessionEnded) || st.settings["m1"].Approvals != 2 {
+		t.Fatalf("card withdrawn by a reset = %v, approvals %d, want the count kept", err, st.settings["m1"].Approvals)
+	}
+	if err := answerCard(t, svc, m, c, false); !errors.Is(err, errDeclined) {
+		t.Fatalf("declined card = %v", err)
 	}
 	approveN(2)
-	if err := withdraw(func(cancel context.CancelFunc) { cancel() }); !errors.Is(err, context.Canceled) || st.settings["m1"].Approvals != 0 {
-		t.Fatalf("card withdrawn by the caller = %v, approvals %d, want reset", err, st.settings["m1"].Approvals)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- svc.approver(m)(ctx, c) }()
+	pendingCards(t, svc, m)
+	cancel()
+	if err := wait(t, done); !errors.Is(err, context.Canceled) || st.settings["m1"].Approvals != 2 {
+		t.Fatalf("card whose call stopped waiting = %v, approvals %d, want the count kept while it is open", err, st.settings["m1"].Approvals)
 	}
+	if suggested() {
+		t.Fatal("suggested after two approvals and an open card")
+	}
+	decideFirst(t, svc, m, false)
 	approveN(2)
 	if suggested() {
-		t.Fatal("suggested after a withdrawn card and two approvals")
+		t.Fatal("suggested after declining the open card and two approvals")
 	}
 	approveN(1)
 	if !suggested() {
@@ -463,5 +506,101 @@ func TestApprovalChoiceIsRecorded(t *testing.T) {
 			t.Fatalf("%s: = %+v, %v; want chosen", name, got, err)
 		}
 		_ = svc.Close()
+	}
+}
+
+func TestTurnEndReleasesWaitsAndKeepsCards(t *testing.T) {
+	svc, m := newCardService(t)
+	done := askCard(svc, m, t.Context())
+	pendingCards(t, svc, m)
+	m.confirms.release(math.MaxInt64)
+	if err := wait(t, done); !errors.Is(err, errTurnEnded) {
+		t.Fatalf("call waiting when the turn ended = %v, want errTurnEnded", err)
+	}
+	if n := pendingCount(t, svc, m); n != 1 {
+		t.Fatalf("%d cards pending after the turn ended, want it kept", n)
+	}
+}
+
+func TestEqualCallsShareOneCardUnlessTheRowChanged(t *testing.T) {
+	svc, m := newCardService(t)
+	call := func(shown time.Time) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			done <- svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodAssistantForget, Summary: "Forget p1",
+				Params: json.RawMessage(`{"id":"p1"}`), Shown: shown})
+		}()
+		return done
+	}
+	t0 := time.Now().UTC()
+	first, second := call(t0), call(t0)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		m.confirms.mu.Lock()
+		waiting := len(m.confirms.waiting)
+		m.confirms.mu.Unlock()
+		if waiting == 1 && pendingCount(t, svc, m) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d cards for two equal calls at once, want one", pendingCount(t, svc, m))
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for _, done := range []<-chan error{first, second} {
+		select {
+		case err := <-done:
+			if !errors.Is(err, errSuperseded) {
+				t.Fatalf("earlier of two equal calls = %v, want superseded", err)
+			}
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	_ = call(t0.Add(time.Second))
+	for pendingCount(t, svc, m) != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("a call on a newer version of the row reused the older card")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestAnEarlierTurnsEndKeepsALaterTurnsWait(t *testing.T) {
+	svc, m := newCardService(t)
+	done := askCard(svc, m, t.Context())
+	pendingCards(t, svc, m)
+	m.confirms.release(-1)
+	select {
+	case err := <-done:
+		t.Fatalf("call of a later turn = %v, want it still waiting", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	m.confirms.release(0)
+	if err := wait(t, done); !errors.Is(err, errTurnEnded) {
+		t.Fatalf("call when its own turn ended = %v, want errTurnEnded", err)
+	}
+}
+
+func TestAnotherConnectorsEqualCallGetsItsOwnCard(t *testing.T) {
+	svc, m := newCardService(t)
+	call := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1", Params: json.RawMessage(`{"run_id":"r1"}`)}
+	park := func(o Origin) string {
+		m.origin = o
+		err := svc.approver(m)(t.Context(), call)
+		var pe *protocol.Error
+		if !errors.As(err, &pe) {
+			t.Fatalf("connector call = %v, want parked", err)
+		}
+		return pe.Message
+	}
+	first := park(ConnectorOrigin("ChatGPT", "con-1", "grant-1"))
+	if again := park(ConnectorOrigin("ChatGPT", "con-1", "grant-1")); again != first {
+		t.Fatalf("the same grant's repeated call = %q, want its card %q", again, first)
+	}
+	if other := park(ConnectorOrigin("Claude", "con-2", "grant-2")); other == first {
+		t.Fatalf("another grant's equal call got the first grant's card: %q", other)
+	}
+	if n := pendingCount(t, svc, m); n != 2 {
+		t.Fatalf("%d cards, want one per grant", n)
 	}
 }

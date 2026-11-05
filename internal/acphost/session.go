@@ -107,6 +107,8 @@ type TurnState struct {
 	// its prompt reached the agent: the state's callback can run after the
 	// agent already acted on the prompt.
 	TurnStartedAt time.Time
+	// Turn is the number of the last turn started when the state was set.
+	Turn int64
 }
 
 // Receipt says what happened to a prompt.
@@ -496,6 +498,14 @@ func (s *Session) Record(n Notice) error {
 
 func (s *Session) ListSessions(ctx context.Context, cwd, cursor string) ([]SessionSummary, string, error) {
 	return s.conn.listSessions(ctx, cwd, cursor)
+}
+
+// Turn is the number of the last turn started; the next prompt or
+// autonomous turn takes a higher one.
+func (s *Session) Turn() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turn
 }
 
 func (s *Session) State() State {

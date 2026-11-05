@@ -43,6 +43,19 @@ export interface AssistantConfirmation {
   defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[]; unchecked?: { field: string; reason: string }[] }
   /** The approval rule approving with always saves, in the server's wording; absent when the card cannot become one. */
   rule?: AssistantRuleOffer
+  /** Pending until decided; approved and running cards stay listed until their call's outcome is in the transcript. Absent from a server without durable cards. */
+  state?: 'pending' | 'approved' | 'running'
+  /** When an approved or running card was decided. */
+  decided_at?: string
+  /** Where the prompt of the turn that raised the card came from. */
+  origin?: AssistantOrigin
+}
+
+/** Where a turn's prompt came from, stamped by the server. */
+export interface AssistantOrigin {
+  door: 'dashboard' | 'phone' | 'desktop' | 'connector'
+  client?: string
+  connector_id?: string
 }
 
 export interface AssistantRuleOffer {

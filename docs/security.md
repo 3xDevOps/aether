@@ -423,7 +423,11 @@ permissions, and it uses the account you signed it in to.
   to the profile endpoint. It is information only and gates nothing.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a session and saving your environment wait for you to
-  approve a card. An unanswered card fails after 10 minutes.
+  approve a card. An unanswered card expires after 10 minutes. Only your own
+  Aether devices decide a card
+  (`assistant.confirm`), never the assistant's tool socket. A card approved
+  after its turn ended runs on the server as you, at most once, and only if it
+  still reads as the card you approved.
 - **Let the assistant act without asking** (auto-approve, off by default)
   skips the card for your own sessions. Messaging or stopping another member's session
   always asks. The assistant cannot turn auto-approve on or approve a card
