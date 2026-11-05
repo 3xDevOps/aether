@@ -384,7 +384,12 @@ opens the card, where you approve it, **Decline** declines it without opening
 the app, and a private card or one over 240 characters has no buttons. **Decline** needs
 **Tailscale** mode and Android 12 or later: it calls `assistant.confirm` on
 the server's dashboard, identified by the phone's tailnet login like any
-dashboard request, and Android asks you to unlock the phone before it runs.
+dashboard request, and Android asks you to unlock the phone before it runs
+when you tap it. A card with buttons is not bridged to a watch, but an app
+you have given notification access can still press **Decline** for you.
+**Decline** refuses a card from a server other than the one chosen under
+**Connection** now, with the error `This card is from <old>, and the app now
+connects to <new>.`
 Older Android cannot require that, so there, and in **Aether Edge** mode,
 where the identity is the CLI the app runs only while it is open, a card's
 notification only opens it. While it runs the notification reads
@@ -394,14 +399,15 @@ card. When a session stops needing you, its notification goes away; a card
 decided or withdrawn elsewhere is replaced, silently, by how it ended, such as
 `Approved: <summary>`.
 
-Sessions and cards that need you arrive on the **Sessions that need you**
-channel; assistant notices, budgets and test notifications on **Assistant
-updates**, which you can quiet separately in Android's settings for the app.
+Sessions, watches and cards that need you, and summaries of them, arrive on
+the **Sessions that need you** channel; assistant notices, budgets and test
+notifications on **Assistant updates**, which you can quiet separately in
+Android's settings for the app.
 The notifications are marked private. Whether the lock screen shows their
 text is Android's setting for sensitive notifications; with it off, the lock
 screen shows only what kind each one is: `A session needs you`, `New update`,
-or `Assistant card` for a card's own notification and the outcome of
-declining it.
+or `Assistant card` for a card with buttons, how a card ended, and the
+outcome of declining it.
 
 In **Tailscale** mode, when you choose another server under **Connection**,
 the app drops its registration at the distributor, tells the previous server
@@ -414,6 +420,9 @@ Limits:
   only on the tailnet or LAN fails with `refusing to connect to <ip>: not a
   public address` in the server's `push: notification not delivered` log
   line. Use ntfy.sh or an ntfy server with a public address.
+- In **Aether Edge** mode, switching to another server through the gateway
+  keeps the registration on the first one, which goes on notifying the
+  phone. Turn notifications off before you switch, and on again after.
 - In **Aether Edge** mode the server learns a new address from the
   distributor only while the app is open; until then notifications go to the
   old one, which the server drops once the push service reports it gone.

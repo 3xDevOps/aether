@@ -31,6 +31,7 @@ private const val ACTION_DECLINE = "io.aether.android.DECLINE"
 private const val EXTRA_CARD = "io.aether.android.CARD"
 private const val EXTRA_TAG = "io.aether.android.TAG"
 private const val EXTRA_TEXT = "io.aether.android.TEXT"
+private const val EXTRA_SERVER = "io.aether.android.SERVER"
 
 /**
  * Receives from the phone's UnifiedPush distributor. Only the connector in
@@ -100,7 +101,7 @@ fun showPush(context: Context, notice: PushNotice) {
                 pushChannel(notice),
                 notice.title,
                 notice.body,
-                public = if (notice.card != null || notice.tag.startsWith("card:")) R.string.push_public_card else null,
+                public = if (notice.card != null) R.string.push_public_card else null,
             )
             .setContentIntent(open)
             .setAutoCancel(true)
@@ -115,6 +116,8 @@ fun showPush(context: Context, notice: PushNotice) {
     // phone must not decide anything.
     val declinesDirectly =
         context.connectionMode() == ConnectionMode.TAILSCALE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    // Not bridged to a watch, where an action skips the unlock.
+    if (notice.card != null) builder.setLocalOnly(true)
     for (action in pushActions(notice, declinesDirectly)) {
         when (action) {
             PushAction.REVIEW -> builder.addAction(0, context.getString(R.string.push_review), open)
@@ -226,6 +229,7 @@ private fun declineIntent(context: Context, notice: PushNotice): PendingIntent {
             .putExtra(EXTRA_TAG, notice.tag)
             .putExtra(EXTRA_TEXT, notice.body)
             .putExtra(EXTRA_PATH, pushPath(notice))
+            .putExtra(EXTRA_SERVER, context.pushServer())
     return PendingIntent.getBroadcast(
         context,
         0,
@@ -252,10 +256,12 @@ class DeclineReceiver : BroadcastReceiver() {
         val path = intent.getStringExtra(EXTRA_PATH)?.takeIf(::isDashboardPath) ?: CARD_PATH
         val app = context.applicationContext
         val manager = NotificationManagerCompat.from(app)
-        fun outcome(title: String, body: String) =
+        // Each opens under the tag it is posted with: sharing the card's
+        // would repoint a summary that took that tag at this card.
+        fun outcome(title: String, body: String, under: String) =
             builder(app, PushChannel.NEEDS_YOU, title, body, public = R.string.push_public_card)
                 .setAutoCancel(true)
-                .setContentIntent(openIntent(app, tag, path))
+                .setContentIntent(openIntent(app, under, path))
         // A summary that took the tag meanwhile stays.
         manager.activeNotifications
             .firstOrNull { it.tag == tag && it.id == ID && it.notification.extras.getString(EXTRA_CARD) == card }
@@ -266,16 +272,22 @@ class DeclineReceiver : BroadcastReceiver() {
         notify(
             manager,
             tag,
-            outcome(text, app.getString(R.string.push_declining))
+            outcome(text, app.getString(R.string.push_declining), "$tag:declining")
                 .setSilent(true)
                 .setOnlyAlertOnce(true)
                 .setTimeoutAfter(DECLINING_TIMEOUT_MS),
             DECLINING_ID,
         )
+        val server = intent.getStringExtra(EXTRA_SERVER)
         val result = goAsync()
         Thread {
-                val done =
+                val error =
                     try {
+                        // A card from a server chosen before the current
+                        // one is unknown here, or worse, another's.
+                        check(server == app.pushServer()) {
+                            "This card is from $server, and the app now connects to ${app.pushServer()}."
+                        }
                         // Connecting and reading wait 4 s each; the DNS
                         // lookup before them has no limit of its own.
                         app.callServer(
@@ -283,20 +295,26 @@ class DeclineReceiver : BroadcastReceiver() {
                             JSONObject().put("confirmation_id", card).put("approve", false),
                             timeoutMs = 4_000,
                         )
-                        outcome(app.getString(R.string.push_declined), text).setSilent(true)
+                        null
                     } catch (e: Exception) {
-                        val error = e.message ?: e.toString()
-                        // The error first, then the card it was about.
-                        outcome(app.getString(R.string.push_decline_failed), error)
-                            .setStyle(NotificationCompat.BigTextStyle().bigText("$error\n\n$text"))
-                    }.addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
+                        e.message ?: e.toString()
+                    }
                 manager.cancel(tag, DECLINING_ID)
                 // A summary of newer pushes may have taken the card's
                 // notification while the call ran; the outcome then shows
                 // apart from it, never over it.
                 val current = manager.activeNotifications.firstOrNull { it.tag == tag && it.id == ID }
                 val shown = current?.notification?.extras?.getString(EXTRA_CARD)
-                notify(manager, if (current != null && shown != card) "$tag:decided" else tag, done)
+                val under = if (current != null && shown != card) "$tag:decided" else tag
+                val done =
+                    if (error == null) {
+                        outcome(app.getString(R.string.push_declined), text, under).setSilent(true)
+                    } else {
+                        // The error first, then the card it was about.
+                        outcome(app.getString(R.string.push_decline_failed), error, under)
+                            .setStyle(NotificationCompat.BigTextStyle().bigText("$error\n\n$text"))
+                    }.addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
+                notify(manager, under, done)
                 result.finish()
             }
             .start()

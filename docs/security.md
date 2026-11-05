@@ -572,13 +572,16 @@ The Android app subscribes the same way through a UnifiedPush distributor and
 shows only messages encrypted to its own keys. Its **Decline** button declines
 an assistant card through `assistant.confirm` with the phone's tailnet
 identity, so the app offers it only on Android 12 and later, which require the
-phone to be unlocked before it runs. The notifications are marked private;
-whether a locked phone shows their text is Android's sensitive-notifications
-setting ([networking.md](networking.md#in-the-android-app)). The connector
+phone to be unlocked before a tap runs it. An app with notification access
+can still press it; the card's notification is kept off watches. The
+notifications are marked private; whether a locked phone shows their text is
+Android's sensitive-notifications setting ([networking.md](networking.md#in-the-android-app)). The connector
 library adds two exported components, as every UnifiedPush app has: a
 receiver for the distributor's broadcasts, which acts only on a registration
 it made and hands the app only what decrypts with its keys, and a service the
-distributor binds to keep the app running while it delivers.
+distributor binds to keep the app running while it delivers. Any app can
+also open Aether at a dashboard route, as an `aether://` link can, or take
+down one of its notifications; a route is only shown, never acted on.
 
 ### Terminal image uploads
 
