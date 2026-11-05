@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -18,7 +15,7 @@ import (
 type LoginLock struct {
 	// Name is the lock's name in the login file's directory.
 	Name string
-	// Flock locks the file Name with flock(2). Otherwise the lock is the
+	// Flock locks the file Name exclusively. Otherwise the lock is the
 	// directory Name, held while it exists and stale once its mtime is
 	// staleLoginLock old, as proper-lockfile keeps it.
 	Flock bool
@@ -97,11 +94,11 @@ func (m *Manager) RefreshLogin(member domain.MemberID, rel string, lock LoginLoc
 }
 
 // writeLoginInPlace rewrites the regular file leaf on its own inode. The
-// member can replace the file during the refresh, so the open neither
-// follows a link nor blocks on a FIFO, and anything but a regular file with
+// member can replace the file during the refresh, so openLoginForWrite
+// neither follows a link nor blocks, and anything but a regular file with
 // one link is refused before the truncate.
 func writeLoginInPlace(parent *os.Root, leaf string, data []byte) error {
-	f, err := parent.OpenFile(leaf, os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := openLoginForWrite(parent, leaf)
 	if err != nil {
 		return err
 	}
@@ -182,7 +179,8 @@ func lockDir(dir *os.Root, name string) (func(), error) {
 	}, nil
 }
 
-// lockFile holds flock(2) on the file name in dir, creating it owned like
+// lockFile holds an exclusive lock on the file name in dir, the lock Codex
+// takes (flock(2), or LockFileEx on Windows), creating the file owned like
 // home when it is missing, as the agent does.
 func lockFile(home, dir *os.Root, name string) (func(), error) {
 	f, err := dir.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
@@ -199,13 +197,13 @@ func lockFile(home, dir *os.Root, name string) (func(), error) {
 	}
 	deadline := time.Now().Add(loginLockWait)
 	for {
-		err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return func() { _ = f.Close() }, nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) {
+		locked, err := tryLockFile(f)
+		if err != nil {
 			_ = f.Close()
-			return nil, fmt.Errorf("flock %s: %w", name, err)
+			return nil, fmt.Errorf("lock %s: %w", name, err)
+		}
+		if locked {
+			return func() { _ = f.Close() }, nil
 		}
 		if time.Now().After(deadline) {
 			_ = f.Close()

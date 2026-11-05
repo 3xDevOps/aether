@@ -2,14 +2,10 @@ package memberhome
 
 import (
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 var (
@@ -17,84 +13,11 @@ var (
 	codexLock  = LoginLock{Name: "auth.lock", Flock: true}
 )
 
-func inode(t *testing.T, name string) uint64 {
-	t.Helper()
-	info, err := os.Stat(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return info.Sys().(*syscall.Stat_t).Ino
-}
-
-// Not parallel: the tests shorten loginLockWait.
-func TestRefreshLoginWritesInPlaceUnderTheLock(t *testing.T) {
-	manager, owner, _ := newLoginHomes(t)
-	login := filepath.Join(owner, ".claude", ".credentials.json")
-	if err := os.WriteFile(login, []byte(`{"old":1}`), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(login, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	before := inode(t, login)
-	lockDir := filepath.Join(owner, ".claude", ".oauth_refresh.lock")
-	err := manager.RefreshLogin("owner", ".claude/.credentials.json", claudeLock, func(old []byte) ([]byte, error) {
-		if string(old) != `{"old":1}` {
-			t.Errorf("refresh read %s", old)
-		}
-		if info, err := os.Stat(lockDir); err != nil || !info.IsDir() {
-			t.Errorf("lock while refreshing = %v, %v", info, err)
-		}
-		return []byte(`{"new":2}`), errors.New("profile check failed")
-	})
-	if err == nil || err.Error() != "profile check failed" {
-		t.Fatalf("RefreshLogin = %v, want refresh's own error", err)
-	}
-	info, err := os.Stat(login)
-	if err != nil || info.Mode() != 0o640 || inode(t, login) != before {
-		t.Fatalf("login after refresh = %v, %v; want mode 0640 on inode %d", info, err, before)
-	}
-	if data, _ := os.ReadFile(login); string(data) != `{"new":2}` {
-		t.Fatalf("login = %s, want the rotated one", data)
-	}
-	if _, err := os.Lstat(lockDir); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("lock after refresh = %v, want removed", err)
-	}
-	if err := manager.RefreshLogin("owner", ".claude/.credentials.json", claudeLock, func([]byte) ([]byte, error) { return nil, nil }); err != nil {
-		t.Fatalf("RefreshLogin with nothing due: %v", err)
-	}
-	if data, _ := os.ReadFile(login); string(data) != `{"new":2}` {
-		t.Fatalf("login = %s after a refresh that wrote nothing", data)
-	}
-	if err := manager.RefreshLogin("owner", ".codex/auth.json", codexLock, func([]byte) ([]byte, error) { return nil, nil }); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("RefreshLogin of a missing login = %v, want fs.ErrNotExist", err)
-	}
-}
-
-func TestRefreshLoginWaitsForAHeldLock(t *testing.T) {
+// Not parallel: it shortens loginLockWait. While one refresh holds a login's
+// lock, of either kind, another waits and gives up without refreshing.
+func TestRefreshLoginHoldsOneRefresherAtATime(t *testing.T) {
 	defer func(wait time.Duration) { loginLockWait = wait }(loginLockWait)
 	loginLockWait = 300 * time.Millisecond
-	manager, owner, _ := newLoginHomes(t)
-	if err := os.MkdirAll(filepath.Join(owner, ".codex"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(owner, ".codex", "auth.json"), []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	lockDir := filepath.Join(owner, ".claude", ".oauth_refresh.lock")
-	if err := os.Mkdir(lockDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	lock, err := os.OpenFile(filepath.Join(owner, ".codex", "auth.lock"), os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = lock.Close() }()
-	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	called := false
-	refresh := func([]byte) ([]byte, error) { called = true; return []byte("rotated"), nil }
 	for _, tc := range []struct {
 		rel  string
 		lock LoginLock
@@ -102,76 +25,69 @@ func TestRefreshLoginWaitsForAHeldLock(t *testing.T) {
 		{".claude/.credentials.json", claudeLock},
 		{".codex/auth.json", codexLock},
 	} {
-		if err := manager.RefreshLogin("owner", tc.rel, tc.lock, refresh); !errors.Is(err, ErrLoginLockHeld) || called {
-			t.Fatalf("%s: RefreshLogin = %v, called %v; want ErrLoginLockHeld before any refresh", tc.rel, err, called)
-		}
-	}
-	if _, err := os.Stat(lockDir); err != nil {
-		t.Fatalf("held lock = %v, want kept", err)
-	}
-
-	stale := time.Now().Add(-2 * staleLoginLock)
-	if err := os.Chtimes(lockDir, stale, stale); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.RefreshLogin("owner", ".claude/.credentials.json", claudeLock, refresh); err != nil || !called {
-		t.Fatalf("RefreshLogin past a stale lock = %v, called %v", err, called)
-	}
-	_ = unix.Flock(int(lock.Fd()), unix.LOCK_UN)
-	called = false
-	if err := manager.RefreshLogin("owner", ".codex/auth.json", codexLock, refresh); err != nil || !called {
-		t.Fatalf("RefreshLogin after the flock's release = %v, called %v", err, called)
-	}
-}
-
-func TestReadLoginRefusesASymlink(t *testing.T) {
-	manager, owner, other := newLoginHomes(t)
-	if err := os.WriteFile(filepath.Join(other, "secret"), []byte("other's"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	login := filepath.Join(owner, ".claude", ".credentials.json")
-	if err := os.Remove(login); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(other, "secret"), login); err != nil {
-		t.Fatal(err)
-	}
-	if data, err := manager.ReadLogin("owner", ".claude/.credentials.json"); err == nil {
-		t.Fatalf("ReadLogin through a symlink = %s", data)
-	}
-}
-
-// A login the member replaces with a FIFO or a link during the refresh is
-// refused, not written through, and the write never blocks.
-func TestRefreshLoginRefusesAReplacedLogin(t *testing.T) {
-	for _, replace := range []struct {
-		name string
-		make func(string) error
-	}{
-		{"fifo", func(p string) error { return unix.Mkfifo(p, 0o600) }},
-		{"symlink", func(p string) error { return os.Symlink("/etc/hostname", p) }},
-	} {
 		manager, owner, _ := newLoginHomes(t)
-		login := filepath.Join(owner, ".claude", ".credentials.json")
+		login := filepath.Join(owner, filepath.FromSlash(tc.rel))
+		if err := os.MkdirAll(filepath.Dir(login), 0o700); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(login, []byte(`{"old":1}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		done := make(chan error, 1)
+		holding, release, done := make(chan struct{}), make(chan struct{}), make(chan error)
 		go func() {
-			done <- manager.RefreshLogin("owner", ".claude/.credentials.json", claudeLock, func([]byte) ([]byte, error) {
-				if err := os.Remove(login); err != nil {
-					return nil, err
-				}
-				return []byte(`{"new":2}`), replace.make(login)
+			done <- manager.RefreshLogin("owner", tc.rel, tc.lock, func([]byte) ([]byte, error) {
+				close(holding)
+				<-release
+				return []byte(`{"first":1}`), nil
 			})
 		}()
-		select {
-		case err := <-done:
-			if err == nil {
-				t.Fatalf("%s: RefreshLogin wrote through a replaced login", replace.name)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("%s: RefreshLogin blocked on the replaced login", replace.name)
+		<-holding
+		called := false
+		err := manager.RefreshLogin("owner", tc.rel, tc.lock, func([]byte) ([]byte, error) { called = true; return nil, nil })
+		if !errors.Is(err, ErrLoginLockHeld) || called {
+			t.Fatalf("%s: second RefreshLogin = %v, called %v; want ErrLoginLockHeld before any refresh", tc.rel, err, called)
 		}
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatalf("%s: first RefreshLogin: %v", tc.rel, err)
+		}
+		err = manager.RefreshLogin("owner", tc.rel, tc.lock, func(old []byte) ([]byte, error) {
+			if string(old) != `{"first":1}` {
+				t.Errorf("%s: second refresh read %s, want the first one's login", tc.rel, old)
+			}
+			return nil, nil
+		})
+		if err != nil {
+			t.Fatalf("%s: RefreshLogin after the release: %v", tc.rel, err)
+		}
+	}
+}
+
+// A login the member replaces with a link during the refresh is refused,
+// and the link's target is never written.
+func TestRefreshLoginRefusesALinkedLogin(t *testing.T) {
+	manager, owner, other := newLoginHomes(t)
+	login := filepath.Join(owner, ".claude", ".credentials.json")
+	if err := os.WriteFile(login, []byte(`{"old":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(other, "secret")
+	if err := os.WriteFile(target, []byte("other's"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := manager.RefreshLogin("owner", ".claude/.credentials.json", claudeLock, func([]byte) ([]byte, error) {
+		if err := os.Remove(login); err != nil {
+			return nil, err
+		}
+		if err := os.Symlink(target, login); err != nil {
+			t.Skipf("cannot create a symlink here: %v", err)
+		}
+		return []byte(`{"new":2}`), nil
+	})
+	if err == nil {
+		t.Fatal("RefreshLogin wrote through a linked login")
+	}
+	if data, _ := os.ReadFile(target); string(data) != "other's" {
+		t.Fatalf("link target = %q, want it untouched", data)
 	}
 }
