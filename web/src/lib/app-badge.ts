@@ -10,7 +10,7 @@ let latest = 0
 /** Whether this browser can badge an app icon, and nothing else badges it. */
 export const badgeSupported = () => !desktopBridge() && 'setAppBadge' in navigator && 'clearAppBadge' in navigator
 
-/** Sets the installed app's badge to count while this device has a push subscription, and clears it otherwise. */
+/** Sets the installed app's badge to count while this device has a push subscription, and clears it otherwise. Rejects when the browser refuses. */
 export async function syncAppBadge(count: number): Promise<void> {
   const nav: Badging = navigator
   if (desktopBridge() || !nav.setAppBadge || !nav.clearAppBadge) return
@@ -21,7 +21,7 @@ export async function syncAppBadge(count: number): Promise<void> {
     if (mine !== latest) return
     await (subscribed && count > 0 ? nav.setAppBadge(count) : nav.clearAppBadge())
   } catch (err) {
-    console.error('Could not set the app badge:', err)
+    throw new Error(`set the app badge to ${count}: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
   }
 }
 
@@ -29,7 +29,7 @@ export async function syncAppBadge(count: number): Promise<void> {
 export function AppBadge() {
   const count = useAskingCount()
   useEffect(() => {
-    const sync = () => void syncAppBadge(count)
+    const sync = () => syncAppBadge(count).catch((err: unknown) => console.error(err))
     sync()
     document.addEventListener('visibilitychange', sync)
     window.addEventListener(pushChanged, sync)
@@ -38,6 +38,6 @@ export function AppBadge() {
       window.removeEventListener(pushChanged, sync)
     }
   }, [count])
-  useEffect(() => () => void syncAppBadge(0), [])
+  useEffect(() => () => void syncAppBadge(0).catch((err: unknown) => console.error(err)), [])
   return null
 }

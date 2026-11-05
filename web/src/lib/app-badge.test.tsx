@@ -41,13 +41,10 @@ describe('syncAppBadge', () => {
     await expect(syncAppBadge(3)).resolves.toBeUndefined()
   })
 
-  it('reports a failure instead of swallowing it', async () => {
+  it('rejects with context when the browser refuses', async () => {
     const nav = badging(true)
     nav.setAppBadge.mockRejectedValue(new Error('denied'))
-    const report = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await syncAppBadge(1)
-    expect(report).toHaveBeenCalledWith('Could not set the app badge:', expect.any(Error))
-    report.mockRestore()
+    await expect(syncAppBadge(1)).rejects.toThrow('set the app badge to 1: denied')
   })
 })
 
