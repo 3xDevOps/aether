@@ -32,7 +32,7 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     expect(opened).toBe(true)
   })
 
@@ -41,7 +41,7 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     expect(opened).toBe(true)
   })
 
@@ -55,7 +55,7 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     expect(opened).toBe(false)
     await vi.advanceTimersByTimeAsync(0)
     expect(opened).toBe(true)
@@ -69,7 +69,7 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     await vi.advanceTimersByTimeAsync(0)
     expect(opened).toBe(false)
     resolve()
@@ -83,7 +83,7 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     await vi.advanceTimersByTimeAsync(0)
     expect(opened).toBe(true)
   })
@@ -96,7 +96,7 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     await vi.advanceTimersByTimeAsync(0)
     expect(opened).toBe(false)
     resolve()
@@ -110,11 +110,44 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     await vi.advanceTimersByTimeAsync(1999)
     expect(opened).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     expect(opened).toBe(true)
+  })
+
+  it('refits when the faces settle after the timeout opened the terminal', async () => {
+    vi.useFakeTimers()
+    const { promise: loading, resolve } = Promise.withResolvers<void>()
+    stubFonts(fontSet('unloaded', 'unloaded', () => loading))
+    let opened = 0
+    let refits = 0
+    whenTerminalFontReady(() => {
+      opened++
+    }, () => {
+      refits++
+    })
+    await vi.advanceTimersByTimeAsync(2000)
+    expect([opened, refits]).toEqual([1, 0])
+    resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    expect([opened, refits]).toEqual([1, 1])
+  })
+
+  it('never refits once cancelled', async () => {
+    vi.useFakeTimers()
+    const { promise: loading, resolve } = Promise.withResolvers<void>()
+    stubFonts(fontSet('unloaded', 'unloaded', () => loading))
+    let refits = 0
+    const cancel = whenTerminalFontReady(() => {}, () => {
+      refits++
+    })
+    await vi.advanceTimersByTimeAsync(2000)
+    cancel()
+    resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refits).toBe(0)
   })
 
   it('never opens once cancelled', async () => {
@@ -124,7 +157,7 @@ describe('whenTerminalFontReady', () => {
     let opened = false
     const cancel = whenTerminalFontReady(() => {
       opened = true
-    })
+    }, () => {})
     cancel()
     resolve()
     // Even the load settling and the timeout window expiring must not open.

@@ -693,6 +693,15 @@ export function useXterm({
         binary.dispose()
         resizeRef.current = null
       }
+    }, () => {
+      if (!active || liveTerminal.current !== created) return
+      // xterm re-measures its cell only when the font option changes, and it
+      // ignores an assignment of the same value.
+      const intent = captureViewport(created, viewportInteractionRevision.current)
+      created.options.fontFamily = 'monospace'
+      created.options.fontFamily = terminalFontFamily
+      resizeRef.current?.()
+      restoreViewport(created, intent, viewportInteractionRevision.current)
     })
 
     return () => {
