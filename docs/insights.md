@@ -53,7 +53,7 @@ A session you stop yourself is abandoned.
 
 ## Success rate
 
-A session succeeds when its status is `merged` or a pull request it opened is merged.
+A session succeeds when its status is `merged`, a pull request it opened is merged, or you marked it complete.
 
 Only pull requests opened through Aether count. A pull request an agent opens
 with `gh` directly is not counted. A merge is counted only after Aether has
