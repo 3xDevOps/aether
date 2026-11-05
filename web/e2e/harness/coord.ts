@@ -21,11 +21,21 @@ export function runCoordCLI<T>(runID: string, args: string[], input?: string): T
   return envelope.result
 }
 
+// The scheduler opens the socket before it creates the container that mounts
+// it, so the CLI is reachable only once the container runs too.
 export async function waitForCoordCLI(runID: string, dataDir: string): Promise<void> {
   await expect
-    .poll(() => existsSync(path.join(dataDir, 'coord', runID, 'coord3.sock')), {
+    .poll(() => existsSync(path.join(dataDir, 'coord', runID, 'coord3.sock')) && containerRunning(runContainer(runID)), {
       timeout: 30_000,
       intervals: [100, 250, 500],
     })
     .toBeTruthy()
+}
+
+function containerRunning(name: string): boolean {
+  try {
+    return execFileSync('docker', ['inspect', '--format', '{{.State.Running}}', name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === 'true'
+  } catch {
+    return false
+  }
 }
