@@ -652,13 +652,24 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   **N more**), or for `run.launch` a **What starts**
   list (`components/assistant/launch-summary.tsx`; the title then stops
   before the quoted task) of kind, workspace,
-  agent with model and mode, account (`Yours` or `<name>'s, shared with
-  you`), fallback, task, and how the member hears back, a
+  agent with model and mode, effort when set, permission tier (`default`
+  when unset), account (`Yours` or `<name>'s, shared with you`), fallback, task, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
-  `confirmations` frame stops listing it. While `auto_approve` is off a card
-  links **Skip these cards…** to Settings > Assistant; a card with
+  `confirmations` frame stops listing it. A card's footer is not sticky: the dock (65dvh with an empty
+  conversation, whose suggestion chips it hides, else 40dvh, 50dvh on tall
+  screens) scrolls the whole card, so its actions come after every row they
+  approve, and rows have no scroll of their own. A card with `rule` adds,
+  under `Or save a rule:`, a secondary button labeled with `rule.wording`
+  (`assistant.confirm` with `always: true`), marked with an accent left rule
+  and `You approved this kind three times in a row.` when `rule.suggested`,
+  and, while `auto_approve` is off,
+  **Approve everything from now on**: it approves the card, then sets the
+  store's `assistantConfirmAutoApprove`, which opens the panel's **Let the
+  assistant act without asking?** confirm (`AutoApproveConfirm` in
+  `components/assistant/approval-choice.tsx`). While `auto_approve` is off a
+  card without `rule` links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
@@ -679,7 +690,7 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `Withdrawn: the turn ended before you answered`, `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
   not, or `Not confirmed: check status before retrying` for an
-  `aether_pr_create` whose result says `write: "pending"`) with `approved by you` or `auto-approved`, and its time. A call
+  `aether_pr_create` whose result says `write: "pending"`) with `approved by you`, `auto-approved` or `approved by your rule <id>` (a record with `approval: "rule"` and its `rule_id`), and its time. A call
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
@@ -732,6 +743,17 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   actions**, which loads them as **Show earlier messages** does. Focus starts
   on the newest entry. Up, Down, Home and End move, and Enter opens the target
   and closes the popover.
+- **Setup question** (`ApprovalChoice` in
+  `components/assistant/approval-choice.tsx`): when the status has
+  `approval_chosen: false` and the state is not `failed` (a failed status
+  carries no stored settings; absent never asks), a notice above the composer
+  asks **How should your assistant act?** **Ask before acting** and **Act
+  without asking** call `assistant.settings` with `auto_approve` false or
+  true; the second shows the auto-approval warning under its button, so it
+  opens no dialog. It scrolls past 40% of the viewport height, and the
+  auto-approval suggestion waits until it is answered. The answer's settings
+  replace the status, which drops the notice, unless another member signed in
+  meanwhile; a refusal shows under the buttons.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a
@@ -3249,7 +3271,8 @@ The timeline rows and both composers share `sessionColumn`
 the message box line up at every width. The box (`rounded-composer`, 14px)
 holds the textarea above one footer row: attach, **Insert a template**, the
 agent's mode, model and effort pickers, the context meter, and the send pill
-at the end. The Standard composer's row has attach, **Insert a template** and
+at the end, with the dictation mic (see [Dictation](#dictation)) just left of
+it. The Standard composer's row has attach, **Insert a template**, the mic and
 Send. The pill is a
 round arrow while it reads **Send** and widens to its word otherwise. Hints
 and the 45-second delivery notice sit under the box. Footer controls wrap on
@@ -3376,6 +3399,74 @@ Details sheet and focuses the card; on other views it lists the cards. `routes/r
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
 agent's auth methods.
 
+### Dictation
+
+`components/dictation/` turns speech into text in a message box. Its
+`DictationButton` takes `{ textarea, onInsert, hints? }`: the box, a callback
+that stores the new text, and optional hints. It is mounted left of **Send** in
+the session composer and the assistant composer, and in a row under the New
+session **Task** box (`run-fields.tsx`). It renders nothing unless
+`server.info` lists the `dictation` feature, which the server sets only once
+dictation is installed.
+
+The button and the composer around it share state through `state.ts`, keyed by
+the box's ref: `useDictationState(textarea)` returns `active` (starting,
+recording or transcribing) and the current `notice`. While `active`, the
+composer's text-sending actions (Send, Steer, Queue) are disabled and Enter
+does nothing, so a missed press cannot send the old draft mid-recording;
+Interrupt, Stop waiting and Resume stay available. The mic will not start in
+a box that is read-only because its message is still sending, since the sent
+draft would replace the dictated words; it shows a notice instead. The New session dialog and the onboarding
+first run hold **Launch** the same way through `useDictating()`, which is true
+while any box dictates. `DictationNotice` draws the notice as a strip
+above the box: failed tint, alert icon and `role="alert"` for an error, a plain
+`role="status"` strip for "No speech was recognized.", and an **x** that
+dismisses it and returns focus to the box.
+
+| State | Button | Live region |
+| --- | --- | --- |
+| Idle | Mic in text colour | - |
+| Starting | Neutral pill: spinner, "Starting mic…" | Starting microphone |
+| Recording | Red pill: stop square, seven-bar level meter, elapsed time | Recording. Press again to stop, Escape to cancel. |
+| Transcribing | Neutral pill: spinner, "Transcribing…" | Transcribing |
+
+The button's name is always **Dictate**; `aria-pressed` says whether it is
+recording. The pills share one minimum width, so the button does not jump
+between states. A tap starts and a second tap stops. A press held 300 ms or
+more after recording began stops on release (hold to talk); a press that
+outlasted the browser's permission prompt counts as a tap. Enter and Space
+toggle like a tap. A pointer press keeps focus in the box, so a phone keeps its
+keyboard up. Escape pressed in the box or on the mic while starting, recording
+or transcribing drops the audio or the request in flight; an Escape anywhere
+else goes to its own owner. Recording stops by
+itself at 2:00.
+
+The browser asks for the microphone on the first press, never on load.
+`capture.ts` opens it with `getUserMedia` at the hardware rate (a 16 kHz
+`AudioContext` records silence on some macOS devices), downmixes each render
+quantum to mono in an `AudioWorklet` loaded from a blob URL, and reads the
+meter from an `AnalyserNode` at 15 Hz. The track stops as soon as recording
+ends. `wav.ts` averages down to 16 kHz, clips at 120 s and encodes PCM16 mono
+WAV; `api.dictationTranscribe` posts it base64 to `dictation.transcribe` with
+the hints. Without `hints`, `dictationHints` sends up to 200 names of at most
+80 bytes: every workspace, the open workspace's repo and run repos, and its
+sessions' titles, newest first. Transcription times out after 240 s, the local gateway's bound.
+
+`insertTranscript` puts the text where the caret or selection was when
+recording started; if the text changed meanwhile, at the caret the member left
+in the box, or at the end, adding a space on either side only where a word would
+otherwise touch it, then focuses the box with the caret after the text. It
+never sends: the mic has `type="button"`, so a press inside the New session
+form does not launch. Errors show verbatim, with paths and the install command
+in code: the server's message (not installed, busy, too long) or the
+browser's, as `Microphone: <DOMException name>: <message>`. A
+`NotAllowedError` adds, on its own muted line, how to allow the microphone
+again. A page served over
+plain http to a non-loopback host is not a secure context and has no
+microphone; the notice names the origin. The meter keeps reading the level
+under reduced motion but drops its transition. On a coarse pointer the mic and
+pills are 44px tall.
+
 ### Trace view
 
 The Trace view (`src/routes/run/trace-view.tsx`) shows when each part of an
@@ -3476,7 +3567,23 @@ while a live session's attach is not live. A finished session reads "Container
 removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
 session with no agent terminal, such as an Enhanced session, shows "No agent
-terminal" and the shell controls. The frame renders one `TakeoverDialog`
+terminal" and the shell controls. Under 768px (`useIsMobile`), the first time
+the Terminal view shows for such a session `useRunningShellOnPhone` reads
+the shell list with `shells.refresh()`, whose revision counter drops a list
+that an **Open shell** overtook. It then shows a running shell a member
+started (`started_by: 'member'`) and has not hidden; the agent's own shells
+stay behind the tab menu. A failed read shows its error with **Retry**. It
+never starts a shell, because viewing a tab must not start a process or take
+a lease: the empty state carries a primary **Open shell** (`shells.open`)
+instead, with a spinner while it starts and the shell-limit reason under it
+when four are running. On that view the Enhanced session's
+`MultiplayerControls` strip, which is about the Chat lease, is hidden; the
+shell's toolbar shows the shell's own control. These three follow the phone
+layout's breakpoint (`useIsMobile`, under 768px, any pointer), because they
+are layout. Fitting, read-first focus and the size stepper follow
+`phoneScreen` (a coarse pointer under 640px) instead: the same query that
+makes a terminal follow the PTY, which fitting needs, and the screens where
+focus raises a soft keyboard. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
@@ -3530,7 +3637,10 @@ open a shell in it" in place of the terminal.
 (named "Terminal tools"): **Find** (**Find in recorded output** while
 reading history), the text size with **Smaller text**, **Larger text** and
 **Reset text size**, **Copy selection**, **Copy screen**, **Paste**,
-**Upload image…** and, on a session, **Captures…**. It is one menu at every
+**Upload image…** and, on a session, **Captures…**. On `phoneScreen` the
+trigger is icon-only so the toolbar fits 360px, and, except while reading recorded history (drawn at the
+chosen size), the size items follow `useTextSizeStepper` (below), with
+**Fit to width** in place of the reset. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
 The rest of this section is the terminal machinery the session terminal, its
@@ -3702,14 +3812,77 @@ A following terminal therefore:
   what makes xterm's textarea read-only, so a tap on a mirror raises no
   keyboard.
 
+**Sizing the PTY to a phone is not done.** A phone could size the PTY
+while no wider client is attached, but the server keeps one grid and one
+transcript per session, so: every keyboard open and close would resize the
+agent's screen and make its TUI redraw; a desktop attaching or leaving would
+flip the width, and output drawn at the phone's 45 columns stays in the
+recorded transcript that later desktop viewers replay; and an older server
+reads an unknown "size only when alone" flag as an ordinary writer imposing
+its size, shrinking every desktop viewer. A phone therefore follows, and fits
+on the client.
+
+**Fit to width.** `useTerminalFit` (`src/components/terminal-fit.ts`), on
+`phoneScreen`, sets xterm's `fontSize` so the followed grid's columns fit the
+host's content box: proportional from the drawn `.xterm-screen` width,
+floored to 0.25px steps, no larger than the chosen size and no smaller than
+`minFitTerminalFontSize` (7px, `src/lib/term-font.ts`), below which the grid
+pans. It grows only when the pane, the grid or the preference changes; a
+render only shrinks an overflow, so device-pixel rounding cannot make it
+oscillate. 80 columns fit a 360px screen at about 7px. The fitted size is
+not stored: the store keeps `terminalFitWidth` (persisted, default on) beside
+`terminalFontSize`, and `setTerminalFontSize` turns fitting off.
+`useTextSizeStepper` (`terminal-keys.tsx`) backs the sheet's bottom row -
+**A−**, the drawn size with **Fit**, **A+** - and the phone's Tools menu: a
+step is one whole pixel from the drawn size, and a step down to the fitted
+size or below the 8px zoom minimum returns to fitting, so **A−** is disabled
+while fitted. Only a phone shows the stepper; a tablet keeps the Tools
+items. A two-finger pinch on the host draws the size live in 0.5px steps;
+on release it returns to fitting when it ends at or below the size fitting
+would draw or below 8px, and otherwise stores the size rounded to a whole
+pixel.
+
+**Read first.** On `phoneScreen` `focusTerminal()` does nothing, so no
+effect - a new shell, a tab change, a closed find bar - raises the soft
+keyboard. Only a tap on the terminal's own textarea, or **Show keyboard** in
+the more-keys sheet, focuses it.
+
 `TerminalKeys` is shown under the host on any coarse pointer while the
-terminal is writable, a tablet included: Ctrl, Esc, Tab, the arrows, Enter
-and Ctrl+C, each through `terminal.input` so the replay gate and
-`disableStdin` treat a tap exactly like a keystroke. Ctrl is a one-shot
-modifier held in the host (`armCtrl`), because a soft keyboard sends
-characters and never a modifier: it rewrites the next character into its
-control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte.
+terminal is writable, a tablet included. Its row does not scroll: **Ctrl**,
+**Alt**, Esc, Tab, the arrows, Enter and **More keys** share the width at
+44px tall. 4px apart. **More keys** (its trigger carries Radix's `aria-expanded`) is a
+non-modal `Popover` above the row that keeps focus where it was: symbols a
+phone keyboard buries, ^C, Home/End, PgUp/PgDn and Del; **F1–F12**, which
+toggles the function keys; Show/Hide keyboard; and the size stepper last,
+next to the row. It stays open while keys are tapped and closes on its
+trigger or a tap outside. The keyboard label reads the textarea's focus and
+whether the visual viewport has lost at least 120px from its tallest,
+because Android's Back hides the keyboard and keeps focus. The stepper's
+size readout stays focusable at full contrast while fitted, with
+`aria-disabled`, rather than a greyed disabled button. Every key goes through
+`terminal.input`, so the replay gate and `disableStdin` treat a tap exactly
+like a keystroke, refuses focus on `pointerdown` so the keyboard stays as it
+was, and then calls `focusTerminal()`, which a tablet honours and a phone
+ignores. The row pads its bottom by `--keyboard-inset` (`keyboard-inset.ts`)
+so it stays above an iOS keyboard.
+
+Ctrl and Alt are sticky modifiers held in the host (`modifiers`,
+`tapModifier`, `clearModifiers` on `XtermController`), because a soft
+keyboard sends characters and never a modifier. `terminal-modifiers.ts` has
+the rules: a tap arms a modifier for one key, a second tap within 400ms locks
+it, the next tap releases it. A locked modifier stays `aria-pressed`, shows a
+lock glyph and adds a visually hidden ", locked" to its name. `applyModifiers`
+rewrites a single character into its control code (xterm's: Ctrl+Space and
+Ctrl+` are NUL, Ctrl+? is DEL, Ctrl+Backspace is ^H) and/or an ESC prefix for
+Alt, and the cursor, Home/End, paging and function-key sequences into
+xterm's `1;<n>` modifier parameter form. A key it does not cover passes
+unmodified and keeps the modifiers armed rather than spending them on the
+wrong byte, and a paste (flagged from the DOM `paste` event and around
+`terminal.paste()`, which Tools → Paste calls, since xterm hands either to
+`onData` like a key) never takes them. The row's arrows, Home
+and End send SS3 (`ESC O`) while the program has asked for application
+cursor keys (`terminal.modes.applicationCursorKeysMode`).
+Losing write access clears them.
 
 In a session's normal buffer, a downward finger drag pans the live grid to its
 top before handing off continuously to integrated history. Horizontal drags
@@ -6264,7 +6437,15 @@ Categories:
   without asking?** with the warning that the assistant will launch sessions,
   message and stop the member's sessions and save the environment on its own;
   turning it off does not ask. A refusal stays in the dialog or under the
-  row. **Change in Settings** in the assistant panel opens
+  row. **Approval rules** (`routes/settings/approval-rules.tsx`) lists
+  `assistant.rules`: each rule's wording, `From:` the card it came from,
+  when it was created and last used and how many times, `Inactive: <reason>`
+  when set, and **Revoke** (`assistant.rules.revoke`), which drops the row
+  once the server answers and reads the list again; with none it says **No rules yet**, and a failed
+  read shows `Couldn’t read your rules` with its error and **Try again**. A
+  muted line under the heading says rules work with auto-approval off; an
+  inactive rule's wording is muted with an `Inactive` badge. It reads again when a card saves a
+  rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
 - **Launch**, where the server offers `launch.defaults.get`: **Saved

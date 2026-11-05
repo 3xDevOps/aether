@@ -88,6 +88,16 @@ async function takeControlFromRawHolder(page: Page, presence: Locator): Promise<
 
 test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
+// These are about panning a grid larger than the phone, so they keep a chosen
+// text size rather than fitting the grid to the width.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('aether.ui')) {
+      localStorage.setItem('aether.ui', JSON.stringify({ state: { terminalFitWidth: false }, version: 11 }))
+    }
+  })
+})
+
 test('a phone can reach and type into a desktop-sized agent without resizing it', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')

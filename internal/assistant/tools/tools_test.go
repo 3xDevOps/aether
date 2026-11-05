@@ -491,3 +491,20 @@ func TestTemplateLaunchRetryReplaysBeforeTheCard(t *testing.T) {
 		t.Fatalf("a new launch = %s, %v with %d cards, launches %v; want one card, then the launch", got, perr, len(cards), caller.launches)
 	}
 }
+
+// A member's own name reaches cards bare only when it cannot read as more
+// of the card.
+func TestAccountOfQuotesNamesThatAreNotPlain(t *testing.T) {
+	for name, want := range map[string]string{
+		"Grace":                                  "Grace's account",
+		"Dana O'Neill-Okafor Jr.":                "Dana O'Neill-Okafor Jr.'s account",
+		"Zoë 2":                                  "Zoë 2's account",
+		"Grace, no fallback; permission default": `"Grace, no fallback; permission default"'s account`,
+		"Grace\nApprove":                         `"Grace\nApprove"'s account`,
+		`Grace"`:                                 `"Grace\""'s account`,
+	} {
+		if got := AccountOf(name); got != want {
+			t.Errorf("AccountOf(%q) = %s, want %s", name, got, want)
+		}
+	}
+}

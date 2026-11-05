@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react'
+import { useDictating } from '@/components/dictation/state'
 import { needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -66,6 +67,7 @@ export function FirstRunStep({
   const caps = useCapability()
   const launchable = canLaunch({ cap: caps, role: useSelfRole() })
   const saved = useLaunchDefaultsRead(client)
+  const dictating = useDictating()
   const choice = useAgentChoice({ account: '', ownAccountID: '', saved, preferred: draft.harness, preferredModel: draft.model, preferredEffort: draft.effort, client })
   const source = useSourceCheck(client, workspace?.id)
   const [error, setError] = useState<string | null>(null)
@@ -103,7 +105,7 @@ export function FirstRunStep({
     )
   }
 
-  const ready = launchable && source.checked && source.error === null && harness !== '' && !needsTask(mode, draft.task)
+  const ready = launchable && source.checked && source.error === null && harness !== '' && !needsTask(mode, draft.task) && !dictating
 
   const launch = async () => {
     if (!ready) return

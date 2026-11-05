@@ -57,18 +57,20 @@ func (e *Engine) checkoutObjectFormat(workTree string) (string, error) {
 // checkout's .git directory is deliberately never used as GIT_DIR: it is
 // agent-writable and may contain config, attributes, hooks, or command names.
 func (e *Engine) ensureScratchGitDir(ctx context.Context, dir, workTree string) error {
-	config := filepath.Join(dir, "config")
-	if _, err := os.Stat(config); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("gitengine: inspect scratch git directory: %w", err)
-	}
+	// Git 2.44 and later write config before HEAD, so only both mark a
+	// finished init; a killed init leaves config alone and is run again.
 	scratchGitMu.Lock()
 	defer scratchGitMu.Unlock()
-	if _, err := os.Stat(config); err == nil {
+	ready := true
+	for _, name := range []string{"config", "HEAD"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); errors.Is(err, os.ErrNotExist) {
+			ready = false
+		} else if err != nil {
+			return fmt.Errorf("gitengine: inspect scratch git directory: %w", err)
+		}
+	}
+	if ready {
 		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("gitengine: inspect scratch git directory: %w", err)
 	}
 	objectFormat, err := e.checkoutObjectFormat(workTree)
 	if err != nil {

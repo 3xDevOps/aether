@@ -16,13 +16,14 @@ import (
 func init() {
 	register(command{
 		name:  "member",
-		short: "list, approve, color, set the git identity of, set your assistant's auto-approval, change the role of, link, list or unlink the edge accounts of, merge, transfer server ownership to, or remove members",
+		short: "list, approve, color, set the git identity of, set your assistant's auto-approval and approval rules, change the role of, link, list or unlink the edge accounts of, merge, transfer server ownership to, or remove members",
 		usage: "aether member list\n" +
 			"aether member approve <member-id>\n" +
 			"aether member remove <member-id>\n" +
 			"aether member color <#rrggbb> [<member-id>]\n" +
 			"aether member git [--name <name>] [--email <email>] [<member-id>]\n" +
 			"aether member assistant [--auto-approve <on|off>]\n" +
+			"aether member assistant rules [--revoke <rule-id>]\n" +
 			"aether member role <member-id> <viewer|collaborator|admin>\n" +
 			"aether member link --github <login>\n" +
 			"aether member link --email <address>\n" +
@@ -40,6 +41,7 @@ func init() {
 			"aether member role mem-rbekp4h6fx collaborator\n" +
 			"aether member git --name \"Alice Doe\" --email alice@example.com\n" +
 			"aether member assistant --auto-approve on\n" +
+			"aether member assistant rules\n" +
 			"aether member identities mem-rbekp4h6fx",
 		run: runMember,
 	})

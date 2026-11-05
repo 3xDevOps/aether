@@ -103,7 +103,7 @@ func (s *Service) watchBudget(ctx context.Context, k budgetKey, next chan budget
 	for {
 		var wake <-chan time.Time
 		if due.state != "" {
-			if wait := time.Until(s.freeAt(k.member)); wait > 0 {
+			if wait := s.freeAt(k.member).Sub(s.now()); wait > 0 {
 				wake = time.After(wait)
 			} else if done, err := s.sendBudget(ctx, k, due.state, &devices); !done {
 				slog.Warn("push: a budget notice was not sent; trying again later", "member", k.member, "workspace", k.workspace, "in", retry, "error", err)

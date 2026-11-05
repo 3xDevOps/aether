@@ -446,3 +446,22 @@ func TestSettingsWritesKeepViewSharingAndTheSuggestion(t *testing.T) {
 		t.Fatalf("settings = %+v, %v, want auto-approval and view sharing on", got, err)
 	}
 }
+
+// Setting auto-approval either way, or answering the suggestion, is the
+// member's choice of how the assistant acts; other settings are not.
+func TestApprovalChoiceIsRecorded(t *testing.T) {
+	for name, p := range map[string]protocol.AssistantSettingsParams{
+		"ask before acting": {AutoApprove: new(bool)},
+		"not now":           {Suggestion: protocol.AssistantSuggestionLater},
+	} {
+		svc := New(Config{Dir: t.TempDir(), Store: newMemStore()})
+		off := false
+		if got, err := svc.SetSettings(t.Context(), "m1", protocol.AssistantSettingsParams{PreferencesEnabled: &off}); err != nil || got.ApprovalChosen {
+			t.Fatalf("%s: after another setting = %+v, %v; want not chosen", name, got, err)
+		}
+		if got, err := svc.SetSettings(t.Context(), "m1", p); err != nil || !got.ApprovalChosen {
+			t.Fatalf("%s: = %+v, %v; want chosen", name, got, err)
+		}
+		_ = svc.Close()
+	}
+}
