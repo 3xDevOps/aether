@@ -198,10 +198,10 @@ func TestWorkspaceDeleteDuringGitTransportTargetsOnlyItsWorkspace(t *testing.T) 
 			if pe := wireErrOf(t, admin.Call(protocol.MethodWorkspaceDelete, protocol.WorkspaceDeleteParams{WorkspaceID: string(e.ws.ID)}, nil)); pe.Code != protocol.CodeConflict {
 				t.Fatalf("delete git workspace = %+v, want conflict", pe)
 			}
+			// The flush is a complete request: git exits without waiting for
+			// stdin EOF and the server then closes the channel, so a later
+			// CloseWrite would race that close and fail with io.EOF.
 			if _, err := io.WriteString(stdin, "0000"); err != nil {
-				t.Fatal(err)
-			}
-			if err := stdin.Close(); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := io.Copy(io.Discard, stdout); err != nil {
