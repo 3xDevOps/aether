@@ -232,6 +232,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/free-disk
+      - uses: ./.github/actions/docker-mirror
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -288,6 +289,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/free-disk
+      - uses: ./.github/actions/docker-mirror
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -352,6 +354,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/free-disk
+      - uses: ./.github/actions/docker-mirror
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -403,6 +406,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/free-disk
+      - uses: ./.github/actions/docker-mirror
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -515,6 +519,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/free-disk
+      - uses: ./.github/actions/docker-mirror
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
