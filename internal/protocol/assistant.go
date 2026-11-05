@@ -237,6 +237,10 @@ type AssistantStatus struct {
 	// ApprovalChosen means the member chose whether the assistant asks
 	// before acting: they set auto_approve, or answered the suggestion.
 	ApprovalChosen bool `json:"approval_chosen"`
+	// SignInRecorded means a sign-in for the assistant was started or
+	// recorded for some agent. The dashboard starts one on its own only
+	// while none was: a sign-in deletes the agent's earlier one.
+	SignInRecorded bool `json:"sign_in_recorded"`
 }
 
 // Answers to the suggestion to turn auto-approval on.

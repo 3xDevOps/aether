@@ -31,6 +31,9 @@ test('the assistant beside a run leaves the run readable and usable', async ({ p
     mode: 'headless',
   })
 
+  // Alice never signed the assistant in, so the panel starts a sign-in;
+  // this layout check holds it at the socket.
+  await page.routeWebSocket(/\/ws\/terminal\?assistant_login=/, () => {})
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto(`${alice.url}&run=${run.id}`)
   await expect(page.getByRole('heading', { level: 1, name: task, exact: true })).toBeVisible()

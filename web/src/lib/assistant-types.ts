@@ -146,6 +146,8 @@ export interface AssistantStatus {
   preferences_enabled?: boolean
   /** The member chose whether the assistant asks before acting; absent from a server without it. */
   approval_chosen?: boolean
+  /** A sign-in for the assistant was started or recorded for some agent; absent from a server without it. */
+  sign_in_recorded?: boolean
 }
 
 export interface AssistantSettings {

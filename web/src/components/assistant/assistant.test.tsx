@@ -215,6 +215,7 @@ describe('states', () => {
     vi.mocked(api.assistantStatus).mockResolvedValue(status({
       state: 'setup',
       agent: undefined,
+      sign_in_recorded: true,
       agents: [
         { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'No login was found' },
         { name: 'codex', display_name: 'Codex', ready: false, reason: 'The Enhanced adapter is not installed' },
@@ -226,6 +227,94 @@ describe('states', () => {
     expect(agents.getByText('No login was found')).toBeDefined()
     expect(agents.getByText('The Enhanced adapter is not installed')).toBeDefined()
     expect(StubSocket.opened).toHaveLength(0)
+  })
+
+  it('starts the first agent\'s sign-in on its own only on the first open, without the terminal', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({
+      state: 'setup',
+      agent: undefined,
+      sign_in_recorded: false,
+      agents: [
+        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' },
+        { name: 'codex', display_name: 'Codex', ready: false, reason: 'Not signed in for the assistant' },
+      ],
+    }))
+    const signIns = () => StubSocket.opened.filter((socket) => socket.url.includes('assistant_login='))
+    const aside = await openPanel()
+    const region = await within(aside).findByRole('region', { name: 'Sign in to Claude Code' })
+    await waitFor(() => expect(signIns().map((socket) => socket.url)).toEqual([expect.stringMatching(/assistant_login=claude$/)]))
+    expect(region.querySelector('.xterm')).toBeNull()
+
+    const url = 'https://claude.com/cai/oauth/authorize?code=true&state=s'
+    const socket = signIns()[0]!
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({ data: JSON.stringify({ ok: true, has_control: true, cols: 80, rows: 24, replay: 0 }) })
+      socket.onmessage?.({ data: new TextEncoder().encode(`visit: \x1b]8;;${url}\x07\x1b[94m${url}\x1b[39m\x1b]8;;\x07\r\nPaste code here if prompted > `).buffer })
+    })
+    expect((await within(region).findByRole('link', { name: 'Open Claude sign-in' })).getAttribute('href')).toBe(url)
+    await userEvent.type(within(region).getByLabelText('Paste the code'), 'code-123#state')
+    await userEvent.click(within(region).getByRole('button', { name: 'Send code' }))
+    expect(socket.frames().filter((frame) => (frame as { type?: string }).type === 'input')).toEqual([
+      { type: 'input', data: 'code-123#state' },
+      { type: 'input', data: '\r' },
+    ])
+
+    await userEvent.click(within(region).getByRole('button', { name: 'Close' }))
+    expect(await within(aside).findByRole('list', { name: 'Agents' })).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'Close assistant' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    expect(await within(await panel()).findByRole('list', { name: 'Agents' })).toBeDefined()
+    expect(signIns()).toHaveLength(1)
+  })
+
+  it("offers Codex's link after a saved screen, and stops the sign-in when the member chooses another agent", async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({
+      state: 'setup', agent: undefined, sign_in_recorded: false,
+      agents: [{ name: 'codex', display_name: 'Codex', ready: false, reason: 'Not signed in for the assistant' }],
+    }))
+    const aside = await openPanel()
+    const region = await within(aside).findByRole('region', { name: 'Sign in to Codex' })
+    const socket = await waitFor(() => StubSocket.opened.find((s) => s.url.includes('assistant_login=codex'))!)
+    const screen = new TextEncoder().encode('\x1b[H\x1b[2J')
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({ data: JSON.stringify({ ok: true, has_control: true, cols: 80, rows: 24, replay: screen.length }) })
+      socket.onmessage?.({ data: screen.buffer })
+      socket.onmessage?.({ data: new TextEncoder().encode('1. Open this link\r\n   https://auth.openai.com/codex/device\r\n\r\n2. Enter this one-time code\r\n   WXYZ-12345\r\n').buffer })
+    })
+    expect((await within(region).findByRole('link', { name: 'Open Codex sign-in' })).getAttribute('href')).toBe('https://auth.openai.com/codex/device')
+    await userEvent.click(within(region).getByRole('button', { name: 'Choose another agent' }))
+    expect(socket.frames().filter((frame) => (frame as { type?: string }).type === 'input')).toEqual([{ type: 'input', data: '\x03' }])
+    expect(await within(aside).findByRole('list', { name: 'Agents' })).toBeDefined()
+  })
+
+  it('keeps the sign-in the member chose over an automatic start still waiting on its read', async () => {
+    const agents = [
+      { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' },
+      { name: 'codex', display_name: 'Codex', ready: false, reason: 'Not signed in for the assistant' },
+    ]
+    const setup = status({ state: 'setup', agent: undefined, sign_in_recorded: false, agents })
+    useStore.getState().setAssistantStatus(setup)
+    const waiting: ((value: typeof setup) => void)[] = []
+    vi.mocked(api.assistantStatus).mockImplementation(() => new Promise((resolve) => { waiting.push(resolve) }))
+    const aside = await openPanel()
+    const list = await within(aside).findByRole('list', { name: 'Agents' })
+    await userEvent.click(within(within(list).getByText('Codex').closest('li')!).getByRole('button', { name: 'Sign in' }))
+    expect(waiting.length).toBeGreaterThan(0)
+    await act(async () => waiting.forEach((resolve) => resolve(setup)))
+    expect(await within(aside).findByRole('region', { name: 'Sign in to Codex' })).toBeDefined()
+    expect(StubSocket.opened.filter((socket) => socket.url.includes('assistant_login=claude'))).toHaveLength(0)
+  })
+
+  it('starts no sign-in on its own when the status read on load is stale', async () => {
+    const agents = [{ name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' }]
+    useStore.getState().setAssistantStatus(status({ state: 'setup', agent: undefined, sign_in_recorded: false, agents }))
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'setup', agent: undefined, sign_in_recorded: true, agents }))
+    const aside = await openPanel()
+    await waitFor(() => expect(useStore.getState().assistantStatus?.sign_in_recorded).toBe(true))
+    expect(await within(aside).findByRole('list', { name: 'Agents' })).toBeDefined()
+    expect(StubSocket.opened.filter((socket) => socket.url.includes('assistant_login='))).toHaveLength(0)
   })
 
   it('signs an agent in for the assistant alone and leaves setup once it is ready', async () => {

@@ -1,6 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AssistantSignIn } from '@/components/assistant/sign-in'
-import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -48,17 +47,36 @@ function usePagePrompts(): Example[] {
 
 export function AssistantSetup({ status }: { status: AssistantStatus }) {
   const [signing, setSigning] = useState('')
+  const [autoError, setAutoError] = useState<string>()
   const signingIn = status.agents.find((agent) => agent.name === signing)
+  // A sign-in deletes the agent's earlier one and stops a running assistant,
+  // so only the first, with nothing to lose, starts on its own. The status
+  // in the store can predate a sign-in made elsewhere, so a fresh read
+  // decides; a failed read starts nothing and the panel's own read reports it.
+  const unrecorded = status.sign_in_recorded === false
+  useEffect(() => {
+    if (!unrecorded || useStore.getState().assistantSignInStarted) return
+    let live = true
+    api.assistantStatus().then((fresh) => {
+      const store = useStore.getState()
+      const first = fresh.sign_in_recorded === false ? fresh.agents[0]?.name : undefined
+      if (!live || !first || store.assistantSignInStarted) return
+      store.noteAssistantSignInStarted()
+      setSigning(first)
+    }, (err: unknown) => live && setAutoError(`Could not check whether to start the sign-in: ${message(err)}`))
+    return () => {
+      live = false
+    }
+  }, [unrecorded])
   if (signingIn) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-        <div>
-          <Button size="sm" variant="ghost" onClick={() => setSigning('')}><ArrowLeft />Back</Button>
-        </div>
         <AssistantSignIn
           key={signingIn.name}
           agent={signingIn}
+          onBack={() => setSigning('')}
           client={api}
+          terminal={false}
           onDone={() => {
             setSigning('')
             void refreshAssistant(useStore, api)
@@ -72,6 +90,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
       <p className="text-ui">
         The assistant runs Claude Code or Codex in a container of its own, with a sign-in of its own. Sign in to one to start.
       </p>
+      {autoError && <Callout tone="failed" role="alert">{autoError}</Callout>}
       <ul aria-label="Agents" className="flex flex-col gap-3">
         {status.agents.map((agent) => (
           <li key={agent.name} className="flex min-w-0 items-start gap-2">
@@ -84,7 +103,11 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
               <p className="text-ui-sm break-words text-muted">{agent.ready ? 'Ready' : agent.reason}</p>
             </div>
             {!agent.ready && (
-              <Button size="sm" variant="secondary" onClick={() => setSigning(agent.name)}>Sign in</Button>
+              <Button size="sm" variant="secondary" onClick={() => {
+                // A choice made here wins over an automatic start still waiting on its read.
+                useStore.getState().noteAssistantSignInStarted()
+                setSigning(agent.name)
+              }}>Sign in</Button>
             )}
           </li>
         ))}

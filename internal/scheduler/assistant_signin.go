@@ -81,11 +81,18 @@ func (s *Scheduler) markAssistantSignIn(member domain.MemberID, agent string) er
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("scheduler: record the assistant sign-in: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, agent+".pending"), nil, 0o600); err != nil {
-		return fmt.Errorf("scheduler: record the assistant sign-in: %w", err)
+	for _, name := range []string{agent + ".pending", signInStarted} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			return fmt.Errorf("scheduler: record the assistant sign-in: %w", err)
+		}
 	}
 	return nil
 }
+
+// signInStarted marks that a sign-in for the member's assistant began.
+// Forgetting a sign-in leaves it, so the dashboard never starts one on its
+// own again.
+const signInStarted = "started"
 
 // forgetAssistantSignIn deletes agent's sign-in file, its record and a
 // pending one.
@@ -142,6 +149,24 @@ func (s *Scheduler) assistantSignedIn(member domain.MemberID, agent string) (boo
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			return false, fmt.Errorf("scheduler: read the assistant sign-in record: %w", err)
+		}
+	}
+	return false, nil
+}
+
+// AssistantSignInRecorded reports whether a sign-in for the member's
+// assistant ever began, or any agent has a sign-in record.
+func (s *Scheduler) AssistantSignInRecorded(member domain.MemberID) (bool, error) {
+	_, err := os.Stat(filepath.Join(assistantSignInDir(s.cfg.AssistantDir, member), signInStarted))
+	if err == nil {
+		return true, nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("scheduler: read the assistant sign-in record: %w", err)
+	}
+	for _, agent := range assistantAgents {
+		if ok, err := s.assistantSignedIn(member, agent); err != nil || ok {
+			return ok, err
 		}
 	}
 	return false, nil
