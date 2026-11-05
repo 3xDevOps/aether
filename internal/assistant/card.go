@@ -486,6 +486,7 @@ func (s *Service) withdraw(ctx context.Context, m *member, id string) error {
 	}
 	m.confirms.answer(id, errSessionEnded)
 	m.notify()
+	s.cardsChanged(m.id)
 	return nil
 }
 
