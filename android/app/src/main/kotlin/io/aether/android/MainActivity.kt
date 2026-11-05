@@ -872,7 +872,7 @@ class MainActivity : ComponentActivity() {
                     sharePath(text)
                 }
                 ACTION_OPEN -> {
-                    // Approve leaves its notification up; this takes it down.
+                    // Review… leaves its notification up; this takes it down.
                     cancelPush(this, intent)
                     intent.getStringExtra(EXTRA_PATH)?.takeIf(::isDashboardPath)
                 }

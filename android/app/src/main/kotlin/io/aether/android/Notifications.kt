@@ -74,8 +74,22 @@ fun showPush(context: Context, notice: PushNotice) {
     val manager = NotificationManagerCompat.from(context)
     if (notice.clear) {
         manager.cancel(notice.tag, DECLINING_ID)
-        val current = manager.activeNotifications.firstOrNull { it.tag == notice.tag && it.id == ID }
-        if (current?.notification?.extras?.getBoolean(EXTRA_KEEP) != true) manager.cancel(notice.tag, ID)
+        val current = manager.activeNotifications.firstOrNull { it.tag == notice.tag && it.id == ID } ?: return
+        if (current.notification.extras.getBoolean(EXTRA_KEEP)) return
+        // A card decided elsewhere says how it ended, as in a browser; a
+        // need that ended just goes.
+        if (!notice.tag.startsWith("card:") || !manager.areNotificationsEnabled()) {
+            manager.cancel(notice.tag, ID)
+            return
+        }
+        notify(
+            manager,
+            notice.tag,
+            builder(context, PushChannel.NEEDS_YOU, notice.title, notice.body, public = R.string.push_public_card)
+                .setContentIntent(openIntent(context, notice.tag, pushPath(notice)))
+                .setAutoCancel(true)
+                .setSilent(true),
+        )
         return
     }
     if (!manager.areNotificationsEnabled()) return
@@ -91,14 +105,19 @@ fun showPush(context: Context, notice: PushNotice) {
             .setContentIntent(open)
             .setAutoCancel(true)
             .setSilent(notice.quiet)
-            .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, notice.notice) })
+            .addExtras(
+                android.os.Bundle().apply {
+                    putBoolean(EXTRA_KEEP, notice.notice)
+                    putString(EXTRA_CARD, notice.card)
+                },
+            )
     // Below Android 12 an action cannot demand an unlock, and a locked
     // phone must not decide anything.
     val declinesDirectly =
         context.connectionMode() == ConnectionMode.TAILSCALE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     for (action in pushActions(notice, declinesDirectly)) {
         when (action) {
-            PushAction.APPROVE -> builder.addAction(0, context.getString(R.string.push_approve), open)
+            PushAction.REVIEW -> builder.addAction(0, context.getString(R.string.push_review), open)
             PushAction.DECLINE ->
                 builder.addAction(
                     NotificationCompat.Action.Builder(0, context.getString(R.string.push_decline), declineIntent(context, notice))
@@ -206,6 +225,7 @@ private fun declineIntent(context: Context, notice: PushNotice): PendingIntent {
             .putExtra(EXTRA_CARD, notice.card)
             .putExtra(EXTRA_TAG, notice.tag)
             .putExtra(EXTRA_TEXT, notice.body)
+            .putExtra(EXTRA_PATH, pushPath(notice))
     return PendingIntent.getBroadcast(
         context,
         0,
@@ -229,12 +249,13 @@ class DeclineReceiver : BroadcastReceiver() {
         val card = intent.getStringExtra(EXTRA_CARD) ?: return
         val tag = intent.getStringExtra(EXTRA_TAG) ?: return
         val text = intent.getStringExtra(EXTRA_TEXT).orEmpty()
+        val path = intent.getStringExtra(EXTRA_PATH)?.takeIf(::isDashboardPath) ?: CARD_PATH
         val app = context.applicationContext
         val manager = NotificationManagerCompat.from(app)
         fun outcome(title: String, body: String) =
             builder(app, PushChannel.NEEDS_YOU, title, body, public = R.string.push_public_card)
                 .setAutoCancel(true)
-                .setContentIntent(openIntent(app, tag, CARD_PATH))
+                .setContentIntent(openIntent(app, tag, path))
         // Not kept: a clear for the card may replace it, and it goes by
         // itself if the receiver dies before the outcome.
         // Under its own id, so its timeout cannot take the outcome with it.
@@ -266,7 +287,12 @@ class DeclineReceiver : BroadcastReceiver() {
                             .setStyle(NotificationCompat.BigTextStyle().bigText("$error\n\n$text"))
                     }.addExtras(android.os.Bundle().apply { putBoolean(EXTRA_KEEP, true) })
                 manager.cancel(tag, DECLINING_ID)
-                notify(manager, tag, done)
+                // A summary of newer pushes may have taken the card's
+                // notification while the call ran; the outcome then shows
+                // apart from it, never over it.
+                val current = manager.activeNotifications.firstOrNull { it.tag == tag && it.id == ID }
+                val shown = current?.notification?.extras?.getString(EXTRA_CARD)
+                notify(manager, if (current != null && shown != card) "$tag:decided" else tag, done)
                 result.finish()
             }
             .start()

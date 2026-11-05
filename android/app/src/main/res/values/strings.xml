@@ -61,7 +61,7 @@
     <string name="share_label">New session</string>
     <string name="share_cut">The shared text was cut to its first %1$d characters.</string>
     <string name="push_channel">Sessions that need you</string>
-    <string name="push_approve">Approve</string>
+    <string name="push_review">Review…</string>
     <string name="push_decline">Decline</string>
     <string name="push_channel_updates">Assistant updates</string>
     <string name="push_public">A session needs you</string>

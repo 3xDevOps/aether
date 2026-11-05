@@ -10,16 +10,30 @@ private fun push(json: String) = parsePush(json.toByteArray())
 
 // What internal/push sends for an assistant card (#722) and for a run.
 private const val CARD =
-    """{"title":"Assistant asks for approval","body":"Close run-7k2m9q4xbd","url":"/?assistant=1","tag":"card:ABCDEFGHIJKLMNOPQRSTUVWXYZ","card":"ABCDEFGHIJKLMNOPQRSTUVWXYZ"}"""
+    """{"title":"Assistant asks for approval","body":"Close run-7k2m9q4xbd","url":"/?assistant=1&card=ABCDEFGHIJKLMNOPQRSTUVWXYZ","tag":"card:ABCDEFGHIJKLMNOPQRSTUVWXYZ","card":"ABCDEFGHIJKLMNOPQRSTUVWXYZ"}"""
 private const val RUN = """{"title":"fix the build","body":"Question from the agent","run":"run-7k2m9q4xbd"}"""
 
 class PushNoticeTest {
     @Test
-    fun cardPushOffersApproveAndDeclineOverTheTailnet() {
+    fun cardPushOffersReviewAndDeclineOverTheTailnet() {
         val notice = push(CARD)
         assertEquals("card:ABCDEFGHIJKLMNOPQRSTUVWXYZ", notice.tag)
-        assertEquals(listOf(PushAction.APPROVE, PushAction.DECLINE), pushActions(notice, declinesDirectly = true))
-        assertEquals("/?assistant=1", pushPath(notice))
+        assertEquals(listOf(PushAction.REVIEW, PushAction.DECLINE), pushActions(notice, declinesDirectly = true))
+        assertEquals("/?assistant=1&card=ABCDEFGHIJKLMNOPQRSTUVWXYZ", pushPath(notice))
+    }
+
+    @Test
+    fun aDecidedCardIsClearedUnderItsTagAndOpensTheCard() {
+        val decided =
+            push(
+                """{"title":"Assistant card","body":"Approved: Close run-7k2m9q4xbd","clear":true,""" +
+                    """"url":"/?assistant=1&card=ABCDEFGHIJKLMNOPQRSTUVWXYZ","tag":"card:ABCDEFGHIJKLMNOPQRSTUVWXYZ"}""",
+            )
+        assertTrue(decided.clear)
+        assertEquals("card:ABCDEFGHIJKLMNOPQRSTUVWXYZ", decided.tag)
+        assertEquals("Approved: Close run-7k2m9q4xbd", decided.body)
+        assertEquals("/?assistant=1&card=ABCDEFGHIJKLMNOPQRSTUVWXYZ", pushPath(decided))
+        assertEquals(emptyList<PushAction>(), pushActions(decided, declinesDirectly = true))
     }
 
     @Test

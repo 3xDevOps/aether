@@ -379,9 +379,9 @@ and install it there.
 A distributor that refuses shows its reason, such as `The push distributor
 refused to register Aether: ACTION_REQUIRED` (sign in to it, then try again).
 
-An assistant card's notification follows the dashboard's rules: **Approve**
-opens the card, **Decline** declines it without opening the app, and a
-private card or one over 240 characters has no buttons. **Decline** needs
+An assistant card's notification follows the dashboard's rules: **Review…**
+opens the card, where you approve it, **Decline** declines it without opening
+the app, and a private card or one over 240 characters has no buttons. **Decline** needs
 **Tailscale** mode and Android 12 or later: it calls `assistant.confirm` on
 the server's dashboard, identified by the phone's tailnet login like any
 dashboard request, and Android asks you to unlock the phone before it runs.
@@ -390,7 +390,9 @@ where the identity is the CLI the app runs only while it is open, a card's
 notification only opens it. While it runs the notification reads
 `Declining…` with no buttons; then `Declined` with the card's text, or
 `Couldn't decline` with the server's own error, which alerts and opens the
-card. When a session stops needing you, its notification goes away.
+card. When a session stops needing you, its notification goes away; a card
+decided or withdrawn elsewhere is replaced, silently, by how it ended, such as
+`Approved: <summary>`.
 
 Sessions and cards that need you arrive on the **Sessions that need you**
 channel; assistant notices, budgets and test notifications on **Assistant

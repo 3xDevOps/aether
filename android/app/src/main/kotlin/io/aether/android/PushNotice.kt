@@ -17,7 +17,7 @@ data class PushNotice(
     val run: String?,
     val workspace: String?,
     val url: String?,
-    /** The assistant card the push offers Approve and Decline for. */
+    /** The assistant card the push offers Review… and Decline for. */
     val card: String?,
     /** The need ended: the notification under [tag] goes. */
     val clear: Boolean,
@@ -39,7 +39,7 @@ fun pushChannel(notice: PushNotice): PushChannel =
         PushChannel.UPDATES
     }
 
-enum class PushAction { APPROVE, DECLINE }
+enum class PushAction { REVIEW, DECLINE }
 
 // The server offers a card's buttons only when the push shows the whole of
 // it, and maxBodyRunes in internal/push is the limit it holds them to.
@@ -92,8 +92,9 @@ fun parsePush(content: ByteArray): PushNotice {
 }
 
 /**
- * The buttons [notice] gets, by #722's rules: Approve opens the card and
- * Decline decides it from the notification. A card the server sent without
+ * The buttons [notice] gets, by the service worker's rules: Review… opens
+ * the card, the one place it is approved, and Decline decides it from the
+ * notification. A card the server sent without
  * its id is private or long, and gets none; so does one longer than
  * [MAX_CARD_RUNES] whatever the server said. "Always" is never offered.
  *
@@ -104,7 +105,7 @@ fun parsePush(content: ByteArray): PushNotice {
 fun pushActions(notice: PushNotice, declinesDirectly: Boolean): List<PushAction> {
     if (notice.card == null || notice.clear || !declinesDirectly) return emptyList()
     if (notice.body.codePointCount(0, notice.body.length) > MAX_CARD_RUNES) return emptyList()
-    return listOf(PushAction.APPROVE, PushAction.DECLINE)
+    return listOf(PushAction.REVIEW, PushAction.DECLINE)
 }
 
 /** The dashboard path tapping [notice] opens, as the service worker picks it. */
