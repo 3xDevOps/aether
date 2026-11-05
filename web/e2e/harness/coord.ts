@@ -25,16 +25,16 @@ export function runCoordCLI<T>(runID: string, args: string[], input?: string): T
 // it, so the CLI is reachable only once the container runs too.
 export async function waitForCoordCLI(runID: string, dataDir: string): Promise<void> {
   await expect
-    .poll(() => coordCLIState(runID, dataDir), { timeout: 30_000, intervals: [100, 250, 500] })
+    .poll(() => {
+      if (!existsSync(path.join(dataDir, 'coord', runID, 'coord3.sock'))) return 'no coord3.sock yet'
+      try {
+        const running = execFileSync('docker', ['inspect', '--format', '{{.State.Running}}', runContainer(runID)], {
+          encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+        }).trim()
+        return running === 'true' ? 'ready' : `container running=${running}`
+      } catch (err) {
+        return `docker inspect: ${(err as { stderr?: string }).stderr?.trim() || String(err)}`
+      }
+    }, { timeout: 30_000, intervals: [100, 250, 500] })
     .toBe('ready')
-}
-
-function coordCLIState(runID: string, dataDir: string): string {
-  if (!existsSync(path.join(dataDir, 'coord', runID, 'coord3.sock'))) return 'no coord3.sock yet'
-  try {
-    const running = execFileSync('docker', ['inspect', '--format', '{{.State.Running}}', runContainer(runID)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-    return running === 'true' ? 'ready' : `container running=${running}`
-  } catch (err) {
-    return `docker inspect: ${(err as { stderr?: string }).stderr?.trim() || String(err)}`
-  }
 }
