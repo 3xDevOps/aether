@@ -9,6 +9,7 @@ const archiveMocks = vi.hoisted(() => ({
   runArchive: vi.fn(),
   runRelease: vi.fn(),
   runCloseCheck: vi.fn(),
+  runClose: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ api: archiveMocks }))
@@ -44,6 +45,60 @@ describe('archive confirmation dialog', () => {
     expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(2, 'run_a', true)
   })
 
+  it('offers live sessions idle for over a day, unchecking those with warnings, and closes before archiving', async () => {
+    const days = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString()
+    const idle = [
+      run({ id: 'run_quiet', task: 'Quiet reply', status: 'running', state: 'answered' }),
+      run({ id: 'run_pr', task: 'Open PR', status: 'running', state: 'answered' }),
+      run({ id: 'run_recent', task: 'Just replied', status: 'running', state: 'answered' }),
+      run({ id: 'run_busy', task: 'Still busy', status: 'running', state: 'waiting-ci' }),
+    ]
+    useStore.setState({ runs: Object.fromEntries([...closed, ...idle].map((r) => [r.id, toRecord(r)])) })
+    archiveMocks.runCloseCheck.mockImplementation(async (ids: string[]) => ids.map((id) => ({
+      run_id: id,
+      merged_pull_request: id === 'run_quiet',
+      idle_since: id === 'run_recent' ? new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() : days(3),
+      warnings: id === 'run_pr'
+        ? [{ kind: 'pull_request', detail: 'Pull request acme/shop#42 was open, not merged', url: 'https://github.com/acme/shop/pull/42', number: 42 }]
+        : [],
+    })))
+    archiveMocks.runClose.mockImplementation(async (id: string, outcome: string) => run({ id, status: outcome as never }))
+    render(<ClearDoneDialog />)
+
+    const list = await screen.findByRole('list', { name: 'Idle sessions' })
+    expect(screen.getByRole('heading', { name: 'Archive 3 sessions, closing 1 first?' })).toBeTruthy()
+    expect(list.textContent).toContain('Closes as merged · idle 3d, replied')
+    expect(list.textContent).toContain('Closes as abandoned · idle 3d, replied')
+    expect(list.textContent).toContain('Check to close anyway.')
+    expect(screen.getByRole('checkbox', { name: 'Quiet reply' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('checkbox', { name: 'Open PR' }).getAttribute('aria-checked')).toBe('false')
+    const all = screen.getByRole('checkbox', { name: 'Select all idle sessions without warnings' })
+    expect(all.getAttribute('aria-checked')).toBe('mixed')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Open PR' }))
+    expect(screen.getByRole('list', { name: 'Idle sessions' }).textContent).toContain('Closing anyway.')
+    expect(all.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(all)
+    expect(screen.getByRole('checkbox', { name: 'Quiet reply' }).getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByRole('checkbox', { name: 'Open PR' }).getAttribute('aria-checked')).toBe('false')
+    expect(all.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(all)
+    expect(screen.getByRole('checkbox', { name: 'Quiet reply' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('checkbox', { name: 'Open PR' }).getAttribute('aria-checked')).toBe('false')
+    expect(all.getAttribute('aria-checked')).toBe('mixed')
+    fireEvent.click(all)
+    expect(screen.getByRole('checkbox', { name: 'Open PR' }).getAttribute('aria-checked')).toBe('false')
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Not included/ }))
+    expect(screen.getByRole('list', { name: 'Live sessions not included' }).textContent).toBe('Still busywaiting on CIJust repliedactive 2h ago')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close 1, archive 3' }))
+    await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
+    expect(archiveMocks.runClose).toHaveBeenCalledTimes(1)
+    expect(archiveMocks.runClose).toHaveBeenCalledWith('run_quiet', 'merged')
+    expect(archiveMocks.runArchive).toHaveBeenCalledWith('run_quiet', true)
+    expect(archiveMocks.runArchive).not.toHaveBeenCalledWith('run_pr', true)
+  })
+
   it('cancels without calling the gateway', () => {
     render(<ClearDoneDialog />)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -67,7 +122,7 @@ describe('archive confirmation dialog', () => {
     )
     render(<ClearDoneDialog />)
 
-    expect(screen.getByText('Checking finished sessions…')).toBeDefined()
+    expect(screen.getByText('Checking sessions…')).toBeDefined()
     const archive = await screen.findByRole('button', { name: 'Archive 3' })
     expect(archiveMocks.runCloseCheck).toHaveBeenCalledWith(['run_c', 'run_d'], 'completed')
     expect(screen.getByRole('link', { name: 'acme/shop#42' })).toBeDefined()
@@ -93,7 +148,7 @@ describe('archive confirmation dialog', () => {
     useStore.setState({ runs: {} })
     render(<ClearDoneDialog />)
     expect(await screen.findByText('Nothing to archive')).toBeDefined()
-    expect(screen.queryByRole('button', { name: /Archive/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Archive 0' })).toHaveProperty('disabled', true)
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(useStore.getState().paletteDialog).toBeNull()
   })

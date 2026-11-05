@@ -1616,7 +1616,7 @@ drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
 when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
 `src/lib/commands.ts`, over the whole active workspace whoever owns the session.
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
-continue past failures and report the first real error; archive counts
+continue past failures and report each session's real error; archive counts
 `CodeNotFound` as done. Archiving hides a session whose status is final or
 `completed` (`isTerminal`) from every group without deleting its history.
 Before the archive confirmation offers its count, it reads `run.close_check` for
@@ -1625,6 +1625,34 @@ reasons, each one that still has live subsessions, a pull request not merged,
 sessions waiting on it or pending cleanup; the server refuses those too, and a
 completed session whose result still awaits review, which the single Archive
 command does not offer.
+The same confirmation offers live sessions that are idle and done:
+`idleArchivePlan()` (`src/lib/idle-archive.ts`) takes a running or parked
+session whose agent replied, or whose turn ended without a report, with
+nothing that needs you, no pending request, no reported wait, no live
+subsessions or held background tasks, not paused, and no open parent. The
+batched `run.close_check` then says how long each has been idle
+(`idle_since`) and whether it closes as merged (`merged_pull_request`, else
+abandoned); one changed within 24 hours, or on an older server that does not
+report `idle_since`, is not included. Each row leads with
+its outcome, then why ("Closes as merged · idle 3d, replied"). One with a
+close warning, a failed check, or an older server that cannot tell its
+outcome starts unchecked and says "Check to close anyway", or "Closing
+anyway" once checked; the rest start checked. The section header's select
+all takes only rows without warnings, so a warned row always needs its own
+click; it shows a full check only when every idle row is checked. On a phone
+the Idle header stays at the top of the scrolling body. Every other live session in scope is listed under **Not included**,
+collapsed, with what keeps it. The title and primary button say what happens
+("Archive 5 sessions, closing 2 first?", **Close 2, archive 5**), Cancel
+holds the focus with its ring drawn, and **Check again** rebuilds the whole
+plan, as does the retry shown when an idle session's check failed. With idle
+sessions offered but none checked the title reads "Choose idle sessions to
+close and archive"; "Nothing to archive" means nothing was offered. On desktop the Idle list scrolls in a bounded box that fades at the
+bottom while more is below; on a phone the sheet scrolls instead. Each checked session is
+closed, then archived, unless it changed since the plan saw it (its status,
+review, state, pause or pending requests); one deleted meanwhile is dropped
+without an error, and a skipped or
+failed close leaves it live and unarchived, and the toast names each session
+that failed with its error.
 Freeing removes a retained container and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet
