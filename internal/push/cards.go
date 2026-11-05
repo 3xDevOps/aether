@@ -117,7 +117,7 @@ func (s *Service) restoreCards(ctx context.Context) []domain.MemberID {
 }
 
 // knownCards is member's lock and announced cards, which only its holder
-// reads or changes.
+// reads or changes once Start has started its goroutines.
 func (s *Service) knownCards(member domain.MemberID) (*sync.Mutex, map[string]announced) {
 	s.cardPushes.mu.Lock()
 	defer s.cardPushes.mu.Unlock()
