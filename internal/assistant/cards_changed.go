@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/push"
 )
@@ -66,14 +68,46 @@ func (s *Service) CardState(ctx context.Context, member domain.MemberID, id stri
 
 // privateCard reports whether c saves, forgets or sends a saved preference,
 // in its parameters or in the text the card shows, which a template
-// launch renders from parameters nested in its own.
+// launch renders from parameters nested in its own. Disabled preferences
+// count, and a card found private stays so: disabling a preference while
+// its card waits must not let the card's text reach a locked screen.
 func (s *Service) privateCard(ctx context.Context, member domain.MemberID, c protocol.AssistantConfirmation) bool {
-	if _, ok := privateSummaries[c.Method]; ok || s.carriesPreference(ctx, member, c) {
+	if _, ok := privateSummaries[c.Method]; ok {
 		return true
 	}
-	shown := c
-	shown.Params, _ = json.Marshal(map[string]string{"task": c.Summary + "\n" + c.Task + "\n" + c.Reason})
-	return s.carriesPreference(ctx, member, shown)
+	if _, ok := s.privateCards.Load(c.ID); ok {
+		return true
+	}
+	if !s.sendsPreference(ctx, member, c) {
+		return false
+	}
+	s.privateCards.Store(c.ID, true)
+	return true
+}
+
+// sendsPreference reports whether c's parameters or shown text hold the
+// text of any of the member's preferences, enabled or not. A failed read
+// counts as holding one.
+func (s *Service) sendsPreference(ctx context.Context, member domain.MemberID, c protocol.AssistantConfirmation) bool {
+	if s.cfg.Preferences == nil {
+		return false
+	}
+	var sent struct {
+		Task    string `json:"task"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(c.Params, &sent)
+	words := preference.Words(preference.Normalize(strings.Join([]string{sent.Task, sent.Message, c.Summary, c.Task, c.Reason}, "\n")))
+	listed, err := s.cfg.Preferences.List(ctx, member, protocol.PreferenceListParams{IncludeDisabled: true})
+	if err != nil {
+		return true
+	}
+	for _, p := range listed.Preferences {
+		if preference.Index(words, preference.Words(p.Text)) >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // cardsChanged tells the bus member's cards changed, for their devices'

@@ -91,10 +91,14 @@ type Host interface {
 }
 
 type Service struct {
-	cfg    Config
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	cfg Config
+	// privateCards holds the ids of cards found to send a saved
+	// preference; they stay private for pushes whatever the preference
+	// becomes.
+	privateCards sync.Map
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
 
 	mu      sync.Mutex
 	members map[domain.MemberID]*member
