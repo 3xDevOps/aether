@@ -250,11 +250,15 @@ func runShow(runID string, asJSON bool) error {
 // needsYou selects the runs that need a member, by the rule push
 // notifications and the dashboard share (domain.Run.NeedsAttention).
 func needsYou(r protocol.Run) bool {
-	run := domain.Run{
+	return domainRun(r).NeedsAttention(r.Paused)
+}
+
+func domainRun(r protocol.Run) *domain.Run {
+	return &domain.Run{
 		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
 		OutcomeUnseen: r.OutcomeUnseen, Review: domain.RunReview(r.Review),
+		ParentRunID: domain.RunID(r.ParentRunID), Detached: r.Detached,
 	}
-	return run.NeedsAttention(r.Paused)
 }
 
 // plural renders a count with its noun, so the notice reads as a sentence
@@ -298,14 +302,15 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 }
 
 // displayStatus is the dashboard's label for a live run's state, else for
-// its status. A reported success awaiting review is Ready for review, live or
-// completed.
+// its status. A reported success awaiting review (domain.Run.AwaitsReview)
+// is Finished: review, live or completed; a subsession's, which is for its
+// parent agent only, is Finished: reported to its parent.
 func displayStatus(r protocol.Run) string {
-	review := domain.RunReview(r.Review)
-	if review == domain.ReviewReady || review == domain.ReviewLater {
-		if r.Activity == string(domain.ActivityFinished) || r.Status == string(domain.RunCompleted) {
-			return "Ready for review"
-		}
+	switch run := domainRun(r); {
+	case run.AwaitsReview(false):
+		return "Finished: review"
+	case run.OutcomeHeld() && (run.Review == domain.ReviewReady || run.Review == domain.ReviewLater):
+		return "Finished: reported to its parent"
 	}
 	if label, ok := activityLabels[domain.RunActivity(r.Activity)]; ok {
 		if r.Wait != nil && waitLabels[r.Wait.Kind] != "" {
@@ -353,7 +358,7 @@ var statusLabels = map[domain.RunStatus]string{
 
 func runRuns(args []string) error {
 	fs := newFlagSet("sessions")
-	onlyNeedsYou := fs.Bool("needs-you", false, "list only sessions that need you (state needs-you or disconnected, an unseen failure, or a reported success ready for review; never paused)")
+	onlyNeedsYou := fs.Bool("needs-you", false, "list only sessions that need you (state needs-you or disconnected, or an unseen failure; never paused, never a finished session awaiting review)")
 	archived := fs.Bool("archived", false, "list only archived sessions")
 	asJSON := fs.Bool("json", false, "print a JSON array, or with a session id one JSON object: id, workspace_id, workspace, status, state, reason, pending_inputs, branch, report")
 	runID := ""

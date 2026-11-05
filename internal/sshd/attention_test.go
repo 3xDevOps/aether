@@ -50,6 +50,10 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		return run
 	}
 
+	finished := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished)
+	if _, _, err := e.store.SetRunReview(ctx, finished.ID, domain.ReviewReady, ""); err != nil {
+		t.Fatal(err)
+	}
 	permission := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "", domain.ActivityNeedsYou)
 	e.runs.mu.Lock()
 	e.runs.acpPending = map[domain.RunID][]acphost.Request{permission.ID: {{
@@ -66,10 +70,39 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 	paused := newRun(e.member.ID, domain.LaunchTUI, domain.RunNeedsAttention, "needs input: still there?", domain.ActivityNeedsYou)
 	e.runs.setPaused(paused.ID, true)
 	working := newRun(e.member.ID, domain.LaunchTUI, domain.RunRunning, "", domain.ActivityWorking)
+	subsessions := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "waiting on 2 subsessions", domain.ActivityWaitingAgents)
+	ci := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "CI on PR 12", domain.ActivityWaitingCI)
+	process := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "release build", domain.ActivityWaitingTools)
 	failed := newRun(e.member.ID, domain.LaunchTUI, domain.RunRunning, "", domain.ActivityWorking)
 	if _, err := e.store.FinishRunReported(ctx, failed.ID, domain.RunNeedsAttention, "agent reported failure", domain.ActivityFailed, nil, nil); err != nil {
 		t.Fatal(err)
 	}
+	lead := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "waiting for 2 subsessions", domain.ActivityWaitingAgents)
+	child := func(reason string, activity domain.RunActivity) *domain.Run {
+		t.Helper()
+		reserved, _, err := e.store.(*store.DB).ReserveChild(ctx, &domain.ChildReservation{
+			ParentRunID: lead.ID, RootRunID: lead.ID, TreeKey: string(lead.ID), WorkspaceID: e.ws.ID,
+			OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "codex", Mode: domain.LaunchACP, Task: "subtask",
+			IdempotencyKey: reason, RequestHash: reason,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := &domain.Run{ID: reserved.RunID, WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "subtask", Harness: "codex", Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+		if err := e.store.(*store.DB).CreateRunWithID(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.store.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, activity, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	heldSuccess := child("agent reported success", domain.ActivityFinished)
+	if _, _, err := e.store.SetRunReview(ctx, heldSuccess.ID, domain.ReviewReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	heldFailure := child("agent reported failure", domain.ActivityFailed)
+	childBlocked := child("blocked: no credentials", domain.ActivityNeedsYou)
 	bobs := newRun(bob.ID, domain.LaunchTUI, domain.RunRunning, "", domain.ActivityWorking)
 	question := &store.RoomMessage{WorkspaceID: e.ws.ID, RunID: bobs.ID, ActorID: e.member.ID, ActorDisplayName: "Ada", Kind: store.RoomMessageQuestion, Body: "Is the migration safe?", IdempotencyKey: "q1"}
 	if err := e.store.CreateRoomMessage(ctx, question); err != nil {
@@ -85,6 +118,8 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		disconnected.ID: {protocol.AttentionKindDisconnected, "Agent disconnected: eof"},
 		blocked.ID:      {protocol.AttentionKindBlocked, "Blocked: no credentials"},
 		failed.ID:       {protocol.AttentionKindFailed, "Agent reported failure; review the result. Session remains open for follow-up."},
+		finished.ID:     {protocol.AttentionKindReady, "Finished: review the result"},
+		childBlocked.ID: {protocol.AttentionKindBlocked, "Blocked: no credentials"},
 	}
 	for id, w := range want {
 		item, ok := got[id]
@@ -92,10 +127,21 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 			t.Errorf("session %s = %+v, want kind %q reason %q", id, item, w[0], w[1])
 		}
 	}
-	for _, id := range []domain.RunID{paused.ID, working.ID, bobs.ID, e.run.ID} {
+	for _, id := range []domain.RunID{paused.ID, working.ID, subsessions.ID, ci.ID, process.ID, lead.ID, heldSuccess.ID, heldFailure.ID, bobs.ID, e.run.ID} {
 		if item, ok := got[id]; ok {
 			t.Errorf("session %s listed for Ada: %+v", id, item)
 		}
+	}
+	raw, perr := callJSON(t, e, e.member.ID, protocol.MethodAttentionList, protocol.AttentionListParams{})
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	var listed protocol.AttentionListResult
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		t.Fatal(err)
+	}
+	if last := listed.Items[len(listed.Items)-1]; last.RunID != string(finished.ID) {
+		t.Errorf("last item = %s, want the oldest item, finished, after every item that asks something", last.RunID)
 	}
 	p := got[permission.ID]
 	if p.Title != "fix the build" || p.Harness != "codex" || p.WorkspaceID != string(e.ws.ID) || p.Request == nil ||

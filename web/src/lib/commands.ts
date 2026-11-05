@@ -36,7 +36,7 @@ import {
 import { api, ApiError, codeInvalidState, codeNotFound, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { errorSentence, message } from '@/lib/format'
-import { awaitsCompletion } from '@/lib/needs-you'
+import { awaitsCompletion, outcomeHeld } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
 import type { CloseOutcome, LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
@@ -629,8 +629,9 @@ export function closeCommand(runID: string, outcome: 'merged' | 'abandoned'): Co
   }
 }
 
-/** A run whose agent reported success and that its owner has not marked complete. */
+/** A run whose agent reported success and that its owner has not marked complete. A subsession finishes by reporting to its parent agent, so it has none of this. */
 function completable(run: RunRecord): boolean {
+  if (outcomeHeld(run)) return false
   return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review === undefined && !run.review_changed_at)
 }
 

@@ -7,21 +7,24 @@ import { EffortPicker } from '@/components/launch/effort-picker'
 import { ModeControl } from '@/components/launch/mode-control'
 import { ModelPicker } from '@/components/launch/model-picker'
 import { initialMode, modeRefusal, refusals } from '@/components/launch/modes'
+import { Callout } from '@/components/ui/callout'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { AgentInfo, LaunchDefaultsResult, LaunchMode } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { type LaunchDefaultsRead, rememberedChoice } from '@/store/launch-defaults'
 
-function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, preferred?: string): string {
+function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, preferred?: string, fallback?: string): string {
   const { launchDefaults, runs } = useStore.getState()
   const ok = list.filter(launchable)
-  if (preferred && ok.some((agent) => agent.name === preferred)) return preferred
-  const last = saved
-    ? ok.find((agent) => agent.name === saved.defaults.agent)
-    : ok.filter((agent) => launchDefaults[agent.name]).sort((a, b) => launchDefaults[b.name].at - launchDefaults[a.name].at)[0]
+  const can = (name?: string): name is string => !!name && ok.some((agent) => agent.name === name)
+  if (can(preferred)) return preferred
+  if (saved && can(saved.defaults.agent)) return saved.defaults.agent
+  if (can(fallback)) return fallback
+  const last = saved ? undefined : ok.filter((agent) => launchDefaults[agent.name]).sort((a, b) => launchDefaults[b.name].at - launchDefaults[a.name].at)[0]
   if (last) return last.name
   const recent = Object.values(runs)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -30,16 +33,18 @@ function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, prefer
 }
 
 /** The agent, mode, model and effort a launch uses, reloaded for each account; `preferred`
- * wins the first pick when that agent can launch, with `preferredModel` and `preferredEffort`.
+ * wins the first pick when that agent can launch, with `preferredModel` and `preferredEffort`;
+ * `fallback` comes right after the saved agent.
  * The first pick waits for `saved`, the server's saved choices, or uses this
  * browser's when the server keeps none or cannot be read. */
-export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, preferredEffort, hold = false, pick = 0, client = api }: {
+export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, preferredEffort, fallback, hold = false, pick = 0, client = api }: {
   account: string
   ownAccountID: string
   saved: LaunchDefaultsRead
   preferred?: string
   preferredModel?: string
   preferredEffort?: string
+  fallback?: string
   /** Holds the first pick while the caller may still switch `account`. */
   hold?: boolean
   /** A change picks again from the saved choices, replacing the current agent. */
@@ -55,7 +60,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   const [effort, setEffort] = useState('')
   const [attempt, setAttempt] = useState(0)
   const savedReady = saved.fresh
-  const choice = useRef({ harness, mode, preferred, preferredModel, preferredEffort, saved: saved.result, pick })
+  const choice = useRef({ harness, mode, preferred, preferredModel, preferredEffort, fallback, saved: saved.result, pick })
   choice.current = { ...choice.current, harness, mode, saved: saved.result }
 
   const choose = useCallback((name: string, list: AgentInfo[]) => {
@@ -88,7 +93,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
     current.pick = pick
     const keep = !repick && (current.harness === customAgent || agents.some((item) => item.name === current.harness && launchable(item)))
     if (!keep) {
-      const name = preselect(agents, current.saved, current.preferred)
+      const name = preselect(agents, current.saved, current.preferred, current.fallback)
       choose(name, agents)
       if (name === current.preferred && current.preferredModel !== undefined) setModel(current.preferredModel)
       if (name === current.preferred && current.preferredEffort !== undefined) setEffort(current.preferredEffort)
@@ -125,6 +130,7 @@ export function RunFields({
   onChoice,
   disabled = false,
   autoFocus = false,
+  shared = false,
 }: {
   choice: ReturnType<typeof useAgentChoice>
   task: string
@@ -133,18 +139,12 @@ export function RunFields({
   onChoice?: () => void
   disabled?: boolean
   autoFocus?: boolean
+  shared?: boolean
 }) {
-  const { agents, agent, harness, mode, noAgents } = choice
+  const { agents, harness, mode, noAgents } = choice
   return (
     <>
-      <FormField
-        label="Task"
-        help={mode === 'headless'
-          ? 'Required. A Background session starts with this task and takes no input.'
-          : 'Optional. Leave it blank to open the agent with no prompt.'}
-      >
-        <TaskBox autoFocus={autoFocus} required={mode === 'headless'} value={task} onTask={onTask} />
-      </FormField>
+      <TaskField mode={mode} task={task} onTask={onTask} autoFocus={autoFocus} shared={shared} />
       {agents === null ? (
         <p className="text-ui-sm text-muted">Loading agents…</p>
       ) : (
@@ -157,10 +157,54 @@ export function RunFields({
           disabled={disabled}
         />
       )}
-      {harness && (
-        <ModeControl label="Mode" value={mode} onChange={(next) => { onChoice?.(); choice.setMode(next) }} refused={refusals(agent, harness)} onSetUp={onSetUp} />
+      <AgentOptions choice={choice} onSetUp={onSetUp} onChoice={onChoice} disabled={disabled} />
+    </>
+  )
+}
+
+/** `shared` marks text another app handed over, which shows whole until edited. */
+export function TaskField({ mode, task, onTask, autoFocus = false, shared = false, brief = false, disabled = false }: {
+  mode: LaunchMode
+  task: string
+  onTask: (task: string) => void
+  autoFocus?: boolean
+  shared?: boolean
+  /** One-word help, for a phone. */
+  brief?: boolean
+  disabled?: boolean
+}) {
+  const headless = mode === 'headless'
+  const characters = [...task].length
+  const lines = task.split('\n').length
+  const help = brief
+    ? (headless ? 'Required in Background mode.' : 'Optional.')
+    : (headless ? 'Required. A Background session starts with this task and takes no input.' : 'Optional. Leave it blank to open the agent with no prompt.')
+  return (
+    <>
+      {shared && (
+        <Callout tone="needs-you" role="status" title="Shared from another app: review it before launching">
+          {characters} {characters === 1 ? 'character' : 'characters'}, {lines} {lines === 1 ? 'line' : 'lines'}. Nothing runs until you choose Launch.
+        </Callout>
       )}
-      {harness && <ModelField harness={harness} accountMemberID={choice.accountMemberID} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />}
+      <FormField label="Task" help={help}>
+        <TaskBox className={cn('[field-sizing:content]', !shared && 'max-h-48')} autoFocus={autoFocus} readOnly={disabled} required={headless} value={task} onTask={onTask} />
+      </FormField>
+    </>
+  )
+}
+
+export function AgentOptions({ choice, onSetUp, onChoice, disabled = false }: {
+  choice: ReturnType<typeof useAgentChoice>
+  onSetUp: () => void
+  onChoice?: () => void
+  disabled?: boolean
+}) {
+  const { agent, harness, mode } = choice
+  if (!harness) return null
+  return (
+    <>
+      <ModeControl label="Mode" value={mode} onChange={(next) => { onChoice?.(); choice.setMode(next) }} refused={refusals(agent, harness)} onSetUp={onSetUp} />
+      <ModelField harness={harness} accountMemberID={choice.accountMemberID} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />
       {choice.effortLevels.length > 0 && <EffortField levels={choice.effortLevels} value={choice.effort} onChange={(next) => { onChoice?.(); choice.setEffort(next) }} disabled={disabled} />}
     </>
   )

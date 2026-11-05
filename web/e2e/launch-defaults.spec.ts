@@ -22,7 +22,12 @@ async function openLaunch(page: Page, onPhone: boolean): Promise<Locator> {
   await button.click()
   const dialog = page.getByRole('dialog', { name: 'New session' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByRole('radio', { name: /^custom/ })).toBeVisible()
+  if (onPhone) {
+    await expect(dialog.getByRole('combobox', { name: 'Agent' })).toBeVisible()
+    await dialog.getByRole('button', { name: /^More options/ }).click()
+  } else {
+    await expect(dialog.getByRole('radio', { name: /^custom/ })).toBeVisible()
+  }
   return dialog
 }
 

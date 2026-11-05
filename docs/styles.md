@@ -97,15 +97,18 @@ the system theme over the native error and update panels.
 
 `accent` is a fill for backgrounds and borders but the link colour for text;
 `bg-accent-hover` darkens the fill for a hovered primary button. The accent
-marks selection, focus, the one primary button per view and links, nothing
-else. Inside a selected row, secondary text uses `text-text`. A floating
+marks selection, focus, the one primary button per view, links and the
+Finished: review state, nothing else. Inside a selected row, secondary text uses `text-text`. A floating
 surface is `bg-raised`, a 1px seam and `shadow-overlay`; dialogs, the
 palette and sheets take `shadow-dialog` and sit over `bg-scrim`.
 [Geometry](#geometry-and-responsive-behavior) lists every shadow.
 
-The five session states (see
+The session states (see
 [dashboard-frontend.md](dashboard-frontend.md#session-state)), used on dots,
-state lines, badges, callouts and request cards:
+state lines, badges, callouts and request cards. Finished: review, a reported
+success awaiting its owner, takes the accent and a filled check circle; it
+asks nothing, so it is never amber. A subsession's success, which is for
+its parent agent only, draws the done check in `icon-faint` (the `held` tone):
 
 | State | Utility | Light | Dark |
 | --- | --- | --- | --- |
@@ -114,6 +117,7 @@ state lines, badges, callouts and request cards:
 | Paused | `state-paused` | `#6e6e6e` | `#8a8a8a` |
 | Done | `state-done` | `#1a7a36` | `#45c26a` |
 | Failed | `state-failed` | `#c8321f` | `#f05c4a` |
+| Finished: review | `text-accent`, `bg-accent-soft` (`review` tone) | `#306f69` | `#5fb3a8` |
 
 Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
 `bg-accent-soft` likewise. `text-on-failed` is the text on a `bg-state-failed`
@@ -317,7 +321,7 @@ it). Subagent sub-lanes use the same fills.
 | Working | `text-state-working`; a live bar adds a 2px `border-state-working` end cap and `live-shimmer` on its activity text |
 | Needs you, or Needed attention in history | `text-state-needs-you`; a live bar ends in a `bg-raised` **Needs you** tag with a pulsing dot |
 | Paused | `text-state-paused` |
-| Ready for review | `text-accent`, matching its dot |
+| Finished: review | `text-accent`, matching its dot; never the Needs you tag. The lane's label carries a review-tone **Finished: review** chip |
 | Done, Failed | `text-state-done`, `text-state-failed`; a finished session's working spans take its outcome's colour |
 | Waiting, answered, closed | `text-muted` |
 | Starting | hollow, dashed `border-seam` |

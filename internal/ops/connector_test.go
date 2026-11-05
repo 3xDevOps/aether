@@ -482,12 +482,13 @@ func TestConnectorReadTools(t *testing.T) {
 	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many})
 	text, out = run(t, cs, "aether_needs_attention", nil)
 	items := out["items"].([]any)
-	if text != "30 of 45 items that need you, pending requests first, then oldest first." || len(items) != 30 || out["total"] != float64(45) {
+	if text != "Showing 30 of 45 items. 5 items need you, pending requests first, then oldest first. 40 finished sessions await review last; they are not blocking." ||
+		len(items) != 30 || out["total"] != float64(45) {
 		t.Fatalf("aether_needs_attention past the cap = %q", text)
 	}
-	want := []string{"run-3", "run-10", "run-20", "run-44"}
+	want := []string{"run-3", "run-10", "run-20", "run-44", "run-40"}
 	for i := 0; len(want) < 30; i++ {
-		if !slices.Contains([]int{3, 10, 20, 44}, i) {
+		if !slices.Contains([]int{3, 10, 20, 40, 44}, i) {
 			want = append(want, fmt.Sprintf("run-%d", i))
 		}
 	}
@@ -500,6 +501,11 @@ func TestConnectorReadTools(t *testing.T) {
 	}
 	if sudoRow := items[3].(map[string]any); sudoRow["answer_id"] != "sudo-1" || sudoRow["answer_with"] != "aether_decide_approval" {
 		t.Fatalf("the sudo request = %v, want it answered with aether_decide_approval", sudoRow)
+	}
+
+	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many[:2]})
+	if text, _ = run(t, cs, "aether_needs_attention", nil); text != "Nothing needs you. 2 finished sessions await review last; they are not blocking." {
+		t.Fatalf("aether_needs_attention with only finished sessions = %q", text)
 	}
 
 	f.answers[protocol.MethodInsightsGet] = func(raw json.RawMessage) (any, error) {
