@@ -137,4 +137,28 @@ describe('an address the desktop app moves to', () => {
     window.history.replaceState(null, '', '/')
     expect(seen).toEqual(['assistant=1&card=c1'])
   })
+
+  it('opens a card over the page in place, so Back leaves it', () => {
+    window.history.replaceState(null, '', '/?page=settings')
+    window.history.pushState(null, '', '/?run=run_a')
+    const store = createRootStore()
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+    const length = window.history.length
+
+    act(() => {
+      window.history.replaceState(window.history.state, '', '/?run=run_a&assistant=1&card=c1')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(window.location.search).toBe('?run=run_a')
+    expect(window.history.length).toBe(length)
+
+    act(() => {
+      window.history.back()
+    })
+    return vi.waitFor(() => {
+      expect(window.location.search).toBe('?page=settings')
+      expect(store.getState().route).toEqual({ name: 'settings', params: {} })
+    })
+  })
 })

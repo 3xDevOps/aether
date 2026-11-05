@@ -225,6 +225,14 @@ export function bindRouteToUrl(store: RouteStore, onAddress?: (query: URLSearchP
   const pop = () => {
     const query = new URLSearchParams(window.location.search)
     onAddress?.(query)
+    // A card is opened once: the entry keeps only its route, so the route
+    // is not pushed again on top of it and Back to it reopens nothing.
+    if (query.has('assistant') || query.has('card')) {
+      const clean = new URL(window.location.href)
+      clean.searchParams.delete('assistant')
+      clean.searchParams.delete('card')
+      window.history.replaceState(window.history.state, '', clean.toString())
+    }
     const route = addressedRoute(query)
     store.getState().navigate(route.name, route.params)
   }
