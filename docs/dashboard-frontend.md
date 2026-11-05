@@ -501,7 +501,7 @@ one's name, muted, after the title.
 | --- | --- |
 | **Needs you** | the `needs-you` route; its badge counts what asks you |
 | **Sessions** | the `sessions` route: the sidebar's session list, full width; current on a session, the board and All workspaces too |
-| **New** | the launch dialog; named **New session**, hidden if you cannot launch |
+| **New** | the [launch sheet](#the-forms); named **New session**, hidden if you cannot launch |
 | **Assistant** | the assistant sheet, with the desktop button's dot and name |
 | **More** | a bottom sheet, a `dialog` named "More"; the tab is **More pages** |
 
@@ -1126,8 +1126,9 @@ layout viewport for the keyboard, so `useKeyboardInset()`
 browsers that resize. `md` is a width breakpoint, so a desktop window
 narrower than 768px is treated as a phone here too. A menu with more than six
 items also opens as a bottom sheet below `md`. On a phone (`phoneScreen`)
-the New session sheet's agent list shows only the chosen agent with **Change**,
+onboarding's First session agent list shows only the chosen agent with **Change**,
 so **Mode** sits above the fold; picking an agent collapses the list again.
+New session has its own phone sheet ([the forms](#the-forms)).
 
 What gives way first:
 
@@ -2498,6 +2499,45 @@ nothing is preselected, Launch stays disabled, and the form says "No agent is
 installed in your environment." with a **Set up an agent** button in place of
 **Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
+
+Below 768px the same form is a bottom sheet (`phone-launch.tsx`): **Task**
+first, focused, with one-word help; then the **Repository** chip, the base
+branch as muted text ("from main"; sessions always start from it) and the
+**Agent** chip; then **Launch** pinned under the form. Permission, Mode, Model,
+Effort, Resource limits, Subsessions, extra repositories and the account sit
+under **More options**, whose caption names the mode, with **Install more
+agents...** at its end. Closing the sheet returns focus to what opened it. The repository starts
+on the workspace of your newest session that you started yourself (not a
+subsession or a connector launch) in a workspace that still exists, read once
+when the sheet opens; without one, the active workspace. The agent is your
+saved agent; with none saved, that session's agent if it can launch; then as
+on desktop. A line under the chips says which of the two match that session. A repository chosen here affects only
+this launch. If the chosen workspace is deleted while the form is open,
+Launch turns off and a callout says so; the task is kept. With no workspace
+at all the sheet says so and offers **Add a
+workspace**, which opens Manage workspaces. A refusal shows between the
+form and Launch, outside the scrolling form, so the keyboard cannot hide it;
+past 40% of the screen it scrolls. So a quick task is three steps: **New**,
+type, Launch.
+
+**Share to Aether.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
+the gateway URL with `&new=1&prompt=...` through an edge, opens New session
+with the text as its task. It is the entry point for sharing from another
+app, so the text only fills the form. At load, before any route is written to
+history, `initialRoute` (`src/lib/url-state.ts`) takes `new` and `prompt` off
+the address with `history.replaceState` and keeps the text in memory, so
+neither Back nor a reload brings it back; a `prompt` without `new=1` is
+dropped. Once the server has answered (not only a saved snapshot) and no
+other form is open,
+`useSharedPrompt` (`components/launch/shared-prompt.ts`) opens the form,
+keeping the first 8000 characters (counted by code point, so an emoji is never split) and saying so in a toast when it cut any.
+Above the task a callout says "Shared from another app: review it before
+launching" with the character and line count, and the task field grows to
+show all of it; both go back to normal once the text is edited. Only the
+address read at load carries a share, so each one meets a fresh form. A
+member who cannot launch gets a toast with the reason: the gateway has no
+`run.launch`, or the role cannot launch. On desktop the panel opens the same
+way.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
 "Native messages, approvals and progress", see

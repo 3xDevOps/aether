@@ -342,7 +342,10 @@ you to allow it. **Root access** lets `sudo` run
 without asking, and **Isolated** keeps every change outside the checkout
 inside the session ([permission tiers](security.md#permission-tiers)). Enter the
 **Task**, pick the **Agent** and the **Mode**, and click **Launch**.
-**Background** mode runs the task once with no interaction. From the CLI:
+**Background** mode runs the task once with no interaction. On a phone, tap
+**New**, type the task and tap **Launch**: the repository and agent start on
+your last session's unless you saved a default agent, and Permission and Mode
+are under **More options**. From the CLI:
 
 ```sh
 aether session "add a health check endpoint" --workspace myproject --agent claude

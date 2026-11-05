@@ -63,6 +63,7 @@ export function hrefFor(href: string, route: Route): string {
 
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
+  keepSharedPrompt()
   if (handedLink()) return { name: 'onboarding', params: {} }
   const route = routeFromQuery(new URLSearchParams(window.location.search))
   // A phone lands on Needs you; the board stays one link away.
@@ -71,6 +72,30 @@ export function initialRoute(): Route {
   if (route.name !== 'settings' || route.params.section || !hash) return route
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
   return { name: 'settings', params: { section: hash } }
+}
+
+let shared: string | null = null
+
+/**
+ * Share to Aether opens `?new=1&prompt=<text>`. Both leave the address before
+ * any route is written, so neither Back nor a reload brings the text back;
+ * the text waits in memory for takeSharedPrompt. A `prompt` without `new=1`
+ * is dropped.
+ */
+function keepSharedPrompt() {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('new') && !url.searchParams.has('prompt')) return
+  if (url.searchParams.get('new') === '1') shared = url.searchParams.get('prompt') ?? ''
+  url.searchParams.delete('new')
+  url.searchParams.delete('prompt')
+  window.history.replaceState(window.history.state, '', url.toString())
+}
+
+/** The text shared at load, once. */
+export function takeSharedPrompt(): string | null {
+  const text = shared
+  shared = null
+  return text
 }
 
 export type HandedLink = { kind: 'join' | 'claim'; link: string }

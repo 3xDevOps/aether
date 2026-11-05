@@ -15,12 +15,15 @@ export interface PaletteSlice {
   paletteForwardTarget: string | null
   /** The pull request the Watch form is for; a run's comes from paletteRunID. */
   paletteWatchTarget: WatchTarget | null
+  /** The task the launch form opens with: text shared to Aether. */
+  paletteLaunchTask: string
   /** A verb that closes a run with close warnings, held until the owner confirms. */
   closeConfirmation: { check: RunCloseCheck; asked: string; outcome: CloseOutcome; command: Command } | null
   /** Runs whose close check is in flight, so a second press does not check again. */
   closeChecking: Record<string, true>
   togglePalette: (open?: boolean) => void
   openPaletteDialog: (dialog: PaletteDialog, runID?: string) => void
+  openLaunchWithTask: (task: string) => void
   openForwardDialog: (target: string) => void
   openWatchDialog: (target: WatchTarget) => void
   closePaletteDialog: () => void
@@ -35,6 +38,7 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
   paletteRunID: null,
   paletteForwardTarget: null,
   paletteWatchTarget: null,
+  paletteLaunchTask: '',
   closeConfirmation: null,
   closeChecking: {},
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
@@ -45,6 +49,16 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
       paletteRunID: runID ?? null,
       paletteForwardTarget: null,
       paletteWatchTarget: null,
+      paletteLaunchTask: '',
+    }),
+  openLaunchWithTask: (task) =>
+    set({
+      paletteOpen: false,
+      paletteDialog: 'launch',
+      paletteRunID: null,
+      paletteForwardTarget: null,
+      paletteWatchTarget: null,
+      paletteLaunchTask: task,
     }),
   openForwardDialog: (target) =>
     set({
@@ -68,6 +82,7 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
       paletteRunID: null,
       paletteForwardTarget: null,
       paletteWatchTarget: null,
+      paletteLaunchTask: '',
     }),
   // A later check's answer never replaces the confirmation on screen, whose
   // Close anyway would then run another session's close.
