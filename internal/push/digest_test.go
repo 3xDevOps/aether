@@ -342,22 +342,27 @@ func TestAResultQueuedAfterADashboardHoldKeepsItsTime(t *testing.T) {
 	}
 }
 
-func TestAHandoffKeepsTheNewOwnersSummary(t *testing.T) {
+func TestAHandoffDropsTheRunOnlyFromTheFormerOwnersSummary(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	for _, member := range []*domain.Member{h.ada, h.bob} {
+	cy := h.member("Cy")
+	for _, member := range []*domain.Member{h.ada, h.bob, cy} {
 		for _, key := range []string{"run-a", "run-b"} {
 			if _, err := h.svc.join(member.ID, key, "run-a", "topic", "Fix it", "Blocked", true); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	h.svc.unjoin(h.ctx, "run-a", h.bob.ID)
-	if h.svc.Summarizes(h.bob.ID, "run-a") != true || !slices.Contains(h.svc.bursts[h.bob.ID][0].keys, "run-a") {
-		t.Fatal("the new owner's summary lost the run")
-	}
+	h.svc.unjoin(h.ctx, "run-a", h.ada.ID)
+	h.svc.mu.Lock()
+	defer h.svc.mu.Unlock()
 	if slices.Contains(h.svc.bursts[h.ada.ID][0].keys, "run-a") {
 		t.Fatal("the former owner's summary still shows the run")
+	}
+	for _, member := range []*domain.Member{h.bob, cy} {
+		if !slices.Contains(h.svc.bursts[member.ID][0].keys, "run-a") {
+			t.Fatalf("%s's summary lost the run, which their watch still needs", member.DisplayName)
+		}
 	}
 }
 
@@ -380,5 +385,40 @@ func TestAResultFromQuietHoursHeldByTheDashboardStaysOvernight(t *testing.T) {
 	h.eventuallyQueued(h.ada, 1)
 	if item := h.digestItems(h.ada)[0]; !item.Overnight {
 		t.Fatalf("item = %+v, want it held for the digest quiet hours end with, not tomorrow's", *item)
+	}
+}
+
+func TestAThirdMembersWatchedQuestionSurvivesAHandoff(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.subscribe(h.ada)
+	bobs := h.subscribe(h.bob)
+	cy := h.member("Cy")
+	cys := h.subscribe(cy)
+	run := h.run(h.ada, "Fix login test", domain.LaunchACP)
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: no staging key")
+
+	// Cy's watch on the run needs her, and joins a burst with another.
+	for _, m := range []Message{
+		{Title: "Fix login test", Body: "Blocked: no staging key", Run: run.ID, Topic: "wat-1|needs_you"},
+		{Title: "Bump deps", Body: "Blocked: lockfile", Topic: "wat-2|needs_you"},
+	} {
+		if _, _, err := h.svc.Push(h.ctx, cy.ID, m, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cys.expect(t, notification{Title: "Fix login test", Body: "Blocked: no staging key", Run: string(run.ID)})
+	cys.expect(t, notification{Title: "2 need you", Body: "Fix login test: Blocked: no staging key\nBump deps: Blocked: lockfile", Quiet: true})
+
+	if err := h.db.TransferRun(h.ctx, run.ID, h.bob.ID); err != nil {
+		t.Fatalf("TransferRun: %v", err)
+	}
+	h.publish(run, events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(h.bob.ID)})
+	bobs.expect(t, notification{Title: "Fix login test", Body: "Blocked: no staging key", Run: string(run.ID)})
+	cys.expectNone(t, testQuiet)
+	h.svc.mu.Lock()
+	defer h.svc.mu.Unlock()
+	if bursts := h.svc.bursts[cy.ID]; len(bursts) != 1 || !slices.Contains(bursts[0].keys, string(run.ID)) {
+		t.Fatal("Cy's summary lost the run her watch still needs")
 	}
 }

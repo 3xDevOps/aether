@@ -78,10 +78,10 @@ func (s *Service) join(member domain.MemberID, key, tag, topic, title, body stri
 	return b.summary(!first, false)
 }
 
-// unjoin drops key's line from every burst whose summary shows it, but
-// for except's: its need ended, or moved to except. A summary still holding a need is sent again without it,
+// unjoin drops key's line from the bursts whose summary shows it: its
+// need ended, for everyone when only is empty, or moved away from only. A summary still holding a need is sent again without it,
 // quietly; one holding none is cleared, as a need that ended is.
-func (s *Service) unjoin(ctx context.Context, key string, except domain.MemberID) {
+func (s *Service) unjoin(ctx context.Context, key string, only domain.MemberID) {
 	type update struct {
 		member domain.MemberID
 		s      *summary
@@ -89,7 +89,7 @@ func (s *Service) unjoin(ctx context.Context, key string, except domain.MemberID
 	var updates []update
 	s.mu.Lock()
 	for member, bursts := range s.bursts {
-		if member == except {
+		if only != "" && member != only {
 			continue
 		}
 		for _, b := range bursts {
