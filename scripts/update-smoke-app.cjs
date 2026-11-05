@@ -36,11 +36,21 @@ async function explain() {
   log('connected over CDP')
   const context = browser.contexts()[0]
   const page = context.pages()[0] || (await context.waitForEvent('page', { timeout: 30000 }))
-  page.on('framenavigated', (frame) => frame === page.mainFrame() && log(`navigated to ${frame.url().replace(/\?.*/, '')}`))
+  const gateway = /^http:\/\/127\.0\.0\.1:\d+\//
+  // Kept from the first navigation, so a page stuck before load still gets
+  // the outside-browser check.
+  const note = (url) => {
+    if (gateway.test(url)) origin ??= new URL(url).origin
+  }
+  note(page.url())
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame()) return
+    log(`navigated to ${frame.url().replace(/\?.*/, '')}`)
+    note(frame.url())
+  })
   page.on('crash', () => log('the page crashed'))
-  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45000 })
+  await page.waitForURL(gateway, { timeout: 45000 })
   log(`loaded ${page.url().replace(/\?.*/, '')}`)
-  origin = new URL(page.url()).origin
   if (mode === 'probe') {
     await bounded('page.evaluate(document.readyState)', 15000, page.evaluate(() => document.readyState))
     // The page's own deadline says whether fetch hung; the outer one
