@@ -2,6 +2,7 @@ package io.aether.android
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -148,6 +149,24 @@ class NavigationTest {
             assertFalse(other, isDashboardUrl(gateway, other))
             assertEquals(other, Navigation.EXTERNAL, navigationFor(gateway, other, other.substringBefore(':'), mainFrame = true))
             assertTrue(other, refusesRequest(gateway, other, other.substringBefore(':'), mainFrame = true))
+        }
+    }
+
+    @Test
+    fun aNotificationOpensInThePageKeepingTheGatewayToken() {
+        val push = "dispatchEvent(new PopStateEvent('popstate'))"
+        assertEquals(
+            "history.pushState(null, '', '/?assistant=1&card=ABC_1-z'); $push",
+            openPathScript("https://h.ts.net/?page=board", "/?assistant=1&card=ABC_1-z"),
+        )
+        assertEquals(
+            "history.pushState(null, '', '/?run=run-7k2m9q4xbd&token=t0K'); $push",
+            openPathScript("http://127.0.0.1:4000/?token=t0K&page=board", "/?run=run-7k2m9q4xbd"),
+        )
+        assertEquals("history.pushState(null, '', '/'); $push", openPathScript("https://h.ts.net/", "/"))
+        // Nothing that could close the string literal or the call reaches the script.
+        for (path in listOf("/?a='-alert(1)-'", "/?a=\"x\"", "/?a=<b>", "/?a=)", "/x", "?a=1", "/?a=b c")) {
+            assertNull(path, openPathScript("https://h.ts.net/", path))
         }
     }
 }

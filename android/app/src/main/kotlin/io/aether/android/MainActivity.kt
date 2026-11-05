@@ -751,7 +751,10 @@ class MainActivity : ComponentActivity() {
         if (raw != null && isEdgeOnlyLink(raw)) {
             Toast.makeText(this, R.string.join_needs_edge, Toast.LENGTH_LONG).show()
         }
-        val link = raw?.let { deepLinkUrl(base, it) } ?: intentPath(intent)?.let { dashboardAt(base, it) }
+        val deep = raw?.let { deepLinkUrl(base, it) }
+        val path = if (deep == null) intentPath(intent) else null
+        if (path != null && intent?.action == ACTION_OPEN && base == loaded && routeInPage(base, path)) return
+        val link = deep ?: path?.let { dashboardAt(base, it) }
         if (link != null) {
             loaded = base
             web.loadUrl(link)
@@ -768,8 +771,11 @@ class MainActivity : ComponentActivity() {
      * it prints one. A link that names something to open is held until then.
      */
     private fun openEdge(intent: Intent?) {
-        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix) ?: intentPath(intent)?.let(::edgeSuffix)
+        val deep = intent?.dataString?.let(::edgeDeepLinkSuffix)
+        val path = if (deep == null) intentPath(intent) else null
         val url = gatewayUrl
+        if (path != null && intent?.action == ACTION_OPEN && gateway?.isActive == true && url != null && routeInPage(url, path)) return
+        val suffix = deep ?: path?.let(::edgeSuffix)
         when {
             gateway?.isActive != true -> {
                 pendingSuffix = suffix ?: ""
@@ -881,6 +887,19 @@ class MainActivity : ComponentActivity() {
         } catch (_: RuntimeException) {
             null
         }
+
+    /**
+     * Opens a notification's [path] in the dashboard at [dashboard] without
+     * reloading it, when that dashboard is what the window shows.
+     */
+    private fun routeInPage(dashboard: String, path: String): Boolean {
+        val current = web.url ?: return false
+        if (rendererLost || gatewayError.visibility == View.VISIBLE) return false
+        if (runCatching { originOf(current) != originOf(dashboard) }.getOrDefault(true)) return false
+        val script = openPathScript(current, path) ?: return false
+        web.evaluateJavascript(script, null)
+        return true
+    }
 
     /** The bridge for the dashboard this window is about to load. */
     private fun installBridge() {

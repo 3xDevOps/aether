@@ -125,14 +125,30 @@ fun atDashboardHome(url: String?): Boolean {
  * to `?page=board` and Back would never reach the end of the history.
  */
 fun routeHomeScript(url: String?): String {
-    val token =
-        try {
-            URI(url ?: "").rawQuery?.split('&')?.firstOrNull { it.startsWith("token=") }
-        } catch (_: URISyntaxException) {
-            null
-        }?.takeIf { it.matches(Regex("token=[A-Za-z0-9%._~-]*")) }
+    val token = gatewayToken(url)
     val phone = "matchMedia('(max-width: 767px)').matches"
     val query = listOfNotNull(token).joinToString("&")
     val home = "$phone ? '/?page=needs-you${if (query.isEmpty()) "" else "&$query"}' : '/${if (query.isEmpty()) "" else "?$query"}'"
     return "history.replaceState(history.state, '', $home); dispatchEvent(new PopStateEvent('popstate'))"
 }
+
+/**
+ * The script that opens [path] in the dashboard already showing at [url],
+ * as the desktop app opens a notification: the dashboard follows its address
+ * on popstate, and a reload would lose unsent drafts. The Edge gateway's
+ * `token` is kept, as for [routeHomeScript]. Null for a path holding
+ * anything but the characters a route is written in, which then loads.
+ */
+fun openPathScript(url: String?, path: String): String? {
+    if (!isDashboardPath(path) || !path.matches(Regex("/(\\?[A-Za-z0-9%._~&=+,:@!*-]*)?"))) return null
+    val query = listOfNotNull(path.removePrefix("/").removePrefix("?").takeIf { it.isNotEmpty() }, gatewayToken(url))
+    val address = if (query.isEmpty()) "/" else "/?" + query.joinToString("&")
+    return "history.pushState(null, '', '$address'); dispatchEvent(new PopStateEvent('popstate'))"
+}
+
+private fun gatewayToken(url: String?): String? =
+    try {
+        URI(url ?: "").rawQuery?.split('&')?.firstOrNull { it.startsWith("token=") }
+    } catch (_: URISyntaxException) {
+        null
+    }?.takeIf { it.matches(Regex("token=[A-Za-z0-9%._~-]*")) }
