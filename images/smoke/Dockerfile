@@ -18,9 +18,20 @@ ARG OPENCODE_VERSION=
 USER root
 ENV HOME=/root
 
-RUN curl -fsSL https://claude.ai/install.sh | bash
-RUN npm install -g --prefix "$HOME/.local" @openai/codex
-RUN curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "$OPENCODE_VERSION"}
+# Each installer pulls from its vendor's servers, which fail now and then,
+# so each step gets three tries. The installers are saved before they run:
+# sh has no pipefail, so curl | bash would run an empty script and pass.
+RUN for try in 1 2 3; do \
+      curl -fsSL --retry 3 -o /tmp/claude-install.sh https://claude.ai/install.sh && \
+      bash /tmp/claude-install.sh && exit 0; sleep 15; \
+    done; exit 1
+RUN for try in 1 2 3; do \
+      npm install -g --prefix "$HOME/.local" @openai/codex && exit 0; sleep 15; \
+    done; exit 1
+RUN for try in 1 2 3; do \
+      curl -fsSL --retry 3 -o /tmp/opencode-install.sh https://opencode.ai/install && \
+      bash /tmp/opencode-install.sh ${OPENCODE_VERSION:+--version "$OPENCODE_VERSION"} && exit 0; sleep 15; \
+    done; exit 1
 
 ENV PATH="/root/.local/bin:/root/.opencode/bin:${PATH}"
 
