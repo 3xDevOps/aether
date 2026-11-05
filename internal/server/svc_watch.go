@@ -26,7 +26,8 @@ func init() {
 			Runs:      d.Runs,
 			Recovered: d.Runs.RecoveryReady(),
 		}
-		if p, ok := d.SSH.Services.Push.(*push.Service); ok {
+		p, pushing := d.SSH.Services.Push.(*push.Service)
+		if pushing {
 			cfg.Push = p
 		}
 		if d.Events != nil {
@@ -37,6 +38,9 @@ func init() {
 			return nil, err
 		}
 		d.SSH.Services.Watches = svc
+		if pushing {
+			p.UseDigestSource(watch.DigestSourceName, svc.DigestSource())
+		}
 		if d.Assistant != nil {
 			svc.UseAssistant(d.Assistant)
 			d.Assistant.UseWatches(svc)

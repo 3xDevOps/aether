@@ -2211,7 +2211,7 @@ export interface WatchObserved {
 export type WatchDeliveryChannel = 'push' | 'in_app' | 'assistant' | 'relay'
 
 /** pending: not sent yet, with why in detail. cleared: dropped unsent because its need was resolved first or its watch stayed paused. withdrawn: delivered, then replaced on the devices because its need ended. */
-export type WatchDeliveryStatus = 'pending' | 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'withdrawn' | 'skipped'
+export type WatchDeliveryStatus = 'pending' | 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'batched' | 'failed' | 'cleared' | 'withdrawn' | 'skipped'
 
 export interface WatchDelivery {
   channel: WatchDeliveryChannel
@@ -2292,17 +2292,30 @@ export interface WatchGetResult {
 
 export type QuietHours = { start: string; end: string; tz: string }
 
+/** blockers: only what needs you at once, the rest in a daily digest; batched: the rest every 30 minutes; all: everything at once. */
+export type NotifyLevel = 'blockers' | 'batched' | 'all'
+
+/** When the blockers level sends its daily digest: HH:MM in an IANA zone, UTC when empty. */
+export interface NotifyDigest {
+  at: string
+  tz: string
+}
+
 export interface NotifyPrefs {
   /** Watch notices to Web Push devices. */
   push: boolean
+  level: NotifyLevel
+  digest: NotifyDigest
   quiet_hours?: QuietHours
   /** Read-only: where notices go now. */
   destinations: { push_devices: number }
 }
 
-/** notify.prefs.set replaces quiet_hours and keeps push as it is when push is left out. */
+/** notify.prefs.set replaces quiet_hours and keeps push, level and digest as they are when left out. */
 export interface NotifyPrefsSetParams {
   push?: boolean
+  level?: NotifyLevel
+  digest?: NotifyDigest
   quiet_hours?: QuietHours
 }
 

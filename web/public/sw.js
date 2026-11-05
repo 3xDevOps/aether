@@ -44,9 +44,10 @@ async function display(message) {
   await self.registration.showNotification(message.title || 'Aether', {
     body: message.body || 'A session needs you.',
     // One notification per watch notice, run, workspace budget or page: a
-    // newer one replaces the older and alerts again.
+    // newer one replaces the older and alerts again, but for a summary of
+    // pushes that arrived within two minutes of it.
     tag: message.tag || message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
-    renotify: true,
+    ...(message.quiet ? { silent: true } : { renotify: true }),
     icon: '/icons/icon-192.png',
     data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url },
   })

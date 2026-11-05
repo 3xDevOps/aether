@@ -28,6 +28,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -73,9 +74,14 @@ type Config struct {
 	Client *http.Client
 	// Quiet overrides DefaultQuiet.
 	Quiet time.Duration
-	// Now replaces time.Now when the quiet period is read, for tests. The
-	// waits stay on real timers, which re-read Now when they fire, so a
-	// clock that jumps does not wake a waiting notice early.
+	// Recovered closes once the scheduler has reconciled the runs a restart
+	// found; digests wait for it, since a session not yet recovered reads
+	// as needing nothing. Nil starts them at once.
+	Recovered <-chan struct{}
+	// Now replaces time.Now when the quiet period, levels, digests and
+	// bursts read it, for tests. The waits stay on real timers, which
+	// re-read Now when they fire, so a clock that jumps does not wake a
+	// waiting notice early.
 	Now func() time.Time
 }
 
@@ -116,6 +122,9 @@ type Service struct {
 	quiet   time.Duration
 	now     func() time.Time
 	sink    Sink
+	sources map[string]DigestSource
+	// recovered is Config.Recovered.
+	recovered <-chan struct{}
 	// started is when Start ran. A run standing in a need it entered before
 	// then was announced, if at all, by the server before this one.
 	started time.Time
@@ -133,6 +142,11 @@ type Service struct {
 	// notices holds, for every admin with a workspace's budget notice
 	// to send, what hands its watcher the state to announce.
 	notices map[budgetKey]chan budgetDue
+	bursts  map[domain.MemberID][]*burst
+	// digestRetry and digestAttempts hold, for a member whose digest no
+	// device took, when to try again and how often it was tried.
+	digestRetry    map[domain.MemberID]time.Time
+	digestAttempts map[domain.MemberID]int
 }
 
 type notification struct {
@@ -142,8 +156,11 @@ type notification struct {
 	Workspace string `json:"workspace,omitempty"`
 	// Clear replaces the run's notification quietly: its need ended.
 	Clear bool `json:"clear,omitempty"`
-	// Notice marks an assistant's news, which a clear leaves shown.
+	// Notice marks news, which a clear leaves shown: an assistant's, a
+	// digest or a burst's summary.
 	Notice bool `json:"notice,omitempty"`
+	// Quiet replaces a notification without alerting again.
+	Quiet bool `json:"quiet,omitempty"`
 }
 
 // clearedBody is what a device shows in place of a need that ended, and
@@ -181,10 +198,17 @@ func New(cfg Config) (*Service, error) {
 		client:  cfg.Client,
 		quiet:   cfg.Quiet,
 		now:     cfg.Now,
-		sink:    noSink{},
-		active:  map[domain.MemberID]time.Time{},
-		watched: map[domain.RunID]chan struct{}{},
-		notices: map[budgetKey]chan budgetDue{},
+
+		recovered: cfg.Recovered,
+		sink:      noSink{},
+		sources:   map[string]DigestSource{},
+		active:    map[domain.MemberID]time.Time{},
+		watched:   map[domain.RunID]chan struct{}{},
+		notices:   map[budgetKey]chan budgetDue{},
+		bursts:    map[domain.MemberID][]*burst{},
+
+		digestRetry:    map[domain.MemberID]time.Time{},
+		digestAttempts: map[domain.MemberID]int{},
 	}, nil
 }
 
@@ -208,6 +232,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.sub, s.stop, s.started = sub, cancel, time.Now()
 	s.mu.Unlock()
 	s.wg.Go(func() { s.consume(loopCtx, sub) })
+	s.wg.Go(func() { s.digests(loopCtx) })
 	return nil
 }
 
@@ -299,6 +324,11 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			if devicesErr != nil {
 				slog.Warn("push: a device was not told a need ended; trying again later", "run", id, "in", retry, "error", devicesErr)
 			}
+			// A summary is updated only once this need's own clear went
+			// out, so a clear retried later never lands over it.
+			if devicesErr == nil {
+				s.unjoin(ctx, string(id), "")
+			}
 			if err = s.sink.Clear(ctx, id); err != nil {
 				slog.Warn("push: the sink did not clear a need; trying again later", "run", id, "in", retry, "error", err)
 			}
@@ -329,8 +359,11 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 				wake = time.After(retry)
 			}
 			for key := range announced {
-				if !strings.HasPrefix(key, string(n.member)+"|") {
+				if former, _, _ := strings.Cut(key, "|"); former != string(n.member) {
 					delete(announced, key)
+					// The former owner's summary no longer shows the
+					// run's need; other members' watches keep theirs.
+					s.unjoin(ctx, string(id), domain.MemberID(former))
 				}
 			}
 			// Clearing can take a while: announce what the run needs then.
@@ -446,8 +479,17 @@ func (s *Service) unwatch(id domain.RunID, signal chan struct{}) bool {
 }
 
 // offer sends n to the next device of its member that has not had it, and
-// reports whether there was one.
+// reports whether there was one. Before the first device it routes n by
+// the member's level: queued for their digest, or joined to their last
+// push as its summary, n has no device to offer it to.
 func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered map[[2]string]domain.MemberID) bool {
+	started := false
+	for device := range offered {
+		started = started || device[0] == n.key
+	}
+	if !started && s.routed(ctx, run, n) {
+		return false
+	}
 	payload, err := json.Marshal(notification{Title: RunTitle(run), Body: n.body, Run: string(run.ID)})
 	if err != nil {
 		slog.Warn("push: encode notification", "run", run.ID, "error", err)
@@ -473,6 +515,45 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 		return true
 	}
 	return false
+}
+
+// routed queues n for its member's digest, or sends it as the summary of
+// their last push, and reports whether it did either. One it could not
+// queue is pushed at once.
+func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
+	kind := needKind(run, n)
+	if kind != KindNeed {
+		// The run stopped asking: a question it had in a summary goes.
+		s.unjoin(ctx, string(run.ID), "")
+	}
+	prefs, err := s.store.GetNotifyPrefs(ctx, n.member)
+	if err != nil {
+		slog.Warn("push: read notification settings; pushing at once", "member", n.member, "error", err)
+		prefs.Level = protocol.NotifyAll
+	}
+	// Routed as of when the need began and as of now, the later of the
+	// two: one that began in quiet hours stays theirs though the
+	// member's dashboard held it past their end, and one held into them
+	// waits for them to end.
+	now := s.now()
+	route := RouteOf(prefs, kind, now)
+	if !n.since.IsZero() && n.since.Before(now) {
+		route = max(route, RouteOf(prefs, kind, n.since))
+	}
+	if route != RouteNow {
+		if err = s.queueNeed(ctx, run, n, kind, route == RouteOvernight); err == nil {
+			return true
+		}
+		slog.Warn("push: queue a notification for the digest; pushing at once", "run", run.ID, "error", err)
+	}
+	sum, err := s.join(n.member, string(run.ID), string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed)
+	if err != nil || sum == nil {
+		return false
+	}
+	if results, err := s.deliverPayload(ctx, n.member, sum.payload, sum.topic, sum.urgency); failed(results, err) {
+		slog.Warn("push: summary not delivered", "member", n.member, "error", errors.Join(err, deviceErrors(results)))
+	}
+	return true
 }
 
 // read is the run as it stands and what it needs, if anything, in the

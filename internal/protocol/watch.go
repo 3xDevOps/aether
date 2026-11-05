@@ -62,7 +62,9 @@ const (
 	WatchStatusNoDestination = "no_destination"
 	WatchStatusDisabled      = "disabled"
 	WatchStatusHeldQuiet     = "held_quiet_hours"
-	WatchStatusFailed        = "failed"
+	// WatchStatusBatched is a push waiting for the member's next digest.
+	WatchStatusBatched = "batched"
+	WatchStatusFailed  = "failed"
 	// WatchStatusCleared is a push dropped unsent: the need it announced
 	// was resolved first, or its watch was paused until it expired.
 	WatchStatusCleared = "cleared"
@@ -210,14 +212,32 @@ type QuietHours struct {
 	TZ    string `json:"tz"`
 }
 
-// NotifyPrefs is how a member's watch notices reach them. Push sends them
-// to their Web Push devices; during QuietHours push is held and one push
-// is sent when they end.
+// Notification levels: what is pushed at once, and what waits for a
+// digest.
+const (
+	NotifyBlockers = "blockers"
+	NotifyBatched  = "batched"
+	NotifyAll      = "all"
+)
+
+// NotifyDigest is when the blockers level sends its daily digest: At is
+// HH:MM in TZ, an IANA zone, UTC when empty.
+type NotifyDigest struct {
+	At string `json:"at"`
+	TZ string `json:"tz"`
+}
+
+// NotifyPrefs is how a member's notifications reach them. Push sends
+// watch notices to their Web Push devices; Level decides what is pushed
+// at once and what waits for a digest; during QuietHours every push is
+// held for the digest sent when they end.
 type NotifyPrefs struct {
-	// Push is always set in a result; notify.prefs.set keeps the current
-	// value when it is omitted.
-	Push       *bool       `json:"push"`
-	QuietHours *QuietHours `json:"quiet_hours,omitempty"`
+	// Push, Level and Digest are always set in a result; notify.prefs.set
+	// keeps the current value of each one it omits.
+	Push       *bool         `json:"push"`
+	Level      string        `json:"level,omitempty"`
+	Digest     *NotifyDigest `json:"digest,omitempty"`
+	QuietHours *QuietHours   `json:"quiet_hours,omitempty"`
 	// Destinations is read-only: notify.prefs.set ignores it.
 	Destinations NotifyDestinations `json:"destinations"`
 }

@@ -795,8 +795,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     watchGet: vi.fn(async () => needsOverride('watchGet')),
     watchUpdate: vi.fn(async () => needsOverride('watchUpdate')),
     watchDelete: vi.fn(async () => needsOverride('watchDelete')),
-    notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
-    notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
+    notifyPrefsGet: vi.fn(async () => ({ push: true, level: 'batched' as const, digest: { at: '09:00', tz: '' }, destinations: { push_devices: 0 } })),
+    notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, level: prefs.level ?? 'batched', digest: prefs.digest ?? { at: '09:00', tz: '' }, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
     localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,
