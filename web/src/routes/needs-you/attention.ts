@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import { create } from 'zustand'
 import { api, ApiError, codeMethodNotFound } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -160,21 +160,27 @@ export function useAttentionSupported(): boolean {
   return useCapability().hasMethod('attention.list') && !unsupported
 }
 
-/** Keeps the list in step with the event feed. */
+let feedTimer: ReturnType<typeof setTimeout> | null = null
+let feeds = 0
+
+/** Keeps the list in step with the event feed. Any number of mounted feeds share one throttle, so the shell's and a page's read it once. */
 export function useAttentionFeed() {
   const supported = useAttentionSupported()
   const key = useStore(changeKey)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // A throttle, not a debounce: a busy event feed still reads at least every 250ms.
   useEffect(() => {
-    if (!supported || timer.current) return
-    timer.current = setTimeout(() => {
-      timer.current = null
+    if (!supported || feedTimer) return
+    feedTimer = setTimeout(() => {
+      feedTimer = null
       void refreshAttention()
     }, 250)
   }, [key, supported])
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = null
+  useEffect(() => {
+    feeds++
+    return () => {
+      if (--feeds > 0 || !feedTimer) return
+      clearTimeout(feedTimer)
+      feedTimer = null
+    }
   }, [])
 }

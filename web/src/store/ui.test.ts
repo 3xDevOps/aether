@@ -503,3 +503,16 @@ describe('scoped Board preferences', () => {
     expect(createRootStore().getState().boardMapFolded).toEqual({ a: true })
   })
 })
+
+describe('a card notification', () => {
+  it('opens the assistant panel even when the stored state had it closed', () => {
+    window.history.replaceState(null, '', '/?assistant=1')
+    window.localStorage.setItem('aether.ui', JSON.stringify({ state: { assistantOpen: false }, version: 8 }))
+    try {
+      expect(createRootStore().getState().assistantOpen).toBe(true)
+    } finally {
+      window.localStorage.removeItem('aether.ui')
+      window.history.replaceState(null, '', '/')
+    }
+  })
+})

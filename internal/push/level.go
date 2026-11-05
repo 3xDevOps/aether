@@ -10,9 +10,10 @@ import (
 )
 
 // Kinds of notification, as a level routes them and a digest counts them.
-// Only a need is a blocker.
+// Only a need and an assistant card are blockers.
 const (
 	KindNeed   = "need"
+	KindCard   = "card"
 	KindDone   = "done"
 	KindFailed = "failed"
 	KindMerged = "merged"
@@ -39,7 +40,7 @@ func RouteOf(p store.NotifyPrefs, kind string, now time.Time) Route {
 	if _, quiet := QuietUntil(p, now); quiet {
 		return RouteOvernight
 	}
-	if p.Level == protocol.NotifyAll || kind == KindNeed {
+	if p.Level == protocol.NotifyAll || kind == KindNeed || kind == KindCard {
 		return RouteNow
 	}
 	return RouteDigest

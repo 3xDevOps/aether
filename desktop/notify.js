@@ -44,12 +44,24 @@ let openRun = () => {}
 let openLink = () => {}
 let selfID = null
 
+// Assistant cards shown, by id, so one decided anywhere closes here, and
+// the sync of them in flight.
+const cardsShown = new Map()
+let cardsSync = Promise.resolve()
+// What a private card that saves or forgets a preference shows in its
+// place; internal/assistant uses the same words.
+const preferenceCards = { 'assistant.remember': 'Save a preference', 'assistant.forget': 'Forget a saved preference' }
+
 // When each run last raised a needs-you notification, by any path, and
 // under `<run> done` a finished one. The same transition can reach us as
 // run.status, as assistant.notice kind needs_attention and as a watch
 // notice; other notice kinds are different events.
 const lastShown = new Map()
 const duplicateWindowMs = 5000
+
+const cardTitle = 'Assistant asks for approval'
+// Opens the dashboard with the assistant panel, where the card is.
+const cardLink = '/?assistant=1'
 
 function recentlyShown(slot) {
   const duplicate = Date.now() - (lastShown.get(slot) || 0) < duplicateWindowMs
@@ -111,6 +123,8 @@ function connect(wsURL) {
     if (ev.ok === true) {
       // Subscribe ack: the gateway accepted us, so the backoff can reset.
       attempt = 0
+      // Cards raised while the app was away show now.
+      queueCards()
       return
     }
     if (ev.type === 'assistant.notice') {
@@ -119,6 +133,16 @@ function connect(wsURL) {
     }
     if (ev.type === 'watch.changed') {
       void showWatchNotice(ev.payload || {})
+      return
+    }
+    if (ev.type === 'assistant.cards') {
+      void (async () => {
+        try {
+          if ((ev.payload || {}).member_id === (await memberID())) queueCards()
+        } catch (err) {
+          console.log(`notify: cannot tell who this member is: ${err.message}`)
+        }
+      })()
       return
     }
     if (!ev.run_id) return
@@ -229,11 +253,105 @@ function closeOwnFinished(runId) {
 // finishes end, so they close now rather than outlive them.
 function closeShown() {
   cleared = ++ends
+  for (const notification of cardsShown.values()) notification.close()
+  cardsShown.clear()
   for (const list of watchShown.values()) for (const { notification } of list) notification.close()
   for (const list of [...finishedShown.values(), ...ownFinished.values()]) for (const notification of list) notification.close()
   watchShown.clear()
   finishedShown.clear()
   ownFinished.clear()
+}
+
+async function gatewayCall(method, params) {
+  const res = await fetch(`${gateway.origin}/api/v1/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${gateway.token}` },
+    body: JSON.stringify(params),
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(body?.error?.message || `${method}: ${res.status}`)
+  return body
+}
+
+// queueCards syncs the member's cards after any sync already running, so
+// an older read never lands over a newer one.
+function queueCards() {
+  cardsSync = cardsSync.then(syncCards, syncCards)
+}
+
+// syncCards shows each pending card with Review, which opens it, and
+// Decline, and closes one no longer pending; macOS shows the buttons,
+// elsewhere a click opens the card. A card the server marks private (it
+// saves, forgets or sends a saved preference), or one too long to show
+// whole, shows no buttons.
+async function syncCards() {
+  if (!Notification.isSupported()) return
+  const since = cleared
+  let status
+  try {
+    status = await gatewayCall('assistant.status', {})
+  } catch (err) {
+    console.log(`notify: assistant cards: ${err.message}`)
+    return
+  }
+  // A read the connection dropped behind would show cards it closed.
+  if (cleared !== since) return
+  const pending = (status.confirmations || []).filter((c) => c.state === 'pending')
+  for (const [id, notification] of cardsShown) {
+    if (pending.some((c) => c.id === id)) continue
+    notification.close()
+    cardsShown.delete(id)
+  }
+  for (const card of pending) {
+    if (cardsShown.has(card.id)) continue
+    const summary = card.summary || ''
+    const whole = !card.private && [...summary].length <= 240
+    const link = cardLinkOf(card.id)
+    const notification = new Notification({
+      title: cardTitle,
+      body: cardBody(card),
+      ...(whole ? { actions: [{ type: 'button', text: 'Review…' }, { type: 'button', text: 'Decline' }] } : {}),
+    })
+    notification.on('click', () => openLink(link))
+    if (whole) notification.on('action', (_event, index) => (index === 0 ? openLink(link) : void decline(card)))
+    cardsShown.set(card.id, notification)
+    notification.show()
+  }
+}
+
+// cardBody is what a card's notification says: a private one only what
+// kind of action it is, a long one cut at a word with a pointer to the rest.
+function cardBody(card) {
+  if (card.private) return `${preferenceCards[card.method] || 'An action that uses a saved preference'}. Open to review.`
+  const summary = card.summary || ''
+  if ([...summary].length <= 240) return summary
+  const rest = '… Open to read the rest.'
+  const cut = [...summary].slice(0, 240 - rest.length).join('')
+  const space = cut.lastIndexOf(' ')
+  return (space > 0 ? cut.slice(0, space).replace(/[ ,;:]+$/, '') : cut) + rest
+}
+
+function cardLinkOf(id) {
+  return `${cardLink}&card=${encodeURIComponent(id)}`
+}
+
+// decline declines card through this app's gateway. Approving is done on
+// the card itself, which shows every parameter the call sends.
+async function decline(card) {
+  let body = `Declined here: ${card.private ? preferenceCards[card.method] || 'An action that uses a saved preference' : card.summary}`
+  let failed = false
+  try {
+    await gatewayCall('assistant.confirm', { confirmation_id: card.id, approve: false })
+  } catch (err) {
+    body = `Not decided: ${err.message}`
+    failed = true
+  }
+  cardsShown.get(card.id)?.close()
+  cardsShown.delete(card.id)
+  // An error stays until it is read.
+  const notification = new Notification({ title: 'Assistant card', body: clip(body, 240), silent: true, ...(failed ? { timeoutType: 'never' } : {}) })
+  notification.on('click', () => openLink(cardLinkOf(card.id)))
+  notification.show()
 }
 
 async function readWatch(watchId) {

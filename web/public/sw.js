@@ -30,12 +30,18 @@ async function display(message) {
     // The need of a watch, of the run, or of the page a need opens, ended. A push that shows nothing would cost the subscription on
     // Safari, so the notification is replaced quietly instead of closed.
     const [current] = await self.registration.getNotifications({ tag: cleared })
-    // An assistant's newer notice about the run stays, shown again as it was.
-    const notice = current?.data?.notice === true
-    await self.registration.showNotification(current?.title || message.title || 'Aether', {
+    // An assistant's newer notice about the run stays, shown again as it
+    // was, as does the outcome this device decided a card with.
+    const notice = current?.data?.notice === true || current?.data?.decided === true
+    // An error a decision met stays until it is read.
+    const persist = current?.data?.persist === true
+    // A card's notification says how it ended under the server's title.
+    const ended = !notice && String(cleared).startsWith('card:') ? message.title : undefined
+    await self.registration.showNotification(ended || current?.title || message.title || 'Aether', {
       body: notice ? current.body : message.body,
       tag: cleared,
       silent: true,
+      ...(persist ? { requireInteraction: true } : {}),
       icon: '/icons/icon-192.png',
       data: notice ? current.data : { run: message.run, url: message.url },
     })
@@ -49,13 +55,58 @@ async function display(message) {
     tag: message.tag || message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
     ...(message.quiet ? { silent: true } : { renotify: true }),
     icon: '/icons/icon-192.png',
-    data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url },
+    // An assistant card's push carries only its id. Review opens the card,
+    // the one place it is approved, since an action runs on a locked
+    // phone; Decline is decided from here with this device's own sign-in.
+    // Safari shows no actions, so a tap opens the card.
+    ...(message.card ? { actions: [{ action: 'review', title: 'Review…' }, { action: 'decline', title: 'Decline' }] } : {}),
+    data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url, card: message.card },
+  })
+}
+
+// decline declines card through assistant.confirm, and puts the outcome,
+// or the server's own error, in place of the notification.
+async function decline(notification, card) {
+  let body = `Declined here: ${notification.body}`
+  let failed = false
+  try {
+    const res = await fetch('/api/v1/assistant.confirm', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation_id: card, approve: false }),
+    })
+    if (!res.ok) {
+      const refusal = await res.json().catch(() => null)
+      body = `Not decided: ${refusal?.error?.message || `HTTP ${res.status}`}`
+      failed = true
+    }
+  } catch (err) {
+    body = `Not decided: ${err instanceof Error ? err.message : String(err)}`
+    failed = true
+  }
+  // A summary of newer pushes may have taken the card's notification while
+  // the request ran; the outcome then shows apart from it, never over it.
+  const [current] = await self.registration.getNotifications({ tag: notification.tag })
+  const tag = current && current.data?.card !== card ? `${notification.tag}:decided` : notification.tag
+  await self.registration.showNotification('Assistant card', {
+    body,
+    tag,
+    silent: true,
+    // An error stays until it is read.
+    requireInteraction: failed,
+    icon: '/icons/icon-192.png',
+    data: { url: notification.data?.url, decided: true, persist: failed },
   })
 }
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const { run, workspace, url } = event.notification.data ?? {}
+  const { run, workspace, url, card } = event.notification.data ?? {}
+  if (card && event.action === 'decline') {
+    event.waitUntil(decline(event.notification, card))
+    return
+  }
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })

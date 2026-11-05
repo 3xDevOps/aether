@@ -543,6 +543,19 @@ describe('confirmations', () => {
     expect(await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })).toBeDefined()
   })
 
+  it('brings the card a notification named into view and focus, and says when it no longer waits', async () => {
+    useStore.getState().setAssistantCard(stop.id)
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', confirmations: [stop] }) })
+    const notified = await within(aside).findByLabelText(`From your notification: ${stop.summary}. Approve or decline below.`)
+    await waitFor(() => expect(document.activeElement).toBe(notified))
+
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', confirmations: [] }) })
+    expect(await within(aside).findByText('The card from your notification no longer waits for you: it was decided, expired or withdrawn.')).toBeDefined()
+    useStore.getState().setAssistantCard(null)
+  })
+
   it('keeps an approved card that runs on the server without buttons, and names a connector turn', async () => {
     const aside = await openPanel()
     acpOpen()

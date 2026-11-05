@@ -74,6 +74,10 @@ test('Fix this on a failed run attaches the run and sends exactly what Inspect s
   const raw = JSON.parse(await shared.getByLabel('Raw JSON').innerText()) as unknown
   await page.screenshot({ path: testInfo.outputPath('inspect-desktop.png') })
   await page.keyboard.press('Escape')
+  // Radix returns focus to the trigger on a timer after the popover unmounts;
+  // focusing the composer before then loses focus to Inspect, so Enter reopens it.
+  await expect(shared).toBeHidden()
+  await expect(assistant.getByRole('button', { name: 'Inspect what is shared' })).toBeFocused()
 
   await box.press('Enter')
   await expect.poll(() => prompts.length).toBe(1)

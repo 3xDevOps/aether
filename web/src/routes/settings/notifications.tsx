@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input'
 import { Radio, RadioGroup } from '@/components/ui/radio'
 import type { NotifyLevel, NotifyPrefs, NotifyPrefsSetParams, SlackLinkResult, SlackStatusResult } from '@/lib/types'
 import { errorSentence } from '@/lib/format'
-import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
+import { androidShell } from '@/lib/android-push'
+import { disablePush, enablePush, readPush, testPush, watchAndroidPushState, type PushState } from '@/lib/push'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 
@@ -25,9 +26,11 @@ function Guide({ page = 'networking', to, children }: { page?: string; to?: stri
 
 const hosted = <Guide to="the-dashboard">the dashboard your server hosts</Guide>
 
-function help(state: PushState | null): ReactNode {
+/** gateway is the capabilities' name for what serves this dashboard: `server` for the tailnet one. */
+function help(state: PushState | null, gateway: string | undefined, hinted = false): ReactNode {
   if (!state) return 'Reading this device…'
   if (state.kind === 'blocked') {
+    if (androidShell()) return 'Android blocks notifications from Aether. Allow them under App info → Notifications (long-press the Aether icon), then turn this on.'
     return 'This browser blocks notifications from this dashboard. Allow them in its site settings, then reload.'
   }
   if (state.kind !== 'unsupported') {
@@ -39,7 +42,16 @@ function help(state: PushState | null): ReactNode {
     case 'gateway':
       return <><Code>aether gui</Code> serves this dashboard from your computer, where a notification could not open it later. Open {hosted} on the device and turn this on there.</>
     case 'home-screen':
+      if (hinted) return 'On iPhone and iPad, only the home-screen app gets notifications.'
       return <>On iPhone and iPad, notifications reach Aether only when it is opened from the home screen. <Guide to="add-it-to-your-home-screen">Add it to your home screen</Guide>, open it from there and turn this on.</>
+    case 'distributor':
+      return (
+        <>
+          The app gets notifications through a UnifiedPush distributor, and this phone has none. Install <a href="https://ntfy.sh" target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">ntfy</a> from Google Play or F-Droid, then turn this on.
+          {gateway === 'server' && <> Or open this dashboard in Chrome and install it.</>}{' '}
+          <Guide to="in-the-android-app">Android notifications guide</Guide>
+        </>
+      )
     case 'browser':
       return <>This browser cannot receive push notifications. On a phone, open this dashboard in Chrome or Safari and <Guide to="add-it-to-your-home-screen">add it to your home screen</Guide>.</>
   }
@@ -123,12 +135,44 @@ export function NotificationSections({ client }: { client: Api }) {
   )
 }
 
+const installHintKey = 'aether.ios-install-hint.dismissed'
+
+function hintDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(installHintKey) === '1'
+  } catch {
+    return false
+  }
+}
+
+function InstallHint({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <Callout
+      tone="review"
+      title="Install Aether to get notifications"
+      actions={(
+        <Button size="sm" variant="secondary" className="coarse:h-11" onClick={() => {
+          try {
+            window.localStorage.setItem(installHintKey, '1')
+          } catch {
+            // Storage that cannot be written only brings the hint back next load.
+          }
+          onDismiss()
+        }}>Dismiss</Button>
+      )}
+    >
+      Needs iOS 16.4 or later. In Safari, tap <b>Share</b> (the square with an arrow; under ⋯ if hidden), then <b>Add to Home Screen</b>. Chrome on iOS can add it too. Open Aether from the new icon and turn this on there.
+    </Callout>
+  )
+}
+
 export function PushSection({ client, onSubscriptionChange }: { client: Api; onSubscriptionChange?: () => void }) {
   const gateway = useStore((s) => s.capabilities?.gateway)
   const [state, setState] = useState<PushState | null>(null)
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dismissed, setDismissed] = useState(hintDismissed)
 
   useEffect(() => {
     let live = true
@@ -144,6 +188,8 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
       live = false
     }
   }, [client, gateway])
+
+  useEffect(() => watchAndroidPushState(setState), [])
 
   const act = (work: Promise<PushState>, done = false) => {
     setBusy(true)
@@ -169,28 +215,35 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
   )
 
   const on = state?.kind === 'on'
+  const install = state?.kind === 'unsupported' && state.why === 'home-screen'
+  const failure = error ?? (state && 'error' in state ? state.error : undefined)
   return (
     <SettingsSection title="Push notifications" id="push" scope="This device">
       <SettingRow
         label="Notify this device when a session needs me"
-        labelFor="settings-push"
-        help={help(state)}
-        control={(
+        labelFor={install ? undefined : 'settings-push'}
+        help={help(state, gateway, install && !dismissed)}
+        control={install ? undefined : (
           <Checkbox
             id="settings-push"
             checked={on}
-            disabled={busy || (state?.kind !== 'on' && state?.kind !== 'off')}
+            disabled={busy || (state?.kind !== 'on' && state?.kind !== 'off' && !(state?.kind === 'unsupported' && state.why === 'distributor'))}
             onCheckedChange={(checked) => act((checked === true ? enablePush(client) : disablePush(client)).finally(() => onSubscriptionChange?.()))}
           />
         )}
       >
+        {install && !dismissed && <InstallHint onDismiss={() => {
+          setDismissed(true)
+          // The callout holding focus is gone: land on the guide link its absence brings back.
+          requestAnimationFrame(() => document.querySelector<HTMLElement>('#push a[href*="networking.md"]')?.focus())
+        }} />}
         {on && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <Button size="sm" variant="secondary" disabled={busy} onClick={test}>Send test notification</Button>
             {sent && <p role="status" className="text-ui-sm text-muted">Sent. It should appear on this device in a few seconds.</p>}
           </div>
         )}
-        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {failure && <Callout tone="failed" role="alert">{failure}</Callout>}
       </SettingRow>
     </SettingsSection>
   )
@@ -291,8 +344,8 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
           onValueChange={(next) => prefs && save({ level: next as NotifyLevel, quiet_hours: prefs.quiet_hours }, 'level')}
         >
           {([
-            { level: 'blockers', label: 'Blockers now, the rest daily', help: `Needs you at once, except during quiet hours; ${later} in one digest daily at ${savedDigest.at}.` },
-            { level: 'batched', label: 'Blockers now, the rest every half hour', help: `Needs you at once, except during quiet hours; ${later} in a digest on each half hour.` },
+            { level: 'blockers', label: 'Blockers now, the rest daily', help: `Needs you and assistant cards at once, except during quiet hours; ${later} in one digest daily at ${savedDigest.at}.` },
+            { level: 'batched', label: 'Blockers now, the rest every half hour', help: `Needs you and assistant cards at once, except during quiet hours; ${later} in a digest on each half hour.` },
             { level: 'all', label: 'Everything at once', help: 'Every push as it happens, except during quiet hours.' },
           ] satisfies { level: NotifyLevel; label: string; help: string }[]).map((l) => (
             <label key={l.level} className="flex min-w-0 cursor-pointer items-start gap-2 py-1 coarse:min-h-11">

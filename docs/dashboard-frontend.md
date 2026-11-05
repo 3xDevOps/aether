@@ -310,8 +310,11 @@ desktop app. `AppShell` (`app-shell.tsx`) mounts it once, together
 with the shell-wide hosts: the command palette, the dialogs the store opens
 (`components/palette/dialogs.tsx`: launch, message, forward, close, archive
 and free), the shortcuts dialog, the updates dialog (`UpdateCenter`), the
-connection announcer, the shell keys (`useNavShortcuts`) and the team
-refresh (`useTeamRefresh`).
+connection announcer, the shell keys (`useNavShortcuts`), the team
+refresh (`useTeamRefresh`) and `AppBadge` (`lib/app-badge.ts`), which sets the
+installed app's icon badge to the Needs you count while push is on, in any
+layout, and clears it when the shell unmounts. It does nothing in the desktop
+app, which badges itself.
 
 ### Sidebar
 
@@ -6745,7 +6748,7 @@ first two:
 | blocked | `Notification.permission` is `denied` | how to allow notifications in the browser |
 | unsupported, `desktop` | the Electron shell | that the desktop app notifies by itself |
 | unsupported, `gateway` | any gateway but the server's own | that `aether gui` cannot be opened by a notification later |
-| unsupported, `home-screen` | no Web Push, on an iPhone or iPad outside a home-screen app | a link to [Add it to your home screen](networking.md#add-it-to-your-home-screen) |
+| unsupported, `home-screen` | no Web Push, on an iPhone or iPad outside a home-screen app | install steps in a dismissible callout (kept in `localStorage`) in place of the switch, and a link to [Add it to your home screen](networking.md#add-it-to-your-home-screen) |
 | unsupported, `browser` | no Web Push anywhere else, the Android app's WebView included | the same link |
 
 `enablePush` calls `Notification.requestPermission()` before anything else is

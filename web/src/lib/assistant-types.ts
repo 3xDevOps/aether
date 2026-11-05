@@ -49,6 +49,8 @@ export interface AssistantConfirmation {
   decided_at?: string
   /** Where the prompt of the turn that raised the card came from. */
   origin?: AssistantOrigin
+  /** The card saves, forgets or sends a saved preference: notifications show only what kind of action it is. */
+  private?: boolean
 }
 
 /** One prompt of the member's queue; its id names the turn it runs. */

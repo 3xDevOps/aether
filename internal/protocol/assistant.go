@@ -120,6 +120,9 @@ type AssistantConfirmation struct {
 	DecidedAt time.Time `json:"decided_at,omitzero"`
 	// Origin is where the prompt of the turn that raised the card came from.
 	Origin AssistantOrigin `json:"origin,omitzero"`
+	// Private means the card saves, forgets or sends a saved preference, so
+	// a notification shows only what kind of action it is.
+	Private bool `json:"private,omitempty"`
 }
 
 // States of an assistant approval card. Approved is the decision; running
