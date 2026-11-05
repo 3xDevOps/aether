@@ -498,6 +498,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Bus:             s.bus,
 		Preferences:     preferences,
 		ConnectorScopes: sshd.ConnectorScopes,
+		ConnectorGrant: func(ctx context.Context, member domain.MemberID, id string) ([]string, error) {
+			return s.ssh.ConnectorGrantScopes(ctx, member, id)
+		},
 	})
 	sshCfg.Services.Assistant = s.assistant
 	sshCfg.Services.Preferences = preferences

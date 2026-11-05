@@ -298,7 +298,7 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_mark_reviewed.action": "complete,later,not-yet", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
 		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",
 		"aether_session_lifecycle.action": "relaunch,protect,unprotect,archive,restore",
-		"aether_switch_session_mode.mode": "standard,enhanced"}; !maps.Equal(enums, want) {
+		"aether_switch_session_mode.mode": "standard,enhanced", "aether_decide_assistant_card.decision": "approve,decline"}; !maps.Equal(enums, want) {
 		t.Errorf("enums = %v, want %v", enums, want)
 	}
 	connectorTools := slices.DeleteFunc(slices.Clone(Ops), func(o Op) bool { return o.Scope == "" })
@@ -319,6 +319,7 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
 		"aether_memory_add": {false, false, false}, "aether_memory_pin": {false, false, false},
 		"aether_watch": {false, false, false}, "aether_unwatch": {false, true, false},
+		"aether_ask_assistant": {false, true, true}, "aether_decide_assistant_card": {false, true, true},
 	}
 	names := map[Scope][]string{}
 	for _, tool := range all {

@@ -10,9 +10,11 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -115,14 +117,24 @@ func (c Card) FullText() string {
 		value := string(fields[name])
 		var text string
 		if json.Unmarshal(fields[name], &text) == nil {
-			value = text
+			value = oneLine(text)
 		}
 		fmt.Fprintf(&b, "\n%s: %s", name, value)
 	}
 	if c.Task != "" {
-		fmt.Fprintf(&b, "\nrendered task: %s", c.Task)
+		fmt.Fprintf(&b, "\nrendered task: %s", oneLine(c.Task))
 	}
 	return b.String()
+}
+
+// oneLine is text as one line of a card's full text: quoted, with escapes,
+// when it holds a line break or another character that is not printed as
+// itself, so a value cannot pose as another field or reorder the line.
+func oneLine(text string) string {
+	if strings.ContainsFunc(text, func(r rune) bool { return r != ' ' && !unicode.IsPrint(r) }) {
+		return strconv.Quote(text)
+	}
+	return text
 }
 
 // confirmations holds the calls waiting for one member's cards. changed
