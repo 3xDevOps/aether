@@ -177,9 +177,11 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   const announcement = useAnnouncement(agent || 'The assistant')
   const ready = status !== null && status.state !== 'setup'
   const onRun = useStore((s) => s.route.name === 'run')
+  const sheet = useContext(AssistantSheet)
   return (
     <>
       <PaneHeader
+        className={sheet ? 'coarse:px-4 coarse:py-2' : undefined}
         title="Assistant"
         level={2}
         size={onRun ? 'run' : 'view'}
@@ -371,7 +373,7 @@ export function AssistantPanel() {
           side="right"
           showCloseButton={false}
           aria-describedby={undefined}
-          className="w-[min(28rem,100vw)]"
+          className="w-full rounded-none border-l-0 pl-[env(safe-area-inset-left)]"
           onOpenAutoFocus={(event) => {
             if (!textarea.current) return
             event.preventDefault()

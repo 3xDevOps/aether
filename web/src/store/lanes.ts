@@ -40,12 +40,15 @@ export interface LanesSlice {
   laneWindow: LaneWindow | null
   laneGroup: LaneGroup
   laneHidden: LaneEdgeKind[]
+  /** The phone's Sessions tab shows lanes instead of the list. */
+  sessionsLanes: boolean
   holdLanes: () => () => void
   appendLaneEvent: (event: Event) => void
   setLaneHistory: (workspaceID: string, patch: Partial<LaneHistory>, older?: Event[]) => void
   setLaneWindow: (window: LaneWindow | null) => void
   setLaneGroup: (group: LaneGroup) => void
   setLaneHidden: (hidden: LaneEdgeKind[]) => void
+  setSessionsLanes: (lanes: boolean) => void
 }
 
 export const emptyLaneHistory: LaneHistory = { events: [], floor: Infinity, loading: false, error: null, capped: false }
@@ -71,6 +74,7 @@ export const createLanesSlice: SliceCreator<LanesSlice> = (set, get) => ({
   laneWindow: null,
   laneGroup: 'status',
   laneHidden: [],
+  sessionsLanes: false,
   // The last view to leave drops the history: nothing appends to it unheld.
   holdLanes: () => {
     set((s) => ({ laneViews: s.laneViews + 1 }))
@@ -105,4 +109,5 @@ export const createLanesSlice: SliceCreator<LanesSlice> = (set, get) => ({
   setLaneWindow: (laneWindow) => set({ laneWindow }),
   setLaneGroup: (laneGroup) => set({ laneGroup }),
   setLaneHidden: (laneHidden) => set({ laneHidden }),
+  setSessionsLanes: (sessionsLanes) => set({ sessionsLanes }),
 })
