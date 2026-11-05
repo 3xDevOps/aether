@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { originLabel } from '@/components/assistant/labels'
 import { isLaunch, launchTitle, useLaunchRows } from '@/components/assistant/launch-summary'
 import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -18,7 +19,7 @@ import { useSecondsUntil } from '@/lib/hooks'
 import type { SessionRequest } from '@/lib/session-types'
 import { AcpRequestCard } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
-import { assistantSessionID } from '@/store/assistant'
+import { assistantSessionID, cardPending } from '@/store/assistant'
 
 function useAction() {
   const [busy, setBusy] = useState<string | null>(null)
@@ -69,6 +70,14 @@ export function paramRows(params: unknown): [string, string][] {
   })
 }
 
+/** How many cards the dock holds and what each waits on. */
+export function cardsHeading(confirmations: AssistantConfirmation[]): string {
+  const waiting = confirmations.filter(cardPending).length
+  const running = confirmations.length - waiting
+  const parts = [waiting && `${waiting} ${waiting === 1 ? 'waits' : 'wait'} for you`, running && `${running} running`].filter(Boolean)
+  return `${confirmations.length} ${confirmations.length === 1 ? 'card' : 'cards'}: ${parts.join(', ')}`
+}
+
 export function ConfirmationCard({ confirmation }: { confirmation: AssistantConfirmation }) {
   const { busy, error, run } = useAction()
   const { harness } = useAssistantAgent()
@@ -86,15 +95,17 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)
   const remaining = useSecondsUntil(confirmation.expires_at)
   const total = Date.parse(confirmation.expires_at) - Date.parse(confirmation.created_at)
+  const pending = cardPending(confirmation)
+  const origin = originLabel(confirmation.origin)
   return (
     <RequestCard
-      aria-label={`Approve this action? ${confirmation.summary}`}
+      aria-label={pending ? `Approve this action? ${confirmation.summary}` : `Approved, running: ${confirmation.summary}`}
       avatar={<IconTile aria-hidden><AgentGlyph agent={harness} className="size-4" /></IconTile>}
       title={launch || confirmation.task ? launchTitle(confirmation.summary) : confirmation.summary}
-      source={<Code>{confirmation.method}</Code>}
-      meta={<>expires <RelativeTime at={confirmation.expires_at} /></>}
-      timeBar={remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
-      footer={(
+      source={<><Code>{confirmation.method}</Code>{origin && <span className="text-ui-xs text-muted">{origin}</span>}</>}
+      meta={pending ? <>expires <RelativeTime at={confirmation.expires_at} /></> : undefined}
+      timeBar={pending && remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
+      footer={pending && (
         // The dock scrolls the whole card: its actions come after every row they approve.
         <RequestFooter className="static">
           <RequestActions>
@@ -137,6 +148,11 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
           ) : !autoApprove && !rule && (
             <p className="text-ui-xs"><AssistantSettingsLink>Skip these cards…</AssistantSettingsLink></p>
           )}
+        </RequestFooter>
+      ) || (
+        // In the footer, the status leaves the title its full width.
+        <RequestFooter className="static">
+          <p className="text-ui-sm text-muted">Approved{confirmation.decided_at && <> <RelativeTime at={confirmation.decided_at} /></>}, running…</p>
         </RequestFooter>
       )}
     >

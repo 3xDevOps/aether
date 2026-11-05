@@ -2485,6 +2485,32 @@ ALTER TABLE assistant_settings ADD COLUMN rule_streak INTEGER NOT NULL DEFAULT 0
 ALTER TABLE assistant_settings ADD COLUMN approval_chosen INTEGER NOT NULL DEFAULT 0;
 UPDATE assistant_settings SET approval_chosen = 1 WHERE auto_approve = 1 OR suggest_off = 1 OR suggest_snoozes > 0;
 `,
+	// v104: assistant approval cards outlive the turn that raised them. A
+	// card holds the exact call it approves and the conversation generation
+	// it belongs to; state 'running' is the claim taken before that call
+	// runs, so it runs at most once.
+	`
+CREATE TABLE assistant_cards (
+	id          TEXT PRIMARY KEY,
+	member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	generation  INTEGER NOT NULL,
+	method      TEXT NOT NULL,
+	params      TEXT NOT NULL,
+	card        TEXT NOT NULL,
+	origin      TEXT NOT NULL,
+	state       TEXT NOT NULL,
+	action_id   TEXT NOT NULL DEFAULT '',
+	result      TEXT NOT NULL DEFAULT '',
+	error       TEXT NOT NULL DEFAULT '',
+	shown_at    INTEGER NOT NULL DEFAULT 0,
+	decided_at  INTEGER NOT NULL DEFAULT 0,
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	updated_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_assistant_cards_member ON assistant_cards(member_id, created_at);
+CREATE INDEX idx_assistant_cards_open ON assistant_cards(state) WHERE state IN ('pending', 'approved', 'running');
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

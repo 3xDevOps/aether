@@ -160,6 +160,10 @@ export interface CloseWarning {
 export interface RunCloseCheck {
   run_id: string
   warnings: CloseWarning[]
+  /** A merged pull request of the run's own repository holds its last commit; absent from older servers. */
+  merged_pull_request?: boolean
+  /** When the run's status, reason or activity last changed; absent from older servers. */
+  idle_since?: string
   error?: { code: number; message: string }
 }
 

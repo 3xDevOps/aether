@@ -66,6 +66,13 @@
                     android:host="claim"
                     android:scheme="aether" />
             </intent-filter>
+            <!-- Share to Aether: shared text or a link becomes a new
+                 session's prompt, which the member still reviews and sends. -->
+            <intent-filter android:label="@string/share_label">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />

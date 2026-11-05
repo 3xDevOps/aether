@@ -33,7 +33,7 @@ export function tickStep(span: number): number {
   return steps.find((step) => span / step <= 8) ?? steps.at(-1)!
 }
 
-interface Tick {
+export interface Tick {
   t: number
   label: string
 }

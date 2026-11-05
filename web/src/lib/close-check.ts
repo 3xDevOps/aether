@@ -35,20 +35,33 @@ export const closeBusyText = 'Another close is waiting for your answer, so this 
 // Mirrors archiveHolding in internal/sshd/close_check.go: what keeps a completed session from being archived.
 const archiveHolding = new Set<CloseWarningKind>(['subsessions', 'pull_request', 'awaited', 'cleanup_pending'])
 
+/** Every session's check, keyed by run id, 50 to a call; a failed or late call is the error of every session it covers. */
+export async function readCloseChecks(runIDs: string[], outcome?: CloseOutcome): Promise<Map<string, RunCloseCheck>> {
+  const checks = new Map<string, RunCloseCheck>()
+  const batches = Array.from({ length: Math.ceil(runIDs.length / 50) }, (_, i) => runIDs.slice(i * 50, i * 50 + 50))
+  await Promise.all(batches.map(async (ids) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`the server did not answer within ${closeCheckDeadlineMs / 1000} seconds`)), closeCheckDeadlineMs)
+    })
+    try {
+      for (const check of await Promise.race([api.runCloseCheck(ids, outcome), late])) checks.set(check.run_id, check)
+    } catch (err) {
+      for (const id of ids) checks.set(id, { run_id: id, warnings: [], error: { code: 0, message: errorSentence(err) } })
+    } finally {
+      clearTimeout(timer)
+    }
+  }))
+  return checks
+}
+
 /** What keeps each completed session from being archived, keyed by run id; a failed read holds every session it covers. */
 export async function readArchiveHolds(runIDs: string[]): Promise<Map<string, RunCloseCheck>> {
   const held = new Map<string, RunCloseCheck>()
-  const batches = Array.from({ length: Math.ceil(runIDs.length / 50) }, (_, i) => runIDs.slice(i * 50, i * 50 + 50))
-  await Promise.all(batches.map(async (ids) => {
-    try {
-      for (const check of await api.runCloseCheck(ids, 'completed')) {
-        const warnings = check.warnings.filter((w) => archiveHolding.has(w.kind))
-        if (check.error || warnings.some((w) => !w.subsession)) held.set(check.run_id, { ...check, warnings })
-      }
-    } catch (err) {
-      for (const id of ids) held.set(id, { run_id: id, warnings: [], error: { code: 0, message: errorSentence(err) } })
-    }
-  }))
+  for (const check of (await readCloseChecks(runIDs, 'completed')).values()) {
+    const warnings = check.warnings.filter((w) => archiveHolding.has(w.kind))
+    if (check.error || warnings.some((w) => !w.subsession)) held.set(check.run_id, { ...check, warnings })
+  }
   return held
 }
 

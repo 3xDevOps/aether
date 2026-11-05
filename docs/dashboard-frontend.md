@@ -500,9 +500,9 @@ one's name, muted, after the title.
 | Tab | Opens |
 | --- | --- |
 | **Needs you** | the `needs-you` route; its badge counts what asks you |
-| **Sessions** | the `sessions` route: the sidebar's session list, full width; current on a session, the board and All workspaces too |
+| **Sessions** | the `sessions` route: **List**, the sidebar's session list at full width, or **Lanes** ([phone lanes](#lanes)), chosen by a **Sessions view** switch in the top bar beside Search; the choice persists as `sessionsLanes`. Current on a session, the board and All workspaces too |
 | **New** | the [launch sheet](#the-forms); named **New session**, hidden if you cannot launch |
-| **Assistant** | the assistant sheet, with the desktop button's dot and name |
+| **Assistant** | the assistant, full screen, with the desktop button's dot and name |
 | **More** | a bottom sheet, a `dialog` named "More"; the tab is **More pages** |
 
 On a phone the Sessions list is regrouped by `attention.list` (`byAttention`
@@ -680,7 +680,9 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   the key first; so does `Mod+Shift+Space` from anywhere. Crossing between
   docked and floating restyles the one `aside` rather than remounting it, so
   the draft, the focused composer and the transcript's scroll survive.
-- **Phone:** a right side sheet, a `dialog` named "Assistant".
+- **Phone:** a full-screen `dialog` named "Assistant", over the tab bar, with
+  square corners and, with a touch screen, a 16px header inset. Its composer sits at the bottom,
+  above the soft keyboard (`--keyboard-inset`).
 - **Header:** an `h2`, because the view beside it owns the page's `h1`. It
   takes the session header's height on a session and the view header's elsewhere, so
   the two seams line up. It holds the agent and state, **Actions**, **New conversation** (confirms, then
@@ -1677,7 +1679,7 @@ drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
 when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
 `src/lib/commands.ts`, over the whole active workspace whoever owns the session.
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
-continue past failures and report the first real error; archive counts
+continue past failures and report each session's real error; archive counts
 `CodeNotFound` as done. Archiving hides a session whose status is final or
 `completed` (`isTerminal`) from every group without deleting its history.
 Before the archive confirmation offers its count, it reads `run.close_check` for
@@ -1686,6 +1688,34 @@ reasons, each one that still has live subsessions, a pull request not merged,
 sessions waiting on it or pending cleanup; the server refuses those too, and a
 completed session whose result still awaits review, which the single Archive
 command does not offer.
+The same confirmation offers live sessions that are idle and done:
+`idleArchivePlan()` (`src/lib/idle-archive.ts`) takes a running or parked
+session whose agent replied, or whose turn ended without a report, with
+nothing that needs you, no pending request, no reported wait, no live
+subsessions or held background tasks, not paused, and no open parent. The
+batched `run.close_check` then says how long each has been idle
+(`idle_since`) and whether it closes as merged (`merged_pull_request`, else
+abandoned); one changed within 24 hours, or on an older server that does not
+report `idle_since`, is not included. Each row leads with
+its outcome, then why ("Closes as merged · idle 3d, replied"). One with a
+close warning, a failed check, or an older server that cannot tell its
+outcome starts unchecked and says "Check to close anyway", or "Closing
+anyway" once checked; the rest start checked. The section header's select
+all takes only rows without warnings, so a warned row always needs its own
+click; it shows a full check only when every idle row is checked. On a phone
+the Idle header stays at the top of the scrolling body. Every other live session in scope is listed under **Not included**,
+collapsed, with what keeps it. The title and primary button say what happens
+("Archive 5 sessions, closing 2 first?", **Close 2, archive 5**), Cancel
+holds the focus with its ring drawn, and **Check again** rebuilds the whole
+plan, as does the retry shown when an idle session's check failed. With idle
+sessions offered but none checked the title reads "Choose idle sessions to
+close and archive"; "Nothing to archive" means nothing was offered. On desktop the Idle list scrolls in a bounded box that fades at the
+bottom while more is below; on a phone the sheet scrolls instead. Each checked session is
+closed, then archived, unless it changed since the plan saw it (its status,
+review, state, pause or pending requests); one deleted meanwhile is dropped
+without an error, and a skipped or
+failed close leaves it live and unarchived, and the toast names each session
+that failed with its error.
 Freeing removes a retained container and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet
@@ -1828,6 +1858,18 @@ Map's scope picker (labelled **Lanes workspace scope**), **Mine** and
 The axis counts back from now ("−20m") up to an hour wide; wider windows
 show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
 dragging the track pans; the history page loads as the window reaches it.
+
+**On a phone** (below 768px, and in the Sessions tab's **Lanes**) the label
+column is 36% of the width, between 112px and 160px, and holds each session's
+title, state dot, agent glyph and age. Titles stay in that column while the
+track pans; bars carry the state words, cut with an ellipsis. With a touch
+screen (`coarse` pointer) the time window's buttons are 44px wide. Everything else folds into one **Filters**
+popover: **Workspace** and **Group** selects, **Only mine** (with the line that it filters Working and Finished
+only) and **Archived (n)** switches, the **Show** checkboxes, **Legend** and **Reset**. The
+button counts the filters changed from their defaults (this workspace, not
+only mine, not archived, every relationship shown, by status) and turns
+accent while any is; Reset restores them. Axis labels that would touch are
+dropped. The track keeps the room the live mail arrow needs left of now.
 
 **Sections.** By status, sections follow the sidebar: Needs you (oldest wait
 first), Finished: review and Working (newest start first), then Finished

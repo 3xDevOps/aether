@@ -21,11 +21,11 @@ import (
 type AssistantService interface {
 	Status(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	Start(ctx context.Context, member domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error)
-	Prompt(ctx context.Context, member domain.MemberID, text, idempotencyKey string, view *protocol.AssistantViewContext) error
+	Prompt(ctx context.Context, member domain.MemberID, text, idempotencyKey string, view *protocol.AssistantViewContext, origin assistant.Origin) error
 	SetView(ctx context.Context, member domain.MemberID, view *protocol.AssistantViewContext) error
 	Cancel(ctx context.Context, member domain.MemberID) error
 	Answer(member domain.MemberID, requestID, optionID string, values map[string]any) error
-	Confirm(member domain.MemberID, confirmationID string, approve bool) error
+	Confirm(ctx context.Context, member domain.MemberID, confirmationID string, approve bool) error
 	ApproveAlways(ctx context.Context, member domain.MemberID, confirmationID string) (protocol.AssistantRule, error)
 	Rules(ctx context.Context, member domain.MemberID) ([]protocol.AssistantRule, error)
 	RevokeRule(ctx context.Context, member domain.MemberID, ruleID string) error
@@ -123,7 +123,7 @@ func (s *Server) assistantPrompt(ctx context.Context, member domain.MemberID, ra
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	if err := svc.Prompt(ctx, member, p.Text, p.IdempotencyKey, view); err != nil {
+	if err := svc.Prompt(ctx, member, p.Text, p.IdempotencyKey, view, assistant.Door(protocol.AssistantDoorDashboard)); err != nil {
 		return nil, assistantError(err)
 	}
 	return struct{}{}, nil
@@ -195,7 +195,7 @@ func (s *Server) assistantConfirm(ctx context.Context, member domain.MemberID, r
 		return nil, invalidParams("confirmation_id is required")
 	}
 	if !p.Always {
-		if err := svc.Confirm(member, p.ConfirmationID, p.Approve); err != nil {
+		if err := svc.Confirm(ctx, member, p.ConfirmationID, p.Approve); err != nil {
 			return nil, assistantError(err)
 		}
 		return protocol.AssistantConfirmResult{}, nil

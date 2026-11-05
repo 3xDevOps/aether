@@ -259,16 +259,17 @@ func (s *Service) inactive(ctx context.Context, m *member, r store.AssistantRule
 // and wording come from the stored card; the caller sends only the id.
 func (s *Service) ApproveAlways(ctx context.Context, id domain.MemberID, confirmationID string) (protocol.AssistantRule, error) {
 	m := s.member(id)
-	cards := m.confirms.snapshot()
-	i := slices.IndexFunc(cards, func(c protocol.AssistantConfirmation) bool { return c.ID == confirmationID })
-	if i < 0 {
+	card, err := s.Card(ctx, id, confirmationID)
+	if err != nil {
+		return protocol.AssistantRule{}, err
+	}
+	if card.State != protocol.AssistantCardPending {
 		return protocol.AssistantRule{}, fmt.Errorf("%w: %s", ErrNoConfirmation, confirmationID)
 	}
-	card := cards[i]
 	if card.Rule == nil {
 		return protocol.AssistantRule{}, ErrNoRule
 	}
-	if err := m.confirms.decide(confirmationID, true); err != nil {
+	if err = s.Confirm(ctx, id, confirmationID, true); err != nil {
 		return protocol.AssistantRule{}, err
 	}
 	m.settings.Lock()

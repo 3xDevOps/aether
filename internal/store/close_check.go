@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -29,6 +31,9 @@ type CloseCheckStore interface {
 	CloseDependents(ctx context.Context, run domain.RunID, recent time.Time) (CloseDependents, error)
 	// RunWaiters lists the live runs with a pending wait on run finishing.
 	RunWaiters(ctx context.Context, run domain.RunID) ([]domain.RunID, error)
+	// RunLastChange is when run's status, reason or activity last changed,
+	// or when it was created if they never did.
+	RunLastChange(ctx context.Context, run domain.RunID) (time.Time, error)
 }
 
 func (d *DB) CloseDependents(ctx context.Context, run domain.RunID, recent time.Time) (CloseDependents, error) {
@@ -82,6 +87,19 @@ func (d *DB) RunWaiters(ctx context.Context, run domain.RunID) ([]domain.RunID, 
 		return nil, fmt.Errorf("store: session waiters: %w", err)
 	}
 	return ids, nil
+}
+
+func (d *DB) RunLastChange(ctx context.Context, run domain.RunID) (time.Time, error) {
+	var at int64
+	err := d.db.QueryRowContext(ctx, `SELECT COALESCE((SELECT MAX(at) FROM run_state_transitions WHERE run_id = ?1), created_at)
+		FROM runs WHERE id = ?1`, run).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("store: session last change: %w", err)
+	}
+	return decodeTime(at), nil
 }
 
 func (d *DB) runIDs(ctx context.Context, query string, args ...any) ([]domain.RunID, error) {

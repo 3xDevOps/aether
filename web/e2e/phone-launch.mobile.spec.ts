@@ -1,6 +1,8 @@
 // Launching from a phone against a real server: + New opens a bottom sheet
 // on your last session's repository, not the active one, with your saved
-// agent, and a shared prompt fills it in without launching.
+// agent, a shared prompt fills it in without launching, and lanes fit the
+// screen.
+
 
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
@@ -39,6 +41,17 @@ test('+ New launches on the last session\'s repository with the saved agent', as
   const { runs } = await alice.api.rpc<{ runs: { task: string; workspace_id: string; harness: string }[] }>('run.list', {})
   expect(runs.find((run) => run.task === 'write the changelog')).toMatchObject({ workspace_id: docs.id, harness: 'claude' })
 
+  await page.setViewportSize({ width: 430, height: 800 })
+  await tabs.getByRole('button', { name: 'Sessions' }).tap()
+  await page.getByRole('radio', { name: 'Lanes' }).tap()
+  // Lanes open on the active workspace, shop; the new session ran in docs.
+  await page.getByRole('button', { name: 'Filters' }).tap()
+  await page.getByRole('combobox', { name: 'Workspace' }).tap()
+  await page.getByRole('option', { name: 'All workspaces' }).tap()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Filters, 1 changed' })).toBeVisible()
+  await expect(page.getByRole('treeitem', { name: /^write the changelog/ })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
 })
 
 test('a shared prompt fills + New without launching and leaves the address', async ({ page, aether }) => {
