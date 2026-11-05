@@ -11,8 +11,8 @@ import { expect, test } from './fixtures'
 import { memberID, seedWorkspace } from './harness/setup'
 
 async function openMerge(page: Page, phone = false) {
-  if (phone) await page.getByRole('button', { name: /^Open sidebar/ }).click()
-  await page.getByRole(phone ? 'dialog' : 'navigation', { name: 'Aether' })
+  if (phone) await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'More pages' }).click()
+  await (phone ? page.getByRole('dialog', { name: 'More' }) : page.getByRole('navigation', { name: 'Aether' }))
     .getByRole('button', { name: /, (Live|Reconnecting|Offline)$/ }).click()
   await page.getByRole('menuitem', { name: 'Profile' }).click()
   const signIns = page.getByRole('dialog', { name: 'Profile' }).getByRole('region', { name: 'Sign-ins' })

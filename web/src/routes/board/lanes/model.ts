@@ -50,7 +50,7 @@ export interface RunLane extends LaneBase {
   card: BoardCard
   title: string
   segments: Segment[]
-  /** Set once the run ended, from its status: the viewer's state can read Ready for review instead. */
+  /** Set once the run ended, from its status: the viewer's state can read Finished: review instead. */
   outcome?: PresentationState
   start: number
   end: number
@@ -110,7 +110,7 @@ export interface LanesModel {
   inWindow: number
 }
 
-const sectionOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
+const sectionOrder: RunGroup[] = ['needs-you', 'review', 'working', 'finished']
 const groupRank = Object.fromEntries(sectionOrder.map((group, i) => [group, i])) as Record<RunGroup, number>
 const familyChildrenOpen = 8
 const agentDepth = 4
@@ -206,6 +206,7 @@ const familyRank: Record<Tone, number> = {
   disconnected: 3,
   neutral: 3,
   done: 2,
+  held: 2,
   closed: 1,
 }
 const outcomeRank: Partial<Record<Tone, number>> = { failed: 3, done: 2, closed: 1 }
@@ -230,7 +231,7 @@ function childCounts(members: RunLane[]): string {
   return [
     counts.needsYou > 0 && `${counts.needsYou} needs you`,
     counts.working > 0 && `${counts.working} working`,
-    counts.done > 0 && `${counts.done} done`,
+    counts.done > 0 && `${counts.done} finished`,
     counts.failed > 0 && `${counts.failed} failed`,
   ].filter(Boolean).join(' · ')
 }
@@ -320,7 +321,8 @@ export function buildLanes(input: LanesInput): LanesModel {
     const key = `section:${id}`
     const count = section.units.reduce((n, unit) => n + unit.members.length, 0)
     const sectionOpen = open.get(key) ?? !section.finished
-    lanes.push({ kind: 'section', key, level: 1, label: section.label, count, open: sectionOpen, before: section.before, member: section.member })
+    // Like the sidebar and the board, a session counts with its subsessions as one.
+    lanes.push({ kind: 'section', key, level: 1, label: section.label, count: section.units.length, open: sectionOpen, before: section.before, member: section.member })
     if (!sectionOpen) {
       if (!section.finished || count === 0) continue
       const members = section.units.flatMap((unit) => unit.members)
@@ -361,7 +363,8 @@ export function buildLanes(input: LanesInput): LanesModel {
       })
       drawn.set(parent.card.run.id, familyKey)
       for (const lane of children) drawn.set(lane.card.run.id, familyKey)
-      for (const lane of familyOpen ? [parent, ...children] : needs) lanes.push(...withAgents({ ...lane, level: 3, parentKey: familyKey }))
+      const folded = unit.members.filter((lane) => needs.includes(lane) || lane.card.group === 'review')
+      for (const lane of familyOpen ? [parent, ...children] : folded) lanes.push(...withAgents({ ...lane, level: 3, parentKey: familyKey }))
     }
   }
   return { lanes, drawn, inWindow }

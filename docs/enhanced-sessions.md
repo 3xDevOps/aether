@@ -204,7 +204,7 @@ Standard session whose agent reports its turns. The reason tells you how it ende
 | Reason | State | Cause |
 | --- | --- | --- |
 | `turn ended without a report` | `waiting` | The turn ended normally with no outcome report |
-| `agent reported success` | `finished` | The session shows **Ready for review** ([failure-handling.md](failure-handling.md#review)) |
+| `agent reported success` | `finished` | The session shows **Finished: review** ([failure-handling.md](failure-handling.md#review)) |
 | `needs input: <question>` | `needs-you` | The agent ran `aether-internal report --outcome needs-input` and ended its turn |
 | `blocked: <summary>` | `needs-you` | The agent reported an external blocker |
 | the summary of a `waiting` report | `waiting-agents`, `waiting-ci` or `waiting-tools` | The agent waits on its own agents, CI or a process |

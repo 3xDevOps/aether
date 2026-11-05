@@ -1,4 +1,4 @@
-// The drawer is a modal, so it stands the shell's global keys down while open.
+// More is a modal sheet below 768px, so it stands the shell's global keys down while open.
 // Mod+B is the exception, because it is the key that opened it.
 
 import { expect, test } from './fixtures'
@@ -16,16 +16,16 @@ test('the drawer answers the key that opened it and gives the rest back', async 
   await page.setViewportSize({ width: 600, height: 800 })
   await page.goto(alice.url)
 
-  const drawer = page.getByRole('dialog', { name: 'Aether' })
+  const drawer = page.getByRole('dialog', { name: 'More' })
   const palette = page.locator('[data-slot="command-input"]')
-  const opener = page.getByRole('banner').getByRole('button', { name: /^Open sidebar/ })
+  const opener = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'More' })
   await expect(opener).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Aether' })).toBeHidden()
+  await expect(page.getByRole('navigation', { name: 'More' })).toBeHidden()
   await opener.focus()
 
   await page.keyboard.press('ControlOrMeta+b')
   await expect(drawer).toBeVisible()
-  await expect(drawer.getByRole('navigation', { name: 'Aether' })).toBeVisible()
+  await expect(drawer.getByRole('navigation', { name: 'More' })).toBeVisible()
   await page.keyboard.press('ControlOrMeta+b')
   await expect(drawer).toBeHidden()
   await expect(opener).toBeFocused()

@@ -81,6 +81,45 @@ export interface RunInputRequest {
   title?: string
 }
 
+/** A pending request as attention.list carries it; a Standard session's has no options. */
+export interface AttentionRequest {
+  id: string
+  kind: string
+  title?: string
+  options?: { id: string; label: string; kind?: string }[]
+  schema?: unknown
+  url?: string
+}
+
+/** In the order the server checks a session, as internal/protocol/attention.go lists them. */
+export type AttentionKind =
+  | 'permission'
+  | 'question'
+  | 'queued-message'
+  | 'room-question'
+  | 'disconnected'
+  | 'blocked'
+  | 'needs-input'
+  | 'ready'
+  | 'failed'
+
+/** One session that waits on the caller, under the first Needs you row that holds for it. */
+export interface AttentionItem {
+  kind: AttentionKind
+  run_id: string
+  workspace_id: string
+  title: string
+  harness: string
+  reason: string
+  since?: string
+  request?: AttentionRequest
+  message?: { id: string; body: string; from?: string }
+}
+
+export interface RunInputRespondResult {
+  status: 'answered' | 'already_answered'
+}
+
 type WaitConditionKind = 'pr_merged' | 'pr_checks' | 'run_finished'
 export type WaitState = 'pending' | 'resolved' | 'cancelled' | 'superseded' | 'expired' | 'error'
 

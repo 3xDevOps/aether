@@ -77,8 +77,9 @@ function useRovingRows(region: React.RefObject<HTMLElement | null>) {
   return { onFocus, onKeyDown }
 }
 
-export function SidebarRuns() {
-  const groups = useSidebarGroups()
+export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) => SidebarGroup[] } = {}) {
+  const listed = useSidebarGroups()
+  const groups = regroup ? regroup(listed) : listed
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
@@ -168,9 +169,15 @@ export const connectors = cn(
   'after:absolute after:top-[calc(var(--wire,50%)+0.5px)] after:bottom-0 after:left-[calc(var(--trunk,--spacing(3.25))-0.5px)] after:border-l after:border-icon-faint last:after:hidden',
 )
 
+// Finished: review sits above Working, so it shows a few rows and offers the rest.
+const reviewRows = 3
+
 /** `toggled` is true once the viewer has turned this group, so only their own change fades the list in. */
 function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; expanded: boolean; toggled: boolean; onToggle: () => void }) {
   const listID = `sidebar-group-${group.key}`
+  const [all, setAll] = useState(false)
+  const extra = group.key === 'review' ? group.runs.length - reviewRows : 0
+  const runs = extra > 0 && !all ? group.runs.slice(0, reviewRows) : group.runs
   return (
     <div className="pt-2">
       <div className="flex items-center gap-1">
@@ -193,7 +200,7 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
       <ul id={listID} hidden={!expanded} className={cn(toggled && 'animate-fade-in motion-reduce:animate-none')}>
         {expanded && group.key === 'needs-you' && <MergesRow />}
         {expanded && group.key === 'needs-you' && <DevicesRow />}
-        {expanded && group.runs.map((tree) => (
+        {expanded && runs.map((tree) => (
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
@@ -207,6 +214,13 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
             )}
           </li>
         ))}
+        {expanded && extra > 0 && (
+          <li>
+            <Button variant="quiet" size="sm" className="ml-5.5 text-ui-sm" aria-expanded={all} onClick={() => setAll(!all)}>
+              {all ? 'Show less' : `${extra} more`}
+            </Button>
+          </li>
+        )}
       </ul>
     </div>
   )

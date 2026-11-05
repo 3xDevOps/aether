@@ -23,11 +23,9 @@ while :; do sleep 1; done`
 
 async function openDock(page: Page, url: string): Promise<Locator> {
   await page.goto(url)
-  const sidebar = page.getByRole('button', { name: /^Open sidebar/ })
-  await expect(sidebar.or(page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }))).toBeVisible()
-  if (await sidebar.isVisible()) {
-    await sidebar.click()
-    await page.getByRole('dialog', { name: 'Aether' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+  if (page.viewportSize()!.width < 768) {
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).click()
+    await page.getByRole('main').getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   } else {
     await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   }

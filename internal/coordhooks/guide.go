@@ -65,7 +65,7 @@ const (
 		"Nothing else wakes you when CI or a process finishes; never ask people to message you when it lands. " +
 		"Not while aether_status shows protected: mail never wakes a protected session, so wait in your turn."
 	BlockedUse = "a human must act, such as missing access or a broken environment; not a way to wait."
-	ReviewRule = "Success shows the session as Ready for review until the user marks it complete or later."
+	ReviewRule = "Success shows the session as Finished: review until the user marks it complete or later."
 	neverRule  = "Never report while still working, and report only what you verified."
 )
 

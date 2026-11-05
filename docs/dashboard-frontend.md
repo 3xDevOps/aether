@@ -475,28 +475,120 @@ overflow measuring still counts only buttons, and it hides while the current
 page is in **More navigation**. Gateway capability gates still apply. Hidden buttons
 are inert and excluded from the accessibility tree.
 
-Under 768px a second, 48px toolbar holds **Open sidebar** with an amber dot
-while anything needs you, the view's title, **Search** and **New session**. On a
-session page the title is "Session", because the session header under it already shows
-the session's title. A connection problem is one line under the toolbar. On a
-phone the view's own header keeps only its actions, and its `h1` stays for
-screen readers. The header's measured bottom edge sets
+Under 768px the header is one 48px row: the view's title and **Search**. On
+a session page the title is "Session", because the session header under it
+already shows the session's title. A connection problem is one line under the
+row. On a phone the view's own header keeps only its actions, and its `h1`
+stays for screen readers. The header's measured bottom edge sets
 `--app-header-bottom` for the command palette's position and height limit.
+Navigation moves to the [phone tab bar](#phone-layout).
+
+### Phone layout
+
+Below 768px (`mobileScreen` in `src/lib/breakpoints.ts`) the shell adds a
+bottom tab bar, `phone-tab-bar.tsx`, a `nav` named "Main navigation". Desktop
+is unchanged. The tabs are at least 44px square, and the bar pads itself by
+the bottom and side safe-area insets, so `main` does not pad the bottom on a
+phone. Its measured height sets `--phone-tabs-height`, which keeps toasts 8px
+above it. On a touch screen the bar hides while the soft keyboard is up: a
+text field other than the terminal's has focus and the visible viewport is
+more than 150px shorter than the tallest it has been at this width. Android's
+Back and iOS's Done close the keyboard without a blur, so focus alone would
+keep the bar hidden. With more than one workspace the header shows the active
+one's name, muted, after the title.
+
+| Tab | Opens |
+| --- | --- |
+| **Needs you** | the `needs-you` route; its badge counts what asks you |
+| **Sessions** | the `sessions` route: the sidebar's session list, full width; current on a session, the board and All workspaces too |
+| **New** | the launch dialog; named **New session**, hidden if you cannot launch |
+| **Assistant** | the assistant sheet, with the desktop button's dot and name |
+| **More** | a bottom sheet, a `dialog` named "More"; the tab is **More pages** |
+
+On a phone the Sessions list is regrouped by `attention.list` (`byAttention`
+in `src/routes/needs-you/attention.ts`): its Needs you group has the badge's
+count and order, and a session the server lists as finished moves to the
+review group, newest change first. A session only the dashboard's copy of the
+rule puts in Needs you stays listed, last, and is not counted.
+
+A phone that opens the dashboard with no `run` or `page` in the address lands
+on Needs you (`initialRoute` in `src/lib/url-state.ts`), or on onboarding on a
+first visit, as the board does on desktop. Every other link still opens its
+own page. The board is in More, and on a phone its address carries
+`page=board`, so a reload stays on it. A gateway without `attention.list`,
+whether it does not list the method or answers `-32601` for it, has no Needs
+you tab, and its landing page redirects to the board. The Sessions route
+exists only on a phone; a wider window redirects it to the board, whose
+sidebar has the same list.
 
 A phone screen has one filled button. A page whose own action is filled calls
 `useHeaderPrimary(shown)` (`src/store/hooks.ts`) while that action shows; the
 `ui` slice counts the holders in `headerPrimaries`, and while the count is
-above zero the top bar draws **New session** as an icon button with the same
-accessible name. A session page always gets the icon, with or without a primary
-action. The holders are a session header with a primary action, Environment's **Open** or **Save
-environment**, onboarding, Files with a file open and the Changes view's
-**Publish…**. The board, lists and settings keep the filled **New session**.
+above zero the **New** tab drops its filled pill. The holders are a session
+header with a primary action, Environment's **Open** or **Save environment**,
+onboarding, Files with a file open and the Changes view's **Publish…**.
 
-The sidebar opens as a left side sheet, a `dialog` named "Aether" with the
-same contents and **Close sidebar** in place of **Hide sidebar**; a tap
-outside, Escape or any navigation closes it, and navigation moves focus to the
-new view's heading. `Mod+B` closes it too, because it is the key that opened
-it; every other shell key stands down while it is open.
+**More** holds the workspace switcher, whose amber counts come from
+`attention.list` too, every page the desktop header and sidebar link to
+(Board, Activity, Insights, Memory, Files, Environment, Agents, Templates,
+Members, Settings, Devices, Manage workspaces) in a list that scrolls, the
+update notice and the profile footer. A tap outside, Escape or any navigation
+closes it, and navigation moves focus to the new view's heading. `Mod+B` opens
+and closes it; every other shell key stands down while it is open.
+
+**Needs you** (`src/routes/needs-you/`) reads the server's `attention.list`
+([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), not
+the dashboard's copy of the rule. It reads it again within 250ms of any change
+to a session's status, state, review, outcome flag, pause, requests, room
+messages and their decisions, or controller, after a reconnect, and each time
+the page opens. One read runs at a time; a change during it asks for one more.
+A different member or server clears the list. While the page shows a saved
+snapshot and the list has not been read, Needs you lists the saved sessions the
+dashboard's own rule puts in Needs you, to open but not answer. A failed read
+shows its own error unless the saved-state banner already shows one. The badge counts the same list's
+requests, plus the devices waiting for approval and the merge proposals to the
+viewer, as the sidebar's Needs you does; their board cards (`DeviceCard`,
+`MergeProposalCard`) sit above the session cards. Cards are ranked by kind in
+the order the server checks them (`needsYouConditions` in
+`src/lib/needs-you.ts`): permission, question, queued message, room question,
+disconnected, blocked, needs input, failed, and a kind this dashboard does not
+know last. Within a kind the server's order holds, oldest first. Each card is
+a `RequestCard`. Its title, at most two lines, opens the session's view the
+condition names; the request's detail is clamped to five lines with **Show
+more**. Then comes its inline answer:
+
+- A permission with `allow_once` and `reject_once` options shows **Deny** and
+  a second half. A sudo request's title is the whole command, so the second
+  half is **Approve** (the session's own `DecisionButtons`). An agent's tool
+  call can be a file edit or a plan that `attention.list` does not carry, so
+  its second half is **Review**, which opens the session where the change is
+  shown and approved. Deny and Approve send `run.input.respond` with the
+  request's id and that option, so a tap that lands after the request changed
+  decides nothing else. **Always** is not offered. A Standard session's
+  permission has no options and opens the terminal instead.
+- An Enhanced session's question shows its form and its options, answered the
+  same way. A link question opens the session.
+- A turn that ended asking (`needs input`, the condition's **Reply**) shows
+  **Reply…**, which opens a focused text field; **Send** or `Mod+Enter` sends
+  `run.inject`. The field scrolls into view above the keyboard, and the list
+  pads by `--keyboard-inset` for iOS, whose keyboard leaves the layout tall. A
+  room question replies with `run.room.post`, correlated to the question. A
+  retry of the same text reuses its idempotency key; a reply not sent or
+  uncertain keeps its draft.
+- Everything else has one button that opens the session.
+
+Setup notices the board shows, such as letting agents use Docker, sit above
+the cards. While the first read is in flight two skeleton cards show; a failed
+read is a failed-tone callout with the server's error and **Retry**, and the
+list and badge keep their last values. `already_answered` shows "Already
+answered: an earlier answer won". Once the server takes an answer the card
+says **Answered** until the list drops the request, so a second tap is never
+sent. While another member controls the session, a permission or question card
+names them and offers only the session, because `run.input.respond` would
+refuse with `-32003`. Any other refusal shows the server's error on the card.
+Below the cards, **Finished: review the result** lists the `ready` items as
+plain rows. They never count toward the badge and have no Mark complete;
+opening one opens the session.
 
 ### Assistant panel
 
@@ -560,13 +652,24 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   **N more**), or for `run.launch` a **What starts**
   list (`components/assistant/launch-summary.tsx`; the title then stops
   before the quoted task) of kind, workspace,
-  agent with model and mode, account (`Yours` or `<name>'s, shared with
-  you`), fallback, task, and how the member hears back, a
+  agent with model and mode, effort when set, permission tier (`default`
+  when unset), account (`Yours` or `<name>'s, shared with you`), fallback, task, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
-  `confirmations` frame stops listing it. While `auto_approve` is off a card
-  links **Skip these cards…** to Settings > Assistant; a card with
+  `confirmations` frame stops listing it. A card's footer is not sticky: the dock (65dvh with an empty
+  conversation, whose suggestion chips it hides, else 40dvh, 50dvh on tall
+  screens) scrolls the whole card, so its actions come after every row they
+  approve, and rows have no scroll of their own. A card with `rule` adds,
+  under `Or save a rule:`, a secondary button labeled with `rule.wording`
+  (`assistant.confirm` with `always: true`), marked with an accent left rule
+  and `You approved this kind three times in a row.` when `rule.suggested`,
+  and, while `auto_approve` is off,
+  **Approve everything from now on**: it approves the card, then sets the
+  store's `assistantConfirmAutoApprove`, which opens the panel's **Let the
+  assistant act without asking?** confirm (`AutoApproveConfirm` in
+  `components/assistant/approval-choice.tsx`). While `auto_approve` is off a
+  card without `rule` links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
@@ -587,7 +690,7 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `Withdrawn: the turn ended before you answered`, `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
   not, or `Not confirmed: check status before retrying` for an
-  `aether_pr_create` whose result says `write: "pending"`) with `approved by you` or `auto-approved`, and its time. A call
+  `aether_pr_create` whose result says `write: "pending"`) with `approved by you`, `auto-approved` or `approved by your rule <id>` (a record with `approval: "rule"` and its `rule_id`), and its time. A call
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
@@ -640,6 +743,17 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   actions**, which loads them as **Show earlier messages** does. Focus starts
   on the newest entry. Up, Down, Home and End move, and Enter opens the target
   and closes the popover.
+- **Setup question** (`ApprovalChoice` in
+  `components/assistant/approval-choice.tsx`): when the status has
+  `approval_chosen: false` and the state is not `failed` (a failed status
+  carries no stored settings; absent never asks), a notice above the composer
+  asks **How should your assistant act?** **Ask before acting** and **Act
+  without asking** call `assistant.settings` with `auto_approve` false or
+  true; the second shows the auto-approval warning under its button, so it
+  opens no dialog. It scrolls past 40% of the viewport height, and the
+  auto-approval suggestion waits until it is answered. The answer's settings
+  replace the status, which drops the notice, unless another member signed in
+  meanwhile; a refusal shows under the buttons.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a
@@ -790,12 +904,14 @@ when a needs-you notification for the same session fired within five
 seconds. A phone gets the web push the server sends for the same notice.
 
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
-component mounted in one place at a time: the sidebar's **New session** row (a secondary
-icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
-the phone toolbar under 768px; keeping it out of the top bar's row leaves that
-row to the header destinations), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
-**Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
-each onboarding step.
+component mounted in one place at a time: the sidebar's **New session** row (a
+secondary icon button to its right, which keeps the workspace switcher's
+room), or the top bar's first row while the sidebar is hidden; under 768px the
+**Assistant** tab of the [phone tab bar](#phone-layout) replaces it; keeping
+it out of the top bar's row leaves that row to the header destinations),
+`Mod+Shift+Space`, the palette's **Ask Aether**, a secondary **Ask Aether** in
+the board's empty states, and **Stuck? Ask Aether** under each onboarding
+step.
 
 ### Landmarks and headers
 
@@ -932,8 +1048,8 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 - `viewport-fit=cover` - the shell paints under the notch and the home
   indicator, and the chrome that touches those edges pads itself back out with
   `env(safe-area-inset-*)`: the phone top bar sideways and downwards, the
-  sidebar sheet on all three edges it reaches, the sidebar on the left and the
-  content view on the right and bottom. The top inset is the one a surface
+  phone tab bar sideways and upwards, the sidebar on the left and the content
+  view on the right (and bottom, on desktop). The top inset is the one a surface
   away from that edge also has to read, because an installed iOS app asks for
   a `black-translucent` status bar and gets the whole screen: it is
   `--safe-top` in `src/index.css`, and the top bar's height, the palette's
@@ -961,8 +1077,8 @@ elements for a finger than for a mouse, or for a narrow window, ask
 room a view has rather than the window, such as Board's columns, measures
 itself with `useElementSize`. The `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
 `src/lib/breakpoints.ts`. The shell has one breakpoint: under 768px
-(`useIsMobile()`, Tailwind `max-md:`) the top bar and the sidebar sheet
-replace the sidebar.
+(`useIsMobile()`, Tailwind `max-md:`) the one-row top bar and the
+[phone tab bar](#phone-layout) replace the sidebar.
 
 A panel docked beside other content decides from room, not from the
 viewport. `minReadableWidth` (560px, `src/lib/breakpoints.ts`) is the width
@@ -992,7 +1108,7 @@ Desktop density is untouched.
 Use this variant rather than a new breakpoint or a per-component pixel value.
 
 **Header offsets follow the rendered layout.** `--top-bar-height` (48px,
-border included) in `src/index.css` sets the phone toolbar's height.
+border included) in `src/index.css` sets the phone header row's height.
 The app header reports its measured bottom edge through `--app-header-bottom`
 for the command palette. Desktop dragging uses the navigation row, not a
 separate height token.
@@ -1677,9 +1793,9 @@ The axis counts back from now ("−20m") up to an hour wide; wider windows
 show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
 dragging the track pans; the history page loads as the window reaches it.
 
-**Sections.** By status, sections follow Board: Needs you (oldest wait first),
-Working and Ready for review (newest start first), then Finished (failed
-first, then latest end). Finished starts folded into one summary lane ("37
+**Sections.** By status, sections follow the sidebar: Needs you (oldest wait
+first), Finished: review and Working (newest start first), then Finished
+(failed first, then latest end). Finished starts folded into one summary lane ("37
 finished · 3 failed") whose strip shows each moment's outcome. By owner, there
 is one section per owner, yours first. A section header counts the sessions that
 ended before the window and offers the next wider window. When no session reaches
@@ -1697,13 +1813,15 @@ outline covers Starting (queued and provisioning); then each span takes the
 state `run.status` history gives it. History knows only the server's
 needs-attention, so a past span reads **Needed attention**; the span since
 the last change shows the viewer's own state (`presentRun`), which alone
-knows Needs you, Paused and Ready for review. Once a session ends, its working
+knows Needs you, Paused and Finished: review. Once a session ends, its working
 spans take its outcome's colour, so only live work reads Working. Time
 before the history read is a dotted outline that says "History not loaded";
 if the read fails, bars fall back to the current state and a **Session history**
 callout shows the server's error with **Retry**. A working bar has a 2px end
 cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
-tag. Finished bars add "took 18m" after their end when there is room.
+tag. A session awaiting review never gets that tag; its label carries a
+review-tone **Finished: review** chip instead of the Needs you chip. Finished
+bars add "took 18m" after their end when there is room.
 
 **Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
 pair within 24px) draws as marks, not links: a dot on the sender's bar and a
@@ -1776,7 +1894,7 @@ on a card. Focusing a lane draws its mail as links and
 chips, and its popover lists every message, so nothing depends on hover. The axis is a separate tab stop,
 **Timeline window**: Left and Right pan by a tenth, `+` and `-` zoom, `0` or
 Home return to now. A polite status line announces sessions that turn Needs you,
-Failed, Ready for review or Completed, gathered for 1.5s and at most three at
+Failed, Finished: review or Completed, gathered for 1.5s and at most three at
 a time (the Workflow panel's announcer, `src/lib/use-announcement.ts`).
 
 **Data.** `useLaneHistory` holds `laneHistory` in `src/store/lanes.ts` while
@@ -1892,16 +2010,23 @@ running".
 | Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action. Also a live `finished` session a member answered **Not yet** (no `review`, with a `review_changed_at`), read "Not finished yet" | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Ready for review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
+| Finished: review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Finished: review, never Needs you |
 | Completed / Merged | check | `completed`, `merged` | Finished |
+| Finished: reported to its parent | check in `icon-faint` | an attached subsession's reported success, which is for its parent agent only ([failure-handling.md](failure-handling.md#needs-you)) | Finished, beneath its parent |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
 | Interrupted | ring with an exclamation mark | `interrupted` | Finished |
 | Disconnected | broken ring, neutral | `disconnected`: the agent session or process ended while the session is open | Needs you for its owner |
 | Paused | bars | a live session paused by a member | Working |
 
-The sidebar and session list show Ready for review as its own quiet group
-between Working and Finished; the board lists it at the head of Finished.
+The sidebar and session list show Finished: review as its own
+quiet group, with its own count, directly below Needs you; the sidebar shows
+three of its rows and a **N more** button for the rest. The board lists it at
+the head of Finished; the list layout, which folds Finished, shows it as a
+group of its own above Working. Lanes sections count a session and its
+subsessions as one, as the sidebar does. A finished session asks nothing of anyone, so it
+never adds to the Needs you count, a workspace badge or the desktop badge. In
+the session view its primary action is **Review**, which opens Changes.
 
 Live actions (stop, pause, message, Stop waiting) still gate on the wire
 `status` (`running`, `needs-attention`), not on the state.
@@ -1930,10 +2055,15 @@ The Needs you group, its counts and badges follow the session-state attention
 rule push notifications, watches and `aether sessions --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live session (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
-`disconnected`, or `failed` while `outcome_unseen`, and a reported success,
-live or `completed`, whose `review` is `ready`. Waiting, every Waiting for
-state, Working, a `review` of `later` or `accepted`, and a finished session
-never count. The sidebar's Needs you count, the workspace badges and the
+`disconnected`, or `failed` while `outcome_unseen`. Waiting, every Waiting
+for state, Working, a reported success awaiting review (`review` `ready` or
+`later`) and a finished session never count. An attached subsession's
+success or failure is for its parent agent only (`outcomeHeld` in
+`src/lib/needs-you.ts`, [failure-handling.md](failure-handling.md#needs-you)),
+so it never counts either: the family stays in its parent's group and counts
+the subsession as done or failed. Its run commands offer no **Mark
+complete**, **Not yet** or **Review later**, and its session view shows no
+completion prompt. The sidebar's Needs you count, the workspace badges and the
 list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused session
 too.
 Needs you means the viewer can resolve it.
@@ -1957,7 +2087,6 @@ they come from the room, which the session's `state` does not cover, so push and
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the session to see its request, with **Open** |
-| `review` `ready` on a live `finished` or a `completed` run (labelled Ready for review) | owner | Your agent reports this task is finished |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
@@ -2052,16 +2181,16 @@ An answer is not ordered against the event stream, so one that a newer
 `run.status` event for the session overtook is dropped and the session is asked about
 again.
 
-A reported success presents **Ready for review** whether or not the flag is
+A reported success presents **Finished: review** whether or not the flag is
 set; a reported failure stays a **Failed** row in Needs you until its owner
-opens the session, the next turn or Close. A session that has ended is in Needs you
-only while its `review` is `ready`; any other keeps its unopened marker in
+opens the session, the next turn or Close. A session that has ended is never in
+Needs you; it keeps its unopened marker in Finished: review or
 Finished.
 
 **Completion review** is the owner's answer to a reported success, held by
 the server as the session's `review` (`""`, `ready`, `later`, `accepted`) and
 `review_changed_at`. A success report sets `ready`; opening the session does not
-change it, so the session stays in Needs you. While the open session is `ready`,
+change it, so the session stays in Finished: review. While the open session is `ready`,
 `CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
 callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
@@ -3143,7 +3272,8 @@ The timeline rows and both composers share `sessionColumn`
 the message box line up at every width. The box (`rounded-composer`, 14px)
 holds the textarea above one footer row: attach, **Insert a template**, the
 agent's mode, model and effort pickers, the context meter, and the send pill
-at the end. The Standard composer's row has attach, **Insert a template** and
+at the end, with the dictation mic (see [Dictation](#dictation)) just left of
+it. The Standard composer's row has attach, **Insert a template**, the mic and
 Send. The pill is a
 round arrow while it reads **Send** and widens to its word otherwise. Hints
 and the 45-second delivery notice sit under the box. Footer controls wrap on
@@ -3270,6 +3400,74 @@ Details sheet and focuses the card; on other views it lists the cards. `routes/r
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
 agent's auth methods.
 
+### Dictation
+
+`components/dictation/` turns speech into text in a message box. Its
+`DictationButton` takes `{ textarea, onInsert, hints? }`: the box, a callback
+that stores the new text, and optional hints. It is mounted left of **Send** in
+the session composer and the assistant composer, and in a row under the New
+session **Task** box (`run-fields.tsx`). It renders nothing unless
+`server.info` lists the `dictation` feature, which the server sets only once
+dictation is installed.
+
+The button and the composer around it share state through `state.ts`, keyed by
+the box's ref: `useDictationState(textarea)` returns `active` (starting,
+recording or transcribing) and the current `notice`. While `active`, the
+composer's text-sending actions (Send, Steer, Queue) are disabled and Enter
+does nothing, so a missed press cannot send the old draft mid-recording;
+Interrupt, Stop waiting and Resume stay available. The mic will not start in
+a box that is read-only because its message is still sending, since the sent
+draft would replace the dictated words; it shows a notice instead. The New session dialog and the onboarding
+first run hold **Launch** the same way through `useDictating()`, which is true
+while any box dictates. `DictationNotice` draws the notice as a strip
+above the box: failed tint, alert icon and `role="alert"` for an error, a plain
+`role="status"` strip for "No speech was recognized.", and an **x** that
+dismisses it and returns focus to the box.
+
+| State | Button | Live region |
+| --- | --- | --- |
+| Idle | Mic in text colour | - |
+| Starting | Neutral pill: spinner, "Starting mic…" | Starting microphone |
+| Recording | Red pill: stop square, seven-bar level meter, elapsed time | Recording. Press again to stop, Escape to cancel. |
+| Transcribing | Neutral pill: spinner, "Transcribing…" | Transcribing |
+
+The button's name is always **Dictate**; `aria-pressed` says whether it is
+recording. The pills share one minimum width, so the button does not jump
+between states. A tap starts and a second tap stops. A press held 300 ms or
+more after recording began stops on release (hold to talk); a press that
+outlasted the browser's permission prompt counts as a tap. Enter and Space
+toggle like a tap. A pointer press keeps focus in the box, so a phone keeps its
+keyboard up. Escape pressed in the box or on the mic while starting, recording
+or transcribing drops the audio or the request in flight; an Escape anywhere
+else goes to its own owner. Recording stops by
+itself at 2:00.
+
+The browser asks for the microphone on the first press, never on load.
+`capture.ts` opens it with `getUserMedia` at the hardware rate (a 16 kHz
+`AudioContext` records silence on some macOS devices), downmixes each render
+quantum to mono in an `AudioWorklet` loaded from a blob URL, and reads the
+meter from an `AnalyserNode` at 15 Hz. The track stops as soon as recording
+ends. `wav.ts` averages down to 16 kHz, clips at 120 s and encodes PCM16 mono
+WAV; `api.dictationTranscribe` posts it base64 to `dictation.transcribe` with
+the hints. Without `hints`, `dictationHints` sends up to 200 names of at most
+80 bytes: every workspace, the open workspace's repo and run repos, and its
+sessions' titles, newest first. Transcription times out after 240 s, the local gateway's bound.
+
+`insertTranscript` puts the text where the caret or selection was when
+recording started; if the text changed meanwhile, at the caret the member left
+in the box, or at the end, adding a space on either side only where a word would
+otherwise touch it, then focuses the box with the caret after the text. It
+never sends: the mic has `type="button"`, so a press inside the New session
+form does not launch. Errors show verbatim, with paths and the install command
+in code: the server's message (not installed, busy, too long) or the
+browser's, as `Microphone: <DOMException name>: <message>`. A
+`NotAllowedError` adds, on its own muted line, how to allow the microphone
+again. A page served over
+plain http to a non-loopback host is not a secure context and has no
+microphone; the notice names the origin. The meter keeps reading the level
+under reduced motion but drops its transition. On a coarse pointer the mic and
+pills are 44px tall.
+
 ### Trace view
 
 The Trace view (`src/routes/run/trace-view.tsx`) shows when each part of an
@@ -3370,7 +3568,23 @@ while a live session's attach is not live. A finished session reads "Container
 removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
 session with no agent terminal, such as an Enhanced session, shows "No agent
-terminal" and the shell controls. The frame renders one `TakeoverDialog`
+terminal" and the shell controls. Under 768px (`useIsMobile`), the first time
+the Terminal view shows for such a session `useRunningShellOnPhone` reads
+the shell list with `shells.refresh()`, whose revision counter drops a list
+that an **Open shell** overtook. It then shows a running shell a member
+started (`started_by: 'member'`) and has not hidden; the agent's own shells
+stay behind the tab menu. A failed read shows its error with **Retry**. It
+never starts a shell, because viewing a tab must not start a process or take
+a lease: the empty state carries a primary **Open shell** (`shells.open`)
+instead, with a spinner while it starts and the shell-limit reason under it
+when four are running. On that view the Enhanced session's
+`MultiplayerControls` strip, which is about the Chat lease, is hidden; the
+shell's toolbar shows the shell's own control. These three follow the phone
+layout's breakpoint (`useIsMobile`, under 768px, any pointer), because they
+are layout. Fitting, read-first focus and the size stepper follow
+`phoneScreen` (a coarse pointer under 640px) instead: the same query that
+makes a terminal follow the PTY, which fitting needs, and the screens where
+focus raises a soft keyboard. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
@@ -3424,7 +3638,10 @@ open a shell in it" in place of the terminal.
 (named "Terminal tools"): **Find** (**Find in recorded output** while
 reading history), the text size with **Smaller text**, **Larger text** and
 **Reset text size**, **Copy selection**, **Copy screen**, **Paste**,
-**Upload image…** and, on a session, **Captures…**. It is one menu at every
+**Upload image…** and, on a session, **Captures…**. On `phoneScreen` the
+trigger is icon-only so the toolbar fits 360px, and, except while reading recorded history (drawn at the
+chosen size), the size items follow `useTextSizeStepper` (below), with
+**Fit to width** in place of the reset. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
 The rest of this section is the terminal machinery the session terminal, its
@@ -3596,14 +3813,77 @@ A following terminal therefore:
   what makes xterm's textarea read-only, so a tap on a mirror raises no
   keyboard.
 
+**Sizing the PTY to a phone is not done.** A phone could size the PTY
+while no wider client is attached, but the server keeps one grid and one
+transcript per session, so: every keyboard open and close would resize the
+agent's screen and make its TUI redraw; a desktop attaching or leaving would
+flip the width, and output drawn at the phone's 45 columns stays in the
+recorded transcript that later desktop viewers replay; and an older server
+reads an unknown "size only when alone" flag as an ordinary writer imposing
+its size, shrinking every desktop viewer. A phone therefore follows, and fits
+on the client.
+
+**Fit to width.** `useTerminalFit` (`src/components/terminal-fit.ts`), on
+`phoneScreen`, sets xterm's `fontSize` so the followed grid's columns fit the
+host's content box: proportional from the drawn `.xterm-screen` width,
+floored to 0.25px steps, no larger than the chosen size and no smaller than
+`minFitTerminalFontSize` (7px, `src/lib/term-font.ts`), below which the grid
+pans. It grows only when the pane, the grid or the preference changes; a
+render only shrinks an overflow, so device-pixel rounding cannot make it
+oscillate. 80 columns fit a 360px screen at about 7px. The fitted size is
+not stored: the store keeps `terminalFitWidth` (persisted, default on) beside
+`terminalFontSize`, and `setTerminalFontSize` turns fitting off.
+`useTextSizeStepper` (`terminal-keys.tsx`) backs the sheet's bottom row -
+**A−**, the drawn size with **Fit**, **A+** - and the phone's Tools menu: a
+step is one whole pixel from the drawn size, and a step down to the fitted
+size or below the 8px zoom minimum returns to fitting, so **A−** is disabled
+while fitted. Only a phone shows the stepper; a tablet keeps the Tools
+items. A two-finger pinch on the host draws the size live in 0.5px steps;
+on release it returns to fitting when it ends at or below the size fitting
+would draw or below 8px, and otherwise stores the size rounded to a whole
+pixel.
+
+**Read first.** On `phoneScreen` `focusTerminal()` does nothing, so no
+effect - a new shell, a tab change, a closed find bar - raises the soft
+keyboard. Only a tap on the terminal's own textarea, or **Show keyboard** in
+the more-keys sheet, focuses it.
+
 `TerminalKeys` is shown under the host on any coarse pointer while the
-terminal is writable, a tablet included: Ctrl, Esc, Tab, the arrows, Enter
-and Ctrl+C, each through `terminal.input` so the replay gate and
-`disableStdin` treat a tap exactly like a keystroke. Ctrl is a one-shot
-modifier held in the host (`armCtrl`), because a soft keyboard sends
-characters and never a modifier: it rewrites the next character into its
-control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte.
+terminal is writable, a tablet included. Its row does not scroll: **Ctrl**,
+**Alt**, Esc, Tab, the arrows, Enter and **More keys** share the width at
+44px tall. 4px apart. **More keys** (its trigger carries Radix's `aria-expanded`) is a
+non-modal `Popover` above the row that keeps focus where it was: symbols a
+phone keyboard buries, ^C, Home/End, PgUp/PgDn and Del; **F1–F12**, which
+toggles the function keys; Show/Hide keyboard; and the size stepper last,
+next to the row. It stays open while keys are tapped and closes on its
+trigger or a tap outside. The keyboard label reads the textarea's focus and
+whether the visual viewport has lost at least 120px from its tallest,
+because Android's Back hides the keyboard and keeps focus. The stepper's
+size readout stays focusable at full contrast while fitted, with
+`aria-disabled`, rather than a greyed disabled button. Every key goes through
+`terminal.input`, so the replay gate and `disableStdin` treat a tap exactly
+like a keystroke, refuses focus on `pointerdown` so the keyboard stays as it
+was, and then calls `focusTerminal()`, which a tablet honours and a phone
+ignores. The row pads its bottom by `--keyboard-inset` (`keyboard-inset.ts`)
+so it stays above an iOS keyboard.
+
+Ctrl and Alt are sticky modifiers held in the host (`modifiers`,
+`tapModifier`, `clearModifiers` on `XtermController`), because a soft
+keyboard sends characters and never a modifier. `terminal-modifiers.ts` has
+the rules: a tap arms a modifier for one key, a second tap within 400ms locks
+it, the next tap releases it. A locked modifier stays `aria-pressed`, shows a
+lock glyph and adds a visually hidden ", locked" to its name. `applyModifiers`
+rewrites a single character into its control code (xterm's: Ctrl+Space and
+Ctrl+` are NUL, Ctrl+? is DEL, Ctrl+Backspace is ^H) and/or an ESC prefix for
+Alt, and the cursor, Home/End, paging and function-key sequences into
+xterm's `1;<n>` modifier parameter form. A key it does not cover passes
+unmodified and keeps the modifiers armed rather than spending them on the
+wrong byte, and a paste (flagged from the DOM `paste` event and around
+`terminal.paste()`, which Tools → Paste calls, since xterm hands either to
+`onData` like a key) never takes them. The row's arrows, Home
+and End send SS3 (`ESC O`) while the program has asked for application
+cursor keys (`terminal.modes.applicationCursorKeysMode`).
+Losing write access clears them.
 
 In a session's normal buffer, a downward finger drag pans the live grid to its
 top before handing off continuously to integrated history. Horizontal drags
@@ -4660,7 +4940,7 @@ completed subtree folds, focus moves to its nearest remaining ancestor; in a
 virtualized tree the focused row stays mounted while scrolled away. Each
 `treeitem` carries `aria-level`, `aria-posinset`, `aria-setsize` and, on a
 parent, `aria-expanded`. One polite status region announces rows that come
-to need you, fail, become ready for review or complete: transitions are
+to need you, fail, finish awaiting review or complete: transitions are
 gathered for 1.5 seconds from the first, then up to three are read, Needs
 you and Failed first. Only Working dots pulse, and rows added after the first
 render enter with `animate-entrance` (a fade and a 4px rise over 360ms); with
@@ -5824,24 +6104,23 @@ opens a dialog with two tabs:
   error and drops the preview, as does editing the code, so only a new
   **Preview** can propose.
 
-A proposal for the viewer to accept (`member.merge.pending` where the
-viewer minted the code) shows in Sign-ins, in the code tab, as a Needs you
-card and as a row in the sidebar's Needs you; **Review** and the row open
-Profile at Sign-ins. Profile is mounted by the app shell (`profileOpen` in
+A proposal for the viewer to accept (`member.merge.pending` where the viewer
+minted the code) shows in Sign-ins, in the code tab, as a Needs you card and
+as a row in the sidebar's Needs you; **Review** and the row open Profile at
+Sign-ins. Profile is mounted by the app shell (`profileOpen` in
 `store/ui.ts`), not the sidebar, so **Review** works with the sidebar
-collapsed or the phone drawer closed. It lists the proposer's sign-ins, the settings kept,
-what is discarded and the resulting role; **Accept and merge** (danger
-style) needs the same tick and sends `member.merge.accept` with the
-proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused
-accept clears the tick and re-reads the proposals, so a `refusal` the
-server now reports disables **Accept and merge**. A proposal the server
-could not plan shows only its `refusal` and **Cancel**, and the viewer's
-own open proposals show with **Cancel**. Every RPC error shows verbatim,
-as a toast when it arrives after its dialog or Profile closed, unless the
-signed-in member changed. After a merge
-the record shows in Sign-ins; **Merge history** lists `member.merge.list`
-with the discarded settings, custom agent definitions included, and the
-archive path.
+collapsed or the phone's More sheet closed. It lists the proposer's sign-ins,
+the settings kept, what is discarded and the resulting role; **Accept and
+merge** (danger style) needs the same tick and sends `member.merge.accept`
+with the proposal's digest, and **Cancel** sends `member.merge.cancel`. A
+refused accept clears the tick and re-reads the proposals, so a `refusal` the
+server now reports disables **Accept and merge**. A proposal the server could
+not plan shows only its `refusal` and **Cancel**, and the viewer's own open
+proposals show with **Cancel**. Every RPC error shows verbatim, as a toast
+when it arrives after its dialog or Profile closed, unless the signed-in
+member changed. After a merge the record shows in Sign-ins; **Merge history**
+lists `member.merge.list` with the discarded settings, custom agent
+definitions included, and the archive path.
 
 `member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
 `resolveMember` in `lib/member-name.ts` follow it, so an id history names
@@ -6159,7 +6438,15 @@ Categories:
   without asking?** with the warning that the assistant will launch sessions,
   message and stop the member's sessions and save the environment on its own;
   turning it off does not ask. A refusal stays in the dialog or under the
-  row. **Change in Settings** in the assistant panel opens
+  row. **Approval rules** (`routes/settings/approval-rules.tsx`) lists
+  `assistant.rules`: each rule's wording, `From:` the card it came from,
+  when it was created and last used and how many times, `Inactive: <reason>`
+  when set, and **Revoke** (`assistant.rules.revoke`), which drops the row
+  once the server answers and reads the list again; with none it says **No rules yet**, and a failed
+  read shows `Couldn’t read your rules` with its error and **Try again**. A
+  muted line under the heading says rules work with auto-approval off; an
+  inactive rule's wording is muted with an `Inactive` badge. It reads again when a card saves a
+  rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
 - **Launch**, where the server offers `launch.defaults.get`: **Saved
@@ -6361,7 +6648,7 @@ cannot read, because Safari drops a subscription whose push shows nothing.
 A message with `clear` set means the session's need, or the watch's, ended: for
 the same reason it is not simply closed but replaced, under the same tag and keeping the shown
 title, by a `silent` notification with the server's body,
-`No longer needs you`. The server sends it only to the devices whose push
+`No longer needs you`, or `No longer awaiting review` for a finished session's. The server sends it only to the devices whose push
 service took the need, when the need ends or the session changes hands,
 under the session's Web Push topic, so a need still queued at the push service
 is never shown, and tries again a minute later for a device it could not
@@ -7249,7 +7536,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   the state mark says what state. `StatusDot`
   (`src/components/ui/status-dot.tsx`) is the only session-state mark: one shape
   and colour per state (filled circle Working, clock Waiting for, dashed ring
-  Waiting, amber ring Needs you, filled accent check Ready for review, check
+  Waiting, amber ring Needs you, filled accent check Finished: review, check
   Completed, ring with a bar Closed, cross Failed, ring with an exclamation
   mark Interrupted, broken ring Disconnected, bars Paused), named by the state
   word where it stands alone.
@@ -7413,27 +7700,30 @@ and Escape. `run-session` streams an Enhanced session, answers a permission,
 sends a message and stops it with Interrupt, then checks its Trace tab.
 
 The touch shell is driven by the `mobile` project, which
-[testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
-phone drawer, taps a session and finds the drawer gone with the session on screen and
-focus on its heading; `dialog-anchor.mobile.spec.ts` checks that a short
-dialog sits at the top rather than the middle, and that the launch form keeps
-its footer on screen on a viewport as short as a keyboard leaves;
-`toast-clearance.mobile.spec.ts` checks that a toast comes to rest 8px clear
-of the bottom edge; `home-screen.mobile.spec.ts` checks the manifest, icons
-and that the top bar clears a phone status bar; `run-views.mobile.spec.ts`
-protects a session from More and reads its changes; and `files-browser.mobile.spec.ts` opens a second file
-from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
-because its keyboard contract - `Mod+B` closing the drawer and the palette
-coming back once it is gone - needs a narrow window with a keyboard rather
-than a phone. `sign-ins-merge.spec.ts` gets a merge code
-as one member and previews it as another at phone width; both harness
-members have an SSH key, so it checks the server's refusal verbatim, and
-`src/routes/members/sign-ins.test.tsx` covers choosing, proposing and
-accepting. `board-card`, `run-switch`, `run-attach-retry`,
-`run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
-corresponding real UI transitions, gateway responses and terminal behavior.
-Run the full browser workflow with `make test-e2e`; its scenario inventory and
-setup details live in [testing.md](testing.md).
+[testing.md](testing.md) describes: `phone-shell.mobile.spec.ts` checks the
+tab bar at 360px and 430px with no sideways scroll, Needs you as the landing
+page and its badge, and approves a permission and replies to a question from
+their cards; `shell-drawer.mobile.spec.ts` taps a session in the Sessions tab
+and finds it on screen with focus on its heading;
+`dialog-anchor.mobile.spec.ts` checks that a short dialog sits at the top
+rather than the middle, and that the launch form keeps its footer on screen on
+a viewport as short as a keyboard leaves; `toast-clearance.mobile.spec.ts`
+checks that a toast comes to rest 8px clear of the bottom edge;
+`home-screen.mobile.spec.ts` checks the manifest, icons and that the top bar
+clears a phone status bar and the tab bar shows; `run-views.mobile.spec.ts`
+protects a session from More and reads its changes; and
+`files-browser.mobile.spec.ts` opens a second file from the tree sheet.
+`sidebar-drawer.spec.ts` stays on the desktop project because its keyboard
+contract - `Mod+B` closing the drawer and the palette coming back once it is
+gone - needs a narrow window with a keyboard rather than a phone.
+`sign-ins-merge.spec.ts` gets a merge code as one member and previews it as
+another at phone width; both harness members have an SSH key, so it checks the
+server's refusal verbatim, and `src/routes/members/sign-ins.test.tsx` covers
+choosing, proposing and accepting. `board-card`, `run-switch`,
+`run-attach-retry`, `run-provisioning`, `terminal-tools` and the onboarding
+scenarios cover the corresponding real UI transitions, gateway responses and
+terminal behavior. Run the full browser workflow with `make test-e2e`; its
+scenario inventory and setup details live in [testing.md](testing.md).
 
 `run-room.spec.ts` and `run-room.mobile.spec.ts` cover shared notes,
 moderated messages, explicit control transfer, the phone Details sheet and

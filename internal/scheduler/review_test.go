@@ -69,8 +69,8 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 		}
 		row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 		if p.Review != domain.ReviewReady || p.ReviewChangedAt == nil || row.Review != domain.ReviewReady ||
-			row.Activity != domain.ActivityFinished || !row.NeedsAttention(false) {
-			t.Fatalf("success park = event %+v, row %s review %q, want finished and ready for review", p, row.Activity, row.Review)
+			row.Activity != domain.ActivityFinished || row.NeedsAttention(false) || !row.AwaitsReview(false) {
+			t.Fatalf("success park = event %+v, row %s review %q, want finished, awaiting review and not needing anyone", p, row.Activity, row.Review)
 		}
 		return row
 	}
@@ -83,7 +83,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	if p := nextReview(t, sub, run.ID); p.Review != domain.ReviewLater || p.StatusSeq <= first.StatusSeq {
 		t.Fatalf("later event = %+v, want later above status_seq %d", p, first.StatusSeq)
 	}
-	if later.Review != domain.ReviewLater || later.Status != domain.RunNeedsAttention || later.NeedsAttention(false) {
+	if later.Review != domain.ReviewLater || later.Status != domain.RunNeedsAttention || later.NeedsAttention(false) || !later.AwaitsReview(false) {
 		t.Fatalf("after later = %s review %q, want still parked and not needing anyone", later.Status, later.Review)
 	}
 	// A reportedOnly complete closes a live run only while its success
@@ -226,8 +226,8 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	}
 	e.rt.byName(string(run.ID)).exitNow(0)
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	if row.Review != domain.ReviewReady || !row.NeedsAttention(false) {
-		t.Fatalf("background success = review %q, want ready and needing its owner", row.Review)
+	if row.Review != domain.ReviewReady || row.NeedsAttention(false) || !row.AwaitsReview(false) {
+		t.Fatalf("background success = review %q, want ready, awaiting review and not needing its owner", row.Review)
 	}
 	if _, err = e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewNotYet, false); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("not-yet on a completed session = %v, want ErrInvalidTransition", err)

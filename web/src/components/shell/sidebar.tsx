@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { AssistantButton } from '@/components/assistant/button'
 import { PanelLeft, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
@@ -16,6 +16,7 @@ import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
 import { surfaces } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
+import { askingByWorkspace, useAttention } from '@/routes/needs-you/attention'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
@@ -103,11 +104,9 @@ export function Sidebar() {
       <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DialogContent
           id="sidebar-drawer"
-          variant="side"
-          side="left"
-          showCloseButton={false}
+          variant="bottom"
           aria-describedby={undefined}
-          className="w-[min(20rem,calc(100vw-3rem))]"
+          className="pr-[calc(1rem+env(safe-area-inset-right))] pl-[calc(1rem+env(safe-area-inset-left))]"
           onOpenAutoFocus={() => {
             opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
           }}
@@ -125,8 +124,8 @@ export function Sidebar() {
             setDrawerOpen(false)
           }}
         >
-          <DialogTitle className="sr-only">Aether</DialogTitle>
-          <SidebarContent onHide={() => setDrawerOpen(false)} />
+          <DialogTitle className="sr-only">More</DialogTitle>
+          <MoreContent />
         </DialogContent>
       </Dialog>
     )
@@ -200,13 +199,11 @@ function DesktopSidebar({ onHide }: { onHide: () => void }) {
 }
 
 function SidebarContent({ onHide }: { onHide: () => void }) {
-  const mobile = useIsMobile()
   const cap = useCapability()
   const admin = useIsAdmin()
   const role = useSelfRole()
   const blocked = useStore((s) => launchBlocked(s.linkStatus))
   const togglePalette = useStore((s) => s.togglePalette)
-  const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const lower = surfaces(cap, admin).filter((surface) => surface.place === 'admin')
 
@@ -219,10 +216,7 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           size="icon"
           label="Search"
           hint={`Search · ${shortcutLabel('palette')}`}
-          onClick={() => {
-            setDrawerOpen(false)
-            togglePalette(true)
-          }}
+          onClick={() => togglePalette(true)}
         >
           <Search />
         </Button>
@@ -230,8 +224,8 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           id="sidebar-hide"
           variant="ghost"
           size="icon"
-          label={mobile ? 'Close sidebar' : 'Hide sidebar'}
-          hint={`${mobile ? 'Close' : 'Hide'} sidebar · ${shortcutLabel('sidebar')}`}
+          label="Hide sidebar"
+          hint={`Hide sidebar · ${shortcutLabel('sidebar')}`}
           onClick={onHide}
         >
           <PanelLeft />
@@ -242,12 +236,9 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           <SplitNewRun
             blocked={blocked ?? null}
             shortcut={shortcutLabel('launch')}
-            onOpen={() => {
-              setDrawerOpen(false)
-              openDialog('launch')
-            }}
+            onOpen={() => openDialog('launch')}
           />
-          {!mobile && <AssistantButton variant="secondary" />}
+          <AssistantButton variant="secondary" />
         </div>
       )}
       <SidebarRuns />
@@ -256,6 +247,29 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
           <NavRows surfaces={lower} />
         </div>
       )}
+      <UpdateNotice />
+      <SidebarFooter />
+    </nav>
+  )
+}
+
+/** On a phone the tab bar carries Needs you, sessions, launch and the assistant; More holds every other page. */
+function MoreContent() {
+  const cap = useCapability()
+  const admin = useIsAdmin()
+  const items = useAttention((s) => s.items)
+  const needsYou = useMemo(() => askingByWorkspace(items), [items])
+  const list = surfaces(cap, admin)
+    .filter((surface) => surface.place !== 'link')
+    .map((surface) => (surface.name === 'devices' ? { ...surface, label: 'Devices' } : surface))
+  return (
+    <nav aria-label="More" className="flex min-h-0 flex-col gap-1">
+      <div className="flex shrink-0 items-center pr-10">
+        <WorkspaceSwitcher needsYou={needsYou} />
+      </div>
+      <div className="min-h-0 overflow-y-auto">
+        <NavRows surfaces={list} />
+      </div>
       <UpdateNotice />
       <SidebarFooter />
     </nav>

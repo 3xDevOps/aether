@@ -44,6 +44,8 @@ vi.mock('@xterm/xterm', () => {
       return { dispose() {} }
     }
 
+    paste() {}
+
     onBinary() {
       return { dispose() {} }
     }

@@ -388,6 +388,27 @@ describe('useRunTerminalSession', () => {
     vi.useRealTimers()
   })
 
+  it('mirrors at once on remount when another client held the lease', () => {
+    vi.useFakeTimers()
+    const first = mount({}, initialTerminal, owner)
+    act(() => StubSocket.last().onopen?.())
+    const mirror = occupyAndReconnect()
+    expect(mirror.frames()[0]).not.toHaveProperty('write')
+    act(() => mirror.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: false }) }))
+    first.unmount()
+
+    const second = mount({}, initialTerminal, owner)
+    const returned = Date.now()
+    act(() => StubSocket.last().onopen?.())
+    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
+    const remirror = occupyAndReconnect()
+
+    expect(remirror.frames()[0]).not.toHaveProperty('write')
+    expect(Date.now() - returned).toBeLessThan(1_000)
+    second.unmount()
+    vi.useRealTimers()
+  })
+
   it.each([
     ['identity', { currentIdentityKey: 'identity-b' }, run()],
     ['terminal cache epoch', { currentCacheEpoch: 1 }, run()],
@@ -453,6 +474,7 @@ describe('useRunTerminalSession', () => {
     vi.useFakeTimers()
     const first = mount()
     act(() => first.result.current.takeControl())
+    act(() => StubSocket.last().onopen?.())
     first.unmount()
 
     // The remount reattaches as the same session, so a conflict may be its

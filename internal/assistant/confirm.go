@@ -158,7 +158,7 @@ func autoApprovable(c protocol.AssistantConfirmation) bool {
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
 	suggest := !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && st.RuleStreak < suggestAfter && !time.Now().Before(st.SnoozedUntil)
 	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: suggest, SuggestionOff: st.NoSuggest, ShareView: st.ShareView,
-		PreferencesEnabled: st.PreferencesEnabled}
+		PreferencesEnabled: st.PreferencesEnabled, ApprovalChosen: st.ApprovalChosen}
 }
 
 // approver passes a confirmed call at once when one of the member's
@@ -321,6 +321,7 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
 	was := st.AutoApprove
+	st.ApprovalChosen = st.ApprovalChosen || p.AutoApprove != nil || p.Suggestion != ""
 	switch p.Suggestion {
 	case protocol.AssistantSuggestionLater:
 		st.Approvals = 0

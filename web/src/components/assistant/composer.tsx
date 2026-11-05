@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import type * as React from 'react'
 import { conflictChoiceID, ContextChips } from '@/components/assistant/context-chips'
+import { DictationButton } from '@/components/dictation/dictation-button'
+import { DictationNotice } from '@/components/dictation/dictation-notice'
+import { useDictationState } from '@/components/dictation/state'
 import { ArrowUp, Square } from '@/components/icons'
 import { TemporaryBanner } from '@/components/assistant/temporary'
 import { Button } from '@/components/ui/button'
@@ -36,6 +39,7 @@ export function AssistantComposer({ textarea, running, dock }: {
   const stopping = useStore((s) => s.assistantStopping)
   const error = useStore((s) => s.assistantError)
   const focus = useStore((s) => s.assistantFocus)
+  const dictating = useDictationState(textarea).active
 
   useEffect(() => {
     if (!focus) return
@@ -52,7 +56,7 @@ export function AssistantComposer({ textarea, running, dock }: {
   const send = async () => {
     const state = useStore.getState()
     const text = state.assistantDraft.trim()
-    if (!text || state.assistantSending || running) return
+    if (!text || state.assistantSending || running || dictating) return
     if (draftConflict(state)) {
       document.getElementById(conflictChoiceID)?.focus()
       return
@@ -128,6 +132,7 @@ export function AssistantComposer({ textarea, running, dock }: {
         {dock}
         <TemporaryBanner />
         {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
+        <DictationNotice textarea={textarea} />
         <ContextChips textarea={textarea} />
         <div className={cn('overflow-hidden rounded-control border border-control bg-canvas', focused && 'outline-1 -outline-offset-1 outline-accent shadow-field-focus')}>
           <Textarea
@@ -151,13 +156,14 @@ export function AssistantComposer({ textarea, running, dock }: {
           />
         </div>
         <div className="flex items-center justify-end gap-2">
+          <DictationButton textarea={textarea} onInsert={setDraft} />
           {running ? (
             <Button size="sm" variant="danger" disabled={stopping} onClick={() => void stop()}>
               <Square className="fill-current" />
               {stopping ? 'Stopping…' : 'Stop'}
             </Button>
           ) : (
-            <Button size="sm" disabled={busy || !draft.trim()} hint={coarse ? undefined : `Send (${shortcutLabel('composer-send')} or Enter)`} onClick={() => void send()}>
+            <Button size="sm" disabled={busy || !draft.trim() || dictating} hint={coarse ? undefined : `Send (${shortcutLabel('composer-send')} or Enter)`} onClick={() => void send()}>
               <ArrowUp />
               {busy ? 'Sending…' : 'Send'}
             </Button>

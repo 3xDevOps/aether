@@ -1004,14 +1004,16 @@ These serve a client with no dashboard and no stream, such as the
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first: each session that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it |
+| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first, `ready` items last: each session that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it, then each reported success awaiting the caller's review |
 | `run.input.respond` | `{"run_id":"...","request_id":"...","option_id":"...","values":{...}}`; Steer | `{"status":"answered"}`, or `{"status":"already_answered"}` when an earlier answer won |
 
 An `AttentionItem` is `{kind, run_id, workspace_id, title,
 harness, reason, since}` plus what answering it needs. `kind` is one of
 `permission`, `question`, `queued-message`, `room-question`,
 `disconnected`,
-`blocked`, `needs-input`, `ready` or `failed`. `permission` and
+`blocked`, `needs-input`, `ready` or `failed`. `ready` is a finished session
+whose success awaits review (reason `Finished: review the result`); it blocks
+nothing and is not Needs you. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 session's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a
@@ -1147,7 +1149,7 @@ The dashboard also calls these methods through the same route:
 | `assistant.rules` | none | `{"rules":[AssistantRule]}` - the caller's [approval rules](assistant.md#approval-rules), oldest first: `{"id":"rule-...","method":"run.launch","wording":"Always approve ...","summary":"<the card it came from>","created_at":"...","last_used_at":"...","uses":3,"inactive":"<reason>"}`; `inactive` is set when the rule's workspace is gone or its account is no longer shared with the caller. Refused to the assistant's own calls and to connectors (`-32001`); the tool socket does not serve it |
 | `assistant.rules.revoke` | `{"id":"rule-..."}` | empty result; deletes the caller's rule, which applies to the next card. `-32000` when the caller has no such rule. Refused like `assistant.rules` |
 | `assistant.reset` | none | `AssistantStatus` - stops the session, discards the conversation and deletes the agent's state in the assistant's home |
-| `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false}`) - the caller's own assistant settings. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's session. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
+| `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false,"approval_chosen":true}`) - the caller's own assistant settings. `approval_chosen` is set once the caller set `auto_approve` or answered the suggestion, and the dashboard then stops asking how the assistant should act. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's session. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
 | `assistant.account` | `{"agent":"claude"}` | `AssistantAccount` (`{"agent":"claude","state":"other","environment":"account <uuid>, organization <uuid>","email":"..."}`) - compares the account recorded for the assistant's sign-in with the caller's environment login. `state` is `unrecorded` (no start has recorded it yet), `same`, `other`, `expired` (the environment's Claude token is past its expiry) or `error` with `error`. It reads the login read-only and never refreshes it; see [Same account as your sessions](assistant.md#same-account-as-your-sessions). The assistant's tool socket does not serve this method |
 | `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history`. A `notice` item may carry an `action` record, below |
 | `assistant.item` | `{"seq":12}` | like `run.acp.item` |
