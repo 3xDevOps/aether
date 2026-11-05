@@ -240,6 +240,10 @@ jobs:
         with:
           mode: restore
       - uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build the browser companion
         uses: docker/build-push-action@v6
         with:
@@ -292,6 +296,10 @@ jobs:
         with:
           mode: restore
       - uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build the standard environment image
         uses: docker/build-push-action@v6
         with:
@@ -352,6 +360,10 @@ jobs:
         with:
           mode: restore
       - uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build the standard environment image
         uses: docker/build-push-action@v6
         with:
@@ -399,6 +411,10 @@ jobs:
         with:
           mode: restore
       - uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build the standard environment image
         uses: docker/build-push-action@v6
         with:
@@ -548,6 +564,10 @@ jobs:
       # Built from the caches the browser and smoke jobs write on main, never
       # written here, so this job does not wait for them.
       - uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build the browser companion
         uses: docker/build-push-action@v6
         with:
