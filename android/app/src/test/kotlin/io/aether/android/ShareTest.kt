@@ -43,10 +43,14 @@ class ShareTest {
     }
 
     @Test
-    fun routingHomeKeepsTheGatewayToken() {
-        assertTrue(routeHomeScript("http://127.0.0.1:4000/?token=ab-1&new=1&prompt=x").contains("'/?token=ab-1'"))
-        assertTrue(routeHomeScript("https://h.ts.net/?run=r").contains("'/'"))
-        assertTrue(routeHomeScript("http://127.0.0.1:4000/?token=a'b").contains("'/'"))
-        assertTrue(routeHomeScript(null).contains("'/'"))
+    fun routingHomeKeepsTheGatewayTokenAndThePhoneHome() {
+        val gateway = routeHomeScript("http://127.0.0.1:4000/?token=ab-1&new=1&prompt=x")
+        assertTrue(gateway.contains("'/?page=needs-you&token=ab-1' : '/?token=ab-1'"))
+        assertTrue(routeHomeScript("https://h.ts.net/?run=r").contains("'/?page=needs-you' : '/'"))
+        assertTrue(routeHomeScript("http://127.0.0.1:4000/?token=a'b").contains("'/?page=needs-you' : '/'"))
+        assertTrue(routeHomeScript(null).contains("'/?page=needs-you' : '/'"))
+        assertTrue(atDashboardHome("https://h.ts.net/?page=needs-you"))
+        assertTrue(atDashboardHome("http://127.0.0.1:4000/?page=needs-you&token=ab-1"))
+        assertFalse(atDashboardHome("https://h.ts.net/?page=board"))
     }
 }

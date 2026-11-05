@@ -113,13 +113,16 @@ fun atDashboardHome(url: String?): Boolean {
     if (uri.scheme != "http" && uri.scheme != "https") return true
     if (uri.rawPath != "/" && !uri.rawPath.isNullOrEmpty()) return false
     val query = uri.rawQuery ?: return true
-    return query.split('&').all { it.isEmpty() || it.startsWith("token=") || it == "page=onboarding" }
+    return query.split('&').all { it.isEmpty() || it.startsWith("token=") || it == "page=onboarding" || it == "page=needs-you" }
 }
 
 /**
  * The script that routes the dashboard home inside the page, keeping the
  * Edge gateway's `token`: the dashboard saves it from the address, so
  * dropping it before that runs leaves the first API call unauthorized.
+ * Home is the address the dashboard keeps as it is: `/` for the board, and
+ * `/?page=needs-you` on a phone, where an empty address would be rewritten
+ * to `?page=board` and Back would never reach the end of the history.
  */
 fun routeHomeScript(url: String?): String {
     val token =
@@ -127,7 +130,9 @@ fun routeHomeScript(url: String?): String {
             URI(url ?: "").rawQuery?.split('&')?.firstOrNull { it.startsWith("token=") }
         } catch (_: URISyntaxException) {
             null
-        }
-    val target = if (token != null && token.matches(Regex("token=[A-Za-z0-9%._~-]*"))) "/?$token" else "/"
-    return "history.replaceState(history.state, '', '$target'); dispatchEvent(new PopStateEvent('popstate'))"
+        }?.takeIf { it.matches(Regex("token=[A-Za-z0-9%._~-]*")) }
+    val phone = "matchMedia('(max-width: 767px)').matches"
+    val query = listOfNotNull(token).joinToString("&")
+    val home = "$phone ? '/?page=needs-you${if (query.isEmpty()) "" else "&$query"}' : '/${if (query.isEmpty()) "" else "?$query"}'"
+    return "history.replaceState(history.state, '', $home); dispatchEvent(new PopStateEvent('popstate'))"
 }
