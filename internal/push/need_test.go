@@ -20,6 +20,7 @@ func TestNeedOf(t *testing.T) {
 	enhanced := func(r *domain.Run) { r.Mode, r.ACP = domain.LaunchACP, true }
 	background := func(r *domain.Run) { r.Mode = domain.LaunchHeadless }
 	unseen := func(r *domain.Run) { r.OutcomeUnseen = true }
+	child := func(r *domain.Run) { r.ParentRunID = "run-parent" }
 	review := func(state domain.RunReview) func(*domain.Run) { return func(r *domain.Run) { r.Review = state } }
 	question := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}}
 	permission := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}, {ID: "p1", SessionID: "s1", Kind: "permission"}}
@@ -62,13 +63,21 @@ func TestNeedOf(t *testing.T) {
 		{name: "needs input", run: parked(needsYou, "needs input: which region?", enhanced), want: "which region?"},
 		{name: "enhanced failure", run: parked(domain.ActivityDisconnected, "enhanced session failed: not logged in", background), want: "Enhanced could not start: not logged in"},
 		{name: "adapter exited", run: parked(domain.ActivityDisconnected, "enhanced session ended: exit code 1", enhanced), want: "Agent disconnected: exit code 1"},
-		{name: "reported success", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewReady)), want: "Agent reported success, review the result"},
-		{name: "reported success seen, still to review", run: parked(domain.ActivityFinished, "agent reported success", review(domain.ReviewReady)), want: "Agent reported success, review the result"},
+		{name: "reported success", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewReady)), want: "Finished: review the result"},
+		{name: "reported success seen, still to review", run: parked(domain.ActivityFinished, "agent reported success", review(domain.ReviewReady)), want: "Finished: review the result"},
 		{name: "reported success for later", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewLater))},
+		{name: "subsession success", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewReady), child)},
+		{name: "subsession failure", run: parked(domain.ActivityFailed, "agent reported failure", enhanced, unseen, child)},
+		{name: "subsession ended failed", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunFailed, OutcomeUnseen: true, ParentRunID: "run-parent"}},
+		{name: "subsession completed", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, Review: domain.ReviewReady, ParentRunID: "run-parent"}},
+		{name: "subsession question", run: parked(needsYou, "turn ended without a report", enhanced, child), inputs: question, want: "Question from the agent"},
+		{name: "subsession blocked", run: parked(needsYou, "blocked: need the staging API key", child), want: "Blocked: need the staging API key"},
+		{name: "detached subsession failure", run: parked(domain.ActivityFailed, "agent reported failure", enhanced, unseen, child, func(r *domain.Run) { r.Detached = true }), want: "Agent reported failure, review the result"},
+		{name: "reported success paused", run: parked(domain.ActivityFinished, "agent reported success", review(domain.ReviewReady)), paused: true},
 		{name: "reported success disconnected", run: parked(domain.ActivityDisconnected, "enhanced session ended: exit code 1", review(domain.ReviewReady)), want: "Agent disconnected: exit code 1"},
 		{name: "reported failure", run: parked(domain.ActivityFailed, "agent reported failure", enhanced, unseen), want: "Agent reported failure, review the result"},
 		{name: "finished before reviews", run: parked(domain.ActivityFinished, "agent reported success", unseen)},
-		{name: "background success", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, Review: domain.ReviewReady}, want: "Agent reported success, review the result"},
+		{name: "background success", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, Review: domain.ReviewReady}, want: "Finished: review the result"},
 		{name: "background success accepted", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, Review: domain.ReviewAccepted}},
 		{name: "finished without a report", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true}},
 		{name: "failed", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunFailed, OutcomeUnseen: true}, want: "Failed, review the result"},
@@ -131,6 +140,9 @@ func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 		if got := needOf(tc.run, nil, false).urgency; got != tc.want {
 			t.Errorf("%s: urgency = %q, want %q", tc.run.Activity, got, tc.want)
 		}
+	}
+	if key := needOf(&finished, nil, false).key; !strings.HasPrefix(key, "finished:") {
+		t.Errorf("a success ready for review has key %q, want a finished: key, never a need's", key)
 	}
 }
 

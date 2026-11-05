@@ -39,6 +39,8 @@ const emptyIDs: string[] = []
 const bottomSlack = 24
 const historyViewports = 3
 const userScrollWindow = 600
+const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', 'Tab'])
+const onControl = (target: EventTarget) => target instanceof Element && target.closest('button, input, textarea, select, [role="button"]') !== null
 const sameMessageWindow = 120_000
 
 function byTime(rows: SessionRow[], extra: SessionRow[]): SessionRow[] {
@@ -279,6 +281,13 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   const markInput = () => {
     lastInput.current = performance.now()
   }
+  // Pressing a control opens a block, and measuring its rows moves the offset: that is not the person scrolling.
+  const markScrollKey = (event: React.KeyboardEvent) => {
+    if (scrollKeys.has(event.key) || (event.key === ' ' && !onControl(event.target))) markInput()
+  }
+  const markPointer = (event: React.PointerEvent) => {
+    if (!onControl(event.target)) markInput()
+  }
   const follow = useRef(() => {})
   follow.current = () => {
     if (active && pinned.current && count > 0) list.current?.scrollToIndex(count - 1, { align: 'end' })
@@ -364,8 +373,8 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         className="relative flex min-h-0 flex-1 flex-col outline-none"
         onWheelCapture={markInput}
         onTouchMoveCapture={markInput}
-        onKeyDownCapture={markInput}
-        onPointerDownCapture={markInput}
+        onKeyDownCapture={markScrollKey}
+        onPointerDownCapture={markPointer}
       >
         {(log?.error || roomError || olderError) && (
           <div className={cn(sessionColumn, 'flex flex-col gap-2 pt-3')}>

@@ -44,7 +44,8 @@ export function MenuContent({
             surface,
             'z-50 min-w-40 overflow-x-hidden overflow-y-auto p-1 outline-none motion-reduce:animate-none',
             sheet
-              ? 'max-h-[85dvh] w-screen rounded-b-none border-x-0 border-b-0 pb-[calc(0.25rem+env(safe-area-inset-bottom))] animate-sheet-up'
+              // The scrim's portal mounts once the items are counted, after this one, so the sheet sits a layer above it.
+              ? 'z-[51] max-h-[85dvh] w-screen rounded-b-none border-x-0 border-b-0 pb-[calc(0.25rem+env(safe-area-inset-bottom))] animate-sheet-up'
               : 'max-h-[min(320px,var(--radix-dropdown-menu-content-available-height))] origin-(--radix-dropdown-menu-content-transform-origin) animate-overlay-in',
             className,
           )}

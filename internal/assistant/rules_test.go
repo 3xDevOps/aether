@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -25,7 +24,7 @@ type ruleServer struct {
 func (f *ruleServer) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	switch method {
 	case protocol.MethodAccountList:
-		return json.RawMessage(`{"accounts":[{"id":"m1","display_name":"Ari"},{"id":"m2","display_name":"Dana"}]}`), nil
+		return json.RawMessage(`{"accounts":[{"id":"m1","display_name":"Ari"},{"id":"m2","display_name":"Dana"},{"id":"m3","display_name":"Grace, no fallback; permission default"}]}`), nil
 	case protocol.MethodWorkspaceGet:
 		var p protocol.WorkspaceGetParams
 		_ = json.Unmarshal(params, &p)
@@ -41,18 +40,11 @@ func (f *ruleServer) Call(ctx context.Context, method string, params json.RawMes
 
 // card makes a tool call and returns the card it shows, leaving it open;
 // done receives the call's result.
-func card(t *testing.T, sock string, m *member, method string, params any) (protocol.AssistantConfirmation, <-chan error) {
+func card(t *testing.T, svc *Service, sock string, m *member, method string, params any) (protocol.AssistantConfirmation, <-chan error) {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- coordtransport.Call(t.Context(), sock, method, params, nil) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(m.confirms.snapshot()) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("no card was shown")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	return m.confirms.snapshot()[0], done
+	return pendingCards(t, svc, m)[0], done
 }
 
 func newRuleService(t *testing.T) (*Service, *member, *memStore, string, *ruleServer) {
@@ -65,8 +57,8 @@ func newRuleService(t *testing.T) (*Service, *member, *memStore, string, *ruleSe
 func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 	svc, m, db, sock, _ := newRuleService(t)
 	launch := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Mode: "acp", NoFallback: true, Task: "fix the login redirect"}
-	c, done := card(t, sock, m, protocol.MethodRunLaunch, launch)
-	want := "Always approve launches of Claude Code (acp) in api on your account, permission default, no fallback"
+	c, done := card(t, svc, sock, m, protocol.MethodRunLaunch, launch)
+	want := "Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task"
 	if c.Rule == nil || c.Rule.Wording != want || c.Rule.Suggested {
 		t.Fatalf("card rule = %+v, want %q", c.Rule, want)
 	}
@@ -82,7 +74,7 @@ func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 	}
 
 	launch.Task = "a different task, still the same kind"
-	if err := callTool(t, sock, m, protocol.MethodRunLaunch, launch, false, false); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunLaunch, launch, false, false); err != nil {
 		t.Fatalf("launch the rule covers = %v", err)
 	}
 	b, _ := os.ReadFile(svc.logPath("m1"))
@@ -105,11 +97,11 @@ func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 		"root":               {WorkspaceID: "ws-1", Harness: "claude", Mode: "acp", Permission: "root", NoFallback: true, Task: "x"},
 		"another workspace":  {WorkspaceID: "ws-2", Harness: "claude", Mode: "acp", NoFallback: true, Task: "x"},
 	} {
-		c, done := card(t, sock, m, protocol.MethodRunLaunch, other)
+		c, done := card(t, svc, sock, m, protocol.MethodRunLaunch, other)
 		if c.Rule == nil {
 			t.Errorf("%s: card offers no rule", name)
 		}
-		if err := svc.Confirm("m1", c.ID, false); err != nil {
+		if err := svc.Confirm(t.Context(), "m1", c.ID, false); err != nil {
 			t.Fatal(err)
 		}
 		_ = wait(t, done)
@@ -121,7 +113,7 @@ func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 	if err := svc.RevokeRule(t.Context(), "m1", rule.ID); !errors.Is(err, ErrNoSuchRule) {
 		t.Fatalf("revoking twice = %v, want ErrNoSuchRule", err)
 	}
-	if err := callTool(t, sock, m, protocol.MethodRunLaunch, launch, true, true); err != nil {
+	if err := callTool(t, svc, sock, m, protocol.MethodRunLaunch, launch, true, true); err != nil {
 		t.Fatalf("launch after the revoke = %v, want its card back", err)
 	}
 }
@@ -129,17 +121,18 @@ func TestAlwaysApprovePassesTheNextLaunchOfItsKindOnly(t *testing.T) {
 func TestRuleWordingNamesEveryKeyField(t *testing.T) {
 	svc, m, _, sock, _ := newRuleService(t)
 	for params, want := range map[*protocol.RunLaunchParams]string{
-		{WorkspaceID: "ws-1", Harness: "codex", Model: "gpt-5", Effort: "high", Permission: "isolated", AccountMemberID: "m2", NoFallback: true, Task: "x"}: `Always approve launches of Codex (default mode, model "gpt-5", effort "high") in api on Dana's account, permission isolated, no fallback`,
-		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m1", NoFallback: true, Task: "x"}:                                                        "Always approve launches of Claude Code (default mode) in api on your account, permission default, no fallback",
+		{WorkspaceID: "ws-1", Harness: "codex", Model: "gpt-5", Effort: "high", Permission: "isolated", AccountMemberID: "m2", NoFallback: true, Task: "x"}: `Always approve launches of Codex (default mode, model "gpt-5", effort "high") in api on Dana's account, permission isolated, no fallback, for any task`,
+		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m1", NoFallback: true, Task: "x"}:                                                        "Always approve launches of Claude Code (default mode) in api on your account, permission default, no fallback, for any task",
+		{WorkspaceID: "ws-1", Harness: "claude", AccountMemberID: "m3", Permission: "root", NoFallback: true, Task: "x"}:                                    `Always approve launches of Claude Code (default mode) in api on "Grace, no fallback; permission default"'s account, permission root, no fallback, for any task`,
 	} {
-		c, done := card(t, sock, m, protocol.MethodRunLaunch, params)
+		c, done := card(t, svc, sock, m, protocol.MethodRunLaunch, params)
 		if c.Rule == nil || c.Rule.Wording != want {
 			t.Errorf("rule = %+v, want %q", c.Rule, want)
 		}
 		if params.Model != "" && !strings.Contains(c.Summary, "model gpt-5, effort high") {
 			t.Errorf("card %q does not show the model and effort the rule names", c.Summary)
 		}
-		_ = svc.Confirm("m1", c.ID, false)
+		_ = svc.Confirm(t.Context(), "m1", c.ID, false)
 		_ = wait(t, done)
 	}
 	for method, want := range map[string]string{
@@ -151,11 +144,11 @@ func TestRuleWordingNamesEveryKeyField(t *testing.T) {
 		if method == protocol.MethodEnvSave {
 			params = struct{}{}
 		}
-		c, done := card(t, sock, m, method, params)
+		c, done := card(t, svc, sock, m, method, params)
 		if c.Rule == nil || c.Rule.Wording != want {
 			t.Errorf("%s rule = %+v, want %q", method, c.Rule, want)
 		}
-		_ = svc.Confirm("m1", c.ID, false)
+		_ = svc.Confirm(t.Context(), "m1", c.ID, false)
 		_ = wait(t, done)
 	}
 }
@@ -182,14 +175,14 @@ func TestNeverRuleableCardsOfferNoRule(t *testing.T) {
 		"handoff":                    {protocol.MethodRunHandoff, protocol.RunHandoffParams{RunID: "run-1", ToMemberID: "m2"}},
 		"memory pin":                 {protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "note-1"}},
 	} {
-		c, done := card(t, sock, m, call.method, call.params)
+		c, done := card(t, svc, sock, m, call.method, call.params)
 		if c.Rule != nil {
 			t.Errorf("%s: card offers %+v, want no rule", name, c.Rule)
 		}
 		if _, err := svc.ApproveAlways(t.Context(), "m1", c.ID); !errors.Is(err, ErrNoRule) {
 			t.Errorf("%s: always = %v, want ErrNoRule", name, err)
 		}
-		_ = svc.Confirm("m1", c.ID, false)
+		_ = svc.Confirm(t.Context(), "m1", c.ID, false)
 		_ = wait(t, done)
 	}
 	if _, err := svc.ApproveAlways(t.Context(), "m1", "no-such-card"); !errors.Is(err, ErrNoConfirmation) {
@@ -236,7 +229,7 @@ func TestOnlyTodaysAutoApprovedMethodsAreRuleable(t *testing.T) {
 func TestRuleWhoseWorkspaceIsGoneIsInactive(t *testing.T) {
 	svc, m, db, sock, fake := newRuleService(t)
 	launch := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Task: "x"}
-	c, done := card(t, sock, m, protocol.MethodRunLaunch, launch)
+	c, done := card(t, svc, sock, m, protocol.MethodRunLaunch, launch)
 	if _, err := svc.ApproveAlways(t.Context(), "m1", c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -276,18 +269,18 @@ func TestNudgeHighlightsTheRuleOfARepeatedKind(t *testing.T) {
 	svc, m, _, sock, _ := newRuleService(t)
 	kill := protocol.RunIDParams{RunID: "run-1"}
 	for range suggestAfter {
-		if err := callTool(t, sock, m, protocol.MethodRunKill, kill, true, true); err == nil {
+		if err := callTool(t, svc, sock, m, protocol.MethodRunKill, kill, true, true); err == nil {
 			t.Fatal("run.kill succeeded; the fake refuses it")
 		}
 	}
 	if st, _ := svc.Settings(t.Context(), "m1"); st.SuggestAutoApprove {
 		t.Fatal("suggested auto-approval after three cards of one kind")
 	}
-	c, done := card(t, sock, m, protocol.MethodRunKill, kill)
+	c, done := card(t, svc, sock, m, protocol.MethodRunKill, kill)
 	if c.Rule == nil || !c.Rule.Suggested {
 		t.Fatalf("fourth card of the kind = %+v, want its rule highlighted", c.Rule)
 	}
-	_ = svc.Confirm("m1", c.ID, false)
+	_ = svc.Confirm(t.Context(), "m1", c.ID, false)
 	_ = wait(t, done)
 
 	for _, call := range []struct {
@@ -298,16 +291,16 @@ func TestNudgeHighlightsTheRuleOfARepeatedKind(t *testing.T) {
 		{protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}},
 		{protocol.MethodEnvSave, struct{}{}},
 	} {
-		_ = callTool(t, sock, m, call.method, call.params, true, true)
+		_ = callTool(t, svc, sock, m, call.method, call.params, true, true)
 	}
 	if st, _ := svc.Settings(t.Context(), "m1"); !st.SuggestAutoApprove {
 		t.Fatal("no suggestion after three cards of different kinds")
 	}
-	c, done = card(t, sock, m, protocol.MethodEnvSave, struct{}{})
+	c, done = card(t, svc, sock, m, protocol.MethodEnvSave, struct{}{})
 	if c.Rule == nil || c.Rule.Suggested {
 		t.Fatalf("card after different kinds = %+v, want its rule offered, not highlighted", c.Rule)
 	}
-	_ = svc.Confirm("m1", c.ID, false)
+	_ = svc.Confirm(t.Context(), "m1", c.ID, false)
 	_ = wait(t, done)
 }
 
@@ -324,16 +317,16 @@ func TestRuleNeverPassesAPreference(t *testing.T) {
 		t.Fatal(err)
 	}
 	carrying := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Task: "Fix the report. I PREFER TABLE\n  OUTPUT."}
-	c, done := card(t, f.sock, f.m, protocol.MethodRunLaunch, carrying)
+	c, done := card(t, f.svc, f.sock, f.m, protocol.MethodRunLaunch, carrying)
 	if c.Rule != nil {
 		t.Fatalf("card carrying a preference offers %+v", c.Rule)
 	}
-	_ = f.svc.Confirm(f.m.id, c.ID, true)
+	_ = f.svc.Confirm(t.Context(), f.m.id, c.ID, true)
 	if err := wait(t, done); err != nil {
 		t.Fatal(err)
 	}
 	plain := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", NoFallback: true, Task: "Fix the report."}
-	if err := callTool(t, f.sock, f.m, protocol.MethodRunLaunch, plain, false, false); err != nil {
+	if err := callTool(t, f.svc, f.sock, f.m, protocol.MethodRunLaunch, plain, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got := actions(t, f.svc, f.m)
@@ -348,9 +341,9 @@ func TestSavingARuleStartsTheCountsOver(t *testing.T) {
 	svc, m, _, sock, _ := newRuleService(t)
 	kill := protocol.RunIDParams{RunID: "run-1"}
 	for range suggestAfter {
-		_ = callTool(t, sock, m, protocol.MethodRunKill, kill, true, true)
+		_ = callTool(t, svc, sock, m, protocol.MethodRunKill, kill, true, true)
 	}
-	c, done := card(t, sock, m, protocol.MethodRunKill, kill)
+	c, done := card(t, svc, sock, m, protocol.MethodRunKill, kill)
 	if _, err := svc.ApproveAlways(t.Context(), "m1", c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -360,28 +353,30 @@ func TestSavingARuleStartsTheCountsOver(t *testing.T) {
 		method string
 		params any
 	}{{protocol.MethodEnvSave, struct{}{}}, {protocol.MethodRunInject, inject}} {
-		_ = callTool(t, sock, m, call.method, call.params, true, true)
+		_ = callTool(t, svc, sock, m, call.method, call.params, true, true)
 		if st, _ := svc.Settings(t.Context(), "m1"); st.SuggestAutoApprove {
 			t.Fatalf("suggested auto-approval %d cards after saving a rule", i+1)
 		}
 	}
 }
 
-// A card answered once cannot be answered again, even after the waiting
-// call took the first answer and before it drops the card: Always cannot
-// save a rule for a declined card.
+// A card answered once cannot be answered again: Always cannot save a rule
+// for a declined card.
 func TestAnsweredCardTakesNoSecondAnswer(t *testing.T) {
 	svc, m, db := newActionService(t)
-	p := &pendingConfirmation{AssistantConfirmation: protocol.AssistantConfirmation{ID: "c1", Method: protocol.MethodEnvSave,
-		Rule: &protocol.AssistantRuleOffer{Key: protocol.AssistantRuleKey{Method: protocol.MethodEnvSave}, Wording: "w"}}, answer: make(chan error, 1)}
-	m.confirms.pending = append(m.confirms.pending, p)
-	if err := m.confirms.decide("c1", false); err != nil {
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodEnvSave, Summary: "Save",
+			Rule: &protocol.AssistantRuleOffer{Key: protocol.AssistantRuleKey{Method: protocol.MethodEnvSave}, Wording: "w"}})
+	}()
+	c := pendingCards(t, svc, m)[0]
+	if err := svc.Confirm(t.Context(), "m1", c.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-p.answer; !errors.Is(err, errDeclined) {
+	if err := wait(t, done); !errors.Is(err, errDeclined) {
 		t.Fatalf("answer = %v, want the decline", err)
 	}
-	if _, err := svc.ApproveAlways(t.Context(), "m1", "c1"); !errors.Is(err, ErrNoConfirmation) {
+	if _, err := svc.ApproveAlways(t.Context(), "m1", c.ID); !errors.Is(err, ErrNoConfirmation) {
 		t.Fatalf("always after a decline = %v, want ErrNoConfirmation", err)
 	}
 	if len(db.rules) != 0 {

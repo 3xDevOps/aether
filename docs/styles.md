@@ -67,8 +67,15 @@ pair it with `font-*` classes.
 ## Semantic palette
 
 `web/src/index.css` is authoritative: light values sit on `:root`, dark ones
-on `.dark`. The theme preference is `system`, `light` or `dark`; `system`
-follows `prefers-color-scheme` live.
+on `.dark`. The theme preference is `dark` (the default), `light` or `system`;
+`system` follows `prefers-color-scheme` live. A theme stored before the dark
+default as `system`, which is how a never-chosen theme was saved, becomes
+`dark`; a stored `light` or `dark` is kept. An inline script in
+`web/src/app/layout.tsx` applies the stored theme before the first paint, so a
+light device never flashes light. The desktop window and the Android
+WebView and its launch window start on the dark `--canvas` for the same
+reason; Android's system bar icons are light over the dashboard and follow
+the system theme over the native error and update panels.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
@@ -82,22 +89,26 @@ follows `prefers-color-scheme` live.
 | `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
 | `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
 | `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |
-| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, focus ring, control outline |
+| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, control outline |
+| `--focus-ring` | `outline-focus` | `#367f77` | `#5fb3a8` | Keyboard focus ring; 3:1 on every surface and on the selected row in both themes |
 | `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
 | `--on-accent` | `text-on-accent` | `#ffffff` | `#ffffff` | Text on `bg-accent` |
 | `--selection` | `bg-selection` | `#dfebe9` | `#17413d` | Selected rows |
 
 `accent` is a fill for backgrounds and borders but the link colour for text;
 `bg-accent-hover` darkens the fill for a hovered primary button. The accent
-marks selection, focus, the one primary button per view and links, nothing
-else. Inside a selected row, secondary text uses `text-text`. A floating
+marks selection, focus, the one primary button per view, links and the
+Finished: review state, nothing else. Inside a selected row, secondary text uses `text-text`. A floating
 surface is `bg-raised`, a 1px seam and `shadow-overlay`; dialogs, the
 palette and sheets take `shadow-dialog` and sit over `bg-scrim`.
 [Geometry](#geometry-and-responsive-behavior) lists every shadow.
 
-The five session states (see
+The session states (see
 [dashboard-frontend.md](dashboard-frontend.md#session-state)), used on dots,
-state lines, badges, callouts and request cards:
+state lines, badges, callouts and request cards. Finished: review, a reported
+success awaiting its owner, takes the accent and a filled check circle; it
+asks nothing, so it is never amber. A subsession's success, which is for
+its parent agent only, draws the done check in `icon-faint` (the `held` tone):
 
 | State | Utility | Light | Dark |
 | --- | --- | --- | --- |
@@ -106,6 +117,7 @@ state lines, badges, callouts and request cards:
 | Paused | `state-paused` | `#6e6e6e` | `#8a8a8a` |
 | Done | `state-done` | `#1a7a36` | `#45c26a` |
 | Failed | `state-failed` | `#c8321f` | `#f05c4a` |
+| Finished: review | `text-accent`, `bg-accent-soft` (`review` tone) | `#306f69` | `#5fb3a8` |
 
 Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
 `bg-accent-soft` likewise. `text-on-failed` is the text on a `bg-state-failed`
@@ -148,6 +160,11 @@ than restyling it.
 | `confirm` | `bg-state-done`, `text-on-done` | Approve, beside a `danger` Deny |
 | `link` | Accent text, underline on hover | Inline actions that read as links |
 | `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
+
+A `secondary` button the app suggests, such as a card's approval rule after
+three approvals of its kind, adds a 2px `border-l-accent` over
+`bg-accent-soft` and a muted line saying why; it never becomes `primary` or
+`confirm`, which stay the card's own Approve.
 
 Sizes are `md` (28px, the default), `sm` (24px), `icon` (28px square),
 `icon-sm` (24px square), and the composer's and the Notes field's send control: `round` (28px
@@ -304,7 +321,7 @@ it). Subagent sub-lanes use the same fills.
 | Working | `text-state-working`; a live bar adds a 2px `border-state-working` end cap and `live-shimmer` on its activity text |
 | Needs you, or Needed attention in history | `text-state-needs-you`; a live bar ends in a `bg-raised` **Needs you** tag with a pulsing dot |
 | Paused | `text-state-paused` |
-| Ready for review | `text-accent`, matching its dot |
+| Finished: review | `text-accent`, matching its dot; never the Needs you tag. The lane's label carries a review-tone **Finished: review** chip |
 | Done, Failed | `text-state-done`, `text-state-failed`; a finished session's working spans take its outcome's colour |
 | Waiting, answered, closed | `text-muted` |
 | Starting | hollow, dashed `border-seam` |
@@ -518,24 +535,30 @@ are sentence-case 12px muted disclosure buttons with their count. The footer
 holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.
 
-Under 768px a second, 48px toolbar (`bg-chrome`) holds the sidebar button,
-with a needs-you dot while anything needs the viewer, the view title in
-13/20 medium, **Search** and **New session**. When the page has its own primary
-action, the toolbar's **New session** becomes a ghost `+` icon so the screen keeps
-one filled button. The sidebar opens as a left side sheet. Content views draw
-`PaneHeader`: the title in `text-title`, one optional muted line under it,
-and actions on the right. A connection problem is a failed-tone `StateLine`,
-in the header on desktop and under the top bar on a phone.
+Under 768px the header is one 48px row (`bg-chrome`): the view title in 13/20
+medium and **Search**. A `bg-chrome` tab bar along the bottom holds Needs you,
+Sessions, New, Assistant and More: 56px tall, a 20px icon in the same 28 ×
+44px box over a 12px label, muted at rest and accent when current, with a 2px
+accent bar along the top edge. Counts over 99 read 99+. The Needs you count is
+an amber chip with `text-canvas` figures, the one place amber fills a count,
+because it is the needs-you signal. **New** is an accent pill unless the page
+has its own primary action, so the screen keeps one filled button. More opens
+as a bottom sheet. Content views draw `PaneHeader`: the title in `text-title`,
+one optional muted line under it, and actions on the right. A connection
+problem is a failed-tone `StateLine`, in the header on desktop and under the
+top bar on a phone.
 
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
 32px rows (44px on a coarse pointer). Theme is in **Settings > General** and the footer menu, with
-explicit **System**, **Light** and **Dark** choices and matching palette
+explicit **Dark**, **Light** and **System** choices and matching palette
 commands.
 
 `focusRing`, `fieldFocus` and `field` in `web/src/lib/utils.ts` are the shared
 focus and field styles. Buttons and navigation show their outlines only
-after Tab, never after a click or another key; text fields use a 1px inset accent outline over the existing border with a
+after Tab, never after a click or another key. One exception: Cancel in a
+close confirmation takes focus when the confirmation opens and shows its
+outline then (`focusRingShown`), so the safe default is visible; text fields use a 1px inset accent outline over the existing border with a
 faint 4px glow and no offset gap. The outline remains visible in forced-colors
 mode, where box shadows disappear. The Chat composer draws this treatment
 on its enclosing box, not its embedded textarea, so attachments do not clip

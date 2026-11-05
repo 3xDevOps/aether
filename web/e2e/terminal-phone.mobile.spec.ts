@@ -88,6 +88,16 @@ async function takeControlFromRawHolder(page: Page, presence: Locator): Promise<
 
 test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
+// These are about panning a grid larger than the phone, so they keep a chosen
+// text size rather than fitting the grid to the width.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('aether.ui')) {
+      localStorage.setItem('aether.ui', JSON.stringify({ state: { terminalFitWidth: false }, version: 11 }))
+    }
+  })
+})
+
 test('a phone can reach and type into a desktop-sized agent without resizing it', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -135,9 +145,9 @@ done`)
   desktop.sendInput('start\r')
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).tap()
   await page
-    .getByRole('dialog', { name: 'Aether' })
+    .getByRole('main').getByRole('region', { name: 'Sessions' })
     .getByRole('button', { name: /watched from a phone/ })
     .tap()
 
@@ -208,12 +218,15 @@ done`)
         await expect(rows.filter({ hasText: 'PHONE-ALTERNATE' })).toHaveCount(1)
       }
       await expect.poll(promptVisible).toBe(true)
+      // How far the grid is scrolled to show the prompt depends on the height the session's
+      // chrome leaves, and a drag past its top hands over to history, so pan by less than that.
       const before = await host.evaluate((element) => element.scrollTop)
-      expect(before).toBeGreaterThan(40)
-      await drag(40)
-      await expect.poll(() => host.evaluate((element) => element.scrollTop)).toBeLessThan(before - 20)
+      expect(before).toBeGreaterThan(20)
+      const pan = Math.min(40, before - 10)
+      await drag(pan)
+      await expect.poll(() => host.evaluate((element) => element.scrollTop)).toBeLessThan(before - pan / 2)
       await expect(page.getByLabel('Terminal scrollback', { exact: true })).toBeHidden()
-      await drag(-80)
+      await drag(-2 * pan)
       await expect.poll(promptVisible).toBe(true)
 
       const promptBox = await prompt.boundingBox()
@@ -370,8 +383,8 @@ done`)
 
   try {
     await page.goto(alice.url)
-    await page.getByRole('button', { name: /^Open sidebar/ }).tap()
-    await page.getByRole('dialog', { name: 'Aether' })
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).tap()
+    await page.getByRole('main').getByRole('region', { name: 'Sessions' })
       .getByRole('button', { name: 'touch through phone history' }).tap()
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live.locator(':scope > div')).toHaveCount(desktopRows)

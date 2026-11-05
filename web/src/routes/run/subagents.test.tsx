@@ -37,6 +37,8 @@ function acpSocket(): ScriptedSession {
 class SizedObserver {
   /** What every observed element measures, the run's row included. */
   static width = 736
+  /** How tall every scroller measures; each row measures 24. */
+  static viewport = 4000
   static reports: (() => void)[] = []
   static resize(width: number) {
     SizedObserver.width = width
@@ -45,7 +47,7 @@ class SizedObserver {
   constructor(private readonly callback: ResizeObserverCallback) {}
   observe(target: Element) {
     const report = () => {
-      const height = (target as HTMLElement).style.overflowY ? 4000 : 24
+      const height = (target as HTMLElement).style.overflowY ? SizedObserver.viewport : 24
       const width = SizedObserver.width
       const box = [{ blockSize: height, inlineSize: width }]
       this.callback([{ target, contentRect: { height, width }, borderBoxSize: box, contentBoxSize: box } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
@@ -67,6 +69,7 @@ afterAll(() => {
 
 beforeEach(() => {
   SizedObserver.width = 736
+  SizedObserver.viewport = 4000
   SizedObserver.reports = []
   vi.stubGlobal('ResizeObserver', SizedObserver)
   StubSocket.install()
@@ -240,8 +243,10 @@ describe('subagents in the session view', () => {
     await waitFor(() => expect(api.runACPHistory).toHaveBeenCalledTimes(2))
   })
 
-  // The session log behind the inspector requests one page on mount; the inspector's own requests count on top.
-  const sessionViewPages = 1
+  // A session log shorter than its viewport pages to fill it, and jsdom never scrolls it away from the top, so
+  // it would page behind the inspector until history ran out. A log taller than its viewport leaves every
+  // request to the inspector.
+  const fullSessionLog = () => { SizedObserver.viewport = 16 }
 
   it('does not page history for an unknown subagent until asked', async () => {
     let page = 100
@@ -249,13 +254,14 @@ describe('subagents in the session view', () => {
       const older = { ...child(1, `c${page}`, 'other', 'Read billing.js'), seq: --page }
       return { frames: [{ seq: older.seq, item: older }], oldest_seq: 1 }
     })
+    fullSessionLog()
     open('missing')
     acpSocket().open({ oldest_seq: 100 }, [{ ...child(1, 'c100', 'other', 'Read billing.js'), seq: 100 }])
     const inspector = await screen.findByRole('dialog', { name: 'Subagent' })
     const more = await within(inspector).findByRole('button', { name: 'Load earlier history' })
-    expect(api.runACPHistory).toHaveBeenCalledTimes(sessionViewPages)
+    expect(api.runACPHistory).not.toHaveBeenCalled()
     await userEvent.click(more)
-    await waitFor(() => expect(api.runACPHistory).toHaveBeenCalledTimes(sessionViewPages + 1))
+    await waitFor(() => expect(api.runACPHistory).toHaveBeenCalledTimes(1))
   })
 
   it('stops auto-paging for a known subagent after five pages and offers the button', async () => {
@@ -264,11 +270,12 @@ describe('subagents in the session view', () => {
       const older = { ...child(1, `c${page}`, 'a1', 'Read billing.js'), seq: --page }
       return { frames: [{ seq: older.seq, item: older }], oldest_seq: 1 }
     })
+    fullSessionLog()
     open('a1')
     acpSocket().open({ oldest_seq: 100 }, [{ ...child(1, 'c100', 'a1', 'Read billing.js'), seq: 100 }])
     const inspector = await screen.findByRole('dialog', { name: 'Subagent' })
     await within(inspector).findByRole('button', { name: 'Load earlier history' })
-    expect(api.runACPHistory).toHaveBeenCalledTimes(sessionViewPages + 5)
+    expect(api.runACPHistory).toHaveBeenCalledTimes(5)
   })
 
   it('shows a subagent whose launch is not loaded as a Not loaded card', async () => {

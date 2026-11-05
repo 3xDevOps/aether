@@ -33,6 +33,7 @@ credentials out of the report.
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the session. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the session can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Dashboard gateways](#the-dashboard-gateways) | `aether gui` listens on loopback with a per-process token. The server's dashboard is tailnet-only HTTPS with per-request identity. | Any process on the server host that connects to the host's own tailnet address is served as the node's owner. |
+| [Dictation](#dictation) | The speech-to-text engine runs in a container with no network, no capabilities and a memory cap, reachable only through a `0600` Unix socket. Only approved members call it, never connectors, one clip at a time. Audio stays in memory. | The engine and model are third-party binaries, checked only against pinned SHA-256 sums. |
 | [Push notifications](#push-notifications) | The server posts only to public HTTPS endpoints, and the payload is encrypted to your browser. | A notice shows run text (title and reason) on your device. |
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
 | [SSH into a session and port forwarding](#ssh-into-a-session) | Same admission as a session shell. Forwards reach only the session's own loopback. | Sessions are not recorded. Attaching an editor lets the session's agent reach your computer through the editor. |
@@ -435,9 +436,19 @@ permissions, and it uses the account you signed it in to.
   **New conversation**.
 - The assistant does not start when the server cannot reach the vendor's
   sign-in service.
+- The [same-account check](assistant.md#same-account-as-your-sessions) reads
+  your environment's login read-only and sends only its Claude access token
+  to the profile endpoint. It is information only and gates nothing.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a session and saving your environment wait for you to
-  approve a card. An unanswered card fails after 10 minutes.
+  approve a card. An unanswered card expires after 10 minutes, or 24 hours
+  when a connector turn raised it. In a connector turn, auto-approval never
+  passes a call the connector's scopes do not cover. Only your own Aether
+  devices decide a card (`assistant.confirm`), and a connector its own
+  turns' cards (see [ChatGPT and Claude connectors](#chatgpt-and-claude-connectors)),
+  never the assistant's tool socket. A card approved
+  after its turn ended runs on the server as you, at most once, and only if it
+  still reads as the card you approved.
 - **Let the assistant act without asking** (auto-approve, off by default)
   skips the card for your own sessions. Messaging or stopping another member's session
   always asks. The assistant cannot turn auto-approve on or approve a card
@@ -546,7 +557,11 @@ The [Android app](install.md#android-app) is a WebView locked to one HTTPS
 origin. It refuses `http://` addresses and certificate errors, opens other
 sites in the phone's browser, stays out of cloud backup and holds no
 credential. Safe Browsing is off because it only loads your server and the
-phone's browser checks every other link ([privacy.md](privacy.md)).
+phone's browser checks every other link ([privacy.md](privacy.md)). It holds
+the `RECORD_AUDIO` permission and grants the microphone only to the
+dashboard's origin, when you press the dashboard's mic button; every other
+origin and every other WebView permission request is denied. The audio goes to
+your Aether server for transcription and the app does not store it.
 
 ### Push notifications
 
@@ -576,6 +591,24 @@ so of what it commits and publishes, unless the repository ignores it. Files
 lists ignored files too, and anyone who can view the session can read any file in
 its checkout, a `.env` included. Keep a value viewers must not see as a
 workspace secret and out of files.
+
+### Dictation
+
+`sudo aether-server dictation install` downloads sherpa-onnx's prebuilt engine
+and an ONNX model from the sherpa-onnx GitHub releases and accepts only files
+matching the SHA-256 sums pinned in `aether-server`, and pulls the engine's
+image by digest ([dictation.md](dictation.md#install)). The engine has no
+authentication and listens on every interface, so its container has no
+network: nothing reaches it, sessions included, but the server through
+`<data-dir>/dictation/sock/engine.sock`, mode `0600` in a `0700` directory. The
+container runs as uid 65534 with a read-only root, every capability dropped,
+`no-new-privileges`, the engine and model mounted read-only, at most 4 CPUs,
+2.5 GiB of memory and 256 processes, and the engine at nice 10
+([dictation.md](dictation.md#the-engine-container)). `dictation.transcribe`
+takes any approved member's clip; pending members, connectors and the assistant
+are refused, and the server queues at most four clips behind the one it
+transcribes, one per member, so dictation takes no more than one engine's CPU
+from sessions.
 
 ## Agent configuration and Files
 
@@ -692,13 +725,36 @@ there is no terminal, file, settings or git-writing tool.
 - Scopes: the member picks them on the consent page, not the client. `read` is
   always granted, and every member can read every session on the server, so a
   connector can read all of them. `write` (launch sessions, message,
-  pause and resume sessions, answer questions, mark sessions reviewed) is checked by
+  pause and resume sessions, answer questions, mark sessions reviewed, ask the assistant) is checked by
   default; `control` (decide permission requests, stop and close sessions) is not, because text an agent wrote could talk the assistant into
   approving or ending work. A connector serves only its scopes' tools, and the
   server checks every call's method against its scopes, a permission decision
   against `control`, and refuses every method outside its table
   ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
   then one every 2 seconds.
+- `aether_ask_assistant` runs a turn of your assistant, in your conversation
+  with your preferences. Its origin and the grant it belongs to come from the
+  connector's token, never from the call. The turn reads no dashboard view
+  context. It returns only that turn's final
+  reply, capped at 4 KiB, with saved preferences matched word for word
+  withheld; a paraphrase still gets out, a risk the owner accepted. Your
+  approval rules and auto-approval pass a connector turn's calls as they do a
+  dashboard turn's, so content the external host reads, which Aether cannot
+  see, can steer them; a method outside the connector's scopes, as they are
+  when the call is made, never passes without a card, and a revoked
+  connector's waiting prompts do not run. A connector decides only cards its own turns raised, and
+  only by echoing the card's text, the summary and every parameter whole,
+  byte for byte. The external host's confirmation of that tool call is the
+  human gate, as for `aether_decide_approval`; the echo binds it to the exact
+  card. Deciding is its own tool, `aether_decide_assistant_card`, so the
+  host asks for each decision; a member who sets that tool to **Always
+  allow** lets the external model, and content it read, approve cards
+  without them. Approving needs the scope of the method's own tool. A card
+  over 2,000 characters, one showing a saved preference, or one whose summary
+  holds a line break or a character not printed as itself is decided only
+  in Aether. The assistant's tool socket cannot call `assistant.ask` or
+  `assistant.confirm`, and no connector can create a rule or change
+  auto-approval.
 - Audit history: a connector's write calls, refused ones included, and its
   creation and revocation are recorded with the member, connector, method,
   target and outcome, never the parameters

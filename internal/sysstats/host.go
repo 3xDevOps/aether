@@ -89,6 +89,15 @@ func readHost(procRoot, sysRoot string, at time.Time) (hostReading, error) {
 	return r, nil
 }
 
+// MemoryAvailable is the host's MemAvailable from /proc/meminfo.
+func MemoryAvailable() (uint64, error) {
+	var r hostReading
+	if err := r.readMeminfo("/proc"); err != nil {
+		return 0, err
+	}
+	return r.sample.MemoryAvailableBytes, nil
+}
+
 func readProc(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

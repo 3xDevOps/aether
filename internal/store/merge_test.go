@@ -45,12 +45,15 @@ var memberRefs = map[string]bool{
 	"assistant_prompt_keys.member_id":          false,
 	"watches.member_id":                        true,
 	"notify_prefs.member_id":                   true,
+	"push_digest.member_id":                    true,
 	"watch_pr_snapshots.member_id":             false,
 	"watches.wait_ended_by":                    false,
 	"member_preferences.member_id":             true,
 	"assistant_settings.member_id":             false,
 	"assistant_rules.member_id":                false,
 	"assistant_rules.account_member_id":        false,
+	"assistant_cards.member_id":                false,
+	"assistant_queue.member_id":                false,
 	"launch_defaults.member_id":                false,
 	"launch_defaults.account_member_id":        true,
 	"events.actor_id":                          false,
@@ -239,8 +242,16 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err := db.PutPushSubscription(ctx, &PushSubscription{Endpoint: "https://push.example/b", MemberID: b.ID, P256DH: "k", Auth: "a"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false}); err != nil {
+	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false, Level: "batched", DigestAt: "09:00"}); err != nil {
 		t.Fatal(err)
+	}
+	for _, item := range []*DigestItem{
+		{MemberID: b.ID, Source: "run", Key: string(b.ID) + "|finished:x", Kind: "done", Title: "t", RunID: runB.ID, CreatedAt: now},
+		{MemberID: b.ID, Source: "watch", Key: "notice-1", Kind: "done", Title: "t", CreatedAt: now},
+	} {
+		if err := db.AddDigestItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
 	}
 	launchRevisions := map[domain.MemberID]int64{}
 	for m, l := range map[domain.MemberID]LaunchDefaults{
@@ -305,6 +316,10 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	merge, err := db.AcceptMerge(ctx, accept)
 	if err != nil {
 		t.Fatalf("AcceptMerge: %v", err)
+	}
+	digest, err := db.ListDigestItems(ctx, a.ID)
+	if err != nil || len(digest) != 2 || digest[0].Key != string(a.ID)+"|finished:x" || digest[1].Key != "notice-1" {
+		t.Fatalf("survivor's digest = %+v, %v; want the session's item keyed to the survivor and the watch's as it was", digest, err)
 	}
 
 	got, err := db.GetMember(ctx, a.ID)

@@ -56,6 +56,10 @@ flowchart LR
   ([environments.md](environments.md#docker-inside-sessions)).
 - Optional: Tailscale. Without it the server needs only outbound HTTPS to the
   edge ([networking.md](networking.md)).
+- Optional: dictation, which transcribes speech on the server in a Docker
+  container, needs 690 MB of disk plus a 100 MB image, and 2 GiB of available
+  memory while it runs; install it with `sudo aether-server dictation install`
+  ([dictation.md](dictation.md)).
 
 ## The install script
 
@@ -288,6 +292,11 @@ The app keeps a device key and edge tokens in private storage, excluded from
 backups. Uninstalling the app or clearing its storage deletes the key, so the
 phone signs in as a new device and may need approval again. To switch mode or
 check for updates, long-press the app icon and choose **Connection**.
+
+**Share** text or a link to Aether's **New session** from any app and the
+dashboard opens a new session with it as the prompt, cut to 8000 characters;
+nothing starts until you send it. Back walks the dashboard's history, returns
+to its home from a page a share opened, and leaves the app only from home.
 
 About once an hour, when you bring it to the front, the app checks for a
 release and shows a banner. **Download update** fetches the new APK; open it
@@ -607,6 +616,7 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 | `mirrors/`, `profiles/` | Source mirror settings and deploy keys, and agent profile snapshots. |
 | `server-update/` | Update state, and the database copy taken before an update that changes its schema. |
 | `home-caches/`, `scratch/` | Package caches and each container's `/tmp`. Rebuildable; no backup needed. |
+| `dictation/` | The speech-to-text engine and model `aether-server dictation install` downloaded. Reinstallable; no backup needed. |
 
 The other directories hold internal server state. To recover a server, back
 up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,

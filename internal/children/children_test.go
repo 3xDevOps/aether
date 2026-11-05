@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +26,10 @@ import (
 )
 
 type fakeRuns struct {
-	db       *store.DB
+	db *store.DB
+	// inflight counts launches still running: repairStarted can mark a
+	// child started once its row exists, before its launch has finished.
+	inflight atomic.Int32
 	mu       sync.Mutex
 	launched []domain.LaunchOptions
 	accounts []domain.MemberID
@@ -35,6 +39,8 @@ type fakeRuns struct {
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	f.inflight.Add(1)
+	defer f.inflight.Add(-1)
 	r := &domain.Run{ID: opts.ReservedRunID, WorkspaceID: ws, MemberID: member, AccountMemberID: account, Task: task, Harness: harness,
 		Mode: mode, Model: opts.Model, Status: domain.RunRunning, BaseCommit: opts.FromCommit}
 	if err := f.db.CreateRunWithID(ctx, r); err != nil {
@@ -287,7 +293,7 @@ func (h *harness) settle() {
 		if err != nil {
 			h.t.Fatal(err)
 		}
-		if len(launching) == 0 {
+		if len(launching) == 0 && h.runs.inflight.Load() == 0 {
 			h.svc.reconcile(h.ctx)
 			return
 		}
@@ -426,7 +432,8 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); code(err) != protocol.CodeInvalidState {
 		t.Fatalf("success with unfinished subsessions = %v, want refused", err)
 	}
-	if err := h.db.DetachChild(h.ctx, domain.RunID(kept.RunID)); err != nil {
+	// Handing a subsession to another member detaches it from its parent.
+	if err := h.db.TransferRun(h.ctx, domain.RunID(kept.RunID), h.bob.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildCancel, json.RawMessage(`{"run_id":"`+stopped.RunID+`"}`)); err != nil {
@@ -588,26 +595,43 @@ func TestRefusalNoticeComesFromTheParent(t *testing.T) {
 	}
 }
 
-func TestFinishedChildrenOutliveTheirParent(t *testing.T) {
-	h := newHarness(t)
-	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
-	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
-	done := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "done"})
-	busy := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "busy"})
-	h.settle()
-	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(done.RunID), domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunFailed, "killed", "", nil, &now); err != nil {
-		t.Fatal(err)
-	}
-	h.settle()
-	kept, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID))
-	stopped, _ := h.db.GetRun(h.ctx, domain.RunID(busy.RunID))
-	if kept.Status.Terminal() || !kept.Detached || !stopped.Status.Terminal() {
-		t.Fatalf("finished subsession %s detached=%v, busy subsession %s; want the finished one kept for review and the busy one stopped",
-			kept.Status, kept.Detached, stopped.Status)
+// A subsession that already reported stays with a completed parent its
+// owner has not accepted yet, to close with it, and its outcome stays for
+// the parent only. Under a parent that ended for good it is stopped, since
+// nobody can close that parent.
+func TestFinishedChildrenStayWithAParentThatCanStillClose(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status domain.RunStatus
+		reason string
+		kept   bool
+	}{
+		{"completed, not accepted", domain.RunCompleted, "agent reported success", true},
+		{"failed", domain.RunFailed, "agent failed", false},
+		{"killed", domain.RunAbandoned, "killed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+			parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+			done := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "done"})
+			busy := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "busy"})
+			h.settle()
+			if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(done.RunID), domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now()
+			if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, tc.status, tc.reason, "", nil, &now); err != nil {
+				t.Fatal(err)
+			}
+			h.settle()
+			kept, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID))
+			stopped, _ := h.db.GetRun(h.ctx, domain.RunID(busy.RunID))
+			if kept.Status.Terminal() == tc.kept || kept.Detached || !kept.OutcomeHeld() || !stopped.Status.Terminal() {
+				t.Fatalf("finished subsession %s detached=%v, busy subsession %s; want the finished one kept=%v under its parent and the busy one stopped",
+					kept.Status, kept.Detached, stopped.Status, tc.kept)
+			}
+		})
 	}
 }
 

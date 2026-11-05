@@ -343,6 +343,9 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. `terminal.file` has 96 MiB for a decoded 64 MiB file.
+`dictation.transcribe` has 6 MiB for a 120 s clip in base64, and `aether gui`
+waits 4 minutes for its answer and never repeats it
+([dictation.md](dictation.md)).
 File and configuration exceptions are listed below.
 
 ### Chat image previews
@@ -749,9 +752,13 @@ the payload.
 
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished session from the board
-and keeps its data, restorable any time: only a session in a final disposition
-(`merged`, `abandoned`, `failed`, or `interrupted`) can be archived, and
-archiving any other status returns `-32002` naming the session's real status.
+and keeps its data, restorable any time: only a `completed` session or one in a
+final disposition (`merged`, `abandoned`, `failed`, or `interrupted`) can be
+archived, and archiving any other status returns `-32002` naming the session's
+real status. A `completed` session is also refused with `-32002`, naming what it
+holds, while its result awaits review or `run.close_check` would warn of live
+subsessions, a pull request not merged, sessions waiting on it or pending
+cleanup.
 Archiving an already-archived session is a no-op that leaves its timestamp
 unchanged; calling it with `"archived":false` restores the session. The response
 is a `RunResult` with `run.archived_at` set while archived and absent otherwise.
@@ -797,17 +804,48 @@ work resumes, Close or another status change. `finish_unopened` is `true`
 from the finish until a member opens or closes the session, `false` after work
 resumes.
 
-`run.review` accepts `{"run_id":"...","action":"complete"}` or
-`"action":"later"` and returns a `RunResult`. It needs the kill permission,
+`run.review` accepts `{"run_id":"...","action":"complete"}`,
+`"action":"later"` or `"action":"not-yet"` and returns a `RunResult`. It needs the kill permission,
 as `run.close` does. `complete` closes a live session as `run.close` does but
 records `completed`, or only records the acceptance on a `completed` session,
 and sets `review` to `accepted`; it is idempotent once accepted, and refused
 with `-32002` for other terminal statuses. `later` without a `ready` or `later`
-review is `-32002` too. `later` sets
-`review` to `later` and leaves the session where it is.
+review is `-32002` too, and so is `not-yet`, which a live session also
+needs. `later` sets `review` to `later` and leaves the session where it is;
+`not-yet` clears `review`, so the session awaits no review until its agent
+reports success again.
 Each change publishes `run.review` with
 `{"review":"...","review_changed_at":"...","status_seq":N}`; apply it only
 when `status_seq` is above the one you hold.
+
+`run.close_check` takes `{"run_ids":["...", ...],"outcome":"merged"}`, 1 to 50
+sessions, and returns `{"runs":[{"run_id":"...","warnings":[...],"merged_pull_request":true,"idle_since":"..."}]}`, each
+distinct id once, in order: what closing each session would affect.
+`merged_pull_request` is true when a merged pull request recorded for the
+session's own repository holds its last commit, so a caller can close it as
+merged. `idle_since` is when the session's status, reason or activity last
+changed. `outcome`
+is optional: `merged`, `abandoned` or `completed` (Mark complete); `merged`
+skips `unmerged_work`. It reads like `run.get`, so any approved
+member may call it; a session that does not exist answers with its own
+`error` and leaves the others unaffected. Each warning has a `kind`, a `detail`
+sentence and, where it applies, `url`, `count` and `run_ids`. A subsession that
+closes with the session adds its own `pull_request`, `unmerged_work` and
+`awaited` warnings, with `subsession` naming it; their `detail` does not repeat the subsession:
+
+| `kind` | When |
+| --- | --- |
+| `protected` | The session is protected (`aether protect`). |
+| `pull_request` | A pull request recorded for it was neither merged nor closed when Aether last checked it; `url` links it. The check does not ask GitHub. |
+| `unmerged_work` | Its branch has commits past its base and no open pull request, or merged one, recorded for its own repository after Aether last recorded a commit. Recorded pull requests carry no commit, so the warning says the commits may not be merged. |
+| `messages` | Mail from other sessions that asks it something (not a reply) and it has not acknowledged, or any mail in the last 30 minutes from a session other than its parent and subsessions; `count`, and the senders in `run_ids`. |
+| `awaited` | Live sessions wait on `run:<session-id>:finished`; `run_ids`. Closing wakes them with its outcome. |
+| `subsessions` | Attached subsessions not yet merged, abandoned, failed, interrupted or accepted, which close with it; `count`, `run_ids`. |
+| `cleanup_pending` | Its container cleanup is pending or failed; `detail` carries the error. |
+
+Closing stays allowed: `run.close` and `run.review` do not read the check.
+The dashboard, `aether close` and the connector's close tools show the
+warnings and ask first ([failure-handling.md](failure-handling.md#before-a-close)).
 
 The `push.*` methods manage Web Push for the caller's own browsers
 ([networking.md](networking.md#notifications)). `push.status` accepts an
@@ -966,14 +1004,16 @@ These serve a client with no dashboard and no stream, such as the
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first: each session that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it |
+| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first, `ready` items last: each session that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it, then each reported success awaiting the caller's review |
 | `run.input.respond` | `{"run_id":"...","request_id":"...","option_id":"...","values":{...}}`; Steer | `{"status":"answered"}`, or `{"status":"already_answered"}` when an earlier answer won |
 
 An `AttentionItem` is `{kind, run_id, workspace_id, title,
 harness, reason, since}` plus what answering it needs. `kind` is one of
 `permission`, `question`, `queued-message`, `room-question`,
 `disconnected`,
-`blocked`, `needs-input`, `ready` or `failed`. `permission` and
+`blocked`, `needs-input`, `ready` or `failed`. `ready` is a finished session
+whose success awaits review (reason `Finished: review the result`); it blocks
+nothing and is not Needs you. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 session's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a
@@ -1099,17 +1139,19 @@ The dashboard also calls these methods through the same route:
 | `terminal.file` | `TerminalFileParams` (`{"run_id":"<run-id>","name":"notes.md","content":"<base64-file-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-files/<random>/notes.md"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
-| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the session belongs to another member, and `rule` when the card may become an [approval rule](assistant.md#approval-rules): `{"key":{...},"wording":"Always approve ...","suggested":true}`, `suggested` after three cards of that kind approved by hand in a row), `auto_approve`, `suggest_auto_approve` and `share_view`. `installing` means a start is installing the agent in the assistant's container |
+| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the conversation's `queue` (waiting and running entries, then the latest 50 that ended), the open `confirmations` (each with `state` `pending`, `approved` or `running`, the turn's `origin` `{door, client, connector_id}`, and `other_member` and `other_owner`, the owner's name, when the session belongs to another member, and `rule` when the card may become an [approval rule](assistant.md#approval-rules): `{"key":{...},"wording":"Always approve ...","suggested":true}`, `suggested` after three cards of that kind approved by hand in a row), `auto_approve`, `suggest_auto_approve` and `share_view`. `installing` means a start is installing the agent in the assistant's container |
 | `assistant.start` | `{"agent":"claude"}` (optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their agent in the caller's assistant container, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation |
-| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `pr`, `check`, `failure`) and any of `workspace_id`, `run_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
+| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...},"door":"phone"}` (`view_context` and `door` optional) | `{"entry":AssistantQueueEntry}`; needs the Launch capability. The prompt joins the caller's queue, and a key the conversation already holds returns its entry instead. With nothing running or queued it is sent at once, starting the assistant when needed, and a failure to send is the error; otherwise `entry.state` is `queued` and it runs when the turns before it end. A sixth waiting prompt answers `-32002` `assistant: 5 prompts are already queued; wait or remove one`. `door` is `phone` or `desktop` when the Aether app runs in that shell; anything else is `dashboard`, and it only labels the entry. An entry is `{id, state, text, origin: {door, client, connector_id}, error, message_id, created_at}`, `state` one of `queued`, `running`, `done`, `failed`, `interrupted` (a turn a restart lost, never rerun) and `removed`. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `pr`, `check`, `failure`) and any of `workspace_id`, `run_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
 | `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. One without `route` forgets the held view: the member removed the page from their draft. Kept in memory only |
-| `assistant.cancel` | none | empty result; cancels the turn in flight |
+| `assistant.cancel` | none | empty result; cancels the turn in flight; the next queued prompt then runs |
+| `assistant.queue.remove` | `{"entry_id":"..."}` | empty result; removes one of the caller's queued prompts before it runs, or dismisses one that failed or was interrupted. One running or done is `not found`. The assistant's tool socket and connectors cannot call it |
 | `assistant.answer` | `{"request_id":"...","option_id":"...","values":{}}` | empty result; answers one of the harness's permission prompts or questions |
-| `assistant.confirm` | `{"confirmation_id":"...","approve":true}`, or `{"confirmation_id":"...","approve":true,"always":true}` | `{}`; answers a tool call waiting for approval. A confirmation expires after 10 minutes. `always` also saves the rule the card offers, built by the server from the card it stored, and returns it as `{"rule":AssistantRule}`; a card that offers none answers `-32002`. The assistant's own calls and connectors cannot use `always` (`-32001`) |
+| `assistant.confirm` | `{"confirmation_id":"...","approve":true}`, or `{"confirmation_id":"...","approve":true,"always":true}` | `{}`; decides a pending card. Its tool call gets the answer while it waits; otherwise the server runs an approved call itself. A card expires after 10 minutes, or 24 hours from a connector turn. A decided or expired card, or one a new conversation withdrew, is `not found`. `always` also saves the rule the card offers, built by the server from the card it stored, and returns it as `{"rule":AssistantRule}`; a card that offers none answers `-32002`. The assistant's own calls and connectors cannot use `always` (`-32001`) |
 | `assistant.rules` | none | `{"rules":[AssistantRule]}` - the caller's [approval rules](assistant.md#approval-rules), oldest first: `{"id":"rule-...","method":"run.launch","wording":"Always approve ...","summary":"<the card it came from>","created_at":"...","last_used_at":"...","uses":3,"inactive":"<reason>"}`; `inactive` is set when the rule's workspace is gone or its account is no longer shared with the caller. Refused to the assistant's own calls and to connectors (`-32001`); the tool socket does not serve it |
 | `assistant.rules.revoke` | `{"id":"rule-..."}` | empty result; deletes the caller's rule, which applies to the next card. `-32000` when the caller has no such rule. Refused like `assistant.rules` |
 | `assistant.reset` | none | `AssistantStatus` - stops the session, discards the conversation and deletes the agent's state in the assistant's home |
-| `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false}`) - the caller's own assistant settings. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's session. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
+| `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false,"approval_chosen":true}`) - the caller's own assistant settings. `approval_chosen` is set once the caller set `auto_approve` or answered the suggestion, and the dashboard then stops asking how the assistant should act. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's session. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
+| `assistant.account` | `{"agent":"claude"}` | `AssistantAccount` (`{"agent":"claude","state":"other","environment":"account <uuid>, organization <uuid>","email":"..."}`) - compares the account recorded for the assistant's sign-in with the caller's environment login. `state` is `unrecorded` (no start has recorded it yet), `same`, `other`, `expired` (the environment's Claude token is past its expiry) or `error` with `error`. It reads the login read-only and never refreshes it; see [Same account as your sessions](assistant.md#same-account-as-your-sessions). The assistant's tool socket does not serve this method |
 | `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history`. A `notice` item may carry an `action` record, below |
 | `assistant.item` | `{"seq":12}` | like `run.acp.item` |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new session checkout's `origin` remote points at |
@@ -2423,7 +2465,10 @@ Both transports reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires
 `visibilitychange` (visible) or `online`. A phone freezes a background tab's
 timers, so without those two events a tab returning from the pocket would sit
-out the rest of a 30-second wait. A foreground return leaves a socket that is
+out the rest of a 30-second wait. The events stream also treats a watchdog tick
+more than 15 seconds late, a `pageshow`, and a settled `navigator.connection`
+`change` as those two events ([dashboard-frontend.md](dashboard-frontend.md)).
+A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.

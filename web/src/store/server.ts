@@ -155,6 +155,8 @@ export interface ServerSlice {
   /** Highest event sequence applied; the cursor a reconnect replays from. */
   lastSeq: number
   hydrated: boolean
+  /** When the painted snapshot was saved (ms) while no live hydration has replaced it; null otherwise. */
+  staleSince: number | null
   hydrationError: string | null
   /** The stream stopped for good - a dead token - and nothing retries. */
   streamDead: boolean
@@ -213,6 +215,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       connection: 'connecting',
       lastSeq: 0,
       hydrated: false,
+      staleSince: null,
       hydrationError: null,
       streamDead: false,
       unreachable: null,
@@ -228,6 +231,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     terminalCacheEpoch: 0,
     lastSeq: 0,
     hydrated: false,
+    staleSince: null,
     hydrationError: null,
     streamDead: false,
     unreachable: null,
@@ -240,7 +244,8 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     agentList: null,
     setAgentList: (identity, agents) => set({ agentList: { identity, agents } }),
     setInfo: (info) => set({ info }),
-    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {} })),
+    // Text shared to the last member's launch form is not the next member's.
+    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {}, ...(s.identityKey !== identityKey && { paletteLaunchTask: '' }) })),
     setCapabilities: (capabilities) => set({ capabilities }),
     setConnection: (connection) => set({ connection }),
     noteSeq: (seq) =>
@@ -254,7 +259,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
         traceLogs: {},
       })),
     setHydrated: (hydrated, error = null) =>
-      set({ hydrated, hydrationError: error }),
+      set({ hydrated, hydrationError: error, ...(hydrated ? {} : { staleSince: null }) }),
     setStreamDead: () => set({ streamDead: true }),
     setUnreachable: (unreachable, approvalCode, at) =>
       set({ unreachable, unreachableAt: unreachable ? at ?? null : null, approvalCode: approvalCode ?? null }),

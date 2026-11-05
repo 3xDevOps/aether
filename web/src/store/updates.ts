@@ -6,6 +6,7 @@ import type {
   UpdateBuildStatus,
   UpdateStatus,
 } from '@/lib/types'
+import { compareVersions } from '@/lib/version'
 import type { RootState } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 
@@ -107,6 +108,7 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
   const id = ++c.issued
   c.pending += 1
   if (refresh) store.setState({ clientChecking: true })
+  const asked = store.getState().info
   try {
     const status = await client.localUpdateCheck(refresh)
     if (id === c.issued) {
@@ -114,6 +116,13 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
       const previous = store.getState().update
       const next = status.cli_error && previous ? { ...status, cli: previous.cli } : status
       store.getState().setUpdate(next)
+      // The gateway reads server.info live for this answer, while a reconnect
+      // that replays events never re-reads it. A hydration that landed while
+      // the check was out read later than the gateway did, so it stands.
+      const info = store.getState().info
+      if (info && info === asked && next.server_version && next.server_version !== info.server_version) {
+        store.getState().setInfo({ ...info, server_version: next.server_version })
+      }
       store.setState({ clientCheckError: status.cli_error || null })
       const s = store.getState()
       const apply = s.clientApply
@@ -323,4 +332,27 @@ export function serverTarget(s: RootState, now: number): UpdateTarget {
   // Only a release check that answered can say there is nothing newer.
   if (status && (status.latest_version || status.latest)) return { state: 'up_to_date', version: running, checkedAt: status.checked_at }
   return { state: 'unknown' }
+}
+
+/** The release core of a version, so a prerelease or source build of a release is not "newer" than it. */
+function core(version: string): string {
+  return /^v?[0-9]+\.[0-9]+\.[0-9]+/.exec(version)?.[0] ?? ''
+}
+
+/**
+ * The server runs an older release than this client. The server refuses
+ * only clients older than itself, so this is not a refusal: it is the
+ * reverse direction, where new client features have no server to serve them.
+ */
+export function serverTooOld(
+  update: UpdateStatus | null,
+  serverVersion = '',
+): { client: string; server: string } | null {
+  // `server.info` is re-read on every reconnect; `update.check` only on its own poll.
+  const running = serverVersion || update?.server_version
+  if (!update || !running) return null
+  const client = core(update.cli.version)
+  const server = core(running)
+  if (!client || !server) return null
+  return (compareVersions(client, server) ?? 0) > 0 ? { client: update.cli.version, server: running } : null
 }

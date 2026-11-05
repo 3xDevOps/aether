@@ -1,8 +1,11 @@
 package io.aether.android
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -12,6 +15,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
+import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -31,6 +35,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -40,6 +45,9 @@ import java.io.ByteArrayInputStream
 import java.util.concurrent.Executors
 
 private const val TAG = "aether"
+
+// The dashboard routes on popstate (web/src/lib/url-state.ts); replacing the
+// entry leaves nothing behind home for back to walk into.
 
 // Not the main thread: a WebView waiting on a hung renderer can be blocking
 // it. One for the process, never shut down, since WebView may deliver to it
@@ -64,6 +72,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var connection: Button
     private lateinit var gatewayError: View
     private lateinit var pickFiles: ActivityResultLauncher<Intent>
+    private lateinit var askMicrophone: ActivityResultLauncher<String>
+
+    /** The page's microphone request waiting on the runtime permission. */
+    private var pendingAudio: PermissionRequest? = null
 
     /**
      * The dashboard the WebView is on, so a changed address reloads it.
@@ -128,15 +140,26 @@ class MainActivity : ComponentActivity() {
     private var clearHistoryOnLoad = false
 
     /**
-     * Back walks the dashboard's own history and then leaves the app running:
-     * finishing would drop the terminal's scrollback on the way to the home
-     * screen. Where the platform does that itself the callback stands down at
-     * the root, so the predictive back-to-home animation runs.
+     * Back walks the dashboard's own history, then goes to the dashboard's
+     * home from a page opened with nothing behind it - a share,
+     * a link - and only from home leaves the app running: finishing
+     * would drop the terminal's scrollback on the way to the home screen.
+     * Where the platform does that itself the callback stands down at home,
+     * so the predictive back-to-home animation runs.
+     *
+     * Home is reached the way the dashboard's own back button would, by
+     * routing in the page: a reload would lose what the page holds, such as
+     * a shared prompt's unsent draft.
      */
     private val back =
         object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (gate?.isShown != true && web.canGoBack()) web.goBack() else moveTaskToBack(true)
+                when {
+                    gate?.isShown == true -> moveTaskToBack(true)
+                    web.canGoBack() -> web.goBack()
+                    !atDashboardHome(web.url) -> web.evaluateJavascript(routeHomeScript(web.url), null)
+                    else -> moveTaskToBack(true)
+                }
             }
         }
 
@@ -171,6 +194,7 @@ class MainActivity : ComponentActivity() {
             UpdateGate(this, findViewById(R.id.update_gate), onConnection = ::openSetup) { shown ->
                 web.visibility = if (shown) View.INVISIBLE else View.VISIBLE
                 syncBackCallback()
+                syncBarIcons()
                 // A refused dashboard keeps calling, and every 426 would ask
                 // update.check again, so it goes blank until the gate clears.
                 if (shown) {
@@ -194,7 +218,15 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+        askMicrophone =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                val request = pendingAudio ?: return@registerForActivityResult
+                pendingAudio = null
+                if (granted) request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else request.deny()
+            }
+
         applyInsets()
+        syncBarIcons()
         configureWebView()
 
         platformBackgroundsUs =
@@ -259,6 +291,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connect(intent: Intent?) {
         gatewayError.visibility = View.GONE
+        syncBarIcons()
         // The WebView a renderer crash left behind is empty, so the
         // dashboard loads again even at an unchanged address.
         val reload = rendererLost
@@ -344,7 +377,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // The dashboard paints dark under the system bars; the native panels follow the system theme.
+    private fun syncBarIcons() {
+        val panel = gatewayError.visibility == View.VISIBLE || gate?.isShown == true
+        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, window.decorView).run {
+            isAppearanceLightStatusBars = panel && !night
+            isAppearanceLightNavigationBars = panel && !night
+        }
+    }
+
     private fun configureWebView() {
+        web.setBackgroundColor(getColor(R.color.page_background))
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -578,6 +622,28 @@ class MainActivity : ComponentActivity() {
                     return true
                 }
 
+                // Only the dashboard's microphone, and only when the page asks:
+                // the runtime permission is never requested before that.
+                override fun onPermissionRequest(request: PermissionRequest) {
+                    if (!grantsAudioCapture(loaded, request.origin.toString(), request.resources)) {
+                        request.deny()
+                        return
+                    }
+                    if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) ==
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+                        return
+                    }
+                    pendingAudio?.deny()
+                    pendingAudio = request
+                    askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
+                }
+
+                override fun onPermissionRequestCanceled(request: PermissionRequest) {
+                    if (pendingAudio === request) pendingAudio = null
+                }
+
                 override fun onCreateWindow(
                     view: WebView,
                     isDialog: Boolean,
@@ -678,7 +744,7 @@ class MainActivity : ComponentActivity() {
         if (raw != null && isEdgeOnlyLink(raw)) {
             Toast.makeText(this, R.string.join_needs_edge, Toast.LENGTH_LONG).show()
         }
-        val link = raw?.let { deepLinkUrl(base, it) }
+        val link = raw?.let { deepLinkUrl(base, it) } ?: intentPath(intent)?.let { dashboardAt(base, it) }
         if (link != null) {
             loaded = base
             web.loadUrl(link)
@@ -695,7 +761,7 @@ class MainActivity : ComponentActivity() {
      * it prints one. A link that names something to open is held until then.
      */
     private fun openEdge(intent: Intent?) {
-        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix)
+        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix) ?: intentPath(intent)?.let(::edgeSuffix)
         val url = gatewayUrl
         when {
             gateway?.isActive != true -> {
@@ -711,6 +777,7 @@ class MainActivity : ComponentActivity() {
         stopGateway()
         gatewayUrl = null
         gatewayError.visibility = View.GONE
+        syncBarIcons()
         gateway =
             Gateway(
                 this,
@@ -749,6 +816,7 @@ class MainActivity : ComponentActivity() {
         findViewById<TextView>(R.id.gateway_error_title).text = title
         findViewById<TextView>(R.id.gateway_error_text).text = message
         gatewayError.visibility = View.VISIBLE
+        syncBarIcons()
     }
 
     private fun stopGateway() {
@@ -761,8 +829,36 @@ class MainActivity : ComponentActivity() {
      * WebView actually has, wherever that history changes.
      */
     private fun syncBackCallback() {
-        if (platformBackgroundsUs) back.isEnabled = gate?.isShown != true && web.canGoBack()
+        if (platformBackgroundsUs) {
+            back.isEnabled = gate?.isShown != true && (web.canGoBack() || !atDashboardHome(web.url))
+        }
     }
+
+    /**
+     * The dashboard path a share opens, or null for any
+     * other intent. Another app can send one: a share only ever prefills a
+     * prompt, and extras filled with a class this app lacks are no path at
+     * all.
+     */
+    private fun intentPath(intent: Intent?): String? =
+        try {
+            when (intent?.action) {
+                Intent.ACTION_SEND -> {
+                    val text =
+                        sharedText(
+                            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+                            intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString(),
+                        )
+                    if ((text?.let(::sharedLength) ?: 0) > MAX_SHARED_CHARS) {
+                        Toast.makeText(this, getString(R.string.share_cut, MAX_SHARED_CHARS), Toast.LENGTH_LONG).show()
+                    }
+                    sharePath(text)
+                }
+                else -> null
+            }
+        } catch (_: RuntimeException) {
+            null
+        }
 
     private fun openSetup() {
         startActivity(Intent(this, SetupActivity::class.java))

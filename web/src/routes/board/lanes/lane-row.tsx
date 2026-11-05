@@ -1,5 +1,6 @@
 import { memo, type CSSProperties, type ReactNode } from 'react'
 import { ChevronRight, Network } from '@/components/icons'
+import { ProtectedMark } from '@/components/protected-mark'
 import { modeLabel } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
@@ -132,7 +133,7 @@ function RunBar({ lane, g, now }: { lane: RunLane; g: LaneGeometry; now: number 
       <Segments segments={lane.segments} outcome={lane.outcome} g={g} height={g.metrics.bar} className={working ? 'border-r-2 border-state-working' : undefined}>
         <span className="relative flex h-full min-w-0 items-center gap-1.5 px-2 text-ui-sm font-medium whitespace-nowrap text-text">
           <StatusDot tone={stateTone[card.state]} />
-          {working ? <Shimmer text={g.compact ? lane.title : barText(lane)} className="min-w-0 overflow-hidden" /> : <span className="min-w-0 overflow-hidden">{g.compact ? lane.title : barText(lane)}</span>}
+          {working ? <Shimmer text={barText(lane)} className={cn('min-w-0 overflow-hidden', g.compact && 'text-ellipsis')} /> : <span className={cn('min-w-0 overflow-hidden', g.compact && 'text-ellipsis')}>{barText(lane)}</span>}
         </span>
         {needs && box && box.width > 200 && (
           <span aria-hidden className="absolute top-1/2 right-1 flex h-4.5 -translate-y-1/2 items-center gap-1 rounded-chip bg-raised px-1.5 text-ui-xs font-medium text-state-needs-you shadow-button">
@@ -176,9 +177,16 @@ function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agen
   )
   if (compact) {
     return (
-      <span className="flex items-center gap-1">
-        <StatusDot tone={stateTone[state]} pulse={state === 'working'} />
-        <AgentGlyph agent={card.run.harness} />
+      <span className="flex min-w-0 flex-1 flex-col justify-center">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <StatusDot tone={stateTone[state]} pulse={state === 'working'} />
+          <span className={cn('min-w-0 truncate text-ui leading-4 font-medium', lane.outcome && 'text-muted')}>{lane.title}</span>
+          {card.run.protected && <ProtectedMark />}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
+          <AgentGlyph agent={card.run.harness} />
+          <span className="tabular-nums">{compactAge(card.run.created_at, now)}</span>
+        </span>
       </span>
     )
   }
@@ -188,7 +196,9 @@ function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agen
         <StatusDot tone={stateTone[state]} />
         {owner}
         <span className={cn('min-w-0 truncate text-ui leading-4 font-medium', lane.outcome && 'text-muted')}>{lane.title}</span>
+        {card.run.protected && <ProtectedMark />}
         {card.group === 'needs-you' && <Badge tone="needs-you" className="h-4 text-ui-xs">Needs you</Badge>}
+        {card.group === 'review' && <Badge tone="review" className="h-4 text-ui-xs">{stateLabel.ready}</Badge>}
       </span>
       <span className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
         <AgentGlyph agent={card.run.harness} />

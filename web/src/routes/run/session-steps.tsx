@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils'
 import { useEffect, useMemo, useState } from 'react'
 import { Bot, Brain, FileText, Globe, ListTodo, Search, Wrench, type LucideIcon } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -226,7 +227,7 @@ export function StepView({ step, first, last, live, runID }: { step: Step; first
       return (
         <StepRow mark={<StatusDot tone={step.tone ?? 'neutral'} />} first={first} last={last}>
           <StepLine className={step.tone && step.tone !== 'neutral' ? 'text-text' : undefined}>{step.text}</StepLine>
-          {step.detail && <p className="line-clamp-2 pb-2 text-ui-sm break-words whitespace-pre-wrap text-muted"><LinkedText text={step.detail} /></p>}
+          {step.detail && <p className={cn('pb-2 text-ui-sm break-words whitespace-pre-wrap text-muted', !step.full && 'line-clamp-2')}><LinkedText text={step.detail} /></p>}
         </StepRow>
       )
   }

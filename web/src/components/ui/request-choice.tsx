@@ -1,9 +1,11 @@
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
+import { createContext, useContext } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { TextSwap } from '@/components/ui/text-swap'
 import { cn, focusRing } from '@/lib/utils'
+import { useStale } from '@/store/hooks'
 
 export function RequestFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
@@ -15,12 +17,23 @@ export function RequestFooter({ className, ...props }: React.ComponentProps<'div
   )
 }
 
+const ReasonShown = createContext(false)
+
+/** Why a painted snapshot's request actions are disabled: a title alone
+ * never shows on touch, and disabled buttons take no pointer events. */
+export function StaleReason() {
+  const stale = useStale()
+  const shown = useContext(ReasonShown)
+  return stale && !shown ? <span className="self-center text-ui-sm text-muted">Reconnect to act</span> : null
+}
+
 export function RequestActions({ extras, className, children }: { extras?: React.ReactNode; className?: string; children: React.ReactNode }) {
   return (
     <div className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}>
       {extras}
-      <div className="ml-auto flex min-w-0 flex-1 flex-wrap justify-end gap-2 @min-[21rem]:flex-none [&>*]:flex-1 @min-[21rem]:[&>*]:flex-none">
-        {children}
+      <StaleReason />
+      <div className="ml-auto flex min-w-0 flex-1 flex-wrap justify-end gap-2 @min-[21rem]:flex-none [&>*]:flex-1 @min-[21rem]:[&>*]:flex-none max-md:@min-[21rem]:flex-1 max-md:@min-[21rem]:[&>*]:flex-1">
+        <ReasonShown.Provider value>{children}</ReasonShown.Provider>
       </div>
     </div>
   )
@@ -34,11 +47,12 @@ function Digit({ digit, onFill }: { digit: number; onFill: boolean }) {
   )
 }
 
-export function RequestAction({ label, digit, variant = 'secondary', className, ...props }: Omit<React.ComponentProps<'button'>, 'children'> & {
+export function RequestAction({ label, digit, variant = 'secondary', className, disabled, ...props }: Omit<React.ComponentProps<'button'>, 'children'> & {
   label: string
   digit?: number
   variant?: 'primary' | 'secondary' | 'danger' | 'confirm' | 'quiet'
 }) {
+  const stale = useStale()
   const filled = variant === 'primary' || variant === 'danger' || variant === 'confirm'
   return (
     <Button
@@ -46,6 +60,8 @@ export function RequestAction({ label, digit, variant = 'secondary', className, 
       variant={variant}
       aria-keyshortcuts={digit ? String(digit) : undefined}
       className={cn('gap-2', className)}
+      disabled={disabled || stale}
+      title={stale ? 'Reconnect to act' : props.title}
       {...props}
     >
       <TextSwap mode="crossfade" layerClassName="whitespace-nowrap">{label}</TextSwap>
@@ -81,7 +97,7 @@ export function RequestPills({ value, onValueChange, items, disabled }: {
           }}
           className={cn(
             focusRing,
-            'flex h-6.5 min-w-0 flex-1 cursor-pointer items-center justify-center rounded-control bg-hover-chrome px-2 text-ui-sm font-medium text-muted coarse:h-8.5',
+            'flex h-6.5 min-w-0 flex-1 cursor-pointer items-center justify-center rounded-control bg-hover-chrome px-2 text-ui-sm font-medium text-muted coarse:h-11',
             'transition-[color,background-color,box-shadow] duration-hover ease-hover motion-reduce:transition-none',
             'hover:text-text disabled:cursor-not-allowed disabled:opacity-50',
             'data-[state=checked]:bg-raised data-[state=checked]:text-text data-[state=checked]:shadow-button data-[state=checked]:ring-1 data-[state=checked]:ring-seam data-[state=checked]:ring-inset',

@@ -12,7 +12,7 @@ import { extraRepoCount, repoLabel } from '@/lib/repos'
 import { rootKey, runKey, runParents } from '@/routes/board/map-layout'
 import type { Member, RunStatusCause, RunWait } from '@/lib/types'
 import type { RootState } from '@/store'
-import { isArchivable, type RunRecord } from '@/store/runs'
+import { isTerminal, type RunRecord } from '@/store/runs'
 
 /** An empty workspace scopes nothing, as before hydration names one. */
 export interface RunsInput {
@@ -88,7 +88,7 @@ export function runRows(ctx: StateContext): RunRow[] {
   const rows: RunRow[] = []
   for (const run of Object.values(ctx.runs)) {
     // A live run can never be hidden.
-    if (run.archived_at && isArchivable(run.status)) continue
+    if (run.archived_at && isTerminal(run.status)) continue
     const shown = presentRun(run, ctx)
     const since = shown.needsYou?.since(run, ctx) ?? run.stateChangedAt
     rows.push({
@@ -179,7 +179,7 @@ const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
   review: byChange,
   finished: failedFirst,
 }
-const groupOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
+const groupOrder: RunGroup[] = ['needs-you', 'review', 'working', 'finished']
 
 function located(row: RunRow, s: RunsInput): RunRow {
   const elsewhere = s.workspace && row.run.workspace_id !== s.workspace

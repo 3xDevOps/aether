@@ -19,124 +19,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-const confirmTTL = 10 * time.Minute
-
-var (
-	// ErrNoConfirmation means no pending confirmation has the id: it was
-	// answered, expired or discarded with its session.
-	ErrNoConfirmation = errors.New("assistant: no such pending confirmation")
-
-	errDeclined     = errors.New("the member declined this action")
-	errExpired      = fmt.Errorf("the member did not answer within %s", confirmTTL)
-	errSessionEnded = errors.New("the turn or session ended before the member answered")
-)
-
-type pendingConfirmation struct {
-	protocol.AssistantConfirmation
-	answer chan error
-	// answered is set, under the registry's lock, by the first answer: the
-	// waiting call may already have taken it, emptying the channel.
-	answered bool
-}
-
-// confirmations holds one member's pending confirmations. changed runs after
-// the set changes and must not block.
-type confirmations struct {
-	now     func() time.Time
-	ttl     time.Duration
-	changed func()
-
-	mu      sync.Mutex
-	pending []*pendingConfirmation
-}
-
-func newConfirmations(changed func()) *confirmations {
-	return &confirmations{now: time.Now, ttl: confirmTTL, changed: changed}
-}
-
-// confirm shows c as a card, filling its id and times, and waits for the
-// member's answer.
-func (r *confirmations) confirm(ctx context.Context, c *protocol.AssistantConfirmation) error {
-	c.ID = rand.Text()
-	c.CreatedAt = r.now().UTC()
-	c.ExpiresAt = c.CreatedAt.Add(r.ttl)
-	p := &pendingConfirmation{AssistantConfirmation: *c, answer: make(chan error, 1)}
-	r.mu.Lock()
-	r.pending = append(r.pending, p)
-	r.mu.Unlock()
-	r.changed()
-	defer r.remove(p)
-
-	timer := time.NewTimer(r.ttl)
-	defer timer.Stop()
-	select {
-	case err := <-p.answer:
-		return err
-	case <-timer.C:
-		return errExpired
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (r *confirmations) remove(p *pendingConfirmation) {
-	r.mu.Lock()
-	i := slices.Index(r.pending, p)
-	if i >= 0 {
-		r.pending = slices.Delete(r.pending, i, i+1)
-	}
-	r.mu.Unlock()
-	if i >= 0 {
-		r.changed()
-	}
-}
-
-func (r *confirmations) decide(id string, approve bool) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, p := range r.pending {
-		if p.ID != id || p.answered {
-			continue
-		}
-		var answer error
-		if !approve {
-			answer = errDeclined
-		}
-		select {
-		case p.answer <- answer:
-			p.answered = true
-			return nil
-		default:
-		}
-	}
-	return fmt.Errorf("%w: %s", ErrNoConfirmation, id)
-}
-
-func (r *confirmations) cancelAll() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, p := range r.pending {
-		if p.answered {
-			continue
-		}
-		select {
-		case p.answer <- errSessionEnded:
-			p.answered = true
-		default:
-		}
-	}
-}
-
-func (r *confirmations) snapshot() []protocol.AssistantConfirmation {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]protocol.AssistantConfirmation, len(r.pending))
-	for i, p := range r.pending {
-		out[i] = p.AssistantConfirmation
-	}
-	return out
-}
-
 // autoApproved are the methods auto-approval may pass. A confirmed method
 // not listed here shows a card whatever the setting.
 var autoApproved = []string{protocol.MethodRunLaunch, protocol.MethodRunInject, protocol.MethodRunKill, protocol.MethodEnvSave}
@@ -158,50 +40,107 @@ func autoApprovable(c protocol.AssistantConfirmation) bool {
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
 	suggest := !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && st.RuleStreak < suggestAfter && !time.Now().Before(st.SnoozedUntil)
 	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: suggest, SuggestionOff: st.NoSuggest, ShareView: st.ShareView,
-		PreferencesEnabled: st.PreferencesEnabled}
+		PreferencesEnabled: st.PreferencesEnabled, ApprovalChosen: st.ApprovalChosen}
 }
 
 // approver passes a confirmed call at once when one of the member's
 // approval rules covers it, or they turned auto-approval on and the call is
-// one it covers, or else when they approve its card. Rules and the setting
-// are read from the store on every call, so a change applies to the live
-// session. A passed call is in the transcript before it
-// runs; one that cannot be recorded does not run. A call that does not pass
-// is recorded with its outcome, in the conversation it was asked in.
+// one it covers, or else raises a card. Rules and the setting are read from
+// the store on every call, so a change applies to the live session. A card
+// from a turn the member may be watching keeps the call waiting until it is
+// decided or expires; one from a connector turn parks, and the call returns
+// at once. A call that stops waiting leaves its card open, and approving it
+// later runs the call on the server (runParked). A passed call is in the
+// transcript before it runs; one that cannot be recorded does not run.
 func (s *Service) approver(m *member) func(context.Context, protocol.AssistantConfirmation) error {
 	return func(ctx context.Context, c protocol.AssistantConfirmation) error {
 		conv := m.conversation()
-		passed, err := s.approveByRule(ctx, conv, m, &c)
-		if !passed && err == nil {
-			passed, err = s.autoApprove(ctx, conv, m, c)
+		origin, entry := m.turn()
+		var passed bool
+		// In a connector turn, nothing its grant's scopes, as they are now,
+		// do not cover passes without a card: neither a rule nor
+		// auto-approval.
+		origin, err := s.liveOrigin(ctx, m.id, origin)
+		if err != nil {
+			slog.Warn("assistant: no pass for a call of a connector turn", "member", m.id, "method", c.Method, "error", err)
+			origin.Scopes, err = nil, nil
+		}
+		if origin.Covers(c.Method, s.cfg.ConnectorScopes) {
+			passed, err = s.approveByRule(ctx, conv, m, &c)
+			if !passed && err == nil {
+				passed, err = s.autoApprove(ctx, conv, m, c)
+			}
 		}
 		if passed {
 			return nil
 		}
+		var answer chan error
+		var generation int64
 		if err == nil {
-			err = m.confirms.confirm(ctx, &c)
-			// A withdrawn card ends with the caller's context done; its
-			// reset must still be stored.
-			if cerr := s.countApproval(context.WithoutCancel(ctx), m, c, err == nil); cerr != nil {
-				err = errors.Join(err, fmt.Errorf("count the approval: %w", cerr))
+			answer, generation, err = s.raise(ctx, m, &c, origin)
+		}
+		if err == nil && entry != "" {
+			// A card its turn's entry does not list cannot be found from it,
+			// so it does not stay open.
+			if err = s.cfg.Store.AddAssistantQueueCard(context.WithoutCancel(ctx), m.id, entry, c.ID); err != nil {
+				err = errors.Join(fmt.Errorf("record the card on its queued prompt: %w", err), s.withdraw(context.WithoutCancel(ctx), m, c.ID))
 			}
 		}
-		a := newAction(c)
-		a.ConfirmationID, a.DecidedAt = c.ID, time.Now().UTC()
+		if err == nil && answer == nil {
+			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(parkedText, c.ID)}
+		}
 		if err != nil {
-			a.Outcome, a.FinishedAt = refusal(err), a.DecidedAt
-			if a.Outcome == protocol.AssistantActionFailed {
-				a.Error = err.Error()
-			}
+			a := newAction(c)
+			a.DecidedAt = time.Now().UTC()
+			a.Outcome, a.FinishedAt, a.Error = protocol.AssistantActionFailed, a.DecidedAt, err.Error()
 			if nerr := s.noteOutcome(conv, m, a, err.Error()); nerr != nil {
-				err = errors.Join(err, fmt.Errorf("record the %s action: %w", a.Outcome, nerr))
+				err = errors.Join(err, fmt.Errorf("record the failed action: %w", nerr))
 			}
 			return err
 		}
-		slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", false)
-		a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
-		if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
-			return fmt.Errorf("record the approval: %w", err)
+		// A call that stops waiting leaves its card open; an approval that
+		// came first then runs on the server. The wait outlasts the card's
+		// expiry only while the expiry is being written.
+		stopWaiting := func(why error) error {
+			if answered, decision := m.confirms.leave(c.ID, answer); answered && decision == nil {
+				s.spawn(func() { s.runParked(m, c.ID, nil) })
+			}
+			return why
+		}
+		deadline := time.NewTimer(time.Until(c.ExpiresAt) + time.Minute)
+		defer deadline.Stop()
+		select {
+		case err = <-answer:
+			if err == nil && ctx.Err() != nil {
+				// Approved as the caller left: nobody reads this call's result.
+				s.spawn(func() { s.runParked(m, c.ID, nil) })
+				return ctx.Err()
+			}
+		case <-ctx.Done():
+			return stopWaiting(ctx.Err())
+		case <-deadline.C:
+			return stopWaiting(errExpired)
+		}
+		if err != nil {
+			return err
+		}
+		a := newAction(c)
+		a.ConfirmationID, a.DecidedAt = c.ID, time.Now().UTC()
+		claimed, err := s.claim(context.WithoutCancel(ctx), m, Card{AssistantConfirmation: c, Generation: generation}, a)
+		if err == nil && !claimed {
+			err = fmt.Errorf("card %s is no longer approved", c.ID)
+		}
+		if err == nil {
+			slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", false)
+			a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
+			if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
+				err = fmt.Errorf("record the approval: %w", err)
+				a.Outcome, a.Approval, a.Error, a.FinishedAt = protocol.AssistantActionFailed, "", err.Error(), time.Now().UTC()
+				err = errors.Join(err, s.finishCard(m, a))
+			}
+		}
+		if err != nil {
+			return err
 		}
 		m.actions.hold(conv, a, c.Params, c.Shown)
 		return nil
@@ -216,7 +155,7 @@ func refusal(err error) string {
 		return protocol.AssistantActionDeclined
 	case errors.Is(err, errExpired):
 		return protocol.AssistantActionExpired
-	case errors.Is(err, errSessionEnded), errors.Is(err, context.Canceled):
+	case errors.Is(err, errSessionEnded):
 		return protocol.AssistantActionWithdrawn
 	}
 	return protocol.AssistantActionFailed
@@ -224,7 +163,7 @@ func refusal(err error) string {
 
 // countApproval counts a card auto-approval would have passed toward the
 // suggestion to turn it on, and the cards of one rule key in a row toward
-// highlighting that rule instead; a decline, timeout or withdrawal of any
+// highlighting that rule instead; a decline, expiry or withdrawal of any
 // card starts both counts over.
 func (s *Service) countApproval(ctx context.Context, m *member, c protocol.AssistantConfirmation, approved bool) error {
 	if approved && !autoApprovable(c) {
@@ -321,6 +260,7 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
 	was := st.AutoApprove
+	st.ApprovalChosen = st.ApprovalChosen || p.AutoApprove != nil || p.Suggestion != ""
 	switch p.Suggestion {
 	case protocol.AssistantSuggestionLater:
 		st.Approvals = 0
@@ -443,12 +383,14 @@ func (s *Service) noteIn(ctx, conv context.Context, m *member, n acphost.Notice)
 	return s.recordLocked(ctx, m, n)
 }
 
-// noteOutcome records a in conv, unless a reset discarded it.
+// noteOutcome records a in conv, unless a reset discarded it, then the
+// outcome of a card's call on the card, whether or not the first worked.
 func (s *Service) noteOutcome(conv context.Context, m *member, a protocol.AssistantAction, body string) error {
-	if err := s.noteAction(conv, conv, m, a, body); !errors.Is(err, errConversationEnded) {
-		return err
+	err := s.noteAction(conv, conv, m, a, body)
+	if errors.Is(err, errConversationEnded) {
+		err = nil
 	}
-	return nil
+	return errors.Join(err, s.finishCard(m, a))
 }
 
 type heldAction struct {
@@ -534,6 +476,8 @@ func (c actionCaller) record(conv context.Context, method string, a protocol.Ass
 	body := ""
 	if rpcErr != nil {
 		a.Outcome, a.Error, body = protocol.AssistantActionFailed, rpcErr.Message, rpcErr.Message
+	} else if refused := refusedIn(result); refused != "" {
+		a.Outcome, a.Error, body = protocol.AssistantActionFailed, refused, refused
 	} else {
 		a.Outcome, a.Result = protocol.AssistantActionSucceeded, created(result, a.Target)
 		if a.Result != nil {
@@ -544,6 +488,28 @@ func (c actionCaller) record(conv context.Context, method string, a protocol.Ass
 	if err := c.s.noteOutcome(conv, c.m, a, body); err != nil {
 		slog.Warn("assistant: record the action's outcome", "member", c.m.id, "method", method, "action", a.ID, "error", err)
 	}
+}
+
+// refusedIn is the failure a successful call reports in its result, as
+// run.pr.create and run.pr.merge do for GitHub's refusal, or for a pull
+// request whose creation is uncertain. A merge that landed or a pull
+// request created or found after reconciling succeeded, whatever error an
+// earlier attempt left in the result.
+func refusedIn(result json.RawMessage) string {
+	var r struct {
+		Error             string `json:"error"`
+		CreationUncertain bool   `json:"creation_uncertain"`
+		Merged            bool   `json:"merged"`
+		Created           bool   `json:"created"`
+		Reconciled        bool   `json:"reconciled"`
+	}
+	if json.Unmarshal(result, &r) != nil || r.Merged || r.Created || r.Reconciled {
+		return ""
+	}
+	if r.Error == "" && r.CreationUncertain {
+		return "GitHub may have created the pull request; check before retrying"
+	}
+	return r.Error
 }
 
 // created names the run a call's result holds that its target does not:

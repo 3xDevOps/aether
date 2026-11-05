@@ -342,7 +342,10 @@ you to allow it. **Root access** lets `sudo` run
 without asking, and **Isolated** keeps every change outside the checkout
 inside the session ([permission tiers](security.md#permission-tiers)). Enter the
 **Task**, pick the **Agent** and the **Mode**, and click **Launch**.
-**Background** mode runs the task once with no interaction. From the CLI:
+**Background** mode runs the task once with no interaction. On a phone, tap
+**New**, type the task and tap **Launch**: the repository and agent start on
+your last session's unless you saved a default agent, and Permission and Mode
+are under **More options**. From the CLI:
 
 ```sh
 aether session "add a health check endpoint" --workspace myproject --agent claude
@@ -450,7 +453,10 @@ failing check has **Send to agent**. Review and merge on GitHub as usual.
 `aether publish <session-id>` is the CLI form of **Publish…**.
 
 When you are done, close the session: **Close session…** in its **More** menu, or
-`aether close <session-id> --outcome merged` (or `abandoned`). Closing commits the
+`aether close <session-id> --outcome merged` (or `abandoned`). Both first list
+what the close affects, such as an open pull request or a session waiting on
+this one, and ask ([failure-handling.md](failure-handling.md#before-a-close)).
+Closing commits the
 agent's latest work to the session's branch and keeps the container 7 days
 (`--run-container-ttl`). Until then the **Relaunch** button where the message
 box sat, **Relaunch** in the **More** menu, or `aether reopen <session-id>` brings

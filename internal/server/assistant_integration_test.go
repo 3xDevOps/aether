@@ -411,15 +411,30 @@ func TestIntegrationAssistant(t *testing.T) {
 	frames.until(t, "the running status", func(f protocol.AssistantFrame) bool {
 		return f.Status != nil && f.Status.State == protocol.AssistantStateRunning
 	})
-	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "again", IdempotencyKey: "k-busy"}, nil); perr == nil || perr.Code != protocol.CodeInvalidState {
-		t.Fatalf("assistant.prompt during a turn = %v, want an invalid-state error", perr)
+	var queued protocol.AssistantPromptResult
+	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "again", IdempotencyKey: "k-busy", Door: "connector"}, &queued); perr != nil {
+		t.Fatalf("assistant.prompt during a turn: %v", perr)
+	}
+	if queued.Entry.State != protocol.AssistantQueueQueued || queued.Entry.Origin.Door != protocol.AssistantDoorDashboard {
+		t.Fatalf("prompt during a turn = %+v, want it queued from the dashboard whatever door the client named", queued.Entry)
 	}
 	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
 		t.Fatalf("assistant.cancel: %v", perr)
 	}
-	frames.until(t, "the idle status", func(f protocol.AssistantFrame) bool {
-		return f.Status != nil && f.Status.State == protocol.AssistantStateIdle
+	ended := frames.until(t, "the queued prompt's turn to end", func(f protocol.AssistantFrame) bool {
+		return f.Status != nil && slices.ContainsFunc(f.Status.Queue, func(e protocol.AssistantQueueEntry) bool {
+			return e.ID == queued.Entry.ID && e.State == protocol.AssistantQueueDone
+		})
 	})
+	if i := slices.IndexFunc(ended.Status.Queue, func(e protocol.AssistantQueueEntry) bool { return e.State == protocol.AssistantQueueFailed }); i < 0 ||
+		ended.Status.Queue[i].Error != "you stopped this turn" {
+		t.Fatalf("queue after Stop = %+v, want the stopped turn failed and the queued one run", ended.Status.Queue)
+	}
+	for deadline := time.Now().Add(10 * time.Second); env.status().State != protocol.AssistantStateIdle; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the assistant did not go idle after the queued turn")
+		}
+	}
 
 	sock := filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock")
 	conn, err := net.Dial("unix", sock)
@@ -671,47 +686,106 @@ func TestIntegrationAssistantCrash(t *testing.T) {
 	}
 }
 
-// TestIntegrationAssistantCancelCards cancels a turn while a
-// tool call waits for approval: the card goes and the call fails unapproved.
-func TestIntegrationAssistantCancelCards(t *testing.T) {
+// TestIntegrationAssistantKeptCards stops a turn while a tool call waits
+// for approval and hangs the call up: the card stays open, approving it
+// then runs the call once on the server, and so does approving one kept
+// across a server restart.
+func TestIntegrationAssistantKeptCards(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	env := startAssistantServer(t, ctx, nil)
-	defer env.stop()
 	if perr := env.call(protocol.MethodAssistantStart, protocol.AssistantStartParams{}, nil); perr != nil {
 		t.Fatal(perr)
 	}
 	frames := env.watch(ctx, 0)
+	// leave asks to save launch defaults at revision and hangs up once its
+	// card shows.
+	leave := func(revision int) protocol.AssistantConfirmation {
+		t.Helper()
+		conn, err := net.Dial("unix", filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.Close() }()
+		params := fmt.Sprintf(`{"defaults":{"permission":"default"},"revision":%d}`, revision)
+		req, _ := json.Marshal(protocol.Request{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: protocol.MethodLaunchDefaultsSet, Params: json.RawMessage(params)})
+		if _, err = conn.Write(append(req, '\n')); err != nil {
+			t.Fatal(err)
+		}
+		pending := frames.until(t, "a pending card", func(f protocol.AssistantFrame) bool {
+			return f.Status != nil && len(f.Status.Confirmations) == 1 && f.Status.Confirmations[0].State == protocol.AssistantCardPending
+		})
+		return pending.Status.Confirmations[0]
+	}
+	// settle approves card c and waits for its call's outcome.
+	settle := func(c protocol.AssistantConfirmation) {
+		t.Helper()
+		if perr := env.call(protocol.MethodAssistantConfirm, protocol.AssistantConfirmParams{ConfirmationID: c.ID, Approve: true}, nil); perr != nil {
+			t.Fatalf("assistant.confirm: %v", perr)
+		}
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			row, err := env.srv.Store().AssistantCard(ctx, env.member.ID, c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.State == protocol.AssistantCardSucceeded {
+				break
+			}
+			if row.State == protocol.AssistantCardFailed || time.Now().After(deadline) {
+				t.Fatalf("card %s is %s: %s", c.ID, row.State, row.Error)
+			}
+		}
+		if perr := env.call(protocol.MethodAssistantConfirm, protocol.AssistantConfirmParams{ConfirmationID: c.ID, Approve: true}, nil); perr == nil || perr.Code != protocol.CodeNotFound {
+			t.Fatalf("second assistant.confirm = %v, want not found", perr)
+		}
+	}
+
 	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: acpmock.PromptWait, IdempotencyKey: "w"}, nil); perr != nil {
 		t.Fatal(perr)
 	}
-	conn, err := net.Dial("unix", filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock"))
-	if err != nil {
-		t.Fatal(err)
+	first := leave(0)
+	if first.Origin.Door != protocol.AssistantDoorDashboard {
+		t.Fatalf("card = %+v, want it from the dashboard", first)
 	}
-	defer func() { _ = conn.Close() }()
-	result := make(chan *protocol.Error, 1)
-	go func() {
-		perr, _ := env.toolCall(conn, bufio.NewReader(conn), protocol.MethodEnvSave)
-		result <- perr
-	}()
-	frames.until(t, "a pending confirmation", func(f protocol.AssistantFrame) bool {
-		return f.Status != nil && len(f.Status.Confirmations) == 1
-	})
 	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
 		t.Fatal(perr)
 	}
-	frames.until(t, "the card to go", func(f protocol.AssistantFrame) bool {
-		return f.Status != nil && len(f.Status.Confirmations) == 0
+	frames.until(t, "the idle status", func(f protocol.AssistantFrame) bool {
+		return f.Status != nil && f.Status.State == protocol.AssistantStateIdle
 	})
-	select {
-	case perr := <-result:
-		if perr == nil || !strings.Contains(perr.Message, "was not approved") {
-			t.Fatalf("env.save after a cancel = %v, want it refused", perr)
+	if st := env.status(); len(st.Confirmations) != 1 || st.Confirmations[0].ID != first.ID {
+		t.Fatalf("cards after Stop and a hang-up = %+v, want %s kept", st.Confirmations, first.ID)
+	}
+	settle(first)
+
+	second := leave(1)
+	env.stop()
+	env = startAssistantServer(t, ctx, env)
+	defer env.stop()
+	if st := env.status(); len(st.Confirmations) != 1 || st.Confirmations[0].ID != second.ID || st.Confirmations[0].Summary != second.Summary {
+		t.Fatalf("cards after a restart = %+v, want %s kept", st.Confirmations, second.ID)
+	}
+	settle(second)
+
+	saved, err := env.srv.Store().LaunchDefaults(ctx, env.member.ID)
+	if err != nil || saved.Revision != 2 {
+		t.Fatalf("launch defaults = %+v, %v, want saved once per card", saved, err)
+	}
+	var history protocol.RunACPHistoryResult
+	if perr := env.call(protocol.MethodAssistantHistory, protocol.AssistantHistoryParams{}, &history); perr != nil {
+		t.Fatal(perr)
+	}
+	for _, c := range []protocol.AssistantConfirmation{first, second} {
+		outcomes := 0
+		for _, f := range history.Frames {
+			if strings.Contains(string(f.Item), `"confirmation_id":"`+c.ID+`"`) && strings.Contains(string(f.Item), `"outcome":"succeeded"`) {
+				outcomes++
+			}
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the tool call stayed blocked after the cancel")
+		if outcomes != 1 {
+			t.Fatalf("%d outcome records for card %s, want 1", outcomes, c.ID)
+		}
 	}
 }
 
@@ -725,27 +799,38 @@ func TestIntegrationAssistantKeyKept(t *testing.T) {
 	defer env.stop()
 	callerCtx, leave := context.WithCancel(ctx)
 	time.AfterFunc(300*time.Millisecond, leave)
-	err := env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone", nil)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("prompt of a caller that left = %v, want the cancellation", err)
+	if err := promptErr(env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door(""))); err != nil {
+		t.Fatalf("prompt of a caller that left = %v, want its entry", err)
 	}
-	if err := env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone", nil); err != nil {
+	if err := promptErr(env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone", nil, assistant.Door(""))); err != nil {
 		t.Fatalf("retry of a dispatched prompt = %v, want it ignored", err)
 	}
-	var history protocol.RunACPHistoryResult
-	if perr := env.call(protocol.MethodAssistantHistory, protocol.AssistantHistoryParams{}, &history); perr != nil {
-		t.Fatal(perr)
+	// The first prompt is sent in the background after its caller left.
+	turns := func() int {
+		var history protocol.RunACPHistoryResult
+		if perr := env.call(protocol.MethodAssistantHistory, protocol.AssistantHistoryParams{}, &history); perr != nil {
+			t.Fatal(perr)
+		}
+		n := 0
+		for _, f := range history.Frames {
+			if strings.Contains(string(f.Item), `"turn_start"`) {
+				n++
+			}
+		}
+		return n
 	}
-	turns := 0
-	for _, f := range history.Frames {
-		if strings.Contains(string(f.Item), `"turn_start"`) {
-			turns++
+	for deadline := time.Now().Add(time.Minute); turns() == 0; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the prompt of a caller that left never started its turn")
 		}
 	}
-	if turns != 1 {
-		t.Fatalf("%d turns after the retry, want 1", turns)
+	time.Sleep(500 * time.Millisecond)
+	if n := turns(); n != 1 {
+		t.Fatalf("%d turns after the retry, want 1", n)
 	}
 	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
 		t.Fatal(perr)
 	}
 }
+
+func promptErr(_ assistant.Entry, err error) error { return err }

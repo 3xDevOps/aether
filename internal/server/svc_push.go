@@ -22,11 +22,12 @@ func init() {
 			return nil, errors.New("push: the store does not keep push subscriptions")
 		}
 		svc, err := push.New(push.Config{
-			Store:   st,
-			Bus:     d.Bus,
-			Runs:    d.Runs,
-			Budgets: d.SSH.Services.Costs,
-			KeyPath: filepath.Join(d.DataDir, "push", "vapid_key.pem"),
+			Store:     st,
+			Bus:       d.Bus,
+			Runs:      d.Runs,
+			Budgets:   d.SSH.Services.Costs,
+			KeyPath:   filepath.Join(d.DataDir, "push", "vapid_key.pem"),
+			Recovered: d.Runs.RecoveryReady(),
 		})
 		if err != nil {
 			return nil, err

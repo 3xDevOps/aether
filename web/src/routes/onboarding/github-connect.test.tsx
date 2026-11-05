@@ -91,6 +91,7 @@ function attachMainTab(): EnvTerminalSocket {
     setControl: vi.fn(),
     requestTakeover: vi.fn(() => false),
     isEnded: vi.fn(() => false),
+    mayHoldControl: vi.fn(() => false),
     close: vi.fn(),
   }
   useStore.getState().resetEnvTerminal()

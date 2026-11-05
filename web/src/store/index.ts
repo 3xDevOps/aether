@@ -103,6 +103,7 @@ const persistedUi = (s: RootState) => ({
   browserBeside: s.browserBeside,
   browserBesideWidth: s.browserBesideWidth,
   terminalFontSize: s.terminalFontSize,
+  terminalFitWidth: s.terminalFitWidth,
   singleKeyShortcuts: s.singleKeyShortcuts,
   diffWrap: s.diffWrap,
   activeWorkspace: s.activeWorkspace,
@@ -114,6 +115,7 @@ const persistedUi = (s: RootState) => ({
   laneWindow: s.laneWindow,
   laneGroup: s.laneGroup,
   laneHidden: s.laneHidden,
+  sessionsLanes: s.sessionsLanes,
   savedLaunchDefaults: s.savedLaunchDefaults,
   dismissedUpdates: s.dismissedUpdates,
   sysboxNudgeDismissed: s.sysboxNudgeDismissed,
@@ -166,7 +168,7 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 11,
+        version: 12,
         // Before 2 the Repository step record is unusable and is dropped, so
         // the step asks the gateway again. Before 3 the resume point is an
         // index. Before 4 there is no furthest step, so the resume point
@@ -175,7 +177,9 @@ export function createRootStore() {
         // the step names are the six-step wizard's and the run dock height is
         // still stored. Before 9 map cameras frame the old packed geometry.
         // Before 10 launch defaults are not kept per member, so whose they
-        // are is unknown and they are dropped.
+        // are is unknown and they are dropped. Before 12 every theme that was
+        // never chosen was stored as 'system', so 'system' gives way to the
+        // dark default.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
@@ -214,6 +218,7 @@ export function createRootStore() {
             if (walk.onboardingStep === 'First run') walk.onboardingStep = 'First session'
             if (walk.onboardingFurthest === 'First run') walk.onboardingFurthest = 'First session'
           }
+          if (version < 12 && state.theme === 'system') delete state.theme
           return state
         },
         // `migrate` only runs on a version change, and xterm does not validate
@@ -223,6 +228,7 @@ export function createRootStore() {
           return {
             ...current,
             ...stored,
+            theme: stored.theme === 'light' || stored.theme === 'system' ? stored.theme : current.theme,
             boardViews: normalizeBoardViews(stored.boardViews),
             boardMapAllWorkspaces: stored.boardMapAllWorkspaces === true,
             boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
@@ -230,12 +236,14 @@ export function createRootStore() {
             laneWindow: normalizeLaneWindow(stored.laneWindow),
             laneGroup: stored.laneGroup === 'owner' ? 'owner' : 'status',
             laneHidden: normalizeLaneHidden(stored.laneHidden),
+            sessionsLanes: stored.sessionsLanes === true,
             sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
             assistantOpen: stored.assistantOpen === true && !onPhone(),
             assistantWidth: clampAssistantWidth(Number(stored.assistantWidth) || current.assistantWidth),
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
+            terminalFitWidth: stored.terminalFitWidth !== false,
           }
         },
         partialize: persistedUi,

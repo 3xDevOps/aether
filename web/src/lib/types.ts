@@ -70,7 +70,7 @@ export type RunActivity =
   | 'failed'
   | 'disconnected'
 
-/** `ready` awaits the owner's Mark complete; `later` is their Not yet. */
+/** `ready` awaits the owner's Mark complete; `later` is their Review later. Not yet clears it to `''`. */
 export type RunReview = '' | 'ready' | 'later' | 'accepted'
 
 export interface RunInputRequest {
@@ -79,6 +79,45 @@ export interface RunInputRequest {
   kind: 'question' | 'permission' | 'form' | 'extension_ui'
   /** Set only on a sudo request (isSudo in lib/run-requests.ts). */
   title?: string
+}
+
+/** A pending request as attention.list carries it; a Standard session's has no options. */
+export interface AttentionRequest {
+  id: string
+  kind: string
+  title?: string
+  options?: { id: string; label: string; kind?: string }[]
+  schema?: unknown
+  url?: string
+}
+
+/** In the order the server checks a session, as internal/protocol/attention.go lists them. */
+export type AttentionKind =
+  | 'permission'
+  | 'question'
+  | 'queued-message'
+  | 'room-question'
+  | 'disconnected'
+  | 'blocked'
+  | 'needs-input'
+  | 'ready'
+  | 'failed'
+
+/** One session that waits on the caller, under the first Needs you row that holds for it. */
+export interface AttentionItem {
+  kind: AttentionKind
+  run_id: string
+  workspace_id: string
+  title: string
+  harness: string
+  reason: string
+  since?: string
+  request?: AttentionRequest
+  message?: { id: string; body: string; from?: string }
+}
+
+export interface RunInputRespondResult {
+  status: 'answered' | 'already_answered'
 }
 
 type WaitConditionKind = 'pr_merged' | 'pr_checks' | 'run_finished'
@@ -98,6 +137,34 @@ interface WaitObserved {
   merged_at?: string
   checks?: WaitChecks
   run_status?: string
+}
+
+export type CloseWarningKind = 'protected' | 'pull_request' | 'unmerged_work' | 'messages' | 'awaited' | 'subsessions' | 'cleanup_pending'
+
+export type CloseOutcome = 'merged' | 'abandoned' | 'completed'
+
+/** One thing closing a run would affect, from `run.close_check`; `subsession` names the subsession closing with it that the warning is about. */
+export interface CloseWarning {
+  kind: CloseWarningKind
+  detail: string
+  url?: string
+  count?: number
+  run_ids?: string[]
+  subsession?: string
+  /** On a pull_request warning: its number and when Aether last observed it. */
+  number?: number
+  observed_at?: string
+}
+
+/** A run's close warnings, or the error reading them. */
+export interface RunCloseCheck {
+  run_id: string
+  warnings: CloseWarning[]
+  /** A merged pull request of the run's own repository holds its last commit; absent from older servers. */
+  merged_pull_request?: boolean
+  /** When the run's status, reason or activity last changed; absent from older servers. */
+  idle_since?: string
+  error?: { code: number; message: string }
 }
 
 /** One condition a run registered with `report --outcome waiting --until`. */
@@ -2144,7 +2211,7 @@ export interface WatchObserved {
 export type WatchDeliveryChannel = 'push' | 'in_app' | 'assistant' | 'relay'
 
 /** pending: not sent yet, with why in detail. cleared: dropped unsent because its need was resolved first or its watch stayed paused. withdrawn: delivered, then replaced on the devices because its need ended. */
-export type WatchDeliveryStatus = 'pending' | 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'withdrawn' | 'skipped'
+export type WatchDeliveryStatus = 'pending' | 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'batched' | 'failed' | 'cleared' | 'withdrawn' | 'skipped'
 
 export interface WatchDelivery {
   channel: WatchDeliveryChannel
@@ -2225,17 +2292,30 @@ export interface WatchGetResult {
 
 export type QuietHours = { start: string; end: string; tz: string }
 
+/** blockers: only what needs you at once, the rest in a daily digest; batched: the rest every 30 minutes; all: everything at once. */
+export type NotifyLevel = 'blockers' | 'batched' | 'all'
+
+/** When the blockers level sends its daily digest: HH:MM in an IANA zone, UTC when empty. */
+export interface NotifyDigest {
+  at: string
+  tz: string
+}
+
 export interface NotifyPrefs {
   /** Watch notices to Web Push devices. */
   push: boolean
+  level: NotifyLevel
+  digest: NotifyDigest
   quiet_hours?: QuietHours
   /** Read-only: where notices go now. */
   destinations: { push_devices: number }
 }
 
-/** notify.prefs.set replaces quiet_hours and keeps push as it is when push is left out. */
+/** notify.prefs.set replaces quiet_hours and keeps push, level and digest as they are when left out. */
 export interface NotifyPrefsSetParams {
   push?: boolean
+  level?: NotifyLevel
+  digest?: NotifyDigest
   quiet_hours?: QuietHours
 }
 

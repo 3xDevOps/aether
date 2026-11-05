@@ -124,7 +124,7 @@ can push branches and open pull requests.
 | `aether_message_session`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back, and the agent acts on it |
 | `aether_pause_session` | no | no | no | Freezes the session's container; resume continues it |
 | `aether_resume_session` | no | no | yes | The agent goes on working and can push |
-| `aether_mark_reviewed` | no | yes | no | `complete` closes the session, which cannot be reopened; records state on the server only |
+| `aether_mark_reviewed` | no | yes | no | `complete` closes the session, which cannot be reopened; `later` puts the review off; `not-yet` withdraws it until the agent reports success again; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
 | `aether_stop_session` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
 | `aether_session_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
@@ -157,8 +157,8 @@ search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-searc
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most 3500
-bytes, 15000 for all of them together. Today that is 32 tools and 11599 bytes, the largest tool
-`aether_launch_session` at 1534 bytes; the whole `tools/list` JSON is 17193 bytes.
+bytes, 15000 for all of them together. Today that is 34 tools and 12471 bytes, the largest tool
+`aether_launch_session` at 1534 bytes; the whole `tools/list` JSON is 18428 bytes.
 Measure tokens offline with the `o200k_base` tokenizer and update these numbers
 when tools change. Give each
 tool one "Use this when" sentence, describe a property only when its name does

@@ -80,7 +80,7 @@ func TestIntegrationAssistantApprovalRule(t *testing.T) {
 
 	var saved protocol.AssistantConfirmResult
 	card, resp := answer(launch("first of its kind", false), protocol.AssistantConfirmParams{Approve: true, Always: true}, &saved)
-	const wording = "Always approve launches of fake (headless) in rules on your account, permission default"
+	const wording = "Always approve launches of fake (Background) in rules on your account, permission default, for any task"
 	if card.Rule == nil || card.Rule.Wording != wording {
 		t.Fatalf("card rule = %+v, want %q", card.Rule, wording)
 	}
@@ -96,7 +96,7 @@ func TestIntegrationAssistantApprovalRule(t *testing.T) {
 	}
 
 	card, resp = answer(launch("another kind", true), protocol.AssistantConfirmParams{Approve: false}, nil)
-	if card.Rule == nil || !strings.HasSuffix(card.Rule.Wording, ", no fallback") || resp.Error == nil || !strings.Contains(resp.Error.Message, "declined") {
+	if card.Rule == nil || !strings.Contains(card.Rule.Wording, ", no fallback,") || resp.Error == nil || !strings.Contains(resp.Error.Message, "declined") {
 		t.Fatalf("launch of another kind: card %+v, response %+v; want a card the member declined", card, resp)
 	}
 

@@ -1,0 +1,16 @@
+name: Docker Hub mirror for the runner's daemon
+description: >
+  Point the runner's Docker daemon at mirror.gcr.io for Docker Hub pulls.
+  The daemon falls back to Docker Hub when the mirror fails. It pulls the
+  BuildKit image setup-buildx starts and every image tests run directly;
+  buildx builders get the same mirror through buildkitd-config-inline.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        config=/etc/docker/daemon.json
+        current=$(sudo cat "$config" 2>/dev/null || printf '{}')
+        printf '%s' "$current" | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee "$config" >/dev/null
+        sudo systemctl restart docker
+        docker info --format 'registry mirrors: {{.RegistryConfig.Mirrors}}'

@@ -25,6 +25,8 @@ export function watchOutcomeSeen(
       tried = null
       return
     }
+    // A saved snapshot may be minutes old, and the store hears again when live state replaces it.
+    if (s.staleSince !== null) return
     if (tried === run.id || inFlight.has(run.id) || doc.hidden) return
     if (!capability(s.capabilities).hasMethod('run.seen')) return
     tried = run.id

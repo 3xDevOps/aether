@@ -401,6 +401,65 @@ describe('the conversation', () => {
   })
 })
 
+describe('queue', () => {
+  const at = '2026-11-03T12:00:00Z'
+
+  it('queues a prompt sent during a turn, shows where queued ones came from, and removes one in a click', async () => {
+    vi.mocked(api.assistantPrompt).mockResolvedValue({})
+    vi.mocked(api.assistantQueueRemove).mockResolvedValue({})
+    const aside = await openPanel()
+    const session = assistantSocket().open({ state: state({ turn_in_flight: true }) }, [item('turn_start', 1), say(1, 'user', 'Install Rust')])
+    const box = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.type(box, 'then the docs')
+    expect(within(aside).getByRole('button', { name: 'Stop' })).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: /^Queue/ }))
+    expect(api.assistantPrompt).toHaveBeenCalledWith('then the docs', expect.any(String), expect.anything(), undefined, expect.any(AbortSignal))
+    session.send({ status: status({ state: 'running', queue: [
+      { id: 'turn-1', state: 'running', text: 'Install Rust', origin: { door: 'dashboard' }, created_at: at },
+      { id: 'turn-2', state: 'queued', text: 'then the docs', origin: { door: 'phone' }, created_at: at },
+      { id: 'turn-3', state: 'failed', text: 'and lint', origin: { door: 'connector', client: 'ChatGPT', connector_id: 'con_1' }, error: 'assistant: no agent is ready', created_at: at },
+    ] }) })
+    const queued = await within(aside).findByRole('group', { name: 'Queued: then the docs' })
+    expect(within(queued).getByText('from phone')).toBeDefined()
+    expect(within(aside).getByText('1 queued, runs after this turn')).toBeDefined()
+    const failed = within(aside).getByRole('group', { name: 'Not sent: and lint' })
+    expect(within(failed).getByText('from ChatGPT (connector)')).toBeDefined()
+    expect(within(failed).getByText('assistant: no agent is ready')).toBeDefined()
+    expect(within(failed).getByRole('button', { name: 'Dismiss: and lint' })).toBeDefined()
+    await userEvent.click(within(queued).getByRole('button', { name: 'Remove: then the docs' }))
+    expect(api.assistantQueueRemove).toHaveBeenCalledWith('turn-2')
+    await waitFor(() => expect(document.activeElement).toBe(within(failed).getByRole('button', { name: 'Retry: and lint' })))
+    await userEvent.click(within(failed).getByRole('button', { name: 'Retry: and lint' }))
+    await waitFor(() => expect(useStore.getState().assistantDraft).toBe('and lint'))
+    expect(useStore.getState().assistantAttempt).toBeNull()
+  })
+
+  it('shows a prompt queued before the conversation has any message', async () => {
+    const aside = await openPanel()
+    const session = acpOpen()
+    session.send({ status: status({ state: 'starting', queue: [{ id: 'turn-1', state: 'queued', text: 'first question', origin: { door: 'desktop' }, created_at: at }] }) })
+    const queued = await within(aside).findByRole('group', { name: 'Queued: first question' })
+    expect(within(queued).getByText('from desktop')).toBeDefined()
+  })
+
+  it('shows a prompt that could not start while the assistant needs setup', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', queue: [{ id: 'turn-1', state: 'failed', text: 'deploy status?', origin: { door: 'phone' }, error: 'assistant: no agent is ready', created_at: at, updated_at: at }] }) })
+    const failed = await within(aside).findByRole('group', { name: 'Not sent: deploy status?' })
+    expect(within(failed).getByText('assistant: no agent is ready')).toBeDefined()
+  })
+
+  it('names the door a past prompt came through', async () => {
+    const aside = await openPanel()
+    const session = acpOpen([say(1, 'user', 'What is running?', 'u1'), say(1, 'assistant', 'Two sessions.', 'a1')])
+    session.send({ status: status({ queue: [
+      { id: 'turn-1', state: 'done', text: 'What is running?', origin: { door: 'connector', client: 'ChatGPT', connector_id: 'con_1' }, message_id: 'u1', created_at: at },
+    ] }) })
+    expect(await within(aside).findByText(/via ChatGPT/)).toBeDefined()
+  })
+})
+
 describe('confirmations', () => {
   it('says what a launch starts and on whose account, and renders a message readably', async () => {
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
@@ -420,6 +479,7 @@ describe('confirmations', () => {
       Agent: 'Claude Code opus (Enhanced)',
       Account: "Bob's account, shared with you",
       Fallback: 'Then mem_carol',
+      Permission: 'default',
       Task: 'Fix the flaky login test\nthen open a PR',
       'You hear back': hearBack.run,
     })
@@ -463,6 +523,40 @@ describe('confirmations', () => {
     expect(within(template).getByText('Launch template "triage" in api: claude (acp) on your account')).toBeDefined()
     expect(within(template).getByText('you asked for 42')).toBeDefined()
     expect(within(template).getByText((_, el) => el?.textContent === 'triage issue 42\nthen label it')).toBeDefined()
+  })
+
+  it('asks before approving everything from a card while the assistant needs setup', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', confirmations: [stop] }) })
+    await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })
+    act(() => useStore.getState().setAssistantConfirmAutoApprove(true))
+    expect(await screen.findByRole('alertdialog', { name: 'Let the assistant act without asking?' })).toBeDefined()
+  })
+
+  it('keeps stored cards decidable while the assistant needs setup or failed', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ state: 'setup', agent: '', confirmations: [stop] }) })
+    expect(await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })).toBeDefined()
+    assistantSocket().send({ status: status({ state: 'failed', error: 'assistant: no agent is ready', confirmations: [stop] }) })
+    expect(await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })).toBeDefined()
+  })
+
+  it('keeps an approved card that runs on the server without buttons, and names a connector turn', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [
+      { ...stop, state: 'running' },
+      { ...stop, id: 'c2', summary: 'Save your environment', origin: { door: 'connector', client: 'ChatGPT', connector_id: 'con_1' } },
+    ] }) })
+    const running = await within(aside).findByRole('group', { name: `Approved, running: ${stop.summary}` })
+    expect(running.textContent).toContain('running…')
+    expect(within(aside).getByText('2 cards: 1 waits for you, 1 running')).toBeDefined()
+    expect(within(running).queryByRole('button')).toBeNull()
+    const parked = within(aside).getByRole('group', { name: 'Approve this action? Save your environment' })
+    expect(within(parked).getByText('from ChatGPT (connector)')).toBeDefined()
+    expect(within(parked).getByRole('button', { name: 'Approve' })).toBeDefined()
   })
 
   it('approves and declines through assistant.confirm and clears on a status frame', async () => {
@@ -989,5 +1083,86 @@ describe('width', () => {
     const restored = createRootStore().getState()
     expect(restored.assistantOpen).toBe(true)
     expect(restored.assistantWidth).toBe(640)
+  })
+})
+
+describe('approval rules', () => {
+  const launch: AssistantConfirmation = {
+    ...stop,
+    id: 'c3',
+    method: 'run.launch',
+    summary: 'Launch claude (acp) in api, no fallback: "Fix the flaky login test"',
+    params: { workspace_id: workspace.id, harness: 'claude', mode: 'acp', no_fallback: true, task: 'Fix the flaky login test' },
+    rule: { wording: 'Always approve launches of Claude Code (Enhanced) in api on your account, permission default, no fallback, for any task' },
+  }
+  const card = (aside: HTMLElement) => within(aside).findByRole('group', { name: `Approve this action? ${launch.summary}` })
+
+  it('saves the rule a card offers, in the server’s wording, with assistant.confirm always', async () => {
+    vi.mocked(api.assistantApproveAlways).mockResolvedValue({ rule: { id: 'rule-1', method: 'run.launch', wording: launch.rule!.wording, summary: launch.summary, created_at: '2026-11-03T10:00:00Z', uses: 0 } })
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [launch, stop] }) })
+    const offered = await card(aside)
+    await userEvent.click(within(offered).getByRole('button', { name: launch.rule!.wording }))
+    expect(api.assistantApproveAlways).toHaveBeenCalledWith('c3')
+    expect(api.assistantConfirm).not.toHaveBeenCalled()
+
+    const plain = within(aside).getByRole('group', { name: `Approve this action? ${stop.summary}` })
+    expect(within(plain).queryByRole('button', { name: /^Always approve/ })).toBeNull()
+    expect(within(plain).queryByRole('button', { name: 'Approve everything from now on' })).toBeNull()
+  })
+
+  it('highlights the rule after three cards of its kind', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [{ ...launch, rule: { ...launch.rule!, suggested: true } }] }) })
+    const offered = await card(aside)
+    expect(within(offered).getByText(/^You approved this kind three times in a row\./)).toBeDefined()
+  })
+
+  it('approves the card with Approve everything, then confirms before turning auto-approval on', async () => {
+    vi.mocked(api.assistantConfirm).mockResolvedValue({})
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true })
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [launch] }) })
+    await userEvent.click(within(await card(aside)).getByRole('button', { name: 'Approve everything from now on' }))
+    expect(api.assistantConfirm).toHaveBeenCalledWith('c3', true)
+    assistantSocket().send({ status: status() })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Let the assistant act without asking?' })
+    expect(api.assistantSettings).not.toHaveBeenCalledWith({ auto_approve: true })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Turn on' }))
+    expect(api.assistantSettings).toHaveBeenCalledWith({ auto_approve: true })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
+  it('asks once after sign-in how the assistant should act, and stores either answer', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ approval_chosen: false }))
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, approval_chosen: true })
+    const aside = await openPanel()
+    acpOpen()
+    const question = await within(aside).findByRole('group', { name: 'How should your assistant act?' })
+    expect(within(question).getByText(/launch sessions, message and stop your sessions and save your environment on its own/)).toBeDefined()
+    await userEvent.click(within(question).getByRole('button', { name: 'Ask before acting' }))
+    expect(api.assistantSettings).toHaveBeenCalledWith({ auto_approve: false })
+    await waitFor(() => expect(within(aside).queryByRole('group', { name: 'How should your assistant act?' })).toBeNull())
+  })
+
+  it('asks once without the auto-approval suggestion beside it, and not from a failed status', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ approval_chosen: false, suggest_auto_approve: true }))
+    const aside = await openPanel()
+    acpOpen()
+    expect(await within(aside).findByRole('group', { name: 'How should your assistant act?' })).toBeDefined()
+    expect(within(aside).queryByRole('group', { name: 'Skip approval cards for the assistant?' })).toBeNull()
+    assistantSocket().send({ status: status({ state: 'failed', error: 'assistant: read settings: database is locked', approval_chosen: false }) })
+    await waitFor(() => expect(within(aside).queryByRole('group', { name: 'How should your assistant act?' })).toBeNull())
+  })
+
+  it('does not ask a member who already chose', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ approval_chosen: true }))
+    const aside = await openPanel()
+    acpOpen()
+    await within(aside).findByRole('region', { name: 'Suggestions' })
+    expect(within(aside).queryByRole('group', { name: 'How should your assistant act?' })).toBeNull()
   })
 })

@@ -20,8 +20,8 @@ test('a confirm opens as a sheet along the bottom of a phone screen', async ({
   })
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: 'More navigation' }).tap()
-  await page.getByRole('menuitem', { name: 'Templates', exact: true }).tap()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'More' }).tap()
+  await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: 'Templates', exact: true }).tap()
   await page.getByRole('option', { name: 'Template nightly' }).tap()
   await page.getByRole('button', { name: 'More for nightly' }).tap()
   await page.getByRole('menuitem', { name: 'Delete' }).tap()
@@ -53,7 +53,7 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
   await shrinkToKeyboardHeight(page)
 
   await page
-    .getByRole('banner')
+    .getByRole('navigation', { name: 'Main navigation' })
     .getByRole('button', { name: 'New session' })
     .tap()
 
@@ -82,20 +82,21 @@ test('a launch refusal sits below the form, not over it', async ({ page, aether 
 
   await page.goto(alice.url)
   await page
-    .getByRole('banner')
+    .getByRole('navigation', { name: 'Main navigation' })
     .getByRole('button', { name: 'New session' })
     .tap()
   const dialog = page.getByRole('dialog', { name: 'New session' })
-  await dialog.getByRole('radio', { name: /^custom/ }).tap()
+  await dialog.getByRole('combobox', { name: 'Agent' }).tap()
+  await page.getByRole('option', { name: 'custom' }).tap()
   await dialog.getByLabel('Task').fill('say hello')
   await dialog.getByRole('button', { name: 'Launch', exact: true }).tap()
 
   const refusal = dialog.getByRole('alert').filter({ hasText: 'Launch failed' })
   await refusal.scrollIntoViewIfNeeded()
-  const mode = await dialog.getByRole('radiogroup', { name: 'Mode' }).boundingBox()
+  const agent = await dialog.getByRole('combobox', { name: 'Agent' }).boundingBox()
   const callout = await refusal.boundingBox()
-  if (!mode || !callout) throw new Error('the launch form did not render')
-  expect(callout.y).toBeGreaterThanOrEqual(mode.y + mode.height)
+  if (!agent || !callout) throw new Error('the launch form did not render')
+  expect(callout.y).toBeGreaterThanOrEqual(agent.y + agent.height)
 
   const width = (await dialog.boundingBox())?.width ?? 0
   const launch = await dialog.getByRole('button', { name: 'Launch', exact: true }).boundingBox()

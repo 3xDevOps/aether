@@ -92,6 +92,7 @@ func newFake(t *testing.T) *fakeServer {
 		protocol.MethodWorkspaceTimeline: returns(protocol.WorkspaceTimelineResult{}),
 		protocol.MethodWorkspaceList:     returns(protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-1", Name: "api"}}}),
 		protocol.MethodRunChildren:       returns(protocol.RunChildrenResult{}),
+		protocol.MethodRunCloseCheck:     returns(protocol.RunCloseCheckResult{Runs: []protocol.RunCloseCheck{{RunID: "run-1"}}}),
 		protocol.MethodLaunchDefaultsGet: returns(protocol.LaunchDefaultsResult{}),
 		protocol.MethodAccountList: returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-me", DisplayName: "Me"},
 			{ID: "mem-ada", DisplayName: "Ada"}}}),
@@ -294,10 +295,10 @@ func TestConnectorToolList(t *testing.T) {
 	// An optional value may be sent empty for its default.
 	if want := map[string]string{"aether_launch_session.mode": ",tui,headless,acp", "aether_launch_session.children": ",on,off", "aether_launch_session.permission": ",root,default,isolated", "aether_launch_session.saved_defaults": ",apply,ignore", "aether_activity_summary.period": ",today,yesterday,week",
 		"aether_decide_approval.decision": "allow,deny", "aether_stop_session.outcome": ",merged,abandoned",
-		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
+		"aether_mark_reviewed.action": "complete,later,not-yet", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
 		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",
 		"aether_session_lifecycle.action": "relaunch,protect,unprotect,archive,restore",
-		"aether_switch_session_mode.mode": "standard,enhanced"}; !maps.Equal(enums, want) {
+		"aether_switch_session_mode.mode": "standard,enhanced", "aether_decide_assistant_card.decision": "approve,decline"}; !maps.Equal(enums, want) {
 		t.Errorf("enums = %v, want %v", enums, want)
 	}
 	connectorTools := slices.DeleteFunc(slices.Clone(Ops), func(o Op) bool { return o.Scope == "" })
@@ -318,6 +319,7 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
 		"aether_memory_add": {false, false, false}, "aether_memory_pin": {false, false, false},
 		"aether_watch": {false, false, false}, "aether_unwatch": {false, true, false},
+		"aether_ask_assistant": {false, true, true}, "aether_decide_assistant_card": {false, true, true},
 	}
 	names := map[Scope][]string{}
 	for _, tool := range all {
@@ -481,12 +483,13 @@ func TestConnectorReadTools(t *testing.T) {
 	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many})
 	text, out = run(t, cs, "aether_needs_attention", nil)
 	items := out["items"].([]any)
-	if text != "30 of 45 items that need you, pending requests first, then oldest first." || len(items) != 30 || out["total"] != float64(45) {
+	if text != "Showing 30 of 45 items. 5 items need you, pending requests first, then oldest first. 40 finished sessions await review last; they are not blocking." ||
+		len(items) != 30 || out["total"] != float64(45) {
 		t.Fatalf("aether_needs_attention past the cap = %q", text)
 	}
-	want := []string{"run-3", "run-10", "run-20", "run-44"}
+	want := []string{"run-3", "run-10", "run-20", "run-44", "run-40"}
 	for i := 0; len(want) < 30; i++ {
-		if !slices.Contains([]int{3, 10, 20, 44}, i) {
+		if !slices.Contains([]int{3, 10, 20, 40, 44}, i) {
 			want = append(want, fmt.Sprintf("run-%d", i))
 		}
 	}
@@ -499,6 +502,11 @@ func TestConnectorReadTools(t *testing.T) {
 	}
 	if sudoRow := items[3].(map[string]any); sudoRow["answer_id"] != "sudo-1" || sudoRow["answer_with"] != "aether_decide_approval" {
 		t.Fatalf("the sudo request = %v, want it answered with aether_decide_approval", sudoRow)
+	}
+
+	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: many[:2]})
+	if text, _ = run(t, cs, "aether_needs_attention", nil); text != "Nothing needs you. 2 finished sessions await review last; they are not blocking." {
+		t.Fatalf("aether_needs_attention with only finished sessions = %q", text)
 	}
 
 	f.answers[protocol.MethodInsightsGet] = func(raw json.RawMessage) (any, error) {
@@ -945,6 +953,48 @@ func TestConnectorRunActions(t *testing.T) {
 	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeNotFound, Message: "session run-x not found"}
 	if text, _, _ := try(t, cs, "aether_get_session", map[string]any{"run_id": "run-x"}); text != "session run-x not found; call aether_list_sessions for session ids" {
 		t.Fatalf("an unknown session = %q", text)
+	}
+}
+
+// A close whose run.close_check has warnings is refused, naming them,
+// until the caller acknowledges them.
+func TestConnectorCloseNeedsAcknowledgment(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodRunClose] = returns(struct{}{})
+	f.answers[protocol.MethodRunKill] = returns(struct{}{})
+	f.answers[protocol.MethodRunReview] = returns(struct{}{})
+	ready := testRun
+	ready.Review = "ready"
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: ready})
+	f.answers[protocol.MethodRunCloseCheck] = returns(protocol.RunCloseCheckResult{Runs: []protocol.RunCloseCheck{{RunID: "run-1", Warnings: []protocol.CloseWarning{
+		{Kind: protocol.CloseWarningPullRequest, Detail: "Pull request acme/api#7 is open, not merged", URL: "https://github.com/acme/api/pull/7"}}}}})
+	cs := connectorSession(t, f, ScopeWrite, ScopeControl)
+	for _, c := range []struct {
+		name   string
+		args   map[string]any
+		method string
+	}{
+		{"aether_stop_session", map[string]any{"run_id": "run-1", "outcome": "abandoned"}, protocol.MethodRunClose},
+		{"aether_stop_session", map[string]any{"run_id": "run-1"}, protocol.MethodRunKill},
+		{"aether_mark_reviewed", map[string]any{"run_id": "run-1", "action": "complete"}, protocol.MethodRunReview},
+	} {
+		f.calls = nil
+		text, _, failed := try(t, cs, c.name, c.args)
+		want := "closing session run-1 has warnings (pull_request), listed under untrusted.warnings; show them to the user, then retry with acknowledge true to close anyway\n" +
+			`{"untrusted":{"warnings":[{"kind":"pull_request","detail":"Pull request acme/api#7 is open, not merged","url":"https://github.com/acme/api/pull/7"}]}}`
+		if !failed || text != want {
+			t.Fatalf("%s without acknowledge = %q, want %q", c.name, text, want)
+		}
+		for _, call := range f.calls {
+			if call.scope != ScopeRead {
+				t.Fatalf("%s without acknowledge made %+v", c.name, call)
+			}
+		}
+		c.args["acknowledge"] = true
+		run(t, cs, c.name, c.args)
+		if got := f.acted(); got.method != c.method {
+			t.Errorf("%s with acknowledge called %+v, want %s", c.name, got, c.method)
+		}
 	}
 }
 

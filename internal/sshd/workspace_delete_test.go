@@ -201,7 +201,8 @@ func TestWorkspaceDeleteDuringGitTransportTargetsOnlyItsWorkspace(t *testing.T) 
 			if _, err := io.WriteString(stdin, "0000"); err != nil {
 				t.Fatal(err)
 			}
-			if err := stdin.Close(); err != nil {
+			// git exits on the flush, so the server's channel close can win.
+			if err := stdin.Close(); err != nil && !errors.Is(err, io.EOF) {
 				t.Fatal(err)
 			}
 			if _, err := io.Copy(io.Discard, stdout); err != nil {

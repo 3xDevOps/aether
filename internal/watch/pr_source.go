@@ -235,6 +235,8 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 		}
 		m.limitErr = nil
 	}
+	// A read is as fresh as its start: GitHub can change while it runs.
+	readAt := p.now()
 	if snap, err = p.read(ctx, member, m, repo, number, prev, ci, recent, create); err != nil {
 		return github.Snapshot{}, false, err
 	}
@@ -247,7 +249,7 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 		return github.Snapshot{}, false, err
 	}
 	if checkedAt.IsZero() {
-		checkedAt = p.now()
+		checkedAt = readAt
 	}
 	if err = p.store.SaveWatchPRSnapshot(ctx, &store.WatchPRSnapshot{MemberID: member, Repo: repo, Number: number, Snapshot: data, CheckedAt: checkedAt}); err != nil {
 		return github.Snapshot{}, false, err
