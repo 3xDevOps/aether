@@ -23,6 +23,21 @@ class PushNoticeTest {
     }
 
     @Test
+    fun aSummaryThatTookACardsTagNeedsYouAndDecidesNothing() {
+        // internal/push's burst summary: the first push's tag, no card id.
+        val summary =
+            push(
+                """{"title":"2 things need you","body":"Assistant asks for approval: Close run-7k2m9q4xbd\n""" +
+                    """fix the build: Question from the agent","url":"/?assistant=1","tag":"card:ABCDEFGHIJKLMNOPQRSTUVWXYZ"}""",
+            )
+        assertNull(summary.card)
+        assertEquals("card:ABCDEFGHIJKLMNOPQRSTUVWXYZ", summary.tag)
+        assertEquals(PushChannel.NEEDS_YOU, pushChannel(summary))
+        assertEquals(emptyList<PushAction>(), pushActions(summary, declinesDirectly = true))
+        assertEquals("/?assistant=1", pushPath(summary))
+    }
+
+    @Test
     fun aDecidedCardIsClearedUnderItsTagAndOpensTheCard() {
         val decided =
             push(
@@ -69,6 +84,8 @@ class PushNoticeTest {
         assertEquals(PushChannel.NEEDS_YOU, pushChannel(push(RUN)))
         // A private card has no id but is still a card.
         assertEquals(PushChannel.NEEDS_YOU, pushChannel(push(CARD.replace(",\"card\":\"ABCDEFGHIJKLMNOPQRSTUVWXYZ\"", ""))))
+        // A watch's need about something other than a run.
+        assertEquals(PushChannel.NEEDS_YOU, pushChannel(push("""{"title":"PR 12","body":"Review requested","url":"/?page=watches","tag":"watch:w1"}""")))
         assertEquals(PushChannel.UPDATES, pushChannel(push("""{"title":"t","body":"b","run":"run-7k2m9q4xbd","notice":true}""")))
         assertEquals(PushChannel.UPDATES, pushChannel(push("""{"title":"ws","body":"Budget warning","workspace":"ws_1"}""")))
         assertEquals(PushChannel.UPDATES, pushChannel(push("""{"title":"Aether","body":"Notifications work on this device."}""")))

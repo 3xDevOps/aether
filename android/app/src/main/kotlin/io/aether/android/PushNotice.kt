@@ -29,14 +29,15 @@ data class PushNotice(
 enum class PushChannel { NEEDS_YOU, UPDATES }
 
 /**
- * A session's need and an assistant card, private ones included, need the
- * member; an assistant's notice, a budget and a test do not.
+ * What needs the member - a session's need, a watch's, an assistant card,
+ * a summary of them - goes to its own channel; an assistant's notice, a
+ * budget and the test push, the one with nothing to tag it, do not.
  */
 fun pushChannel(notice: PushNotice): PushChannel =
-    if (notice.card != null || notice.tag.startsWith("card:") || (notice.run != null && !notice.notice)) {
-        PushChannel.NEEDS_YOU
-    } else {
+    if (notice.notice || notice.workspace != null || notice.tag == FALLBACK_TAG) {
         PushChannel.UPDATES
+    } else {
+        PushChannel.NEEDS_YOU
     }
 
 enum class PushAction { REVIEW, DECLINE }
@@ -53,6 +54,7 @@ private val WORKSPACE_ID = Regex("^[0-9A-Za-z_-]{1,64}$")
 
 private const val FALLBACK_TITLE = "Aether"
 private const val FALLBACK_BODY = "A session needs you."
+private const val FALLBACK_TAG = "aether"
 
 /**
  * The push in [content]. A message this app cannot read still shows the
@@ -79,7 +81,7 @@ fun parsePush(content: ByteArray): PushNotice {
             if (clear && cleared != null) {
                 cleared
             } else {
-                tag ?: run ?: workspace?.let { "budget:$it" } ?: url ?: "aether"
+                tag ?: run ?: workspace?.let { "budget:$it" } ?: url ?: FALLBACK_TAG
             },
         run = run,
         workspace = workspace,
