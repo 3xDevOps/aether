@@ -24,8 +24,8 @@ func (f *fakeCards) PendingCards(_ context.Context, member domain.MemberID) ([]C
 	return f.pending[member], nil
 }
 
-func (f *fakeCards) CardOutcome(_ context.Context, _ domain.MemberID, id string) (string, error) {
-	return "Declined: card " + id, nil
+func (f *fakeCards) CardState(_ context.Context, _ domain.MemberID, id string) (string, string, error) {
+	return protocol.AssistantCardDeclined, "card " + id, nil
 }
 
 func (f *fakeCards) set(member domain.MemberID, cards ...Card) {
@@ -68,7 +68,7 @@ func TestACardIsPushedWithItsIDAndWithdrawnWhenDecidedAnywhere(t *testing.T) {
 
 	cards.set(h.ada.ID)
 	h.cardsChanged(h.ada)
-	phone.expect(t, notification{Title: cardDecidedTitle, Body: "Declined: card c1", Clear: true})
+	phone.expect(t, notification{Title: cardDecidedTitle, Body: "Declined: Launch claude in api", Clear: true})
 }
 
 func TestACardPushOffersActionsOnlyWhenItShowsTheWholeCard(t *testing.T) {
@@ -157,4 +157,22 @@ func TestACardInQuietHoursWaitsForTheDigestAndLeavesItOnceDecided(t *testing.T) 
 		t.Fatal(err)
 	}
 	phone.expect(t, notification{Title: "Aether · 1 to approve", Body: "Overnight: Assistant asks for approval: Launch codex in web  [Approve]", Notice: true})
+}
+
+func TestDecidingACardThatASummaryTookOverUpdatesTheSummary(t *testing.T) {
+	t.Parallel()
+	h, cards := newCardHarness(t)
+	phone := h.subscribe(h.ada)
+	a, b := Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: h.clock.now()}, Card{ID: "c2", Summary: "Stop run-9y3", CreatedAt: h.clock.now()}
+	cards.set(h.ada.ID, a)
+	h.cardsChanged(h.ada)
+	phone.expect(t, notification{Title: cardTitle, Body: "Stop run-8x2", Card: "c1"})
+	cards.set(h.ada.ID, a, b)
+	h.cardsChanged(h.ada)
+	phone.expect(t, notification{Title: "2 things need you", Body: "Assistant asks for approval: Stop run-8x2\nAssistant asks for approval: Stop run-9y3", Quiet: true})
+
+	cards.set(h.ada.ID, b)
+	h.cardsChanged(h.ada)
+	phone.expect(t, notification{Title: "1 thing needs you", Body: "Assistant asks for approval: Stop run-9y3", Quiet: true})
+	phone.expectNone(t, testQuiet)
 }

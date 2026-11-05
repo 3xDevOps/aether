@@ -143,10 +143,19 @@ export function watchPush(store: RootStore, client: Api): () => void {
       refused = err instanceof ApiError && (err.code === methodNotFound || err.code === denied)
     })
   }
+  // The desktop app opens a card's link by changing the query in place.
+  const card = () => {
+    const query = new URLSearchParams(window.location.search)
+    if (!query.has('assistant')) return
+    store.getState().setAssistantOpen(true)
+    store.getState().setAssistantCard(query.get('card'))
+  }
   navigator.serviceWorker?.addEventListener('message', open)
+  window.addEventListener('popstate', card)
   for (const type of activityEvents) window.addEventListener(type, active, { capture: true, passive: true })
   return () => {
     navigator.serviceWorker?.removeEventListener('message', open)
+    window.removeEventListener('popstate', card)
     for (const type of activityEvents) window.removeEventListener(type, active, { capture: true })
   }
 }

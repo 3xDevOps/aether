@@ -286,6 +286,7 @@ function queueCards() {
 // whole, shows no buttons.
 async function syncCards() {
   if (!Notification.isSupported()) return
+  const since = cleared
   let status
   try {
     status = await gatewayCall('assistant.status', {})
@@ -293,6 +294,8 @@ async function syncCards() {
     console.log(`notify: assistant cards: ${err.message}`)
     return
   }
+  // A read the connection dropped behind would show cards it closed.
+  if (cleared !== since) return
   const pending = (status.confirmations || []).filter((c) => c.state === 'pending')
   for (const [id, notification] of cardsShown) {
     if (pending.some((c) => c.id === id)) continue

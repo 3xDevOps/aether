@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -408,7 +409,7 @@ func TestAThirdMembersWatchedQuestionSurvivesAHandoff(t *testing.T) {
 		}
 	}
 	cys.expect(t, notification{Title: "Fix login test", Body: "Blocked: no staging key", Run: string(run.ID)})
-	cys.expect(t, notification{Title: "2 need you", Body: "Fix login test: Blocked: no staging key\nBump deps: Blocked: lockfile", Quiet: true})
+	cys.expect(t, notification{Title: "2 things need you", Body: "Fix login test: Blocked: no staging key\nBump deps: Blocked: lockfile", Quiet: true})
 
 	if err := h.db.TransferRun(h.ctx, run.ID, h.bob.ID); err != nil {
 		t.Fatalf("TransferRun: %v", err)
@@ -444,5 +445,34 @@ func TestANeedHeldByTheDashboardIntoQuietHoursWaitsForThem(t *testing.T) {
 	phone.expectNone(t, testQuiet)
 	if item := h.digestItems(h.ada)[0]; !item.Overnight {
 		t.Fatalf("item = %+v, want it held for the digest quiet hours end with", *item)
+	}
+}
+
+func TestASummaryOfLongEscapedLinesStillFitsOnePush(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	var sum *summary
+	for i := range 6 {
+		var err error
+		if sum, err = h.svc.join(h.ada.ID, fmt.Sprintf("run-%d", i), "run-0", "topic", strings.Repeat("&", 60), strings.Repeat("<&>", 60), true, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sum == nil || len(sum.payload) > maxPayload {
+		t.Fatalf("summary is %d octets, want at most %d", len(sum.payload), maxPayload)
+	}
+}
+
+func TestAnUnrelatedNeedEndingKeepsABurstInsideItsWindow(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if _, err := h.svc.join(h.ada.ID, "pr-1", "tag", "topic", "acme/web#7", "Checks passed", false, false); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.unjoin(h.ctx, "run-x", "")
+	h.svc.mu.Lock()
+	defer h.svc.mu.Unlock()
+	if n := len(h.svc.bursts[h.ada.ID]); n != 1 {
+		t.Fatalf("member keeps %d bursts, want the one still inside its window", n)
 	}
 }

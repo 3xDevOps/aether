@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -37,11 +38,24 @@ type Card struct {
 }
 
 // Cards is what the assistant knows about a member's approval cards.
-// CardOutcome is one line on what became of a card no longer pending, its
-// summary as a push may show it included.
+// CardState is a card's state and its summary as a push may show it.
 type Cards interface {
 	PendingCards(ctx context.Context, member domain.MemberID) ([]Card, error)
-	CardOutcome(ctx context.Context, member domain.MemberID, id string) (string, error)
+	CardState(ctx context.Context, member domain.MemberID, id string) (state, summary string, err error)
+}
+
+// announced is a card a push told a member of: pushed when it has a
+// notification of its own, and the summary that showed.
+type announced struct {
+	pushed  bool
+	summary string
+}
+
+// outcomes is how a decided card's notification starts, by its state.
+var outcomes = map[string]string{
+	protocol.AssistantCardApproved: "Approved", protocol.AssistantCardRunning: "Approved",
+	protocol.AssistantCardSucceeded: "Approved", protocol.AssistantCardFailed: "Approved",
+	protocol.AssistantCardDeclined: "Declined", protocol.AssistantCardExpired: "Expired",
 }
 
 // cardLink opens the dashboard on the card with id, in the assistant panel.
@@ -64,12 +78,11 @@ func cardBody(c Card) string {
 	return string(cut) + rest
 }
 
-// cardPushes is, per member, the cards announced: true for one pushed to
-// their devices, false for one queued for a digest. held marks a member
+// cardPushes is, per member, the cards announced. held marks a member
 // whose new cards wait for them to leave the dashboard.
 type cardPushes struct {
 	mu    sync.Mutex
-	cards map[domain.MemberID]map[string]bool
+	cards map[domain.MemberID]map[string]announced
 	held  map[domain.MemberID]bool
 }
 
@@ -94,7 +107,7 @@ func (s *Service) restoreCards(ctx context.Context) {
 	for member, ids := range pushed {
 		known := s.knownCards(member)
 		for _, id := range ids {
-			known[id] = true
+			known[id] = announced{pushed: true}
 		}
 	}
 	s.cardPushes.mu.Unlock()
@@ -104,10 +117,10 @@ func (s *Service) restoreCards(ctx context.Context) {
 }
 
 // knownCards is member's announced cards. cardPushes.mu is held.
-func (s *Service) knownCards(member domain.MemberID) map[string]bool {
+func (s *Service) knownCards(member domain.MemberID) map[string]announced {
 	known := s.cardPushes.cards[member]
 	if known == nil {
-		known = map[string]bool{}
+		known = map[string]announced{}
 		s.cardPushes.cards[member] = known
 	}
 	return known
@@ -129,24 +142,21 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		return
 	}
 	known := s.knownCards(member)
-	for id, pushed := range known {
+	for id, a := range known {
 		if slices.ContainsFunc(pending, func(c Card) bool { return c.ID == id }) {
 			continue
 		}
 		s.unjoin(ctx, cardTopic(id), "")
-		if pushed {
-			outcome, err := s.cards.CardOutcome(ctx, member, id)
-			if err != nil {
-				slog.Warn("push: read a decided card", "member", member, "card", id, "error", err)
-				outcome = "No longer waits for you"
+		// A summary that took over the card's notification was updated
+		// by unjoin; a clear would hide the rest of it.
+		if a.pushed && !s.Summarizes(member, cardTopic(id)) {
+			if err := s.withdrawCard(ctx, member, id, a); err != nil {
+				slog.Warn("push: withdraw a decided card's notification; trying again on its next change", "member", member, "card", id, "error", err)
+				continue
 			}
-			results, err := s.Deliver(ctx, member, Message{Title: cardDecidedTitle, Body: outcome, URL: cardLink(id), Topic: cardTopic(id), Clear: true})
-			if failed(results, err) {
-				slog.Warn("push: withdraw a decided card's notification", "member", member, "card", id, "error", errors.Join(err, deviceErrors(results)))
-			}
-			if err := s.store.DeletePushedCard(ctx, member, id); err != nil {
-				slog.Warn("push: forget a pushed card", "member", member, "card", id, "error", err)
-			}
+		}
+		if err := s.store.DeletePushedCard(ctx, member, id); err != nil {
+			slog.Warn("push: forget a pushed card", "member", member, "card", id, "error", err)
 		}
 		delete(known, id)
 	}
@@ -171,9 +181,11 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		}
 		pushed, err := s.announceCard(ctx, member, c)
 		if err != nil {
+			// Tried again on the member's next card change.
 			slog.Warn("push: announce a card", "member", member, "card", c.ID, "error", err)
+			continue
 		}
-		known[c.ID] = pushed
+		known[c.ID] = announced{pushed: pushed, summary: cardBody(c)}
 		if pushed {
 			// A push that went out is recorded even when the server is
 			// stopping, so the next start can withdraw it.
@@ -182,6 +194,27 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 			}
 		}
 	}
+}
+
+// withdrawCard replaces the notification of card id, decided anywhere,
+// with how it ended and the summary its push showed.
+func (s *Service) withdrawCard(ctx context.Context, member domain.MemberID, id string, a announced) error {
+	state, summary, err := s.cards.CardState(ctx, member, id)
+	if err != nil {
+		return err
+	}
+	if a.summary != "" {
+		summary = a.summary
+	}
+	outcome := outcomes[state]
+	if outcome == "" {
+		outcome = "Withdrawn"
+	}
+	results, err := s.Deliver(ctx, member, Message{Title: cardDecidedTitle, Body: outcome + ": " + summary, URL: cardLink(id), Topic: cardTopic(id), Clear: true})
+	if failed(results, err) {
+		return errors.Join(err, deviceErrors(results))
+	}
+	return nil
 }
 
 // announceCard pushes card c, or queues it for the digest quiet hours

@@ -33,10 +33,13 @@ async function display(message) {
     // An assistant's newer notice about the run stays, shown again as it
     // was, as does the outcome this device decided a card with.
     const notice = current?.data?.notice === true || current?.data?.decided === true
+    // An error a decision met stays until it is read.
+    const persist = current?.data?.persist === true
     await self.registration.showNotification(current?.title || message.title || 'Aether', {
       body: notice ? current.body : message.body,
       tag: cleared,
       silent: true,
+      ...(persist ? { requireInteraction: true } : {}),
       icon: '/icons/icon-192.png',
       data: notice ? current.data : { run: message.run, url: message.url },
     })
@@ -87,7 +90,7 @@ async function decline(notification, card) {
     // An error stays until it is read.
     requireInteraction: failed,
     icon: '/icons/icon-192.png',
-    data: { url: notification.data?.url, decided: true },
+    data: { url: notification.data?.url, decided: true, persist: failed },
   })
 }
 

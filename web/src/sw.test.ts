@@ -105,6 +105,13 @@ describe('service worker', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps a refused decision on screen when the server withdraws the card', async () => {
+    const shown = [{ tag: 'card:c1', title: 'Assistant card', body: 'Not decided: offline', data: { decided: true, persist: true } }]
+    const { self, dispatch } = worker([], shown)
+    await dispatch('push', { data: { json: () => ({ title: 'Assistant card', body: 'Expired: Stop run-8x2', tag: 'card:c1', clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant card', expect.objectContaining({ body: 'Not decided: offline', requireInteraction: true }))
+  })
+
   it('keeps the outcome this device decided when the server withdraws the card', async () => {
     const shown = [{ tag: 'card:c1', title: 'Assistant asks for approval', body: 'Declined', data: { decided: true } }]
     const { self, dispatch } = worker([], shown)

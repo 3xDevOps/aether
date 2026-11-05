@@ -41,8 +41,8 @@ func TestAPushActionDecidesItsCardOnceAndOnlyForItsMember(t *testing.T) {
 	if n := w.caller.kills(); n != 1 {
 		t.Fatalf("run.kill ran %d times, want once", n)
 	}
-	if outcome, outcomeErr := w.svc.CardOutcome(t.Context(), w.member, c.ID); outcomeErr != nil || outcome != "Approved: "+c.Summary {
-		t.Fatalf("outcome = %q, %v; want the approval with the card's summary", outcome, outcomeErr)
+	if state, summary, stateErr := w.svc.CardState(t.Context(), w.member, c.ID); stateErr != nil || state == protocol.AssistantCardPending || summary != c.Summary {
+		t.Fatalf("card state = %q, %q, %v; want decided with the card's summary", state, summary, stateErr)
 	}
 	if pending, err = w.svc.PendingCards(t.Context(), w.member); err != nil || len(pending) != 0 {
 		t.Fatalf("pending cards after the decision = %+v, %v, want none, so the push is withdrawn", pending, err)

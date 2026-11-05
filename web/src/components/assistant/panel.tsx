@@ -89,8 +89,12 @@ function NotifiedCard({ confirmation }: { confirmation: AssistantConfirmation })
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!notified) return
-    ref.current?.scrollIntoView({ block: 'nearest' })
-    ref.current?.focus()
+    // After the panel's own opening focus, which would otherwise take it.
+    const frame = requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ block: 'nearest' })
+      ref.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
   }, [notified])
   return (
     <div
@@ -98,7 +102,7 @@ function NotifiedCard({ confirmation }: { confirmation: AssistantConfirmation })
       tabIndex={notified ? -1 : undefined}
       aria-label={notified ? `From your notification: ${confirmation.summary}. Approve or decline below.` : undefined}
       className={cn('rounded-panel', notified && 'outline-2 outline-offset-2 outline-accent')}
-      onBlur={() => notified && useStore.getState().setAssistantCard(null)}
+      onBlur={(event) => notified && !event.currentTarget.contains(event.relatedTarget) && useStore.getState().setAssistantCard(null)}
     >
       <ConfirmationCard confirmation={confirmation} />
     </div>

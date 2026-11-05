@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -50,32 +51,29 @@ func privateSummary(method string) string {
 	return "An action that uses a saved preference"
 }
 
-// CardOutcome is what became of the member's card id, with its summary as
-// a push may show it. Which door decided it is not recorded.
-func (s *Service) CardOutcome(ctx context.Context, member domain.MemberID, id string) (string, error) {
+// CardState is the state of the member's card id and its summary as a
+// push may show it.
+func (s *Service) CardState(ctx context.Context, member domain.MemberID, id string) (string, string, error) {
 	c, err := s.Card(ctx, member, id)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	summary := c.Summary
 	if s.privateCard(ctx, member, c.AssistantConfirmation) {
-		summary = privateSummary(c.Method)
+		return c.State, privateSummary(c.Method), nil
 	}
-	switch c.State {
-	case protocol.AssistantCardApproved, protocol.AssistantCardRunning, protocol.AssistantCardSucceeded, protocol.AssistantCardFailed:
-		return "Approved: " + summary, nil
-	case protocol.AssistantCardDeclined:
-		return "Declined: " + summary, nil
-	case protocol.AssistantCardExpired:
-		return "Expired: " + summary, nil
-	}
-	return "Withdrawn: " + summary, nil
+	return c.State, c.Summary, nil
 }
 
-// privateCard reports whether c saves, forgets or sends a saved preference.
+// privateCard reports whether c saves, forgets or sends a saved preference,
+// in its parameters or in the text the card shows, which a template
+// launch renders from parameters nested in its own.
 func (s *Service) privateCard(ctx context.Context, member domain.MemberID, c protocol.AssistantConfirmation) bool {
-	_, ok := privateSummaries[c.Method]
-	return ok || s.carriesPreference(ctx, member, c)
+	if _, ok := privateSummaries[c.Method]; ok || s.carriesPreference(ctx, member, c) {
+		return true
+	}
+	shown := c
+	shown.Params, _ = json.Marshal(map[string]string{"task": c.Summary + "\n" + c.Task + "\n" + c.Reason})
+	return s.carriesPreference(ctx, member, shown)
 }
 
 // cardsChanged tells the bus member's cards changed, for their devices'

@@ -29,9 +29,9 @@ type burst struct {
 	needs      map[string]bool
 	// summarized is set once a summary replaced the first push.
 	summarized bool
-	// cards is set once an assistant card joined, so the summary opens
-	// the assistant panel.
-	cards bool
+	// cards marks the items that are assistant cards: while one is in
+	// the summary, it opens the assistant panel.
+	cards map[string]bool
 }
 
 // summary is a burst's notification as it is sent.
@@ -64,7 +64,7 @@ func (s *Service) join(member domain.MemberID, key, tag, topic, title, body stri
 	if n := len(bursts); n > 0 && now.Before(bursts[n-1].start.Add(burstWindow)) {
 		b = bursts[n-1]
 	} else {
-		b = &burst{start: now, tag: tag, topic: topic, lines: map[string]string{}, needs: map[string]bool{}}
+		b = &burst{start: now, tag: tag, topic: topic, lines: map[string]string{}, needs: map[string]bool{}, cards: map[string]bool{}}
 		s.bursts[member] = append(bursts, b)
 	}
 	first := need && !slices.ContainsFunc(b.keys, func(k string) bool { return b.needs[k] })
@@ -72,7 +72,7 @@ func (s *Service) join(member domain.MemberID, key, tag, topic, title, body stri
 		b.keys = append(b.keys, key)
 	}
 	b.lines[key], b.needs[key] = line, need
-	b.cards = b.cards || card
+	b.cards[key] = card
 	// A summary that shrank to one item stays a summary: the item's own
 	// notification was never sent.
 	if len(b.keys) == 1 && !b.summarized {
@@ -91,6 +91,7 @@ func (s *Service) unjoin(ctx context.Context, key string, only domain.MemberID) 
 		s      *summary
 	}
 	var updates []update
+	now := s.now()
 	s.mu.Lock()
 	for member, bursts := range s.bursts {
 		if only != "" && member != only {
@@ -103,6 +104,7 @@ func (s *Service) unjoin(ctx context.Context, key string, only domain.MemberID) 
 			b.keys = slices.DeleteFunc(b.keys, func(k string) bool { return k == key })
 			delete(b.lines, key)
 			delete(b.needs, key)
+			delete(b.cards, key)
 			if !b.summarized {
 				continue
 			}
@@ -113,8 +115,9 @@ func (s *Service) unjoin(ctx context.Context, key string, only domain.MemberID) 
 			}
 			updates = append(updates, update{member, out})
 		}
+		// A burst still inside its window keeps gathering pushes.
 		s.bursts[member] = slices.DeleteFunc(bursts, func(b *burst) bool {
-			return !slices.ContainsFunc(b.keys, func(k string) bool { return b.needs[k] })
+			return !now.Before(b.start.Add(burstWindow)) && !slices.ContainsFunc(b.keys, func(k string) bool { return b.needs[k] })
 		})
 		if len(s.bursts[member]) == 0 {
 			delete(s.bursts, member)
@@ -140,35 +143,40 @@ func (b *burst) summary(quiet, ended bool) (*summary, error) {
 		}
 		lines = append(lines, b.lines[key])
 	}
-	n := notification{Body: clearedBody, Clear: true}
-	if needs > 0 || !ended {
-		title := fmt.Sprintf("%d things need you", len(lines))
-		if len(lines) == 1 {
-			title = "1 thing needs you"
-		}
-		if needs < len(lines) {
-			title = fmt.Sprintf("%d notifications", len(lines))
-		}
-		shown := lines[:min(len(lines), digestLines)]
-		body := strings.Join(shown, "\n")
-		if more := len(lines) - len(shown); more > 0 {
-			body += fmt.Sprintf("\n+%d more", more)
-		}
-		n = notification{Title: title, Body: body, Quiet: quiet}
-	}
 	link := "/"
-	if b.cards {
+	if slices.ContainsFunc(b.keys, func(k string) bool { return b.cards[k] }) {
 		link = CardLink
-	}
-	payload, err := json.Marshal(message{notification: n, URL: link, Tag: b.tag})
-	if err != nil {
-		return nil, fmt.Errorf("push: encode a summary: %w", err)
 	}
 	urgency := urgencyNormal
 	if needs > 0 {
 		urgency = urgencyHigh
 	}
-	return &summary{payload: payload, topic: b.topic, urgency: urgency}, nil
+	// Lines that would not fit one push message go into the count of the
+	// rest.
+	for shownCount := min(len(lines), digestLines); ; shownCount-- {
+		n := notification{Body: clearedBody, Clear: true}
+		if needs > 0 || !ended {
+			title := fmt.Sprintf("%d things need you", len(lines))
+			if len(lines) == 1 {
+				title = "1 thing needs you"
+			}
+			if needs < len(lines) {
+				title = fmt.Sprintf("%d notifications", len(lines))
+			}
+			body := strings.Join(lines[:shownCount], "\n")
+			if more := len(lines) - shownCount; more > 0 {
+				body += fmt.Sprintf("\n+%d more", more)
+			}
+			n = notification{Title: title, Body: strings.TrimPrefix(body, "\n"), Quiet: quiet}
+		}
+		payload, err := json.Marshal(message{notification: n, URL: link, Tag: b.tag})
+		if err != nil {
+			return nil, fmt.Errorf("push: encode a summary: %w", err)
+		}
+		if len(payload) <= maxPayload || shownCount == 0 {
+			return &summary{payload: payload, topic: b.topic, urgency: urgency}, nil
+		}
+	}
 }
 
 // Summarizes reports whether a burst's summary that still shows a need
