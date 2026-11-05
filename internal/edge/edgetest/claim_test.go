@@ -128,16 +128,17 @@ func TestFailedClaimRecordRecovers(t *testing.T) {
 		t.Fatalf("members after the claim = %+v, %v; want alice as admin", members, err)
 	}
 	admin := members[0].ID
-	if _, err = edgeDB.Exec(`DROP TRIGGER fail_claim`); err != nil {
-		t.Fatal(err)
-	}
 
 	// The edge closed the control channel with its reason; the server's
-	// next enrollment is told it is unclaimed.
+	// next enrollment is told it is unclaimed. The claim returns before
+	// the edge reads the server's report, so the fault stays until then.
 	h.proxy.await(t, "the server back, unclaimed", from, func(e logEntry) bool {
 		r, ok := e.msg.(edgeproto.Ready)
 		return ok && r.ServerID == a.id && r.State == edgeproto.StateUnclaimed
 	})
+	if _, err = edgeDB.Exec(`DROP TRIGGER fail_claim`); err != nil {
+		t.Fatal(err)
+	}
 	eventually(t, "the server forgets the owner the edge never recorded", func() error {
 		owner, ownerErr := a.state().Owner()
 		if ownerErr == nil && owner != nil {
