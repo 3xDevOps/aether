@@ -160,7 +160,8 @@ object PushRegistration {
 
     fun endpointChanged(context: Context, endpoint: String, p256dh: String, auth: String) {
         context.storePush(StoredPush(endpoint, p256dh, auth, synced = false, error = context.storedPush().error, server = null))
-        sync(context)
+        // The answer an enable or a move waits for: it goes on to the server.
+        subscribe(context)
     }
 
     /**
@@ -170,7 +171,10 @@ object PushRegistration {
      * changed, it moves the registration instead.
      */
     fun sync(context: Context) {
-        if (pending) return
+        if (!pending) subscribe(context)
+    }
+
+    private fun subscribe(context: Context) {
         val stored = context.storedPush()
         val server = context.pushServer()
         if (stored.endpoint == null || stored.p256dh == null || stored.auth == null) return
@@ -179,6 +183,8 @@ object PushRegistration {
             return
         }
         if (stored.synced && stored.server == server) return
+        pending = true
+        changed()
         Thread {
                 val keys = JSONObject().put("p256dh", stored.p256dh).put("auth", stored.auth)
                 val error =
