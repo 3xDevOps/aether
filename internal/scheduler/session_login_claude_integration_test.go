@@ -5,6 +5,7 @@ package scheduler
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -56,7 +57,13 @@ func claudeCodeBinary(t *testing.T) string {
 	if err = os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.Get(claudeCodeURL)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, claudeCodeURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Skipf("download Claude Code %s: %v", claudeCodeVersion, err)
 	}

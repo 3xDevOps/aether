@@ -153,22 +153,28 @@ func (s *Scheduler) sessionLoginMounts(ctx context.Context, run *domain.Run, lau
 	return []runtime.Mount{{HostPath: file, ContainerPath: path.Join(home, rel), ReadOnly: true, CheckInode: true}}, nil
 }
 
-// writeLaunchSessionLogin writes a launch's first copy while the share
-// still holds, under the lock a revocation takes: the launch's admission
-// released it before a refresh that may have waited on the vendor.
+// writeLaunchSessionLogin writes a launch's first copy, then checks that
+// the share still holds and signs the copy out if not. The launch released
+// its admission lock before a refresh that may have waited on the vendor, and
+// it holds cache locks a terminal open takes after that lock, so it checks
+// after the write instead of locking around it: a revocation that committed
+// first is seen, and a later one is a revocation of a live session.
 func (s *Scheduler) writeLaunchSessionLogin(ctx context.Context, run domain.RunID, launcher, account domain.MemberID, agent string, login []byte, user string) (string, error) {
-	if f := s.usageFallbackSeam(); f != nil && f.AuthorizationMu != nil {
-		f.AuthorizationMu.Lock()
-		defer f.AuthorizationMu.Unlock()
+	file, err := s.writeSessionLogin(run, account, agent, login, user)
+	if err != nil {
+		return "", err
 	}
 	shared, err := s.cfg.Store.AccountSharedWith(ctx, account, launcher)
+	if err == nil && !shared {
+		err = fmt.Errorf("%s no longer shares their account with %s", account, launcher)
+	}
 	if err != nil {
+		if signOutErr := s.rewriteSessionLogin(run, account, agent, signedOutLogin); signOutErr != nil {
+			err = errors.Join(err, signOutErr)
+		}
 		return "", fmt.Errorf("scheduler: check %s's share: %w", account, err)
 	}
-	if !shared {
-		return "", fmt.Errorf("scheduler: %s no longer shares their account with %s", account, launcher)
-	}
-	return s.writeSessionLogin(run, account, agent, login, user)
+	return file, nil
 }
 
 // writeSessionLogin writes run's copy of the agent's login with one write
