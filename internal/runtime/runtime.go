@@ -73,6 +73,10 @@ type Mount struct {
 	// overlay whose writes land in Overlay/upper, so they never reach
 	// HostPath. Overlay is a directory the caller owns and removes.
 	Overlay string
+	// CheckInode makes every start of the container confirm, before its main
+	// process runs, that the container sees HostPath's own inode at
+	// ContainerPath, as it does for every Subpath mount.
+	CheckInode bool
 }
 
 // ContainerInfo is immutable metadata captured from a live or stopped

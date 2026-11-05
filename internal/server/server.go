@@ -130,6 +130,9 @@ type Config struct {
 	// HarnessUpdateDisabled stops pre-launch harness updates. The zero
 	// value keeps them on, which is the shipped default.
 	HarnessUpdateDisabled bool
+	// SessionLoginAccounts are the accounts whose claude and codex shares
+	// mount a session login copy instead of the owner's own login.
+	SessionLoginAccounts map[domain.MemberID]bool
 	// WhoIs overrides tailnet identity resolution; nil keeps the default
 	// (the local tailscaled socket when present). The E2E suite stubs it
 	// so join and fallback scenarios need no real tailnet.
@@ -434,6 +437,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		AssistantIssuer:      cfg.AssistantIssuer,
 
 		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,
+		SessionLoginAccounts:  cfg.SessionLoginAccounts,
 	}); err != nil {
 		return nil, err
 	}

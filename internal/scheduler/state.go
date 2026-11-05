@@ -435,6 +435,9 @@ type sidecar struct {
 	// LoginMember is the account owner whose login paths the container
 	// mounts, empty when it mounts none.
 	LoginMember string `json:"login_member,omitempty"`
+	// SessionLogin is the agent whose session login copy the container
+	// mounts instead of LoginMember's own login, empty when none.
+	SessionLogin string `json:"session_login,omitempty"`
 	// VerifiedLogins are the account owners whose own login the runtime
 	// confirmed in a container of this run.
 	VerifiedLogins      []domain.MemberID        `json:"verified_logins,omitempty"`
@@ -523,6 +526,7 @@ func (e *supervised) sidecar() sidecar {
 		RunUser:             e.runUser,
 		Home:                e.home,
 		LoginMember:         string(e.loginMember),
+		SessionLogin:        e.sessionLogin,
 		VerifiedLogins:      e.verifiedLogins,
 		Reporter:            e.reporter,
 		Egress:              e.egress,
@@ -688,6 +692,7 @@ func (s *Scheduler) removeSidecar(run domain.RunID) {
 	}
 	s.releaseCoordination(run)
 	s.removeScratch(string(run))
+	s.removeSessionLogin(run)
 }
 
 const stoppedByParentReason = "stopped by parent session "

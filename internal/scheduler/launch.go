@@ -537,6 +537,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 	s.mu.Lock()
 	entry.home = plan.Home
 	entry.loginMember = plan.LoginMember
+	entry.sessionLogin = plan.SessionLogin
 	s.mu.Unlock()
 	if reserveErr := s.reserveRunUser(ctx, entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return nil, reserveErr
