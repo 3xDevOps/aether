@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -301,8 +302,8 @@ func TestASummaryClaimsItsFirstPushsNotificationWhileItShowsANeed(t *testing.T) 
 	if !h.svc.Summarizes(h.ada.ID, "wat-1|needs_you") {
 		t.Fatal("a summary of two needs does not claim the first push's notification")
 	}
-	h.svc.unjoin(h.ctx, "run-a")
-	h.svc.unjoin(h.ctx, "run-b")
+	h.svc.unjoin(h.ctx, "run-a", "")
+	h.svc.unjoin(h.ctx, "run-b", "")
 	if h.svc.Summarizes(h.ada.ID, "wat-1|needs_you") {
 		t.Fatal("a summary with no need left still claims the notification")
 	}
@@ -316,7 +317,7 @@ func TestASummaryThatShrankToOneItemStaysASummary(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h.svc.unjoin(h.ctx, "run-a")
+	h.svc.unjoin(h.ctx, "run-a", "")
 	sum, err := h.svc.join(h.ada.ID, "run-b", "run-b", "topic-b", "Fix it", "Which region?", true)
 	if err != nil || sum == nil {
 		t.Fatalf("join = %v, %v; want the summary updated, not a second notification", sum, err)
@@ -338,5 +339,46 @@ func TestAResultQueuedAfterADashboardHoldKeepsItsTime(t *testing.T) {
 	}
 	if item := h.digestItems(h.ada)[0]; got.ReviewChangedAt == nil || !item.CreatedAt.Equal(got.ReviewChangedAt.UTC()) {
 		t.Fatalf("queued at %v, want when the session finished (%v)", item.CreatedAt, got.ReviewChangedAt)
+	}
+}
+
+func TestAHandoffKeepsTheNewOwnersSummary(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	for _, member := range []*domain.Member{h.ada, h.bob} {
+		for _, key := range []string{"run-a", "run-b"} {
+			if _, err := h.svc.join(member.ID, key, "run-a", "topic", "Fix it", "Blocked", true); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	h.svc.unjoin(h.ctx, "run-a", h.bob.ID)
+	if h.svc.Summarizes(h.bob.ID, "run-a") != true || !slices.Contains(h.svc.bursts[h.bob.ID][0].keys, "run-a") {
+		t.Fatal("the new owner's summary lost the run")
+	}
+	if slices.Contains(h.svc.bursts[h.ada.ID][0].keys, "run-a") {
+		t.Fatal("the former owner's summary still shows the run")
+	}
+}
+
+func TestAResultFromQuietHoursHeldByTheDashboardStaysOvernight(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.subscribe(h.ada)
+	now := h.clock.now().UTC()
+	if err := h.db.PutNotifyPrefs(h.ctx, h.ada.ID, store.NotifyPrefs{
+		Push: true, Level: protocol.NotifyBlockers, DigestAt: now.Add(-2 * time.Hour).Format("15:04"),
+		QuietStart: now.Add(-time.Hour).Format("15:04"), QuietEnd: now.Add(time.Hour).Format("15:04"), QuietTZ: "UTC",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.Active(h.ada.ID)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	h.finish(run)
+	// Quiet hours end while the dashboard still holds the result.
+	h.clock.advance(time.Hour + time.Minute)
+	h.eventuallyQueued(h.ada, 1)
+	if item := h.digestItems(h.ada)[0]; !item.Overnight {
+		t.Fatalf("item = %+v, want it held for the digest quiet hours end with, not tomorrow's", *item)
 	}
 }

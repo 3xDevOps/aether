@@ -74,6 +74,10 @@ type Config struct {
 	Client *http.Client
 	// Quiet overrides DefaultQuiet.
 	Quiet time.Duration
+	// Recovered closes once the scheduler has reconciled the runs a restart
+	// found; digests wait for it, since a session not yet recovered reads
+	// as needing nothing. Nil starts them at once.
+	Recovered <-chan struct{}
 	// Now replaces time.Now when the quiet period, levels, digests and
 	// bursts read it, for tests. The waits stay on real timers, which
 	// re-read Now when they fire, so a clock that jumps does not wake a
@@ -119,6 +123,8 @@ type Service struct {
 	now     func() time.Time
 	sink    Sink
 	sources map[string]DigestSource
+	// recovered is Config.Recovered.
+	recovered <-chan struct{}
 	// started is when Start ran. A run standing in a need it entered before
 	// then was announced, if at all, by the server before this one.
 	started time.Time
@@ -192,12 +198,14 @@ func New(cfg Config) (*Service, error) {
 		client:  cfg.Client,
 		quiet:   cfg.Quiet,
 		now:     cfg.Now,
-		sink:    noSink{},
-		sources: map[string]DigestSource{},
-		active:  map[domain.MemberID]time.Time{},
-		watched: map[domain.RunID]chan struct{}{},
-		notices: map[budgetKey]chan budgetDue{},
-		bursts:  map[domain.MemberID][]*burst{},
+
+		recovered: cfg.Recovered,
+		sink:      noSink{},
+		sources:   map[string]DigestSource{},
+		active:    map[domain.MemberID]time.Time{},
+		watched:   map[domain.RunID]chan struct{}{},
+		notices:   map[budgetKey]chan budgetDue{},
+		bursts:    map[domain.MemberID][]*burst{},
 
 		digestRetry:    map[domain.MemberID]time.Time{},
 		digestAttempts: map[domain.MemberID]int{},
@@ -319,7 +327,7 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			// A summary is updated only once this need's own clear went
 			// out, so a clear retried later never lands over it.
 			if devicesErr == nil {
-				s.unjoin(ctx, string(id))
+				s.unjoin(ctx, string(id), "")
 			}
 			if err = s.sink.Clear(ctx, id); err != nil {
 				slog.Warn("push: the sink did not clear a need; trying again later", "run", id, "in", retry, "error", err)
@@ -359,7 +367,7 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			}
 			// A former owner's summary no longer shows the run's need.
 			if handedOff {
-				s.unjoin(ctx, string(id))
+				s.unjoin(ctx, string(id), n.member)
 			}
 			// Clearing can take a while: announce what the run needs then.
 			if moved && err == nil {
@@ -519,14 +527,20 @@ func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
 	kind := needKind(run, n)
 	if kind != KindNeed {
 		// The run stopped asking: a question it had in a summary goes.
-		s.unjoin(ctx, string(run.ID))
+		s.unjoin(ctx, string(run.ID), "")
 	}
 	prefs, err := s.store.GetNotifyPrefs(ctx, n.member)
 	if err != nil {
 		slog.Warn("push: read notification settings; pushing at once", "member", n.member, "error", err)
 		prefs.Level = protocol.NotifyAll
 	}
-	if route := RouteOf(prefs, kind, s.now()); route != RouteNow {
+	// Routed as of when the need began: one that began in quiet hours is
+	// theirs, though the member's dashboard held it past their end.
+	at := s.now()
+	if !n.since.IsZero() && n.since.Before(at) {
+		at = n.since
+	}
+	if route := RouteOf(prefs, kind, at); route != RouteNow {
 		if err = s.queueNeed(ctx, run, n, kind, route == RouteOvernight); err == nil {
 			return true
 		}

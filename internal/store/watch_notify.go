@@ -130,6 +130,28 @@ func (d *DB) SetWatchPush(ctx context.Context, id, state string, attempts int, n
 	return nil
 }
 
+func (d *DB) QueueWatchDigest(ctx context.Context, id string, del WatchDelivery, item *DigestItem) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: queue watch digest: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if err := notFoundOnZeroRows(tx.ExecContext(ctx,
+		`UPDATE watch_notifications SET push_state = 'none', push_next_at = NULL WHERE id = ?`, id)); err != nil {
+		return fmt.Errorf("store: queue watch digest %s: %w", id, err)
+	}
+	if err := setWatchDelivery(ctx, tx, id, del); err != nil {
+		return err
+	}
+	if err := addDigestItem(ctx, tx, item); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: queue watch digest: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) WithdrawWatchNeeds(ctx context.Context, watch string, now time.Time) (int64, error) {
 	at, err := encodeTime(now)
 	if err != nil {

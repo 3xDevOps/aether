@@ -69,7 +69,6 @@ type Pusher interface {
 	Deliver(ctx context.Context, member domain.MemberID, m push.Message) ([]push.DeviceResult, error)
 	Push(ctx context.Context, member domain.MemberID, m push.Message, need bool) ([]push.DeviceResult, bool, error)
 	Summarizes(member domain.MemberID, topic string) bool
-	Queue(ctx context.Context, item *store.DigestItem) error
 	Devices(ctx context.Context, member domain.MemberID) (int, error)
 	HeldUntil(member domain.MemberID) time.Time
 }

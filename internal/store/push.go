@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -110,11 +111,17 @@ func (d *DB) DeletePushSubscription(ctx context.Context, member domain.MemberID,
 }
 
 func (d *DB) AddDigestItem(ctx context.Context, item *DigestItem) error {
+	return addDigestItem(ctx, d.db, item)
+}
+
+func addDigestItem(ctx context.Context, db interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}, item *DigestItem) error {
 	at, err := encodeTime(item.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("store: add digest item: %w", err)
 	}
-	_, err = d.db.ExecContext(ctx,
+	_, err = db.ExecContext(ctx,
 		`INSERT INTO push_digest (member_id, source, key, kind, workspace, title, body, url, run_id, overnight, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (member_id, source, key) DO UPDATE SET overnight = max(overnight, excluded.overnight)`,

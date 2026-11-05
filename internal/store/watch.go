@@ -159,6 +159,10 @@ type WatchStore interface {
 	// SetWatchPush records a notification's push state and, when d is not
 	// nil, replaces its delivery row on d's channel.
 	SetWatchPush(ctx context.Context, id, state string, attempts int, next *time.Time, d *WatchDelivery) error
+	// QueueWatchDigest hands notification id's push to its member's
+	// digest: item is queued and the push row replaced by d, in one
+	// transaction, so a stop between them loses neither.
+	QueueWatchDigest(ctx context.Context, id string, d WatchDelivery, item *DigestItem) error
 	// WithdrawWatchNeeds makes watch's needs_you notices whose push was
 	// delivered due at now to be withdrawn, and counts them.
 	WithdrawWatchNeeds(ctx context.Context, watch string, now time.Time) (int64, error)

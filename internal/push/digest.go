@@ -140,6 +140,13 @@ func plain(s string) string {
 }
 
 func (s *Service) digests(ctx context.Context) {
+	if s.recovered != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.recovered:
+		}
+	}
 	tick := time.NewTicker(digestTick)
 	defer tick.Stop()
 	for {
