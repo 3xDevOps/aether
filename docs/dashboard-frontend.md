@@ -512,7 +512,8 @@ review group, newest change first. A session only the dashboard's copy of the
 rule puts in Needs you stays listed, last, and is not counted.
 
 A phone that opens the dashboard with no `run` or `page` in the address lands
-on Needs you (`initialRoute` in `src/lib/url-state.ts`), or on onboarding on a
+on Needs you (`initialRoute` in `src/lib/url-state.ts`; Back to such an
+address does too), or on onboarding on a
 first visit, as the board does on desktop. Every other link still opens its
 own page. The board is in More, and on a phone its address carries
 `page=board`, so a reload stays on it. A gateway without `attention.list`,

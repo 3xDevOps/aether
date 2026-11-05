@@ -1,6 +1,7 @@
 import { act } from '@testing-library/react'
 import { bindRouteToUrl, historyDepth, hrefFor, redirectRoute, routeFromQuery, routeQuery, sessionEntry } from '@/lib/url-state'
 import { createRootStore } from '@/store'
+import { atViewport } from '@/test/viewport'
 import type { Route } from '@/store/ui'
 
 const query = (route: Route) => routeQuery(route).toString()
@@ -42,6 +43,21 @@ describe('route in the query string', () => {
 })
 
 describe('bindRouteToUrl', () => {
+  it('reads a phone\'s bare address as Needs you when Back returns to it, as on load', () => {
+    atViewport(390, { pointer: 'coarse' })
+    window.history.replaceState(null, '', '/')
+    const store = createRootStore()
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+    window.history.replaceState(null, '', '/')
+
+    act(() => store.getState().navigate('run', { runId: 'run_1' }))
+    act(() => {
+      window.history.back()
+    })
+    return vi.waitFor(() => expect(store.getState().route).toEqual({ name: 'needs-you', params: {} }))
+  })
+
   it('remembers where a session was opened across its own entries, for a phone\'s Back', () => {
     const store = createRootStore()
     store.setState({ route: { name: 'needs-you', params: {} } })

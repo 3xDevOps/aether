@@ -61,12 +61,16 @@ export function hrefFor(href: string, route: Route): string {
   return url.toString()
 }
 
+/** The route an address names here: a phone's empty address is Needs you, whether it loads or Back returns to it; the board stays one link away. */
+function addressedRoute(query: URLSearchParams): Route {
+  const route = routeFromQuery(query)
+  return route === boardRoute && window.matchMedia?.(mobileScreen).matches ? { name: 'needs-you', params: {} } : route
+}
+
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
   if (handedLink()) return { name: 'onboarding', params: {} }
-  const route = routeFromQuery(new URLSearchParams(window.location.search))
-  // A phone lands on Needs you; the board stays one link away.
-  if (route === boardRoute && window.matchMedia?.(mobileScreen).matches) return { name: 'needs-you', params: {} }
+  const route = addressedRoute(new URLSearchParams(window.location.search))
   const hash = window.location.hash.slice(1)
   if (route.name !== 'settings' || route.params.section || !hash) return route
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
@@ -193,7 +197,7 @@ export function bindRouteToUrl(store: RouteStore): () => void {
     if (state.route !== previous.route) sync(state.route, previous.route)
   })
   const pop = () => {
-    const route = routeFromQuery(new URLSearchParams(window.location.search))
+    const route = addressedRoute(new URLSearchParams(window.location.search))
     store.getState().navigate(route.name, route.params)
   }
   window.addEventListener('popstate', pop)
