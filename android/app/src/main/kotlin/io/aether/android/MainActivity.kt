@@ -108,6 +108,14 @@ class MainActivity : ComponentActivity() {
     private var rendererLost = false
 
     /**
+     * Whether the window's document finished loading with no error for it,
+     * which a notification may route inside; an error page on the
+     * dashboard's origin is not the dashboard.
+     */
+    private var pageLoaded = false
+    private var pageFailed = false
+
+    /**
      * Set when the shell ends a renderer that stopped responding. Written on
      * [rendererWatch], read where the renderer's loss is handled.
      */
@@ -487,6 +495,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    pageLoaded = false
+                    pageFailed = false
                     connection.visibility = View.GONE
                     // A gateway restart or a link can load the dashboard
                     // under the gate; it stays blank until the gate clears.
@@ -510,6 +520,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
+                    pageLoaded = !pageFailed
                     // A refusal on the dashboard's WebSocket never reaches
                     // onReceivedHttpError, so every gateway page asks too.
                     gatewayUrl?.let { if (url.startsWith(it.substringBefore("?"))) gate?.check(it) }
@@ -536,7 +547,9 @@ class MainActivity : ComponentActivity() {
                     // what actually failed. This only adds the way back to
                     // the address that failed. An HTTP status is not this
                     // case: the server answered, so the address is right.
-                    if (request.isForMainFrame) connection.visibility = View.VISIBLE
+                    if (!request.isForMainFrame) return
+                    pageFailed = true
+                    connection.visibility = View.VISIBLE
                 }
 
                 // webgate answers -32005 with HTTP 426 on any call from a
@@ -546,6 +559,7 @@ class MainActivity : ComponentActivity() {
                     request: WebResourceRequest,
                     errorResponse: WebResourceResponse,
                 ) {
+                    if (request.isForMainFrame) pageFailed = true
                     // The first refusal asks past the gateway's release cache,
                     // which can predate the release the server now needs.
                     // With the gate up its own checks take over.
@@ -558,6 +572,7 @@ class MainActivity : ComponentActivity() {
                 // Android reclaims the renderer of an app in the background,
                 // as while the member signs in to Edge in the browser.
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    pageLoaded = false
                     // The page's file input dies with it.
                     fileChooser?.onReceiveValue(null)
                     fileChooser = null
@@ -894,7 +909,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun routeInPage(dashboard: String, path: String): Boolean {
         val current = web.url ?: return false
-        if (rendererLost || gatewayError.visibility == View.VISIBLE) return false
+        if (!pageLoaded || rendererLost || gatewayError.visibility == View.VISIBLE) return false
         if (runCatching { originOf(current) != originOf(dashboard) }.getOrDefault(true)) return false
         val script = openPathScript(current, path) ?: return false
         web.evaluateJavascript(script, null)

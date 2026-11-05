@@ -395,7 +395,10 @@ where the identity is the CLI the app runs only while it is open, a card's
 notification only opens it. While it runs the notification reads
 `Declining…` with no buttons; then `Declined` with the card's text, or
 `Couldn't decline` with the server's own error, which alerts and opens the
-card. When a session stops needing you, its notification goes away; a card
+card. Tapping a notification while the dashboard is open opens its page in
+place, keeping unsent drafts; a card opens over the page you are on, so Back
+still returns where it did. When a session stops needing you, its
+notification goes away; a card
 decided or withdrawn elsewhere is replaced, silently, by how it ended, such as
 `Approved: <summary>`.
 
