@@ -636,7 +636,17 @@ exit 1
     $oldShellDir = Join-Path $root 'old-shell'
     New-Item -ItemType Directory -Path $oldShellDir -Force | Out-Null
     $oldShellZip = Join-Path $oldShellDir "aether-desktop-windows-$Arch.zip"
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$OldShellTag/aether-desktop-windows-$Arch.zip" -OutFile $oldShellZip
+    # GitHub's release downloads answer 5xx now and then.
+    for ($try = 1; ; $try++) {
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$OldShellTag/aether-desktop-windows-$Arch.zip" -OutFile $oldShellZip
+            break
+        } catch {
+            if ($try -eq 3) { throw }
+            Write-Host "downloading the $OldShellTag shell failed (try $try of 3): $($_.Exception.Message)"
+            Start-Sleep -Seconds (30 * $try)
+        }
+    }
     $installed = New-Sandbox 'oldshell'
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
     $appDir = Split-Path -Parent $desktop
