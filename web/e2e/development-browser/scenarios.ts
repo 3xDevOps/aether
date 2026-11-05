@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import { expect } from '../fixtures'
 import type { DevBrowserActionResult, DevBrowserSnapshotResult, DevControlAcquireResult } from '../../src/lib/types'
-import { addressBar, appAddress, browserAction, chooseViewport, clickRemote, expectLive, remotePage, remotePoint, typeRemote, type BrowserFixture } from './fixture'
+import { addressBar, appAddress, browserAction, chooseViewport, clickRemote, expectLive, remotePage, remotePoint, showBrowser, typeRemote, type BrowserFixture } from './fixture'
 
 const driving = (page: Page) => page.getByRole('img', { name: 'You are driving', exact: true })
 
@@ -52,7 +52,7 @@ export async function signInAndHotUpdate(page: Page, fixture: BrowserFixture, ph
 
   // Leaving the view gives the lease up; coming back needs no button to take it again.
   await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
-  await page.getByRole('tab', { name: 'Browser', exact: true }).click()
+  await showBrowser(page)
   await expectLive(page)
   await fixture.waitText('Signed in as test@example.invalid')
   const returned = await fixture.currentPage()

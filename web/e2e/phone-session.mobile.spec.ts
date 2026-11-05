@@ -88,6 +88,8 @@ test('a link to a view wins on a phone, and Back returns to Needs you', async ({
   await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong').first()).toBeVisible({ timeout: 180_000 })
   await page.getByRole('combobox', { name: 'Message the agent' }).fill('ask permission')
   await page.getByRole('button', { name: 'Send', exact: true }).tap()
+  // Leaving before the agent asks would drop the prompt with the page.
+  await expect(page.getByText('Answer the request above to continue.')).toBeVisible({ timeout: 60_000 })
 
   await page.goto(alice.url)
   const card = page.getByRole('list', { name: 'Needs you' }).getByRole('group').filter({ hasText: 'Permission requested' })

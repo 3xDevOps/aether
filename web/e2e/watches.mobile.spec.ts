@@ -23,7 +23,7 @@ test('a phone creates, pauses, resumes and deletes a watch, and sees its notice 
 
   await page.goto(`${alice.url}&run=${run.id}`)
   await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('toolbar', { name: 'Session actions' }).getByRole('button', { name: 'More', exact: true }).tap()
+  await page.getByRole('button', { name: 'More', exact: true }).tap()
   await page.getByRole('menuitem', { name: 'Watch…' }).tap()
   const form = page.getByRole('dialog', { name: /^Watch / })
   await form.getByRole('button', { name: 'Watch', exact: true }).tap()

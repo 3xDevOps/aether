@@ -218,8 +218,10 @@ done`)
         await expect(rows.filter({ hasText: 'PHONE-ALTERNATE' })).toHaveCount(1)
       }
       await expect.poll(promptVisible).toBe(true)
+      // The 40px drag below must be able to move the grid more than 20px back; how far the
+      // grid is scrolled to show the prompt depends on how much height the session's chrome leaves.
       const before = await host.evaluate((element) => element.scrollTop)
-      expect(before).toBeGreaterThan(40)
+      expect(before).toBeGreaterThan(20)
       await drag(40)
       await expect.poll(() => host.evaluate((element) => element.scrollTop)).toBeLessThan(before - 20)
       await expect(page.getByLabel('Terminal scrollback', { exact: true })).toBeHidden()
