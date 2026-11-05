@@ -127,7 +127,7 @@ func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 
 	first := view("run-a", t0)
 	m.holdView(first, viewFromNavigation, t0)
-	if err := s.Prompt(ctx, "m1", "fix this", "k0", view("run-b", t0.Add(2*time.Second)), Door("")); err == nil || !strings.Contains(err.Error(), "agent list unavailable") {
+	if err := promptErr(s.Prompt(ctx, "m1", "fix this", "k0", view("run-b", t0.Add(2*time.Second)), Door(""))); err == nil || !strings.Contains(err.Error(), "agent list unavailable") {
 		t.Fatalf("Prompt = %v, want the failed session start", err)
 	}
 	if got := held(t0); got.ViewContext != first || got.Source != viewFromNavigation {
@@ -158,16 +158,16 @@ func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 	m.mu.Unlock()
 
 	prompt := view("run-b", t0.Add(2*time.Second))
-	if err := s.Prompt(ctx, "m1", "fix this", "k1", prompt, Door("")); err != nil {
+	if err := promptErr(s.Prompt(ctx, "m1", "fix this", "k1", prompt, Door(""))); err != nil {
 		t.Fatal(err)
 	}
 	sent := time.Now()
-	if got := held(sent); got.ViewContext != prompt || got.Source != viewFromPrompt {
+	if got := held(sent); got.ViewContext == nil || got.ViewContext.Route.RunID != "run-b" || got.Source != viewFromPrompt {
 		t.Fatalf("held after the prompt = %+v, want the prompt's view", got)
 	}
 
 	m.holdView(view("run-a", t0.Add(time.Second)), viewFromNavigation, sent.Add(time.Second))
-	if got := held(sent); got.ViewContext != prompt {
+	if got := held(sent); got.ViewContext.Route.RunID != "run-b" {
 		t.Fatalf("held after an update captured before the prompt = %+v, want the prompt's view", got.ViewContext.Route)
 	}
 
@@ -183,7 +183,7 @@ func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 		t.Fatalf("held after a slow device's update past the race = %+v, want it", got.ViewContext.Route)
 	}
 
-	if err := s.Prompt(ctx, "m1", "fix this", "k1", view("run-old", t0), Door("")); err != nil {
+	if err := promptErr(s.Prompt(ctx, "m1", "fix this", "k1", view("run-old", t0), Door(""))); err != nil {
 		t.Fatalf("a prompt sent before = %v, want it skipped", err)
 	}
 	if got := held(sent); got.ViewContext != slow {

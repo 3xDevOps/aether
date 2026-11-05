@@ -95,6 +95,10 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodRunHandoff:        scopeControl,
 }
 
+// ConnectorScopes are the scopes, any one of which lets a connector call
+// method; none for a method no connector may call.
+func ConnectorScopes(method string) []string { return slices.Clone(connectorMethodScopes[method]) }
+
 // connectorScopeRefusal refuses method to a connector call whose grant
 // lacks the method's scope, and every unlisted method to any connector.
 // Other callers pass.

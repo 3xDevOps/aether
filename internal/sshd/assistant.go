@@ -21,7 +21,8 @@ import (
 type AssistantService interface {
 	Status(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	Start(ctx context.Context, member domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error)
-	Prompt(ctx context.Context, member domain.MemberID, text, idempotencyKey string, view *protocol.AssistantViewContext, origin assistant.Origin) error
+	Prompt(ctx context.Context, member domain.MemberID, text, idempotencyKey string, view *protocol.AssistantViewContext, origin assistant.Origin) (assistant.Entry, error)
+	RemoveQueued(ctx context.Context, member domain.MemberID, entryID string) error
 	SetView(ctx context.Context, member domain.MemberID, view *protocol.AssistantViewContext) error
 	Cancel(ctx context.Context, member domain.MemberID) error
 	Answer(member domain.MemberID, requestID, optionID string, values map[string]any) error
@@ -59,6 +60,7 @@ func init() {
 	registerMethod(protocol.MethodAssistantRules, (*Server).assistantRules)
 	registerMethod(protocol.MethodAssistantRuleRevoke, (*Server).assistantRuleRevoke)
 	registerMethod(protocol.MethodAssistantAccount, (*Server).assistantAccount)
+	registerMethod(protocol.MethodAssistantQueueRemove, (*Server).assistantQueueRemove)
 }
 
 var errAssistantUnavailable = &protocol.Error{Code: protocol.CodeUnavailable, Message: "the assistant is not configured on this server"}
@@ -123,7 +125,28 @@ func (s *Server) assistantPrompt(ctx context.Context, member domain.MemberID, ra
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	if err := svc.Prompt(ctx, member, p.Text, p.IdempotencyKey, view, assistant.Door(protocol.AssistantDoorDashboard)); err != nil {
+	entry, err := svc.Prompt(ctx, member, p.Text, p.IdempotencyKey, view, assistant.Door(p.Door))
+	if err != nil {
+		return nil, assistantError(err)
+	}
+	return protocol.AssistantPromptResult{Entry: entry.AssistantQueueEntry}, nil
+}
+
+// assistantQueueRemove removes one of the caller's own queued prompts. No
+// connector may call it, and the assistant's tool socket does not serve it.
+func (s *Server) assistantQueueRemove(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil, errAssistantUnavailable
+	}
+	p, perr := decodeParams[protocol.AssistantQueueRemoveParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.EntryID == "" {
+		return nil, invalidParams("entry_id is required")
+	}
+	if err := svc.RemoveQueued(ctx, member, p.EntryID); err != nil {
 		return nil, assistantError(err)
 	}
 	return struct{}{}, nil
@@ -382,11 +405,11 @@ func assistantError(err error) *protocol.Error {
 	switch {
 	case errors.As(err, &notReady):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
-	case errors.Is(err, assistant.ErrNoConfirmation), errors.Is(err, assistant.ErrNoSuchRule):
+	case errors.Is(err, assistant.ErrNoConfirmation), errors.Is(err, assistant.ErrNoSuchRule), errors.Is(err, assistant.ErrNoEntry):
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: err.Error()}
 	case errors.Is(err, assistant.ErrNoRule):
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
-	case errors.Is(err, assistant.ErrTurnRunning):
+	case errors.Is(err, assistant.ErrTurnRunning), errors.Is(err, assistant.ErrQueueFull):
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	case errors.Is(err, assistant.ErrNotRunning), errors.Is(err, assistant.ErrNoAgent), errors.Is(err, assistant.ErrClosed), errors.Is(err, assistant.ErrRemoving):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}

@@ -2511,6 +2511,31 @@ CREATE TABLE assistant_cards (
 CREATE INDEX idx_assistant_cards_member ON assistant_cards(member_id, created_at);
 CREATE INDEX idx_assistant_cards_open ON assistant_cards(state) WHERE state IN ('pending', 'approved', 'running');
 `,
+	// v105: each member's assistant prompt queue, in seq order. A key names
+	// one entry per conversation; one that failed before it was sent frees
+	// it.
+	`
+CREATE TABLE assistant_queue (
+	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+	id         TEXT NOT NULL UNIQUE,
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	generation INTEGER NOT NULL,
+	key        TEXT NOT NULL,
+	text       TEXT NOT NULL,
+	view       TEXT NOT NULL,
+	origin     TEXT NOT NULL,
+	state      TEXT NOT NULL,
+	error      TEXT NOT NULL DEFAULT '',
+	reply      TEXT NOT NULL DEFAULT '',
+	message_id TEXT NOT NULL DEFAULT '',
+	cards      TEXT NOT NULL DEFAULT '',
+	sent       INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_assistant_queue_key ON assistant_queue(member_id, generation, key) WHERE state <> 'failed' OR sent = 1;
+CREATE INDEX idx_assistant_queue_member ON assistant_queue(member_id, state, seq);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

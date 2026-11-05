@@ -662,8 +662,9 @@ export const api = {
   attentionList: () => call<{ items: AttentionItem[] }>('attention.list', {}),
   assistantStatus: () => call<AssistantStatus>('assistant.status', {}),
   assistantStart: (params: AssistantStartParams = {}) => call<AssistantStatus>('assistant.start', params),
-  assistantPrompt: (text: string, idempotencyKey: string, viewContext?: ViewContext, signal?: AbortSignal) =>
-    call<unknown>('assistant.prompt', { text, idempotency_key: idempotencyKey, ...(viewContext ? { view_context: viewContext } : {}) }, signal),
+  assistantPrompt: (text: string, idempotencyKey: string, viewContext?: ViewContext, door?: 'phone' | 'desktop', signal?: AbortSignal) =>
+    call<unknown>('assistant.prompt', { text, idempotency_key: idempotencyKey, ...(viewContext ? { view_context: viewContext } : {}), ...(door ? { door } : {}) }, signal),
+  assistantQueueRemove: (entryID: string) => call<unknown>('assistant.queue.remove', { entry_id: entryID }),
   /** Replaces the member's latest view context. */
   assistantView: (viewContext: ViewContext) => call<unknown>('assistant.view', { view_context: viewContext }),
   assistantCancel: (signal?: AbortSignal) => call<unknown>('assistant.cancel', {}, signal),

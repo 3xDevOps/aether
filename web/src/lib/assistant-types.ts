@@ -51,6 +51,20 @@ export interface AssistantConfirmation {
   origin?: AssistantOrigin
 }
 
+/** One prompt of the member's queue; its id names the turn it runs. */
+export interface AssistantQueueEntry {
+  id: string
+  state: 'queued' | 'running' | 'done' | 'failed' | 'interrupted' | 'removed'
+  text: string
+  origin: AssistantOrigin
+  error?: string
+  /** The prompt's message in the transcript, once its turn ended. */
+  message_id?: string
+  created_at: string
+  /** When the entry last changed, such as when it failed. */
+  updated_at?: string
+}
+
 /** Where a turn's prompt came from, stamped by the server. */
 export interface AssistantOrigin {
   door: 'dashboard' | 'phone' | 'desktop' | 'connector'
@@ -117,6 +131,8 @@ export interface AssistantStatus {
   agents: AssistantAgent[]
   error?: string
   confirmations: AssistantConfirmation[]
+  /** The conversation's prompts: waiting and running, then the latest that ended. Absent from a server without the queue. */
+  queue?: AssistantQueueEntry[]
   /** Confirmed tools run without a card, as if approved. */
   auto_approve: boolean
   /** The member approved enough cards by hand that the panel may suggest auto-approval. */

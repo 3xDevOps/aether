@@ -582,6 +582,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     assistantApproveAlways: vi.fn(async () => needsOverride('assistantApproveAlways')),
     assistantRules: vi.fn(async () => []),
     assistantRuleRevoke: vi.fn(async () => needsOverride('assistantRuleRevoke')),
+    assistantQueueRemove: vi.fn(async () => needsOverride('assistantQueueRemove')),
     assistantItem: vi.fn(async () => needsOverride('assistantItem')),
     assistantReset: vi.fn(async () => needsOverride('assistantReset')),
     assistantSettings: vi.fn(async () => ({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true })),

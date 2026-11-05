@@ -34,6 +34,9 @@ const (
 	// MethodAssistantAccount compares an agent's assistant sign-in with the
 	// login in the caller's environment.
 	MethodAssistantAccount = "assistant.account"
+	// MethodAssistantQueueRemove removes one of the caller's queued prompts.
+	// The assistant's tool socket does not serve it.
+	MethodAssistantQueueRemove = "assistant.queue.remove"
 )
 
 const (
@@ -216,8 +219,11 @@ type AssistantStatus struct {
 	Agents        []AssistantAgent        `json:"agents"`
 	Error         string                  `json:"error,omitempty"`
 	Confirmations []AssistantConfirmation `json:"confirmations"`
-	AutoApprove   bool                    `json:"auto_approve"`
-	ShareView     bool                    `json:"share_view"`
+	// Queue is the current conversation's prompts: those waiting and
+	// running, then the latest 50 that ended.
+	Queue       []AssistantQueueEntry `json:"queue"`
+	AutoApprove bool                  `json:"auto_approve"`
+	ShareView   bool                  `json:"share_view"`
 	// PreferencesEnabled lets the assistant read and save the member's
 	// preferences; Temporary keeps this conversation from using them.
 	PreferencesEnabled bool `json:"preferences_enabled"`
@@ -273,6 +279,45 @@ type AssistantPromptParams struct {
 	Text           string                `json:"text"`
 	IdempotencyKey string                `json:"idempotency_key"`
 	ViewContext    *AssistantViewContext `json:"view_context,omitempty"`
+	// Door is the Aether client's name for itself, AssistantDoorPhone or
+	// AssistantDoorDesktop, shown on the prompt; anything else is the
+	// dashboard. It decides nothing.
+	Door string `json:"door,omitempty"`
+}
+
+// AssistantPromptResult is the queue entry a prompt became.
+type AssistantPromptResult struct {
+	Entry AssistantQueueEntry `json:"entry"`
+}
+
+type AssistantQueueRemoveParams struct {
+	EntryID string `json:"entry_id"`
+}
+
+// States of an assistant queue entry. Interrupted is a turn the server
+// lost to a restart; it is not run again.
+const (
+	AssistantQueueQueued      = "queued"
+	AssistantQueueRunning     = "running"
+	AssistantQueueDone        = "done"
+	AssistantQueueFailed      = "failed"
+	AssistantQueueInterrupted = "interrupted"
+	AssistantQueueRemoved     = "removed"
+)
+
+// AssistantQueueEntry is one prompt in a member's assistant queue; its id
+// names the turn it runs.
+type AssistantQueueEntry struct {
+	ID     string          `json:"id"`
+	State  string          `json:"state"`
+	Text   string          `json:"text"`
+	Origin AssistantOrigin `json:"origin"`
+	Error  string          `json:"error,omitempty"`
+	// MessageID is the id of the prompt's message in the transcript once its
+	// turn ended.
+	MessageID string    `json:"message_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type AssistantViewParams struct {

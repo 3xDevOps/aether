@@ -423,8 +423,10 @@ permissions, and it uses the account you signed it in to.
   to the profile endpoint. It is information only and gates nothing.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a session and saving your environment wait for you to
-  approve a card. An unanswered card expires after 10 minutes. Only your own
-  Aether devices decide a card
+  approve a card. An unanswered card expires after 10 minutes, or 24 hours
+  when a connector turn raised it. In a connector turn, auto-approval never
+  passes a call the connector's scopes do not cover. Only your own Aether
+  devices decide a card
   (`assistant.confirm`), never the assistant's tool socket. A card approved
   after its turn ended runs on the server as you, at most once, and only if it
   still reads as the card you approved.

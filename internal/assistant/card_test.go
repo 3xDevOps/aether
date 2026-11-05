@@ -476,3 +476,13 @@ func TestARefusedPullRequestMergeIsRecordedFailed(t *testing.T) {
 		t.Fatalf("a launch's result read as refused: %q", got)
 	}
 }
+
+func TestCardFullTextShowsEveryFieldWhole(t *testing.T) {
+	task := "Fix the flaky login test\n" + strings.Repeat("and then some ", 20)
+	params, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: task})
+	c := Card{AssistantConfirmation: protocol.AssistantConfirmation{Summary: `Launch claude (default mode) in api: "Fix the flaky login test…"`, Params: params}}
+	want := c.Summary + "\nharness: claude\ntask: " + task + "\nworkspace_id: ws-1"
+	if got := c.FullText(); got != want {
+		t.Fatalf("full text = %q, want %q", got, want)
+	}
+}
