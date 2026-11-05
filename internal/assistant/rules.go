@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -165,6 +166,9 @@ func callAs[T any](ctx context.Context, s *Service, m *member, method string, pa
 	return out, nil
 }
 
+// modeNames are the launch modes as the dashboard's launch card names them.
+var modeNames = map[string]string{"acp": "Enhanced", "tui": "Standard", "headless": "Background"}
+
 // ruleWording is the server's sentence for what a rule with key covers,
 // which the card's button and the rules list show.
 func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.AssistantRuleKey) (string, error) {
@@ -185,7 +189,7 @@ func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.Assis
 	if p, ok := harness.Lookup(key.Agent); ok && p.DisplayName != "" {
 		agent = p.DisplayName
 	}
-	how := []string{cmp.Or(key.Mode, "default mode")}
+	how := []string{cmp.Or(modeNames[key.Mode], key.Mode, "default mode")}
 	if key.Model != "" {
 		how = append(how, fmt.Sprintf("model %q", key.Model))
 	}
@@ -201,13 +205,13 @@ func (s *Service) ruleWording(ctx context.Context, m *member, key protocol.Assis
 		if owner == "" {
 			return "", fmt.Errorf("account %s is not shared with you", key.AccountMemberID)
 		}
-		account = owner + "'s account"
+		account = tools.AccountOf(owner)
 	}
 	wording := fmt.Sprintf("Always approve launches of %s (%s) in %s on %s, permission %s", agent, strings.Join(how, ", "), ws.Workspace.Name, account, key.Permission)
 	if key.NoFallback {
 		wording += ", no fallback"
 	}
-	return wording, nil
+	return wording + ", for any task", nil
 }
 
 // sharedAccount names the owner of account when the member may launch on

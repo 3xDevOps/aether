@@ -3,6 +3,7 @@ package push
 import (
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,10 +72,25 @@ func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 	// A warning still waiting out the quiet period when the cap is reached
 	// gives way to it.
 	budget(30, 25)
+	states, err := h.bus.Subscribe(h.ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeBudget}}})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	h.clock.freeze()
 	h.svc.Active(h.ada.ID)
 	h.svc.Active(carol.ID)
 	spend(26)
 	spend(31)
+	for reached := false; !reached; {
+		select {
+		case e := <-states.Events():
+			reached = e.Payload.(events.BudgetPayload).State == events.BudgetExceeded
+		case <-time.After(10 * time.Second):
+			t.Fatal("the cost service did not publish the cap reached")
+		}
+	}
+	_ = states.Close()
+	h.clock.resume(testQuiet)
 	expect("Budget reached: $31.00 of $30.00 spent, new sessions are refused", urgencyHigh)
 
 	// A warning raised again before it went out goes out once.
@@ -97,6 +113,37 @@ func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 	spend(37)
 	adas.expectNone(t, testQuiet)
 	bobs.expectNone(t, testQuiet)
+}
+
+// clock is the time the service reads; frozen, the quiet period never ends.
+type clock struct {
+	mu     sync.Mutex
+	frozen time.Time
+	skew   time.Duration
+}
+
+func (c *clock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.frozen.IsZero() {
+		return c.frozen
+	}
+	return time.Now().Add(c.skew)
+}
+
+func (c *clock) freeze() {
+	now := c.now()
+	c.mu.Lock()
+	c.frozen = now
+	c.mu.Unlock()
+}
+
+// resume lets time run again from d past when it froze.
+func (c *clock) resume(d time.Duration) {
+	c.mu.Lock()
+	c.skew = time.Until(c.frozen.Add(d))
+	c.frozen = time.Time{}
+	c.mu.Unlock()
 }
 
 func (s *sink) expectNotices(t *testing.T, want ...string) {

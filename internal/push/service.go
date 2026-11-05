@@ -73,6 +73,10 @@ type Config struct {
 	Client *http.Client
 	// Quiet overrides DefaultQuiet.
 	Quiet time.Duration
+	// Now replaces time.Now when the quiet period is read, for tests. The
+	// waits stay on real timers, which re-read Now when they fire, so a
+	// clock that jumps does not wake a waiting notice early.
+	Now func() time.Time
 }
 
 // Need is a need as a Sink hears of it: Key identifies it, Body is the
@@ -110,6 +114,7 @@ type Service struct {
 	key     *vapidKey
 	client  *http.Client
 	quiet   time.Duration
+	now     func() time.Time
 	sink    Sink
 	// started is when Start ran. A run standing in a need it entered before
 	// then was announced, if at all, by the server before this one.
@@ -160,6 +165,9 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Quiet <= 0 {
 		cfg.Quiet = DefaultQuiet
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	return &Service{
 		store:   cfg.Store,
 		bus:     cfg.Bus,
@@ -168,6 +176,7 @@ func New(cfg Config) (*Service, error) {
 		key:     key,
 		client:  cfg.Client,
 		quiet:   cfg.Quiet,
+		now:     cfg.Now,
 		sink:    noSink{},
 		active:  map[domain.MemberID]time.Time{},
 		watched: map[domain.RunID]chan struct{}{},
@@ -329,7 +338,7 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			announced[n.key] = true
 		}
 		if n != nil && (!announced[n.key] || shown != "" && shown != n.key) {
-			if wait := time.Until(s.freeAt(n.member)); wait > 0 {
+			if wait := s.freeAt(n.member).Sub(s.now()); wait > 0 {
 				wake = time.After(wait)
 			} else if !announced[n.key] && s.offer(ctx, run, n, offered) {
 				continue
@@ -489,7 +498,7 @@ func topicOf(id string) string {
 // the run's need leaves shown; one with a check is a need, which it replaces.
 func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, urgent bool, flush <-chan struct{}, current func(context.Context) bool) error {
 	for flushed := false; !flushed; {
-		wait := time.Until(s.freeAt(member))
+		wait := s.freeAt(member).Sub(s.now())
 		if wait <= 0 {
 			break
 		}
@@ -596,7 +605,7 @@ func (s *Service) Test(ctx context.Context, member domain.MemberID, endpoint str
 // Active records that member is using a dashboard now.
 func (s *Service) Active(member domain.MemberID) {
 	s.mu.Lock()
-	s.active[member] = time.Now()
+	s.active[member] = s.now()
 	s.mu.Unlock()
 }
 

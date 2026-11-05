@@ -23,6 +23,7 @@ import {
   ListTodo as LucideListTodo,
   LoaderCircle as LucideLoaderCircle,
   Lock as LucideLock,
+  Mic as LucideMic,
   MessageSquare as LucideMessageSquare,
   PanelLeft as LucidePanelLeft,
   Orbit as LucideOrbit,
@@ -188,6 +189,7 @@ export const Keyboard = icon(LucideKeyboard)
 export const ListTodo = icon(LucideListTodo)
 export const LoaderCircle = icon(LucideLoaderCircle)
 export const Lock = icon(LucideLock)
+export const Mic = icon(LucideMic)
 export const MessageSquare = icon(LucideMessageSquare)
 export const PanelLeft = icon(LucidePanelLeft)
 export const Pause = icon(LucidePause)

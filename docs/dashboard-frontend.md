@@ -714,13 +714,24 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   **N more**), or for `run.launch` a **What starts**
   list (`components/assistant/launch-summary.tsx`; the title then stops
   before the quoted task) of kind, workspace,
-  agent with model and mode, account (`Yours` or `<name>'s, shared with
-  you`), fallback, task, and how the member hears back, a
+  agent with model and mode, effort when set, permission tier (`default`
+  when unset), account (`Yours` or `<name>'s, shared with you`), fallback, task, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
-  `confirmations` frame stops listing it. While `auto_approve` is off a card
-  links **Skip these cards…** to Settings > Assistant; a card with
+  `confirmations` frame stops listing it. A card's footer is not sticky: the dock (65dvh with an empty
+  conversation, whose suggestion chips it hides, else 40dvh, 50dvh on tall
+  screens) scrolls the whole card, so its actions come after every row they
+  approve, and rows have no scroll of their own. A card with `rule` adds,
+  under `Or save a rule:`, a secondary button labeled with `rule.wording`
+  (`assistant.confirm` with `always: true`), marked with an accent left rule
+  and `You approved this kind three times in a row.` when `rule.suggested`,
+  and, while `auto_approve` is off,
+  **Approve everything from now on**: it approves the card, then sets the
+  store's `assistantConfirmAutoApprove`, which opens the panel's **Let the
+  assistant act without asking?** confirm (`AutoApproveConfirm` in
+  `components/assistant/approval-choice.tsx`). While `auto_approve` is off a
+  card without `rule` links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
@@ -741,7 +752,7 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `Withdrawn: the turn ended before you answered`, `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
   not, or `Not confirmed: check status before retrying` for an
-  `aether_pr_create` whose result says `write: "pending"`) with `approved by you` or `auto-approved`, and its time. A call
+  `aether_pr_create` whose result says `write: "pending"`) with `approved by you`, `auto-approved` or `approved by your rule <id>` (a record with `approval: "rule"` and its `rule_id`), and its time. A call
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
@@ -794,6 +805,17 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   actions**, which loads them as **Show earlier messages** does. Focus starts
   on the newest entry. Up, Down, Home and End move, and Enter opens the target
   and closes the popover.
+- **Setup question** (`ApprovalChoice` in
+  `components/assistant/approval-choice.tsx`): when the status has
+  `approval_chosen: false` and the state is not `failed` (a failed status
+  carries no stored settings; absent never asks), a notice above the composer
+  asks **How should your assistant act?** **Ask before acting** and **Act
+  without asking** call `assistant.settings` with `auto_approve` false or
+  true; the second shows the auto-approval warning under its button, so it
+  opens no dialog. It scrolls past 40% of the viewport height, and the
+  auto-approval suggestion waits until it is answered. The answer's settings
+  replace the status, which drops the notice, unless another member signed in
+  meanwhile; a refusal shows under the buttons.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a
@@ -3271,7 +3293,8 @@ The timeline rows and both composers share `sessionColumn`
 the message box line up at every width. The box (`rounded-composer`, 14px)
 holds the textarea above one footer row: attach, **Insert a template**, the
 agent's mode, model and effort pickers, the context meter, and the send pill
-at the end. The Standard composer's row has attach, **Insert a template** and
+at the end, with the dictation mic (see [Dictation](#dictation)) just left of
+it. The Standard composer's row has attach, **Insert a template**, the mic and
 Send. The pill is a
 round arrow while it reads **Send** and widens to its word otherwise. Hints
 and the 45-second delivery notice sit under the box. Footer controls wrap on
@@ -3397,6 +3420,74 @@ you** shows one link, "1 request, shown below the timeline", that closes a
 Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
 agent's auth methods.
+
+### Dictation
+
+`components/dictation/` turns speech into text in a message box. Its
+`DictationButton` takes `{ textarea, onInsert, hints? }`: the box, a callback
+that stores the new text, and optional hints. It is mounted left of **Send** in
+the session composer and the assistant composer, and in a row under the New
+session **Task** box (`run-fields.tsx`). It renders nothing unless
+`server.info` lists the `dictation` feature, which the server sets only once
+dictation is installed.
+
+The button and the composer around it share state through `state.ts`, keyed by
+the box's ref: `useDictationState(textarea)` returns `active` (starting,
+recording or transcribing) and the current `notice`. While `active`, the
+composer's text-sending actions (Send, Steer, Queue) are disabled and Enter
+does nothing, so a missed press cannot send the old draft mid-recording;
+Interrupt, Stop waiting and Resume stay available. The mic will not start in
+a box that is read-only because its message is still sending, since the sent
+draft would replace the dictated words; it shows a notice instead. The New session dialog and the onboarding
+first run hold **Launch** the same way through `useDictating()`, which is true
+while any box dictates. `DictationNotice` draws the notice as a strip
+above the box: failed tint, alert icon and `role="alert"` for an error, a plain
+`role="status"` strip for "No speech was recognized.", and an **x** that
+dismisses it and returns focus to the box.
+
+| State | Button | Live region |
+| --- | --- | --- |
+| Idle | Mic in text colour | - |
+| Starting | Neutral pill: spinner, "Starting mic…" | Starting microphone |
+| Recording | Red pill: stop square, seven-bar level meter, elapsed time | Recording. Press again to stop, Escape to cancel. |
+| Transcribing | Neutral pill: spinner, "Transcribing…" | Transcribing |
+
+The button's name is always **Dictate**; `aria-pressed` says whether it is
+recording. The pills share one minimum width, so the button does not jump
+between states. A tap starts and a second tap stops. A press held 300 ms or
+more after recording began stops on release (hold to talk); a press that
+outlasted the browser's permission prompt counts as a tap. Enter and Space
+toggle like a tap. A pointer press keeps focus in the box, so a phone keeps its
+keyboard up. Escape pressed in the box or on the mic while starting, recording
+or transcribing drops the audio or the request in flight; an Escape anywhere
+else goes to its own owner. Recording stops by
+itself at 2:00.
+
+The browser asks for the microphone on the first press, never on load.
+`capture.ts` opens it with `getUserMedia` at the hardware rate (a 16 kHz
+`AudioContext` records silence on some macOS devices), downmixes each render
+quantum to mono in an `AudioWorklet` loaded from a blob URL, and reads the
+meter from an `AnalyserNode` at 15 Hz. The track stops as soon as recording
+ends. `wav.ts` averages down to 16 kHz, clips at 120 s and encodes PCM16 mono
+WAV; `api.dictationTranscribe` posts it base64 to `dictation.transcribe` with
+the hints. Without `hints`, `dictationHints` sends up to 200 names of at most
+80 bytes: every workspace, the open workspace's repo and run repos, and its
+sessions' titles, newest first. Transcription times out after 240 s, the local gateway's bound.
+
+`insertTranscript` puts the text where the caret or selection was when
+recording started; if the text changed meanwhile, at the caret the member left
+in the box, or at the end, adding a space on either side only where a word would
+otherwise touch it, then focuses the box with the caret after the text. It
+never sends: the mic has `type="button"`, so a press inside the New session
+form does not launch. Errors show verbatim, with paths and the install command
+in code: the server's message (not installed, busy, too long) or the
+browser's, as `Microphone: <DOMException name>: <message>`. A
+`NotAllowedError` adds, on its own muted line, how to allow the microphone
+again. A page served over
+plain http to a non-loopback host is not a secure context and has no
+microphone; the notice names the origin. The meter keeps reading the level
+under reduced motion but drops its transition. On a coarse pointer the mic and
+pills are 44px tall.
 
 ### Trace view
 
@@ -6368,7 +6459,15 @@ Categories:
   without asking?** with the warning that the assistant will launch sessions,
   message and stop the member's sessions and save the environment on its own;
   turning it off does not ask. A refusal stays in the dialog or under the
-  row. **Change in Settings** in the assistant panel opens
+  row. **Approval rules** (`routes/settings/approval-rules.tsx`) lists
+  `assistant.rules`: each rule's wording, `From:` the card it came from,
+  when it was created and last used and how many times, `Inactive: <reason>`
+  when set, and **Revoke** (`assistant.rules.revoke`), which drops the row
+  once the server answers and reads the list again; with none it says **No rules yet**, and a failed
+  read shows `Couldn’t read your rules` with its error and **Try again**. A
+  muted line under the heading says rules work with auto-approval off; an
+  inactive rule's wording is muted with an `Inactive` badge. It reads again when a card saves a
+  rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
 - **Launch**, where the server offers `launch.defaults.get`: **Saved
