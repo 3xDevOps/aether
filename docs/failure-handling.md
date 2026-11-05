@@ -267,7 +267,9 @@ is still there. To free space yourself:
 | `repos/` | Nothing. Every push and session branch is kept. |
 
 Archiving a session (**Archive finished sessions…** or `aether archive <session-id>`) only
-hides it and frees nothing.
+hides it and frees nothing. **Archive finished sessions…** also offers live
+sessions idle and done for over a day; it closes each one you leave checked
+before archiving it.
 
 `scheduler: host capacity unavailable: ...` means Aether could not measure a
 filesystem or host memory, for example a Docker daemon whose storage it cannot

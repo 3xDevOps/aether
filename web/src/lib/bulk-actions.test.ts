@@ -1,6 +1,8 @@
 import { toast } from 'sonner'
 import { ApiError, type Api } from '@/lib/api'
 import { runClearDone, runReleaseFinished } from '@/lib/commands'
+import { archiveState } from '@/lib/idle-archive'
+import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
 
@@ -39,7 +41,35 @@ describe('archive closed runs', () => {
     for (const id of ids) settle.get(id)!.resolve()
     await done
 
-    expect(toast.error).toHaveBeenCalledWith('Archived 6, 2 failed: fourth failed')
+    expect(toast.error).toHaveBeenCalledWith('Archived 6, 2 failed', { description: 'rewrite the checkout flow: fourth failed\nrewrite the checkout flow: seventh failed', duration: Infinity })
+  })
+
+  it('closes an idle session with its outcome before archiving it, and names each session that failed', async () => {
+    const [done, replied, stuck] = [
+      toRecord(run({ id: 'run_done', status: 'merged', task: 'Done already' })),
+      toRecord(run({ id: 'run_replied', status: 'running', task: 'Replied days ago' })),
+      toRecord(run({ id: 'run_stuck', status: 'running', task: 'Close refused' })),
+    ]
+    const calls: string[] = []
+    const api = {
+      runClose: vi.fn(async (id: string, outcome: string) => {
+        calls.push(`close ${id} ${outcome}`)
+        if (id === stuck.id) throw new ApiError(409, 'session is finishing', -32002)
+        return run({ id })
+      }),
+      runArchive: vi.fn(async (id: string) => {
+        calls.push(`archive ${id}`)
+        return run({ id })
+      }),
+    } as unknown as Api
+    useStore.setState({ runs: { [done.id]: done, [replied.id]: replied, [stuck.id]: stuck } })
+    await runClearDone([done, replied, stuck], { api, removeRun: vi.fn() }, new Map([[replied.id, { outcome: 'merged' as const, asked: archiveState(replied, undefined) }], [stuck.id, { outcome: 'abandoned' as const, asked: archiveState(stuck, undefined) }]]))
+
+    expect(calls).toContain('close run_replied merged')
+    expect(calls.indexOf('close run_replied merged')).toBeLessThan(calls.indexOf('archive run_replied'))
+    expect(calls).toContain('archive run_done')
+    expect(calls).not.toContain('archive run_stuck')
+    expect(toast.error).toHaveBeenCalledWith('Archived 2, 1 failed', { description: 'Close refused: session is finishing', duration: Infinity })
   })
 
   it('treats a run that is already gone as archived and drops it locally', async () => {
@@ -71,5 +101,33 @@ describe('free retained containers', () => {
 
     expect(api.runRelease).toHaveBeenCalledTimes(2)
     expect(toast.error).toHaveBeenCalledWith('Freed 1, 1 failed: evidence is still pending')
+  })
+
+  it('skips a close whose session changed since the member chose it, naming it, and archives nothing of it', async () => {
+    const chosen = toRecord(run({ id: 'run_moved', status: 'running', task: 'Moved on', status_seq: 4 }))
+    useStore.setState({ runs: { [chosen.id]: { ...chosen, status_seq: 5, state: 'working' } } })
+    const api = { runClose: vi.fn(), runArchive: vi.fn() } as unknown as Api
+    await runClearDone([chosen], { api, removeRun: vi.fn() }, new Map([[chosen.id, { outcome: 'abandoned' as const, asked: archiveState(chosen, undefined) }]]))
+    expect(api.runClose).not.toHaveBeenCalled()
+    expect(api.runArchive).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('Archived 0, 1 failed', { description: 'Moved on: The session changed while its close was being checked, so it was not closed', duration: Infinity })
+  })
+
+  it('drops a chosen session that was deleted meanwhile without an error', async () => {
+    const gone = toRecord(run({ id: 'run_gone', status: 'running', task: 'Deleted meanwhile' }))
+    useStore.setState({ runs: {} })
+    const api = { runClose: vi.fn(), runArchive: vi.fn() } as unknown as Api
+    await runClearDone([gone], { api, removeRun: vi.fn() }, new Map([[gone.id, { outcome: 'abandoned' as const, asked: archiveState(gone, undefined) }]]))
+    expect(api.runClose).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('skips a chosen session paused since it was chosen', async () => {
+    const chosen = toRecord(run({ id: 'run_paused', status: 'running', task: 'Paused since' }))
+    useStore.setState({ runs: { [chosen.id]: chosen }, pausedRuns: { [chosen.id]: true } })
+    const api = { runClose: vi.fn(), runArchive: vi.fn() } as unknown as Api
+    await runClearDone([chosen], { api, removeRun: vi.fn() }, new Map([[chosen.id, { outcome: 'abandoned' as const, asked: archiveState(chosen, undefined) }]]))
+    expect(api.runClose).not.toHaveBeenCalled()
+    useStore.setState({ pausedRuns: {} })
   })
 })

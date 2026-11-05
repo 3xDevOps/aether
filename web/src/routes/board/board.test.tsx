@@ -511,7 +511,7 @@ describe('Finished footer', () => {
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive finished sessions…' }))
     const dialog = within(await screen.findByRole('dialog'))
     expect(await dialog.findByRole('link', { name: 'acme/shop#42' })).toBeDefined()
-    expect(within(dialog.getByRole('list', { name: 'Sessions to archive' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['landed already'])
+    expect(within(dialog.getByRole('list', { name: 'Sessions to archive' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual([expect.stringMatching(/^landed alreadyMerged · /)])
     fireEvent.click(dialog.getByRole('button', { name: 'Archive 1' }))
 
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 session'))

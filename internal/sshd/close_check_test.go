@@ -213,6 +213,36 @@ func TestRunCloseCheckKinds(t *testing.T) {
 			}
 		})
 	}
+	t.Run("merged pull request", func(t *testing.T) {
+		ids := []string{string(shipped.ID), string(stale.ID), string(extra.ID), string(unmerged.ID)}
+		var res protocol.RunCloseCheckResult
+		if err := controlClient(t, e).Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: ids}, &res); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, check := range res.Runs {
+			got[check.RunID] = check.MergedPullRequest
+		}
+		want := map[string]bool{string(shipped.ID): true, string(stale.ID): false, string(extra.ID): false, string(unmerged.ID): false}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("merged_pull_request = %v, want %v (only a merged pull request of the run's own repository that holds its last commit counts)", got, want)
+		}
+	})
+
+	t.Run("idle since", func(t *testing.T) {
+		quietSince := time.Now().UTC().Truncate(time.Second)
+		if _, err := db.UpdateRunStatus(ctx, quiet.ID, domain.RunNeedsAttention, "agent replied", domain.ActivityAnswered, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		var res protocol.RunCloseCheckResult
+		if err := controlClient(t, e).Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(quiet.ID)}}, &res); err != nil {
+			t.Fatal(err)
+		}
+		since, err := time.Parse(time.RFC3339, res.Runs[0].IdleSince)
+		if err != nil || since.Before(quietSince) || since.After(time.Now().Add(time.Second)) {
+			t.Errorf("idle_since = %q (%v), want the time of its last change, about %s", res.Runs[0].IdleSince, err, quietSince)
+		}
+	})
 }
 
 // run.close_check reads like run.get: any approved member checks any run,

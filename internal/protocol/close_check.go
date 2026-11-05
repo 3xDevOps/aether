@@ -24,10 +24,15 @@ type RunCloseCheckParams struct {
 	Outcome string   `json:"outcome,omitempty"`
 }
 
+// RunCloseCheck.MergedPullRequest reports that a merged pull request of
+// the run's own repository holds its last commit, so a close can record it
+// as merged; IdleSince is when its status, reason or activity last changed.
 type RunCloseCheck struct {
-	RunID    string         `json:"run_id"`
-	Warnings []CloseWarning `json:"warnings"`
-	Error    *Error         `json:"error,omitempty"`
+	RunID             string         `json:"run_id"`
+	Warnings          []CloseWarning `json:"warnings"`
+	MergedPullRequest bool           `json:"merged_pull_request"`
+	IdleSince         string         `json:"idle_since,omitempty"`
+	Error             *Error         `json:"error,omitempty"`
 }
 
 // CloseWarning.Subsession names the subsession a warning is about, when
