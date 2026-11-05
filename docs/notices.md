@@ -13,19 +13,56 @@ own license; Aether's GPL-3.0 license does not replace those terms.
 
 ## In the APK
 
-The Android app links two Google libraries, both under the Apache License 2.0:
+The Android app links these libraries, all under the Apache License 2.0:
 
 - `androidx.core:core`
 - `androidx.activity:activity`
+- `androidx.webkit:webkit`
+- `org.unifiedpush.android:connector`, by UnifiedPush
 
 Their transitive dependencies - the Kotlin standard library, kotlinx
-coroutines, the rest of androidx - are Apache-2.0 as well. The exact versions
+coroutines, the rest of androidx, Google's Tink, Gson and Error Prone
+annotations - are Apache-2.0 as well, except Protocol Buffers
+(`com.google.protobuf:protobuf-java`, through Tink), which is under the
+BSD 3-Clause licence below. The exact versions
 and their checksums are in
 [`android/gradle/verification-metadata.xml`](../android/gradle/verification-metadata.xml);
 the direct ones are in
 [`android/gradle/libs.versions.toml`](../android/gradle/libs.versions.toml).
 A copy of the Apache-2.0 text ships inside the APK at
 `META-INF/androidx/annotation/annotation/LICENSE.txt`.
+
+Protocol Buffers:
+
+```text
+Copyright 2008 Google Inc.  All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+    * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## In the dashboard bundle
 

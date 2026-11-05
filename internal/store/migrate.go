@@ -2561,6 +2561,15 @@ CREATE TABLE push_digest (
 );
 UPDATE watch_notifications SET push_state = 'pending', push_next_at = 0 WHERE push_state = 'held';
 `,
+	// v107: the assistant cards pushed to a member's devices, so a server
+	// that restarts still withdraws the push of one decided meanwhile.
+	`
+CREATE TABLE push_cards (
+	member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	card_id   TEXT NOT NULL,
+	PRIMARY KEY (member_id, card_id)
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

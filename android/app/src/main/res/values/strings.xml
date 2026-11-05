@@ -60,5 +60,15 @@
     <string name="update_gate_check_failed">Could not check again: %1$s</string>
     <string name="share_label">New session</string>
     <string name="share_cut">The shared text was cut to its first %1$d characters.</string>
+    <string name="push_channel">Sessions that need you</string>
+    <string name="push_review">Review…</string>
+    <string name="push_decline">Decline</string>
+    <string name="push_channel_updates">Assistant updates</string>
+    <string name="push_public">A session needs you</string>
+    <string name="push_public_update">New update</string>
+    <string name="push_public_card">Assistant card</string>
+    <string name="push_declining">Declining…</string>
+    <string name="push_declined">Declined</string>
+    <string name="push_decline_failed">Couldn\'t decline</string>
     <string name="no_app_for_link">No app on this phone opens %1$s</string>
 </resources>

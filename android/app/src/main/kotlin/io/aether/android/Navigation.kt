@@ -2,6 +2,7 @@ package io.aether.android
 
 import java.net.URI
 import java.net.URISyntaxException
+import java.net.URLDecoder
 
 /** What the shell does with a navigation the page started. */
 enum class Navigation {
@@ -125,14 +126,64 @@ fun atDashboardHome(url: String?): Boolean {
  * to `?page=board` and Back would never reach the end of the history.
  */
 fun routeHomeScript(url: String?): String {
-    val token =
-        try {
-            URI(url ?: "").rawQuery?.split('&')?.firstOrNull { it.startsWith("token=") }
-        } catch (_: URISyntaxException) {
-            null
-        }?.takeIf { it.matches(Regex("token=[A-Za-z0-9%._~-]*")) }
+    val token = gatewayToken(url)
     val phone = "matchMedia('(max-width: 767px)').matches"
     val query = listOfNotNull(token).joinToString("&")
     val home = "$phone ? '/?page=needs-you${if (query.isEmpty()) "" else "&$query"}' : '/${if (query.isEmpty()) "" else "?$query"}'"
     return "history.replaceState(history.state, '', $home); dispatchEvent(new PopStateEvent('popstate'))"
 }
+
+/**
+ * The script that opens [path] in the dashboard already showing at [url],
+ * as the desktop app opens a notification: the dashboard follows its address
+ * on popstate, and a reload would lose unsent drafts. A card opens over the
+ * page in place, which the dashboard leaves at its route, so Back is as it
+ * was; any other route is a new entry. The page already holds its gateway
+ * token, and a `token` in the path, which another app can send, is dropped
+ * under any encoding. Null for an address holding anything but the
+ * characters a route is written in, which then loads.
+ */
+fun openPathScript(url: String?, path: String): String? {
+    if (!isDashboardPath(path)) return null
+    val params = routeParams(path.removePrefix("/").removePrefix("?")) ?: return null
+    val card = params.isNotEmpty() && params.all { paramName(it) == "assistant" || paramName(it) == "card" }
+    val query =
+        if (card) {
+            val current =
+                try {
+                    URI(url ?: return null).rawQuery.orEmpty()
+                } catch (_: URISyntaxException) {
+                    return null
+                }
+            (routeParams(current) ?: return null).filter { paramName(it) != "assistant" && paramName(it) != "card" } + params
+        } else {
+            params
+        }
+    val address = "'/" + (if (query.isEmpty()) "" else "?" + query.joinToString("&")) + "'"
+    val state = if (card) "history.replaceState(history.state, ''," else "history.pushState(null, '',"
+    return "$state $address); dispatchEvent(new PopStateEvent('popstate'))"
+}
+
+private val ROUTE_PARAM = Regex("[A-Za-z0-9%._~=+,:@!*-]+")
+
+/** [query]'s parameters but any named `token`, or null if one holds other characters or does not decode. */
+private fun routeParams(query: String): List<String>? {
+    val params = query.split('&').filter { it.isNotEmpty() }
+    if (!params.all { ROUTE_PARAM.matches(it) && paramName(it) != null }) return null
+    return params.filter { paramName(it) != "token" }
+}
+
+/** A parameter's name as URLSearchParams reads it; null when it does not decode. */
+private fun paramName(param: String): String? =
+    try {
+        URLDecoder.decode(param.substringBefore('='), "UTF-8")
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+
+private fun gatewayToken(url: String?): String? =
+    try {
+        URI(url ?: "").rawQuery?.split('&')?.firstOrNull { it.startsWith("token=") }
+    } catch (_: URISyntaxException) {
+        null
+    }?.takeIf { it.matches(Regex("token=[A-Za-z0-9%._~-]*")) }

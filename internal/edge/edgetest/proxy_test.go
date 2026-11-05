@@ -86,6 +86,14 @@ func (p *proxy) handler(backAddr string) http.Handler {
 		if route != nil {
 			r.URL.Path = route(r.URL.Path)
 		}
+		// The transport may still be reading the request body when the
+		// edge's answer arrives; a server that is not full duplex closes
+		// the body once the answer starts, which fails that read and
+		// drops the connection mid-answer.
+		if err := http.NewResponseController(w).EnableFullDuplex(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		rp.ServeHTTP(w, r)
 	})
 }

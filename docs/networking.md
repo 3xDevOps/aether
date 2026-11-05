@@ -268,8 +268,19 @@ A phone can keep the dashboard as an app that opens full screen.
 
 - On Android, open the server URL in Chrome and pick **Install app** from the
   ⋮ menu.
-- On an iPhone, open the server URL in Safari and pick **Share → Add to Home
-  Screen**.
+- On an iPhone, open the server URL in Safari (Chrome on iOS can add it too)
+  and pick **Share → Add to Home Screen**.
+
+On iOS, Web Push works only for the installed app, and has these limits:
+
+- iOS 16.4 or later, and the app opened from the home-screen icon. In a Safari
+  tab **Settings → Push notifications** shows install steps instead of the
+  switch; **Dismiss** hides them on that browser.
+- The permission prompt appears when you turn the switch on, because iOS asks
+  only after a tap.
+- The icon badge shows the **Needs you** count while the app is open and push
+  is on, and clears at 0. The push carries no count, so a closed app keeps
+  the badge it last had until you open it.
 
 Install the server URL, not an `aether gui` one. An `aether gui` URL carries a
 per-process token that the home-screen icon drops, so the app opens
@@ -317,7 +328,9 @@ in **Settings → Notifications**: by default what needs you is pushed at once
 and a finished or failed session waits for a digest every 30 minutes. Pushes
 within 2 minutes of another join it as one quiet summary, and
 [quiet hours](watches.md#notification-preferences) hold every push for a digest
-sent when they end. Runs the
+sent when they end. An [assistant card](watches.md#assistant-cards) is pushed with
+**Review…**, which opens the card where you approve it, and **Decline**,
+where the device shows them. Runs the
 [assistant](assistant.md#notifications) launched for you also notify you when
 they finish, through the [watch](watches.md#assistant-watches) it keeps on
 them.
@@ -329,8 +342,8 @@ It needs:
 - A browser with Web Push: Chrome, Edge and Firefox on a computer or Android,
   Safari on a Mac. On an iPhone or iPad it works only in the dashboard added to
   the home screen, on iOS 16.4 or later. The
-  [Android app](install.md#android-app) cannot receive notifications: install
-  the dashboard from Chrome instead.
+  [Android app](install.md#android-app) needs a UnifiedPush distributor
+  ([below](#in-the-android-app)).
 - Outbound HTTPS from the server on port 443 to the browser vendors' push
   services: `fcm.googleapis.com` (Chrome), `updates.push.services.mozilla.com`
   (Firefox), `web.push.apple.com` (Safari) and `*.notify.windows.com` (Edge).
@@ -342,6 +355,83 @@ The server signs messages with a key it creates on first start,
 on again on each device. A refused message is logged as `push: notification not
 delivered` with the service's answer. What the push service receives is in
 [privacy.md](privacy.md#push-notifications).
+
+### In the Android app
+
+The app's WebView has no Web Push, so the app subscribes itself through
+[UnifiedPush](https://unifiedpush.org): a distributor app on the phone, such
+as [ntfy](https://ntfy.sh) from Google Play or F-Droid, holds one connection
+to its push server for every app that uses it. The switch is the same
+**Settings → Notify this device when a session needs me**, in either
+connection mode, `aether gui`'s Edge gateway included.
+
+Turning it on asks Android for permission to notify, then asks the
+distributor for an address and Web Push keys, picking the default
+distributor or showing Android's picker when there are several. The app hands
+the address and keys to `push.subscribe` itself, as the dashboard would. The
+server encrypts and signs exactly as it does for Chrome; the connector library
+in the app decrypts, and the app drops any message not encrypted to its keys.
+
+With no distributor installed the switch row says `The app gets notifications
+through a UnifiedPush distributor, and this phone has none.` Install ntfy and
+turn the switch on, or, in **Tailscale** mode, open the dashboard in Chrome
+and install it there.
+A distributor that refuses shows its reason, such as `The push distributor
+refused to register Aether: ACTION_REQUIRED` (sign in to it, then try again).
+
+An assistant card's notification follows the dashboard's rules: **Review…**
+opens the card, where you approve it, **Decline** declines it without opening
+the app, and a private card or one over 240 characters has no buttons. **Decline** needs
+**Tailscale** mode and Android 12 or later: it calls `assistant.confirm` on
+the server's dashboard, identified by the phone's tailnet login like any
+dashboard request, and Android asks you to unlock the phone before it runs
+when you tap it. A card with buttons is not bridged to a watch, but an app
+you have given notification access can still press **Decline** for you.
+**Decline** refuses a card from a server other than the one chosen under
+**Connection** now, with the error `This card is from <old>, and the app now
+connects to <new>.`
+Older Android cannot require that, so there, and in **Aether Edge** mode,
+where the identity is the CLI the app runs only while it is open, a card's
+notification only opens it. While it runs the notification reads
+`Declining…` with no buttons; then `Declined` with the card's text, or
+`Couldn't decline` with the server's own error, which alerts and opens the
+card. Tapping a notification while the dashboard is open opens its page in
+place, keeping unsent drafts; a card opens over the page you are on, so Back
+still returns where it did. When a session stops needing you, its
+notification goes away; a card
+decided or withdrawn elsewhere is replaced, silently, by how it ended, such as
+`Approved: <summary>`.
+
+Sessions, watches and cards that need you, and summaries of them, arrive on
+the **Sessions that need you** channel; assistant notices, budgets and test
+notifications on **Assistant updates**, which you can quiet separately in
+Android's settings for the app.
+The notifications are marked private. Whether the lock screen shows their
+text is Android's setting for sensitive notifications; with it off, the lock
+screen shows only what kind each one is: `A session needs you`, `New update`,
+or `Assistant card` for a card with buttons, how a card ended, and the
+outcome of declining it.
+
+In **Tailscale** mode, when you choose another server under **Connection**,
+the app drops its registration at the distributor, tells the previous server
+to forget the phone, and registers a new address for the new server, so
+nothing the previous server sends reaches the phone.
+
+Limits:
+
+- The server posts only to public addresses. A self-hosted ntfy reachable
+  only on the tailnet or LAN fails with `refusing to connect to <ip>: not a
+  public address` in the server's `push: notification not delivered` log
+  line. Use ntfy.sh or an ntfy server with a public address.
+- In **Aether Edge** mode, switching to another server through the gateway
+  keeps the registration on the first one, which goes on notifying the
+  phone. Turn notifications off before you switch, and on again after.
+- In **Aether Edge** mode the server learns a new address from the
+  distributor only while the app is open; until then notifications go to the
+  old one, which the server drops once the push service reports it gone.
+- ntfy keeps a connection open, which its authors measure at about 0-1% of
+  battery over 17 hours. ntfy from Google Play delivers ntfy.sh messages
+  through Firebase unless instant delivery is on.
 
 ### When it does not start
 

@@ -2,6 +2,7 @@ package io.aether.android
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -149,5 +150,37 @@ class NavigationTest {
             assertEquals(other, Navigation.EXTERNAL, navigationFor(gateway, other, other.substringBefore(':'), mainFrame = true))
             assertTrue(other, refusesRequest(gateway, other, other.substringBefore(':'), mainFrame = true))
         }
+    }
+
+    @Test
+    fun aNotificationOpensInThePage() {
+        val pop = "dispatchEvent(new PopStateEvent('popstate'))"
+        // A route is a new entry, so Back returns to the page it left.
+        assertEquals("history.pushState(null, '', '/?run=run-7k2m9q4xbd'); $pop", openPathScript("https://h.ts.net/?page=board", "/?run=run-7k2m9q4xbd"))
+        assertEquals("history.pushState(null, '', '/'); $pop", openPathScript("https://h.ts.net/", "/"))
+        // A card opens over the page in place.
+        assertEquals(
+            "history.replaceState(history.state, '', '/?run=r&view=log&assistant=1&card=ABC_1-z'); $pop",
+            openPathScript("https://h.ts.net/?run=r&view=log&assistant=1&card=old", "/?assistant=1&card=ABC_1-z"),
+        )
+        // Nothing that could close the string literal or the call reaches the script.
+        for (path in listOf("/?a='-alert(1)-'", "/?a=\"x\"", "/?a=<b>", "/?a=)", "/x", "?a=1", "/?a=b c", "/?%zz=1")) {
+            assertNull(path, openPathScript("https://h.ts.net/", path))
+        }
+    }
+
+    @Test
+    fun noTokenFromAPathReachesTheAddress() {
+        val pop = "dispatchEvent(new PopStateEvent('popstate'))"
+        for (forged in listOf("token=x", "%74oken=x", "%74%6F%6B%65%6E=x", "t%6fken=x")) {
+            assertEquals(forged, "history.pushState(null, '', '/?run=r'); $pop", openPathScript("http://127.0.0.1:4000/", "/?$forged&run=r"))
+        }
+        // The dashboard reads `token` exactly, so these are other names.
+        assertEquals("history.pushState(null, '', '/?TOKEN=x&run=r'); $pop", openPathScript("http://127.0.0.1:4000/", "/?TOKEN=x&run=r"))
+        // Nor is the page's own token written back into its address.
+        assertEquals(
+            "history.replaceState(history.state, '', '/?page=board&assistant=1&card=c'); $pop",
+            openPathScript("http://127.0.0.1:4000/?token=t0K&page=board", "/?assistant=1&card=c"),
+        )
     }
 }

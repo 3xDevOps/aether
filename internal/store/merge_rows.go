@@ -47,6 +47,8 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 			key = CASE WHEN source = 'run' AND key LIKE ?1 || '|%' THEN ?2 || substr(key, length(?1) + 1) ELSE key END
 			WHERE member_id = ?1`},
 		{"notification digest", `DELETE FROM push_digest WHERE member_id = ?1`},
+		{"pushed cards", `UPDATE OR IGNORE push_cards SET member_id = ?2 WHERE member_id = ?1`},
+		{"pushed cards", `DELETE FROM push_cards WHERE member_id = ?1`},
 		{"assistant preferences", `UPDATE member_preferences SET member_id = ?2 WHERE member_id = ?1`},
 		{"launch defaults", `INSERT OR REPLACE INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, source, updated_at)
 			SELECT l.member_id, l.agent, l.agents, CASE l.account_member_id WHEN ?1 THEN ?2 ELSE l.account_member_id END, l.fallback_policy,

@@ -11,6 +11,7 @@ import { StaleBanner } from '@/components/shell/stale-banner'
 import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
 import { UpdateCenter } from '@/components/update-banner'
+import { AppBadge, useBadging } from '@/lib/app-badge'
 import { useIsMobile } from '@/lib/breakpoints'
 import { cn } from '@/lib/utils'
 import { useAttentionFeed } from '@/routes/needs-you/attention'
@@ -25,6 +26,7 @@ export function AppShell() {
   const profileOpen = useStore((s) => s.profileOpen)
   const setProfileOpen = useStore((s) => s.setProfileOpen)
   const mobile = useIsMobile()
+  const badge = useBadging()
   const stacked = useStore((s) => mobile && s.route.name === 'run')
   return (
     <div className={cn('flex h-full min-h-0 flex-col bg-canvas text-ui text-text', stacked && 'pt-[var(--safe-top)]')}>
@@ -51,18 +53,21 @@ export function AppShell() {
         </main>
         <AssistantPanel />
       </div>
-      {mobile && <PhoneShell />}
+      {(mobile || badge) && <AttentionFeed />}
+      {mobile && <PhoneTabBar />}
       <CommandPalette />
       <PaletteDialogs />
       <ShortcutsDialog />
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
       <UpdateCenter />
       <ConnectionAnnouncer />
+      {badge && <AppBadge />}
     </div>
   )
 }
 
-function PhoneShell() {
+/** Keeps the attention list fresh for the tab bar and the badge without re-rendering the shell on each change. */
+function AttentionFeed() {
   useAttentionFeed()
-  return <PhoneTabBar />
+  return null
 }

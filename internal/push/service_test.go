@@ -79,6 +79,7 @@ type harness struct {
 	bob   *domain.Member
 	keys  int
 	sink  Sink
+	cards Cards
 	clock clock
 
 	keyPath string
@@ -138,6 +139,9 @@ func (h *harness) start() {
 	}
 	if h.sink != nil {
 		svc.UseSink(h.sink)
+	}
+	if h.cards != nil {
+		svc.UseCards(h.cards)
 	}
 	if err = svc.Start(h.ctx); err != nil {
 		h.t.Fatalf("Start: %v", err)

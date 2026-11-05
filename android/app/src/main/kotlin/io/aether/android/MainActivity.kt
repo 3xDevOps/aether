@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
     private var mode = ConnectionMode.TAILSCALE
     private var gateway: Gateway? = null
     private var updates: UpdateNotice? = null
+    private lateinit var push: PushBridge
     private var gate: UpdateGate? = null
 
     /** The running gateway's address, once it has printed it. */
@@ -105,6 +106,14 @@ class MainActivity : ComponentActivity() {
 
     /** Set while the failure panel shows a lost renderer rather than the gateway. */
     private var rendererLost = false
+
+    /**
+     * Whether the window's document finished loading with no error for it,
+     * which a notification may route inside; an error page on the
+     * dashboard's origin is not the dashboard.
+     */
+    private var pageLoaded = false
+    private var pageFailed = false
 
     /**
      * Set when the shell ends a renderer that stopped responding. Written on
@@ -141,7 +150,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Back walks the dashboard's own history, then goes to the dashboard's
-     * home from a page opened with nothing behind it - a share,
+     * home from a page opened with nothing behind it - a share, a notification,
      * a link - and only from home leaves the app running: finishing
      * would drop the terminal's scrollback on the way to the home screen.
      * Where the platform does that itself the callback stands down at home,
@@ -225,6 +234,7 @@ class MainActivity : ComponentActivity() {
                 if (granted) request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else request.deny()
             }
 
+        push = PushBridge(this)
         applyInsets()
         syncBarIcons()
         configureWebView()
@@ -274,6 +284,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         updates?.resume()
+        push.resume()
         if (mode == ConnectionMode.EDGE && gateway?.isActive != true &&
             gatewayError.visibility != View.VISIBLE
         ) {
@@ -285,6 +296,8 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         updates?.destroy()
         gate?.destroy()
+        // A first launch with nothing set up finishes before the bridge exists.
+        if (::push.isInitialized) push.destroy()
         stopGateway()
         super.onDestroy()
     }
@@ -296,6 +309,7 @@ class MainActivity : ComponentActivity() {
         // dashboard loads again even at an unchanged address.
         val reload = rendererLost
         rendererLost = false
+        installBridge()
         when (mode) {
             ConnectionMode.TAILSCALE -> {
                 stopGateway()
@@ -403,6 +417,7 @@ class MainActivity : ComponentActivity() {
             allowContentAccess = false
         }
         applyModeSettings()
+        installBridge()
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         // Lets `chrome://inspect` attach to a debuggable build; a release
         // build stays closed. See docs/dashboard-frontend.md.
@@ -480,6 +495,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    pageLoaded = false
+                    pageFailed = false
                     connection.visibility = View.GONE
                     // A gateway restart or a link can load the dashboard
                     // under the gate; it stays blank until the gate clears.
@@ -503,6 +520,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
+                    pageLoaded = !pageFailed
                     // A refusal on the dashboard's WebSocket never reaches
                     // onReceivedHttpError, so every gateway page asks too.
                     gatewayUrl?.let { if (url.startsWith(it.substringBefore("?"))) gate?.check(it) }
@@ -529,7 +547,9 @@ class MainActivity : ComponentActivity() {
                     // what actually failed. This only adds the way back to
                     // the address that failed. An HTTP status is not this
                     // case: the server answered, so the address is right.
-                    if (request.isForMainFrame) connection.visibility = View.VISIBLE
+                    if (!request.isForMainFrame) return
+                    pageFailed = true
+                    connection.visibility = View.VISIBLE
                 }
 
                 // webgate answers -32005 with HTTP 426 on any call from a
@@ -539,6 +559,7 @@ class MainActivity : ComponentActivity() {
                     request: WebResourceRequest,
                     errorResponse: WebResourceResponse,
                 ) {
+                    if (request.isForMainFrame) pageFailed = true
                     // The first refusal asks past the gateway's release cache,
                     // which can predate the release the server now needs.
                     // With the gate up its own checks take over.
@@ -551,6 +572,7 @@ class MainActivity : ComponentActivity() {
                 // Android reclaims the renderer of an app in the background,
                 // as while the member signs in to Edge in the browser.
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    pageLoaded = false
                     // The page's file input dies with it.
                     fileChooser?.onReceiveValue(null)
                     fileChooser = null
@@ -744,7 +766,10 @@ class MainActivity : ComponentActivity() {
         if (raw != null && isEdgeOnlyLink(raw)) {
             Toast.makeText(this, R.string.join_needs_edge, Toast.LENGTH_LONG).show()
         }
-        val link = raw?.let { deepLinkUrl(base, it) } ?: intentPath(intent)?.let { dashboardAt(base, it) }
+        val deep = raw?.let { deepLinkUrl(base, it) }
+        val path = if (deep == null) intentPath(intent) else null
+        if (path != null && intent?.action == ACTION_OPEN && base == loaded && routeInPage(base, path)) return
+        val link = deep ?: path?.let { dashboardAt(base, it) }
         if (link != null) {
             loaded = base
             web.loadUrl(link)
@@ -761,8 +786,11 @@ class MainActivity : ComponentActivity() {
      * it prints one. A link that names something to open is held until then.
      */
     private fun openEdge(intent: Intent?) {
-        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix) ?: intentPath(intent)?.let(::edgeSuffix)
+        val deep = intent?.dataString?.let(::edgeDeepLinkSuffix)
+        val path = if (deep == null) intentPath(intent) else null
         val url = gatewayUrl
+        if (path != null && intent?.action == ACTION_OPEN && gateway?.isActive == true && url != null && routeInPage(url, path)) return
+        val suffix = deep ?: path?.let(::edgeSuffix)
         when {
             gateway?.isActive != true -> {
                 pendingSuffix = suffix ?: ""
@@ -784,6 +812,13 @@ class MainActivity : ComponentActivity() {
                 gatewayPort(),
                 onReady = { url ->
                     gatewayUrl = url
+                    LiveGateway.url = url
+                    // The CLI moves to an ephemeral port when the stored one
+                    // is taken, so the bridge follows the address it printed.
+                    push.install(web, url)
+                    // An endpoint the distributor handed over while no
+                    // gateway ran reaches the server now.
+                    PushRegistration.sync(this)
                     // A new address is a new origin: what the old one has in
                     // flight stops before it can be read as an escape.
                     web.stopLoading()
@@ -798,12 +833,14 @@ class MainActivity : ComponentActivity() {
                 },
                 onExited = {
                     gatewayUrl = null
+                    LiveGateway.url = null
                     loaded = null
                     web.stopLoading()
                     web.loadUrl("about:blank")
                 },
                 onFailed = { message ->
                     gatewayUrl = null
+                    LiveGateway.url = null
                     loaded = null
                     rendererLost = false
                     showFailure(getString(R.string.gateway_stopped), message)
@@ -820,6 +857,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopGateway() {
+        LiveGateway.url = null
         gateway?.stop()
         gateway = null
     }
@@ -835,10 +873,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The dashboard path a share opens, or null for any
-     * other intent. Another app can send one: a share only ever prefills a
-     * prompt, and extras filled with a class this app lacks are no path at
-     * all.
+     * The dashboard path a share or a notification opens, or null for any
+     * other intent. Another app can send either: a share only ever prefills
+     * a prompt, a notification's path is held to [isDashboardPath], and
+     * extras filled with a class this app lacks are no path at all.
      */
     private fun intentPath(intent: Intent?): String? =
         try {
@@ -854,11 +892,39 @@ class MainActivity : ComponentActivity() {
                     }
                     sharePath(text)
                 }
+                ACTION_OPEN -> {
+                    // Review… leaves its notification up; this takes it down.
+                    cancelPush(this, intent)
+                    intent.getStringExtra(EXTRA_PATH)?.takeIf(::isDashboardPath)
+                }
                 else -> null
             }
         } catch (_: RuntimeException) {
             null
         }
+
+    /**
+     * Opens a notification's [path] in the dashboard at [dashboard] without
+     * reloading it, when that dashboard is what the window shows.
+     */
+    private fun routeInPage(dashboard: String, path: String): Boolean {
+        val current = web.url ?: return false
+        if (!pageLoaded || rendererLost || gatewayError.visibility == View.VISIBLE) return false
+        if (runCatching { originOf(current) != originOf(dashboard) }.getOrDefault(true)) return false
+        val script = openPathScript(current, path) ?: return false
+        web.evaluateJavascript(script, null)
+        return true
+    }
+
+    /** The bridge for the dashboard this window is about to load. */
+    private fun installBridge() {
+        val dashboard =
+            when (mode) {
+                ConnectionMode.TAILSCALE -> storedDashboardUrl()
+                ConnectionMode.EDGE -> gatewayUrl ?: "http://127.0.0.1:${gatewayPort()}/"
+            } ?: return
+        push.install(web, dashboard)
+    }
 
     private fun openSetup() {
         startActivity(Intent(this, SetupActivity::class.java))

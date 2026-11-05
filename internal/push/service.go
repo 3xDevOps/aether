@@ -123,6 +123,7 @@ type Service struct {
 	now     func() time.Time
 	sink    Sink
 	sources map[string]DigestSource
+	cards   Cards
 	// recovered is Config.Recovered.
 	recovered <-chan struct{}
 	// started is when Start ran. A run standing in a need it entered before
@@ -143,6 +144,9 @@ type Service struct {
 	// to send, what hands its watcher the state to announce.
 	notices map[budgetKey]chan budgetDue
 	bursts  map[domain.MemberID][]*burst
+	// cardPushes has a lock of its own: reading cards and pushing them
+	// must not hold mu.
+	cardPushes cardPushes
 	// digestRetry and digestAttempts hold, for a member whose digest no
 	// device took, when to try again and how often it was tried.
 	digestRetry    map[domain.MemberID]time.Time
@@ -161,6 +165,9 @@ type notification struct {
 	Notice bool `json:"notice,omitempty"`
 	// Quiet replaces a notification without alerting again.
 	Quiet bool `json:"quiet,omitempty"`
+	// Card is the assistant card a notification asks to decide, which the
+	// device approves or declines with its own sign-in.
+	Card string `json:"card,omitempty"`
 }
 
 // clearedBody is what a device shows in place of a need that ended, and
@@ -207,6 +214,8 @@ func New(cfg Config) (*Service, error) {
 		notices:   map[budgetKey]chan budgetDue{},
 		bursts:    map[domain.MemberID][]*burst{},
 
+		cardPushes: cardPushes{cards: map[domain.MemberID]map[string]announced{}, held: map[domain.MemberID]bool{}, members: map[domain.MemberID]*sync.Mutex{}},
+
 		digestRetry:    map[domain.MemberID]time.Time{},
 		digestAttempts: map[domain.MemberID]int{},
 	}, nil
@@ -222,7 +231,7 @@ func (s *Service) Start(ctx context.Context) error {
 	sub, err := s.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
 		events.TypeRunStatus, events.TypeRunInput, events.TypeRunOutcomeSeen,
 		events.TypeRunReview, events.TypeRunMode, events.TypeTimeline, events.TypeRunDeleted,
-		events.TypeRunArchived, events.TypeBudget,
+		events.TypeRunArchived, events.TypeBudget, events.TypeAssistantCards,
 	}}})
 	if err != nil {
 		return fmt.Errorf("push: subscribe: %w", err)
@@ -233,6 +242,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 	s.wg.Go(func() { s.consume(loopCtx, sub) })
 	s.wg.Go(func() { s.digests(loopCtx) })
+	s.wg.Go(func() { s.restoreCards(loopCtx) })
 	return nil
 }
 
@@ -271,6 +281,8 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 			switch p := e.Payload.(type) {
 			case events.BudgetPayload:
 				s.budget(ctx, e, p)
+			case events.AssistantCardsPayload:
+				s.wg.Go(func() { s.cardsChanged(ctx, p.MemberID) })
 			default:
 				s.changed(ctx, e.RunID)
 			}
@@ -546,7 +558,7 @@ func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
 		}
 		slog.Warn("push: queue a notification for the digest; pushing at once", "run", run.ID, "error", err)
 	}
-	sum, err := s.join(n.member, string(run.ID), string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed)
+	sum, err := s.join(n.member, string(run.ID), string(run.ID), topicOf(string(run.ID)), RunTitle(run), n.body, kind == KindNeed, false)
 	if err != nil || sum == nil {
 		return false
 	}

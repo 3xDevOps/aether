@@ -449,6 +449,19 @@ permissions, and it uses the account you signed it in to.
   never the assistant's tool socket. A card approved
   after its turn ended runs on the server as you, at most once, and only if it
   still reads as the card you approved.
+- A card's push holds only its id and what it does, never a token, and never
+  the text of a saved preference: a card that saves, forgets or sends one
+  reads only `Save a preference`, `Forget a saved preference` or `An action
+  that uses a saved preference`. No notification approves a card, because a
+  notification shows only a summary and its actions run even on a locked
+  phone or Mac: **Review…** opens the full card, which shows every parameter
+  the call sends, and you approve there. **Decline** decides at once through
+  `assistant.confirm` from that device with its own sign-in (its tailnet
+  identity or edge session, or the desktop app's gateway token). Someone who
+  sees or copies a push cannot decide the card without that device's
+  sign-in. A card is decided once; a replayed or foreign decision gets
+  `assistant: no such pending confirmation`. **Always** options appear only
+  on the full card.
 - **Let the assistant act without asking** (auto-approve, off by default)
   skips the card for your own sessions. Messaging or stopping another member's session
   always asks. The assistant cannot turn auto-approve on or approve a card
@@ -572,6 +585,21 @@ addresses, never its own host, LAN or tailnet. The payload is encrypted to the
 browser and signed with the key in `<data-dir>/push/vapid_key.pem`, which
 grants nothing on the server. A notice carries the session's title and a reason
 from the session.
+
+The Android app subscribes the same way through a UnifiedPush distributor and
+shows only messages encrypted to its own keys. Its **Decline** button declines
+an assistant card through `assistant.confirm` with the phone's tailnet
+identity, so the app offers it only on Android 12 and later, which require the
+phone to be unlocked before a tap runs it. An app with notification access
+can still press it; the card's notification is kept off watches. The
+notifications are marked private; whether a locked phone shows their text is
+Android's sensitive-notifications setting ([networking.md](networking.md#in-the-android-app)). The connector
+library adds two exported components, as every UnifiedPush app has: a
+receiver for the distributor's broadcasts, which acts only on a registration
+it made and hands the app only what decrypts with its keys, and a service the
+distributor binds to keep the app running while it delivers. Any app can
+also open Aether at a dashboard route, as an `aether://` link can, or take
+down one of its notifications; a route is only shown, never acted on.
 
 ### Terminal image uploads
 

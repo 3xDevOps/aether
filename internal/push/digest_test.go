@@ -2,9 +2,11 @@ package push
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,7 +55,7 @@ func TestPushesWithinTwoMinutesJoinTheFirstAsOneNotification(t *testing.T) {
 	phone.expect(t, notification{Title: "Fix login test", Body: "run the migration?", Run: string(a.ID)})
 	h.clock.advance(time.Minute)
 	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: no docs key")
-	phone.expect(t, notification{Title: "2 need you", Body: "Fix login test: run the migration?\nLaunch docs: Blocked: no docs key", Quiet: true})
+	phone.expect(t, notification{Title: "2 things need you", Body: "Fix login test: run the migration?\nLaunch docs: Blocked: no docs key", Quiet: true})
 	if got, want := phone.topic.Load(), topicOf(string(a.ID)); got != want {
 		t.Errorf("summary topic = %v, want the first push's %s, which it replaces", got, want)
 	}
@@ -64,7 +66,7 @@ func TestPushesWithinTwoMinutesJoinTheFirstAsOneNotification(t *testing.T) {
 	// An item whose need ends leaves the summary; once none is left, it is
 	// cleared like a need that ended.
 	h.status(b, domain.RunRunning, domain.ActivityWorking, "")
-	phone.expect(t, notification{Title: "1 need you", Body: "Fix login test: run the migration?", Quiet: true})
+	phone.expect(t, notification{Title: "1 thing needs you", Body: "Fix login test: run the migration?", Quiet: true})
 	h.status(a, domain.RunRunning, domain.ActivityWorking, "")
 	phone.expect(t, notification{Title: "Fix login test", Body: clearedBody, Run: string(a.ID), Clear: true})
 	phone.expect(t, notification{Body: clearedBody, Clear: true})
@@ -279,7 +281,7 @@ func TestExpiredBurstsWithoutANeedAreForgotten(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	for i := range 3 {
-		if _, err := h.svc.join(h.ada.ID, fmt.Sprintf("pr-%d", i), "tag", "topic", "acme/web#7", "Checks passed", false); err != nil {
+		if _, err := h.svc.join(h.ada.ID, fmt.Sprintf("pr-%d", i), "tag", "topic", "acme/web#7", "Checks passed", false, false); err != nil {
 			t.Fatal(err)
 		}
 		h.clock.advance(burstWindow)
@@ -295,7 +297,7 @@ func TestASummaryClaimsItsFirstPushsNotificationWhileItShowsANeed(t *testing.T) 
 	t.Parallel()
 	h := newHarness(t)
 	for _, key := range []string{"run-a", "run-b"} {
-		if _, err := h.svc.join(h.ada.ID, key, "wat-1|needs_you", "topic", "Fix it", "Blocked", true); err != nil {
+		if _, err := h.svc.join(h.ada.ID, key, "wat-1|needs_you", "topic", "Fix it", "Blocked", true, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -313,12 +315,12 @@ func TestASummaryThatShrankToOneItemStaysASummary(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	for _, key := range []string{"run-a", "run-b"} {
-		if _, err := h.svc.join(h.ada.ID, key, "run-a", "topic", "Fix it", "Blocked", true); err != nil {
+		if _, err := h.svc.join(h.ada.ID, key, "run-a", "topic", "Fix it", "Blocked", true, false); err != nil {
 			t.Fatal(err)
 		}
 	}
 	h.svc.unjoin(h.ctx, "run-a", "")
-	sum, err := h.svc.join(h.ada.ID, "run-b", "run-b", "topic-b", "Fix it", "Which region?", true)
+	sum, err := h.svc.join(h.ada.ID, "run-b", "run-b", "topic-b", "Fix it", "Which region?", true, false)
 	if err != nil || sum == nil {
 		t.Fatalf("join = %v, %v; want the summary updated, not a second notification", sum, err)
 	}
@@ -348,7 +350,7 @@ func TestAHandoffDropsTheRunOnlyFromTheFormerOwnersSummary(t *testing.T) {
 	cy := h.member("Cy")
 	for _, member := range []*domain.Member{h.ada, h.bob, cy} {
 		for _, key := range []string{"run-a", "run-b"} {
-			if _, err := h.svc.join(member.ID, key, "run-a", "topic", "Fix it", "Blocked", true); err != nil {
+			if _, err := h.svc.join(member.ID, key, "run-a", "topic", "Fix it", "Blocked", true, false); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -408,7 +410,7 @@ func TestAThirdMembersWatchedQuestionSurvivesAHandoff(t *testing.T) {
 		}
 	}
 	cys.expect(t, notification{Title: "Fix login test", Body: "Blocked: no staging key", Run: string(run.ID)})
-	cys.expect(t, notification{Title: "2 need you", Body: "Fix login test: Blocked: no staging key\nBump deps: Blocked: lockfile", Quiet: true})
+	cys.expect(t, notification{Title: "2 things need you", Body: "Fix login test: Blocked: no staging key\nBump deps: Blocked: lockfile", Quiet: true})
 
 	if err := h.db.TransferRun(h.ctx, run.ID, h.bob.ID); err != nil {
 		t.Fatalf("TransferRun: %v", err)
@@ -444,5 +446,59 @@ func TestANeedHeldByTheDashboardIntoQuietHoursWaitsForThem(t *testing.T) {
 	phone.expectNone(t, testQuiet)
 	if item := h.digestItems(h.ada)[0]; !item.Overnight {
 		t.Fatalf("item = %+v, want it held for the digest quiet hours end with", *item)
+	}
+}
+
+func TestASummaryOfLongEscapedLinesStillFitsOnePush(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	var sum *summary
+	for i := range 6 {
+		var err error
+		if sum, err = h.svc.join(h.ada.ID, fmt.Sprintf("run-%d", i), "run-0", "topic", strings.Repeat("&", 60), strings.Repeat("<&>", 60), true, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sum == nil || len(sum.payload) > maxPayload {
+		t.Fatalf("summary is %d octets, want at most %d", len(sum.payload), maxPayload)
+	}
+}
+
+func TestAnUnrelatedNeedEndingKeepsABurstInsideItsWindow(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if _, err := h.svc.join(h.ada.ID, "pr-1", "tag", "topic", "acme/web#7", "Checks passed", false, false); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.unjoin(h.ctx, "run-x", "")
+	h.svc.mu.Lock()
+	defer h.svc.mu.Unlock()
+	if n := len(h.svc.bursts[h.ada.ID]); n != 1 {
+		t.Fatalf("member keeps %d bursts, want the one still inside its window", n)
+	}
+}
+
+func TestADigestHoldingACardOpensTheAssistantPanel(t *testing.T) {
+	t.Parallel()
+	payload, err := digestPayload([]*store.DigestItem{{Kind: KindCard, Title: cardTitle, Body: "Stop run-8x2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m message
+	if err = json.Unmarshal(payload, &m); err != nil || m.URL != CardLink {
+		t.Fatalf("digest opens %q, %v; want the assistant panel", m.URL, err)
+	}
+}
+
+func TestAnEmptiedBurstGivesItsTagUp(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if _, err := h.svc.join(h.ada.ID, "card:a", "card:a", "topic-a", cardTitle, "Stop run-8x2", true, true); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.unjoin(h.ctx, "card:a", "")
+	sum, err := h.svc.join(h.ada.ID, "card:b", "card:b", "topic-b", cardTitle, "Stop run-9y3", true, true)
+	if err != nil || sum != nil {
+		t.Fatalf("join = %v, %v; want card b's own notification, not a summary under a's tag", sum, err)
 	}
 }

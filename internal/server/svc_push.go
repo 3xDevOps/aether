@@ -32,6 +32,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
+		if d.Assistant != nil {
+			svc.UseCards(d.Assistant)
+		}
 		d.SSH.Services.Push = svc
 		return svc, nil
 	})

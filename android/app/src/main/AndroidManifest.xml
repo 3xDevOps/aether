@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- allowBackup is off because the stored state must never leave the
          phone: the connection choice and server address, and in Edge mode the
@@ -85,5 +86,22 @@
             android:name=".SetupActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- Only the UnifiedPush connector in this app binds it; the
+             connector's own exported receiver takes the distributor's
+             broadcasts. -->
+        <service
+            android:name=".AetherPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Declines an assistant card from its notification. Not exported:
+             only this app's own PendingIntent reaches it. -->
+        <receiver
+            android:name=".DeclineReceiver"
+            android:exported="false" />
     </application>
 </manifest>
