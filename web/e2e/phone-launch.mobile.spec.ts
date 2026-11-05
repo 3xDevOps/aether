@@ -3,14 +3,10 @@
 // agent, a shared prompt fills it in without launching, and lanes fit the
 // screen.
 
-import type { Page } from '@playwright/test'
 
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
-
-const overflowX = (page: Page) =>
-  page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
 const idleAgent = 'sleep 600'
 
@@ -55,7 +51,7 @@ test('+ New launches on the last session\'s repository with the saved agent', as
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'Filters, 1 changed' })).toBeVisible()
   await expect(page.getByRole('treeitem', { name: /^write the changelog/ })).toBeVisible()
-  expect(await overflowX(page)).toBe(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
 })
 
 test('a shared prompt fills + New without launching and leaves the address', async ({ page, aether }) => {
