@@ -80,8 +80,8 @@ func cardBody(c Card) string {
 
 // cardPushes is, per member, the cards announced, and a lock that keeps
 // that member's card pushes in order without holding up other members'.
-// held marks a member whose new cards wait for them to leave the
-// dashboard. mu guards the maps themselves.
+// held marks a member whose cards are read again on a timer. mu guards
+// the maps themselves.
 type cardPushes struct {
 	mu      sync.Mutex
 	cards   map[domain.MemberID]map[string]announced
@@ -154,7 +154,8 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		// by unjoin; a clear would hide the rest of it.
 		if a.pushed && !s.Summarizes(member, cardTopic(id)) {
 			if err := s.withdrawCard(ctx, member, id, a); err != nil {
-				slog.Warn("push: withdraw a decided card's notification; trying again on its next change", "member", member, "card", id, "error", err)
+				slog.Warn("push: withdraw a decided card's notification; trying again later", "member", member, "card", id, "in", retry, "error", err)
+				s.cardsAgain(ctx, member, retry)
 				continue
 			}
 		}
@@ -164,20 +165,7 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		delete(known, id)
 	}
 	if wait := s.freeAt(member).Sub(s.now()); wait > 0 {
-		s.cardPushes.mu.Lock()
-		wasHeld := s.cardPushes.held[member]
-		s.cardPushes.held[member] = true
-		s.cardPushes.mu.Unlock()
-		if !wasHeld {
-			time.AfterFunc(wait, func() {
-				s.cardPushes.mu.Lock()
-				delete(s.cardPushes.held, member)
-				s.cardPushes.mu.Unlock()
-				if ctx.Err() == nil {
-					s.cardsChanged(ctx, member)
-				}
-			})
-		}
+		s.cardsAgain(ctx, member, wait)
 		return
 	}
 	started := s.startedAt()
@@ -187,8 +175,8 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 		}
 		pushed, err := s.announceCard(ctx, member, c)
 		if err != nil {
-			// Tried again on the member's next card change.
-			slog.Warn("push: announce a card", "member", member, "card", c.ID, "error", err)
+			slog.Warn("push: announce a card; trying again later", "member", member, "card", c.ID, "in", retry, "error", err)
+			s.cardsAgain(ctx, member, retry)
 			continue
 		}
 		known[c.ID] = announced{pushed: pushed, summary: cardBody(c)}
@@ -200,6 +188,26 @@ func (s *Service) cardsChanged(ctx context.Context, member domain.MemberID) {
 			}
 		}
 	}
+}
+
+// cardsAgain has member's cards read again after wait, once however often
+// it is asked meanwhile: they wait for the member to leave the dashboard,
+// or a push or withdrawal failed.
+func (s *Service) cardsAgain(ctx context.Context, member domain.MemberID, wait time.Duration) {
+	s.cardPushes.mu.Lock()
+	defer s.cardPushes.mu.Unlock()
+	if s.cardPushes.held[member] {
+		return
+	}
+	s.cardPushes.held[member] = true
+	time.AfterFunc(wait, func() {
+		s.cardPushes.mu.Lock()
+		delete(s.cardPushes.held, member)
+		s.cardPushes.mu.Unlock()
+		if ctx.Err() == nil {
+			s.cardsChanged(ctx, member)
+		}
+	})
 }
 
 // withdrawCard replaces the notification of card id, decided anywhere,

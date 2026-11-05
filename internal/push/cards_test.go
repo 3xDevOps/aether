@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -197,5 +198,24 @@ func TestACardFromQuietHoursHeldByTheDashboardStaysOvernight(t *testing.T) {
 	phone.expectNone(t, testQuiet)
 	if item := h.digestItems(h.ada)[0]; !item.Overnight {
 		t.Fatalf("item = %+v, want it in the digest quiet hours end with", *item)
+	}
+}
+
+func TestAFailedCardPushIsTriedAgainOnItsOwn(t *testing.T) {
+	t.Parallel()
+	h, cards := newCardHarness(t)
+	phone := h.subscribe(h.ada)
+	phone.answer.Store(http.StatusServiceUnavailable)
+	cards.set(h.ada.ID, Card{ID: "c1", Summary: "Stop run-8x2", CreatedAt: h.clock.now()})
+	h.svc.cardsChanged(h.ctx, h.ada.ID)
+	lock, known := h.svc.knownCards(h.ada.ID)
+	lock.Lock()
+	_, recorded := known["c1"]
+	lock.Unlock()
+	h.svc.cardPushes.mu.Lock()
+	scheduled := h.svc.cardPushes.held[h.ada.ID]
+	h.svc.cardPushes.mu.Unlock()
+	if recorded || !scheduled {
+		t.Fatalf("after a failed push: recorded %v, retry scheduled %v; want it unrecorded and retried", recorded, scheduled)
 	}
 }
