@@ -20,7 +20,8 @@ const (
 	KindOther  = "other"
 )
 
-// Route is what becomes of a notification.
+// Route is what becomes of a notification, each later than the one
+// before.
 type Route int
 
 const (

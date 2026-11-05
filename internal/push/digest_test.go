@@ -422,3 +422,27 @@ func TestAThirdMembersWatchedQuestionSurvivesAHandoff(t *testing.T) {
 		t.Fatal("Cy's summary lost the run her watch still needs")
 	}
 }
+
+func TestANeedHeldByTheDashboardIntoQuietHoursWaitsForThem(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	now := h.clock.now().UTC()
+	// Quiet hours start minutes after the need is raised, as at 21:59 to their 22:00.
+	if err := h.db.PutNotifyPrefs(h.ctx, h.ada.ID, store.NotifyPrefs{
+		Push: true, Level: protocol.NotifyBatched, DigestAt: "09:00",
+		QuietStart: now.Add(2 * time.Minute).Format("15:04"), QuietEnd: now.Add(3 * time.Hour).Format("15:04"), QuietTZ: "UTC",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.Active(h.ada.ID)
+	run := h.run(h.ada, "Fix login test", domain.LaunchACP)
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: no staging key")
+	// The dashboard holds the need until quiet hours have begun.
+	h.clock.advance(3 * time.Minute)
+	h.eventuallyQueued(h.ada, 1)
+	phone.expectNone(t, testQuiet)
+	if item := h.digestItems(h.ada)[0]; !item.Overnight {
+		t.Fatalf("item = %+v, want it held for the digest quiet hours end with", *item)
+	}
+}

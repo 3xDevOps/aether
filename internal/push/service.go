@@ -531,13 +531,16 @@ func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
 		slog.Warn("push: read notification settings; pushing at once", "member", n.member, "error", err)
 		prefs.Level = protocol.NotifyAll
 	}
-	// Routed as of when the need began: one that began in quiet hours is
-	// theirs, though the member's dashboard held it past their end.
-	at := s.now()
-	if !n.since.IsZero() && n.since.Before(at) {
-		at = n.since
+	// Routed as of when the need began and as of now, the later of the
+	// two: one that began in quiet hours stays theirs though the
+	// member's dashboard held it past their end, and one held into them
+	// waits for them to end.
+	now := s.now()
+	route := RouteOf(prefs, kind, now)
+	if !n.since.IsZero() && n.since.Before(now) {
+		route = max(route, RouteOf(prefs, kind, n.since))
 	}
-	if route := RouteOf(prefs, kind, at); route != RouteNow {
+	if route != RouteNow {
 		if err = s.queueNeed(ctx, run, n, kind, route == RouteOvernight); err == nil {
 			return true
 		}
