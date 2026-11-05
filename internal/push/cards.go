@@ -51,14 +51,12 @@ type announced struct {
 	summary string
 }
 
-// outcomes is how a decided card's notification starts, by its state.
 var outcomes = map[string]string{
 	protocol.AssistantCardApproved: "Approved", protocol.AssistantCardRunning: "Approved",
 	protocol.AssistantCardSucceeded: "Approved", protocol.AssistantCardFailed: "Approved",
 	protocol.AssistantCardDeclined: "Declined", protocol.AssistantCardExpired: "Expired",
 }
 
-// cardLink opens the dashboard on the card with id, in the assistant panel.
 func cardLink(id string) string { return CardLink + "&card=" + url.QueryEscape(id) }
 
 // cardBody is what a card's push says: its summary, cut at a word to fit

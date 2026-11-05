@@ -85,9 +85,13 @@ async function decline(notification, card) {
     body = `Not decided: ${err instanceof Error ? err.message : String(err)}`
     failed = true
   }
+  // A summary of newer pushes may have taken the card's notification while
+  // the request ran; the outcome then shows apart from it, never over it.
+  const [current] = await self.registration.getNotifications({ tag: notification.tag })
+  const tag = current && current.data?.card !== card ? `${notification.tag}:decided` : notification.tag
   await self.registration.showNotification('Assistant card', {
     body,
-    tag: notification.tag,
+    tag,
     silent: true,
     // An error stays until it is read.
     requireInteraction: failed,

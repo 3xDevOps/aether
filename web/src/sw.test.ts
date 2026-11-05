@@ -105,6 +105,17 @@ describe('service worker', () => {
     vi.unstubAllGlobals()
   })
 
+  it('shows a decline apart from a summary that took the card\u2019s notification meanwhile', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const shown = [{ tag: 'card:c1', title: '2 things need you', body: 'Stop run-8x2\nStop run-9y3', data: { url: '/?assistant=1' } }]
+    const { self, dispatch } = worker([], shown)
+    const notification = { title: 'Assistant asks for approval', body: 'Stop run-8x2', tag: 'card:c1', data: { card: 'c1', url: '/?assistant=1&card=c1' }, close: vi.fn() }
+    await dispatch('notificationclick', { notification, action: 'decline' })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Assistant card', expect.objectContaining({ tag: 'card:c1:decided', body: 'Declined here: Stop run-8x2' }))
+    expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ tag: 'card:c1' }))
+    vi.unstubAllGlobals()
+  })
+
   it('keeps a refused decision on screen when the server withdraws the card', async () => {
     const shown = [{ tag: 'card:c1', title: 'Assistant card', body: 'Not decided: offline', data: { decided: true, persist: true } }]
     const { self, dispatch } = worker([], shown)
