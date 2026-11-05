@@ -237,7 +237,7 @@ describe('shared terminal geometry', () => {
       proposal.mockReturnValue({ cols: 100, rows: 34 })
       resolve()
       await act(() => vi.advanceTimersByTimeAsync(0))
-      expect(fontFamily).toHaveBeenLastCalledWith(terminalFontFamily)
+      expect(fontFamily.mock.calls).toEqual([['monospace'], [terminalFontFamily]])
       expect(onResize).toHaveBeenLastCalledWith(100, 34)
     } finally {
       view.unmount()

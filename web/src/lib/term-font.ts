@@ -32,7 +32,7 @@ const faces = [`12px "JetBrainsMono NFM"`, `bold 12px "JetBrainsMono NFM"`]
  * caches glyph metrics synchronously at `Terminal.open`, so opening before
  * the font arrives would bake fallback metrics in for the terminal's whole
  * life. A hung load opens anyway after a bounded wait: a terminal with
- * fallback glyphs beats no terminal. If the faces settle after that, `refit`
+ * fallback glyphs beats no terminal. If a face loads after that, `refit`
  * runs so the terminal can re-measure its cell. Returns a cancel function; a
  * cancelled wait never opens or refits.
  */
@@ -56,10 +56,10 @@ export function whenTerminalFontReady(open: () => void, refit: () => void): () =
   const timer = setTimeout(openOnce, loadTimeoutMs)
   // A failed face falls back to platform glyphs, not a dead pane, but must
   // not open the terminal while the other face is still arriving.
-  void Promise.allSettled(faces.map((face) => fonts.load(face, sampleGlyph))).then(() => {
+  void Promise.allSettled(faces.map((face) => fonts.load(face, sampleGlyph))).then((results) => {
     if (cancelled) return
-    if (opened) refit()
-    else openOnce()
+    if (!opened) openOnce()
+    else if (results.some((result) => result.status === 'fulfilled')) refit()
   })
   return () => {
     cancelled = true

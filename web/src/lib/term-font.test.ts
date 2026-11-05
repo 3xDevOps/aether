@@ -67,14 +67,18 @@ describe('whenTerminalFontReady', () => {
     const { promise: loading, resolve } = Promise.withResolvers<void>()
     stubFonts(fontSet('unloaded', 'unloaded', () => loading))
     let opened = false
+    let refits = 0
     whenTerminalFontReady(() => {
       opened = true
-    }, () => {})
+    }, () => {
+      refits++
+    })
     await vi.advanceTimersByTimeAsync(0)
     expect(opened).toBe(false)
     resolve()
     await vi.advanceTimersByTimeAsync(0)
     expect(opened).toBe(true)
+    expect(refits).toBe(0)
   })
 
   it('opens anyway when the font load rejects', async () => {
@@ -133,6 +137,20 @@ describe('whenTerminalFontReady', () => {
     resolve()
     await vi.advanceTimersByTimeAsync(0)
     expect([opened, refits]).toEqual([1, 1])
+  })
+
+  it('does not refit when every face failed after the timeout', async () => {
+    vi.useFakeTimers()
+    const { promise: loading, reject } = Promise.withResolvers<void>()
+    stubFonts(fontSet('unloaded', 'unloaded', () => loading))
+    let refits = 0
+    whenTerminalFontReady(() => {}, () => {
+      refits++
+    })
+    await vi.advanceTimersByTimeAsync(2000)
+    reject(new Error('net::ERR_NETWORK_CHANGED'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refits).toBe(0)
   })
 
   it('never refits once cancelled', async () => {
