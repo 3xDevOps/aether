@@ -350,10 +350,16 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 				slog.Warn("push: a former owner's device was not told a need moved; trying again later", "run", id, "in", retry, "error", err)
 				wake = time.After(retry)
 			}
+			handedOff := false
 			for key := range announced {
 				if !strings.HasPrefix(key, string(n.member)+"|") {
 					delete(announced, key)
+					handedOff = true
 				}
+			}
+			// A former owner's summary no longer shows the run's need.
+			if handedOff {
+				s.unjoin(ctx, string(id))
 			}
 			// Clearing can take a while: announce what the run needs then.
 			if moved && err == nil {
@@ -511,6 +517,10 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 // queue is pushed at once.
 func (s *Service) routed(ctx context.Context, run *domain.Run, n *need) bool {
 	kind := needKind(run, n)
+	if kind != KindNeed {
+		// The run stopped asking: a question it had in a summary goes.
+		s.unjoin(ctx, string(run.ID))
+	}
 	prefs, err := s.store.GetNotifyPrefs(ctx, n.member)
 	if err != nil {
 		slog.Warn("push: read notification settings; pushing at once", "member", n.member, "error", err)

@@ -47,6 +47,8 @@ func (d digestItems) Stale(ctx context.Context, item *store.DigestItem) (string,
 		return "Resolved before the digest was sent", nil
 	case status == "" && w.State == protocol.WatchPaused:
 		return "You paused the watch", nil
+	case status == "" && w.State == protocol.WatchExpired:
+		return "The watch expired", nil
 	}
 	return detail, nil
 }

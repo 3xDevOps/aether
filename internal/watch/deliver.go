@@ -115,15 +115,22 @@ func (s *Service) queue(ctx context.Context, w *store.Watch, n *store.WatchNotif
 	if w.TargetKind == protocol.WatchTargetRun {
 		item.RunID = w.RunID
 	}
-	if err := s.push.Queue(ctx, item); err != nil {
-		return fmt.Errorf("notice %s: %w", n.ID, err)
-	}
 	status, detail := protocol.WatchStatusBatched, "In your next digest"
 	if route == push.RouteOvernight {
 		until, _ := push.QuietUntil(prefs, s.now())
 		status, detail = protocol.WatchStatusHeldQuiet, quietDetail(prefs, until)
 	}
-	return s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, status, detail)
+	// The row says it waits before the item is queued, so a digest sent at
+	// once records its outcome after it, not before.
+	if err := s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, status, detail); err != nil {
+		return err
+	}
+	if err := s.push.Queue(ctx, item); err != nil {
+		next := s.now().Add(backoff(n.PushAttempts + 1))
+		return errors.Join(fmt.Errorf("notice %s: %w", n.ID, err),
+			s.settle(ctx, w, n, store.WatchPushPending, n.PushAttempts, &next, protocol.WatchStatusPending, "Not queued for the digest: "+err.Error()))
+	}
+	return nil
 }
 
 func noticeMessage(n *store.WatchNotification, w *store.Watch) push.Message {

@@ -59,7 +59,6 @@ func (s *Service) UseDigestSource(name string, source DigestSource) {
 	s.sources[name] = source
 }
 
-// Queue adds item to its member's next digest.
 func (s *Service) Queue(ctx context.Context, item *store.DigestItem) error {
 	return s.store.AddDigestItem(ctx, item)
 }
@@ -153,7 +152,6 @@ func (s *Service) digests(ctx context.Context) {
 	}
 }
 
-// sendDigests sends every digest that fell due.
 func (s *Service) sendDigests(ctx context.Context) {
 	members, err := s.store.DigestMembers(ctx)
 	if err != nil {
@@ -212,7 +210,14 @@ func (s *Service) sendDigest(ctx context.Context, member domain.MemberID) error 
 	if err = s.store.DeleteDigestItems(ctx, member, stale); err != nil {
 		errs = append(errs, err)
 	}
-	if len(current) == 0 || digestDue(prefs, current, now).After(now) {
+	if len(current) == 0 {
+		s.mu.Lock()
+		delete(s.digestAttempts, member)
+		delete(s.digestRetry, member)
+		s.mu.Unlock()
+		return errors.Join(errs...)
+	}
+	if digestDue(prefs, current, now).After(now) {
 		return errors.Join(errs...)
 	}
 	payload, err := digestPayload(current)
@@ -298,6 +303,12 @@ func (s *Service) source(item *store.DigestItem) DigestSource {
 
 // queueNeed adds a session's notification to its owner's digest.
 func (s *Service) queueNeed(ctx context.Context, run *domain.Run, n *need, kind string, overnight bool) error {
+	// Queued as of when the need began, not when the member left the
+	// dashboard, so a hold never pushes it past its digest.
+	queued := s.now()
+	if !n.since.IsZero() && n.since.Before(queued) {
+		queued = n.since
+	}
 	workspace := ""
 	if ws, err := s.store.GetWorkspace(ctx, run.WorkspaceID); err == nil {
 		workspace = ws.Name
@@ -307,7 +318,7 @@ func (s *Service) queueNeed(ctx context.Context, run *domain.Run, n *need, kind 
 	return s.Queue(ctx, &store.DigestItem{
 		MemberID: n.member, Source: runSource, Key: n.key, Kind: kind, Workspace: workspace,
 		Title: RunTitle(run), Body: n.body, URL: "/?run=" + url.QueryEscape(string(run.ID)), RunID: run.ID,
-		Overnight: overnight, CreatedAt: s.now(),
+		Overnight: overnight, CreatedAt: queued,
 	})
 }
 

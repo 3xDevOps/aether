@@ -198,18 +198,9 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
 
 const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const quietDefault = () => ({ start: '22:00', end: '07:00', tz: browserZone() })
-const zones = () => Intl.supportedValuesOf('timeZone')
 
 const later = 'finished, failed, stopped, merged, checks, reviews and closed pull requests'
 
-/** What each level pushes at once and when the rest arrives; at is the saved daily digest time. */
-function levels(at: string): { level: NotifyLevel; label: string; help: string }[] {
-  return [
-    { level: 'blockers', label: 'Blockers now, the rest daily', help: `Needs you at once, except during quiet hours; ${later} in one digest daily at ${at}.` },
-    { level: 'batched', label: 'Blockers now, the rest every half hour', help: `Needs you at once, except during quiet hours; ${later} in a digest on each half hour.` },
-    { level: 'all', label: 'Everything at once', help: 'Every push as it happens, except during quiet hours.' },
-  ]
-}
 
 type Row = 'watch-push' | 'level' | 'quiet-hours'
 
@@ -299,7 +290,11 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
           disabled={busy || !prefs}
           onValueChange={(next) => prefs && save({ level: next as NotifyLevel, quiet_hours: prefs.quiet_hours }, 'level')}
         >
-          {levels(savedDigest.at).map((l) => (
+          {([
+            { level: 'blockers', label: 'Blockers now, the rest daily', help: `Needs you at once, except during quiet hours; ${later} in one digest daily at ${savedDigest.at}.` },
+            { level: 'batched', label: 'Blockers now, the rest every half hour', help: `Needs you at once, except during quiet hours; ${later} in a digest on each half hour.` },
+            { level: 'all', label: 'Everything at once', help: 'Every push as it happens, except during quiet hours.' },
+          ] satisfies { level: NotifyLevel; label: string; help: string }[]).map((l) => (
             <label key={l.level} className="flex min-w-0 cursor-pointer items-start gap-2 py-1 coarse:min-h-11">
               <Radio value={l.level} aria-labelledby={`settings-level-${l.level}-label`} aria-describedby={`settings-level-${l.level}`} className="mt-0.5" />
               <span className="flex min-w-0 flex-col gap-0.5">
@@ -320,7 +315,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
                 </Button>
               )}
               {here !== savedZone && (
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => prefs && save({ digest: { at: savedDigest.at, tz: here }, quiet_hours: prefs.quiet_hours }, 'level')}>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => prefs && save({ digest: { at: digestAt || savedDigest.at, tz: here }, quiet_hours: prefs.quiet_hours }, 'level')}>
                   Use this browser’s zone ({here})
                 </Button>
               )}
@@ -379,7 +374,7 @@ export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api;
               </label>
               <span id="settings-quiet-zone-help">An IANA zone, such as Europe/Berlin.</span>
               <datalist id="settings-quiet-zones">
-                {zones().map((zone) => <option key={zone} value={zone} />)}
+                {Intl.supportedValuesOf('timeZone').map((zone) => <option key={zone} value={zone} />)}
               </datalist>
             </div>
             {edited && (

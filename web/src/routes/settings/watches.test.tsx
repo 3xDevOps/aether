@@ -491,7 +491,10 @@ describe('watch notification preferences', () => {
   it('describes every level, and saves the level and the digest time in the saved zone, keeping quiet hours', async () => {
     const user = userEvent.setup()
     const quiet = { start: '22:00', end: '07:00', tz: 'Europe/Berlin' }
-    let saved: NotifyPrefs = { push: true, level: 'batched', digest: { at: '09:00', tz: 'Pacific/Auckland' }, quiet_hours: quiet, destinations: { push_devices: 0 } }
+    const browser = Intl.DateTimeFormat().resolvedOptions().timeZone
+    // A saved zone this browser is not in, so it offers to switch.
+    const away = browser === 'Pacific/Auckland' ? 'America/Lima' : 'Pacific/Auckland'
+    let saved: NotifyPrefs = { push: true, level: 'batched', digest: { at: '09:00', tz: away }, quiet_hours: quiet, destinations: { push_devices: 0 } }
     const client = fakeApi({
       notifyPrefsGet: vi.fn(async () => saved),
       notifyPrefsSet: vi.fn(async (p: NotifyPrefsSetParams) => (saved = { ...saved, level: p.level ?? saved.level, digest: p.digest ?? saved.digest, quiet_hours: p.quiet_hours })),
@@ -504,14 +507,16 @@ describe('watch notification preferences', () => {
     await user.click(screen.getByRole('radio', { name: 'Blockers now, the rest daily' }))
     // notify.prefs.set turns quiet hours off when they are left out.
     expect(client.notifyPrefsSet).toHaveBeenCalledWith({ level: 'blockers', quiet_hours: quiet })
-    const time = await screen.findByLabelText('Daily digest at (Pacific/Auckland)')
+    const time = await screen.findByLabelText(`Daily digest at (${away})`)
     await user.clear(time)
     await user.type(time, '08:30')
     await user.click(screen.getByRole('button', { name: 'Save digest time' }))
-    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: 'Pacific/Auckland' }, quiet_hours: quiet })
-    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    await user.click(screen.getByRole('button', { name: `Use this browser’s zone (${zone})` }))
-    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: zone }, quiet_hours: quiet })
+    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '08:30', tz: away }, quiet_hours: quiet })
+    // An edited, unsaved time goes along with the zone.
+    await user.clear(time)
+    await user.type(time, '07:15')
+    await user.click(screen.getByRole('button', { name: `Use this browser’s zone (${browser})` }))
+    expect(client.notifyPrefsSet).toHaveBeenLastCalledWith({ digest: { at: '07:15', tz: browser }, quiet_hours: quiet })
   })
 
   it('re-reads the device count when this device subscribes', async () => {

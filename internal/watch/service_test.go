@@ -220,6 +220,7 @@ func TestANeedSentInADigestIsNotWithdrawnOnItsOwn(t *testing.T) {
 	h.eventually("both held", func() bool {
 		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
 	})
+	h.queued(h.ada.ID, 2)
 	h.digest(h.ada.ID)
 	if s := h.pushStatus(wa.ID); s != protocol.WatchStatusDelivered {
 		t.Fatalf("push of the digest's notice = %s, want delivered", s)
@@ -311,6 +312,15 @@ func (h *harness) level(member *domain.Member, level string) {
 	if _, err := h.svc.SetPrefs(h.ctx, member.ID, protocol.NotifyPrefs{Level: level}); err != nil {
 		h.t.Fatal(err)
 	}
+}
+
+// queued waits for member's digest to hold n items.
+func (h *harness) queued(member domain.MemberID, n int) {
+	h.t.Helper()
+	h.eventually(fmt.Sprintf("%d digest items", n), func() bool {
+		items, err := h.db.ListDigestItems(h.ctx, member)
+		return err == nil && len(items) == n
+	})
 }
 
 // digest settles member's queued notices the way the push service's digest
@@ -1248,6 +1258,7 @@ func TestQuietHoursQueueNoticesForTheDigest(t *testing.T) {
 	h.eventually("both held", func() bool {
 		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
 	})
+	h.queued(h.ada.ID, 2)
 
 	// The hold survives a restart: the digest's queue is stored.
 	_ = h.svc.Close()
@@ -1269,6 +1280,7 @@ func TestQuietHoursQueueNoticesForTheDigest(t *testing.T) {
 	wc := h.watch(h.ada, runTarget(c)).Watch
 	h.status(c, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: three")
 	h.eventually("the third held", func() bool { return h.pushStatus(wc.ID) == protocol.WatchStatusHeldQuiet })
+	h.queued(h.ada.ID, 3)
 	paused := true
 	if _, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: wc.ID, Paused: &paused}); err != nil {
 		t.Fatal(err)
@@ -1381,6 +1393,7 @@ func TestPushOfAPausedRunWaitsForItsResumption(t *testing.T) {
 	w := h.watch(h.ada, runTarget(run)).Watch
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: keep going?")
 	h.eventually("the held push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusHeldQuiet })
+	h.queued(h.ada.ID, 1)
 
 	h.runs.pause(run.ID, true)
 	h.digest(h.ada.ID)
@@ -1522,6 +1535,7 @@ func TestTheLevelBatchesWhatDoesNotBlock(t *testing.T) {
 	h.eventually("the need pushed at once", func() bool { return h.pushStatus(wa.ID) == protocol.WatchStatusDelivered })
 	h.status(b, domain.RunInterrupted, "", "")
 	h.eventually("the end batched", func() bool { return h.pushStatus(wb.ID) == protocol.WatchStatusBatched })
+	h.queued(h.ada.ID, 1)
 	if n := phone.received.Load(); n != 1 {
 		t.Fatalf("device received %d pushes, want the need alone", n)
 	}
@@ -1554,5 +1568,25 @@ func TestNotificationPreferencesRefuseTheServersOwnZone(t *testing.T) {
 	got, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Level: protocol.NotifyBlockers, Digest: &protocol.NotifyDigest{At: "08:30", TZ: "Europe/Berlin"}})
 	if err != nil || got.Level != protocol.NotifyBlockers || *got.Digest != (protocol.NotifyDigest{At: "08:30", TZ: "Europe/Berlin"}) {
 		t.Fatalf("SetPrefs = %+v, %v, want the level and digest time saved", got, err)
+	}
+}
+
+func TestAnExpiredWatchsQueuedNoticeLeavesTheDigest(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.subscribe(h.ada)
+	run := h.run(h.bob, "Ends")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunInterrupted, "", "")
+	h.eventually("the end batched", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusBatched })
+	h.queued(h.ada.ID, 1)
+	expired := h.watchState(w.ID)
+	expired.State = protocol.WatchExpired
+	if err := h.db.UpdateWatch(h.ctx, expired); err != nil {
+		t.Fatal(err)
+	}
+	h.digest(h.ada.ID)
+	if d := pushOf(h.notices(w.ID)[0]); d.Status != protocol.WatchStatusCleared || d.Detail != "The watch expired" {
+		t.Fatalf("push of an expired watch's notice = %+v, want dropped from the digest", d)
 	}
 }

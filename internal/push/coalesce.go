@@ -69,7 +69,9 @@ func (s *Service) join(member domain.MemberID, key, tag, topic, title, body stri
 		b.keys = append(b.keys, key)
 	}
 	b.lines[key], b.needs[key] = line, need
-	if len(b.keys) == 1 {
+	// A summary that shrank to one item stays a summary: the item's own
+	// notification was never sent.
+	if len(b.keys) == 1 && !b.summarized {
 		return nil, nil
 	}
 	b.summarized = true

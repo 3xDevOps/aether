@@ -94,7 +94,6 @@ func TestAnItemThatWaitsDoesNotMakeTheDigestDue(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
-	h.clock.advance(30*time.Minute + time.Second)
 	h.finish(run)
 	h.eventuallyQueued(h.ada, 2)
 	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
@@ -306,5 +305,38 @@ func TestASummaryClaimsItsFirstPushsNotificationWhileItShowsANeed(t *testing.T) 
 	h.svc.unjoin(h.ctx, "run-b")
 	if h.svc.Summarizes(h.ada.ID, "wat-1|needs_you") {
 		t.Fatal("a summary with no need left still claims the notification")
+	}
+}
+
+func TestASummaryThatShrankToOneItemStaysASummary(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	for _, key := range []string{"run-a", "run-b"} {
+		if _, err := h.svc.join(h.ada.ID, key, "run-a", "topic", "Fix it", "Blocked", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.svc.unjoin(h.ctx, "run-a")
+	sum, err := h.svc.join(h.ada.ID, "run-b", "run-b", "topic-b", "Fix it", "Which region?", true)
+	if err != nil || sum == nil {
+		t.Fatalf("join = %v, %v; want the summary updated, not a second notification", sum, err)
+	}
+}
+
+func TestAResultQueuedAfterADashboardHoldKeepsItsTime(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.subscribe(h.ada)
+	h.level(h.ada, protocol.NotifyBatched)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	h.svc.Active(h.ada.ID)
+	h.finish(run)
+	h.eventuallyQueued(h.ada, 1)
+	got, err := h.db.GetRun(h.ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item := h.digestItems(h.ada)[0]; got.ReviewChangedAt == nil || !item.CreatedAt.Equal(got.ReviewChangedAt.UTC()) {
+		t.Fatalf("queued at %v, want when the session finished (%v)", item.CreatedAt, got.ReviewChangedAt)
 	}
 }
