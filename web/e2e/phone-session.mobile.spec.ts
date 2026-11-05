@@ -60,8 +60,12 @@ test('an Enhanced session opens on Chat and takes a message from the pinned comp
   await restore()
 
   // iOS shrinks only the visual viewport, so the composer rides --keyboard-inset above its keyboard.
-  await page.evaluate(() => document.documentElement.style.setProperty('--keyboard-inset', '200px'))
+  // useKeyboardInset rewrites the property on each visualViewport resize, and the restored
+  // viewport's resize lands asynchronously: set it only once that has been handled.
   const height = page.viewportSize()!.height
+  await expect.poll(() => page.evaluate(() => window.visualViewport?.height)).toBe(height)
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+  await page.evaluate(() => document.documentElement.style.setProperty('--keyboard-inset', '200px'))
   await expect.poll(async () => {
     const rect = await box.boundingBox()
     return rect ? rect.y + rect.height : Infinity
