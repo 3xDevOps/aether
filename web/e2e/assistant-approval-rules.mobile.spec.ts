@@ -33,7 +33,16 @@ test('a launch card shows every row it covers before Always approve, inside the 
   const sheet = page.getByRole('dialog', { name: 'Assistant' })
   const always = sheet.getByRole('button', { name: wording })
   await expect(always).toBeVisible()
-  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'))
+  // The card's expiry bar restarts its width transition on every tick, so a
+  // wait for no running animation can last forever on a slow runner; only
+  // the sheet's slide-in has to settle before its box is measured.
+  let last = ''
+  await expect.poll(async () => {
+    const now = JSON.stringify(await sheet.boundingBox())
+    const settled = now === last
+    last = now
+    return settled
+  }, { intervals: [100] }).toBe(true)
 
   const box = (await sheet.boundingBox())!
   expect(box.x).toBeGreaterThanOrEqual(0)
