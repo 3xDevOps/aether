@@ -512,7 +512,8 @@ review group, newest change first. A session only the dashboard's copy of the
 rule puts in Needs you stays listed, last, and is not counted.
 
 A phone that opens the dashboard with no `run` or `page` in the address lands
-on Needs you (`initialRoute` in `src/lib/url-state.ts`), or on onboarding on a
+on Needs you (`initialRoute` in `src/lib/url-state.ts`; Back to such an
+address does too), or on onboarding on a
 first visit, as the board does on desktop. Every other link still opens its
 own page. The board is in More, and on a phone its address carries
 `page=board`, so a reload stays on it. A gateway without `attention.list`,
@@ -589,6 +590,68 @@ refuse with `-32003`. Any other refusal shows the server's error on the card.
 Below the cards, **Finished: review the result** lists the `ready` items as
 plain rows. They never count toward the badge and have no Mark complete;
 opening one opens the session.
+
+### Phone session
+
+On a phone a session opens full screen: the `run` route renders no top bar
+and the tab bar hides, so the shell pads the top safe area (above the
+reconnect banner) and `main` the bottom and side ones.
+The header (`routes/run/phone-header.tsx`) is one 48px row: **Back**, the
+title with its protection lock, a state line (status dot, state, agent and
+mode), the header's primary action when there is one, and **More**. Under it
+the tabs **Chat**, **Terminal** and **Changes** fill a 44px row; a Standard
+session orders them **Terminal**, **Chat**, **Changes**. **Changes** carries
+the muted `+N −M` of the latest snapshot, unless it was truncated, and drops
+it below 400px while a fourth tab shows. The pull request, with its checks,
+feedback and **Watch PR**, would crowd the tabs, so it sits in a 44px row of
+its own under them on the Changes tab only.
+
+**More** opens with a **Views** group (Trace, Files, Browser, **Session
+details**, **Workflow**, **Search…**, **Assistant**), then the session's
+commands, Captures and Raw events. A view opened from there joins the tabs
+while it shows. The views stay reachable while a command runs. Close, Stop
+and Delete are the same commands, with the same confirmations, as on
+desktop.
+
+Without a `view` in the address a phone lands on `defaultView`, never on the
+view this tab last showed: Chat for an Enhanced session, Terminal for a
+Standard one. A link that names a view still opens it. A tab switch replaces
+the history entry instead of pushing one. Each history entry records its
+depth, and an entry of a session records the depth at which that session
+was opened, carried across the session's own entries, a subagent's included
+(`pushedEntry` and `sessionEntry` in `src/lib/url-state.ts`; a
+notification's entry records them too). **Back** steps back to the entry
+below that one, so it leaves the session in one step. A session opened by a
+link or a reload has no app page below it, and **Back** replaces it with
+Sessions.
+
+While the soft keyboard is up, the header folds to one 44px row: the title,
+the status dot and, from 400px wide, the state's name. The tabs (kept
+mounted but visually hidden, since each view's panel is labelled by its
+tab), the wait line, the lineage line and the
+[multiplayer strip](#multiplayer-controls) leave. The keyboard counts as up
+on a touch screen while a text field, the composer or the terminal's input,
+has focus and the visible viewport is more than 150px shorter than the
+tallest it has been at that width (`useKeyboardUp` in
+`src/lib/keyboard-inset.ts`, which the tab bar uses too). Android's Back and
+iOS's Done close the keyboard without a blur, so focus alone is not enough.
+
+On a phone the strip shows only while someone else watches, another member
+or another of your tabs holds control, the session is not yours, or control,
+presence or the stream failed (`useSharedPresence`). Only the owner takes
+free control implicitly, by sending a message or changing a model, mode or
+effort option. What waits for control runs in the order it was asked, each after the one before settles, so an
+option chosen before a send reaches the agent first. An option change that does not
+get control within 10 seconds says so at the composer. Details lists the people. A hidden tab bar removes
+`--phone-tabs-height`, so toasts fall back to the bottom safe area.
+
+The Chat composer is the desktop `ComposerBox`. It pads by
+`--keyboard-inset` (`src/lib/keyboard-inset.ts`) less the bottom safe area
+that `main` already pads, so it sits on an iOS keyboard. While a request is
+open, the request card holds the one filled button: its answers fill the
+card's width, and on Chat the header's action and the composer's
+**Interrupt** are outlined. A session that is still loading on a phone shows
+**Back to sessions**.
 
 ### Assistant panel
 
@@ -2749,7 +2812,8 @@ as `changes`.
 Every way into a session navigates to `run`: board card, sidebar row, session list,
 palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
-showed for the session (`runViewMemory`, not persisted), else `defaultView`:
+showed for the session (`runViewMemory`, not persisted; a phone skips it, see
+[Phone session](#phone-session)), else `defaultView`:
 Session for an Enhanced session or any session that streams a session (`acp: true`),
 Terminal otherwise. Trace follows Chat for a session with `acp: true` only.
 Files is in the list while the session still has its
@@ -2889,8 +2953,7 @@ row is too narrow for every tab, as on a phone whose session has a pull request,
 the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
 sight as the view or the room changes, and the right edge fades while more
 tabs lie past it. The [Workflow panel](#workflow-panel)'s chip follows the
-tabs. On a phone with the composer focused the header keeps only the title
-line.
+tabs. A phone has its own header and tabs; see [Phone session](#phone-session).
 
 A session with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the

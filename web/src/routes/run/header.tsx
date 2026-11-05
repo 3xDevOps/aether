@@ -31,6 +31,7 @@ import { useModeSwitch } from '@/routes/run/mode-switch'
 import { useOpenInEditor } from '@/routes/run/open-in-editor'
 import { useRunPullRequest } from '@/routes/run/pull-request'
 import { requestCardID } from '@/routes/run/requests'
+import { PhoneRunHeader } from '@/routes/run/phone-header'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
@@ -264,7 +265,7 @@ export function RunHeader({
   views,
   agent,
   nav,
-  composing,
+  keyboard,
   detailsOpen,
   onDetails,
   onCaptures,
@@ -272,19 +273,23 @@ export function RunHeader({
   agentName,
   agentEntry,
   workflow,
+  onWorkflow,
 }: {
   run: RunRecord
   agentName: string
   agentEntry: AgentInfo | undefined
   /** The Workflow chip, which sits beside the view switch. */
   workflow?: React.ReactNode
+  /** Opens the workflow, which a phone lists under the session's actions instead of the chip. */
+  onWorkflow: (returnTo: HTMLElement | null) => void
   view: RunView
   views: RunView[]
   agent: AgentTerminal
   nav: RunNavigation
-  composing: boolean
+  /** The phone's soft keyboard is up, so the header folds to one row. */
+  keyboard: boolean
   detailsOpen: boolean
-  onDetails: (returnTo: HTMLElement) => void
+  onDetails: (returnTo: HTMLElement | null) => void
   onCaptures: (returnTo: HTMLElement | null) => void
   onEvents: (returnTo: HTMLElement | null) => void
 }) {
@@ -297,19 +302,58 @@ export function RunHeader({
   const editor = useOpenInEditor(run)
   const childRunsItems = useChildRunsItems(run)
   useHeaderPrimary(Boolean(primary))
+  const extra = [
+    ...(modeSwitch.item ? [modeSwitch.item] : []),
+    ...(editor.item ? [editor.item] : []),
+    ...childRunsItems,
+    { id: 'captures', label: 'Captures…', Icon: Camera, onSelect: onCaptures },
+    { id: 'events', label: 'Raw events…', Icon: ScrollText, onSelect: onEvents },
+  ]
+  const dialogs = (
+    <>
+      {modeSwitch.dialog}
+      {pullRequest.panel}
+      {editor.dialog}
+    </>
+  )
+
+  if (mobile) {
+    return (
+      <>
+        <PhoneRunHeader
+          run={run}
+          view={view}
+          views={views}
+          nav={nav}
+          agentName={agentName}
+          keyboard={keyboard}
+          primary={primary}
+          detailsOpen={detailsOpen}
+          onDetails={onDetails}
+          onWorkflow={onWorkflow}
+          extra={extra}
+          pullRequest={pullRequest.status}
+        />
+        {!keyboard && <WaitLine run={run} />}
+        {!keyboard && <RunLineage run={run} />}
+        <RunRetention run={run} className="border-b border-seam px-4 py-2" />
+        {dialogs}
+      </>
+    )
+  }
 
   return (
     <>
       <PaneHeader
-        size={composing ? 'view' : 'run'}
+        size="run"
         title={
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate">{runLabel(run)}</span>
             {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can message, control or stop this session" className="size-3.5 shrink-0 text-muted" />}
           </span>
         }
-        stateLine={!composing && <StateLine run={run} agentName={agentName} />}
-        onOpenSidebar={!mobile && collapsed ? toggleSidebar : undefined}
+        stateLine={<StateLine run={run} agentName={agentName} />}
+        onOpenSidebar={collapsed ? toggleSidebar : undefined}
         actionsLabel="Session actions"
         actions={
           <>
@@ -318,41 +362,26 @@ export function RunHeader({
               variant="ghost"
               size="icon"
               label={detailsOpen ? 'Hide details' : 'Show details'}
-              hint={mobile ? 'Details' : `Details (${shortcutLabel('run-details')})`}
+              hint={`Details (${shortcutLabel('run-details')})`}
               aria-expanded={detailsOpen}
               aria-controls="run-details"
               onClick={(event) => onDetails(event.currentTarget)}
             >
               <PanelRight />
             </Button>
-            <RunActions
-              run={run}
-              compact={mobile}
-              extra={[
-                ...(modeSwitch.item ? [modeSwitch.item] : []),
-                ...(editor.item ? [editor.item] : []),
-                ...childRunsItems,
-                { id: 'captures', label: 'Captures…', Icon: Camera, onSelect: onCaptures },
-                { id: 'events', label: 'Raw events…', Icon: ScrollText, onSelect: onEvents },
-              ]}
-            />
+            <RunActions run={run} extra={extra} />
           </>
         }
       />
-      {mobile && !composing && <WaitLine run={run} />}
       <RunLineage run={run} />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
-      {!composing && (
-        <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
-          <ViewSwitch view={view} views={views} />
-          {workflow}
-          {pullRequest.status}
-        </div>
-      )}
-      {modeSwitch.dialog}
-      {pullRequest.panel}
-      {editor.dialog}
-      {!mobile && <ConnectionLine className="border-b border-seam px-4 py-1" />}
+      <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
+        <ViewSwitch view={view} views={views} />
+        {workflow}
+        {pullRequest.status}
+      </div>
+      {dialogs}
+      <ConnectionLine className="border-b border-seam px-4 py-1" />
     </>
   )
 }

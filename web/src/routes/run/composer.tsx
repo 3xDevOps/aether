@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
+import { useIsMobile } from '@/lib/breakpoints'
 import { canReopenRun } from '@/lib/commands'
 import { useFileDrop } from '@/lib/file-drag'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
@@ -49,7 +50,7 @@ interface ComposerProps {
 
 function ComposerFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="shrink-0 bg-canvas pb-[var(--keyboard-inset,0px)]">
+    <div className="shrink-0 bg-canvas pb-[max(0px,calc(var(--keyboard-inset,0px)-env(safe-area-inset-bottom)))]">
       <div className={cn(sessionColumn, 'flex flex-col gap-2 pb-4')}>{children}</div>
     </div>
   )
@@ -96,6 +97,8 @@ function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock
     </ComposerFrame>
   )
 }
+
+const optionUnsent = 'This tab did not get control of the session, so the option was not changed.'
 
 const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'primary' | 'danger' }> = {
   send: { label: 'Send', Icon: ArrowUp, variant: 'primary' },
@@ -368,6 +371,7 @@ function useQueueHeld(active: boolean): boolean {
 }
 
 function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock, onEscape }: ComposerProps) {
+  const mobile = useIsMobile()
   const self = useSelf()
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
@@ -507,10 +511,12 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     }
   }
 
-  const setOption = async (option: ConfigOption, value: string) => {
-    const lease = sessionLease(useStore, run.id)
-    if (lease) await attempt(() => api.runACPSetOption(run.id, option.id, value, lease))
-  }
+  const setOption = (option: ConfigOption, value: string) => new Promise<void>((resolve) => {
+    control.withControl(() => {
+      const lease = sessionLease(useStore, run.id)
+      return attempt(() => lease ? api.runACPSetOption(run.id, option.id, value, lease) : Promise.reject(new Error(optionUnsent))).then(resolve)
+    }, () => void attempt(() => Promise.reject(new Error(optionUnsent))).then(resolve))
+  })
 
   if (gate) {
     return (
@@ -521,7 +527,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           reason={gate.reason}
           failure={gate.interrupt ? error : undefined}
           action={gate.interrupt && turnRunning && (
-            <Button size="sm" variant="danger" aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
+            <Button size="sm" variant={mobile ? 'secondary' : 'danger'} aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
               <Square className="fill-current" />
               Interrupt
             </Button>

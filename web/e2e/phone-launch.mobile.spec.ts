@@ -41,6 +41,11 @@ test('+ New launches on the last session\'s repository with the saved agent', as
   const { runs } = await alice.api.rpc<{ runs: { task: string; workspace_id: string; harness: string }[] }>('run.list', {})
   expect(runs.find((run) => run.task === 'write the changelog')).toMatchObject({ workspace_id: docs.id, harness: 'claude' })
 
+  // The new session opens full screen over the tab bar; Back leaves it.
+  await expect(page.getByRole('heading', { name: 'write the changelog', exact: true })).toBeVisible()
+  await expect(tabs).toBeHidden()
+  await page.getByRole('button', { name: 'Back', exact: true }).tap()
+
   await page.setViewportSize({ width: 430, height: 800 })
   await tabs.getByRole('button', { name: 'Sessions' }).tap()
   await page.getByRole('radio', { name: 'Lanes' }).tap()

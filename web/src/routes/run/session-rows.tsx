@@ -14,6 +14,7 @@ import { AssistantRow, EventRow, LiveActivityRow, MessageRow } from '@/component
 import { playEntrance, type Entrance } from '@/lib/motion'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { allowed } from '@/lib/permissions'
+import { cn } from '@/lib/utils'
 import { inputHint } from '@/lib/run-requests'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
@@ -190,12 +191,16 @@ function UserRow({ row, ctx, name }: { row: Extract<SessionRow, { kind: 'user' }
       attachments={row.images?.length || row.files?.length ? <MessageAttachments runID={ctx.runID} images={row.images} files={row.files} /> : undefined}
       meta={
         <>
+          {author && <span aria-hidden className="-ml-1">·</span>}
           {row.delivery && (
-            <span className={row.delivery === 'Not sent' || row.delivery === 'Denied' ? 'text-state-failed' : undefined}>
-              {row.delivery === 'Queued' && row.deliverAfter ? <DeliveryCountdown deliverAfter={row.deliverAfter} /> : row.delivery}
-            </span>
+            <>
+              <span className={cn('shrink-0', (row.delivery === 'Not sent' || row.delivery === 'Denied') && 'text-state-failed')}>
+                {row.delivery === 'Queued' && row.deliverAfter ? <DeliveryCountdown deliverAfter={row.deliverAfter} /> : row.delivery}
+              </span>
+              <span aria-hidden>·</span>
+            </>
           )}
-          <RelativeTime at={row.at} />
+          <span className="shrink-0 whitespace-nowrap"><RelativeTime at={row.at} /></span>
         </>
       }
     >

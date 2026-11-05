@@ -36,14 +36,11 @@ test('the Sessions tab opens a run full screen', async ({ page, aether }) => {
     page.getByRole('heading', { name: 'read the deployment log', exact: true }),
   ).toBeVisible()
 
-  // Focus lands on the run. The top bar says Session, so
-  // the title shows once, in the run header, and its controls are finger-sized.
+  // Focus lands on the run, which opens over the top bar, and Back is finger-sized.
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
-  const bar = page.getByRole('banner')
-  await expect(bar).toContainText('Session')
-  await expect(bar).not.toContainText('read the deployment log')
-  const search = bar.getByRole('button', { name: 'Search', exact: true })
-  expect((await search.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
+  await expect(page.getByRole('banner')).toHaveCount(0)
+  const back = page.getByRole('button', { name: 'Back', exact: true })
+  expect((await back.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
 
   // The shell still fits the phone in both directions.
   const overflow = await page.evaluate(() =>

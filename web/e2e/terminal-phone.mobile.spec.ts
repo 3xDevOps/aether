@@ -218,12 +218,15 @@ done`)
         await expect(rows.filter({ hasText: 'PHONE-ALTERNATE' })).toHaveCount(1)
       }
       await expect.poll(promptVisible).toBe(true)
+      // How far the grid is scrolled to show the prompt depends on the height the session's
+      // chrome leaves, and a drag past its top hands over to history, so pan by less than that.
       const before = await host.evaluate((element) => element.scrollTop)
-      expect(before).toBeGreaterThan(40)
-      await drag(40)
-      await expect.poll(() => host.evaluate((element) => element.scrollTop)).toBeLessThan(before - 20)
+      expect(before).toBeGreaterThan(20)
+      const pan = Math.min(40, before - 10)
+      await drag(pan)
+      await expect.poll(() => host.evaluate((element) => element.scrollTop)).toBeLessThan(before - pan / 2)
       await expect(page.getByLabel('Terminal scrollback', { exact: true })).toBeHidden()
-      await drag(-80)
+      await drag(-2 * pan)
       await expect.poll(promptVisible).toBe(true)
 
       const promptBox = await prompt.boundingBox()
