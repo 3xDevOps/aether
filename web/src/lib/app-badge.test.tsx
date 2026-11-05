@@ -1,13 +1,8 @@
 import { act, render } from '@testing-library/react'
 import { AppBadge, syncAppBadge } from '@/lib/app-badge'
 import { pushChanged } from '@/lib/push'
-import { useAttention, useAttentionFeed } from '@/routes/needs-you/attention'
+import { useAttention } from '@/routes/needs-you/attention'
 import type { AttentionItem } from '@/lib/types'
-
-vi.mock('@/routes/needs-you/attention', async (original) => ({
-  ...(await original<typeof import('@/routes/needs-you/attention')>()),
-  useAttentionFeed: vi.fn(),
-}))
 
 function badging(subscribed: boolean) {
   const nav = {
@@ -56,12 +51,26 @@ describe('syncAppBadge', () => {
   })
 })
 
+describe('syncAppBadge ordering', () => {
+  it('lets a newer sync win over an older one still reading the subscription', async () => {
+    const nav = badging(true)
+    let release: (value: object) => void = () => {}
+    nav.serviceWorker.getRegistration = async () => ({ pushManager: { getSubscription: () => new Promise((resolve) => { release = resolve }) } })
+    const older = syncAppBadge(5)
+    nav.serviceWorker.getRegistration = async () => ({ pushManager: { getSubscription: async () => ({}) } })
+    await syncAppBadge(0)
+    release({})
+    await older
+    expect(nav.setAppBadge).not.toHaveBeenCalled()
+    expect(nav.clearAppBadge).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('AppBadge', () => {
   it('follows the Needs you count in any layout, re-syncs when push changes, and clears on unmount', async () => {
     const nav = badging(true)
     useAttention.setState({ items: asks(2) })
     const view = render(<AppBadge />)
-    expect(useAttentionFeed).toHaveBeenCalled()
     await vi.waitFor(() => expect(nav.setAppBadge).toHaveBeenLastCalledWith(2))
 
     act(() => useAttention.setState({ items: asks(3) }))
