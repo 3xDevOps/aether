@@ -7,7 +7,7 @@ import { noModifiers } from '@/components/terminal-modifiers'
 import { TerminalPane } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
 import type { XtermController } from '@/components/xterm-host'
-import { defaultTerminalFontSize } from '@/lib/term-font'
+import { defaultTerminalFontSize, terminalFontFamily } from '@/lib/term-font'
 import { connectAttach } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
@@ -217,6 +217,34 @@ describe('shared terminal geometry', () => {
     expect(host.geometry()).toEqual({ cols: 100, rows: 25 })
     view.unmount()
     proposal.mockRestore()
+  })
+
+  it('re-fits when the shipped font arrives after the terminal opened without it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { promise: loading, resolve } = Promise.withResolvers<void>()
+    Object.defineProperty(document, 'fonts', {
+      value: Object.assign([{ family: 'JetBrainsMono NFM', status: 'unloaded' }], { load: () => loading }),
+      configurable: true,
+    })
+    const proposal = vi.spyOn(FitAddon.prototype, 'proposeDimensions').mockReturnValue({ cols: 100, rows: 39 })
+    const onResize = vi.fn()
+    let controller: XtermController | null = null
+    const view = render(<SizedProbe follow={false} onResize={onResize} onReady={(next) => { controller = next }} />)
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(2000))
+      expect(onResize).toHaveBeenLastCalledWith(100, 39)
+      const fontFamily = vi.spyOn((controller as unknown as XtermController).terminal!.options, 'fontFamily', 'set')
+      proposal.mockReturnValue({ cols: 100, rows: 34 })
+      resolve()
+      await act(() => vi.advanceTimersByTimeAsync(0))
+      expect(fontFamily.mock.calls).toEqual([['monospace'], [terminalFontFamily]])
+      expect(onResize).toHaveBeenLastCalledWith(100, 34)
+    } finally {
+      view.unmount()
+      proposal.mockRestore()
+      Object.defineProperty(document, 'fonts', { value: undefined, configurable: true })
+      vi.useRealTimers()
+    }
   })
 
   it('starts measuring immediately when a phone becomes a desktop', async () => {
