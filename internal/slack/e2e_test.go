@@ -204,7 +204,7 @@ func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 	if got := h.slack.waitPosts(4)[3]; got.ThreadTS != ts || got.Text != "Sent to the session." {
 		t.Fatalf("reply answer = %+v", got)
 	}
-	if !h.slack.acked("env-link") || !h.slack.acked("env-press") || !h.slack.acked("env-reply") {
-		t.Fatal("an envelope went unacknowledged")
+	for _, id := range []string{"env-link", "env-press", "env-reply"} {
+		eventually(t, "the ack of "+id, func() bool { return h.slack.acked(id) })
 	}
 }
