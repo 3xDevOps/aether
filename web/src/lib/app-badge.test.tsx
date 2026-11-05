@@ -1,5 +1,5 @@
-import { act, render } from '@testing-library/react'
-import { AppBadge, syncAppBadge } from '@/lib/app-badge'
+import { act, render, renderHook } from '@testing-library/react'
+import { AppBadge, syncAppBadge, useBadging } from '@/lib/app-badge'
 import { pushChanged } from '@/lib/push'
 import { useAttention } from '@/routes/needs-you/attention'
 import type { AttentionItem } from '@/lib/types'
@@ -80,5 +80,23 @@ describe('AppBadge', () => {
 
     view.unmount()
     await vi.waitFor(() => expect(nav.clearAppBadge).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('useBadging', () => {
+  it('is on only while this browser is subscribed, so a push-off browser reads no attention list', async () => {
+    const nav = badging(false)
+    const { result } = renderHook(() => useBadging())
+    await act(async () => {})
+    expect(result.current).toBe(false)
+
+    nav.serviceWorker.getRegistration = async () => ({ pushManager: { getSubscription: async () => ({}) } })
+    await act(async () => void window.dispatchEvent(new Event(pushChanged)))
+    expect(result.current).toBe(true)
+
+    vi.stubGlobal('navigator', {})
+    const unsupported = renderHook(() => useBadging())
+    await act(async () => {})
+    expect(unsupported.result.current).toBe(false)
   })
 })
