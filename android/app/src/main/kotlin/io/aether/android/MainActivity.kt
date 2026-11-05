@@ -142,8 +142,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Back walks the dashboard's own history, then goes to the dashboard's
-     * home from a page opened with nothing behind it - a notification, a
-     * share, a link - and only from home leaves the app running: finishing
+     * home from a page opened with nothing behind it - a share,
+     * a link - and only from home leaves the app running: finishing
      * would drop the terminal's scrollback on the way to the home screen.
      * Where the platform does that itself the callback stands down at home,
      * so the predictive back-to-home animation runs.
@@ -745,7 +745,7 @@ class MainActivity : ComponentActivity() {
         if (raw != null && isEdgeOnlyLink(raw)) {
             Toast.makeText(this, R.string.join_needs_edge, Toast.LENGTH_LONG).show()
         }
-        val link = raw?.let { deepLinkUrl(base, it) }
+        val link = raw?.let { deepLinkUrl(base, it) } ?: intentPath(intent)?.let { dashboardAt(base, it) }
         if (link != null) {
             loaded = base
             web.loadUrl(link)
@@ -762,7 +762,7 @@ class MainActivity : ComponentActivity() {
      * it prints one. A link that names something to open is held until then.
      */
     private fun openEdge(intent: Intent?) {
-        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix)
+        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix) ?: intentPath(intent)?.let(::edgeSuffix)
         val url = gatewayUrl
         when {
             gateway?.isActive != true -> {
@@ -837,9 +837,9 @@ class MainActivity : ComponentActivity() {
 
     /**
      * The dashboard path a share opens, or null for any
-     * other intent. Another app can send one, so the path is held to
-     * [isDashboardPath], a share only ever prefills a prompt, and extras
-     * filled with a class this app lacks are no path at all.
+     * other intent. Another app can send one: a share only ever prefills a
+     * prompt, and extras filled with a class this app lacks are no path at
+     * all.
      */
     private fun intentPath(intent: Intent?): String? =
         try {
@@ -850,7 +850,7 @@ class MainActivity : ComponentActivity() {
                             intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
                             intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString(),
                         )
-                    if ((text?.length ?: 0) > MAX_SHARED_CHARS) {
+                    if ((text?.let(::sharedLength) ?: 0) > MAX_SHARED_CHARS) {
                         Toast.makeText(this, getString(R.string.share_cut, MAX_SHARED_CHARS), Toast.LENGTH_LONG).show()
                     }
                     sharePath(text)

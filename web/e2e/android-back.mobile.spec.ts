@@ -1,5 +1,5 @@
 // What the Android app's back does on a page opened with nothing behind it,
-// such as one a notification or a share opened: it runs ROUTE_HOME
+// such as one a share opened: it runs ROUTE_HOME
 // (android/.../MainActivity.kt) in the page. The dashboard must route home
 // on it without a reload, so whatever the page holds survives.
 
