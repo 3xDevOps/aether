@@ -1,5 +1,5 @@
 import { ApiError } from '@/lib/api'
-import { disablePush, enablePush, readPush, testPush, watchPush } from '@/lib/push'
+import { disablePush, enablePush, needsHomeScreen, readPush, testPush, watchPush } from '@/lib/push'
 import type { GatewayCapabilities } from '@/lib/types'
 import { createRootStore } from '@/store'
 import { fakeApi, serverInfo } from '@/test/fixtures'
@@ -61,6 +61,23 @@ afterEach(() => {
   vi.useRealTimers()
   Reflect.deleteProperty(navigator, 'serviceWorker')
   Reflect.deleteProperty(window, 'aetherDesktop')
+})
+
+describe('needsHomeScreen', () => {
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) Safari/604.1'
+  it('is true only on iOS outside a home-screen app', () => {
+    vi.stubGlobal('navigator', { userAgent: iphone, maxTouchPoints: 5 })
+    expect(needsHomeScreen()).toBe(true)
+    vi.stubGlobal('navigator', { userAgent: iphone, maxTouchPoints: 5, standalone: true })
+    expect(needsHomeScreen()).toBe(false)
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15', maxTouchPoints: 5 })
+    expect(needsHomeScreen()).toBe(true)
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(display-mode: standalone)' }))
+    expect(needsHomeScreen()).toBe(false)
+    vi.unstubAllGlobals()
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130', maxTouchPoints: 0 })
+    expect(needsHomeScreen()).toBe(false)
+  })
 })
 
 describe('readPush', () => {

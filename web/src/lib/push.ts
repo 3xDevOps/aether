@@ -15,12 +15,17 @@ export type PushState =
 
 const worker = '/sw.js'
 
+/** Fired on window when this device subscribes or unsubscribes. */
+export const pushChanged = 'aether:push-changed'
+
 /** iOS and iPadOS offer push only to a dashboard opened from the home screen. */
-function needsHomeScreen(): boolean {
+export function needsHomeScreen(): boolean {
   const apple =
     /iPhone|iPad|iPod/.test(navigator.userAgent) ||
     (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1)
-  return apple && !window.matchMedia('(display-mode: standalone)').matches
+  // Safari sets navigator.standalone for a home-screen app; display-mode is the standard spelling.
+  const installed = (navigator as { standalone?: boolean }).standalone === true || window.matchMedia('(display-mode: standalone)').matches
+  return apple && !installed
 }
 
 async function subscription(): Promise<PushSubscription | null> {
@@ -73,6 +78,7 @@ export async function enablePush(client: Api): Promise<PushState> {
   }
   current ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
   await client.pushSubscribe(current.toJSON())
+  window.dispatchEvent(new Event(pushChanged))
   return { kind: 'on' }
 }
 
@@ -84,6 +90,7 @@ export async function disablePush(client: Api): Promise<PushState> {
     })
     await current.unsubscribe()
   }
+  window.dispatchEvent(new Event(pushChanged))
   return { kind: 'off' }
 }
 
