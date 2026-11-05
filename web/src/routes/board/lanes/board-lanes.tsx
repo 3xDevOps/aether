@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { ListFilter } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { Checkbox } from '@/components/ui/checkbox'
+import { CountBadge } from '@/components/ui/count-badge'
+import { Label } from '@/components/ui/label'
 import { Menu, MenuCheckboxItem, MenuContent, MenuTrigger } from '@/components/ui/menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SlidingIndicator } from '@/components/ui/sliding-indicator'
+import { Switch } from '@/components/ui/switch'
 import { coarsePointer, useDelayed, useElementSize, useMediaQuery } from '@/lib/hooks'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { useAnnouncement } from '@/lib/use-announcement'
@@ -72,7 +78,7 @@ function WindowControl({ value, custom, onChange }: { value: LaneWindow; custom:
             aria-checked={checked}
             tabIndex={checked || (custom && key === value) ? 0 : -1}
             data-indicator-key={key}
-            className={cn(focusRingInset, 'relative h-full rounded-chip px-2 shadow-none hover:bg-transparent', checked ? 'text-text' : 'text-muted')}
+            className={cn(focusRingInset, 'relative h-full rounded-chip px-2 shadow-none hover:bg-transparent coarse:min-w-11', checked ? 'text-text' : 'text-muted')}
             onClick={() => onChange(key)}
           >
             {key}
@@ -115,7 +121,7 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
   const [sizeRef, size] = useElementSize<HTMLElement>()
   const compact = useMediaQuery(phone)
   const metrics = useMediaQuery(coarsePointer) ? coarseMetrics : fineMetrics
-  const labelWidth = compact ? 48 : 240
+  const labelWidth = compact ? Math.min(160, Math.max(112, Math.round(size.width * 0.36))) : 240
   const width = Math.max(120, size.width - labelWidth - trackGutter)
   const now = useNow(tickInterval(span, width))
   const following = end === null || end >= now
@@ -239,49 +245,105 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
     )
   }
 
+  const filtersOn = Number(allWorkspaces && workspace !== '') + Number(mineOnly) + Number(showArchived) + prefs.hidden.length + Number(prefs.group === 'owner')
+  const scopeControl = (
+    <Select value={scope ? 'workspace' : 'all'} onValueChange={(value) => setAllWorkspaces(value === 'all')}>
+      <SelectTrigger id="lanes-scope" aria-label={compact ? undefined : 'Lanes workspace scope'} className={compact ? 'w-full' : 'w-40'}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        {workspace && <SelectItem value="workspace">{workspaceName}</SelectItem>}
+        <SelectItem value="all">All workspaces</SelectItem>
+      </SelectContent>
+    </Select>
+  )
+  const mineControl = <Button variant={mineOnly ? 'secondary' : 'ghost'} size="sm" aria-pressed={mineOnly} onClick={() => setMineOnly(!mineOnly)} hint="Mine filters Working and Finished. Needs you always includes every workspace.">Mine</Button>
+  const archivedControl = (archivedCards.length > 0 || showArchived) && (
+    <Button variant="ghost" size="sm" aria-pressed={showArchived} onClick={() => setShowArchived(!showArchived)}>
+      {showArchived ? 'Back to Finished' : `Archived (${archivedCards.length})`}
+    </Button>
+  )
+  const showControl = (
+    <Menu>
+      <MenuTrigger asChild>
+        <Button variant="ghost" size="sm">Show</Button>
+      </MenuTrigger>
+      <MenuContent align="start">
+        {laneEdgeKinds.map((kind) => (
+          <MenuCheckboxItem
+            key={kind}
+            checked={!hidden.has(kind)}
+            onSelect={(event) => event.preventDefault()}
+            onCheckedChange={(checked) => setLaneHidden(checked ? prefs.hidden.filter((k) => k !== kind) : [...prefs.hidden, kind])}
+          >
+            {edgeWords[kind]}
+          </MenuCheckboxItem>
+        ))}
+      </MenuContent>
+    </Menu>
+  )
+  const groupControl = (
+    <Select value={prefs.group} onValueChange={(value) => setLaneGroup(value === 'owner' ? 'owner' : 'status')}>
+      <SelectTrigger id="lanes-group" aria-label={compact ? undefined : 'Group lanes by'} className={compact ? 'w-full' : 'w-28'}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="status">By status</SelectItem>
+        <SelectItem value="owner">By owner</SelectItem>
+      </SelectContent>
+    </Select>
+  )
+
   return (
     <section ref={sizeRef} aria-label="Session lanes view" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-seam px-4 py-2">
-        <h2 className="text-ui-sm font-medium">Sessions <span className="text-muted tabular-nums">{model.inWindow}</span></h2>
-        <Select value={scope ? 'workspace' : 'all'} onValueChange={(value) => setAllWorkspaces(value === 'all')}>
-          <SelectTrigger aria-label="Lanes workspace scope" className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {workspace && <SelectItem value="workspace">{workspaceName}</SelectItem>}
-            <SelectItem value="all">All workspaces</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button variant={mineOnly ? 'secondary' : 'ghost'} size="sm" aria-pressed={mineOnly} onClick={() => setMineOnly(!mineOnly)} hint="Mine filters Working and Finished. Needs you always includes every workspace.">Mine</Button>
-        {(archivedCards.length > 0 || showArchived) && (
-          <Button variant="ghost" size="sm" aria-pressed={showArchived} onClick={() => setShowArchived(!showArchived)}>
-            {showArchived ? 'Back to Finished' : `Archived (${archivedCards.length})`}
-          </Button>
+        <h2 className={cn('text-ui-sm font-medium', compact && 'sr-only')}>Sessions <span className="text-muted tabular-nums">{model.inWindow}</span></h2>
+        {compact ? (
+          <>
+            <WindowControl value={preset} custom={custom !== null} onChange={choose} />
+            <PhoneFilters
+              filtersOn={filtersOn}
+              onReset={() => {
+                setAllWorkspaces(false)
+                setMineOnly(false)
+                setShowArchived(false)
+                setLaneHidden([])
+                setLaneGroup('status')
+              }}
+            >
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="lanes-scope">Workspace</Label>
+                {scopeControl}
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="lanes-group">Group</Label>
+                {groupControl}
+              </div>
+              <div className="flex flex-col">
+                <SwitchRow id="lanes-mine" label="Only mine" checked={mineOnly} onChange={setMineOnly} />
+                <p className="text-ui-sm text-muted">Mine filters Working and Finished. Needs you always includes every workspace.</p>
+              </div>
+              {(archivedCards.length > 0 || showArchived) && (
+                <SwitchRow id="lanes-archived" label={`Archived (${archivedCards.length})`} checked={showArchived} onChange={setShowArchived} />
+              )}
+              <fieldset className="flex flex-col gap-1">
+                <legend className="mb-1 text-ui-sm text-muted">Show</legend>
+                {laneEdgeKinds.map((kind) => (
+                  <label key={kind} className="flex min-h-11 cursor-pointer items-center gap-2 text-ui">
+                    <Checkbox checked={!hidden.has(kind)} onCheckedChange={(checked) => setLaneHidden(checked === true ? prefs.hidden.filter((k) => k !== kind) : [...prefs.hidden, kind])} />
+                    {edgeWords[kind]}
+                  </label>
+                ))}
+              </fieldset>
+            </PhoneFilters>
+          </>
+        ) : (
+          <>
+            {scopeControl}
+            {mineControl}
+            {archivedControl}
+            <WindowControl value={preset} custom={custom !== null} onChange={choose} />
+            {showControl}
+            {groupControl}
+            <Legend />
+          </>
         )}
-        <WindowControl value={preset} custom={custom !== null} onChange={choose} />
-        <Menu>
-          <MenuTrigger asChild>
-            <Button variant="ghost" size="sm">Show</Button>
-          </MenuTrigger>
-          <MenuContent align="start">
-            {laneEdgeKinds.map((kind) => (
-              <MenuCheckboxItem
-                key={kind}
-                checked={!hidden.has(kind)}
-                onSelect={(event) => event.preventDefault()}
-                onCheckedChange={(checked) => setLaneHidden(checked ? prefs.hidden.filter((k) => k !== kind) : [...prefs.hidden, kind])}
-              >
-                {edgeWords[kind]}
-              </MenuCheckboxItem>
-            ))}
-          </MenuContent>
-        </Menu>
-        <Select value={prefs.group} onValueChange={(value) => setLaneGroup(value === 'owner' ? 'owner' : 'status')}>
-          <SelectTrigger aria-label="Group lanes by" className="w-28"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="status">By status</SelectItem>
-            <SelectItem value="owner">By owner</SelectItem>
-          </SelectContent>
-        </Select>
-        <Legend />
         {!following && <Button variant="secondary" size="sm" onClick={() => setEnd(null)}>Now</Button>}
         {history.loading && <span role="status" className="text-ui-sm text-muted">Loading history…</span>}
         {!history.loading && history.capped && <span className="text-ui-sm text-muted">Older history not loaded</span>}
@@ -296,5 +358,36 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
       {body}
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
     </section>
+  )
+}
+
+function SwitchRow({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <div className="flex min-h-11 items-center justify-between gap-3">
+      <Label htmlFor={id}>{label}</Label>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
+/** A phone's lane filters behind one button, which counts those changed from the defaults. */
+function PhoneFilters({ filtersOn, onReset, children }: { filtersOn: number; onReset: () => void; children: ReactNode }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant={filtersOn ? 'secondary' : 'ghost'} size="sm" aria-label={filtersOn ? `Filters, ${filtersOn} changed` : 'Filters'} className={cn(filtersOn > 0 && 'text-accent')}>
+          <ListFilter />
+          Filters
+          {filtersOn > 0 && <CountBadge aria-hidden>{filtersOn}</CountBadge>}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-label="Lane filters" className="flex w-72 flex-col gap-3">
+        {children}
+        <div className="flex items-center justify-between gap-2 border-t border-seam pt-2">
+          <Legend />
+          <Button variant="ghost" size="sm" disabled={filtersOn === 0} onClick={onReset}>Reset</Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }

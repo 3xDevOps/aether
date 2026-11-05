@@ -11,6 +11,7 @@ import { useIsMobile } from '@/lib/breakpoints'
 import { AssistantButton } from '@/components/assistant/button'
 import { surfaces } from '@/lib/surfaces'
 import { cn } from '@/lib/utils'
+import { SessionsViewSwitch } from '@/routes/sessions'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
@@ -203,6 +204,7 @@ function PhoneToolbar() {
           <span className="truncate font-medium text-text">{title}</span>
           {activeWorkspace && activeWorkspace !== title && <span className="truncate text-ui-sm text-muted">{activeWorkspace}</span>}
         </p>
+        {route.name === 'sessions' && <SessionsViewSwitch />}
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
           <Search />
         </Button>

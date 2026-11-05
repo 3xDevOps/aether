@@ -500,9 +500,9 @@ one's name, muted, after the title.
 | Tab | Opens |
 | --- | --- |
 | **Needs you** | the `needs-you` route; its badge counts what asks you |
-| **Sessions** | the `sessions` route: the sidebar's session list, full width; current on a session, the board and All workspaces too |
+| **Sessions** | the `sessions` route: **List**, the sidebar's session list at full width, or **Lanes** ([phone lanes](#lanes)), chosen by a **Sessions view** switch in the top bar beside Search; the choice persists as `sessionsLanes`. Current on a session, the board and All workspaces too |
 | **New** | the [launch sheet](#the-forms); named **New session**, hidden if you cannot launch |
-| **Assistant** | the assistant sheet, with the desktop button's dot and name |
+| **Assistant** | the assistant, full screen, with the desktop button's dot and name |
 | **More** | a bottom sheet, a `dialog` named "More"; the tab is **More pages** |
 
 On a phone the Sessions list is regrouped by `attention.list` (`byAttention`
@@ -617,7 +617,9 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   the key first; so does `Mod+Shift+Space` from anywhere. Crossing between
   docked and floating restyles the one `aside` rather than remounting it, so
   the draft, the focused composer and the transcript's scroll survive.
-- **Phone:** a right side sheet, a `dialog` named "Assistant".
+- **Phone:** a full-screen `dialog` named "Assistant", over the tab bar, with
+  square corners and, with a touch screen, a 16px header inset. Its composer sits at the bottom,
+  above the soft keyboard (`--keyboard-inset`).
 - **Header:** an `h2`, because the view beside it owns the page's `h1`. It
   takes the session header's height on a session and the view header's elsewhere, so
   the two seams line up. It holds the agent and state, **Actions**, **New conversation** (confirms, then
@@ -1765,6 +1767,18 @@ Map's scope picker (labelled **Lanes workspace scope**), **Mine** and
 The axis counts back from now ("−20m") up to an hour wide; wider windows
 show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
 dragging the track pans; the history page loads as the window reaches it.
+
+**On a phone** (below 768px, and in the Sessions tab's **Lanes**) the label
+column is 36% of the width, between 112px and 160px, and holds each session's
+title, state dot, agent glyph and age. Titles stay in that column while the
+track pans; bars carry the state words, cut with an ellipsis. With a touch
+screen (`coarse` pointer) the time window's buttons are 44px wide. Everything else folds into one **Filters**
+popover: **Workspace** and **Group** selects, **Only mine** (with the line that it filters Working and Finished
+only) and **Archived (n)** switches, the **Show** checkboxes, **Legend** and **Reset**. The
+button counts the filters changed from their defaults (this workspace, not
+only mine, not archived, every relationship shown, by status) and turns
+accent while any is; Reset restores them. Axis labels that would touch are
+dropped. The track keeps the room the live mail arrow needs left of now.
 
 **Sections.** By status, sections follow the sidebar: Needs you (oldest wait
 first), Finished: review and Working (newest start first), then Finished
