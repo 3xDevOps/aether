@@ -109,7 +109,7 @@ test('agent-created TUI shares authority, geometry, protocol responses, limits a
   await page.keyboard.press('Control+Shift+V')
   await expect.poll(() => file('input').includes('paste-界')).toBe(true)
   await testInfo.attach('shared-alternate-screen', { body: await dock.screenshot(), contentType: 'image/png' })
-  await expect(dock.getByText('You control', { exact: true })).toBeVisible()
+  await expect(dock.getByRole('button', { name: 'Release' })).toBeVisible()
 
   const watcherContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   const watcherPage = await watcherContext.newPage()

@@ -3744,7 +3744,7 @@ refusal, a release or a dropped connection discards them. If the server
 answers with a full replay instead of resuming, that redraw stays on screen
 rather than behind "Restoring terminal history", which would blur the terminal
 mid-word.
-The toolbar reads "You control" with an accent-filled **Release**, or "<name> controls"
+The toolbar shows an accent-filled **Release** while you control the shell, or "<name> controls"
 / "The agent controls" with **Take control**, which confirms; with nobody
 controlling it shows neither. Under 768px the controller's name moves to the
 line under the toolbar. Leaving the Terminal view releases the lease. **Shell
