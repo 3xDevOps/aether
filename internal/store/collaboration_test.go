@@ -93,6 +93,82 @@ func TestRoomMessageDeliveryAndDecisionHaveOneWinner(t *testing.T) {
 	}
 }
 
+func TestResolveRoomMessageIdempotentThenConflicting(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	msg := testRoomMessage(t, db, RoomMessageComment, "resolve-1")
+	if err := db.CreateRoomMessage(ctx, msg); err != nil {
+		t.Fatalf("CreateRoomMessage: %v", err)
+	}
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	resolved, err := db.ResolveRoomMessage(ctx, msg.ID, RoomResolutionDone, "reviewer-1", at)
+	if err != nil {
+		t.Fatalf("ResolveRoomMessage: %v", err)
+	}
+	if resolved.Resolution != RoomResolutionDone || resolved.ResolvedBy != "reviewer-1" || resolved.ResolvedAt == nil || !resolved.ResolvedAt.Equal(at) {
+		t.Fatalf("resolved = %+v, want done/reviewer-1/%v", resolved, at)
+	}
+
+	// A retry with the same outcome replays the stored row.
+	replay, err := db.ResolveRoomMessage(ctx, msg.ID, RoomResolutionDone, "reviewer-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ResolveRoomMessage replay: %v", err)
+	}
+	if replay.Resolution != RoomResolutionDone || !replay.ResolvedAt.Equal(at) {
+		t.Fatalf("replay = %+v, want the original done resolution", replay)
+	}
+
+	// A different outcome than the one already recorded conflicts.
+	if _, err := db.ResolveRoomMessage(ctx, msg.ID, RoomResolutionDeleted, "reviewer-2", time.Now().UTC()); !errors.Is(err, ErrRoomMessageResolveConflict) {
+		t.Fatalf("ResolveRoomMessage conflicting outcome = %v, want ErrRoomMessageResolveConflict", err)
+	}
+}
+
+func TestResolveRoomMessageDeletedHiddenFromList(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	done := &RoomMessage{WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID, Kind: RoomMessageComment, Body: "done note", IdempotencyKey: "list-done"}
+	deleted := &RoomMessage{WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID, Kind: RoomMessageComment, Body: "deleted note", IdempotencyKey: "list-deleted"}
+	if err := db.CreateRoomMessage(ctx, done); err != nil {
+		t.Fatalf("CreateRoomMessage done: %v", err)
+	}
+	if err := db.CreateRoomMessage(ctx, deleted); err != nil {
+		t.Fatalf("CreateRoomMessage deleted: %v", err)
+	}
+	if _, err := db.ResolveRoomMessage(ctx, done.ID, RoomResolutionDone, member.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("ResolveRoomMessage done: %v", err)
+	}
+	if _, err := db.ResolveRoomMessage(ctx, deleted.ID, RoomResolutionDeleted, member.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("ResolveRoomMessage deleted: %v", err)
+	}
+
+	page, err := db.ListRoomMessages(ctx, workspace.ID, run.ID, "", 10)
+	if err != nil {
+		t.Fatalf("ListRoomMessages: %v", err)
+	}
+	var ids []string
+	for _, m := range page.Items {
+		ids = append(ids, m.ID)
+	}
+	if slices.Contains(ids, deleted.ID) {
+		t.Fatalf("ListRoomMessages = %v, deleted message %q must be excluded", ids, deleted.ID)
+	}
+	if !slices.Contains(ids, done.ID) {
+		t.Fatalf("ListRoomMessages = %v, done message %q must stay listed for history", ids, done.ID)
+	}
+
+	got, err := db.GetRoomMessage(ctx, deleted.ID)
+	if err != nil {
+		t.Fatalf("GetRoomMessage deleted: %v", err)
+	}
+	if got.Resolution != RoomResolutionDeleted {
+		t.Fatalf("GetRoomMessage deleted resolution = %q, want deleted", got.Resolution)
+	}
+}
+
 func TestRoomMessageDecisionAttributionRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

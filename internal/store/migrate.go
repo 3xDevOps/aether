@@ -2570,6 +2570,14 @@ CREATE TABLE push_cards (
 	PRIMARY KEY (member_id, card_id)
 );
 `,
+	// v108: let a comment's author, the run's owner, or an admin complete or
+	// delete it. resolved_at is nullable because unresolved is itself
+	// meaningful; resolved_by/resolution follow the zero-default convention.
+	`
+ALTER TABLE room_messages ADD COLUMN resolved_at INTEGER;
+ALTER TABLE room_messages ADD COLUMN resolved_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE room_messages ADD COLUMN resolution TEXT NOT NULL DEFAULT '' CHECK (resolution IN ('', 'done', 'deleted'));
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

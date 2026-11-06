@@ -53,6 +53,19 @@ const (
 	AgentDelivered AgentDelivery = "delivered"
 )
 
+// RoomResolution is how a member settled a comment: a done note stays
+// visible in history, a deleted one is hidden everywhere.
+type RoomResolution string
+
+const (
+	RoomResolutionDone    RoomResolution = "done"
+	RoomResolutionDeleted RoomResolution = "deleted"
+)
+
+func (r RoomResolution) Valid() bool {
+	return r == RoomResolutionDone || r == RoomResolutionDeleted
+}
+
 func (s RoomMessageState) Valid() bool {
 	switch s {
 	case RoomMessageQueued, RoomMessageSent, RoomMessageNotSent, RoomMessageUncertain, RoomMessageDenied, RoomMessageCancelled:
@@ -110,8 +123,13 @@ type RoomMessage struct {
 	DeliveredAt   *time.Time
 	AgentDelivery AgentDelivery
 	Failure       *RoomMessageFailure
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// ResolvedAt, ResolvedBy, and Resolution record who completed or deleted
+	// a comment and when. Resolution is empty for every other kind.
+	ResolvedAt *time.Time
+	ResolvedBy domain.MemberID
+	Resolution RoomResolution
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // EvidenceTrigger identifies why an evidence packet was captured.
@@ -294,6 +312,10 @@ type RoomMessageStore interface {
 	// DecideRoomMessage atomically records a moderation decision only when the
 	// row is still in from. It returns false when another transition won.
 	DecideRoomMessage(context.Context, string, RoomMessageState, RoomMessageState, string, time.Time) (bool, error)
+	// ResolveRoomMessage atomically records who completed or deleted a
+	// comment. Retrying with the same outcome replays the stored row;
+	// retrying with a different one is ErrRoomMessageResolveConflict.
+	ResolveRoomMessage(context.Context, string, RoomResolution, domain.MemberID, time.Time) (*RoomMessage, error)
 	// MarkRoomMessageAgentQueued records that a sent steer waits behind the
 	// agent's running turn. It returns false once the session already settled
 	// the steer, which can happen before the send itself is recorded.
@@ -366,7 +388,7 @@ type CollaborationStore interface {
 
 var _ CollaborationStore = (*DB)(nil)
 
-const roomMessageCols = `id, workspace_id, run_id, actor_id, actor_display_name, kind, body, attachments, anchor, correlation_id, idempotency_key, state, deliver_after, decided_by, decided_at, delivered_at, failure, created_at, updated_at, agent_delivery, via`
+const roomMessageCols = `id, workspace_id, run_id, actor_id, actor_display_name, kind, body, attachments, anchor, correlation_id, idempotency_key, state, deliver_after, decided_by, decided_at, delivered_at, failure, created_at, updated_at, agent_delivery, via, resolved_at, resolved_by, resolution`
 const evidencePacketCols = `id, workspace_id, run_id, origin_kind, origin_id, owner_id, creator_id, publication_owner, trigger, objective, captured_at, expires_at, availability, expired_at, event_boundary, base_revision, retained_revision, changed_files, sources, related_room_message_ids, unresolved_facts, next_action, provenance, idempotency_key, created_at, updated_at, captures, verification_notes`
 
 func marshalCollaborationJSON(v any, empty string) (string, error) {
@@ -441,7 +463,7 @@ func (d *DB) CreateRoomMessage(ctx context.Context, m *RoomMessage) error {
 		return fmt.Errorf("store: create room message: %w", err)
 	}
 	res, err := d.db.ExecContext(ctx, `INSERT INTO room_messages (`+roomMessageCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, NULL, ?, ?, '', ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, NULL, ?, ?, '', ?, NULL, '', '')
 		ON CONFLICT (actor_id, run_id, idempotency_key) DO NOTHING`,
 		id, m.WorkspaceID, m.RunID, m.ActorID, m.ActorDisplayName, m.Kind, m.Body, attachments, nullableJSON(anchor),
 		m.CorrelationID, m.IdempotencyKey, state, deliverAfter, deliveredAt, createdAt, updatedAt, m.Via)
@@ -505,7 +527,7 @@ func (d *DB) ListRoomMessages(ctx context.Context, workspace domain.WorkspaceID,
 	if workspace == "" {
 		return nil, errors.New("store: list room messages: workspace_id is required")
 	}
-	query := `SELECT rowid, ` + roomMessageCols + ` FROM room_messages WHERE workspace_id = ?`
+	query := `SELECT rowid, ` + roomMessageCols + ` FROM room_messages WHERE workspace_id = ? AND resolution <> 'deleted'`
 	args := []any{workspace}
 	if run != "" {
 		query += ` AND run_id = ?`
@@ -958,12 +980,14 @@ func scanRoomMessage(row interface{ Scan(...any) error }) (*RoomMessage, error) 
 		deliverAfter *int64
 		decidedAt    *int64
 		deliveredAt  *int64
+		resolvedAt   *int64
 		createdAt    int64
 		updatedAt    int64
 	)
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.RunID, &m.ActorID, &m.ActorDisplayName, &m.Kind, &m.Body, &attachments, &anchor,
 		&m.CorrelationID, &m.IdempotencyKey, &m.State, &deliverAfter, &m.DecidedBy, &decidedAt,
-		&deliveredAt, &failure, &createdAt, &updatedAt, &m.AgentDelivery, &m.Via); err != nil {
+		&deliveredAt, &failure, &createdAt, &updatedAt, &m.AgentDelivery, &m.Via,
+		&resolvedAt, &m.ResolvedBy, &m.Resolution); err != nil {
 		return nil, err
 	}
 	if attachments.Valid && attachments.String != "" {
@@ -986,6 +1010,53 @@ func scanRoomMessage(row interface{ Scan(...any) error }) (*RoomMessage, error) 
 	m.DeliverAfter = decodeTimePtr(deliverAfter)
 	m.DecidedAt = decodeTimePtr(decidedAt)
 	m.DeliveredAt = decodeTimePtr(deliveredAt)
+	m.ResolvedAt = decodeTimePtr(resolvedAt)
 	m.CreatedAt, m.UpdatedAt = decodeTime(createdAt), decodeTime(updatedAt)
 	return &m, nil
+}
+
+// ErrRoomMessageResolveConflict means a message was already resolved with a
+// different outcome than the one requested.
+var ErrRoomMessageResolveConflict = errors.New("store: room message already resolved with a different outcome")
+
+// ResolveRoomMessage atomically records who completed or deleted a comment.
+// Retrying with the same outcome replays the existing row instead of
+// erroring; a different outcome than the one already recorded conflicts.
+func (d *DB) ResolveRoomMessage(ctx context.Context, id string, outcome RoomResolution, by domain.MemberID, resolvedAt time.Time) (*RoomMessage, error) {
+	if id == "" || by == "" || !outcome.Valid() {
+		return nil, errors.New("store: resolve room message: id, by, and a valid outcome are required")
+	}
+	if resolvedAt.IsZero() {
+		resolvedAt = time.Now().UTC()
+	}
+	resolvedAtN, err := encodeTime(resolvedAt)
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve room message: %w", err)
+	}
+	updatedAt, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve room message: %w", err)
+	}
+	res, err := d.db.ExecContext(ctx, `UPDATE room_messages
+		SET resolution = ?, resolved_by = ?, resolved_at = ?, updated_at = ?
+		WHERE id = ? AND resolution = ''`,
+		outcome, by, resolvedAtN, updatedAt, id)
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve room message %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve room message %s: %w", id, err)
+	}
+	if n > 0 {
+		return d.GetRoomMessage(ctx, id)
+	}
+	existing, err := d.GetRoomMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Resolution == outcome {
+		return existing, nil
+	}
+	return nil, fmt.Errorf("store: resolve room message %s: %w", id, ErrRoomMessageResolveConflict)
 }

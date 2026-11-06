@@ -70,6 +70,10 @@ func cloneRoomMessage(m *store.RoomMessage) *store.RoomMessage {
 		f := *m.Failure
 		copy.Failure = &f
 	}
+	if m.ResolvedAt != nil {
+		v := *m.ResolvedAt
+		copy.ResolvedAt = &v
+	}
 	return &copy
 }
 
@@ -123,7 +127,7 @@ func (s *collabStore) ListRoomMessages(_ context.Context, workspace domain.Works
 	defer s.mu.Unlock()
 	var items []*store.RoomMessage
 	for _, m := range s.messages {
-		if m.WorkspaceID == workspace && (run == "" || m.RunID == run) {
+		if m.WorkspaceID == workspace && (run == "" || m.RunID == run) && m.Resolution != store.RoomResolutionDeleted {
 			items = append(items, cloneRoomMessage(m))
 		}
 	}
@@ -287,6 +291,24 @@ func (s *collabStore) DecideRoomMessage(_ context.Context, id string, from, to s
 	m.DecidedBy = domain.MemberID(by)
 	m.DecidedAt = &at
 	return true, nil
+}
+func (s *collabStore) ResolveRoomMessage(_ context.Context, id string, outcome store.RoomResolution, by domain.MemberID, at time.Time) (*store.RoomMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.messages[id]
+	if m == nil {
+		return nil, store.ErrNotFound
+	}
+	if m.Resolution != "" {
+		if m.Resolution == outcome {
+			return cloneRoomMessage(m), nil
+		}
+		return nil, store.ErrRoomMessageResolveConflict
+	}
+	m.Resolution = outcome
+	m.ResolvedBy = by
+	m.ResolvedAt = &at
+	return cloneRoomMessage(m), nil
 }
 func (s *collabStore) CreateEvidencePacket(context.Context, *store.EvidencePacket) error { return nil }
 func (s *collabStore) GetEvidencePacket(context.Context, string) (*store.EvidencePacket, error) {
@@ -1078,6 +1100,69 @@ func TestProtectedRunRejectsOwnerAndAdminSteering(t *testing.T) {
 	}
 	if got.State != store.RoomMessageNotSent {
 		t.Fatalf("protected queued state = %q, want not_sent", got.State)
+	}
+}
+
+// Resolve is author-or-owner-or-admin, unlike Steer's owner-or-admin: a third
+// collaborator who is neither is refused even though they could steer a run
+// whose workspace allows steering others.
+func TestResolvePermissionsKindAndIdempotency(t *testing.T) {
+	st, clock, ws, owner, other, run := setupCollab(t)
+	admin := &domain.Member{ID: "admin", DisplayName: "Admin", Role: domain.RoleAdmin}
+	third := &domain.Member{ID: "third", DisplayName: "Third", Role: domain.RoleCollaborator}
+	st.members[admin.ID], st.members[third.ID] = admin, third
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment := func(key string) *store.RoomMessage {
+		t.Helper()
+		result, postErr := service.Post(context.Background(), MessageInput{
+			WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+			Kind: store.RoomMessageComment, Body: "note", IdempotencyKey: key,
+		})
+		if postErr != nil {
+			t.Fatal(postErr)
+		}
+		return result.Message
+	}
+
+	refused := comment("refused")
+	if _, err := service.Resolve(context.Background(), refused.ID, third.ID, store.RoomResolutionDone); !errors.Is(err, ErrUnauthorizedDecision) {
+		t.Fatalf("uninvolved collaborator resolve = %v, want ErrUnauthorizedDecision", err)
+	}
+
+	byAuthor := comment("by-author")
+	if _, err := service.Resolve(context.Background(), byAuthor.ID, other.ID, store.RoomResolutionDone); err != nil {
+		t.Fatalf("author resolve: %v", err)
+	}
+
+	byOwner := comment("by-owner")
+	if _, err := service.Resolve(context.Background(), byOwner.ID, owner.ID, store.RoomResolutionDone); err != nil {
+		t.Fatalf("owner resolve: %v", err)
+	}
+
+	byAdmin := comment("by-admin")
+	if _, err := service.Resolve(context.Background(), byAdmin.ID, admin.ID, store.RoomResolutionDeleted); err != nil {
+		t.Fatalf("admin resolve: %v", err)
+	}
+
+	question, postErr := service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID,
+		Kind: store.RoomMessageQuestion, Body: "what now?", IdempotencyKey: "question-1",
+	})
+	if postErr != nil {
+		t.Fatal(postErr)
+	}
+	if _, err := service.Resolve(context.Background(), question.Message.ID, owner.ID, store.RoomResolutionDone); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("question resolve = %v, want ErrInvalidRequest", err)
+	}
+
+	if _, err := service.Resolve(context.Background(), byAuthor.ID, other.ID, store.RoomResolutionDone); err != nil {
+		t.Fatalf("author resolve replay: %v", err)
+	}
+	if _, err := service.Resolve(context.Background(), byAuthor.ID, other.ID, store.RoomResolutionDeleted); !errors.Is(err, store.ErrRoomMessageResolveConflict) {
+		t.Fatalf("author resolve conflicting outcome = %v, want ErrRoomMessageResolveConflict", err)
 	}
 }
 
