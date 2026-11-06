@@ -1,4 +1,4 @@
-import { readiness } from '@/components/launch/account-picker'
+import { asFallback, readiness } from '@/components/launch/account-picker'
 import { agentInfo } from '@/test/fixtures'
 import type { UsageProvider } from '@/lib/types'
 
@@ -11,12 +11,12 @@ const hardLink = 'login file has another hard link'
 
 describe('readiness', () => {
   it.each([
-    ['Not installed', { agents: [claude({ installed: false })] }, { className: 'text-muted' }],
-    ['Not installed', { agents: [] }, { className: 'text-muted' }],
-    ["Needs Bob's login", { agents: [claude({ login_missing: true })], usage: usage(10) }, { className: 'text-state-needs-you' }],
-    ['Your account only', { agents: [claude({ own_account_only: true })] }, { className: 'text-muted' }],
-    ['Unavailable', { agents: [claude({ unavailable: hardLink })] }, { className: 'text-state-failed', title: hardLink }],
-    ['Sign in after launch', { agents: [claude({ login_found: false })] }, { className: 'text-muted' }],
+    ['Not installed', { agents: [claude({ installed: false })] }, { className: 'text-muted', refused: true }],
+    ['Not installed', { agents: [] }, { className: 'text-muted', refused: true }],
+    ["Needs Bob's login", { agents: [claude({ login_missing: true })], usage: usage(10) }, { className: 'text-state-needs-you', refused: true }],
+    ['Your account only', { agents: [claude({ own_account_only: true })] }, { className: 'text-muted', refused: true }],
+    ['Unavailable', { agents: [claude({ unavailable: hardLink })] }, { className: 'text-state-failed', title: hardLink, refused: true }],
+    ['Sign in after launch', { agents: [claude({ login_found: false })] }, { className: 'text-muted', signIn: true }],
     ['Ready', { agents: [claude()] }, { className: 'text-text' }],
     ['Ready', { agents: [claude()], usageError: 'account.usage: usage providers unavailable' }, { className: 'text-text', title: 'Usage not read: account.usage: usage providers unavailable' }],
     ['Not checked', { agentsError: 'agent.list: connection refused' }, { className: 'text-state-failed', title: 'agent.list: connection refused' }],
@@ -31,6 +31,13 @@ describe('readiness', () => {
   it('says nothing until the account\'s agent list answers, even with usage known', () => {
     expect(readiness({ usage: usage(50) }, 'claude', 'Bob', now)).toBeNull()
     expect(readiness(undefined, 'claude', 'Bob', now)).toBeNull()
+  })
+
+  it('says on a fallback row which accounts usage fallback skips', () => {
+    expect(asFallback(readiness({ agents: [claude({ login_missing: true })] }, 'claude', 'Bob', now))?.text).toBe("Skipped: needs Bob's login")
+    expect(asFallback(readiness({ agents: [claude({ unavailable: hardLink })] }, 'claude', 'Bob', now))).toMatchObject({ text: 'Skipped: unavailable', className: 'text-muted', title: hardLink })
+    expect(asFallback(readiness({ agents: [claude({ login_found: false })] }, 'claude', undefined, now))?.text).toBe('Sign in when used')
+    expect(asFallback(readiness({ agents: [claude()] }, 'claude', undefined, now))?.text).toBe('Ready')
   })
 
   it('says nothing for the pinned custom agent', () => {

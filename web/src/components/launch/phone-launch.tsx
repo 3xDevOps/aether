@@ -115,10 +115,13 @@ export function PhoneLaunchSheet({
           <Collapsible>
             <CollapsibleTrigger>
               <span className="shrink-0 font-medium">More options</span>
-              {(harness || accountName) && (
-                <span className="min-w-0 truncate text-muted">
-                  {[harness && modeLabel(mode), accountName && `${accountName}'s account`].filter(Boolean).map((part) => `· ${part}`).join(' ')}
-                </span>
+              {harness && <span className="shrink-0 text-muted">· {modeLabel(mode)}</span>}
+              {accountName && (
+                <>
+                  <span className="shrink-0 text-muted">·</span>
+                  <span className="min-w-0 truncate text-muted">{accountName}</span>
+                  <span className="-ml-1 shrink-0 text-muted">&apos;s account</span>
+                </>
               )}
             </CollapsibleTrigger>
             <CollapsibleContent className="flex flex-col gap-4 pt-2">

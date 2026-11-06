@@ -4,7 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { accessLabel, type Readiness, ReadinessText } from '@/components/launch/account-picker'
+import { accessLabel, asFallback, type Readiness, ReadinessText } from '@/components/launch/account-picker'
 import { limitsText, type LimitsDraft, parseLimits, RunLimitsFields } from '@/components/launch/run-limits'
 import type { Member, RunLimits, Workspace } from '@/lib/types'
 
@@ -65,7 +65,9 @@ export function FallbackOptions({
     <Collapsible>
       <CollapsibleTrigger>
         <span className="shrink-0 font-medium">Fallback</span>
-        <span className="min-w-0 truncate text-muted">· If {owner} runs out · {params.no_fallback ? 'Off' : params.fallback_account_member_ids ? 'Ordered' : 'Automatic'}</span>
+        <span className="shrink-0 text-muted">· {params.no_fallback ? 'Off' : params.fallback_account_member_ids ? 'Ordered' : 'Automatic'} · if</span>
+        <span className="min-w-0 truncate text-muted">{owner}</span>
+        <span className="shrink-0 text-muted">runs out</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-1 pt-2 pl-5">
         <label className="flex min-h-7 cursor-pointer items-center gap-2 text-ui coarse:min-h-11">
@@ -87,7 +89,7 @@ export function FallbackOptions({
                           <span className="min-w-0 truncate">{name}</span>
                           {member && <span className="shrink-0 text-ui-sm text-muted">{accessLabel(member, ownAccountID)}</span>}
                         </span>
-                        {member && <ReadinessText ready={status(member)} className="ml-0 truncate" />}
+                        {member && <ReadinessText ready={asFallback(status(member))} className="ml-0 truncate" />}
                       </span>
                     </label>
                     <Button type="button" variant="ghost" size="icon-sm" label={`Move ${name} up`} disabled={index === 0} onClick={() => move(index, -1)}>

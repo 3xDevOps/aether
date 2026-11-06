@@ -527,7 +527,8 @@ cannot be read (an API-key login, signed out, or a vendor read over 3 seconds).
 Candidates are your own account and every account shared with you whose owner is
 logged in to the agent. The one with the most usage left wins. In the launch
 dialog, **Fallback → Fall back to another account** turns it off and lists
-**Fallback accounts**, which you untick or reorder. From the CLI:
+**Fallback accounts**, which you untick or reorder; an account a launch could
+not run on reads **Skipped:** and the reason. From the CLI:
 
 ```sh
 # If Grace's account is exhausted, try Lin's, then your own

@@ -25,7 +25,7 @@ function status(agent: AgentInfo, owner: string | undefined): string {
   if (agent.own_account_only) return 'Your account only'
   if (agent.unavailable) return 'Unavailable'
   if (agent.source !== 'shipped' || agent.login_found === undefined) return ''
-  return agent.login_found ? 'Login found' : 'Sign in after launch'
+  return agent.login_found ? 'Ready' : 'Sign in after launch'
 }
 
 export function AgentPicker({

@@ -134,7 +134,7 @@ describe('new run', () => {
     ])
     await open()
 
-    expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeLogin found')
+    expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeReady')
     expect(agentRow(/^Codex/).textContent).toBe('CodexSign in after launch')
     expect(screen.queryByRole('radio', { name: /^Pi/ })).toBeNull()
     expect(agentRow(/^custom/).disabled).toBe(false)
@@ -472,7 +472,7 @@ describe('new run', () => {
       await userEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
       const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
       await waitFor(() => expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['BobSharedReady', 'VeraSharedReady', 'CarolSharedReady']))
-      expect(screen.getByRole('button', { name: /^Fallback/ }).textContent).toBe('Fallback· If Alice runs out · Automatic')
+      expect(screen.getByRole('button', { name: /^Fallback/ }).textContent).toBe('Fallback· Automatic · ifAliceruns out')
       expect(screen.getByText("If Alice's usage is 95% or more at launch, or the vendor reports the limit mid-session, the session moves to the ticked account with the most usage left.")).toBeDefined()
 
       await userEvent.click(screen.getByRole('button', { name: 'Move Carol up' }))

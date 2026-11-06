@@ -43,7 +43,8 @@ export function useAccountStatus(accounts: Member[], ownAccountID: string, clien
 }
 
 /** `title` carries a failed read's error. */
-export type Readiness = { text: string; className: string; title?: string }
+/** `refused` marks a launch the server refuses there, which usage fallback skips too; `signIn` an own account with no login file. */
+export type Readiness = { text: string; className: string; title?: string; refused?: boolean; signIn?: boolean }
 
 /** What a launch of `harness` on the account would meet, known only once its `agent.list` settled; `owner` names a shared account's owner. */
 export function readiness(status: AccountStatus | undefined, harness: string, owner: string | undefined, now: number): Readiness | null {
@@ -51,10 +52,10 @@ export function readiness(status: AccountStatus | undefined, harness: string, ow
   if (status.agentsError) return { text: 'Not checked', className: 'text-state-failed', title: status.agentsError }
   if (!status.agents) return null
   const agent = status.agents.find((item) => item.name === harness)
-  if (!agent?.installed) return { text: 'Not installed', className: 'text-muted' }
-  if (agent.login_missing) return { text: `Needs ${owner ?? 'the owner'}'s login`, className: 'text-state-needs-you' }
-  if (agent.own_account_only) return { text: 'Your account only', className: 'text-muted' }
-  if (agent.unavailable) return { text: 'Unavailable', className: 'text-state-failed', title: agent.unavailable }
+  if (!agent?.installed) return { text: 'Not installed', className: 'text-muted', refused: true }
+  if (agent.login_missing) return { text: `Needs ${owner ?? 'the owner'}'s login`, className: 'text-state-needs-you', refused: true }
+  if (agent.own_account_only) return { text: 'Your account only', className: 'text-muted', refused: true }
+  if (agent.unavailable) return { text: 'Unavailable', className: 'text-state-failed', title: agent.unavailable, refused: true }
   const provider = status.usage?.find((item) => item.provider === harness)
   const windows = currentWindows(provider, now)
   if (windows.length) {
@@ -67,8 +68,15 @@ export function readiness(status: AccountStatus | undefined, harness: string, ow
       : { text: `${used}% used`, className }
   }
   const usageError = status.usageError ? `Usage not read: ${status.usageError}` : undefined
-  if (agent.login_found === false) return { text: 'Sign in after launch', className: 'text-muted', title: usageError }
+  if (agent.login_found === false) return { text: 'Sign in after launch', className: 'text-muted', title: usageError, signIn: true }
   return { text: 'Ready', className: 'text-text', title: usageError }
+}
+
+/** The same status on a fallback row: usage fallback never moves a launch where it would be refused. */
+export function asFallback(ready: Readiness | null): Readiness | null {
+  if (ready?.refused) return { ...ready, text: `Skipped: ${ready.text.charAt(0).toLowerCase()}${ready.text.slice(1)}`, className: 'text-muted' }
+  if (ready?.signIn) return { ...ready, text: 'Sign in when used' }
+  return ready
 }
 
 export function accessLabel(member: Member, ownAccountID: string): string {

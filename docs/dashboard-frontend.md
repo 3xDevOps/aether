@@ -2596,7 +2596,7 @@ then reveals it. A refusal shows the server's error and any setup output.
 The launch form lives in `components/launch/`. It asks for a
 task, an agent, an account when one is shared with the caller, a mode and a
 model. The agent picker is a list of rows from `agent.list`: the vendor glyph
-in its colour, the display name, and "Login found" or "Sign in after launch"
+in its colour, the display name, and "Ready" or "Sign in after launch"
 for a shipped agent (`login_found` checks the launch home for login files, not
 for a working session; a server that does not report it shows nothing). While
 the list is read again for another account the last one stays, dimmed and
@@ -2616,7 +2616,7 @@ branch as muted text ("from main"; sessions always start from it) and the
 **Agent** chip; then **Launch** pinned under the form. Permission, the
 account and fallback, Mode, Model, Effort, Resource limits, Subsessions and
 extra repositories sit under **More options**, whose caption names the mode
-and, on a shared account, "<owner>'s account", truncated to fit, with **Install more
+and, on a shared account, "<owner>'s account", only the name truncated, with **Install more
 agents...** at its end. Closing the sheet returns focus to what opened it. The repository starts
 on the workspace of your newest session that you started yourself (not a
 subsession or a connector launch) in a workspace that still exists, read once
@@ -2795,11 +2795,14 @@ sessions** select: **Use my setting** (naming it, "(off)"), **Allow for this
 session** and **Off for this session**, sent as `run.launch` `subsessions: "on"` or
 `"off"`; the first sends nothing.
 
-The collapsed **Fallback** under the account list, whose caption reads "If
-<owner> runs out" and "Automatic", "Ordered" or "Off", holds the [usage
+The collapsed **Fallback** under the account list, whose caption reads
+"Automatic", "Ordered" or "Off", then "if <owner> runs out" with only the
+name truncated, holds the [usage
 fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
-each account with a checkbox, "You" or "Shared", the account list's status,
+each account with a checkbox, "You" or "Shared", the account list's status
+("Skipped: <status>" where a launch would be refused, which usage fallback
+skips too, and "Sign in when used" for "Sign in after launch"),
 and **Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "If
 <owner>'s usage is 95% or more at launch, or the vendor reports the limit
 mid-session, the session moves to the ticked account with the most usage
