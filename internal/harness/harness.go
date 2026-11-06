@@ -309,9 +309,7 @@ type Profile struct {
 	// AccountState maps a home-relative JSON file to its keys that describe
 	// the account the CLI is signed in to. A launch on another member's
 	// account mounts its own copy of the file without them, so the session
-	// neither shows nor sends the launcher's account. Every container pins
-	// an existing one in place, as it does PinnedLogins, so no rename
-	// detaches a copy.
+	// neither shows nor sends the launcher's account.
 	AccountState map[string][]string
 	// PinnedLogins are the login files the CLI replaces by rename. Each is
 	// mounted in place in the owner's own containers too; the rename then

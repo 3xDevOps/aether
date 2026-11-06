@@ -217,8 +217,7 @@ func writeRunFile(file string, data []byte, user string) error {
 // accountStateMounts mounts, over each of the profile's AccountState files in
 // the launcher's home, run's own copy without the keys that name the
 // launcher's account. The copy lives beside run's login copies, read-write
-// for the CLI. pinnedLogins pins the file in the launcher's other
-// containers, so none of them can rename over it and detach the copy.
+// for the CLI, so what the session changes there stays in the session.
 func (s *Scheduler) accountStateMounts(run *domain.Run, launcher domain.MemberID, profile harness.Profile, home, user string) ([]runtime.Mount, error) {
 	var mounts []runtime.Mount
 	for _, rel := range slices.Sorted(maps.Keys(profile.AccountState)) {
@@ -248,7 +247,7 @@ func (s *Scheduler) accountStateMounts(run *domain.Run, launcher domain.MemberID
 		if err := writeRunFile(file, out, user); err != nil {
 			return nil, fmt.Errorf("scheduler: write the session's ~/%s: %w", rel, err)
 		}
-		if err := s.cfg.Homes.PrepareStateMountpoint(launcher, rel); err != nil {
+		if err := s.cfg.Homes.PrepareLoginMountpoint(launcher, rel, false); err != nil {
 			return nil, fmt.Errorf("scheduler: %w", err)
 		}
 		mounts = append(mounts, runtime.Mount{HostPath: file, ContainerPath: path.Join(home, rel), CheckInode: true})

@@ -248,12 +248,9 @@ Claude Code also caches the account it is signed in to as `oauthAccount` in
 `~/.claude.json` and shows it in `claude auth status`. A `claude` session on
 your account therefore mounts its own copy of their `~/.claude.json`,
 `<data-dir>/scheduler/logins/<session-id>/<your-member-id>/.claude.json`,
-without `oauthAccount`, and Claude Code fetches your profile with your login
-instead. Their containers pin their `~/.claude.json` in place like their
-login, so Claude Code saves it in place and no rename detaches the copy. What
-the session changes in its copy lasts until the session is relaunched or
-moves to another account, when the copy is made again from their file. A
-`~/.claude.json` that is a symlink or has other hard links refuses the launch.
+without `oauthAccount`, so it never shows or sends their account; Claude Code
+fetches your profile with your login instead. What the session changes in
+that file stays in the session.
 
 - Root in their session can copy your login file. The refresh token in it
   outlives a revoke and keeps working until you log out and in again.

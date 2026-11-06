@@ -196,10 +196,8 @@ func TestSharerOnAnotherAccountPrefersForeignLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codex Launch: %v", err)
 	}
-	// The claude launch left a ~/.claude.json in Ada's home, which her other
-	// containers now pin too.
 	codex := runtime.Mount{HostPath: e.ownerHome, Subpath: ".codex/auth.json", ContainerPath: "/root/.codex/auth.json"}
-	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", codex, e.pin(claudeLogin), e.pin(".claude.json"), e.pin(geminiLogin))
+	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", append([]runtime.Mount{codex}, e.pins()...)...)
 }
 
 // A sharer's own Claude login path that cannot be shared is left unpinned,
