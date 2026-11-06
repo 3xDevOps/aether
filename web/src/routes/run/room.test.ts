@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import { useRunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { alice, bob, fakeApi, roomMessage, run, serverInfo } from '@/test/fixtures'
 
 const conflict = new ApiError(200, 'room message already resolved with a different outcome', -32003)
@@ -43,5 +44,24 @@ describe('resolving a note', () => {
     })
     expect(outcome?.error).toContain('already resolved')
     expect(held('n1')).toMatchObject({ resolution: 'done', resolved_by: alice.id })
+  })
+
+  it('carries a refusal that lands after the deadline, instead of leaving only the timeout text', async () => {
+    let refuse!: (cause: unknown) => void
+    const { result } = await mounted(() => new Promise((_, reject) => { refuse = reject }))
+    vi.useFakeTimers()
+    try {
+      let pending!: Promise<{ ok: boolean; error?: string; refused?: Promise<string> }>
+      act(() => { pending = result.current.resolve('n1', 'deleted') })
+      await act(async () => { await vi.advanceTimersByTimeAsync(optimisticDeadlineMs) })
+      const outcome = await pending
+      expect(outcome.ok).toBe(false)
+      expect(outcome.error).toContain('did not answer')
+      expect(outcome.refused).toBeDefined()
+      refuse(conflict)
+      await expect(outcome.refused).resolves.toContain('already resolved')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

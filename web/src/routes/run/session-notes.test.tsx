@@ -124,6 +124,22 @@ describe('sticky note rail', () => {
     expect(screen.getByText('keep me')).toBeDefined()
   })
 
+  it('shows the real refusal once it arrives after the timeout', async () => {
+    seed([note(1, { body: 'keep me' })])
+    let settleRefusal!: (reason: string) => void
+    const refused = new Promise<string>((resolve) => { settleRefusal = resolve })
+    const resolve = vi.fn(async () => ({ ok: false as const, error: 'The server did not answer in 5 seconds.', refused }))
+    render(<NotesRail run={record} room={fakeRoom(resolve)} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete note' }))
+    await waitFor(() => expect(screen.getByText('The server did not answer in 5 seconds.')).toBeDefined())
+    await act(async () => {
+      settleRefusal('The run no longer exists.')
+      await refused
+    })
+    expect(screen.getByText('The run no longer exists.')).toBeDefined()
+    expect(screen.queryByText('The server did not answer in 5 seconds.')).toBeNull()
+  })
+
   it('keeps the card visible when a refusal lands during the scratch', async () => {
     let releaseScratch!: () => void
     const scratchDone = new Promise<void>((resolve) => { releaseScratch = resolve })

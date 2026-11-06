@@ -25,7 +25,7 @@ export interface RunRoom {
   note: (body: string) => Promise<void>
   decide: (messageID: string, decision: 'approve' | 'deny') => Promise<void>
   /** Complete or delete a comment. The caller plays the exit animation; a refusal restores it and reports its error. */
-  resolve: (messageID: string, outcome: RoomResolution) => Promise<{ ok: boolean; error?: string }>
+  resolve: (messageID: string, outcome: RoomResolution) => Promise<{ ok: boolean; error?: string; refused?: Promise<string> }>
   loadOlder: () => Promise<void>
   refresh: () => Promise<void>
   error: string | undefined
@@ -237,7 +237,7 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
       // Another member's resolution may have landed meanwhile; only undo our own.
       revert: () => before && held() === applied && useStore.getState().upsertRoomMessage(before),
     })
-    return outcome_.ok ? { ok: true as const } : { ok: false as const, error: outcome_.error }
+    return outcome_.ok ? { ok: true as const } : { ok: false as const, error: outcome_.error, refused: outcome_.refused }
   }, [client, runID])
 
   const clearError = useCallback(() => useStore.getState().setRoomActionError(runID), [runID])

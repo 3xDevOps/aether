@@ -234,7 +234,12 @@ function useStickyNotes(run: RunRecord, room: RunRoom) {
     rail.markExiting(note.id)
     rail.setError(note.id, undefined)
     void room.resolve(note.id, outcome).then((result) => {
-      if (!result.ok) return rail.setError(note.id, { message: result.error ?? 'The server refused.', outcome })
+      if (!result.ok) {
+        rail.setError(note.id, { message: result.error ?? 'The server refused.', outcome })
+        // The deadline passed before the server answered; carry its real refusal to the card once it arrives.
+        void result.refused?.then((error) => rail.setError(note.id, { message: error, outcome }))
+        return
+      }
       setAnnouncement(outcome === 'done' ? 'Note completed.' : 'Note deleted.')
       rail.settle(note.id)
     })
