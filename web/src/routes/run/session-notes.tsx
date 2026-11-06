@@ -191,7 +191,7 @@ function StickyCard({ note, index, run, error, retryable, onResolve, onDismissEr
     <li
       ref={frame}
       className={cn(
-        'sticky-note group/note relative flex w-[236px] flex-col gap-1.5 overflow-hidden rounded-[6px] border p-3 shadow-[var(--card-shadow)]',
+        'sticky-note group/note relative flex w-[236px] shrink-0 flex-col gap-1.5 overflow-hidden rounded-[6px] border p-3 shadow-[var(--card-shadow)]',
         error && 'border-state-failed',
       )}
       style={{ transform: `rotate(${rotations[index % 2]})` }}
