@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { LaunchDefaultsResult, LaunchMode } from '@/lib/types'
 import { useStore } from '@/store'
+import { capability } from '@/store/hooks'
 import { type LaunchDefaultsRead, rememberedChoice, useLaunchDefaultsRead } from '@/store/launch-defaults'
 
 export interface LastLaunch {
@@ -31,9 +32,9 @@ export function savedRefused(last: LastLaunch, saved: LaunchDefaultsResult | nul
   return (saved?.invalid ?? []).some((issue) => issue.field === 'agent' || issue.field === 'account_member_id' || issue.field === `agents.${last.harness}` || issue.field.startsWith(`agents.${last.harness}.`))
 }
 
-/** Starts a run on `last` with no task, on the saved account and fallback, as the launch panel would. */
+/** Starts a run on `last` with no task, on the saved account and fallback, with subsessions allowed whatever the member setting says. */
 export async function quickLaunch(last: LastLaunch, saved: LaunchDefaultsResult | null): Promise<void> {
-  const { activeWorkspace, info, upsertRun, navigate } = useStore.getState()
+  const { activeWorkspace, info, capabilities, upsertRun, navigate } = useStore.getState()
   const own = info?.member.id ?? ''
   try {
     const wanted = saved?.defaults.account_member_id ?? ''
@@ -55,6 +56,7 @@ export async function quickLaunch(last: LastLaunch, saved: LaunchDefaultsResult 
       ...(saved?.defaults.permission ? { permission: saved.defaults.permission } : {}),
       ...(account ? { account_member_id: account } : {}),
       ...(accounts.length ? fallbackParams(fallback, accounts, account || own) : {}),
+      ...(capability(capabilities).hasMethod('run.children.allow') ? { children: 'on' as const } : {}),
     })
     upsertRun(run)
     navigate('run', { runId: run.id })

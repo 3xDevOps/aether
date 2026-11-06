@@ -652,6 +652,9 @@ setting. Only the session's owner allows it, and a handoff to another member voi
 it. An admin can turn it off. Handing a session to another member detaches it from
 its parent and from its subsessions, so no lineage spans two owners.
 
+The quick-launch button beside **New session** launches your last agent again
+with no task, and always allows subsessions for that session.
+
 When a parent is closed (merged, abandoned, or completed and accepted), its
 subsessions are closed with it: finished ones are relabeled the same way and
 working ones are stopped first. A subsession its parent cancels ends `completed`
