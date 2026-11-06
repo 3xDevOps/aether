@@ -52,9 +52,11 @@ function useRailOrder(open: RoomMessage[]) {
   useEffect(() => {
     const byID = new Map(open.map((m) => [m.id, m]))
     setNotes((prev) => {
-      const kept = prev.filter((m) => byID.has(m.id) || exiting.current.has(m.id)).map((m) => byID.get(m.id) ?? m)
-      const added = open.filter((m) => !kept.some((k) => k.id === m.id))
-      return added.length === 0 && kept.length === prev.length && kept.every((m, i) => m === prev[i]) ? prev : [...kept, ...added]
+      // Still-exiting cards left `open`, so only creation order among them
+      // and the open set puts a newly loaded older note ahead of newer ones.
+      const exitingOnly = prev.filter((m) => !byID.has(m.id) && exiting.current.has(m.id))
+      const next = exitingOnly.length === 0 ? open : byCreated([...open, ...exitingOnly])
+      return next.length === prev.length && next.every((m, i) => m === prev[i]) ? prev : next
     })
   }, [open])
   const setError = (id: string, error: NoteError | undefined) =>

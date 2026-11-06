@@ -75,6 +75,14 @@ describe('sticky note rail', () => {
     expect(bodies.map((el) => el.textContent)).toEqual(['first', 'second'])
   })
 
+  it('keeps creation order when an older note loads in beside an already-shown one', () => {
+    seed([note(2, { body: 'second' })])
+    render(<NotesRail run={record} room={fakeRoom(applyingResolve('ok'))} />)
+    act(() => seed([note(1, { body: 'first', created_at: '2026-08-14T09:00:00Z' }), note(2, { body: 'second' })]))
+    const bodies = screen.getAllByText(/first|second/)
+    expect(bodies.map((el) => el.textContent)).toEqual(['first', 'second'])
+  })
+
   it('completing a note plays the scratch strokes then removes it', async () => {
     const animate = vi.spyOn(Element.prototype, 'animate')
     seed([note(1, { body: 'finish me' })])
