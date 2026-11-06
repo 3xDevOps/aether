@@ -21,6 +21,8 @@ export interface FailedNote {
 
 export interface CollaborationSlice {
   roomMessages: Record<string, RoomMessage[]>
+  /** IDs a delete has already removed, so a list response issued before the delete cannot add them back. */
+  deletedRoomIDs: Record<string, Set<string>>
   roomNextBefore: Record<string, string | undefined>
   roomPagination: Record<string, PaginationState>
   roomStatus: Record<string, RoomStatusResult | undefined>
@@ -135,8 +137,20 @@ function mergeRoomMessages(current: RoomMessage[], incoming: RoomMessage[], from
   return [...order].map((id) => merged.get(id)!).sort((a, b) => compareInstants(a.created_at, b.created_at))
 }
 
-function withoutMessage(state: CollaborationSlice, runID: string, id: string): CollaborationSlice['roomMessages'] {
-  return { ...state.roomMessages, [runID]: (state.roomMessages[runID] ?? []).filter((m) => m.id !== id) }
+function withoutMessage(state: CollaborationSlice, runID: string, id: string): Pick<CollaborationSlice, 'roomMessages' | 'deletedRoomIDs'> {
+  return {
+    roomMessages: { ...state.roomMessages, [runID]: (state.roomMessages[runID] ?? []).filter((m) => m.id !== id) },
+    deletedRoomIDs: { ...state.deletedRoomIDs, [runID]: new Set(state.deletedRoomIDs[runID]).add(id) },
+  }
+}
+
+/** The id is confirmed not deleted after all: clear it so an older page may list it again. */
+function undeleted(state: CollaborationSlice, runID: string, id: string): CollaborationSlice['deletedRoomIDs'] {
+  const current = state.deletedRoomIDs[runID]
+  if (!current?.has(id)) return state.deletedRoomIDs
+  const next = new Set(current)
+  next.delete(id)
+  return { ...state.deletedRoomIDs, [runID]: next }
 }
 
 const isSaved = (messages: RoomMessage[], key: string) => messages.some((m) => !isProvisional(m) && m.idempotency_key === key)
@@ -188,6 +202,7 @@ function pagePagination(
 
 export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) => ({
   roomMessages: {},
+  deletedRoomIDs: {},
   roomNextBefore: {},
   roomPagination: {},
   roomStatus: {},
@@ -235,7 +250,11 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
         nextBefore,
         append,
       )
-      const merged = mergeRoomMessages(state.roomMessages[runID] ?? [], messages, append ? 'older page' : 'page')
+      // A page issued before a delete can still answer after it: drop any
+      // row the delete already tombstoned instead of merging it back in.
+      const deleted = state.deletedRoomIDs[runID]
+      const incoming = deleted?.size ? messages.filter((m) => !deleted.has(m.id)) : messages
+      const merged = mergeRoomMessages(state.roomMessages[runID] ?? [], incoming, append ? 'older page' : 'page')
       return {
         ...settleNotes(state, runID, merged),
         roomMessages: { ...state.roomMessages, [runID]: merged },
@@ -251,25 +270,36 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
     }),
   upsertRoomMessage: (message) =>
     set((state) => {
+      // Merge first, deleted or not: a retry's saved-but-deleted answer still
+      // carries the idempotency key that drops its provisional card and
+      // settles its note state, as a surviving answer does.
+      const merged = mergeRoomMessages(state.roomMessages[message.run_id] ?? [], [message], 'event')
+      const settled = settleNotes(state, message.run_id, merged)
       // A deleted comment is hidden everywhere: its event may drop it before
       // the resolve RPC answers with the same message.
-      if (message.resolution === 'deleted') return { roomMessages: withoutMessage(state, message.run_id, message.id) }
-      const merged = mergeRoomMessages(state.roomMessages[message.run_id] ?? [], [message], 'event')
+      if (message.resolution === 'deleted') {
+        return {
+          ...settled,
+          roomMessages: { ...state.roomMessages, [message.run_id]: merged.filter((m) => m.id !== message.id) },
+          deletedRoomIDs: { ...state.deletedRoomIDs, [message.run_id]: new Set(state.deletedRoomIDs[message.run_id]).add(message.id) },
+        }
+      }
       return {
-        ...settleNotes(state, message.run_id, merged),
+        ...settled,
         roomMessages: { ...state.roomMessages, [message.run_id]: merged },
+        deletedRoomIDs: undeleted(state, message.run_id, message.id),
       }
     }),
-  dropRoomMessage: (runID, id) => set((state) => ({ roomMessages: withoutMessage(state, runID, id) })),
+  dropRoomMessage: (runID, id) => set((state) => withoutMessage(state, runID, id)),
   setRoomMessageResolution: (runID, id, resolution, resolvedBy, resolvedAt) =>
-    set((state) => ({
-      roomMessages: resolution === 'deleted' ? withoutMessage(state, runID, id) : {
+    set((state) => resolution === 'deleted' ? withoutMessage(state, runID, id) : {
+      roomMessages: {
         ...state.roomMessages,
         [runID]: (state.roomMessages[runID] ?? []).map((m) =>
           m.id === id ? { ...m, resolution, resolved_by: resolvedBy, resolved_at: resolvedAt } : m,
         ),
       },
-    })),
+    }),
   setNoteDraft: (runID, text) =>
     set((state) => ({ noteDrafts: { ...state.noteDrafts, [runID]: text } })),
   noteSending: (runID, text, key) =>
@@ -300,6 +330,7 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
       noteDrafts: {},
       noteKeys: {},
       failedNotes: {},
+      deletedRoomIDs: {},
       roomMessages: Object.fromEntries(
         Object.entries(state.roomMessages).map(([runID, messages]) => [runID, messages.filter((m) => !isProvisional(m))]),
       ),
