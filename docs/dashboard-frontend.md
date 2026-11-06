@@ -3051,8 +3051,9 @@ list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
 session the rows come from the session's `run.agent`, `workspace.timeline`,
 `run.status` and `run.review` events (read with `workspace.timeline` filtered by session and type,
 then kept live by sync), room messages, the session record and its pending inputs:
-`user` (a message to the agent with its delivery word), `note` (the Notes
-thread's row, without the thread's own arrival motion), `steps` (consecutive
+`user` (a message to the agent with its delivery word), `note` (the owner's
+own question as a Notes thread row, without the thread's own arrival motion;
+`comment` messages get no row, they are stickies), `steps` (consecutive
 tool calls in one closed block, "Ran 3 commands and read 2 files", expanding
 to verb-first steps), `request` (an agent request reads "Answer in
 the terminal." with **Open terminal**, or "Answer it from the agent's
@@ -3088,8 +3089,8 @@ screens, opening Details narrows the pane rather than overlaying the composer.
 Its focus highlight follows the outer border around the textarea and attachments.
 Transcript rows retain their 736px reading width.
 
-`comment` room messages show as a floating sticky rail in the pane's right
-gutter (`session-notes.tsx`), not the Notes thread: stacked oldest first,
+Open `comment` room messages show as a floating sticky rail in the pane's
+right gutter (`session-notes.tsx`), not as transcript rows: stacked oldest first,
 236px wide, 20px from the top and right edges, each card rotated a degree
 off the last, and not scroll-linked to the rows above it. A check completes a
 note: red strokes scratch across its text, the text dims, then the card fades
@@ -5014,8 +5015,8 @@ whatever opened it. Sections (`details.tsx`):
   **Approve** / **Deny** or the composer.
 - **Done**: completed comments, newest first, five shown with **Show all**
   for the rest; each row is the same as a thread row with a done badge, timed
-  by when it was completed rather than posted. Deleted comments show nowhere,
-  in Details or the rail.
+  by when it was completed rather than posted. Deleted comments show nowhere:
+  not in Details, the rail, the strip, or the Chat transcript.
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
   Watching, Container ("Starting", "Running", "Stopped, kept for reopening"
