@@ -781,8 +781,9 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 	return true, nil
 }
 
-// pinnedLogins mounts each harness's PinnedLogins in member's own home over
-// itself, except where the plan mounts another member's login there. A
+// pinnedLogins mounts each harness's PinnedLogins and AccountState files in
+// member's own home over themselves, except where the plan mounts another
+// member's login or a session's own state copy there. A
 // rename over a pinned login fails, so the CLI rewrites it in place: no
 // container replaces the file a run on a shared account mounts over (the
 // kernel would detach that mount), nor the login member shares. A login path
@@ -803,13 +804,15 @@ func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, ho
 	}
 	var pins []runtime.Mount
 	for _, profile := range harness.Profiles() {
-		for _, rel := range profile.PinnedLogins {
+		for _, rel := range slices.Concat(profile.PinnedLogins, slices.Sorted(maps.Keys(profile.AccountState))) {
 			target := path.Join(home, rel)
 			if slices.ContainsFunc(planned, func(m runtime.Mount) bool { return m.ContainerPath == target }) {
 				continue
 			}
 			dir, pathErr := s.cfg.Homes.LoginPathIsDir(member, rel)
-			if errors.Is(pathErr, fs.ErrNotExist) {
+			// A state file nothing has created yet has no CLI saving it to
+			// rename over; a shared launch creates it before mounting its copy.
+			if _, state := profile.AccountState[rel]; !state && errors.Is(pathErr, fs.ErrNotExist) {
 				pathErr = s.cfg.Homes.PrepareLoginMountpoint(member, rel, false)
 			}
 			if pathErr != nil || dir {

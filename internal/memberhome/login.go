@@ -76,13 +76,32 @@ func (m *Manager) PrepareLoginMountpoint(member domain.MemberID, rel string, dir
 	return nil
 }
 
-// prepareLoginFile creates rel as an empty 0600 file with its parents, or
-// accepts the regular file already there.
+// PrepareStateMountpoint makes the JSON state file rel in member's home a
+// regular file to mount over, creating a missing one as an empty object: an
+// empty file is not JSON, and the CLI stops saving state it cannot parse.
+func (m *Manager) PrepareStateMountpoint(member domain.MemberID, rel string) error {
+	home, err := m.openHome(member)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = home.Close() }()
+	if err := prepareFile(home, rel, []byte("{}")); err != nil {
+		return fmt.Errorf("memberhome: prepare state mountpoint %s in %q: %w", rel, member, err)
+	}
+	return nil
+}
+
 func prepareLoginFile(home *os.Root, rel string) error {
+	return prepareFile(home, rel, nil)
+}
+
+// prepareFile creates rel as a 0600 file holding content, with its parents,
+// or accepts the regular file already there.
+func prepareFile(home *os.Root, rel string, content []byte) error {
 	if err := ensureDir(home, path.Dir(rel)); err != nil {
 		return err
 	}
-	err := writeNew(home, rel, nil, 0o600)
+	err := writeNew(home, rel, content, 0o600)
 	if !errors.Is(err, fs.ErrExist) {
 		return err
 	}
@@ -136,12 +155,6 @@ func openLoginParent(home *os.Root, rel string) (*os.Root, string, error) {
 // CLI's own state file is small, and anything larger is not rewritten.
 const maxBorrowedStateBytes = 4 << 20
 
-// MarkBorrowedState makes rel, a JSON object file in member's home, carry
-// each value in keys, creating the file with mode 0600 when it is missing.
-// A file that cannot be read as a small regular JSON object is left alone
-// and the launch goes on: the CLI owns it and recovers from it in its own
-// way. Two launches creating the file at once both succeed: the loser of the
-// exclusive create re-reads what the winner wrote.
 // ErrBorrowedStateTooLarge means a state file is larger than Aether reads.
 var ErrBorrowedStateTooLarge = errors.New("larger than Aether reads")
 
@@ -179,6 +192,12 @@ func (m *Manager) ReadBorrowedState(member domain.MemberID, rel string) ([]byte,
 	return data, nil
 }
 
+// MarkBorrowedState makes rel, a JSON object file in member's home, carry
+// each value in keys, creating the file with mode 0600 when it is missing.
+// A file that cannot be read as a small regular JSON object is left alone
+// and the launch goes on: the CLI owns it and recovers from it in its own
+// way. Two launches creating the file at once both succeed: the loser of the
+// exclusive create re-reads what the winner wrote.
 func (m *Manager) MarkBorrowedState(member domain.MemberID, rel string, keys map[string]any) error {
 	home, err := m.openHome(member)
 	if err != nil {

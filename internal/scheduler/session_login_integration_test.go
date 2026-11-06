@@ -22,7 +22,8 @@ var printAccess = []string{"sh", "-c", `sleep 1; printf 'harness-login:%s\n' "$(
 // TestIntegrationSessionLoginDocker launches Ada's run on Grace's listed
 // account for real: the agent reads Grace's access token from the run's own
 // copy, which the container sees by inode and cannot write, and which
-// follows Grace's login in place. Ada's own login under it is left alone.
+// follows Grace's login in place, and its own ~/.claude.json without Ada's
+// account. Ada's own login and state under them are left alone.
 func TestIntegrationSessionLoginDocker(t *testing.T) {
 	e, docker, cli, owner := newShareDockerEnv(t, printAccess)
 	ctx := t.Context()
@@ -41,7 +42,7 @@ func TestIntegrationSessionLoginDocker(t *testing.T) {
 	in := time.Now().Add(8 * time.Hour)
 	adaLogin := `{"claudeAiOauth":{"accessToken":"ada-access","refreshToken":"ada~1"}}`
 	seedHome(t, ownerHome, map[string]string{claudeLogin: claudeOwnerLogin("grace-access-1", "grace~1", in)})
-	seedHome(t, adaHome, map[string]string{claudeLogin: adaLogin})
+	seedHome(t, adaHome, map[string]string{claudeLogin: adaLogin, ".claude.json": adaClaudeState})
 	adaOwn := filepath.Join(adaHome, filepath.FromSlash(claudeLogin))
 
 	shared := launchShareRun(t, e, docker, cli, e.member.ID, owner.ID, "session login", "grace-access-1")
@@ -58,8 +59,8 @@ func TestIntegrationSessionLoginDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Container.Config.Labels["aether.inode-checks"]; got != `["`+target+`"]` {
-		t.Fatalf("inode-check label = %q, want the login target", got)
+	if got := info.Container.Config.Labels["aether.inode-checks"]; got != `["`+target+`","/root/.claude.json"]` {
+		t.Fatalf("inode-check label = %q, want the login and state targets", got)
 	}
 
 	seedHome(t, ownerHome, map[string]string{claudeLogin: claudeOwnerLogin("grace-access-2", "grace~2", in)})
@@ -72,11 +73,20 @@ func TestIntegrationSessionLoginDocker(t *testing.T) {
 
 	// Ada's own containers pin her login, so none of them can rename over
 	// the mountpoint the copy is bound on.
+	// The session's ~/.claude.json is its own copy without Ada's account, and
+	// her containers pin her file the same way.
+	const state = "/root/.claude.json"
+	stateCopy := filepath.Join(e.sched.sessionLoginRoot(), string(shared.run.ID), string(owner.ID), ".claude.json")
+	shared.want(t, "stat -c %i "+state, fmt.Sprintf("%d\n", inodeOf(t, stateCopy)))
+	shared.want(t, "grep -c -e oauthAccount -e ada@example.com "+state+"; true", "0\n")
 	own := launchShareRun(t, e, docker, cli, e.member.ID, e.member.ID, "own", "ada-access")
-	if code, out := own.sh(t, "printf x > "+target+".tmp && mv -f "+target+".tmp "+target); code == 0 || !strings.Contains(strings.ToLower(out), "busy") {
-		t.Fatalf("rename over Ada's pinned login = exit %d, %q; want it refused busy", code, out)
+	for _, file := range []string{target, state} {
+		if code, out := own.sh(t, "printf x > "+file+".tmp && mv -f "+file+".tmp "+file); code == 0 || !strings.Contains(strings.ToLower(out), "busy") {
+			t.Fatalf("rename over Ada's pinned %s = exit %d, %q; want it refused busy", file, code, out)
+		}
 	}
 	shared.want(t, `sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p' `+target, "grace-access-2")
+	shared.want(t, "stat -c %i "+state, fmt.Sprintf("%d\n", inodeOf(t, stateCopy)))
 	own.close(t, e)
 
 	// A rename on the host detaches the bind, as it does a subpath mount's,

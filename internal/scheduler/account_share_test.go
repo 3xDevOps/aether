@@ -148,14 +148,15 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 	writeHomeFiles(t, e.ownerHome, append([]string{".claude/.credentials.json", ".omp/agent/agent.db"}, ownerState...)...)
 	// Ada's own Claude and Gemini logins stay pinned except where the
 	// borrowed login takes the Claude one's place, and claude gets its own
-	// ~/.claude.json without Ada's account.
+	// ~/.claude.json without Ada's account; once the claude launch created
+	// Ada's ~/.claude.json, later containers pin it too.
 	for _, tc := range []struct {
 		harness, login string
 		dir            bool
 		mounts         int
 	}{
 		{"claude", ".claude/.credentials.json", false, 6},
-		{"omp", ".omp/agent", true, 6},
+		{"omp", ".omp/agent", true, 7},
 	} {
 		run, err := e.launch(t, tc.harness)
 		if err != nil {

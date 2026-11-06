@@ -688,7 +688,7 @@ const adaClaudeState = `{"oauthAccount":{"emailAddress":"ada@example.com","accou
 // launcher's ~/.claude.json without the account the launcher is signed in
 // to, so Claude Code neither shows nor uses the launcher's identity and
 // fetches the account owner's from the login it holds. The launcher's file
-// keeps everything; a session on the launcher's own account mounts nothing.
+// keeps everything, and their own sessions pin it in place.
 func TestSharedClaudeSessionDropsTheLaunchersAccount(t *testing.T) {
 	t.Parallel()
 	for _, listed := range []bool{true, false} {
@@ -721,12 +721,15 @@ func TestSharedClaudeSessionDropsTheLaunchersAccount(t *testing.T) {
 			t.Fatalf("listed %v: Ada's own ~/.claude.json changed to %s", listed, got)
 		}
 
+		// Ada's own session pins her ~/.claude.json in place, so her Claude
+		// Code saves it without a rename that would detach the copy above.
 		own, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "own", "claude", domain.LaunchTUI)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m, ok := mountFor(e.rt.byName(string(own.ID)).spec, "/root/.claude.json"); ok {
-			t.Fatalf("listed %v: own-account session mounts %+v over ~/.claude.json", listed, m)
+		pin := runtime.Mount{HostPath: e.adaHome, Subpath: ".claude.json", ContainerPath: "/root/.claude.json"}
+		if m, ok := mountFor(e.rt.byName(string(own.ID)).spec, "/root/.claude.json"); !ok || m != pin {
+			t.Fatalf("listed %v: own-account session's ~/.claude.json mount = %+v, %v; want the pin %+v", listed, m, ok, pin)
 		}
 	}
 }
