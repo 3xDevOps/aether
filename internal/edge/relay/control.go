@@ -208,6 +208,10 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	}
 	old := r.servers[id]
 	r.servers[id] = reg
+	if a := r.away[id]; a != nil {
+		close(a.back)
+		delete(r.away, id)
+	}
 	r.mu.Unlock()
 	if old != nil {
 		old.cancel(errReplaced)
@@ -258,11 +262,29 @@ func (r *Relay) admitUnclaimedLocked(addr netip.Prefix, serverID string) error {
 
 func (r *Relay) unregister(reg *registration, cause error) {
 	reg.cancel(cause)
+	now := time.Now()
 	r.mu.Lock()
-	if r.servers[reg.id] == reg {
-		delete(r.servers, reg.id)
+	defer r.mu.Unlock()
+	if r.servers[reg.id] != reg {
+		return
 	}
-	r.mu.Unlock()
+	delete(r.servers, reg.id)
+	if !reg.claimed || errors.Is(context.Cause(reg.ctx), errUnenrolled) {
+		return
+	}
+	for id, a := range r.away {
+		if now.Sub(a.since) >= r.returnWait {
+			delete(r.away, id)
+		}
+	}
+	r.away[reg.id] = &absence{since: now, back: make(chan struct{})}
+}
+
+// absence is a claimed server's time away from the edge, from when its
+// control channel ended; back is closed when it enrolls again.
+type absence struct {
+	since time.Time
+	back  chan struct{}
 }
 
 // serveRegistration reads the server's messages until the control channel

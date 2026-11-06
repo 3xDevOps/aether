@@ -144,6 +144,8 @@ func (h *harness) startEdge() {
 	}
 	relayCfg := svc.RelayConfig(0)
 	relayCfg.DirectoryInterval = 200 * time.Millisecond
+	// A request to a stopped server is held this long, not 30 seconds.
+	relayCfg.ReturnWait = 10 * time.Second
 	rl, err := relay.New(context.Background(), relayCfg)
 	if err != nil {
 		t.Fatal(err)

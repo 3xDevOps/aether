@@ -103,7 +103,9 @@ func mcpRequest(t *testing.T, method, target string, header http.Header, body io
 // sandboxed, a streamed answer streams, bodies are capped at 1 MiB, a
 // server holds at most 8 connections apart from its SSH ones and a
 // request past them waits for one, and the edge refuses, with the cause, a server that serves no connector, a
-// path on the wrong host and an offline server.
+// path on the wrong host and an offline server. Requests to a server that
+// just went offline are held for its return, at most 16, until the
+// return wait passes.
 func TestMCPConnector(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -299,9 +301,31 @@ func TestMCPConnector(t *testing.T) {
 		if v := s.agent.EdgeVersion(); v != 0 {
 			t.Errorf("EdgeVersion of a stopped server = %d, want 0", v)
 		}
-		resp, body := mcpRequest(t, http.MethodPost, base, nil, nil)
-		if resp.StatusCode != http.StatusServiceUnavailable || strings.TrimSpace(body) != string(edgeproto.RefusalNotConnected) {
-			t.Fatalf("an offline server: %s %q", resp.Status, body)
+		refused := func(what string, resp *http.Response, body string) {
+			if resp.StatusCode != http.StatusServiceUnavailable || strings.TrimSpace(body) != string(edgeproto.RefusalNotConnected) {
+				t.Errorf("%s: %s %q", what, resp.Status, body)
+			}
 		}
+		var wg sync.WaitGroup
+		held := make(chan struct{}, edgeproto.MaxHTTPWaitersPerServer)
+		for range edgeproto.MaxHTTPWaitersPerServer {
+			wg.Go(func() {
+				resp, body := mcpRequest(t, http.MethodPost, base, nil, nil)
+				held <- struct{}{}
+				refused("a request held past the return wait", resp, body)
+			})
+		}
+		select {
+		case <-held:
+			t.Fatal("a request to a server that just went offline was answered at once; want it held")
+		case <-time.After(200 * time.Millisecond):
+		}
+		start := time.Now()
+		resp, body := mcpRequest(t, http.MethodPost, base, nil, nil)
+		refused("a request past the held ones", resp, body)
+		if waited := time.Since(start); waited > time.Second {
+			t.Errorf("a request past the %d held ones waited %s; want it refused at once", edgeproto.MaxHTTPWaitersPerServer, waited)
+		}
+		wg.Wait()
 	})
 }

@@ -95,6 +95,10 @@ func (r *Relay) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
+	if !r.awaitReturn(req.Context(), serverID) {
+		r.refuseHTTP(w, req, serverID, edgeproto.RefusalNotConnected)
+		return
+	}
 	r.forward(w, req, serverID, body, "")
 }
 
@@ -124,6 +128,10 @@ func (r *Relay) ReadMCPBody(w http.ResponseWriter, req *http.Request) ([]byte, b
 // connected server whose protocol predates edgeproto.VersionUniversalMCP
 // is refused with 501.
 func (r *Relay) ForwardUniversal(w http.ResponseWriter, req *http.Request, serverID string, body []byte, browser string) {
+	if !r.awaitReturn(req.Context(), serverID) {
+		r.refuseHTTP(w, req, serverID, edgeproto.RefusalNotConnected)
+		return
+	}
 	r.mu.Lock()
 	reg := r.servers[serverID]
 	var old error
@@ -233,9 +241,49 @@ func (c *connWait) got() {
 	}
 	c.waiting = false
 	c.timer.Stop()
-	if c.r.httpWaiting[c.serverID]--; c.r.httpWaiting[c.serverID] == 0 {
-		delete(c.r.httpWaiting, c.serverID)
+	c.r.doneWaitingLocked(c.serverID)
+}
+
+func (r *Relay) doneWaitingLocked(serverID string) {
+	if r.httpWaiting[serverID]--; r.httpWaiting[serverID] == 0 {
+		delete(r.httpWaiting, serverID)
 	}
+}
+
+// awaitReturn holds a request to serverID while the server is away, until
+// it enrolls again or returnWait has passed since it left, so a request
+// sent across a restart reaches the restarted server. It returns false
+// for a request past MaxHTTPWaitersPerServer, which the server, away, does
+// not take.
+func (r *Relay) awaitReturn(ctx context.Context, serverID string) bool {
+	r.mu.Lock()
+	a := r.away[serverID]
+	var left time.Duration
+	if a != nil {
+		left = r.returnWait - time.Since(a.since)
+	}
+	if left <= 0 || r.closing {
+		r.mu.Unlock()
+		return true
+	}
+	if r.httpWaiting[serverID] >= edgeproto.MaxHTTPWaitersPerServer {
+		r.mu.Unlock()
+		return false
+	}
+	r.httpWaiting[serverID]++
+	r.mu.Unlock()
+	t := time.NewTimer(left)
+	defer t.Stop()
+	select {
+	case <-a.back:
+	case <-t.C:
+	case <-ctx.Done():
+	case <-r.ctx.Done():
+	}
+	r.mu.Lock()
+	r.doneWaitingLocked(serverID)
+	r.mu.Unlock()
+	return true
 }
 
 // refuseHTTP answers a request that reached no server, or whose server's

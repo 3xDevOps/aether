@@ -794,6 +794,7 @@ A tool call can fail with:
 | --- | --- |
 | `<method> needs the <scope> scope, which <client> connector <id> was not granted; ...` | Select **Reconnect** next to the connector and check the box the message names |
 | `<method>: <client> connector <id> cannot call this method; ...` | No connector can. Use the app or the CLI |
+| `503 server is not connected to the edge` | The server is down or cannot reach the edge; an admin runs `sudo aether-server edge status`. A restart that reconnects within 30 seconds does not cause it: the edge holds each call until the server is back, and the restarted server answers it. If the client then marks the connector failed, reconnect it (in Claude Code, `/mcp`) |
 
 On the page that opens when you connect:
 
