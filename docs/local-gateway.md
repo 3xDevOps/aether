@@ -1006,7 +1006,9 @@ the saved result; a different outcome than the one already recorded is
 `-32003`. Each resolution publishes `workspace.room_message` with
 `resolution` set, so a client already holding the message can tell a
 completed or deleted comment apart from one whose state did not otherwise
-change.
+change. The event's `actor_id` is the member who resolved the comment; the
+payload's `actor_id` stays its author. Activity reads "Alice completed a
+note" or "Alice deleted a note".
 
 ### Methods for an external assistant
 

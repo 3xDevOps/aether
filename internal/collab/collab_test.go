@@ -1166,6 +1166,48 @@ func TestResolvePermissionsKindAndIdempotency(t *testing.T) {
 	}
 }
 
+type recordingCollabBus struct {
+	events.Bus
+	published []events.Event
+}
+
+func (b *recordingCollabBus) Publish(ctx context.Context, e events.Event) (events.Event, error) {
+	b.published = append(b.published, e)
+	return b.Bus.Publish(ctx, e)
+}
+
+func TestResolvePublishesTheResolverAsActor(t *testing.T) {
+	st, clock, ws, owner, other, run := setupCollab(t)
+	bus, err := events.NewInProc(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	recording := &recordingCollabBus{Bus: bus}
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Bus: recording, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageComment, Body: "note", IdempotencyKey: "resolved-by-owner",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Resolve(context.Background(), posted.Message.ID, owner.ID, store.RoomResolutionDone); err != nil {
+		t.Fatal(err)
+	}
+	last := recording.published[len(recording.published)-1]
+	payload, ok := last.Payload.(events.RoomMessagePayload)
+	if !ok {
+		t.Fatalf("payload = %T, want RoomMessagePayload", last.Payload)
+	}
+	if last.ActorID != owner.ID || payload.ActorID != other.ID || payload.Resolution != string(store.RoomResolutionDone) {
+		t.Fatalf("event actor %q, payload author %q, resolution %q; want resolver %q, author %q, done", last.ActorID, payload.ActorID, payload.Resolution, owner.ID, other.ID)
+	}
+}
+
 func TestRoomIdempotencyAndReceiptClassification(t *testing.T) {
 	st, clock, ws, _, other, run := setupCollab(t)
 	pty := &collabPTY{}
