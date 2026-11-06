@@ -27,6 +27,15 @@ const (
 	RoomMessageCancelled RoomMessageState = "cancelled"
 )
 
+// RoomResolution mirrors the durable store vocabulary for a completed or
+// deleted comment.
+type RoomResolution string
+
+const (
+	RoomResolutionDone    RoomResolution = "done"
+	RoomResolutionDeleted RoomResolution = "deleted"
+)
+
 // RoomMessageAnchor is a safe, bounded reference to a diff interval or
 // transcript offset. It has no host filesystem path.
 type RoomMessageAnchor struct {
@@ -70,6 +79,9 @@ type RoomMessage struct {
 	DeliveredAt    *string             `json:"delivered_at,omitempty"`
 	AgentDelivery  string              `json:"agent_delivery,omitempty"`
 	Failure        *RoomMessageFailure `json:"failure,omitempty"`
+	ResolvedAt     *string             `json:"resolved_at,omitempty"`
+	ResolvedBy     string              `json:"resolved_by,omitempty"`
+	Resolution     RoomResolution      `json:"resolution,omitempty"`
 	CreatedAt      string              `json:"created_at"`
 	UpdatedAt      string              `json:"updated_at"`
 }
@@ -160,6 +172,7 @@ const (
 	MethodRunRoomStatus         = "run.room.status"
 	MethodRunRoomPost           = "run.room.post"
 	MethodRunRoomDecide         = "run.room.decide"
+	MethodRunRoomResolve        = "run.room.resolve"
 	MethodRunEvidenceList       = "run.evidence.list"
 	MethodRunEvidenceGet        = "run.evidence.get"
 	MethodRunEvidencePatch      = "run.evidence.patch"
@@ -237,6 +250,15 @@ type RunRoomPostResult struct {
 type RunRoomDecideResult struct {
 	Message RoomMessage `json:"message"`
 	Receipt string      `json:"receipt,omitempty"`
+}
+
+type RunRoomResolveParams struct {
+	MessageID string         `json:"message_id"`
+	Outcome   RoomResolution `json:"outcome"`
+}
+
+type RunRoomResolveResult struct {
+	Message RoomMessage `json:"message"`
 }
 
 type RunEvidenceListParams struct {
@@ -326,6 +348,7 @@ func RoomMessageFromStore(m *store.RoomMessage) RoomMessage {
 		DeliverAfter: collaborationTimePtr(m.DeliverAfter), DecidedBy: string(m.DecidedBy),
 		DecidedAt: collaborationTimePtr(m.DecidedAt), DeliveredAt: collaborationTimePtr(m.DeliveredAt),
 		AgentDelivery: string(m.AgentDelivery), Failure: roomMessageFailureFromStore(m.Failure),
+		ResolvedAt: collaborationTimePtr(m.ResolvedAt), ResolvedBy: string(m.ResolvedBy), Resolution: RoomResolution(m.Resolution),
 		CreatedAt: collaborationTime(m.CreatedAt), UpdatedAt: collaborationTime(m.UpdatedAt),
 	}
 }

@@ -31,6 +31,11 @@ type handlerRoomService struct {
 	denyID            string
 	denySession       string
 	denyGeneration    uint64
+	resolveResult     *store.RoomMessage
+	resolveErr        error
+	resolveID         string
+	resolveBy         domain.MemberID
+	resolveOutcome    store.RoomResolution
 	protectRun        domain.RunID
 }
 
@@ -61,6 +66,12 @@ func (f *handlerRoomService) Deny(_ context.Context, id string, _ domain.MemberI
 	f.denySession = session
 	f.denyGeneration = generation
 	return f.denyResult, nil
+}
+func (f *handlerRoomService) Resolve(_ context.Context, id string, by domain.MemberID, outcome store.RoomResolution) (*store.RoomMessage, error) {
+	f.resolveID = id
+	f.resolveBy = by
+	f.resolveOutcome = outcome
+	return f.resolveResult, f.resolveErr
 }
 func (f *handlerRoomService) Protect(_ context.Context, run domain.RunID, _ domain.MemberID) error {
 	f.protectRun = run
@@ -100,6 +111,10 @@ func (f *persistentRoomService) ApproveNow(ctx context.Context, id string, _ dom
 
 func (f *persistentRoomService) Deny(ctx context.Context, id string, _ domain.MemberID, _ string, _ uint64) (*store.RoomMessage, error) {
 	return f.db.GetRoomMessage(ctx, id)
+}
+
+func (f *persistentRoomService) Resolve(ctx context.Context, id string, by domain.MemberID, outcome store.RoomResolution) (*store.RoomMessage, error) {
+	return f.db.ResolveRoomMessage(ctx, id, outcome, by, time.Now().UTC())
 }
 
 func (f *persistentRoomService) Protect(ctx context.Context, run domain.RunID, _ domain.MemberID) error {
@@ -240,6 +255,48 @@ func TestRoomHandlersPermissionsBoundsAndMutations(t *testing.T) {
 	}
 	if rooms.denyID != queued.ID || rooms.denySession != "controller-tab" || rooms.denyGeneration != 7 {
 		t.Fatalf("deny service decision=%q/%q/%d", rooms.denyID, rooms.denySession, rooms.denyGeneration)
+	}
+}
+
+func TestRoomResolveHandlerRoutesValidatesAndGuardsMembership(t *testing.T) {
+	e := newTestEnv(t, nil)
+	msg := handlerRoomMessage("room-note", e.ws.ID, e.run.ID, e.member.ID)
+	msg.Kind = store.RoomMessageComment
+	if err := e.store.CreateRoomMessage(context.Background(), msg); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	rooms := &handlerRoomService{resolveResult: handlerRoomMessage("room-note", e.ws.ID, e.run.ID, e.member.ID)}
+	rooms.resolveResult.Resolution = store.RoomResolutionDone
+	e.srv.cfg.Services.Rooms = rooms
+
+	var resolved protocol.RunRoomResolveResult
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunRoomResolve, protocol.RunRoomResolveParams{
+		MessageID: msg.ID, Outcome: protocol.RoomResolutionDone,
+	}, &resolved); err != nil {
+		t.Fatalf("resolve room message: %v", err)
+	}
+	if rooms.resolveID != msg.ID || rooms.resolveBy != e.member.ID || rooms.resolveOutcome != store.RoomResolutionDone ||
+		resolved.Message.Resolution != protocol.RoomResolutionDone {
+		t.Fatalf("resolve = %+v, service call id=%q by=%q outcome=%q", resolved, rooms.resolveID, rooms.resolveBy, rooms.resolveOutcome)
+	}
+
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunRoomResolve, protocol.RunRoomResolveParams{
+		MessageID: msg.ID, Outcome: "archived",
+	}, nil); err == nil {
+		t.Fatal("invalid outcome succeeded")
+	}
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunRoomResolve, protocol.RunRoomResolveParams{
+		Outcome: protocol.RoomResolutionDone,
+	}, nil); err == nil {
+		t.Fatal("missing message_id succeeded")
+	}
+
+	// The View guard fences out a pending member before the service runs.
+	_, pending := addMember(t, e, "Pending", domain.RoleCollaborator, true)
+	if err := handlerCallJSON(t, e, pending.ID, protocol.MethodRunRoomResolve, protocol.RunRoomResolveParams{
+		MessageID: msg.ID, Outcome: protocol.RoomResolutionDone,
+	}, nil); err == nil {
+		t.Fatal("pending member resolve succeeded")
 	}
 }
 

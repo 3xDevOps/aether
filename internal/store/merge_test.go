@@ -80,6 +80,7 @@ var memberRefs = map[string]bool{
 	"profile_snapshots.member_id":              false,
 	"room_messages.actor_id":                   false,
 	"room_messages.decided_by":                 false,
+	"room_messages.resolved_by":                false,
 	"run_account_segments.account_member_id":   false,
 	"run_cost_deletions.member_id":             false,
 	"run_launch_receipts.member_id":            false,

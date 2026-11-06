@@ -3051,8 +3051,9 @@ list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
 session the rows come from the session's `run.agent`, `workspace.timeline`,
 `run.status` and `run.review` events (read with `workspace.timeline` filtered by session and type,
 then kept live by sync), room messages, the session record and its pending inputs:
-`user` (a message to the agent with its delivery word), `note` (the Notes
-thread's row, without the thread's own arrival motion), `steps` (consecutive
+`user` (a message to the agent with its delivery word), `note` (the owner's
+own question as a Notes thread row, without the thread's own arrival motion;
+`comment` messages get no row, they are stickies), `steps` (consecutive
 tool calls in one closed block, "Ran 3 commands and read 2 files", expanding
 to verb-first steps), `request` (an agent request reads "Answer in
 the terminal." with **Open terminal**, or "Answer it from the agent's
@@ -3087,6 +3088,34 @@ The composer fills the Chat pane with 16px gutters on both sides; on wide
 screens, opening Details narrows the pane rather than overlaying the composer.
 Its focus highlight follows the outer border around the textarea and attachments.
 Transcript rows retain their 736px reading width.
+
+Open `comment` room messages show as a floating sticky rail in the pane's
+right gutter (`session-notes.tsx`), not as transcript rows: stacked oldest first,
+236px wide, 20px from the top, right and bottom edges, each card rotated a degree
+off the last, and not scroll-linked to the rows above it; the rail scrolls its own
+contents instead of growing past the pane. A card still being sent shows "Sending…"
+in place of the time and "via ChatGPT" after the name when a connector posted it,
+the same as a thread row, and its Complete and Delete stay disabled until the
+saved copy, under its server id, replaces it. A check completes a
+note: red strokes scratch across its text, the text dims, then the card fades
+and collapses; an X deletes it the same way with no scratch. Both buttons show
+on hover, focus, or touch and need the note's author, the session's owner, or
+an admin; there is no undo. A screen reader hears "Note completed." or "Note
+deleted." once the server accepts. When the Chat pane is below 1248px wide
+(Details or a docked Browser can narrow it), the rail becomes a strip above
+the composer, "N notes ▾", that expands to the same cards within its own
+bounded, scrolling list so expanding it cannot push the composer out of view,
+and Details keeps listing open notes as it always did. At 1248px and over,
+while Chat is the active view, Details drops that list - the rail already shows
+the open ones - and keeps only the composer and a "Done" history of completed
+notes; switching to Terminal, Changes or another view, the rail no longer shows,
+so Details lists open comments again. `question` notes are never stickies; they
+keep their row in Details and **Reply**. A refused completion or deletion
+restores the card with the server's error and **Retry**; if the server answers
+after the 5 second deadline, the late refusal replaces the "did not answer"
+text with its real reason. If another member already completed or deleted
+the note, the card shows the error without **Retry**, and **Dismiss** removes
+it.
 
 The changes bar (`changes-bar.tsx`) sits above the composer: one line,
 "14 files changed +612 −140" and **Review**. It counts the session's whole
@@ -4958,9 +4987,12 @@ whatever opened it. Sections (`details.tsx`):
   descendant the store holds changes.
 - **Agent messages**: the session-scoped agent mail, which the Chat view also
   shows inline, with **Show older** and **Show all**.
-- **Notes**: a comment thread (`note-thread.tsx`) of `comment` room messages,
-  human to human on the session, and teammates' `question` messages. Each note is
-  a row: the author's `Avatar` ringed in their member colour, the name
+- **Notes**: a thread (`note-thread.tsx`) of teammates' `question` messages,
+  human to human on the session, plus open `comment` messages too, unless
+  Chat is the active view and its pane is 1248px or over (however Details or
+  a docked Browser narrowed it) - there, the rail already shows open
+  comments, so the thread here holds only questions.
+  Each note is a row: the author's `Avatar` ringed in their member colour, the name
   ("via ChatGPT" after it when a connector posted it, the name the message
   carried when the member is gone), a **question** badge, the time, and the
   body indented under the name, clamped to eight lines with **Show more**.
@@ -4993,6 +5025,13 @@ whatever opened it. Sections (`details.tsx`):
   still reading "Sending…", when the signed-in member changes; an answer or failure that arrives after the
   change is dropped too. Adding a note never disables **Reply**,
   **Approve** / **Deny** or the composer.
+- **Done**: completed comments, newest first, five shown with **Show all**
+  for the rest; each row is the same as a thread row with a done badge, timed
+  by when it was completed rather than posted. Deleted comments show nowhere:
+  not in Details, the rail, the strip, or the Chat transcript. A delete tombstones
+  its id client-side, so a `run.room.list` page already in flight when it lands
+  cannot re-add the row, and a retried send that turns out to target an
+  already-deleted note drops its own sticky too, rather than leaving an orphan.
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
   Watching, Container ("Starting", "Running", "Stopped, kept for reopening"

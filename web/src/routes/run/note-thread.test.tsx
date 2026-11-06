@@ -9,7 +9,7 @@ import type { RoomMessage } from '@/lib/types'
 const record = toRecord(run())
 
 const room = (over: Partial<RunRoom> = {}): RunRoom => ({
-  post: vi.fn(), note: vi.fn(), decide: vi.fn(), loadOlder: vi.fn(), refresh: vi.fn(), error: undefined, errorFromComposer: false, clearError: vi.fn(), ...over,
+  post: vi.fn(), note: vi.fn(), decide: vi.fn(), resolve: vi.fn(), loadOlder: vi.fn(), refresh: vi.fn(), error: undefined, errorFromComposer: false, clearError: vi.fn(), ...over,
 })
 
 function note(n: number, over: Partial<RoomMessage> = {}): RoomMessage {
@@ -33,7 +33,7 @@ function seed(messages: RoomMessage[], exhausted = true) {
 }
 
 const reveal = vi.fn()
-const thread = (props: Partial<RunRoom> = {}) => <NoteThread run={record} room={room(props)} nav={{ reveal } as never} />
+const thread = (props: Partial<RunRoom> = {}, wide = false) => <NoteThread run={record} room={room(props)} nav={{ reveal } as never} wide={wide} />
 
 afterEach(() => vi.restoreAllMocks())
 

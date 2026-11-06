@@ -997,6 +997,20 @@ and the session item log keeps that URI. An image attached for an agent
 without `prompt_images` refuses the message as **Not sent**; other files need
 no capability.
 
+`run.room.resolve` lets a comment's author, the run's owner, or an admin
+complete or delete it: `{"message_id":"...","outcome":"done"|"deleted"}`.
+Only a `comment` message can be resolved; a `question` answers `-32602`.
+A done comment stays listed by `run.room.list` for history. A deleted one is
+left out of `run.room.list`, and a download of its attachments answers
+`-32000` "room image not found". Retrying with the same outcome replays
+the saved result; a different outcome than the one already recorded is
+`-32003`. Each resolution publishes `workspace.room_message` with
+`resolution` set, so a client already holding the message can tell a
+completed or deleted comment apart from one whose state did not otherwise
+change. The event's `actor_id` is the member who resolved the comment; the
+payload's `actor_id` stays its author. Activity reads "Alice completed a
+note" or "Alice deleted a note".
+
 ### Methods for an external assistant
 
 These serve a client with no dashboard and no stream, such as the

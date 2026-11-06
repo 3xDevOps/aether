@@ -26,6 +26,7 @@ type RoomService interface {
 	Post(context.Context, collab.MessageInput) (collab.Result, error)
 	ApproveNow(context.Context, string, domain.MemberID, string, uint64) (collab.Result, error)
 	Deny(context.Context, string, domain.MemberID, string, uint64) (*store.RoomMessage, error)
+	Resolve(context.Context, string, domain.MemberID, store.RoomResolution) (*store.RoomMessage, error)
 	Protect(context.Context, domain.RunID, domain.MemberID) error
 }
 
@@ -55,6 +56,10 @@ func init() {
 	registerGuarded(protocol.MethodRunRoomStatus, permissions.View, roomTarget, (*Server).runRoomStatus)
 	registerMethod(protocol.MethodRunRoomPost, (*Server).runRoomPost)
 	registerGuarded(protocol.MethodRunRoomDecide, permissions.Steer, roomMessageTarget, (*Server).runRoomDecide)
+	// Completing or deleting a comment is not a Steer-shaped permission: its
+	// author may always resolve their own note, protection notwithstanding.
+	// View only fences out non-members; Service.Resolve checks author/owner/admin.
+	registerGuarded(protocol.MethodRunRoomResolve, permissions.View, roomMessageTarget, (*Server).runRoomResolve)
 
 	registerGuarded(protocol.MethodRunEvidenceList, permissions.View, evidenceListTarget, (*Server).runEvidenceList)
 	registerGuarded(protocol.MethodRunEvidenceGet, permissions.View, evidencePacketTarget, (*Server).runEvidenceGet)
@@ -311,6 +316,29 @@ func (s *Server) runRoomDecide(ctx context.Context, member domain.MemberID, raw 
 	return protocol.RunRoomDecideResult{Message: protocol.RoomMessageFromStore(msg), Receipt: string(receipt)}, nil
 }
 
+func (s *Server) runRoomResolve(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	rooms, perr := s.rooms()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.RunRoomResolveParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.MessageID == "" {
+		return nil, invalidParams("message_id is required")
+	}
+	outcome := store.RoomResolution(p.Outcome)
+	if !outcome.Valid() {
+		return nil, invalidParams(`outcome must be "done" or "deleted"`)
+	}
+	msg, err := rooms.Resolve(ctx, p.MessageID, member, outcome)
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	return protocol.RunRoomResolveResult{Message: protocol.RoomMessageFromStore(msg)}, nil
+}
+
 func roomMutationResult(result collab.Result) protocol.RunRoomPostResult {
 	out := protocol.RunRoomPostResult{Receipt: string(result.Receipt), Outcome: result.Outcome}
 	if result.Message != nil {
@@ -445,6 +473,8 @@ func collaborationRPCError(err error) *protocol.Error {
 		return &protocol.Error{Code: protocol.CodeDenied, Message: "collaboration operation denied"}
 	case errors.Is(err, collab.ErrInvalidRequest), errors.Is(err, collab.ErrInvalidAttachment), errors.Is(err, collab.ErrInvalidAnchor):
 		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid collaboration request"}
+	case errors.Is(err, store.ErrRoomMessageResolveConflict):
+		return &protocol.Error{Code: protocol.CodeConflict, Message: "room message already resolved with a different outcome"}
 	case errors.Is(err, evidence.ErrExpired):
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "evidence packet expired"}
 	case errors.Is(err, evidence.ErrTranscriptUnavailable):

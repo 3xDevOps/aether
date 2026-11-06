@@ -765,6 +765,8 @@ export interface RoomMessageFailure {
   retryable?: boolean
 }
 
+export type RoomResolution = 'done' | 'deleted'
+
 export interface RoomMessage {
   id: string
   workspace_id: string
@@ -786,6 +788,10 @@ export interface RoomMessage {
   delivered_at?: string
   agent_delivery?: 'queued' | 'delivered'
   failure?: RoomMessageFailure
+  /** Set only on a comment: who completed or deleted it, and when. */
+  resolved_at?: string
+  resolved_by?: string
+  resolution?: RoomResolution
   created_at: string
   updated_at: string
 }
@@ -823,6 +829,10 @@ export interface RoomPostResult {
 export interface RoomDecideResult {
   message: RoomMessage
   receipt?: RoomDeliveryReceipt
+}
+
+export interface RoomResolveResult {
+  message: RoomMessage
 }
 
 export type RoomDeliveryReceipt = 'sent' | 'not_sent' | 'uncertain'

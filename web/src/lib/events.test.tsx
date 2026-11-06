@@ -27,6 +27,13 @@ describe('event words', () => {
   it('keeps an unknown reason exactly as the server wrote it', () => {
     expect(words('run.status', { to: 'failed', reason: 'disk quota exceeded' })).toContain('disk quota exceeded')
   })
+
+  it('names who completed or deleted a note, not its author', () => {
+    const note = { kind: 'comment', actor_id: bob.id }
+    expect(words('workspace.room_message', note, bob.id)).toBe("You added a note")
+    expect(words('workspace.room_message', { ...note, resolution: 'done' }, alice.id)).toBe(`${alice.display_name} completed a note`)
+    expect(words('workspace.room_message', { ...note, resolution: 'deleted' }, alice.id)).toBe(`${alice.display_name} deleted a note`)
+  })
 })
 
 describe('feed rows', () => {

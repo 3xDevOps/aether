@@ -74,10 +74,12 @@ const steerStates: Record<RoomMessageState, string> = {
   cancelled: 'was cancelled',
 }
 
-function roomLine(p: Payload): ReactNode {
+function roomLine(p: Payload, actor: string): ReactNode {
   const who = <Who id={p.actor_id} />
   switch (text(p.kind) as RoomMessageKind) {
     case 'comment':
+      if (p.resolution === 'done') return <><Who id={actor} /> completed a note</>
+      if (p.resolution === 'deleted') return <><Who id={actor} /> deleted a note</>
       return <>{who} added a note</>
     case 'question':
       return <>{who} asked a question</>
@@ -286,7 +288,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.pr': (p) => `Pull request${typeof p.number === 'number' ? ` #${p.number}` : ''} ${p.merged_at ? 'merged' : text(p.state).toLowerCase() || 'changed'}`,
   'sync.conflict': (p) => `Live sync paused: ${files(p.files)} changed on both sides`,
   'server.update': (p) => updateLine(p),
-  'workspace.room_message': (p) => roomLine(p),
+  'workspace.room_message': (p, e) => roomLine(p, e.actor_id),
   'workspace.evidence_packet': (p) => captureWords[text(p.trigger)] ?? 'Saved evidence for the session',
   'coord.message': (p) => (
     <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5">
