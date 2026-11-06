@@ -107,6 +107,15 @@ describe('sticky note rail', () => {
     expect(animate.mock.calls.length).toBe(2)
   })
 
+  it('shows who sent it, the connector it came through, and disables actions until it is saved', () => {
+    seed([note(1, { body: 'typing…', id: 'prov1', idempotency_key: 'prov1', via: 'ChatGPT' })])
+    render(<NotesRail run={record} room={fakeRoom(applyingResolve('ok'))} />)
+    expect(screen.getByText('Sending…')).toBeDefined()
+    expect(screen.getByText(/via ChatGPT/)).toBeDefined()
+    expect((screen.getByRole('button', { name: 'Complete note' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Delete note' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('a refusal keeps the note and shows the real error', async () => {
     seed([note(1, { body: 'keep me' })])
     render(<NotesRail run={record} room={fakeRoom(applyingResolve('refuse'))} />)

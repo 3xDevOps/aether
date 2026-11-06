@@ -13,7 +13,7 @@ import type { RoomMessage, RoomResolution } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import type { RunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
-import { byCreated, canResolveNote, isOpenNote } from '@/store/collaboration'
+import { byCreated, canResolveNote, isOpenNote, isProvisional } from '@/store/collaboration'
 import type { RunRecord } from '@/store/runs'
 
 /** The 736px Chat column plus a 256px card slot (236px card, 20px edge) on each
@@ -199,12 +199,17 @@ function StickyCard({ note, index, run, error, retryable, onResolve, onDismissEr
       <ScratchStrokes draw={scratch} />
       <div className="flex min-w-0 items-center gap-2 text-ui">
         <Avatar name={name} color={member?.color} size="header" />
-        <span className="sticky-note__header min-w-0 truncate font-medium">{name}</span>
-        <RelativeTime at={note.created_at} className="ml-auto shrink-0 pl-2 text-ui-sm tabular-nums opacity-80" />
+        <span className="sticky-note__header min-w-0 truncate font-medium">
+          {name}
+          {note.via && <span className="font-normal opacity-80"> via {note.via}</span>}
+        </span>
+        {isProvisional(note)
+          ? <span className="ml-auto shrink-0 pl-2 text-ui-sm opacity-80">Sending…</span>
+          : <RelativeTime at={note.created_at} className="ml-auto shrink-0 pl-2 text-ui-sm tabular-nums opacity-80" />}
         {may && (
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-focus-within/note:opacity-100 group-hover/note:opacity-100 coarse:opacity-100">
-            <Button variant="ghost" size="icon-sm" label="Complete note" onClick={() => act('done')}><Check /></Button>
-            <Button variant="ghost" size="icon-sm" label="Delete note" onClick={() => act('deleted')}><X /></Button>
+            <Button variant="ghost" size="icon-sm" label="Complete note" disabled={isProvisional(note)} onClick={() => act('done')}><Check /></Button>
+            <Button variant="ghost" size="icon-sm" label="Delete note" disabled={isProvisional(note)} onClick={() => act('deleted')}><X /></Button>
           </div>
         )}
       </div>
