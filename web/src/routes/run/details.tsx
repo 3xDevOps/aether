@@ -29,7 +29,7 @@ import type { RunView } from '@/routes/run/views'
 import { WaitConditions } from '@/routes/run/wait-conditions'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { byCreated, isDoneNote, isOpenNote } from '@/store/collaboration'
+import { compareInstants, isDoneNote, isOpenNote } from '@/store/collaboration'
 import { useRunPresentation } from '@/store/hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { loadMessagePage, messageScopeKey, useMessageList, type MessageScope } from '@/store/messages'
@@ -110,10 +110,15 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
 const recentDone = 5
 
 /** Completed comments: still viewable, per decision 3, however the Chat view shows open ones. */
-function DoneNotes({ run, inset }: { run: RunRecord; inset: boolean }) {
+export function DoneNotes({ run, inset }: { run: RunRecord; inset: boolean }) {
   const messages = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
   const [all, setAll] = useState(false)
-  const done = useMemo(() => byCreated(messages.filter(isDoneNote)).reverse(), [messages])
+  // Newest completed first, by the same time the card shows.
+  const resolvedAt = (m: RoomMessage) => m.resolved_at ?? m.created_at
+  const done = useMemo(
+    () => messages.filter(isDoneNote).sort((a, b) => compareInstants(resolvedAt(b), resolvedAt(a))),
+    [messages],
+  )
   if (done.length === 0) return null
   const shown = all ? done : done.slice(0, recentDone)
   return (
