@@ -3088,6 +3088,22 @@ screens, opening Details narrows the pane rather than overlaying the composer.
 Its focus highlight follows the outer border around the textarea and attachments.
 Transcript rows retain their 736px reading width.
 
+`comment` room messages show as a floating sticky rail in the pane's right
+gutter (`session-notes.tsx`), not the Notes thread: stacked oldest first,
+236px wide, 20px from the top and right edges, each card rotated a degree
+off the last, and not scroll-linked to the rows above it. A check completes a
+note: red strokes scratch across its text, the text dims, then the card fades
+and collapses; an X deletes it the same way with no scratch. Both buttons show
+on hover, focus, or touch and need the note's author, the session's owner, or
+an admin; there is no undo. Below 1100px, or whenever Details narrows the pane
+past it, the rail becomes a strip above the composer, "N notes ▾", that
+expands to the same cards, and Details keeps listing open notes as it always
+did. At 1100px and over, Details drops that list - the rail already shows the
+open ones - and keeps only the composer and a "Done" history of completed
+notes. `question` notes are never stickies; they keep their row in Details
+and **Reply**. A refused completion or deletion restores the card with the
+server's error.
+
 The changes bar (`changes-bar.tsx`) sits above the composer: one line,
 "14 files changed +612 −140" and **Review**. It counts the session's whole
 worktree against its base, the Changes view's **All changes**, so
@@ -4958,8 +4974,11 @@ whatever opened it. Sections (`details.tsx`):
   descendant the store holds changes.
 - **Agent messages**: the session-scoped agent mail, which the Chat view also
   shows inline, with **Show older** and **Show all**.
-- **Notes**: a comment thread (`note-thread.tsx`) of `comment` room messages,
-  human to human on the session, and teammates' `question` messages. Each note is
+- **Notes**: a thread (`note-thread.tsx`) of teammates' `question` messages,
+  human to human on the session, plus open `comment` messages too once the
+  Chat view's pane is narrower than the sticky rail needs (below 1100px, or
+  Details narrowed it that far); at 1100px and over, the rail already shows
+  open comments, so the thread here holds only questions. Each note is
   a row: the author's `Avatar` ringed in their member colour, the name
   ("via ChatGPT" after it when a connector posted it, the name the message
   carried when the member is gone), a **question** badge, the time, and the
@@ -4993,6 +5012,10 @@ whatever opened it. Sections (`details.tsx`):
   still reading "Sending…", when the signed-in member changes; an answer or failure that arrives after the
   change is dropped too. Adding a note never disables **Reply**,
   **Approve** / **Deny** or the composer.
+- **Done**: completed comments, newest first, five shown with **Show all**
+  for the rest; each row is the same as a thread row with a done badge, timed
+  by when it was completed rather than posted. Deleted comments show nowhere,
+  in Details or the rail.
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
   Watching, Container ("Starting", "Running", "Stopped, kept for reopening"

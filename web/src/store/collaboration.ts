@@ -1,6 +1,7 @@
 import type {
   EvidencePacket,
   RoomMessage,
+  RoomResolution,
   RoomStatusResult,
 } from '@/lib/types'
 import type { ControlMetadata } from '@/routes/terminal/attach'
@@ -50,6 +51,8 @@ export interface CollaborationSlice {
   setRoomPage: (runID: string, messages: RoomMessage[], nextBefore?: string, append?: boolean) => void
   upsertRoomMessage: (message: RoomMessage) => void
   dropRoomMessage: (runID: string, id: string) => void
+  /** Optimistic apply/revert for a comment's completed/deleted state; empty resolution reverts it to open. */
+  setRoomMessageResolution: (runID: string, id: string, resolution: RoomResolution | '', resolvedBy?: string, resolvedAt?: string) => void
   setNoteDraft: (runID: string, text: string) => void
   noteSending: (runID: string, text: string, key: string) => void
   /** A failure for a note whose saved copy is already here is ignored. */
@@ -257,6 +260,15 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
         [runID]: (state.roomMessages[runID] ?? []).filter((m) => m.id !== id),
       },
     })),
+  setRoomMessageResolution: (runID, id, resolution, resolvedBy, resolvedAt) =>
+    set((state) => ({
+      roomMessages: {
+        ...state.roomMessages,
+        [runID]: (state.roomMessages[runID] ?? []).map((m) =>
+          m.id === id ? { ...m, resolution: resolution || undefined, resolved_by: resolvedBy, resolved_at: resolvedAt } : m,
+        ),
+      },
+    })),
   setNoteDraft: (runID, text) =>
     set((state) => ({ noteDrafts: { ...state.noteDrafts, [runID]: text } })),
   noteSending: (runID, text, key) =>
@@ -364,7 +376,17 @@ export function queuedSteers(messages: RoomMessage[]): RoomMessage[] {
   )
 }
 
-export const isNote = (message: RoomMessage) => message.kind === 'comment' || message.kind === 'question'
+/** A comment nobody has completed or deleted: a sticky in the rail or strip. Questions are never resolvable. */
+export const isOpenNote = (message: RoomMessage) => message.kind === 'comment' && !message.resolution
+
+/** A completed comment: still visible, in the rail's strip and Details' Done history. */
+export const isDoneNote = (message: RoomMessage) => message.kind === 'comment' && message.resolution === 'done'
+
+/** Admin, the run's owner, or the note's own author may complete or delete it. */
+export function canResolveNote(self: { id?: string; role?: string | null }, note: RoomMessage, ownerID: string): boolean {
+  if (self.role === 'admin') return true
+  return !!self.id && (self.id === note.actor_id || self.id === ownerID)
+}
 
 export function repliesByQuestion(messages: RoomMessage[]): Map<string, RoomMessage[]> {
   const replies = new Map<string, RoomMessage[]>()

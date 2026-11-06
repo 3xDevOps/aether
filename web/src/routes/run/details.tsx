@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type * as React from 'react'
 import { MessageRow } from '@/components/messages/message-row'
 import { Avatar } from '@/components/ui/avatar'
@@ -22,14 +22,14 @@ import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { ChildRuns } from '@/routes/run/child-runs'
 import { usePrimaryAction, type RunNavigation } from '@/routes/run/header'
 import { NoteComposer } from '@/routes/run/note-composer'
-import { NoteThread } from '@/routes/run/note-thread'
+import { NoteMessage, NoteThread } from '@/routes/run/note-thread'
 import { NeedsYouCards, useRunRequests } from '@/routes/run/requests'
 import type { RunRoom } from '@/routes/run/room'
 import type { RunView } from '@/routes/run/views'
 import { WaitConditions } from '@/routes/run/wait-conditions'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { isNote } from '@/store/collaboration'
+import { byCreated, isDoneNote, isOpenNote } from '@/store/collaboration'
 import { useRunPresentation } from '@/store/hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { loadMessagePage, messageScopeKey, useMessageList, type MessageScope } from '@/store/messages'
@@ -107,11 +107,38 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   )
 }
 
-function Notes({ run, room, nav, inset, focus }: { run: RunRecord; room: RunRoom; nav: RunNavigation; inset: boolean; focus: number }) {
+const recentDone = 5
+
+/** Completed comments: still viewable, per decision 3, however the Chat view shows open ones. */
+function DoneNotes({ run, inset }: { run: RunRecord; inset: boolean }) {
   const messages = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
+  const [all, setAll] = useState(false)
+  const done = useMemo(() => byCreated(messages.filter(isDoneNote)).reverse(), [messages])
+  if (done.length === 0) return null
+  const shown = all ? done : done.slice(0, recentDone)
   return (
-    <Section title="Notes" count={messages.filter(isNote).length} inset={inset}>
-      <NoteThread run={run} room={room} nav={nav} />
+    <Section title="Done" count={done.length} inset={inset}>
+      <ol className="flex flex-col gap-4">
+        {shown.map((m) => (
+          <li key={m.id}>
+            <NoteMessage authorID={m.actor_id} authorName={m.actor_display_name} via={m.via} at={m.resolved_at ?? m.created_at} body={m.body} done />
+          </li>
+        ))}
+      </ol>
+      {!all && done.length > recentDone && (
+        <Button size="sm" variant="quiet" className="self-start" onClick={() => setAll(true)}>Show all</Button>
+      )}
+    </Section>
+  )
+}
+
+function Notes({ run, room, nav, inset, focus, wide }: { run: RunRecord; room: RunRoom; nav: RunNavigation; inset: boolean; focus: number; wide: boolean }) {
+  const messages = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
+  const count = messages.filter((m) => m.kind === 'question' || (!wide && isOpenNote(m))).length
+  return (
+    <Section title="Notes" count={count} inset={inset}>
+      <NoteThread run={run} room={room} nav={nav} wide={wide} />
+      <DoneNotes run={run} inset={false} />
       <NoteComposer runID={run.id} room={room} focus={focus} />
       <p className="text-ui-xs text-muted">Notes are for people. The agent never sees them.</p>
     </Section>
@@ -187,7 +214,7 @@ function ConditionCard({ run, view, agent, nav }: { run: RunRecord; view: RunVie
   )
 }
 
-export function RunDetails({ run, view, agent, agentName, room, nav, inset, noteFocus }: {
+export function RunDetails({ run, view, agent, agentName, room, nav, inset, noteFocus, notesWide }: {
   run: RunRecord
   view: RunView
   agentName: string
@@ -196,6 +223,8 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
   nav: RunNavigation
   inset: boolean
   noteFocus: number
+  /** Whether the Chat view shows the sticky rail instead of the notes strip. */
+  notesWide: boolean
 }) {
   const requests = useRunRequests(run)
   const waiting = requests.inputs.length + requests.sudo.length + requests.sessionRequests.length + requests.steers.length + requests.questions.length
@@ -215,7 +244,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
       <WaitConditions run={run} inset={inset} />
       <ChildRuns run={run} inset={inset} />
       <AgentMessages run={run} inset={inset} />
-      <Notes run={run} room={room} nav={nav} inset={inset} focus={noteFocus} />
+      <Notes run={run} room={room} nav={nav} inset={inset} focus={noteFocus} wide={notesWide} />
       <Facts run={run} agent={agent} agentName={agentName} inset={inset} />
     </div>
   )

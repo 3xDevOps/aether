@@ -14,17 +14,19 @@ import type { RunNavigation } from '@/routes/run/header'
 import { requestCardID } from '@/routes/run/requests'
 import type { RunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
-import { compareInstants, isNote, isProvisional, repliesByQuestion, unansweredQuestions, type FailedNote } from '@/store/collaboration'
+import { compareInstants, isOpenNote, isProvisional, repliesByQuestion, unansweredQuestions, type FailedNote } from '@/store/collaboration'
 import type { RunRecord } from '@/store/runs'
 
 const arrival: Entrance = { motion: { duration: '--duration-360', easing: '--ease-glide' }, rise: 4 }
 
-export function NoteMessage({ authorID, authorName, via, question, at, body, status, reply, arrive, children }: {
+export function NoteMessage({ authorID, authorName, via, question, done, at, body, status, reply, arrive, children }: {
   authorID: string
   /** The name the message carried, shown when the author is no longer a member. */
   authorName?: string
   via?: string
   question?: boolean
+  /** A completed comment, shown in Details' Done history. */
+  done?: boolean
   at: string
   body: string
   /** Takes the time's place and mutes the body while the note is not saved. */
@@ -51,6 +53,7 @@ export function NoteMessage({ authorID, authorName, via, question, at, body, sta
           {via && <span className="font-normal text-muted"> via {via}</span>}
         </span>
         {question && <Badge>question</Badge>}
+        {done && <Badge tone="done">done</Badge>}
         <span className="ml-auto shrink-0 pl-2 text-ui-sm text-muted tabular-nums">
           {status ?? <RelativeTime at={at} />}
         </span>
@@ -99,7 +102,7 @@ const recentNotes = 5
 const emptyMessages: RoomMessage[] = []
 const noFailedNotes: FailedNote[] = []
 
-export function NoteThread({ run, room, nav }: { run: RunRecord; room: RunRoom; nav: RunNavigation }) {
+export function NoteThread({ run, room, nav, wide }: { run: RunRecord; room: RunRoom; nav: RunNavigation; wide: boolean }) {
   const runID = run.id
   const messages = useStore((s) => s.roomMessages[runID] ?? emptyMessages)
   const failed = useStore((s) => s.failedNotes[runID] ?? noFailedNotes)
@@ -109,13 +112,19 @@ export function NoteThread({ run, room, nav }: { run: RunRecord; room: RunRoom; 
   const selfID = useStore((s) => s.info?.member.id)
   const [all, setAll] = useState(false)
   const [olderFailed, setOlderFailed] = useState(false)
-  const notes = useMemo(() => messages.filter(isNote), [messages])
+  // A wide layout has a sticky rail for open comments, so the thread here
+  // keeps only questions; a narrow one has no rail, so it keeps the open
+  // comments too, as the thread always did before resolution existed.
+  const notes = useMemo(
+    () => messages.filter((m) => m.kind === 'question' || (!wide && isOpenNote(m))),
+    [messages, wide],
+  )
   const replies = useMemo(() => repliesByQuestion(messages), [messages])
   const awaiting = useMemo(
     () => new Set(unansweredQuestions(messages).filter((m) => m.actor_id !== run.member_id).map((m) => m.id)),
     [messages, run.member_id],
   )
-  const threaded = useMemo(() => messages.filter((m) => isNote(m) || m.kind === 'reply'), [messages])
+  const threaded = useMemo(() => [...notes, ...messages.filter((m) => m.kind === 'reply')], [notes, messages])
   const { arriving, announcement } = useArrivals(threaded, messages, pagination?.initialized === true, selfID)
   const shown = all ? notes : notes.slice(-recentNotes)
   const earlier = notes.length - shown.length

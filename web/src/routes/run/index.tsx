@@ -29,6 +29,7 @@ import { MultiplayerControls, useSharedPresence } from '@/routes/run/multiplayer
 import { useKeyboardFold } from '@/routes/run/phone-header'
 import { dockedRequestID } from '@/routes/run/request-dock'
 import { useRunRoom } from '@/routes/run/room'
+import { notesRailMinWidth } from '@/routes/run/session-notes'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
 import { WorkflowChip, WorkflowPanel, workflowPanelID } from '@/routes/run/workflow-panel'
@@ -95,6 +96,10 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const [frameRef, frame] = useElementSize<HTMLDivElement>()
   const splittable = browser && frame.width >= 2 * minBesideWidth
   const docked = splittable && beside
+  // Below this, or whenever Details shrinks the frame past it, notes move
+  // from the Chat view's sticky rail into a strip above the composer.
+  const notesWide = frame.width >= notesRailMinWidth
+
   const files = hasFiles(run, cap)
   const views = runViews.filter((view) =>
     (view !== 'browser' || (browser && !docked)) && (view !== 'files' || files) && (view !== 'trace' || run.acp === true))
@@ -242,7 +247,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   })
 
   const details = (inset: boolean) => (
-    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteFocus={noteFocus} />
+    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteFocus={noteFocus} notesWide={notesWide} />
   )
   const requesterID = agent.takeover.review?.requester_member_id
   const holding = !agent.localControl ? agent.takeover.interaction.phase : undefined
@@ -302,6 +307,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
                   }}
                   shells={shells}
                   switchable={switchable}
+                  notesWide={notesWide}
                 />
               </TabsContent>
             )}

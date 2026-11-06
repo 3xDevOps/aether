@@ -704,7 +704,7 @@ export async function applyEvent(
       // server-computed attention count even for a room never opened.
       const runID = ev.run_id
       const workspaceID = ev.workspace_id
-      const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string; state?: string }
+      const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string; state?: string; resolution?: string }
       store.getState().clearTyping(runID, ev.actor_id)
       store.getState().noteRoomEvent()
       if (
@@ -719,12 +719,18 @@ export async function applyEvent(
           return false
         }
       }
+      // A deleted comment is excluded from the server's list, so a page
+      // reconcile would never remove the cached row; drop it directly.
+      if (runID && payload.resolution === 'deleted' && payload.message_id) {
+        store.getState().dropRoomMessage(runID, payload.message_id)
+        break
+      }
       const held = runID
         ? store.getState().roomMessages[runID]?.find((message) => message.id === payload.message_id)
         : undefined
       // A steer request's agent delivery changes without its state, and the
       // payload does not carry it.
-      const current = held !== undefined && held.kind !== 'steer_request' && held.state === payload.state
+      const current = held !== undefined && held.kind !== 'steer_request' && held.state === payload.state && (held.resolution ?? '') === (payload.resolution ?? '')
       if (runID && workspaceID && store.getState().roomMessages[runID] && !current) {
         await reconcileRoomHistory(store, client, workspaceID, runID, payload.message_id)
           .then(() => store.getState().setRoomError(runID))
