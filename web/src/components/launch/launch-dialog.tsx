@@ -4,7 +4,8 @@ import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 import { useDictating } from '@/components/dictation/state'
 import { RefusalNotes } from '@/components/launch/agent-picker'
-import { AccountPicker, useAccountStatus } from '@/components/launch/account-picker'
+import { AccountPicker, readiness, useAccountStatus } from '@/components/launch/account-picker'
+import { agentLabel } from '@/components/launch/modes'
 import { automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, FallbackOptions, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
 import { PermissionControl, permissionFeature } from '@/components/launch/permission-control'
 import { ExtraRepos } from '@/components/launch/extra-repos'
@@ -18,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { SlideOut } from '@/components/ui/slide-out'
 import { api } from '@/lib/api'
+import { useClock } from '@/lib/clock'
 import { mobileScreen, useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
 import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
@@ -212,7 +214,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
             : 'Set up an agent opens Agents, where Add agent installs it.'}
         </Callout>
       )}
-      {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} />}
+      {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} accountPlace={phone ? 'More options → Account' : 'Account'} />}
       {savedRead.error && (
         <Callout
           tone="failed"
@@ -226,12 +228,16 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       {saved && <SavedIssues title="Saved defaults not used" issues={(saved.invalid ?? []).filter((issue) => !issue.field.startsWith('agents.') || issue.field.split('.')[1] === harness)} />}
     </>
   )
-  const multiAccount = accounts.length > 1
-  const accountPicker = multiAccount && (
-    <AccountPicker accounts={accounts} ownAccountID={ownAccountID} value={account} onChange={(next) => { setError(null); setAccount(next) }} harness={harness} status={accountStatus} disabled={launching} />
-  )
-  const fallbackOptions = multiAccount && (
-    <FallbackOptions accounts={accounts} ownAccountID={ownAccountID} account={account} fallback={fallback} onFallback={setFallback} save={savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />} />
+  // Ticks while open, so a usage window that resets drops out.
+  useClock()
+  const now = Date.now()
+  const accountReadiness = (member: Member) => readiness(accountStatus[member.id], harness, member.id === ownAccountID ? undefined : member.display_name, now)
+  const accountChoice = accounts.length > 1 && (
+    <div className="flex flex-col gap-2">
+      <AccountPicker accounts={accounts} ownAccountID={ownAccountID} value={account} onChange={(next) => { setError(null); setAccount(next) }} agentName={harness ? agentLabel(choice.agent, harness) : ''} status={accountReadiness} disabled={launching} />
+      <FallbackOptions accounts={accounts} ownAccountID={ownAccountID} account={account} fallback={fallback} onFallback={setFallback} status={accountReadiness} />
+      {savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />}
+    </div>
   )
 
   const failure = error && <Callout ref={errorCallout} tone="failed" role="alert" title="Launch failed">{error}{setup && <SetupOutput output={setup} />}</Callout>
@@ -241,7 +247,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       {late ? stillWaiting : launching ? 'Launching…' : 'Launch'}
     </>
   )
-  const launchDisabled = launching || !workspace || !account || !harness || taskMissing || dictating
+  // agents is null while the chosen account's list is read, and harness may still be the last account's.
+  const launchDisabled = launching || !workspace || !account || !harness || !agents || taskMissing || dictating
 
   if (phone) {
     return (
@@ -263,12 +270,11 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         options={
           <>
             {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
+            {accountChoice}
             <AgentOptions choice={choice} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} />
             {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
             {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
             {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
-            {accountPicker}
-            {fallbackOptions}
           </>
         }
         notes={notes}
@@ -301,12 +307,11 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           onSubmit={(event) => { event.preventDefault(); if (!dictating) void submit() }}
         >
           {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
-          <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus shared={shared !== '' && task === shared} account={accountPicker} />
+          <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus shared={shared !== '' && task === shared} account={accountChoice} owner={sharedAccount ? accountName : undefined} />
           {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
           {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
           {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
           {notes}
-          {fallbackOptions}
           {failure}
         </form>
         <DialogFooter className="sm:items-center">

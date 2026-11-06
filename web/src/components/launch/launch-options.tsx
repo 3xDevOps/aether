@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react'
 import { ChevronDown, ChevronUp, GitBranch } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { accessLabel, type Readiness, ReadinessText } from '@/components/launch/account-picker'
 import { limitsText, type LimitsDraft, parseLimits, RunLimitsFields } from '@/components/launch/run-limits'
 import type { Member, RunLimits, Workspace } from '@/lib/types'
 
@@ -18,105 +18,93 @@ function candidates(fallback: Fallback, accounts: Member[], skip: string): strin
   return [...order, ...accounts.map((member) => member.id).filter((id) => !order.includes(id))].filter((id) => id !== skip)
 }
 
+/** Ticked; once reordered, an account the order does not hold, such as the one the launch left, stays unticked until ticked. */
+function ticked(fallback: Fallback, id: string): boolean {
+  return !fallback.excluded.includes(id) && (!fallback.order || fallback.order.includes(id))
+}
+
 export function fallbackParams(fallback: Fallback, accounts: Member[], skip: string): { fallback_account_member_ids?: string[]; no_fallback?: boolean } {
   if (fallback.off) return { no_fallback: true }
   if (!fallback.order) return {}
-  const ids = candidates(fallback, accounts, skip).filter((id) => !fallback.excluded.includes(id))
+  const ids = candidates(fallback, accounts, skip).filter((id) => ticked(fallback, id))
   // An empty list reads as automatic on the server, so unticking every account means off.
   return ids.length ? { fallback_account_member_ids: ids } : { no_fallback: true }
 }
 
-function FallbackList({
-  accounts,
-  account,
-  skip,
-  accountName,
-  fallback,
-  onChange,
-}: {
-  accounts: Member[]
-  account: string
-  skip: string
-  accountName: (member: Member) => string
-  fallback: Fallback
-  onChange: (fallback: Fallback) => void
-}) {
-  const ids = candidates(fallback, accounts, skip)
-  const owner = accounts.find((member) => member.id === account)?.display_name ?? account
-  const move = (index: number, by: number) => {
-    const order = [...ids]
-    ;[order[index], order[index + by]] = [order[index + by], order[index]]
-    onChange({ ...fallback, order })
-  }
-  const toggle = (id: string, on: boolean) => onChange({
-    ...fallback,
-    order: fallback.order ?? ids,
-    excluded: on ? fallback.excluded.filter((other) => other !== id) : [...fallback.excluded, id],
-  })
-  return (
-    <div className="flex flex-col gap-1 pt-2">
-      <label className="flex min-h-7 cursor-pointer items-center gap-2 text-ui coarse:min-h-11">
-        <Checkbox checked={!fallback.off} onCheckedChange={(on) => onChange({ ...fallback, off: on !== true })} />
-        Fall back to another account
-      </label>
-      {!fallback.off && (
-        <>
-          <ul aria-label="Fallback accounts" className="flex flex-col pl-6">
-            {ids.map((id, index) => {
-              const member = accounts.find((item) => item.id === id)
-              const name = member ? accountName(member) : id
-              return (
-                <li key={id} className="flex min-h-7 items-center gap-2 coarse:min-h-11">
-                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-ui">
-                    <Checkbox checked={!fallback.excluded.includes(id)} onCheckedChange={(on) => toggle(id, on === true)} />
-                    <span className="min-w-0 truncate">{name}</span>
-                  </label>
-                  <Button type="button" variant="ghost" size="icon-sm" label={`Move ${name} up`} disabled={index === 0} onClick={() => move(index, -1)}>
-                    <ChevronUp />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon-sm" label={`Move ${name} down`} disabled={index === ids.length - 1} onClick={() => move(index, 1)}>
-                    <ChevronDown />
-                  </Button>
-                </li>
-              )
-            })}
-          </ul>
-          <p className="text-ui-sm text-muted">
-            The session starts on {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the account here with the most usage left'} if {owner}&apos;s usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-session.
-          </p>
-        </>
-      )}
-    </div>
-  )
-}
-
-/** Where a launch moves when its account's usage runs out, and `save`, which keeps the account and fallback. */
+/** Where a launch moves when its account's usage runs out; each row carries `status`, as the account list does. */
 export function FallbackOptions({
   accounts,
   ownAccountID,
   account,
   fallback,
   onFallback,
-  save,
+  status,
 }: {
   accounts: Member[]
   ownAccountID: string
   account: string
   fallback: Fallback
   onFallback: (fallback: Fallback) => void
-  save?: ReactNode
+  status: (member: Member) => Readiness | null
 }) {
-  const accountName = (member: Member) => `${member.display_name}${member.id === ownAccountID ? ' (you)' : ' (shared)'}`
+  const ids = candidates(fallback, accounts, account)
+  const owner = accounts.find((member) => member.id === account)?.display_name ?? account
   const params = fallbackParams(fallback, accounts, account)
+  // Accounts the order does not hold join it unticked, so a reorder never ticks them.
+  const ordered = (order: string[]) => ({ order, excluded: [...fallback.excluded, ...ids.filter((id) => !ticked(fallback, id) && !fallback.excluded.includes(id))] })
+  const move = (index: number, by: number) => {
+    const order = [...ids]
+    ;[order[index], order[index + by]] = [order[index + by], order[index]]
+    onFallback({ ...fallback, ...ordered(order) })
+  }
+  const toggle = (id: string, on: boolean) => {
+    const next = ordered(ids)
+    onFallback({ ...fallback, order: next.order, excluded: on ? next.excluded.filter((other) => other !== id) : [...next.excluded, id] })
+  }
   return (
     <Collapsible>
       <CollapsibleTrigger>
-        <span className="font-medium">Fallback</span>
-        <span className="min-w-0 truncate text-muted">· {params.no_fallback ? 'Off' : params.fallback_account_member_ids ? 'Ordered' : 'Automatic'}</span>
+        <span className="shrink-0 font-medium">Fallback</span>
+        <span className="min-w-0 truncate text-muted">· If {owner} runs out · {params.no_fallback ? 'Off' : params.fallback_account_member_ids ? 'Ordered' : 'Automatic'}</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="flex flex-col gap-1 pl-5">
-        <FallbackList accounts={accounts} account={account} skip={account} accountName={accountName} fallback={fallback} onChange={onFallback} />
-        {save}
+      <CollapsibleContent className="flex flex-col gap-1 pt-2 pl-5">
+        <label className="flex min-h-7 cursor-pointer items-center gap-2 text-ui coarse:min-h-11">
+          <Checkbox checked={!fallback.off} onCheckedChange={(on) => onFallback({ ...fallback, off: on !== true })} />
+          Fall back to another account
+        </label>
+        {!fallback.off && (
+          <>
+            <ul aria-label="Fallback accounts" className="flex flex-col pl-6">
+              {ids.map((id, index) => {
+                const member = accounts.find((item) => item.id === id)
+                const name = member?.display_name ?? id
+                return (
+                  <li key={id} className="flex min-h-7 min-w-0 items-center gap-1 coarse:min-h-11">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-0.5 text-ui">
+                      <Checkbox checked={ticked(fallback, id)} onCheckedChange={(on) => toggle(id, on === true)} />
+                      <span className="flex min-w-0 flex-col">
+                        <span className="flex min-w-0 items-baseline gap-2">
+                          <span className="min-w-0 truncate">{name}</span>
+                          {member && <span className="shrink-0 text-ui-sm text-muted">{accessLabel(member, ownAccountID)}</span>}
+                        </span>
+                        {member && <ReadinessText ready={status(member)} className="ml-0 truncate" />}
+                      </span>
+                    </label>
+                    <Button type="button" variant="ghost" size="icon-sm" label={`Move ${name} up`} disabled={index === 0} onClick={() => move(index, -1)}>
+                      <ChevronUp />
+                    </Button>
+                    <Button type="button" variant="ghost" size="icon-sm" label={`Move ${name} down`} disabled={index === ids.length - 1} onClick={() => move(index, 1)}>
+                      <ChevronDown />
+                    </Button>
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="text-ui-sm text-muted">
+              If {owner}&apos;s usage is 95% or more at launch, or the vendor reports the limit mid-session, the session moves to {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the ticked account with the most usage left'}.
+            </p>
+          </>
+        )}
       </CollapsibleContent>
     </Collapsible>
   )

@@ -20,12 +20,12 @@ function rank(agent: AgentInfo): number {
   return launchable(agent) ? 0 : 1
 }
 
-function status(agent: AgentInfo): string {
-  if (agent.login_missing) return 'Not logged in'
+function status(agent: AgentInfo, owner: string | undefined): string {
+  if (agent.login_missing) return `Needs ${owner ?? 'the owner'}'s login`
   if (agent.own_account_only) return 'Your account only'
   if (agent.unavailable) return 'Unavailable'
   if (agent.source !== 'shipped' || agent.login_found === undefined) return ''
-  return agent.login_found ? 'Login found' : 'No login found'
+  return agent.login_found ? 'Login found' : 'Sign in after launch'
 }
 
 export function AgentPicker({
@@ -34,6 +34,7 @@ export function AgentPicker({
   value,
   onChange,
   onSetUp,
+  owner,
   disabled = false,
 }: {
   label: string
@@ -41,13 +42,15 @@ export function AgentPicker({
   value: string
   onChange: (name: string) => void
   onSetUp?: () => void
+  /** A shared account's owner, whose login the agents need. */
+  owner?: string
   disabled?: boolean
 }) {
   const phone = useMediaQuery(phoneScreen)
   const [browsing, setBrowsing] = useState(false)
   const sorted = agents.filter((agent) => agent.installed).sort((a, b) => rank(a) - rank(b))
   const rows = [
-    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent), enabled: launchable(agent) })),
+    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent, owner), enabled: launchable(agent) })),
     { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', enabled: true },
   ]
   const chosen = rows.find((row) => row.name === value)
@@ -103,7 +106,8 @@ export function AgentPicker({
   )
 }
 
-export function RefusalNotes({ agents, accountName }: { agents: AgentInfo[]; accountName: string }) {
+/** `accountPlace` is where the form shows Account. */
+export function RefusalNotes({ agents, accountName, accountPlace }: { agents: AgentInfo[]; accountName: string; accountPlace: string }) {
   const loggedOut = agents.filter((agent) => agent.installed && agent.login_missing)
   const ownOnly = agents.filter((agent) => agent.installed && agent.own_account_only)
   const unavailable = agents.filter((agent) => agent.installed && agent.unavailable)
@@ -118,7 +122,7 @@ export function RefusalNotes({ agents, accountName }: { agents: AgentInfo[]; acc
       )}
       {ownOnly.length > 0 && (
         <p>
-          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account under Account.
+          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account under {accountPlace}.
         </p>
       )}
       {unavailable.map((agent) => (

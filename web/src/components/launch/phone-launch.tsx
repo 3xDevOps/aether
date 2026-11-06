@@ -114,7 +114,7 @@ export function PhoneLaunchSheet({
           </div>
           <Collapsible>
             <CollapsibleTrigger>
-              <span className="font-medium">More options</span>
+              <span className="shrink-0 font-medium">More options</span>
               {(harness || accountName) && (
                 <span className="min-w-0 truncate text-muted">
                   {[harness && modeLabel(mode), accountName && `${accountName}'s account`].filter(Boolean).map((part) => `· ${part}`).join(' ')}
