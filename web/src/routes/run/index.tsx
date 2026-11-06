@@ -246,8 +246,11 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
     } : undefined,
   })
 
+  // Chat's rail only shows open comments while Chat itself is on screen;
+  // otherwise Details must keep showing them, or they appear nowhere.
+  const notesShownInRail = view === 'session' && notesWide
   const details = (inset: boolean) => (
-    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteFocus={noteFocus} notesWide={notesWide} />
+    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteFocus={noteFocus} notesWide={notesShownInRail} />
   )
   const requesterID = agent.takeover.review?.requester_member_id
   const holding = !agent.localControl ? agent.takeover.interaction.phase : undefined
