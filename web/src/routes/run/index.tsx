@@ -96,9 +96,9 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const [frameRef, frame] = useElementSize<HTMLDivElement>()
   const splittable = browser && frame.width >= 2 * minBesideWidth
   const docked = splittable && beside
-  // Below this, or whenever Details shrinks the frame past it, notes move
-  // from the Chat view's sticky rail into a strip above the composer.
-  const notesWide = frame.width >= notesRailMinWidth
+  const [paneRef, pane] = useElementSize<HTMLDivElement>()
+  // The pane, not the frame: a docked Browser takes its share of the frame.
+  const notesWide = pane.width >= notesRailMinWidth
 
   const files = hasFiles(run, cap)
   const views = runViews.filter((view) =>
@@ -290,7 +290,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
         />
         {run.mode === 'acp' && view !== 'browser' && view !== 'files' && (!mobile || (shared && !keyboard && view !== 'terminal')) && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div ref={frameRef} className="flex min-h-0 flex-1">
-          <div className="relative min-h-0 min-w-0 flex-1">
+          <div ref={paneRef} className="relative min-h-0 min-w-0 flex-1">
             {visited.has('session') && (
               <TabsContent value="session" forceMount inert={view !== 'session'} className={cn(panel, view !== 'session' && 'invisible')}>
                 <SessionView

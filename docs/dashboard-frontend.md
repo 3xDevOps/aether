@@ -3097,10 +3097,10 @@ note: red strokes scratch across its text, the text dims, then the card fades
 and collapses; an X deletes it the same way with no scratch. Both buttons show
 on hover, focus, or touch and need the note's author, the session's owner, or
 an admin; there is no undo. A screen reader hears "Note completed." or "Note
-deleted." once the server accepts. Below 1248px, or whenever Details narrows the pane
-past it, the rail becomes a strip above the composer, "N notes ▾", that
-expands to the same cards, and Details keeps listing open notes as it always
-did. At 1248px and over, Details drops that list - the rail already shows the
+deleted." once the server accepts. When the Chat pane is below 1248px wide
+(Details or a docked Browser can narrow it), the rail becomes a strip above
+the composer, "N notes ▾", that expands to the same cards, and Details keeps
+listing open notes as it always did. At 1248px and over, Details drops that list - the rail already shows the
 open ones - and keeps only the composer and a "Done" history of completed
 notes. `question` notes are never stickies; they keep their row in Details
 and **Reply**. A refused completion or deletion restores the card with the
@@ -4980,10 +4980,10 @@ whatever opened it. Sections (`details.tsx`):
   shows inline, with **Show older** and **Show all**.
 - **Notes**: a thread (`note-thread.tsx`) of teammates' `question` messages,
   human to human on the session, plus open `comment` messages too once the
-  Chat view's pane is narrower than the sticky rail needs (below 1248px, or
-  Details narrowed it that far); at 1248px and over, the rail already shows
-  open comments, so the thread here holds only questions. Each note is
-  a row: the author's `Avatar` ringed in their member colour, the name
+  Chat view's pane is narrower than the sticky rail needs (below 1248px,
+  however Details or a docked Browser narrowed it); at 1248px and over, the
+  rail already shows open comments, so the thread here holds only questions.
+  Each note is a row: the author's `Avatar` ringed in their member colour, the name
   ("via ChatGPT" after it when a connector posted it, the name the message
   carried when the member is gone), a **question** badge, the time, and the
   body indented under the name, clamped to eight lines with **Show more**.

@@ -17,8 +17,8 @@ import { byCreated, canResolveNote, isOpenNote } from '@/store/collaboration'
 import type { RunRecord } from '@/store/runs'
 
 /** The 736px Chat column plus a 256px card slot (236px card, 20px edge) on each
- * side. Below this frame width, or whenever Details shrinks it past this, notes
- * move from the rail into a strip above the composer. */
+ * side. Below this Chat pane width, notes move from the rail into a strip above
+ * the composer. */
 export const notesRailMinWidth = 1248
 
 const scratchMotion: Motion = { duration: '--duration-450', easing: '--ease-glide' }
