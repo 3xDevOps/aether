@@ -271,7 +271,9 @@ export function NotesRail({ run, room }: { run: RunRecord; room: RunRoom }) {
   const { count, cards, status } = useStickyNotes(run, room)
   return (
     <>
-      {count > 0 && <ol aria-label="Notes" className="absolute top-5 right-5 z-10 flex w-[236px] flex-col gap-3">{cards}</ol>}
+      {count > 0 && (
+        <ol aria-label="Notes" className="absolute top-5 right-5 bottom-5 z-10 flex w-[236px] flex-col gap-3 overflow-y-auto">{cards}</ol>
+      )}
       {status}
     </>
   )
@@ -289,7 +291,7 @@ export function NotesStrip({ run, room, className }: { run: RunRecord; room: Run
             {count} {count === 1 ? 'note' : 'notes'}
             <ChevronDown className={cn('transition-transform', expanded && 'rotate-180')} />
           </Button>
-          {expanded && <ol aria-label="Notes" className="flex flex-wrap gap-3">{cards}</ol>}
+          {expanded && <ol aria-label="Notes" className="flex max-h-[40vh] flex-wrap gap-3 overflow-y-auto">{cards}</ol>}
         </div>
       )}
       {status}

@@ -203,6 +203,14 @@ describe('sticky note rail', () => {
     await waitFor(() => expect(screen.queryByText('fade only')).toBeNull())
     expect(animate.mock.calls.length).toBe(1)
   })
+
+  it('bounds the rail to the available height and scrolls its own contents', () => {
+    seed([note(1, { body: 'first' })])
+    render(<NotesRail run={record} room={fakeRoom(applyingResolve('ok'))} />)
+    const list = screen.getByRole('list', { name: 'Notes' })
+    expect(list.className).toContain('overflow-y-auto')
+    expect(list.className).toContain('bottom-5')
+  })
 })
 
 describe('notes strip', () => {
@@ -223,5 +231,14 @@ describe('notes strip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete note' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: /1 note/ })).toBeNull())
     expect(screen.getByRole('status').textContent).toBe('Note deleted.')
+  })
+
+  it('bounds the expanded strip to its own scrollbar so it cannot push the composer off screen', () => {
+    seed([note(1, { body: 'strip note' })])
+    render(<NotesStrip run={record} room={fakeRoom(applyingResolve('ok'))} />)
+    fireEvent.click(screen.getByRole('button', { name: /1 note/ }))
+    const list = screen.getByRole('list', { name: 'Notes' })
+    expect(list.className).toContain('overflow-y-auto')
+    expect(list.className).toContain('max-h-')
   })
 })
