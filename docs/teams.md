@@ -446,8 +446,9 @@ behind it. One member can let a collaborator launch sessions on theirs.
 The owner shares under **Profile → Agent account sharing → Share account**. The
 recipient picks the owner under **New session → Account**. Each row there is
 marked **Your own** or **Shared** and says whether the chosen agent can launch
-on that account: its fullest usage window as `<n>% used`, **Ready**, **Not
-logged in**, **Not installed**, **Your account only** or **Unavailable**. Only
+on that account: its fullest usage window as `<n>% used`, **Ready**, **No
+login found**, **Not logged in**, **Not installed**, **Your account only** or
+**Unavailable**. Only
 your own account and accounts shared with you are listed, and the server
 refuses any other with `permission denied: member <id> has not shared their
 account with you`. From the CLI:

@@ -46,7 +46,8 @@ function readiness(status: AccountStatus | undefined, harness: string, now: numb
     const used = Math.max(...windows.map((window) => window.used_percent))
     return { text: `${Math.round(used)}% used`, className: toneText[tone(used)] }
   }
-  return agent && launchable(agent) ? { text: 'Ready', className: 'text-muted' } : null
+  if (!agent || !launchable(agent)) return null
+  return { text: agent.login_found === false ? 'No login found' : 'Ready', className: 'text-muted' }
 }
 
 /** The account a launch runs on: the caller's own and each one shared with them, with the chosen agent's readiness on it. */

@@ -2758,11 +2758,11 @@ read once per open with `agent.list` and `account.usage` for every account:
 "Not installed", "Not logged in", "Your account only" or "Unavailable" from
 the `agent.list` fields below, else the agent's fullest current usage window
 as "<n>% used" (amber from 80%, red at 100%, as on Settings > **Usage**),
-else "Ready". A failed read leaves the row without it. A shared selection
-says whose login and quota the session uses, and sends its ID as
-`account_member_id` on `agent.list` and `run.launch`; `run.launch` refuses
-an account not shared with the caller with the server's error under
-"Launch failed". `agent.list` still
+else "No login found" when `login_found` is false, else "Ready". A failed
+read leaves the row without it. A shared selection says whose login and
+quota the session uses, and sends its ID as `account_member_id` on
+`agent.list` and `run.launch`; `run.launch` refuses an account not shared
+with the caller with the server's error under "Launch failed". `agent.list` still
 returns the caller's own agents and installations, since the session executes
 in the caller's environment, and marks each agent the account's owner has no
 login for with `login_missing`, each name that resolves to the caller's own
