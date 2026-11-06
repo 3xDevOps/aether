@@ -37,23 +37,24 @@ function openComments(messages: RoomMessage[]): RoomMessage[] {
 }
 
 /**
- * Keeps a note mounted through its exit animation after it leaves `open`,
- * so the animation can finish before the row (and its error, if the server
- * refused) disappears from the rail.
+ * Keeps a note mounted after it leaves `open` until both its exit animation
+ * and the server's answer are in, so a refusal can still show its error on
+ * the card. A deleted note leaves the store at once, so the rail keeps the
+ * last copy it saw.
  */
 function useRailOrder(open: RoomMessage[]) {
-  const exiting = useRef<Set<string>>(new Set())
+  // Per exiting note: how many of the animation and the answer are still due.
+  const exiting = useRef<Map<string, number>>(new Map())
   const openRef = useRef<RoomMessage[]>(open)
   openRef.current = open
-  const [ids, setIds] = useState<string[]>([])
+  const [notes, setNotes] = useState<RoomMessage[]>([])
   const [errors, setErrors] = useState<Record<string, NoteError>>({})
   useEffect(() => {
-    const openIDs = open.map((m) => m.id)
-    const keep = new Set(openIDs)
-    setIds((prev) => {
-      const kept = prev.filter((id) => keep.has(id) || exiting.current.has(id))
-      const added = openIDs.filter((id) => !kept.includes(id))
-      return added.length === 0 && kept.length === prev.length ? prev : [...kept, ...added]
+    const byID = new Map(open.map((m) => [m.id, m]))
+    setNotes((prev) => {
+      const kept = prev.filter((m) => byID.has(m.id) || exiting.current.has(m.id)).map((m) => byID.get(m.id) ?? m)
+      const added = open.filter((m) => !kept.some((k) => k.id === m.id))
+      return added.length === 0 && kept.length === prev.length && kept.every((m, i) => m === prev[i]) ? prev : [...kept, ...added]
     })
   }, [open])
   const setError = (id: string, error: NoteError | undefined) =>
@@ -65,20 +66,27 @@ function useRailOrder(open: RoomMessage[]) {
       }
       return { ...prior, [id]: error }
     })
+  // Drops the row only if it is still resolved in the store, so a reverted
+  // refusal leaves it in place.
+  const clearExiting = (id: string) => {
+    exiting.current.delete(id)
+    setNotes((prev) => {
+      if (openRef.current.some((m) => m.id === id)) return prev
+      return prev.filter((m) => m.id !== id)
+    })
+  }
   return {
-    ids,
+    notes,
     errors,
-    markExiting: (id: string) => exiting.current.add(id),
+    markExiting: (id: string) => exiting.current.set(id, 2),
     setError,
-    // The exit animation finished; drop the row only if it is still
-    // resolved in the store, so a reverted refusal leaves it in place.
-    clearExiting: (id: string) => {
-      exiting.current.delete(id)
-      setIds((prev) => {
-        if (openRef.current.some((m) => m.id === id)) return prev
-        return prev.filter((x) => x !== id)
-      })
+    /** The exit animation or the server's acceptance is in. */
+    settle: (id: string) => {
+      const due = (exiting.current.get(id) ?? 1) - 1
+      if (due > 0) exiting.current.set(id, due)
+      else clearExiting(id)
     },
+    clearExiting,
   }
 }
 
@@ -100,15 +108,17 @@ function ScratchStrokes({ draw }: { draw: React.RefObject<SVGSVGElement | null> 
   )
 }
 
-function StickyCard({ note, index, run, error, onResolve, onDismissError, onSettled }: {
+function StickyCard({ note, index, run, error, retryable, onResolve, onDismissError, onSettled }: {
   note: RoomMessage
   index: number
   run: RunRecord
   error: NoteError | undefined
+  /** The note is still open, so a resend can succeed. */
+  retryable: boolean
   onResolve: (outcome: RoomResolution) => void
   onDismissError: () => void
   /** The card's exit animation has finished and it may be unmounted. */
-  onSettled: (outcome: RoomResolution) => void
+  onSettled: () => void
 }) {
   const member = useStore((s) => resolveMember(s, note.actor_id).member)
   const name = useStore((s) => memberNameOr(s, note.actor_id, note.actor_display_name))
@@ -118,27 +128,32 @@ function StickyCard({ note, index, run, error, onResolve, onDismissError, onSett
   const frame = useRef<HTMLLIElement>(null)
   const scratch = useRef<SVGSVGElement>(null)
   const started = useRef(false)
+  // Bumped by a refusal; an exit from an earlier generation stops at its next step.
+  const generation = useRef(0)
 
-  // A refusal that resolves before the local exit animation's `fill:
-  // forwards` lands leaves this same card alive, not freshly mounted: undo
-  // the collapse so it is visible again instead of stuck invisible.
+  // A refusal reaches this same card mid-exit or already collapsed: stop the
+  // exit and undo the scratch and the collapse so the card shows its error.
   useEffect(() => {
     if (!error || !started.current) return
     started.current = false
+    generation.current += 1
     const el = frame.current
     if (!el) return
-    el.getAnimations().forEach((a) => a.cancel())
-    el.style.opacity = ''
+    const paths = Array.from(el.querySelectorAll('path'))
+    for (const node of [el, ...paths]) node.getAnimations().forEach((a) => a.cancel())
+    for (const path of paths) path.style.opacity = '0'
     el.style.height = ''
     el.style.overflow = ''
   }, [error])
 
   const runExit = async (outcome: RoomResolution) => {
     const el = frame.current
-    if (!el) return onSettled(outcome)
+    if (!el) return onSettled()
+    const current = generation.current
+    const live = () => generation.current === current
     if (prefersReducedMotion()) {
       await play(el, [{ opacity: 1 }, { opacity: 0 }], reducedExitMotion, { fill: 'forwards' }).finished.catch(() => {})
-      onSettled(outcome)
+      if (live()) onSettled()
       return
     }
     if (outcome === 'done' && scratch.current) {
@@ -150,6 +165,7 @@ function StickyCard({ note, index, run, error, onResolve, onDismissError, onSett
         path.style.opacity = '1'
         return play(path, [{ strokeDashoffset: length }, { strokeDashoffset: 0 }], scratchMotion, { extraDelay: i * 60, fill: 'forwards' }).finished
       })).catch(() => {})
+      if (!live()) return
     }
     const height = el.getBoundingClientRect().height
     el.style.overflow = 'clip'
@@ -159,7 +175,7 @@ function StickyCard({ note, index, run, error, onResolve, onDismissError, onSett
       play(el, [{ height: `${height}px` }, { height: '0px' }], motion, { fill: 'forwards' }),
     ]
     await Promise.all(animations.map((a) => a.finished)).catch(() => {})
-    onSettled(outcome)
+    if (live()) onSettled()
   }
 
   const act = (outcome: RoomResolution) => {
@@ -194,7 +210,7 @@ function StickyCard({ note, index, run, error, onResolve, onDismissError, onSett
       {error && (
         <FailureCallout
           error={error.message}
-          onRetry={() => { started.current = false; act(error.outcome) }}
+          onRetry={retryable ? () => { started.current = false; act(error.outcome) } : undefined}
           onDismiss={() => { started.current = false; onDismissError() }}
         />
       )}
@@ -204,7 +220,6 @@ function StickyCard({ note, index, run, error, onResolve, onDismissError, onSett
 
 function useStickyNotes(run: RunRecord, room: RunRoom) {
   const messages = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
-  const byID = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages])
   const open = useMemo(() => openComments(messages), [messages])
   const rail = useRailOrder(open)
   const [announcement, setAnnouncement] = useState('')
@@ -212,56 +227,60 @@ function useStickyNotes(run: RunRecord, room: RunRoom) {
     rail.markExiting(note.id)
     rail.setError(note.id, undefined)
     void room.resolve(note.id, outcome).then((result) => {
-      if (!result.ok) rail.setError(note.id, { message: result.error ?? 'The server refused.', outcome })
+      if (!result.ok) return rail.setError(note.id, { message: result.error ?? 'The server refused.', outcome })
+      setAnnouncement(outcome === 'done' ? 'Note completed.' : 'Note deleted.')
+      rail.settle(note.id)
     })
   }
-  const cards = rail.ids.map((id, index) => {
-    const note = byID.get(id)
-    if (!note) return null
-    return (
-      <StickyCard
-        key={id}
-        note={note}
-        index={index}
-        run={run}
-        error={rail.errors[id]}
-        onResolve={(outcome) => resolve(note, outcome)}
-        onDismissError={() => rail.setError(id, undefined)}
-        onSettled={(outcome) => {
-          rail.clearExiting(id)
-          setAnnouncement(outcome === 'done' ? 'Note completed.' : 'Note deleted.')
-        }}
-      />
-    )
-  })
-  return { count: rail.ids.length, cards, announcement }
+  const cards = rail.notes.map((note, index) => (
+    <StickyCard
+      key={note.id}
+      note={note}
+      index={index}
+      run={run}
+      error={rail.errors[note.id]}
+      retryable={open.some((m) => m.id === note.id)}
+      onResolve={(outcome) => resolve(note, outcome)}
+      onDismissError={() => {
+        rail.setError(note.id, undefined)
+        rail.clearExiting(note.id)
+      }}
+      onSettled={() => rail.settle(note.id)}
+    />
+  ))
+  // The live region stays mounted after the last note leaves, or its
+  // announcement would never be read.
+  const status = <span role="status" aria-live="polite" className="sr-only">{announcement}</span>
+  return { count: rail.notes.length, cards, status }
 }
 
 /** The floating rail in the Chat view's right gutter, wide layouts only. */
 export function NotesRail({ run, room }: { run: RunRecord; room: RunRoom }) {
-  const { count, cards, announcement } = useStickyNotes(run, room)
-  if (count === 0) return null
+  const { count, cards, status } = useStickyNotes(run, room)
   return (
-    <ol aria-label="Notes" className="absolute top-5 right-5 z-10 flex w-[236px] flex-col gap-3">
-      {cards}
-      <span role="status" aria-live="polite" className="sr-only">{announcement}</span>
-    </ol>
+    <>
+      {count > 0 && <ol aria-label="Notes" className="absolute top-5 right-5 z-10 flex w-[236px] flex-col gap-3">{cards}</ol>}
+      {status}
+    </>
   )
 }
 
 /** A collapsible strip above the composer, narrow layouts only. */
-export function NotesStrip({ run, room }: { run: RunRecord; room: RunRoom }) {
-  const { count, cards, announcement } = useStickyNotes(run, room)
+export function NotesStrip({ run, room, className }: { run: RunRecord; room: RunRoom; className?: string }) {
+  const { count, cards, status } = useStickyNotes(run, room)
   const [expanded, setExpanded] = useState(false)
-  if (count === 0) return null
   return (
-    <div className="flex flex-col gap-2">
-      <Button variant="quiet" size="sm" className="self-start gap-1" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-        {count} {count === 1 ? 'note' : 'notes'}
-        <ChevronDown className={cn('transition-transform', expanded && 'rotate-180')} />
-      </Button>
-      {expanded && <ol aria-label="Notes" className="flex flex-wrap gap-3">{cards}</ol>}
-      <span role="status" aria-live="polite" className="sr-only">{announcement}</span>
-    </div>
+    <>
+      {count > 0 && (
+        <div className={cn('flex flex-col gap-2', className)}>
+          <Button variant="quiet" size="sm" className="self-start gap-1" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            {count} {count === 1 ? 'note' : 'notes'}
+            <ChevronDown className={cn('transition-transform', expanded && 'rotate-180')} />
+          </Button>
+          {expanded && <ol aria-label="Notes" className="flex flex-wrap gap-3">{cards}</ol>}
+        </div>
+      )}
+      {status}
+    </>
   )
 }

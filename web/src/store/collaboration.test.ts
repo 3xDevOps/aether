@@ -131,6 +131,19 @@ describe('collaboration slice', () => {
     expect(store.getState().evidenceNextBefore.run_evidence).toBeUndefined()
     expect(store.getState().evidencePagination.run_evidence.exhausted).toBe(true)
   })
+
+  it('never keeps a deleted comment, even when the resolve answer lands after its event', () => {
+    const store = createRootStore()
+    const note = roomMessage({ id: 'gone', kind: 'comment', body: 'deleted body' })
+    store.getState().upsertRoomMessage(note)
+    store.getState().dropRoomMessage(note.run_id, note.id)
+    store.getState().upsertRoomMessage({ ...note, resolution: 'deleted' })
+    expect(store.getState().roomMessages[note.run_id]).toEqual([])
+
+    store.getState().upsertRoomMessage(note)
+    store.getState().setRoomMessageResolution(note.run_id, note.id, 'deleted', 'mem_alice', createdAt)
+    expect(store.getState().roomMessages[note.run_id]).toEqual([])
+  })
 })
 
 describe('repliesByQuestion', () => {

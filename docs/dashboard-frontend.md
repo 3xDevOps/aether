@@ -3096,14 +3096,17 @@ off the last, and not scroll-linked to the rows above it. A check completes a
 note: red strokes scratch across its text, the text dims, then the card fades
 and collapses; an X deletes it the same way with no scratch. Both buttons show
 on hover, focus, or touch and need the note's author, the session's owner, or
-an admin; there is no undo. Below 1248px, or whenever Details narrows the pane
+an admin; there is no undo. A screen reader hears "Note completed." or "Note
+deleted." once the server accepts. Below 1248px, or whenever Details narrows the pane
 past it, the rail becomes a strip above the composer, "N notes ▾", that
 expands to the same cards, and Details keeps listing open notes as it always
 did. At 1248px and over, Details drops that list - the rail already shows the
 open ones - and keeps only the composer and a "Done" history of completed
 notes. `question` notes are never stickies; they keep their row in Details
 and **Reply**. A refused completion or deletion restores the card with the
-server's error.
+server's error and **Retry**. If another member already completed or deleted
+the note, the card shows the error without **Retry**, and **Dismiss** removes
+it.
 
 The changes bar (`changes-bar.tsx`) sits above the composer: one line,
 "14 files changed +612 −140" and **Review**. It counts the session's whole

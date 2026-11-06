@@ -224,11 +224,18 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
   const resolve = useCallback(async (messageID: string, outcome: RoomResolution) => {
     const self = useStore.getState().info?.member.id ?? ''
     const now = new Date().toISOString()
+    const held = () => useStore.getState().roomMessages[runID]?.find((m) => m.id === messageID)
+    const before = held()
+    let applied: RoomMessage | undefined
     const outcome_ = await optimistic({
-      apply: () => useStore.getState().setRoomMessageResolution(runID, messageID, outcome, self, now),
+      apply: () => {
+        useStore.getState().setRoomMessageResolution(runID, messageID, outcome, self, now)
+        applied = held()
+      },
       send: () => client.runRoomResolve({ message_id: messageID, outcome }),
       confirm: (result) => useStore.getState().upsertRoomMessage(result.message),
-      revert: () => useStore.getState().setRoomMessageResolution(runID, messageID, ''),
+      // Another member's resolution may have landed meanwhile; only undo our own.
+      revert: () => before && held() === applied && useStore.getState().upsertRoomMessage(before),
     })
     return outcome_.ok ? { ok: true as const } : { ok: false as const, error: outcome_.error }
   }, [client, runID])

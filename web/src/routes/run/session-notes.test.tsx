@@ -40,6 +40,17 @@ function applyingResolve(outcome: 'ok' | 'refuse') {
   })
 }
 
+/** The real optimistic shape: apply, then the server refuses and the store puts the note back. */
+function refusingAfterApply(): RunRoom['resolve'] {
+  return async (id: string, outcome: RoomResolution) => {
+    const before = useStore.getState().roomMessages[record.id].find((m) => m.id === id)!
+    act(() => useStore.getState().setRoomMessageResolution(record.id, id, outcome, alice.id, '2026-08-14T11:00:00Z'))
+    await Promise.resolve()
+    act(() => useStore.getState().upsertRoomMessage(before))
+    return { ok: false, error: 'conflict from server' }
+  }
+}
+
 afterEach(() => vi.restoreAllMocks())
 
 describe('sticky note rail', () => {
@@ -96,6 +107,58 @@ describe('sticky note rail', () => {
     expect(screen.getByText('keep me')).toBeDefined()
   })
 
+  it('keeps the card visible when a refusal lands during the scratch', async () => {
+    let releaseScratch!: () => void
+    const scratchDone = new Promise<void>((resolve) => { releaseScratch = resolve })
+    const animated: string[] = []
+    vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element) {
+      animated.push(this.tagName)
+      const finished = this.tagName.toLowerCase() === 'path' ? scratchDone : Promise.resolve()
+      return { finished, cancel() {} } as unknown as Animation
+    })
+    seed([note(1, { body: 'keep me' })])
+    render(<NotesRail run={record} room={fakeRoom(refusingAfterApply())} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Complete note' }))
+    await waitFor(() => expect(screen.getByText('conflict from server')).toBeDefined())
+    await act(async () => {
+      releaseScratch()
+      await scratchDone
+    })
+    // No fade or collapse of the card itself after the error showed.
+    expect(animated.filter((tag) => tag === 'LI')).toEqual([])
+    expect(screen.getByText('keep me')).toBeDefined()
+  })
+
+  it('offers no Retry when another member already resolved the note, and Dismiss removes it', async () => {
+    seed([note(1, { body: 'theirs now' })])
+    const resolve = async (id: string) => {
+      act(() => useStore.getState().setRoomMessageResolution(record.id, id, 'done', bob.id, '2026-08-14T11:00:00Z'))
+      return { ok: false, error: 'room message already resolved with a different outcome' }
+    }
+    render(<NotesRail run={record} room={fakeRoom(resolve)} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete note' }))
+    await waitFor(() => expect(screen.getByText('room message already resolved with a different outcome')).toBeDefined())
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText('theirs now')).toBeNull()
+  })
+
+  it('announces nothing for a deletion the server refused', async () => {
+    seed([note(1, { body: 'keep me' })])
+    render(<NotesRail run={record} room={fakeRoom(refusingAfterApply())} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete note' }))
+    await waitFor(() => expect(screen.getByText('conflict from server')).toBeDefined())
+    expect(screen.getByRole('status').textContent).toBe('')
+  })
+
+  it('reads the announcement for the last note, from outside the list', async () => {
+    seed([note(1, { body: 'only one' })])
+    render(<NotesRail run={record} room={fakeRoom(applyingResolve('ok'))} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Complete note' }))
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Notes' })).toBeNull())
+    expect(screen.getByRole('status').textContent).toBe('Note completed.')
+  })
+
   it('stays still under reduced motion and still removes the note', async () => {
     vi.spyOn(window, 'matchMedia').mockImplementation(
       (query: string) => ({ matches: query.includes('prefers-reduced-motion'), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList,
@@ -118,5 +181,14 @@ describe('notes strip', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(toggle)
     expect(within(screen.getByRole('list', { name: 'Notes' })).getByText('strip note')).toBeDefined()
+  })
+
+  it('reads the announcement for the last note after the strip empties', async () => {
+    seed([note(1, { body: 'strip note' })])
+    render(<NotesStrip run={record} room={fakeRoom(applyingResolve('ok'))} />)
+    fireEvent.click(screen.getByRole('button', { name: /1 note/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete note' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /1 note/ })).toBeNull())
+    expect(screen.getByRole('status').textContent).toBe('Note deleted.')
   })
 })

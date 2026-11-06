@@ -51,8 +51,8 @@ export interface CollaborationSlice {
   setRoomPage: (runID: string, messages: RoomMessage[], nextBefore?: string, append?: boolean) => void
   upsertRoomMessage: (message: RoomMessage) => void
   dropRoomMessage: (runID: string, id: string) => void
-  /** Optimistic apply/revert for a comment's completed/deleted state; empty resolution reverts it to open. */
-  setRoomMessageResolution: (runID: string, id: string, resolution: RoomResolution | '', resolvedBy?: string, resolvedAt?: string) => void
+  /** Optimistically completes or deletes a comment; a deleted one leaves the store. */
+  setRoomMessageResolution: (runID: string, id: string, resolution: RoomResolution, resolvedBy: string, resolvedAt: string) => void
   setNoteDraft: (runID: string, text: string) => void
   noteSending: (runID: string, text: string, key: string) => void
   /** A failure for a note whose saved copy is already here is ignored. */
@@ -133,6 +133,10 @@ function mergeRoomMessages(current: RoomMessage[], incoming: RoomMessage[], from
   const rest = from === 'event' ? kept : kept.filter((m) => !listed.has(m.id))
   const order = new Set((from === 'older page' ? [...page, ...rest] : [...rest, ...page]).map((m) => m.id))
   return [...order].map((id) => merged.get(id)!).sort((a, b) => compareInstants(a.created_at, b.created_at))
+}
+
+function withoutMessage(state: CollaborationSlice, runID: string, id: string): CollaborationSlice['roomMessages'] {
+  return { ...state.roomMessages, [runID]: (state.roomMessages[runID] ?? []).filter((m) => m.id !== id) }
 }
 
 const isSaved = (messages: RoomMessage[], key: string) => messages.some((m) => !isProvisional(m) && m.idempotency_key === key)
@@ -247,25 +251,22 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
     }),
   upsertRoomMessage: (message) =>
     set((state) => {
+      // A deleted comment is hidden everywhere: its event may drop it before
+      // the resolve RPC answers with the same message.
+      if (message.resolution === 'deleted') return { roomMessages: withoutMessage(state, message.run_id, message.id) }
       const merged = mergeRoomMessages(state.roomMessages[message.run_id] ?? [], [message], 'event')
       return {
         ...settleNotes(state, message.run_id, merged),
         roomMessages: { ...state.roomMessages, [message.run_id]: merged },
       }
     }),
-  dropRoomMessage: (runID, id) =>
-    set((state) => ({
-      roomMessages: {
-        ...state.roomMessages,
-        [runID]: (state.roomMessages[runID] ?? []).filter((m) => m.id !== id),
-      },
-    })),
+  dropRoomMessage: (runID, id) => set((state) => ({ roomMessages: withoutMessage(state, runID, id) })),
   setRoomMessageResolution: (runID, id, resolution, resolvedBy, resolvedAt) =>
     set((state) => ({
-      roomMessages: {
+      roomMessages: resolution === 'deleted' ? withoutMessage(state, runID, id) : {
         ...state.roomMessages,
         [runID]: (state.roomMessages[runID] ?? []).map((m) =>
-          m.id === id ? { ...m, resolution: resolution || undefined, resolved_by: resolvedBy, resolved_at: resolvedAt } : m,
+          m.id === id ? { ...m, resolution, resolved_by: resolvedBy, resolved_at: resolvedAt } : m,
         ),
       },
     })),
