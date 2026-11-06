@@ -39,11 +39,35 @@ func TestSweepScratchRemovesOnlyOrphans(t *testing.T) {
 			}
 		}
 	}
+	for _, name := range []string{"run-live", "run-gone", "run-young", "run-kept"} {
+		dir := filepath.Join(s.accountConfigRoot(), name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if name != "run-young" {
+			if err := os.Chtimes(dir, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(s.sidecarPath("run-kept"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	s.sweepScratch(context.Background())
 	for name, want := range map[string]bool{"run-live": true, "run-gone": false, "run-young": true, "terminal-ada": true, "terminal-bob": false} {
 		_, err := os.Stat(filepath.Join(s.scratchRoot(), name))
 		if (err == nil) != want {
 			t.Errorf("%s exists = %v, want %v", name, err == nil, want)
 		}
+	}
+	for name, want := range map[string]bool{"run-live": true, "run-gone": false, "run-young": true, "run-kept": true} {
+		_, err := os.Stat(filepath.Join(s.accountConfigRoot(), name))
+		if (err == nil) != want {
+			t.Errorf("account config %s exists = %v, want %v", name, err == nil, want)
+		}
+	}
+	s.removeSidecar("run-live")
+	if _, err := os.Stat(filepath.Join(s.accountConfigRoot(), "run-live")); !os.IsNotExist(err) {
+		t.Errorf("account config of a removed sidecar = %v, want it removed", err)
 	}
 }

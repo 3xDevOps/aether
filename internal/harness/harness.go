@@ -303,9 +303,12 @@ type Profile struct {
 	// links into, mounted read-only when a launch borrows the owner's install.
 	InstallPaths []string
 	// BorrowedState maps a home-relative JSON file to keys a borrowing launch
-	// sets in the launcher's copy when absent, so the CLI starts signed in
-	// instead of running first-time setup.
+	// sets in its copy of AccountConfig, so the CLI starts signed in instead
+	// of running first-time setup.
 	BorrowedState map[string]map[string]any
+	// AccountConfig is where the CLI caches the account it is signed in to.
+	// A launch that borrows another member's login gets its own copy of it.
+	AccountConfig *AccountConfig
 	// PinnedLogins are the login files the CLI replaces by rename. Each is
 	// mounted in place in the owner's own containers too; the rename then
 	// fails with EBUSY and the CLI falls back to rewriting the shared inode.
@@ -403,6 +406,19 @@ npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
 "{server}" package-exchange "$dir" "$stage/lib/node_modules/{pkg}"`)
 }
 
+// AccountConfig is a home-relative JSON file, File, holding the account the
+// CLI is signed in to under Keys. Env set to the home-relative directory Dir
+// makes the CLI use Dir/<base of File> instead of File, unless the
+// home-relative Legacy file is there: the CLI then uses that one, and so
+// does the launcher's own CLI.
+type AccountConfig struct {
+	File   string
+	Keys   []string
+	Env    string
+	Dir    string
+	Legacy string
+}
+
 // profiles is the shipped registry. "custom" takes its command from
 // deployment configuration and declares no credentials or key passthrough.
 var profiles = map[string]Profile{
@@ -436,6 +452,22 @@ var profiles = map[string]Profile{
 		// Claude Code runs its setup wizard, whose sign-in step ignores an
 		// existing login, until ~/.claude.json says setup is complete.
 		BorrowedState: map[string]map[string]any{".claude.json": {"hasCompletedOnboarding": true}},
+		// `claude auth status` reports the account cached in oauthAccount,
+		// not the one the login belongs to. Keys are what Claude Code 2.1.319
+		// clears on a sign-in to another account, its own API key and the
+		// API keys the launcher approved. CLAUDE_CONFIG_DIR moves only this
+		// file while it names the default ~/.claude. Claude Code reads an
+		// existing ~/.claude/.config.json first, wherever the variable points,
+		// and ignores it only when it is empty and read-only.
+		AccountConfig: &AccountConfig{File: ".claude.json", Legacy: ".claude/.config.json", Keys: []string{
+			"oauthAccount", "primaryApiKey", "customApiKeyResponses",
+			"managedSettingsNoticeSeenOrg", "additionalModelOptionsCache", "additionalModelOptionsAnsweredAt",
+			"additionalModelCostsCache", "modelAccessCache", "orgModelDefaultCache", "cachedArtifactRoster",
+			"artifactRosterDenied", "lastSeenOrgDefaultUpdatedAt", "clientDataCache", "clientDataCacheSlots",
+			"autoCompactWindowsCache", "cachedUsageUtilization", "metricsStatusCache",
+			"metricsStatusCacheByPrincipal", "githubWebConnectionStatusCache", "unusedLimitResetStatusCache",
+			"startupPrefetchedAt",
+		}, Env: "CLAUDE_CONFIG_DIR", Dir: ".claude"},
 		// Claude Code writes the login to a temporary file and renames it
 		// over the old one, and rewrites it in place only when that rename
 		// fails with EXDEV, EPERM, EEXIST or EBUSY.

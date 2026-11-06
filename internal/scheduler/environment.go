@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -189,6 +190,14 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			if len(logins) > 0 {
 				plan.Mounts = append(plan.Mounts, logins...)
 				plan.LoginMember = run.AccountMemberID
+				if ac := profile.AccountConfig; ac != nil {
+					config, configErr := s.accountConfigMounts(run, member.ID, profile, home)
+					if configErr != nil {
+						return nil, configErr
+					}
+					plan.Mounts = append(plan.Mounts, config...)
+					env[ac.Env] = path.Join(home, ac.Dir)
+				}
 			}
 			install, err := s.installMounts(member.ID, run.AccountMemberID, profile, home)
 			if err != nil {
@@ -202,7 +211,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				plan.Path = env["PATH"]
 			}
 		}
-		pins, err := s.pinnedLogins(ctx, member.ID, homePath, home, plan.Mounts)
+		pins, err := s.pinnedLogins(ctx, member.ID, homePath, home, plan.Mounts, isolated)
 		if err != nil {
 			return nil, err
 		}
@@ -258,7 +267,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}
 	var roots []string
 	if s.cfg.Homes != nil {
-		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot()}
+		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot(), s.accountConfigRoot()}
 	}
 	if s.cfg.Signing != nil {
 		agentDir, err := s.cfg.Signing.Serve(member.ID)
@@ -518,12 +527,84 @@ func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.Me
 			ContainerPath: path.Join(home, login.rel),
 		})
 	}
-	for rel, keys := range profile.BorrowedState {
-		if err := s.cfg.Homes.MarkBorrowedState(launcher, rel, keys); err != nil {
+	return mounts, nil
+}
+
+// accountConfigMounts writes run's own copy of the launcher's account
+// config, without the account the launcher is signed in to and with the
+// profile's BorrowedState, under the server's state directory, which no
+// container mounts. The copy is made from the Legacy file when the launcher
+// has one, as their own CLI reads that, and an empty read-only file masks
+// the Legacy file so the CLI reads the copy. The copy is mounted where the
+// profile's Env points the CLI: mounted over the launcher's file instead, it
+// would be detached by the launcher's other containers replacing that file
+// by rename. Each plan writes the copy afresh, so a run moved to another
+// account starts with none of the previous account cached.
+func (s *Scheduler) accountConfigMounts(run *domain.Run, launcher domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {
+	ac := profile.AccountConfig
+	set := profile.BorrowedState[ac.File]
+	data, legacy, err := s.cfg.Homes.StateWithout(launcher, ac.Legacy, ac.Keys, set)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	if !legacy {
+		if data, _, err = s.cfg.Homes.StateWithout(launcher, ac.File, ac.Keys, set); err != nil {
 			return nil, fmt.Errorf("scheduler: %w", err)
 		}
 	}
+	dir := filepath.Join(s.accountConfigRoot(), string(run.ID))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("scheduler: create the session's account config directory: %w", err)
+	}
+	name := path.Base(ac.File)
+	if err := writeFileIn(dir, name, data); err != nil {
+		return nil, fmt.Errorf("scheduler: write the session's ~/%s: %w", path.Join(ac.Dir, name), err)
+	}
+	target := path.Join(ac.Dir, name)
+	if err := s.cfg.Homes.PrepareLoginMountpoint(launcher, target, false); err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	mounts := []runtime.Mount{{HostPath: filepath.Join(dir, name), ContainerPath: path.Join(home, target)}}
+	if legacy {
+		mask := filepath.Join(dir, "legacy-mask")
+		if err := writeFileIn(dir, path.Base(mask), nil); err != nil {
+			return nil, fmt.Errorf("scheduler: mask the session's ~/%s: %w", ac.Legacy, err)
+		}
+		if err := os.Chmod(mask, 0o444); err != nil {
+			return nil, fmt.Errorf("scheduler: mask the session's ~/%s: %w", ac.Legacy, err)
+		}
+		mounts = append(mounts, runtime.Mount{HostPath: mask, ContainerPath: path.Join(home, ac.Legacy), ReadOnly: true})
+	}
 	return mounts, nil
+}
+
+// writeFileIn replaces the content of the regular file name in dir, mode
+// 0600 when created, and opens nothing else for writing: no link, FIFO or
+// device node, and nothing outside dir.
+func writeFileIn(dir, name string, data []byte) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
+	if err != nil {
+		return err
+	}
+	info, err := f.Stat()
+	switch {
+	case err != nil:
+	case !info.Mode().IsRegular():
+		err = fmt.Errorf("%s is not a regular file", name)
+	default:
+		if err = f.Truncate(0); err == nil {
+			_, err = f.Write(data)
+		}
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // accountBin and accountLib are where a launch that borrows the account
@@ -773,8 +854,10 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 // kernel would detach that mount), nor the login member shares. A login path
 // that is a directory or cannot be shared is left unpinned rather than
 // refused: it cannot be shared either, and refusing would keep the member
-// from the terminal that fixes it.
-func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount) ([]runtime.Mount, error) {
+// from the terminal that fixes it. Outside an isolated run, whose renames
+// stay in its overlay, the paths each AccountConfig copy and Legacy mask are
+// mounted at are pinned the same way.
+func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount, isolated bool) ([]runtime.Mount, error) {
 	// An engine that cannot mount a subpath cannot mount a shared login
 	// either, so there is nothing to keep mounted.
 	if checker, ok := s.cfg.Runtime.(subpathAPIChecker); ok {
@@ -788,13 +871,21 @@ func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, ho
 	}
 	var pins []runtime.Mount
 	for _, profile := range harness.Profiles() {
-		for _, rel := range profile.PinnedLogins {
+		rels := profile.PinnedLogins
+		var legacy string
+		if ac := profile.AccountConfig; ac != nil && !isolated {
+			legacy = ac.Legacy
+			rels = append(slices.Clip(rels), path.Join(ac.Dir, path.Base(ac.File)), legacy)
+		}
+		for _, rel := range rels {
 			target := path.Join(home, rel)
 			if slices.ContainsFunc(planned, func(m runtime.Mount) bool { return m.ContainerPath == target }) {
 				continue
 			}
 			dir, pathErr := s.cfg.Homes.LoginPathIsDir(member, rel)
-			if errors.Is(pathErr, fs.ErrNotExist) {
+			// A Legacy file Aether created would be read in place of the
+			// CLI's config, so only one already there is pinned.
+			if errors.Is(pathErr, fs.ErrNotExist) && rel != legacy {
 				pathErr = s.cfg.Homes.PrepareLoginMountpoint(member, rel, false)
 			}
 			if pathErr != nil || dir {

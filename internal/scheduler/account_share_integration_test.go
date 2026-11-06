@@ -334,3 +334,61 @@ func TestIntegrationSharerPinDocker(t *testing.T) {
 	shared.close(t, e)
 	own.close(t, e)
 }
+
+// TestIntegrationSharedClaudeConfigCopyDocker: a claude session on Grace's
+// account reads its own copy of Ada's ~/.claude.json, without her account,
+// where CLAUDE_CONFIG_DIR points. A save by rename over it fails as Claude
+// Code expects and an in-place save lands in the copy; Ada's other
+// containers replacing her ~/.claude.json by rename leave it in place.
+func TestIntegrationSharedClaudeConfigCopyDocker(t *testing.T) {
+	e, docker, cli, owner := newShareDockerEnv(t, printLogin)
+	ownerHome, err := e.cfg.Homes.Path(owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adaHome, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedHome(t, ownerHome, map[string]string{".claude/.credentials.json": "grace-login"})
+	seedHome(t, adaHome, map[string]string{".claude.json": `{"oauthAccount":{"emailAddress":"ada@example.com"},"theme":"dark"}`})
+
+	shared := launchShareRun(t, e, docker, cli, e.member.ID, owner.ID, "shared config", "grace-login")
+	shared.want(t, `printf %s "$CLAUDE_CONFIG_DIR"`, "/root/.claude")
+	shared.want(t, `cat "$CLAUDE_CONFIG_DIR/.claude.json"`, `{"hasCompletedOnboarding":true,"theme":"dark"}`)
+	if code, out := shared.sh(t, `printf '{"saved":1}' > /root/.claude/.claude.json.tmp && mv /root/.claude/.claude.json.tmp /root/.claude/.claude.json`); code == 0 {
+		t.Fatalf("a rename over the session's copy succeeded: %s", out)
+	}
+	shared.want(t, `printf '{"saved":2}' > /root/.claude/.claude.json && cat /root/.claude/.claude.json`, `{"saved":2}`)
+	copyPath := filepath.Join(e.sched.accountConfigRoot(), string(shared.run.ID), ".claude.json")
+	if data, err := os.ReadFile(copyPath); err != nil || string(data) != `{"saved":2}` {
+		t.Fatalf("session copy on the host = %q, %v; want the in-place save", data, err)
+	}
+
+	replaced := filepath.Join(adaHome, ".claude.json.new")
+	if err := os.WriteFile(replaced, []byte(`{"oauthAccount":{"emailAddress":"ada@example.com"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replaced, filepath.Join(adaHome, ".claude.json")); err != nil {
+		t.Fatal(err)
+	}
+	shared.want(t, "cat /root/.claude/.claude.json", `{"saved":2}`)
+	if data, err := os.ReadFile(filepath.Join(adaHome, ".claude", ".claude.json")); err != nil || len(data) != 0 {
+		t.Fatalf("Ada's mountpoint ~/.claude/.claude.json = %q, %v; want it empty", data, err)
+	}
+
+	// Ada's own session, as if it set CLAUDE_CONFIG_DIR=~/.claude, saves
+	// there by rename from another mount namespace: the pin refuses it, so
+	// the shared session's copy stays mounted.
+	seedHome(t, adaHome, map[string]string{".claude/.credentials.json": "ada-login"})
+	own := launchShareRun(t, e, docker, cli, e.member.ID, e.member.ID, "own config", "ada-login")
+	if code, out := own.sh(t, `printf '{"oauthAccount":{"emailAddress":"ada@example.com"}}' > /root/.claude/.claude.json.tmp && mv /root/.claude/.claude.json.tmp /root/.claude/.claude.json`); code == 0 {
+		t.Fatalf("a rename over the pinned ~/.claude/.claude.json in Ada's own session succeeded: %s", out)
+	}
+	shared.want(t, "cat /root/.claude/.claude.json", `{"saved":2}`)
+	shared.close(t, e)
+	waitFor(t, "session copy removed", func() bool {
+		_, err := os.Stat(filepath.Dir(copyPath))
+		return os.IsNotExist(err)
+	})
+}

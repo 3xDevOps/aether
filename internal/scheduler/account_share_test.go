@@ -153,8 +153,8 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		dir            bool
 		mounts         int
 	}{
-		{"claude", ".claude/.credentials.json", false, 5},
-		{"omp", ".omp/agent", true, 6},
+		{"claude", ".claude/.credentials.json", false, 6},
+		{"omp", ".omp/agent", true, 7},
 	} {
 		run, err := e.launch(t, tc.harness)
 		if err != nil {
@@ -169,7 +169,7 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 			t.Fatalf("%s: image = %q, want the launcher's %q", tc.harness, spec.Image, launcherImage)
 		}
 		if len(spec.Mounts) != tc.mounts {
-			t.Fatalf("%s: mounts = %+v, want launcher's home/cache/scratch, its pins and one borrowed login", tc.harness, spec.Mounts)
+			t.Fatalf("%s: mounts = %+v, want launcher's home/cache/scratch, its pins, one borrowed login and, for claude, its config copy", tc.harness, spec.Mounts)
 		}
 		if home := spec.Mounts[0]; home != (runtime.Mount{HostPath: e.adaHome, ContainerPath: "/root"}) {
 			t.Fatalf("%s: home mount = %+v, want the launcher's home %q at /root", tc.harness, home, e.adaHome)
@@ -214,7 +214,7 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		t.Fatalf("owner Launch: %v", err)
 	}
 	spec := e.rt.byName(string(own.ID)).spec
-	if spec.Image != ownerImage || len(spec.Mounts) != 5 ||
+	if spec.Image != ownerImage || len(spec.Mounts) != 6 ||
 		spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) ||
 		slices.ContainsFunc(subpathMounts(spec), func(m runtime.Mount) bool { return m.HostPath != e.ownerHome }) {
 		t.Fatalf("own launch = image %q mounts %+v, want %q and only the owner's home, pins and cache", spec.Image, spec.Mounts, ownerImage)
@@ -233,8 +233,8 @@ func TestSharedLaunchWithoutOwnerLogin(t *testing.T) {
 		t.Fatalf("fake Launch: %v", err)
 	}
 	spec := e.rt.byName(string(run.ID)).spec
-	if len(spec.Mounts) != 5 || spec.Mounts[0].HostPath != e.adaHome {
-		t.Fatalf("fake mounts = %+v, want only launcher's home, its pinned logins and cache", spec.Mounts)
+	if len(spec.Mounts) != 6 || spec.Mounts[0].HostPath != e.adaHome {
+		t.Fatalf("fake mounts = %+v, want only launcher's home, its pins and cache", spec.Mounts)
 	}
 	e.assertOwnerExposedOnlyAt(t, spec)
 
@@ -464,8 +464,11 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 	}
 	spec := e.rt.byName(string(run.ID)).spec
 	want := runtime.Mount{HostPath: e.ownerHome, Subpath: ".claude/.credentials.json", ContainerPath: "/home/aether/.claude/.credentials.json"}
-	if spec.User != "1000:1000" || len(spec.Mounts) != 5 || spec.Mounts[1] != want {
+	if spec.User != "1000:1000" || len(spec.Mounts) != 6 || spec.Mounts[1] != want {
 		t.Fatalf("spec user %q mounts %+v, want 1000:1000 and login %+v", spec.User, spec.Mounts, want)
+	}
+	if got := ownerOf(t, spec.Mounts[2].HostPath); spec.Mounts[2].ContainerPath != "/home/aether/.claude/.claude.json" || got != 1000 {
+		t.Fatalf("config copy %+v owned by %d, want the session user 1000", spec.Mounts[2], got)
 	}
 	if got := ownerOf(t, filepath.Join(e.ownerHome, ".claude", ".credentials.json")); got != 1000 {
 		t.Fatalf("owner's login owned by %d, want the session user 1000", got)
@@ -1014,92 +1017,110 @@ func TestSharedRunPinsLauncherProfile(t *testing.T) {
 	}
 }
 
-// A borrowed Claude Code login starts signed in: the launcher's own
-// ~/.claude.json gets setup marked complete, keeping whatever it already
-// says, and is otherwise left to Claude Code. Nothing is written for a
-// launcher's own login, for a harness without such state, or over a file
-// that is not a JSON object.
+// A borrowed Claude Code login starts signed in: the session's copy of the
+// launcher's ~/.claude.json marks setup complete, while the launcher's own
+// file is neither created nor changed. A launcher's file the copy cannot be
+// made from, or a link planted where the copy is mounted, refuses the
+// launch with the real error before any container exists and writes nothing
+// through the link. Other agents and own-account launches touch no
+// ~/.claude.json.
 func TestBorrowedClaudeLoginMarksSetupComplete(t *testing.T) {
 	t.Parallel()
-	read := func(t *testing.T, home string) (map[string]any, os.FileMode) {
+	copyOf := func(t *testing.T, e *shareEnv) map[string]any {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(home, ".claude.json"))
-		if err != nil {
-			t.Fatalf("read ~/.claude.json: %v", err)
+		m, ok := mountFor(e.launchSpec(t, "claude"), "/root/.claude/.claude.json")
+		if !ok {
+			t.Fatal("no session copy of ~/.claude.json")
 		}
-		info, err := os.Stat(filepath.Join(home, ".claude.json"))
+		data, err := os.ReadFile(m.HostPath)
 		if err != nil {
 			t.Fatal(err)
 		}
 		var state map[string]any
 		if err := json.Unmarshal(data, &state); err != nil {
-			t.Fatalf("~/.claude.json = %q: %v", data, err)
+			t.Fatalf("session copy %q: %v", data, err)
 		}
-		return state, info.Mode().Perm()
+		return state
 	}
 
 	e := newShareEnv(t, nil)
-	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json", ".claude.json")
-	e.launchSpec(t, "claude")
-	state, mode := read(t, e.adaHome)
-	if len(state) != 1 || state["hasCompletedOnboarding"] != true || mode != 0o600 {
-		t.Fatalf("launcher ~/.claude.json = %v mode %o, want only hasCompletedOnboarding=true, mode 0600", state, mode)
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	if state := copyOf(t, e); len(state) != 1 || state["hasCompletedOnboarding"] != true {
+		t.Fatalf("session copy = %v, want only hasCompletedOnboarding=true", state)
+	}
+	if _, err := os.Lstat(filepath.Join(e.adaHome, ".claude.json")); !os.IsNotExist(err) {
+		t.Fatalf("launcher ~/.claude.json = %v, want none created", err)
 	}
 
 	f := newShareEnv(t, nil)
 	writeHomeFiles(t, f.ownerHome, ".claude/.credentials.json")
-	if err := os.WriteFile(filepath.Join(f.adaHome, ".claude.json"), []byte(`{"theme":"light","projects":{}}`), 0o644); err != nil {
+	const unfinished = `{"hasCompletedOnboarding":false,"theme":"light"}`
+	if err := os.WriteFile(filepath.Join(f.adaHome, ".claude.json"), []byte(unfinished), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.Stat(filepath.Join(f.adaHome, ".claude.json"))
-	if err != nil {
-		t.Fatal(err)
+	if state := copyOf(t, f); state["hasCompletedOnboarding"] != true || state["theme"] != "light" {
+		t.Fatalf("session copy = %v, want the launcher's state with setup complete", state)
 	}
-	f.launchSpec(t, "claude")
-	state, _ = read(t, f.adaHome)
-	after, err := os.Stat(filepath.Join(f.adaHome, ".claude.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state["theme"] != "light" || state["hasCompletedOnboarding"] != true || len(state) != 3 {
-		t.Fatalf("launcher ~/.claude.json = %v, want the existing keys plus hasCompletedOnboarding", state)
-	}
-	if !os.SameFile(before, after) || before.Sys().(*syscall.Stat_t).Ino != after.Sys().(*syscall.Stat_t).Ino {
-		t.Fatal("~/.claude.json was replaced rather than rewritten in place")
+	if data, err := os.ReadFile(filepath.Join(f.adaHome, ".claude.json")); err != nil || string(data) != unfinished {
+		t.Fatalf("launcher ~/.claude.json = %q, %v; want it unchanged", data, err)
 	}
 
-	// Setup started but never finished, or recorded as not done, is marked
-	// done too: Claude Code runs its wizard for anything but true.
-	i := newShareEnv(t, nil)
-	writeHomeFiles(t, i.ownerHome, ".claude/.credentials.json")
-	if err := os.WriteFile(filepath.Join(i.adaHome, ".claude.json"), []byte(`{"hasCompletedOnboarding":false}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	i.launchSpec(t, "claude")
-	if state, _ := read(t, i.adaHome); state["hasCompletedOnboarding"] != true {
-		t.Fatalf("launcher ~/.claude.json = %v, want hasCompletedOnboarding true", state)
-	}
-
-	// A file the CLI owns in a shape Aether does not rewrite - not a JSON
-	// object, or too large - is left alone and the launch still starts.
-	g := newShareEnv(t, nil)
-	writeHomeFiles(t, g.ownerHome, ".claude/.credentials.json")
-	if err := os.WriteFile(filepath.Join(g.adaHome, ".claude.json"), []byte("[]"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	g.launchSpec(t, "claude")
-	if data, _ := os.ReadFile(filepath.Join(g.adaHome, ".claude.json")); string(data) != "[]" {
-		t.Fatalf("a non-object ~/.claude.json was rewritten to %q", data)
-	}
-	j := newShareEnv(t, nil)
-	writeHomeFiles(t, j.ownerHome, ".claude/.credentials.json")
-	large := []byte(`{"pad":"` + strings.Repeat("x", 5<<20) + `"}`)
-	if err := os.WriteFile(filepath.Join(j.adaHome, ".claude.json"), large, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	j.launchSpec(t, "claude")
-	if info, err := os.Stat(filepath.Join(j.adaHome, ".claude.json")); err != nil || info.Size() != int64(len(large)) {
-		t.Fatalf("an oversized ~/.claude.json was changed: %v %v", info, err)
+	for name, tc := range map[string]struct {
+		plant func(t *testing.T, e *shareEnv, outside string)
+		want  string
+	}{
+		"not a JSON object": {func(t *testing.T, e *shareEnv, _ string) {
+			if err := os.WriteFile(filepath.Join(e.adaHome, ".claude.json"), []byte("[]"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, "cannot unmarshal array"},
+		"larger than 64 MiB": {func(t *testing.T, e *shareEnv, _ string) {
+			f, err := os.Create(filepath.Join(e.adaHome, ".claude.json"))
+			if err == nil {
+				err = f.Truncate(64<<20 + 1)
+			}
+			if err == nil {
+				err = f.Close()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}, "over the 64 MiB Aether copies"},
+		"a hard link to another file": {func(t *testing.T, e *shareEnv, outside string) {
+			if err := os.Link(outside, filepath.Join(e.adaHome, ".claude.json")); err != nil {
+				t.Fatal(err)
+			}
+		}, "another hard link"},
+		"a link to another file": {func(t *testing.T, e *shareEnv, outside string) {
+			if err := os.Symlink(outside, filepath.Join(e.adaHome, ".claude.json")); err != nil {
+				t.Fatal(err)
+			}
+		}, "symlink"},
+		"a link where the copy is mounted": {func(t *testing.T, e *shareEnv, outside string) {
+			if err := os.MkdirAll(filepath.Join(e.adaHome, ".claude"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(e.adaHome, ".claude", ".claude.json")); err != nil {
+				t.Fatal(err)
+			}
+		}, "not a regular file"},
+	} {
+		g := newShareEnv(t, nil)
+		writeHomeFiles(t, g.ownerHome, ".claude/.credentials.json")
+		outside := filepath.Join(t.TempDir(), "outside.json")
+		if err := os.WriteFile(outside, []byte(`{"oauthAccount":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tc.plant(t, g, outside)
+		if _, err := g.launch(t, "claude"); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: Launch = %v, want a refusal containing %q", name, err, tc.want)
+		}
+		if g.containerCount() != 0 {
+			t.Fatalf("%s: a container was created for the refused launch", name)
+		}
+		if data, err := os.ReadFile(outside); err != nil || string(data) != `{"oauthAccount":{}}` {
+			t.Fatalf("%s: the link's target = %q, %v; want it untouched", name, data, err)
+		}
 	}
 
 	h := newShareEnv(t, nil)
@@ -1113,5 +1134,124 @@ func TestBorrowedClaudeLoginMarksSetupComplete(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(h.ownerHome, ".claude.json")); !os.IsNotExist(err) {
 		t.Fatalf("an own-account launch wrote ~/.claude.json: %v", err)
+	}
+}
+
+// A claude session on another member's account reads its own copy of the
+// launcher's ~/.claude.json, without the account the launcher is signed in
+// to or the launcher's API key, so `claude auth status` cannot report the
+// launcher. The launcher's file keeps both, and a session on the launcher's
+// own account reads that file as before.
+func TestSharedClaudeSessionCarriesNoLauncherAccount(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, nil)
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	const adaState = `{"oauthAccount":{"emailAddress":"ada@example.com","accountUuid":"acct-ada"},"primaryApiKey":"ada-key","projects":{"/w":{"allowedTools":[]}},"theme":"dark","hasCompletedOnboarding":true}`
+	adaFile := filepath.Join(e.adaHome, ".claude.json")
+	if err := os.WriteFile(adaFile, []byte(adaState), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := e.launch(t, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := e.rt.byName(string(run.ID)).spec
+	if got := spec.Env["CLAUDE_CONFIG_DIR"]; got != "/root/.claude" {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want /root/.claude", got)
+	}
+	m, ok := mountFor(spec, "/root/.claude/.claude.json")
+	if !ok || m.ReadOnly || m.Subpath != "" || m.HostPath != filepath.Join(e.sched.accountConfigRoot(), string(run.ID), ".claude.json") {
+		t.Fatalf("~/.claude/.claude.json mount = %+v, %v; want a writable copy in the server's account config directory", m, ok)
+	}
+	data, err := os.ReadFile(m.HostPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state map[string]any
+	if err = json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("session config %q: %v", data, err)
+	}
+	_, account := state["oauthAccount"]
+	_, key := state["primaryApiKey"]
+	if account || key || state["theme"] != "dark" || state["projects"] == nil || state["hasCompletedOnboarding"] != true {
+		t.Fatalf("session config = %v, want Ada's state without her account or API key", state)
+	}
+	if data, err = os.ReadFile(adaFile); err != nil || string(data) != adaState {
+		t.Fatalf("Ada's ~/.claude.json = %q, %v; want it unchanged", data, err)
+	}
+
+	// Claude Code caches Grace's account in the copy. The next plan, as a
+	// move to another account builds, starts again from Ada's file.
+	if err = os.WriteFile(m.HostPath, []byte(`{"oauthAccount":{"emailAddress":"grace@example.com"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claude, _ := harness.Lookup("claude")
+	if _, err = e.sched.BuildEnvironmentPlan(t.Context(), run, e.ws, e.member, claude, EnvironmentPurposeRun); err != nil {
+		t.Fatal(err)
+	}
+	if data, err = os.ReadFile(m.HostPath); err != nil || strings.Contains(string(data), "@example.com") || !strings.Contains(string(data), `"theme":"dark"`) {
+		t.Fatalf("session config after a new plan = %q, %v; want Ada's state again without any account", data, err)
+	}
+
+	own, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "own", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownSpec := e.rt.byName(string(own.ID)).spec
+	pin := runtime.Mount{HostPath: e.adaHome, Subpath: ".claude/.claude.json", ContainerPath: "/root/.claude/.claude.json"}
+	if got, _ := mountFor(ownSpec, pin.ContainerPath); got != pin || ownSpec.Env["CLAUDE_CONFIG_DIR"] != "" {
+		t.Fatalf("own-account session: CLAUDE_CONFIG_DIR %q, mounts %+v; want Ada's own ~/.claude.json and her pinned mountpoint", ownSpec.Env["CLAUDE_CONFIG_DIR"], ownSpec.Mounts)
+	}
+}
+
+// A launcher whose Claude Code still reads the legacy ~/.claude/.config.json
+// gets the session's copy made from that file, and the legacy path masked by
+// an empty read-only file Claude Code ignores, so it reads the copy. Numbers
+// keep their exact text. The launcher's own session pins the legacy file and
+// masks nothing.
+func TestSharedClaudeSessionMasksTheLegacyConfig(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, nil)
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	const legacy = `{"oauthAccount":{"emailAddress":"ada@example.com"},"theme":"legacy","numStartups":12345678901234567890}`
+	writeHomeFiles(t, e.adaHome, ".claude/.config.json")
+	if err := os.WriteFile(filepath.Join(e.adaHome, ".claude", ".config.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(e.adaHome, ".claude.json"), []byte(`{"theme":"main"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	spec := e.launchSpec(t, "claude")
+	config, ok := mountFor(spec, "/root/.claude/.claude.json")
+	if !ok {
+		t.Fatal("no session copy of the config")
+	}
+	data, err := os.ReadFile(config.HostPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); strings.Contains(got, "ada@example.com") || !strings.Contains(got, `"theme":"legacy"`) || !strings.Contains(got, `"numStartups":12345678901234567890`) {
+		t.Fatalf("session copy = %s, want the legacy file's state, exact numbers kept, without Ada's account", got)
+	}
+	mask, ok := mountFor(spec, "/root/.claude/.config.json")
+	if !ok || !mask.ReadOnly || mask.Subpath != "" || filepath.Dir(mask.HostPath) != filepath.Dir(config.HostPath) {
+		t.Fatalf("legacy mount = %+v, %v; want a read-only mask beside the copy", mask, ok)
+	}
+	if info, statErr := os.Stat(mask.HostPath); statErr != nil || info.Size() != 0 || info.Mode().Perm() != 0o444 {
+		t.Fatalf("mask = %v, %v; want an empty 0444 file", info, statErr)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(e.adaHome, ".claude", ".config.json")); readErr != nil || string(got) != legacy {
+		t.Fatalf("Ada's legacy config = %q, %v; want it unchanged", got, readErr)
+	}
+
+	own, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "own", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := runtime.Mount{HostPath: e.adaHome, Subpath: ".claude/.config.json", ContainerPath: "/root/.claude/.config.json"}
+	if got, _ := mountFor(e.rt.byName(string(own.ID)).spec, pin.ContainerPath); got != pin {
+		t.Fatalf("own session's legacy mount = %+v, want the pin %+v", got, pin)
 	}
 }

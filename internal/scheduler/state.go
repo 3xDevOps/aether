@@ -688,6 +688,7 @@ func (s *Scheduler) removeSidecar(run domain.RunID) {
 	}
 	s.releaseCoordination(run)
 	s.removeScratch(string(run))
+	s.removeAccountConfig(run)
 }
 
 const stoppedByParentReason = "stopped by parent session "

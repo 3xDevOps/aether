@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,8 +15,9 @@ import (
 )
 
 const (
-	scratchDirName     = "scratch"
-	terminalScratchTag = "terminal-"
+	scratchDirName       = "scratch"
+	accountConfigDirName = "account-config"
+	terminalScratchTag   = "terminal-"
 	// A directory is planned before its owner is registered.
 	scratchOrphanAge = time.Hour
 )
@@ -63,14 +66,20 @@ func (s *Scheduler) removeScratch(name string) {
 	}
 }
 
-// sweepScratch removes scratch directories whose run or terminal no longer
-// has a container to own them.
+// sweepScratch removes scratch and account config directories whose run or
+// terminal no longer has a container to own them.
 func (s *Scheduler) sweepScratch(ctx context.Context) {
-	entries, err := os.ReadDir(s.scratchRoot())
+	scratch, err := readRoot(s.scratchRoot())
 	if err != nil {
-		if !os.IsNotExist(err) {
-			slog.Warn("scheduler: list scratch directories", "error", err)
-		}
+		slog.Warn("scheduler: list scratch directories", "error", err)
+		return
+	}
+	configs, err := readRoot(s.accountConfigRoot())
+	if err != nil {
+		slog.Warn("scheduler: list account config directories", "error", err)
+		return
+	}
+	if len(scratch) == 0 && len(configs) == 0 {
 		return
 	}
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
@@ -93,13 +102,16 @@ func (s *Scheduler) sweepScratch(ctx context.Context) {
 		owned[terminalScratchName(member)] = true
 	}
 	s.mu.Unlock()
-	for _, entry := range entries {
-		name := entry.Name()
-		if owned[name] {
-			continue
+	orphan := func(entry os.DirEntry) bool {
+		if owned[entry.Name()] {
+			return false
 		}
 		info, err := entry.Info()
-		if err != nil || time.Since(info.ModTime()) < scratchOrphanAge {
+		return err == nil && time.Since(info.ModTime()) >= scratchOrphanAge
+	}
+	for _, entry := range scratch {
+		name := entry.Name()
+		if !orphan(entry) {
 			continue
 		}
 		if member, ok := strings.CutPrefix(name, terminalScratchTag); ok {
@@ -110,6 +122,34 @@ func (s *Scheduler) sweepScratch(ctx context.Context) {
 			continue
 		}
 		s.removeScratch(name)
+	}
+	for _, entry := range configs {
+		if !orphan(entry) {
+			continue
+		}
+		if _, err := os.Stat(s.sidecarPath(domain.RunID(entry.Name()))); err == nil {
+			continue
+		}
+		s.removeAccountConfig(domain.RunID(entry.Name()))
+	}
+}
+
+// readRoot lists dir, which may not exist yet.
+func readRoot(dir string) ([]os.DirEntry, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return entries, err
+}
+
+func (s *Scheduler) accountConfigRoot() string {
+	return filepath.Join(s.cfg.StateDir, accountConfigDirName)
+}
+
+func (s *Scheduler) removeAccountConfig(run domain.RunID) {
+	if err := os.RemoveAll(filepath.Join(s.accountConfigRoot(), string(run))); err != nil {
+		slog.Warn("scheduler: remove account config directory", "run", run, "error", err)
 	}
 }
 
