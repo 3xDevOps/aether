@@ -289,7 +289,7 @@ func (s *Server) openRoomImage(ctx context.Context, member domain.MemberID, req 
 	if lookupErr != nil {
 		return protocol.DevArtifact{}, nil, nil, lookupErr
 	}
-	if message.RunID != domain.RunID(req.RunID) || index >= len(message.Attachments) {
+	if message.RunID != domain.RunID(req.RunID) || message.Resolution == store.RoomResolutionDeleted || index >= len(message.Attachments) {
 		return protocol.DevArtifact{}, nil, nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
 	}
 	workspace, reference := message.WorkspaceID, message.Attachments[index]
@@ -301,7 +301,8 @@ func (s *Server) openRoomImage(ctx context.Context, member domain.MemberID, req 
 		if err != nil {
 			return err
 		}
-		if current.RunID != domain.RunID(req.RunID) || current.WorkspaceID != workspace || index >= len(current.Attachments) || current.Attachments[index] != reference {
+		if current.RunID != domain.RunID(req.RunID) || current.WorkspaceID != workspace || current.Resolution == store.RoomResolutionDeleted ||
+			index >= len(current.Attachments) || current.Attachments[index] != reference {
 			return &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
 		}
 		target, err := resolveRunTarget(ctx, s.cfg.Store, current.RunID)

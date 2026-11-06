@@ -1000,8 +1000,9 @@ no capability.
 `run.room.resolve` lets a comment's author, the run's owner, or an admin
 complete or delete it: `{"message_id":"...","outcome":"done"|"deleted"}`.
 Only a `comment` message can be resolved; a `question` answers `-32602`.
-A done comment stays listed by `run.room.list` for history; a deleted one is
-excluded there and everywhere else. Retrying with the same outcome replays
+A done comment stays listed by `run.room.list` for history. A deleted one is
+left out of `run.room.list`, and a download of its attachments answers
+`-32000` "room image not found". Retrying with the same outcome replays
 the saved result; a different outcome than the one already recorded is
 `-32003`. Each resolution publishes `workspace.room_message` with
 `resolution` set, so a client already holding the message can tell a
