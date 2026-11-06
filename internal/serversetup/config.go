@@ -77,6 +77,8 @@ var retiredOptions = map[string]bool{
 	// `aether gui` replaced.
 	"dashboard-port": true,
 	"dashboard-addr": true,
+	// Removed with session login copies for shared accounts.
+	"session-login-accounts": true,
 }
 
 // Apply sets values on set, skipping every flag the operator already passed

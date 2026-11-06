@@ -343,9 +343,10 @@ func TestApplyRetiresRemovedOptionsInsteadOfFailing(t *testing.T) {
 	}
 
 	retired, err := Apply(fs, map[string]string{
-		"addr":           ":2300",
-		"dashboard-port": "8080",
-		"dashboard-addr": "100.64.0.1:8080",
+		"addr":                   ":2300",
+		"dashboard-port":         "8080",
+		"dashboard-addr":         "100.64.0.1:8080",
+		"session-login-accounts": "mem-1",
 	})
 	if err != nil {
 		t.Fatalf("Apply with retired keys: %v, want it to carry on", err)
@@ -353,7 +354,7 @@ func TestApplyRetiresRemovedOptionsInsteadOfFailing(t *testing.T) {
 	if *addr != ":2300" {
 		t.Errorf("addr = %q, want the live key still applied", *addr)
 	}
-	want := []string{"dashboard-addr", "dashboard-port"}
+	want := []string{"dashboard-addr", "dashboard-port", "session-login-accounts"}
 	if len(retired) != len(want) {
 		t.Fatalf("retired = %v, want %v", retired, want)
 	}

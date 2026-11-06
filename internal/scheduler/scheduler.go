@@ -149,9 +149,6 @@ type Config struct {
 	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
 	// installed in the member home.
 	HarnessUpdateDisabled bool
-	// SessionLoginAccounts are the accounts whose claude and codex shares
-	// mount a session login copy instead of the owner's own login.
-	SessionLoginAccounts map[domain.MemberID]bool
 	// Test-only overrides of the matching default* constants.
 	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
@@ -201,13 +198,6 @@ type Scheduler struct {
 	recoveryReadyOnce sync.Once
 	// recovering is set while Start recovers runs.
 	recovering atomic.Bool
-	// sessionLoginRefresh holds a *sync.Mutex per sessionLoginKey: two
-	// refreshes of one login that both found its CLI lock stale would remove
-	// each other's lock and spend the refresh token twice.
-	sessionLoginRefresh sync.Map
-	// sessionLoginWrite serializes the truncate-then-write of session login
-	// copies, which a launch and the pump can both make to one file.
-	sessionLoginWrite sync.Mutex
 	// superCtx bounds every supervision goroutine; cancelling it never stops a
 	// container.
 	superCtx    context.Context
@@ -335,9 +325,6 @@ type supervised struct {
 	// loginMember is the account owner whose login paths the container
 	// mounts; empty when none.
 	loginMember domain.MemberID
-	// sessionLogin is the agent whose session login copy of loginMember's
-	// login the container mounts, empty when it mounts the login itself.
-	sessionLogin string
 	// verifiedLogins are the account owners whose own login a container of
 	// this run was started with, as the runtime confirmed at start.
 	verifiedLogins []domain.MemberID
@@ -742,19 +729,14 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
 	s.recovering.Store(false)
 	watchCtx, stopWatch := context.WithCancel(ctx)
-	watched, pumped := make(chan struct{}), make(chan struct{})
+	watched := make(chan struct{})
 	go func() {
 		defer close(watched)
 		s.watchUsageLimits(watchCtx, limits, start)
 	}()
-	go func() {
-		defer close(pumped)
-		s.pumpSessionLogins(watchCtx)
-	}()
 	defer func() {
 		stopWatch()
 		<-watched
-		<-pumped
 	}()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
@@ -794,7 +776,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			}
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepScratch(ctx)
-			s.sweepSessionLogins(ctx)
 			s.sweepCaches(ctx, false)
 		}
 	}

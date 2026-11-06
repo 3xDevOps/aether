@@ -5,7 +5,9 @@ while the recipient can no longer take, log out or overwrite the sharer's
 login, and a revoke stops a running session's use.
 
 **Status:** approved by the owner on 2026-11-03: Phase 0 and Phase 1, and
-a canary before any existing share switches.
+a canary before any existing share switches. Phase 0 shipped. Phase 1
+shipped behind `--session-login-accounts`, failed its live canary, and was
+removed; shares mount the owner's login as before.
 
 ## Today
 

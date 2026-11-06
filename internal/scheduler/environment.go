@@ -51,9 +51,6 @@ type EnvironmentPlan struct {
 	// LoginMember is the account owner whose login paths are mounted, empty
 	// when the plan mounts nothing from another member's home.
 	LoginMember domain.MemberID
-	// SessionLogin is the agent whose session login copy of LoginMember's
-	// login is mounted in place of the login itself, empty when none is.
-	SessionLogin string
 	// SecretEnv names the workspace secrets in Env.
 	SecretEnv []string
 	Egress    bool
@@ -185,14 +182,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 					}
 				}
 			}
-			var logins []runtime.Mount
-			var err error
-			if s.sessionLoginAccount(run.AccountMemberID, profile) {
-				logins, err = s.sessionLoginMounts(ctx, run, member.ID, profile, home, user)
-				plan.SessionLogin = profile.Name
-			} else {
-				logins, err = s.loginMounts(ctx, member.ID, run.AccountMemberID, profile, home)
-			}
+			logins, err := s.loginMounts(ctx, member.ID, run.AccountMemberID, profile, home)
 			if err != nil {
 				return nil, err
 			}
@@ -268,7 +258,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}
 	var roots []string
 	if s.cfg.Homes != nil {
-		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot(), s.sessionLoginRoot()}
+		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot()}
 	}
 	if s.cfg.Signing != nil {
 		agentDir, err := s.cfg.Signing.Serve(member.ID)
