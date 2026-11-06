@@ -16,9 +16,10 @@ import { useStore } from '@/store'
 import { byCreated, canResolveNote, isOpenNote } from '@/store/collaboration'
 import type { RunRecord } from '@/store/runs'
 
-/** Below this frame width, or whenever Details shrinks it past this, notes
+/** The 736px Chat column plus a 256px card slot (236px card, 20px edge) on each
+ * side. Below this frame width, or whenever Details shrinks it past this, notes
  * move from the rail into a strip above the composer. */
-export const notesRailMinWidth = 1100
+export const notesRailMinWidth = 1248
 
 const scratchMotion: Motion = { duration: '--duration-450', easing: '--ease-glide' }
 const doneExitMotion: Motion = { duration: '--duration-300', easing: '--ease-glide' }
@@ -201,20 +202,12 @@ function StickyCard({ note, index, run, error, onResolve, onDismissError, onSett
   )
 }
 
-function useNotesAnnouncement() {
-  const [announcement, setAnnouncement] = useState('')
-  return [announcement, (outcome: RoomResolution) => setAnnouncement(outcome === 'done' ? 'Note completed.' : 'Note deleted.')] as const
-}
-
-/** The floating rail in the Chat view's right gutter, wide layouts only. */
-export function NotesRail({ run, room }: { run: RunRecord; room: RunRoom }) {
+function useStickyNotes(run: RunRecord, room: RunRoom) {
   const messages = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
   const byID = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages])
   const open = useMemo(() => openComments(messages), [messages])
   const rail = useRailOrder(open)
-  const [announcement, announce] = useNotesAnnouncement()
-  if (rail.ids.length === 0) return null
-
+  const [announcement, setAnnouncement] = useState('')
   const resolve = (note: RoomMessage, outcome: RoomResolution) => {
     rail.markExiting(note.id)
     rail.setError(note.id, undefined)
@@ -222,28 +215,35 @@ export function NotesRail({ run, room }: { run: RunRecord; room: RunRoom }) {
       if (!result.ok) rail.setError(note.id, { message: result.error ?? 'The server refused.', outcome })
     })
   }
+  const cards = rail.ids.map((id, index) => {
+    const note = byID.get(id)
+    if (!note) return null
+    return (
+      <StickyCard
+        key={id}
+        note={note}
+        index={index}
+        run={run}
+        error={rail.errors[id]}
+        onResolve={(outcome) => resolve(note, outcome)}
+        onDismissError={() => rail.setError(id, undefined)}
+        onSettled={(outcome) => {
+          rail.clearExiting(id)
+          setAnnouncement(outcome === 'done' ? 'Note completed.' : 'Note deleted.')
+        }}
+      />
+    )
+  })
+  return { count: rail.ids.length, cards, announcement }
+}
 
+/** The floating rail in the Chat view's right gutter, wide layouts only. */
+export function NotesRail({ run, room }: { run: RunRecord; room: RunRoom }) {
+  const { count, cards, announcement } = useStickyNotes(run, room)
+  if (count === 0) return null
   return (
     <ol aria-label="Notes" className="absolute top-5 right-5 z-10 flex w-[236px] flex-col gap-3">
-      {rail.ids.map((id, index) => {
-        const note = byID.get(id)
-        if (!note) return null
-        return (
-          <StickyCard
-            key={id}
-            note={note}
-            index={index}
-            run={run}
-            error={rail.errors[id]}
-            onResolve={(outcome) => resolve(note, outcome)}
-            onDismissError={() => rail.setError(id, undefined)}
-            onSettled={(outcome) => {
-              rail.clearExiting(id)
-              announce(outcome)
-            }}
-          />
-        )
-      })}
+      {cards}
       <span role="status" aria-live="polite" className="sr-only">{announcement}</span>
     </ol>
   )
@@ -251,51 +251,16 @@ export function NotesRail({ run, room }: { run: RunRecord; room: RunRoom }) {
 
 /** A collapsible strip above the composer, narrow layouts only. */
 export function NotesStrip({ run, room }: { run: RunRecord; room: RunRoom }) {
-  const messages = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
-  const byID = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages])
-  const open = useMemo(() => openComments(messages), [messages])
-  const rail = useRailOrder(open)
+  const { count, cards, announcement } = useStickyNotes(run, room)
   const [expanded, setExpanded] = useState(false)
-  const [announcement, announce] = useNotesAnnouncement()
-  if (rail.ids.length === 0) return null
-
-  const resolve = (note: RoomMessage, outcome: RoomResolution) => {
-    rail.markExiting(note.id)
-    rail.setError(note.id, undefined)
-    void room.resolve(note.id, outcome).then((result) => {
-      if (!result.ok) rail.setError(note.id, { message: result.error ?? 'The server refused.', outcome })
-    })
-  }
-
+  if (count === 0) return null
   return (
     <div className="flex flex-col gap-2">
       <Button variant="quiet" size="sm" className="self-start gap-1" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-        {rail.ids.length} {rail.ids.length === 1 ? 'note' : 'notes'}
+        {count} {count === 1 ? 'note' : 'notes'}
         <ChevronDown className={cn('transition-transform', expanded && 'rotate-180')} />
       </Button>
-      {expanded && (
-        <ol aria-label="Notes" className="flex flex-wrap gap-3">
-          {rail.ids.map((id, index) => {
-            const note = byID.get(id)
-            if (!note) return null
-            return (
-              <StickyCard
-                key={id}
-                note={note}
-                index={index}
-                run={run}
-                error={rail.errors[id]}
-                onResolve={(outcome) => resolve(note, outcome)}
-                onDismissError={() => rail.setError(id, undefined)}
-                onSettled={(outcome) => {
-                  rail.clearExiting(id)
-                  announce(outcome)
-                }}
-              />
-            )
-          })}
-        </ol>
-      )}
+      {expanded && <ol aria-label="Notes" className="flex flex-wrap gap-3">{cards}</ol>}
       <span role="status" aria-live="polite" className="sr-only">{announcement}</span>
     </div>
   )

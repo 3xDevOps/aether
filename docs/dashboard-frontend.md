@@ -3095,10 +3095,10 @@ off the last, and not scroll-linked to the rows above it. A check completes a
 note: red strokes scratch across its text, the text dims, then the card fades
 and collapses; an X deletes it the same way with no scratch. Both buttons show
 on hover, focus, or touch and need the note's author, the session's owner, or
-an admin; there is no undo. Below 1100px, or whenever Details narrows the pane
+an admin; there is no undo. Below 1248px, or whenever Details narrows the pane
 past it, the rail becomes a strip above the composer, "N notes ▾", that
 expands to the same cards, and Details keeps listing open notes as it always
-did. At 1100px and over, Details drops that list - the rail already shows the
+did. At 1248px and over, Details drops that list - the rail already shows the
 open ones - and keeps only the composer and a "Done" history of completed
 notes. `question` notes are never stickies; they keep their row in Details
 and **Reply**. A refused completion or deletion restores the card with the
@@ -4976,8 +4976,8 @@ whatever opened it. Sections (`details.tsx`):
   shows inline, with **Show older** and **Show all**.
 - **Notes**: a thread (`note-thread.tsx`) of teammates' `question` messages,
   human to human on the session, plus open `comment` messages too once the
-  Chat view's pane is narrower than the sticky rail needs (below 1100px, or
-  Details narrowed it that far); at 1100px and over, the rail already shows
+  Chat view's pane is narrower than the sticky rail needs (below 1248px, or
+  Details narrowed it that far); at 1248px and over, the rail already shows
   open comments, so the thread here holds only questions. Each note is
   a row: the author's `Avatar` ringed in their member colour, the name
   ("via ChatGPT" after it when a connector posted it, the name the message
