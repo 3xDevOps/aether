@@ -443,32 +443,30 @@ func TestConnectorAcrossServerRestart(t *testing.T) {
 		}
 		return nil
 	})
-	type answer struct {
-		sent time.Time
-		err  error
-	}
 	const calls = 4
-	answers := make(chan answer, calls)
+	answers := make(chan error, calls)
 	for range calls {
 		go func() {
-			sent := time.Now()
 			_, err := session.ListTools(t.Context(), nil)
-			answers <- answer{sent, err}
+			answers <- err
 		}()
 	}
-	// Each call reaches the edge well before the server enrolls again.
-	time.Sleep(200 * time.Millisecond)
-	select {
-	case a := <-answers:
-		t.Fatalf("tools/list answered while the server is down: %v", a.err)
-	default:
-	}
+	eventually(t, "every call held at the edge", func() error {
+		select {
+		case err := <-answers:
+			t.Fatalf("tools/list answered while the server is down: %v", err)
+		default:
+		}
+		if n := h.relay().Metrics().MCPWaiting; n != calls {
+			return fmt.Errorf("%d held", n)
+		}
+		return nil
+	})
 	restarted := time.Now()
 	s.start()
 	for range calls {
-		a := <-answers
-		if a.err != nil || !a.sent.Before(restarted) {
-			t.Fatalf("tools/list sent %s before the server started again: %v", restarted.Sub(a.sent), a.err)
+		if err := <-answers; err != nil {
+			t.Fatalf("tools/list sent while the server was down: %v", err)
 		}
 	}
 	t.Logf("calls sent while the server was down answered %s after it started again", time.Since(restarted).Round(time.Millisecond))

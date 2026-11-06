@@ -559,9 +559,12 @@ shortly` for a request that waited 15 seconds for one of them to finish or found
 16 others already waiting, and
 `413 request body is over the edge's limit of 1048576 bytes`. A request to a
 server whose control channel ended in the last 30 seconds, as a restarting
-server's does, waits for it to enroll again and goes to it then; `503 server is
-not connected to the edge` comes only once the 30 seconds pass, or at once for a
-request that finds 16 others waiting. On the
+server's does, waits for it to enroll again and goes to it then. So does a
+request still waiting for a connection when the server drops off; a request the
+server received is never sent twice. `503 server is not connected to the edge`
+comes only once the 30 seconds pass, or at once for a request that finds 16
+others waiting. A host that drops off the network without closing the channel
+is noticed only after 60 seconds of silence. On the
 universal URL it also answers `401` with `WWW-Authenticate` naming the metadata
 for a request without a token or whose token names no server, `400
 invalid_grant` for a code or refresh token that names none, and `501 server
@@ -922,8 +925,10 @@ The metrics listener serves Prometheus text at `/metrics` on loopback; scrape it
 on the edge host or over an SSH tunnel. Alert on `aether_edge_throttled` equal to
 1 (the egress budget is spent), on `aether_edge_servers{state="claimed"}` falling
 to near zero, and on a sustained rise in one
-`aether_edge_refusals_total{reason="..."}`. `aether_edge_egress_month_bytes` and
-`aether_edge_github_errors_total` are also exported.
+`aether_edge_refusals_total{reason="..."}`. `aether_edge_egress_month_bytes`,
+`aether_edge_github_errors_total` and `aether_edge_mcp_waiting` (connector
+requests waiting for a connection or for their server to return) are also
+exported.
 
 `/healthz` (`aether-edge healthcheck`) is liveness. `/readyz` (`aether-edge
 healthcheck --ready`) answers 200 when the database answers within a second, the

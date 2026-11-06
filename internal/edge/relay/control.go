@@ -46,7 +46,11 @@ type registration struct {
 	// message before it, and reg is in Relay.servers sooner, so send
 	// waits for it.
 	ready chan struct{}
-	// claimed, directory and hasDirectory are guarded by Relay.mu.
+	// unenrolled is set once the edge removes the server, before it
+	// tells the server.
+	unenrolled bool
+	// claimed, unenrolled, directory and hasDirectory are guarded by
+	// Relay.mu.
 	// directory is the latest directory an unclaimed server pushed: it
 	// pushes one as it accepts a claim, which may arrive before the edge
 	// recorded the claim.
@@ -269,7 +273,7 @@ func (r *Relay) unregister(reg *registration, cause error) {
 		return
 	}
 	delete(r.servers, reg.id)
-	if !reg.claimed || errors.Is(context.Cause(reg.ctx), errUnenrolled) {
+	if !returns(reg) {
 		return
 	}
 	for id, a := range r.away {
@@ -277,7 +281,35 @@ func (r *Relay) unregister(reg *registration, cause error) {
 			delete(r.away, id)
 		}
 	}
-	r.away[reg.id] = &absence{since: now, back: make(chan struct{})}
+	if r.away[reg.id] == nil {
+		r.away[reg.id] = &absence{since: now, back: make(chan struct{})}
+	}
+}
+
+// returns reports whether requests wait for the server of reg, which
+// ended, to enroll again: it was claimed and did not leave the edge.
+// Relay.mu guards claimed and unenrolled.
+func returns(reg *registration) bool {
+	return reg.claimed && !reg.unenrolled && !errors.Is(context.Cause(reg.ctx), errUnenrolled)
+}
+
+// awayLocked returns serverID's absence within returnWait of its start,
+// or nil. A claimed registration that ended but is not unregistered yet
+// starts one, which unregister keeps.
+func (r *Relay) awayLocked(serverID string, now time.Time) *absence {
+	a := r.away[serverID]
+	if a == nil {
+		reg := r.servers[serverID]
+		if reg == nil || reg.ctx.Err() == nil || !returns(reg) {
+			return nil
+		}
+		a = &absence{since: now, back: make(chan struct{})}
+		r.away[serverID] = a
+	}
+	if now.Sub(a.since) >= r.returnWait {
+		return nil
+	}
+	return a
 }
 
 // absence is a claimed server's time away from the edge, from when its

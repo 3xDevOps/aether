@@ -58,11 +58,10 @@ func (c *stubConnector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = io.WriteString(w, "second\n")
 	case strings.HasSuffix(r.URL.Path, "/hold"):
+		// Not even a stopping server answers it, so its connection is
+		// never free for another request.
 		c.held <- struct{}{}
-		select {
-		case <-c.release:
-		case <-r.Context().Done():
-		}
+		<-c.release
 	case strings.HasSuffix(r.URL.Path, "/authorize"):
 		http.Redirect(w, r, "https://chatgpt.example.test/callback?code=x", http.StatusFound)
 	default:
@@ -315,17 +314,85 @@ func TestMCPConnector(t *testing.T) {
 				refused("a request held past the return wait", resp, body)
 			})
 		}
-		select {
-		case <-held:
-			t.Fatal("a request to a server that just went offline was answered at once; want it held")
-		case <-time.After(200 * time.Millisecond):
-		}
+		eventually(t, "every request held", func() error {
+			select {
+			case <-held:
+				t.Fatal("a request to a server that just went offline was answered; want it held")
+			default:
+			}
+			if n := h.relay().Metrics().MCPWaiting; n != edgeproto.MaxHTTPWaitersPerServer {
+				return fmt.Errorf("%d held", n)
+			}
+			return nil
+		})
 		start := time.Now()
 		resp, body := mcpRequest(t, http.MethodPost, base, nil, nil)
 		refused("a request past the held ones", resp, body)
-		if waited := time.Since(start); waited > time.Second {
+		if waited := time.Since(start); waited > returnWait/2 {
 			t.Errorf("a request past the %d held ones waited %s; want it refused at once", edgeproto.MaxHTTPWaitersPerServer, waited)
 		}
 		wg.Wait()
 	})
+}
+
+// TestMCPRequestQueuedAcrossRestart has a request wait for one of its
+// server's 8 busy connections when the server stops. The edge refuses it
+// as not connected before it was written to the server, so it waits for
+// the server to return and reaches the restarted one.
+func TestMCPRequestQueuedAcrossRestart(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	conn := newStubConnector()
+	s := h.newMCPServer(edgeproto.PolicyApprovedDevices, conn)
+	h.claimServer(h.login(alice)[0], s)
+	base := h.relayURL + edgeproto.MCPPath(s.id)
+	t.Cleanup(func() { close(conn.release) })
+	for range edgeproto.MaxHTTPConnsPerServer {
+		go func() {
+			if resp, err := http.Post(base+"/hold", "text/plain", nil); err == nil {
+				_ = resp.Body.Close()
+			}
+		}()
+	}
+	for range edgeproto.MaxHTTPConnsPerServer {
+		<-conn.held
+	}
+	type answer struct {
+		status int
+		body   string
+		err    error
+	}
+	queued := make(chan answer, 1)
+	go func() {
+		resp, err := http.Post(base, "application/json", strings.NewReader("{}"))
+		if err != nil {
+			queued <- answer{err: err}
+			return
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		queued <- answer{resp.StatusCode, strings.TrimSpace(string(body)), err}
+	}()
+	eventually(t, "the request waiting for a connection", func() error {
+		if n := h.relay().Metrics().MCPWaiting; n != 1 {
+			return fmt.Errorf("%d waiting", n)
+		}
+		return nil
+	})
+	s.stop()
+	eventually(t, "the request waiting for the server", func() error {
+		select {
+		case a := <-queued:
+			t.Fatalf("the queued request ended while the server was down: %d %q %v", a.status, a.body, a.err)
+		default:
+		}
+		if h.relay().Online(s.id) || h.relay().Metrics().MCPWaiting != 1 {
+			return fmt.Errorf("server online %t, %d waiting", h.relay().Online(s.id), h.relay().Metrics().MCPWaiting)
+		}
+		return nil
+	})
+	s.start()
+	if a := <-queued; a.err != nil || a.status != http.StatusOK {
+		t.Fatalf("the queued request after the restart: %d %q %v, want 200", a.status, a.body, a.err)
+	}
 }

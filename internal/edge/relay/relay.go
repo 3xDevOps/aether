@@ -294,6 +294,9 @@ type Metrics struct {
 	ServersByProtocol map[int]int
 	// Draining is set once Shutdown started.
 	Draining bool
+	// MCPWaiting counts connector requests waiting for a connection of
+	// their server or for it to enroll again.
+	MCPWaiting int
 	// Splices counts attached connections.
 	Splices int
 	// BytesRelayed counts bytes sent to either side since the relay
@@ -322,6 +325,9 @@ func (r *Relay) Metrics() Metrics {
 		if c.spliced {
 			m.Splices++
 		}
+	}
+	for _, n := range r.httpWaiting {
+		m.MCPWaiting += n
 	}
 	r.mu.Unlock()
 	m.BytesRelayed = r.bytes.Load()
@@ -384,6 +390,13 @@ func (r *Relay) CloseServer(serverID string) {
 func (r *Relay) Unenroll(serverID string) {
 	r.mu.Lock()
 	reg := r.servers[serverID]
+	if reg != nil {
+		reg.unenrolled = true
+	}
+	if a := r.away[serverID]; a != nil {
+		close(a.back)
+		delete(r.away, serverID)
+	}
 	r.mu.Unlock()
 	if reg != nil {
 		if err := reg.send(edgeproto.Unenroll{}); err != nil {
