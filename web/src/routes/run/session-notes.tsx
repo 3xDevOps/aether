@@ -230,14 +230,19 @@ function useStickyNotes(run: RunRecord, room: RunRoom) {
   const open = useMemo(() => openComments(messages), [messages])
   const rail = useRailOrder(open)
   const [announcement, setAnnouncement] = useState('')
+  // The newest attempt per note: a refusal from a replaced attempt must not mark the newer one failed.
+  const attempts = useRef<Record<string, number>>({})
   const resolve = (note: RoomMessage, outcome: RoomResolution) => {
+    const attempt = (attempts.current[note.id] = (attempts.current[note.id] ?? 0) + 1)
+    const current = () => attempts.current[note.id] === attempt
     rail.markExiting(note.id)
     rail.setError(note.id, undefined)
     void room.resolve(note.id, outcome).then((result) => {
       if (!result.ok) {
+        if (!current()) return
         rail.setError(note.id, { message: result.error ?? 'The server refused.', outcome })
         // The deadline passed before the server answered; carry its real refusal to the card once it arrives.
-        void result.refused?.then((error) => rail.setError(note.id, { message: error, outcome }))
+        void result.refused?.then((error) => current() && rail.setError(note.id, { message: error, outcome }))
         return
       }
       setAnnouncement(outcome === 'done' ? 'Note completed.' : 'Note deleted.')

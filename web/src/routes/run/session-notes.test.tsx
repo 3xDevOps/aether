@@ -140,6 +140,25 @@ describe('sticky note rail', () => {
     expect(screen.queryByText('The server did not answer in 5 seconds.')).toBeNull()
   })
 
+  it('ignores a late refusal from an attempt the user has since replaced', async () => {
+    seed([note(1, { body: 'keep me' })])
+    let settleRefusal!: (reason: string) => void
+    const refused = new Promise<string>((resolve) => { settleRefusal = resolve })
+    const resolve = vi.fn()
+      .mockResolvedValueOnce({ ok: false as const, error: 'The server did not answer in 5 seconds.', refused })
+      .mockReturnValueOnce(new Promise(() => {}))
+    render(<NotesRail run={record} room={fakeRoom(resolve)} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete note' }))
+    await waitFor(() => expect(screen.getByText('The server did not answer in 5 seconds.')).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(resolve).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      settleRefusal('The run no longer exists.')
+      await refused
+    })
+    expect(screen.queryByText('The run no longer exists.')).toBeNull()
+  })
+
   it('keeps the card visible when a refusal lands during the scratch', async () => {
     let releaseScratch!: () => void
     const scratchDone = new Promise<void>((resolve) => { releaseScratch = resolve })
