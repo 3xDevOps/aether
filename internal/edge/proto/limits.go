@@ -30,6 +30,12 @@ const (
 	// longer than AttachDeadline, so a connection being opened for it
 	// attaches or fails first.
 	HTTPConnWait = 15 * time.Second
+	// HTTPReturnWait is how long after a claimed server's control channel
+	// ended the edge holds a request to it, among the server's
+	// MaxHTTPWaitersPerServer, for the server to enroll again, as it does
+	// after a restart. Connector clients give up on a server that fails
+	// several requests in a row, so a restart must not fail them.
+	HTTPReturnWait = 30 * time.Second
 	// HTTPIdleTimeout is how long the edge keeps an idle KindHTTP
 	// connection for the next request. A server keeps one open longer,
 	// so it is the edge that closes an idle one, never a request in

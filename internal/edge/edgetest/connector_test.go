@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -398,4 +399,76 @@ func TestConnectorAtEdgeProtocol1(t *testing.T) {
 			t.Errorf("the server enrolled again: %+v", m)
 		}
 	}
+}
+
+// TestConnectorAcrossServerRestart connects at the universal URL with
+// go-sdk's MCP and OAuth client, as Claude and ChatGPT do, then restarts
+// the server. A tools/list sent while the server is down is held at the
+// edge and answered by the restarted server: a client sees no failure, so
+// it has no reason to give up on the connector.
+func TestConnectorAcrossServerRestart(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	client := newConnectorClient(t)
+	policy := edgeproto.PolicyApprovedDevices
+	s := h.newConnectorServer(policy, client, sshd.Services{})
+	al := h.login(alice)[0]
+	h.claimServer(al, s)
+	code := call[protocol.ConnectorCodeResult](t, h.control(al, s), protocol.MethodConnectorCode, struct{}{})
+	browser, err := h.signIn(alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{
+		ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{URL: client.id},
+		RedirectURL:                    client.redirect,
+		AuthorizationCodeFetcher: func(_ context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
+			res, _ := universalConsent(t, browser, args.URL, "", s.memberOf(t, alice).DisplayName, code.Code, policy)
+			return res, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := h.relayURL + edgeproto.PathUniversalMCP
+	session := connectMCP(t, &mcp.StreamableClientTransport{Endpoint: base, OAuthHandler: handler})
+	if _, err := session.ListTools(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	s.stop()
+	eventually(t, "server offline", func() error {
+		if h.relay().Online(s.id) {
+			return fmt.Errorf("server %s still online", s.id)
+		}
+		return nil
+	})
+	const calls = 4
+	answers := make(chan error, calls)
+	for range calls {
+		go func() {
+			_, err := session.ListTools(t.Context(), nil)
+			answers <- err
+		}()
+	}
+	eventually(t, "every call held at the edge", func() error {
+		select {
+		case err := <-answers:
+			t.Fatalf("tools/list answered while the server is down: %v", err)
+		default:
+		}
+		if n := h.relay().Metrics().MCPWaiting; n != calls {
+			return fmt.Errorf("%d held", n)
+		}
+		return nil
+	})
+	restarted := time.Now()
+	s.start()
+	for range calls {
+		if err := <-answers; err != nil {
+			t.Fatalf("tools/list sent while the server was down: %v", err)
+		}
+	}
+	t.Logf("calls sent while the server was down answered %s after it started again", time.Since(restarted).Round(time.Millisecond))
+	callTool(t, session, "aether_list_workspaces", nil)
 }

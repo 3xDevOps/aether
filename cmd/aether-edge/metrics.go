@@ -208,6 +208,9 @@ aether_edge_servers{state="unclaimed"} %d
 # HELP aether_edge_splices Relayed connections with both ends attached.
 # TYPE aether_edge_splices gauge
 aether_edge_splices %d
+# HELP aether_edge_mcp_waiting Connector requests waiting for a connection of their server or for it to enroll again.
+# TYPE aether_edge_mcp_waiting gauge
+aether_edge_mcp_waiting %d
 # HELP aether_edge_relayed_bytes_total Bytes relayed since the edge started.
 # TYPE aether_edge_relayed_bytes_total counter
 aether_edge_relayed_bytes_total %d
@@ -225,7 +228,7 @@ aether_edge_draining %d
 aether_edge_github_errors_total %d
 # HELP aether_edge_servers_by_protocol Servers holding a control channel by negotiated protocol version.
 # TYPE aether_edge_servers_by_protocol gauge
-`, m.Servers, m.UnclaimedServers, m.Splices, m.BytesRelayed, m.EgressThisMonth, throttled, draining, githubErrors)
+`, m.Servers, m.UnclaimedServers, m.Splices, m.MCPWaiting, m.BytesRelayed, m.EgressThisMonth, throttled, draining, githubErrors)
 	for _, v := range slices.Sorted(maps.Keys(m.ServersByProtocol)) {
 		_, _ = fmt.Fprintf(w, "aether_edge_servers_by_protocol{version=\"%d\"} %d\n", v, m.ServersByProtocol[v])
 	}

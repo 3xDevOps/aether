@@ -6,6 +6,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -89,6 +90,8 @@ type Config struct {
 	// DirectoryInterval overrides the least time between two stores of
 	// one server's directory. Zero keeps the default.
 	DirectoryInterval time.Duration
+	// ReturnWait overrides edgeproto.HTTPReturnWait. Zero keeps it.
+	ReturnWait time.Duration
 }
 
 const (
@@ -144,6 +147,7 @@ type Relay struct {
 	// Durations, rates and limits that tests shorten.
 	attachDeadline     time.Duration
 	httpConnWait       time.Duration
+	returnWait         time.Duration
 	unclaimedTTL       time.Duration
 	pingInterval       time.Duration
 	idleTimeout        time.Duration
@@ -157,8 +161,12 @@ type Relay struct {
 	servers map[string]*registration
 	conns   map[string]*relayConn
 	// httpWaiting counts, per server id, the requests waiting for one of
-	// its http connections.
+	// its http connections or for it to enroll again.
 	httpWaiting map[string]int
+	// away holds, per claimed server whose control channel ended within
+	// returnWait, when it ended and a channel closed when the server
+	// enrolls again.
+	away map[string]*absence
 	// claims holds, by connection id, the claim connections a server may
 	// still report as claimed.
 	claims map[string]claimGrant
@@ -215,6 +223,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		flushed:            make(chan struct{}),
 		attachDeadline:     edgeproto.AttachDeadline,
 		httpConnWait:       edgeproto.HTTPConnWait,
+		returnWait:         cmp.Or(cfg.ReturnWait, edgeproto.HTTPReturnWait),
 		unclaimedTTL:       edgeproto.UnclaimedTTL,
 		pingInterval:       edgeproto.PingInterval,
 		idleTimeout:        edgeproto.ControlIdleTimeout,
@@ -225,6 +234,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		servers:            map[string]*registration{},
 		conns:              map[string]*relayConn{},
 		httpWaiting:        map[string]int{},
+		away:               map[string]*absence{},
 		claims:             map[string]claimGrant{},
 		directories:        map[string]*directoryWrite{},
 		addrConns:          map[netip.Prefix]int{},
@@ -284,6 +294,9 @@ type Metrics struct {
 	ServersByProtocol map[int]int
 	// Draining is set once Shutdown started.
 	Draining bool
+	// MCPWaiting counts connector requests waiting for a connection of
+	// their server or for it to enroll again.
+	MCPWaiting int
 	// Splices counts attached connections.
 	Splices int
 	// BytesRelayed counts bytes sent to either side since the relay
@@ -312,6 +325,9 @@ func (r *Relay) Metrics() Metrics {
 		if c.spliced {
 			m.Splices++
 		}
+	}
+	for _, n := range r.httpWaiting {
+		m.MCPWaiting += n
 	}
 	r.mu.Unlock()
 	m.BytesRelayed = r.bytes.Load()
@@ -374,6 +390,13 @@ func (r *Relay) CloseServer(serverID string) {
 func (r *Relay) Unenroll(serverID string) {
 	r.mu.Lock()
 	reg := r.servers[serverID]
+	if reg != nil {
+		reg.unenrolled = true
+	}
+	if a := r.away[serverID]; a != nil {
+		close(a.back)
+		delete(r.away, serverID)
+	}
 	r.mu.Unlock()
 	if reg != nil {
 		if err := reg.send(edgeproto.Unenroll{}); err != nil {

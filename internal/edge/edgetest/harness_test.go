@@ -47,6 +47,10 @@ import (
 // push, a reconnect, a connection closing.
 const waitTimeout = 20 * time.Second
 
+// returnWait is how long the edge holds a request to a stopped server, in
+// place of edgeproto.HTTPReturnWait.
+const returnWait = 10 * time.Second
+
 // policies are the two access policies a test runs under when it holds
 // for both.
 var policies = []edgeproto.AccessPolicy{edgeproto.PolicyAccount, edgeproto.PolicyApprovedDevices}
@@ -144,6 +148,7 @@ func (h *harness) startEdge() {
 	}
 	relayCfg := svc.RelayConfig(0)
 	relayCfg.DirectoryInterval = 200 * time.Millisecond
+	relayCfg.ReturnWait = returnWait
 	rl, err := relay.New(context.Background(), relayCfg)
 	if err != nil {
 		t.Fatal(err)
