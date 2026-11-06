@@ -200,6 +200,10 @@ func newShareDockerEnv(t *testing.T, claude []string) (*testEnv, *runtime.Docker
 	if err = e.db.CreateMember(t.Context(), owner); err != nil {
 		t.Fatal(err)
 	}
+	// A launch checks the share again before it starts.
+	if _, err = e.db.ShareAccount(t.Context(), owner.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
 	return e, docker, cli, owner
 }
 

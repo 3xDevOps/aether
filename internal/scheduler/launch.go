@@ -492,6 +492,13 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err != nil {
 		return err
 	}
+	// A share revoked since admission is refused here, before any agent
+	// starts with the owner's login; leaveIfRevoked covers a revoke after.
+	if run.AccountMember() != run.HomeMember() {
+		if err = s.resolveRunAccount(ctx, run); err != nil {
+			return fmt.Errorf("check the account share: %w", err)
+		}
+	}
 	s.updateHarness(run, plan, profile)
 	// Recorded before coordination is provisioned, because the co-author
 	// list written there already leaves this address out: the agent's own
@@ -526,7 +533,35 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	}
 	run.Status = domain.RunRunning
 	s.startSupervision(entry)
+	s.leaveIfRevoked(ctx, entry, run)
 	return nil
+}
+
+// leaveIfRevoked moves a run that just started on another member's account
+// off it when the share was revoked while the run provisioned or moved: that
+// revoke found no container it could move. A revoke committed after this
+// check finds the run running and moves it itself. The check outlives the
+// request that started the run.
+func (s *Scheduler) leaveIfRevoked(ctx context.Context, entry *supervised, run *domain.Run) {
+	if run.AccountMember() == run.HomeMember() {
+		return
+	}
+	revoked, err := s.accountRevoked(context.WithoutCancel(ctx), run)
+	if err != nil {
+		slog.Warn("scheduler: check the new session's account share", "run", run.ID, "error", err)
+		return
+	}
+	if !revoked {
+		return
+	}
+	s.goMove(func() {
+		select {
+		case <-s.recoveryReady:
+		case <-s.superCtx.Done():
+			return
+		}
+		s.leaveRevokedAccount(entry)
+	})
 }
 
 func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, profile harness.Profile) (*EnvironmentPlan, error) {

@@ -268,6 +268,9 @@ func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	if err := e.db.CreateMember(t.Context(), account); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := e.db.ShareAccount(t.Context(), account.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
 	run, err := e.sched.Launch(
 		t.Context(), e.ws.ID, e.member.ID, account.ID,
 		"save image", "fake", domain.LaunchTUI,
@@ -1148,6 +1151,9 @@ func TestSharedAccountLaunchUsesLauncherHomeAndKeepsActorIdentity(t *testing.T) 
 		Color: "#3cb44b", Role: domain.RoleCollaborator,
 	}
 	if err := e.db.CreateMember(t.Context(), account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.ShareAccount(t.Context(), account.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	sub := e.subscribe(t)

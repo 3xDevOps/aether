@@ -84,8 +84,13 @@ func writeHomeFiles(t *testing.T, home string, rels ...string) {
 	}
 }
 
+// launch launches harnessName for Ada on Grace's account, shared first as
+// admission requires: the launch checks the share again before it starts.
 func (e *shareEnv) launch(t *testing.T, harnessName string) (*domain.Run, error) {
 	t.Helper()
+	if _, err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
 	return e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "use "+harnessName, harnessName, domain.LaunchTUI)
 }
 
@@ -687,6 +692,9 @@ func TestSharedLaunchRecipientsShareOneMapping(t *testing.T) {
 			t.Parallel()
 			e := newShareEnv(t, withImageUsers(map[string]string{launcherImage: "1000:1000", recipientImage: tc.second}))
 			lin := e.addRecipient(t)
+			if _, err := e.db.ShareAccount(t.Context(), e.owner.ID, lin.ID); err != nil {
+				t.Fatal(err)
+			}
 			writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
 			if _, err := e.launch(t, "claude"); err != nil {
 				t.Fatalf("first recipient Launch: %v", err)

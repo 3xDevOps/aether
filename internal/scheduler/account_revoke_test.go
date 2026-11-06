@@ -1,11 +1,14 @@
 package scheduler
 
 import (
+	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -32,6 +35,23 @@ func (e *shareEnv) revoke(t *testing.T) {
 	}
 	e.sched.recoveryReadyOnce.Do(func() { close(e.sched.recoveryReady) })
 	e.sched.RevokeAccount(e.owner.ID, e.member.ID)
+}
+
+// revokeNow revokes Grace's share with Ada and runs the revoke's pass over
+// every run before it returns, so a run it cannot claim yet is left to
+// whatever checks the share later.
+func (e *shareEnv) revokeNow(t *testing.T) {
+	t.Helper()
+	if _, err := e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
+		t.Error(err)
+	}
+	e.sched.recoveryReadyOnce.Do(func() { close(e.sched.recoveryReady) })
+	e.sched.mu.Lock()
+	entries := slices.Collect(maps.Values(e.sched.runs))
+	e.sched.mu.Unlock()
+	for _, entry := range entries {
+		e.sched.leaveRevokedAccount(entry)
+	}
 }
 
 func (e *shareEnv) assertMovedToAda(t *testing.T, rt *acpRuntime, run domain.RunID, notes *roomNotes, note int) {
@@ -230,4 +250,71 @@ func TestSweepMovesARunOnARevokedAccount(t *testing.T) {
 	e.sched.leaveRevokedAccounts(t.Context(), nil)
 
 	e.assertMovedToAda(t, rt, run.ID, notes, 0)
+}
+
+// A revoke that commits while Ada's launch on Grace's account is creating
+// its container finds no container to move, and the sweep that would catch
+// it later runs only on a started scheduler. The launch itself moves the run
+// off Grace's account once it is running.
+func TestRevokeDuringLaunchMovesTheRunOnceItRuns(t *testing.T) {
+	t.Parallel()
+	e, rt, notes := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	var once sync.Once
+	e.rt.createHook = func() { once.Do(func() { e.revokeNow(t) }) }
+
+	run := e.launchOnGrace(t)
+
+	e.assertMovedToAda(t, rt, run.ID, notes, 0)
+}
+
+// A revoke that commits while Ada's launch on Grace's account prepares its
+// checkout refuses the launch with the revoke before any container exists.
+func TestRevokeBeforeTheContainerRefusesTheLaunch(t *testing.T) {
+	t.Parallel()
+	e, _, _ := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	e.git.createHook = func(domain.RunID) {
+		if _, err := e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
+			t.Error(err)
+		}
+	}
+
+	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "revoked", "claude", domain.LaunchACP)
+	if err == nil || !strings.Contains(err.Error(), "check the account share") {
+		t.Fatalf("Launch = %v, want a refusal from the share check", err)
+	}
+	if n := e.containerCount(); n != 0 {
+		t.Fatalf("%d containers, want none started with Grace's login", n)
+	}
+}
+
+// A revoke that commits while a usage move takes Ada's run onto Grace's
+// account finds the run mid-move and leaves it; the move itself then takes
+// the run off Grace's account again.
+func TestRevokeDuringAMoveOntoTheAccountLeavesIt(t *testing.T) {
+	t.Parallel()
+	e, _, _ := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	var once sync.Once
+	e.rt.createHook = func() { once.Do(func() { e.revokeNow(t) }) }
+
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+
+	waitFor(t, "the run off Grace's revoked account", func() bool {
+		row, err := e.db.GetRun(t.Context(), run.ID)
+		if err != nil {
+			return false
+		}
+		if row.Status == domain.RunFailed {
+			return strings.HasPrefix(row.Reason, revokedReason)
+		}
+		segments, err := e.db.ListRunAccountSegments(t.Context(), run.ID)
+		return err == nil && len(segments) == 3 && segments[2].Reason == revokedSegment
+	})
 }
