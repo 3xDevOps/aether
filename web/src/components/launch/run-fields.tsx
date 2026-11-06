@@ -131,6 +131,7 @@ export function RunFields({
   disabled = false,
   autoFocus = false,
   shared = false,
+  account,
 }: {
   choice: ReturnType<typeof useAgentChoice>
   task: string
@@ -140,11 +141,14 @@ export function RunFields({
   disabled?: boolean
   autoFocus?: boolean
   shared?: boolean
+  /** The account picker, above the agents it decides. */
+  account?: React.ReactNode
 }) {
   const { agents, harness, mode, noAgents } = choice
   return (
     <>
       <TaskField mode={mode} task={task} onTask={onTask} autoFocus={autoFocus} shared={shared} />
+      {account}
       {agents === null ? (
         <p className="text-ui-sm text-muted">Loading agents…</p>
       ) : (

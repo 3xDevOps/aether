@@ -118,7 +118,7 @@ export function RefusalNotes({ agents, accountName }: { agents: AgentInfo[]; acc
       )}
       {ownOnly.length > 0 && (
         <p>
-          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account, marked (you), under Account.
+          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account under Account.
         </p>
       )}
       {unavailable.map((agent) => (

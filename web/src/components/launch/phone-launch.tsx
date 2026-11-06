@@ -27,6 +27,7 @@ export function PhoneLaunchSheet({
   workspace,
   onWorkspace,
   lastSession,
+  accountName,
   onAddWorkspace,
   options,
   notes,
@@ -49,6 +50,8 @@ export function PhoneLaunchSheet({
   onWorkspace: (id: string) => void
   /** What still matches your newest session, which the sheet starts from. */
   lastSession: 'repository and agent' | 'repository' | 'none'
+  /** The shared account the launch runs on; absent for the caller's own. */
+  accountName?: string
   onAddWorkspace: () => void
   /** Permission, mode, model, limits and the rest of the desktop form. */
   options: ReactNode
@@ -112,7 +115,11 @@ export function PhoneLaunchSheet({
           <Collapsible>
             <CollapsibleTrigger>
               <span className="font-medium">More options</span>
-              {harness && <span className="min-w-0 truncate text-muted">· {modeLabel(mode)}</span>}
+              {(harness || accountName) && (
+                <span className="min-w-0 truncate text-muted">
+                  {[harness && modeLabel(mode), accountName && `${accountName}'s account`].filter(Boolean).map((part) => `· ${part}`).join(' ')}
+                </span>
+              )}
             </CollapsibleTrigger>
             <CollapsibleContent className="flex flex-col gap-4 pt-2">
               {options}

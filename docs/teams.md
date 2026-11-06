@@ -444,8 +444,13 @@ launch. A member's **agent account** is that vendor login and the subscription
 behind it. One member can let a collaborator launch sessions on theirs.
 
 The owner shares under **Profile → Agent account sharing → Share account**. The
-recipient selects **New session → Options → Account** and picks `<name> (shared)`
-From the CLI:
+recipient picks the owner under **New session → Account**. Each row there is
+marked **Your own** or **Shared** and says whether the chosen agent can launch
+on that account: its fullest usage window as `<n>% used`, **Ready**, **Not
+logged in**, **Not installed**, **Your account only** or **Unavailable**. Only
+your own account and accounts shared with you are listed, and the server
+refuses any other with `permission denied: member <id> has not shared their
+account with you`. From the CLI:
 
 ```sh
 aether account share <member-id>      # owner
@@ -512,7 +517,7 @@ cannot be read (an API-key login, signed out, or a vendor read over 3 seconds).
 
 Candidates are your own account and every account shared with you whose owner is
 logged in to the agent. The one with the most usage left wins. In the launch
-dialog, **Options → Fall back to another account** turns it off and lists
+dialog, **Fallback → Fall back to another account** turns it off and lists
 **Fallback accounts**, which you untick or reorder. From the CLI:
 
 ```sh
@@ -567,7 +572,7 @@ The dashboard's launch panel opens on them, the right half of **New session**
 launches the last agent, mode, model and permission tier at once, and the
 panel saves the agent, mode and model of each launch, and the permission tier
 as soon as you change it. It saves the account and fallback only when you select
-**Save as my default** under **Options**. **Settings → Launch** shows them,
+**Save as my default** under **Fallback**. **Settings → Launch** shows them,
 with each invalid choice and its reason, and changes or clears them.
 
 `launch.defaults.get` returns your choices with a `revision`, which is 0 when

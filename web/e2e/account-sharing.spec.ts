@@ -61,9 +61,7 @@ test('a member shares their agent account and a teammate launches on it', async 
       return dialog
     }
     const chooseAliceAccount = async (dialog: Locator) => {
-      await dialog.getByRole('button', { name: /^Options/ }).click()
-      await dialog.getByRole('combobox', { name: 'Account', exact: true }).click()
-      await bobPage.getByRole('option', { name: `${aliceName} (shared)` }).click()
+      await dialog.getByRole('radiogroup', { name: 'Account' }).getByRole('radio', { name: new RegExp(`^${aliceName}`) }).click()
     }
 
     // Before the share, Bob has only his own account, so there is no
@@ -71,7 +69,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await bobPage.goto(bob.url)
     let dialog = await openLaunch()
     await expect(dialog.getByRole('radio', { name: /^custom/ })).toBeVisible()
-    await expect(dialog.getByRole('button', { name: /^Options/ })).toHaveCount(0)
+    await expect(dialog.getByRole('radiogroup', { name: 'Account' })).toHaveCount(0)
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
 

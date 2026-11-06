@@ -5,7 +5,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { limitsText, type LimitsDraft, parseLimits, RunLimitsFields } from '@/components/launch/run-limits'
 import type { Member, RunLimits, Workspace } from '@/lib/types'
 
@@ -91,53 +90,31 @@ function FallbackList({
   )
 }
 
-export function AccountOptions({
-  label,
+/** Where a launch moves when its account's usage runs out, and `save`, which keeps the account and fallback. */
+export function FallbackOptions({
   accounts,
   ownAccountID,
   account,
-  onChange,
   fallback,
   onFallback,
   save,
 }: {
-  label: string
   accounts: Member[]
   ownAccountID: string
   account: string
-  onChange: (account: string) => void
   fallback: Fallback
   onFallback: (fallback: Fallback) => void
   save?: ReactNode
 }) {
   const accountName = (member: Member) => `${member.display_name}${member.id === ownAccountID ? ' (you)' : ' (shared)'}`
-  const chosen = accounts.find((member) => member.id === account)
-  const shared = account !== '' && account !== ownAccountID
+  const params = fallbackParams(fallback, accounts, account)
   return (
-    <Collapsible defaultOpen={shared}>
+    <Collapsible>
       <CollapsibleTrigger>
-        <span className="font-medium">Options</span>
-        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, account).no_fallback && ' · Fallback off'}</span>}
+        <span className="font-medium">Fallback</span>
+        <span className="min-w-0 truncate text-muted">· {params.no_fallback ? 'Off' : params.fallback_account_member_ids ? 'Ordered' : 'Automatic'}</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="flex flex-col gap-1 pt-2 pl-5">
-        <Label htmlFor="launch-account">{label}</Label>
-        <Select value={account} onValueChange={onChange}>
-          <SelectTrigger id="launch-account">
-            <SelectValue placeholder="Choose an account" />
-          </SelectTrigger>
-          <SelectContent>
-            {accounts.map((member) => (
-              <SelectItem key={member.id} value={member.id}>
-                {accountName(member)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-ui-sm text-muted">
-          {shared
-            ? `Uses ${chosen?.display_name ?? account}'s agent login and vendor quota in your own environment, with your GitHub login. You remain its owner and actor.`
-            : 'A teammate who shares their agent account appears here.'}
-        </p>
+      <CollapsibleContent className="flex flex-col gap-1 pl-5">
         <FallbackList accounts={accounts} account={account} skip={account} accountName={accountName} fallback={fallback} onChange={onFallback} />
         {save}
       </CollapsibleContent>
