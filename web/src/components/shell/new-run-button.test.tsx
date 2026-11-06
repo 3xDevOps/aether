@@ -41,7 +41,7 @@ it('relaunches on the saved permission tier', async () => {
   vi.mocked(api.launchDefaultsGet).mockResolvedValue(saved('acp', { permission: 'isolated' }))
   render(<SplitNewRun blocked={null} shortcut="n" onOpen={() => {}} />)
   fireEvent.click(await quick())
-  await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', model: 'opus', permission: 'isolated' }))
+  await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', model: 'opus', permission: 'isolated', children: 'on' }))
 })
 
 it('is one plain New run button until a launch has been saved', async () => {
@@ -61,7 +61,7 @@ it('opens the panel from the left half and launches the saved choices, without a
 
   fireEvent.click(await quick())
   await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
-  expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', model: 'opus' })
+  expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', model: 'opus', children: 'on' })
   await waitFor(() => expect(useStore.getState().route.name).toBe('run'))
   expect(onOpen).toHaveBeenCalledOnce()
 })
@@ -94,7 +94,7 @@ it('sends the saved account and fallback with the launch', async () => {
   render(<SplitNewRun blocked={null} shortcut="n" onOpen={() => {}} />)
   fireEvent.click(await quick())
   await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
-  expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).toMatchObject({ mode: 'tui', no_fallback: true })
+  expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).toMatchObject({ mode: 'tui', no_fallback: true, children: 'on' })
 })
 
 it('shows the server refusal as a toast and stays put', async () => {
@@ -112,4 +112,12 @@ it('does nothing on either half while launching is blocked', async () => {
   fireEvent.click(await quick())
   expect(onOpen).not.toHaveBeenCalled()
   expect(api.runLaunch).not.toHaveBeenCalled()
+})
+
+it('leaves subsessions to the server when it cannot set them per session', async () => {
+  useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'launch.defaults.get', 'account.list'], ws: [] } })
+  render(<SplitNewRun blocked={null} shortcut="n" onOpen={() => {}} />)
+  fireEvent.click(await quick())
+  await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
+  expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).not.toHaveProperty('children')
 })
