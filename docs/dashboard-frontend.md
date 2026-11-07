@@ -2804,7 +2804,9 @@ fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
 each account with a checkbox, "You" or "Shared", the account list's status
 ("Skipped: <status>" where a launch would be refused, which usage fallback
-skips too, and "Sign in when used" for "Sign in after launch"),
+skips too, and "No saved login" for "Sign in after launch", whose tooltip
+says a launch may still fall back there, last, but a running session moves
+there only with an API key),
 and **Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "If
 <owner>'s usage is 95% or more at launch, or the vendor reports the limit
 mid-session, the session moves to the ticked account with the most usage

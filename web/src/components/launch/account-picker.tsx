@@ -68,9 +68,13 @@ export function readiness(status: AccountStatus | undefined, harness: string, ow
   return { text: 'Ready', className: 'text-text', title: usageError }
 }
 
+const noLoginFallback = 'A launch may still fall back here, last, and the agent asks you to sign in. A running session moves here only if an API key signs the agent in.'
+
 export function asFallback(ready: Readiness | null): Readiness | null {
   if (ready?.refused) return { ...ready, text: `Skipped: ${ready.text.charAt(0).toLowerCase()}${ready.text.slice(1)}`, className: 'text-muted' }
-  if (ready?.signIn) return { ...ready, text: 'Sign in when used' }
+  // Launch-time fallback may still pick it, last; a running session's move
+  // (chooseMove) skips it unless an API key signs the agent in.
+  if (ready?.signIn) return { ...ready, text: 'No saved login', title: noLoginFallback }
   return ready
 }
 

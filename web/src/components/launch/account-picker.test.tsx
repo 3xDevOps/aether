@@ -36,7 +36,7 @@ describe('readiness', () => {
   it('says on a fallback row which accounts usage fallback skips', () => {
     expect(asFallback(readiness({ agents: [claude({ login_missing: true })] }, 'claude', 'Bob', now))?.text).toBe("Skipped: needs Bob's login")
     expect(asFallback(readiness({ agents: [claude({ unavailable: hardLink })] }, 'claude', 'Bob', now))).toMatchObject({ text: 'Skipped: unavailable', className: 'text-muted', title: hardLink })
-    expect(asFallback(readiness({ agents: [claude({ login_found: false })] }, 'claude', undefined, now))?.text).toBe('Sign in when used')
+    expect(asFallback(readiness({ agents: [claude({ login_found: false })] }, 'claude', undefined, now))).toMatchObject({ text: 'No saved login', title: expect.stringContaining('A running session moves here only if an API key signs the agent in.') })
     expect(asFallback(readiness({ agents: [claude()] }, 'claude', undefined, now))?.text).toBe('Ready')
   })
 
