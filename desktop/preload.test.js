@@ -69,7 +69,7 @@ test('Cmd zooms the window on macOS and Ctrl does not', () => {
   assert.equal(press('Equal', { metaKey: true }), true)
   assert.equal(press('Equal', { ctrlKey: true }), false)
   assert.equal(level, 0.5)
-  assert.equal(press('Numpad0', { metaKey: true }), true)
+  assert.equal(press('Numpad0', { metaKey: true, key: '0' }), true)
   assert.equal(level, 0)
 })
 
@@ -82,4 +82,7 @@ test('leaves keys the page claimed or that mean something else', () => {
   assert.equal(press('Equal'), false)
   assert.equal(press('KeyA', { ctrlKey: true }), false)
   assert.equal(level, 0)
+  level = 1
+  assert.equal(press('Numpad0', { ctrlKey: true, key: 'Insert' }), false)
+  assert.equal(level, 1)
 })

@@ -14,7 +14,8 @@ const zoomSteps = { Equal: 0.5, NumpadAdd: 0.5, Minus: -0.5, NumpadSubtract: -0.
 window.addEventListener('keydown', (event) => {
   const command = process.platform === 'darwin' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
   if (event.defaultPrevented || !command || event.altKey) return
-  if (event.code === 'Digit0' || event.code === 'Numpad0') {
+  // With Num Lock off the keypad 0 is Insert, and Ctrl+Insert is copy.
+  if (event.code === 'Digit0' || (event.code === 'Numpad0' && event.key === '0')) {
     if (event.shiftKey) return
     webFrame.setZoomLevel(0)
   } else if (event.code in zoomSteps) {
