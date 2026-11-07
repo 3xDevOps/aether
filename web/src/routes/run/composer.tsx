@@ -22,6 +22,7 @@ import { AttachmentChips } from '@/routes/run/composer-attachments'
 import { AttachButton, DropOverlay, dropRoom } from '@/routes/run/composer-dropzone'
 import { hasImages, useComposerImages, type ComposerImageState } from '@/routes/run/composer-images'
 import { ContextWindow } from '@/routes/run/context-window'
+import { usePromptHistory } from '@/routes/run/composer-history'
 import { commandSuggestions, currentChoice, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
 import { TemplateInsert } from '@/routes/run/composer-templates'
@@ -420,6 +421,10 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const files = useFileSuggestions(run.workspace_id, run.id, trigger?.kind === '@' ? trigger.query : null)
   const suggestions: Suggestion[] = trigger?.kind === '/' ? commandSuggestions(state?.commands ?? [], trigger.query) : trigger?.kind === '@' ? files : []
   const current = Math.min(active, Math.max(0, suggestions.length - 1))
+  const recall = usePromptHistory(run.id, body, (next) => {
+    setBody(next)
+    setDismissed(true)
+  })
 
   const pick = (item: Suggestion) => {
     if (composerDraft(run.id).busy) return
@@ -620,7 +625,11 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
         menu={<SuggestionList id={listID} items={suggestions} active={current} onPick={pick} />}
         onKeyDown={(event) => {
           if (busy) return
-          if (suggestions.length === 0 || event.nativeEvent.isComposing) return
+          if (suggestions.length === 0) {
+            recall(event)
+            return
+          }
+          if (event.nativeEvent.isComposing) return
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault()
             setActive((current + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length)
