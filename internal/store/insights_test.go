@@ -127,6 +127,7 @@ func TestInsightsOutcomes(t *testing.T) {
 		}
 	}
 	mergedPR("r1", 1)
+	exec(`UPDATE runs SET review = 'accepted' WHERE id = 'r8'`)
 
 	query := func(tz *time.Location, from, to string, f func(*InsightsQuery)) *Insights {
 		t.Helper()
@@ -197,7 +198,7 @@ func TestInsightsOutcomes(t *testing.T) {
 	check("ada runs", everyone.Members[0].Runs, []InsightsOutcome{o(1, 0, 0), o(1, 1, 0), o(0, 0, 1)})
 	check("bob runs", everyone.Members[1].Runs, []InsightsOutcome{o(0, 0, 0), o(0, 0, 0), o(1, 0, 1)})
 	check("everyone totals vs days", sum(all.runs), o(everyone.Totals.Completed+everyone.Totals.Merged, everyone.Totals.Failed, everyone.Totals.Abandoned+everyone.Totals.Interrupted))
-	check("everyone success", everyone.Success, InsightsSuccess{RunsSucceeded: 2, RunsFinished: 6})
+	check("everyone success", everyone.Success, InsightsSuccess{RunsSucceeded: 3, RunsFinished: 6})
 	check("everyone cost by agent", everyone.Cost.ByAgent, []*InsightsCostAgent{
 		{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 3, InputTokens: 110, OutputTokens: 55},
 		{Harness: "codex", UnmeteredRuns: 1},
@@ -215,7 +216,7 @@ func TestInsightsOutcomes(t *testing.T) {
 	all, byMember, _ = days(scoped)
 	check("workspace run days", all.runs, []InsightsOutcome{o(0, 0, 0), o(0, 0, 0), o(1, 0, 1)})
 	check("workspace stacked run days", byMember.runs, all.runs)
-	check("workspace success", scoped.Success, InsightsSuccess{RunsFinished: 2})
+	check("workspace success", scoped.Success, InsightsSuccess{RunsSucceeded: 1, RunsFinished: 2})
 	check("workspace cost by agent", scoped.Cost.ByAgent, []*InsightsCostAgent{
 		{Harness: "claude", UnmeteredRuns: 1}, {Harness: "codex", UnmeteredRuns: 1},
 	})
