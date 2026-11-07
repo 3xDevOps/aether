@@ -108,18 +108,19 @@ function ImageViewer({ url, name, gallery, zoomed, refocus, onStep }: {
         )}
       >
         {zoomable ? (
-          <button
+          <Button
             ref={zoom}
             type="button"
+            variant="quiet"
             aria-label={actual ? 'Fit image to window' : 'Show image at actual size'}
-            className={cn('outline-none', actual ? 'm-auto cursor-zoom-out' : 'size-full cursor-zoom-in')}
+            className={cn('rounded-none outline-none', actual ? 'm-auto cursor-zoom-out' : 'size-full cursor-zoom-in')}
             onClick={(event) => {
               // Enter and Space report no pointer position; zoom on the middle then.
               toggle(event.detail === 0 ? undefined : pointOn(event.currentTarget.querySelector('img'), event.clientX, event.clientY))
             }}
           >
             {image}
-          </button>
+          </Button>
         ) : (
           <div className="size-full">{image}</div>
         )}
@@ -166,7 +167,7 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
         <>
           {!loaded && <span role="status" className="absolute p-3 text-ui-sm text-muted">Loading {name.toLowerCase()}…</span>}
           {url && (
-            <button type="button" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-zoom-in', focusRingInset)} onClick={onOpen}>
+            <Button type="button" variant="quiet" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-zoom-in', focusRingInset)} onClick={onOpen}>
               <img
                 src={url}
                 alt={name}
@@ -177,7 +178,7 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
                   setError('The downloaded image could not be decoded.')
                 }}
               />
-            </button>
+            </Button>
           )}
         </>
       )}
