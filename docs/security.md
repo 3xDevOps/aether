@@ -244,6 +244,47 @@ they have no installation of the agent in their own `~/.local/bin`, they also
 get yours, read-only, with your whole `~/.local/bin` on their `PATH` after
 their own entries.
 
+Claude Code caches the account it is signed in to as `oauthAccount` in
+`~/.claude.json`, and `claude auth status` reports that cache, not the owner of
+the login. A `claude` session on your account therefore gets its own copy of
+their `~/.claude.json` without `oauthAccount`, their `primaryApiKey`, the API
+keys they approved, or the account caches Claude Code clears when it signs in
+to another account. The copy is written to
+`<data-dir>/scheduler/account-config/<session-id>/.claude.json`, which no
+container can replace, and mounted at `~/.claude/.claude.json` with
+`CLAUDE_CONFIG_DIR=~/.claude`, so Claude Code reads it instead. Claude Code
+then fetches your profile with your login. When they still have a legacy
+`~/.claude/.config.json`, which Claude Code reads before either file, the copy
+is made from it instead, and the session sees an empty read-only file there,
+which Claude Code ignores.
+
+Their own `~/.claude.json` is never mounted there, so their other sessions
+rewriting it cannot replace the copy. Every member's containers other than
+Isolated sessions mount their own `~/.claude/.claude.json`, and an existing
+`~/.claude/.config.json`, in place like their login, so a CLI there that saves
+to those paths cannot detach the session's files either. Every member's home
+therefore has an empty `~/.claude/.claude.json`, visible under **Files**. A
+`~/.claude.json` or `~/.claude/.config.json` of theirs that is a symlink, has
+another hard link, is not a JSON object, or is over 64 MiB refuses the launch
+with the read error.
+
+What the session changes in its copy lasts until its container is recreated: a
+move to another account recreates it, while reopening a retained session keeps
+it. Claude Code writes backups of the copy, which name your account once it
+has fetched your profile, to their `~/.claude/backups/`, and the `cp -f`
+restore command it prints for a damaged config can point at one of them.
+
+A session on your account still takes from their home and environment
+everything but these files and the login file. A `claude` API key that
+reaches it overrides your login: `apiKeyHelper`, or `ANTHROPIC_API_KEY` or
+`ANTHROPIC_AUTH_TOKEN` under `env`, in their `~/.claude/settings.json`; the
+same variables set as workspace variables; and `ANTHROPIC_API_KEY` that the
+server passes through to every `claude` session. With `ANTHROPIC_API_KEY`
+set, `claude auth status` reports `"authMethod": "api_key"`, and because the
+copy leaves out the keys they approved, the interactive session first asks
+`Detected a custom API key in your environment`; answering yes uses the key
+instead of your login.
+
 - Root in their session can copy your login file. The refresh token in it
   outlives a revoke and keeps working until you log out and in again.
 - Their session can end or replace your login. Measured with Claude Code

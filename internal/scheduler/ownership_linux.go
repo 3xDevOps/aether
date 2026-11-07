@@ -79,6 +79,12 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, hom
 		if m.ReadOnly || m.Subpath != "" {
 			continue
 		}
+		if info, err := os.Lstat(m.HostPath); err == nil && info.Mode().IsRegular() {
+			if err := os.Lchown(m.HostPath, uid, gid); err != nil {
+				return fmt.Errorf("scheduler: chown %s: %w", m.HostPath, err)
+			}
+			continue
+		}
 		if err := chownTree(m.HostPath, uid, gid, nil); err != nil {
 			return err
 		}

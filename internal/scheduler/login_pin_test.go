@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	claudeLogin = ".claude/.credentials.json"
-	geminiLogin = ".gemini/oauth_creds.json"
+	claudeLogin  = ".claude/.credentials.json"
+	geminiLogin  = ".gemini/oauth_creds.json"
+	claudeConfig = ".claude/.claude.json"
 )
 
 // newSharerEnv is a shareEnv where the launcher (Ada) has shared their own
@@ -53,9 +54,10 @@ func (e *shareEnv) pin(login string) runtime.Mount {
 	return runtime.Mount{HostPath: e.adaHome, Subpath: login, ContainerPath: "/root/" + login}
 }
 
-// pins are the sharer's own logins that their CLIs replace by rename.
+// pins are the sharer's own logins that their CLIs replace by rename, and
+// the path a shared session's account config copy is mounted at.
 func (e *shareEnv) pins() []runtime.Mount {
-	return []runtime.Mount{e.pin(claudeLogin), e.pin(geminiLogin)}
+	return []runtime.Mount{e.pin(claudeLogin), e.pin(claudeConfig), e.pin(geminiLogin)}
 }
 
 func subpathMounts(spec runtime.Spec) []runtime.Mount {
@@ -188,7 +190,13 @@ func TestSharerOnAnotherAccountPrefersForeignLogin(t *testing.T) {
 		t.Fatalf("claude Launch: %v", err)
 	}
 	foreign := runtime.Mount{HostPath: e.ownerHome, Subpath: claudeLogin, ContainerPath: "/root/" + claudeLogin}
-	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", foreign, e.pin(geminiLogin))
+	spec := e.rt.byName(string(run.ID)).spec
+	config := runtime.Mount{HostPath: filepath.Join(e.sched.accountConfigRoot(), string(run.ID), ".claude.json"), ContainerPath: "/root/.claude/.claude.json"}
+	if !slices.Contains(spec.Mounts, config) {
+		t.Fatalf("claude mounts = %+v, want the session's config copy %+v", spec.Mounts, config)
+	}
+	spec.Mounts = slices.DeleteFunc(slices.Clone(spec.Mounts), func(m runtime.Mount) bool { return m == config })
+	e.assertLoginMounts(t, spec, "runs", foreign, e.pin(geminiLogin))
 
 	run, err = e.launch(t, "codex")
 	if err != nil {
@@ -224,12 +232,16 @@ func TestSharerUnshareableLoginIsNotPinned(t *testing.T) {
 			t.Parallel()
 			e := newSharerEnv(t)
 			plant(t, e.adaHome)
-			gemini := []runtime.Mount{e.pin(geminiLogin)}
-			if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, gemini) {
-				t.Fatalf("run subpath mounts = %+v, want only %+v", got, gemini)
+			// The account config path shares ~/.claude with the login.
+			want := []runtime.Mount{e.pin(claudeConfig), e.pin(geminiLogin)}
+			if name == "symlinked directory" {
+				want = want[1:]
 			}
-			if got := subpathMounts(e.terminal(t)); !slices.Equal(got, gemini) {
-				t.Fatalf("terminal subpath mounts = %+v, want only %+v", got, gemini)
+			if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, want) {
+				t.Fatalf("run subpath mounts = %+v, want only %+v", got, want)
+			}
+			if got := subpathMounts(e.terminal(t)); !slices.Equal(got, want) {
+				t.Fatalf("terminal subpath mounts = %+v, want only %+v", got, want)
 			}
 		})
 	}
@@ -341,7 +353,7 @@ func TestSharerHardLinkedLoginIsRefused(t *testing.T) {
 	if got, refusal, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginUnavailable || !strings.Contains(refusal, "has another hard link and cannot be shared") {
 		t.Fatalf("CheckSharedLaunch on a hard-linked login = %v, %q, %v; want SharedLoginUnavailable with the hard-link refusal", got, refusal, err)
 	}
-	if got, gemini := subpathMounts(e.ownRun(t)), []runtime.Mount{e.pin(geminiLogin)}; !slices.Equal(got, gemini) {
-		t.Fatalf("sharer run subpath mounts = %+v, want only %+v", got, gemini)
+	if got, want := subpathMounts(e.ownRun(t)), []runtime.Mount{e.pin(claudeConfig), e.pin(geminiLogin)}; !slices.Equal(got, want) {
+		t.Fatalf("sharer run subpath mounts = %+v, want only %+v", got, want)
 	}
 }

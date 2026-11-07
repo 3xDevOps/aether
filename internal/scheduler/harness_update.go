@@ -113,6 +113,12 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 		}
 	}
 	env := maps.Clone(plan.Env)
+	// The updater pins nothing, so a CLI saving its config at a shared
+	// session's account config path would replace that mountpoint and
+	// detach the session's copy.
+	if ac := profile.AccountConfig; ac != nil {
+		delete(env, ac.Env)
+	}
 	if s.cfg.Homes != nil {
 		// Provisioning holds this member's cache lock. Publish the key
 		// before starting the detached worker; running state protects
