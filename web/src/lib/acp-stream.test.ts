@@ -52,6 +52,23 @@ describe('the session stream client', () => {
     stream.close()
   })
 
+  it('holds the ack until every replayed item has arrived, then applies them together', () => {
+    const onAck = vi.fn()
+    const { h, frames, states } = handlers({ onAck })
+    connectSessionStream('run_1', h)
+    const session = ScriptedSession.last().open({ seq: 3, replay: 3 }).send({ reset: true, epoch: 0 }, { seq: 1, item: item('turn_start', 1) })
+    session.send({ type: 'control', has_control: false }, { seq: 2, item: item('message', 1) })
+    expect(onAck).not.toHaveBeenCalled()
+    expect(frames).toEqual([])
+    expect(states).toEqual(['connecting'])
+
+    session.items(item('turn_end', 1))
+    expect(onAck).toHaveBeenCalledOnce()
+    expect(states).toEqual(['connecting', 'live'])
+    expect(h.onControl).toHaveBeenCalledOnce()
+    expect(frames.map((f) => f.seq ?? 'reset')).toEqual(['reset', 1, 2, 3])
+  })
+
   it('passes a reset frame through so the store drops what it holds', () => {
     const { h, frames } = handlers()
     connectSessionStream('run_1', h)

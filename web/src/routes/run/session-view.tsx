@@ -5,9 +5,11 @@ import { VList, type VListHandle } from 'virtua'
 import type { Tone } from '@/components/ui/status-dot'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
 import { useRefuseStrayFileDrops } from '@/lib/file-drag'
+import { useDelayed } from '@/lib/hooks'
 import { memberName } from '@/lib/member-name'
 import { backgroundReason, liveStateOf, runLabel, stateTone } from '@/lib/status'
 import { RunFileLinks } from '@/routes/files/path-link'
@@ -36,6 +38,7 @@ import { loadOlderItems } from '@/store/session-stream'
 import { agentState, extrasSig, noAgents, turnExtras, withAgentRows, type AgentIndex } from '@/store/subagents'
 
 const emptyRoom: RoomMessage[] = []
+const noRows: SessionRow[] = []
 const emptyIDs: string[] = []
 const bottomSlack = 24
 const historyViewports = 3
@@ -201,6 +204,28 @@ function SessionWelcome({ run, agentName }: { run: RunRecord; agentName: string 
   )
 }
 
+const replyLines = ['w-full', 'w-11/12', 'w-4/5', 'w-2/3']
+
+// On canvas a skeleton shows mostly through its sweep, which reduced motion stops.
+const bar = 'motion-reduce:bg-hover-chrome'
+
+function LoadingChat() {
+  return (
+    <div role="status" className={cn(sessionColumn, 'flex min-h-0 flex-1 flex-col justify-end gap-10 overflow-hidden pb-4 [scrollbar-gutter:stable]')}>
+      <span className="sr-only">Loading the conversation…</span>
+      {[0, 1, 2].map((exchange) => (
+        <div key={exchange} className="flex shrink-0 flex-col gap-2">
+          <Skeleton className={cn(bar, 'ml-auto h-14 w-3/5 rounded-composer')} />
+          <Skeleton className={cn(bar, 'mb-2 ml-auto h-3 w-24')} />
+          <div className="flex flex-col gap-1.5 pl-6">
+            {replyLines.map((width, line) => <Skeleton key={line} className={cn(bar, 'h-4', width)} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function SessionView({ run, agent, agentName, room, nav, active, textarea, focusComposer, onComposing, shells, switchable, notesWide }: {
   run: RunRecord
   agent: AgentTerminal
@@ -220,6 +245,12 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   const enhanced = run.acp === true
   const showMessages = useStore((s) => !s.hiddenAgentMessages[run.id])
   const { rows, session, missingRoomImages } = useRows(run, enhanced, showMessages)
+  // Until the stream's first replay lands there is nothing to place the people's messages against.
+  const firstLoad = enhanced && !run.switching && !session?.seq && !session?.state && (!session || session.stream === 'connecting')
+  const loaded = useRef(false)
+  if (!firstLoad) loaded.current = true
+  const loading = firstLoad && !loaded.current
+  const skeleton = useDelayed(loading)
   const expanded = useStore((s) => s.expandedRows[run.id])
   const log = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]))
   const roomError = useStore((s) => s.roomError[run.id])
@@ -245,7 +276,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     return agent !== undefined && agentState(agent) === 'running'
   }), [agents])
   const [focused, setFocused] = useState<string | null>(null)
-  const flat = useFlatRows(rows, expanded, following, focused, policy)
+  const flat = useFlatRows(loading ? noRows : rows, expanded, following, focused, policy)
   const arrivals = useArrivals(flat, expanded)
   const lastInput = useRef(-Infinity)
   const viewport = useRef<HTMLDivElement>(null)
@@ -291,29 +322,39 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   const markPointer = (event: React.PointerEvent) => {
     if (!onControl(event.target)) markInput()
   }
-  const follow = useRef(() => {})
-  follow.current = () => {
-    if (active && pinned.current && count > 0) list.current?.scrollToIndex(count - 1, { align: 'end' })
+  const follow = useRef<(grown?: boolean) => void>(() => {})
+  follow.current = (grown = false) => {
+    if (!active || !pinned.current || count === 0) return
+    if (grown) list.current?.scrollTo(list.current.scrollSize)
+    else list.current?.scrollToIndex(count - 1, { align: 'end' })
   }
   useLayoutEffect(() => follow.current(), [active, count])
   const reveal = useStore((s) => s.sessionReveal[run.id])
   useLayoutEffect(() => {
-    if (!active || !reveal) return
+    if (!active || !reveal || loading) return
     useStore.getState().revealSessionRow(run.id, undefined)
     const index = flat.findIndex((item) => item.key === reveal || (item.kind === 'row' && item.row.kind === 'user' && item.row.itemID === reveal))
     if (index === -1) return
     pin(false)
     list.current?.scrollToIndex(index + Number(older), { align: 'center' })
-  }, [active, reveal, flat, older, run.id])
+  }, [active, reveal, loading, flat, older, run.id])
   useEffect(() => {
     const node = viewport.current
     if (!node) return
+    // virtua sizes this to its rows, so it grows while a streamed reply grows its row without adding one.
+    const content = node.querySelector('[role="log"]')?.firstElementChild
     let frame = 0
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => follow.current())
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === content) follow.current(true)
+        else {
+          cancelAnimationFrame(frame)
+          frame = requestAnimationFrame(() => follow.current())
+        }
+      }
     })
     observer.observe(node)
+    if (content) observer.observe(content)
     return () => {
       observer.disconnect()
       cancelAnimationFrame(frame)
@@ -333,17 +374,20 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     hadPending.current = pendingCount > 0
   }, [pendingCount, active, textarea])
 
-  const loadOlder = () => {
-    pin(false)
+  const fetchOlder = () => {
     if (enhanced && session?.more) void loadOlderItems(useStore, api, run.id)
     if (olderRoom) void room.loadOlder()
+  }
+  const loadOlder = () => {
+    pin(false)
+    fetchOlder()
   }
   const loadingOlder = roomLoading || (enhanced && Boolean(session?.olderLoading))
   const olderError = enhanced ? session?.olderError : undefined
   const loadEarlier = () => {
     const handle = list.current
     if (!active || !enhanced || !older || loadingOlder || olderError || roomError || !handle || handle.viewportSize === 0) return
-    if (handle.scrollOffset <= historyViewports * handle.viewportSize && (!pinned.current || handle.scrollSize <= handle.viewportSize + bottomSlack)) loadOlder()
+    if (handle.scrollOffset <= historyViewports * handle.viewportSize && (!pinned.current || handle.scrollSize <= handle.viewportSize + bottomSlack)) fetchOlder()
   }
   useEffect(() => {
     const frame = requestAnimationFrame(loadEarlier)
@@ -398,14 +442,14 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
             )}
           </div>
         )}
-        {enhanced && count === 0 && <SessionWelcome run={run} agentName={agentName} />}
+        {loading ? skeleton && <LoadingChat /> : enhanced && count === 0 && <SessionWelcome run={run} agentName={agentName} />}
         <VList
           ref={list}
           role="log"
           aria-live="off"
           aria-label="Chat"
           className="min-h-0 flex-1"
-          style={enhanced && count === 0 ? { display: 'none' } : undefined}
+          style={loading || (enhanced && count === 0) ? { display: 'none' } : undefined}
           data={older ? [null, ...flat] : flat}
           shift={shift}
           keepMounted={focusedIndex >= 0 ? [focusedIndex + Number(older)] : undefined}

@@ -167,6 +167,36 @@ describe('the Enhanced session view', () => {
     expect(within(log).getByText('Exit code 0')).toBeDefined()
   })
 
+  it('stands a skeleton in for the conversation until its replay lands', async () => {
+    open()
+    act(() => useStore.getState().upsertRoomMessage(roomMessage({ kind: 'steer_request', body: 'Round the totals' })))
+    expect(await screen.findByText('Loading the conversation…')).toBeDefined()
+    expect(screen.queryByRole('region', { name: 'Session overview' })).toBeNull()
+    expect(screen.queryByText('Round the totals')).toBeNull()
+
+    acpSocket().open({}, [item('turn_start', 1), say(1, 'user', 'Round the totals'), say(1, 'assistant', 'Rounded.')])
+    const log = await screen.findByRole('log', { name: 'Chat' })
+    expect(await within(log).findByText('Rounded.')).toBeDefined()
+    expect(screen.queryByText('Loading the conversation…')).toBeNull()
+  })
+
+  it('shows the overview, not a skeleton, while the session switches mode', async () => {
+    open({ switching: 'tui' })
+    expect(await screen.findByRole('region', { name: 'Session overview' })).toBeDefined()
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+    expect(screen.queryByText('Loading the conversation…')).toBeNull()
+  })
+
+  it('keeps the overview while an empty session reconnects', async () => {
+    open()
+    acpSocket().open({ state: undefined })
+    expect(await screen.findByRole('region', { name: 'Session overview' })).toBeDefined()
+    act(() => useStore.getState().acpStream('run_1', 'connecting'))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+    expect(screen.getByRole('region', { name: 'Session overview' })).toBeDefined()
+    expect(screen.queryByText('Loading the conversation…')).toBeNull()
+  })
+
   it('carries the live turn in its block header and shuts the block when the turn ends', async () => {
     open()
     const session = acpSocket().open({ has_control: true, control_generation: 4 }, [
