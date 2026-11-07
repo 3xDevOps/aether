@@ -1,3 +1,4 @@
+import { useRef, type CSSProperties } from 'react'
 import { ControlMatrix } from '@/components/control-matrix'
 import { Shield, Users } from '@/components/icons'
 import { connectionLabel } from '@/components/shell/connection'
@@ -8,6 +9,7 @@ import { memberName, resolveMember } from '@/lib/member-name'
 import { allowed } from '@/lib/permissions'
 import type { RoomController } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { dotFadeShape, useDotFade } from '@/routes/run/dot-fade'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { useStore } from '@/store'
 import { useSelf } from '@/store/hooks'
@@ -55,6 +57,8 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   onPeople: () => void
 }) {
   const self = useSelf()
+  const strip = useRef<HTMLDivElement>(null)
+  const fadesDots = useDotFade(strip)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const summary = usePresenceSummary(run, agent)
@@ -73,7 +77,13 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   const staleWatchers = stream !== 'live' || Boolean(presenceError)
 
   return (
-    <div role="group" aria-label="Multiplayer controls" className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1">
+    <div
+      ref={strip}
+      data-dot-fade={fadesDots || undefined}
+      style={fadesDots ? dotFadeShape as CSSProperties : undefined}
+      role="group"
+      aria-label="Multiplayer controls"
+      className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1">
       <ControlMatrix
         appearance={agent.localControl ? 'active'
           : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}
