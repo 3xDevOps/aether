@@ -19,7 +19,7 @@ chart. Below them:
 | Section | What it shows |
 | --- | --- |
 | Sessions completed | How many ended, plus how many failed or were abandoned |
-| Success rate | Share of finished sessions that merged a pull request |
+| Success rate | Share of finished sessions that merged a pull request or were marked complete |
 | Total tokens used | Tokens across all sessions, and the agent that used the most |
 | Finished work | Your sessions that ended in the last 7 days, newest first, up to 50 |
 | Last 26 weeks | A heatmap of how many sessions were active each day |
@@ -53,7 +53,7 @@ A session you stop yourself is abandoned.
 
 ## Success rate
 
-A session succeeds when its status is `merged` or a pull request it opened is merged.
+A session succeeds when its status is `merged`, a pull request it opened is merged, or its owner chose **Mark complete**.
 
 Only pull requests opened through Aether count. A pull request an agent opens
 with `gh` directly is not counted. A merge is counted only after Aether has

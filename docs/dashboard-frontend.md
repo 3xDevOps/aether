@@ -5349,8 +5349,8 @@ section loads, fails and retries on its own.
   - *Sessions completed*: `outcomes.runs.done`, with the failed and
     abandoned counts below. Every number is from `outcomes`, work
     that finished in the window, so the box and the chart agree.
-  - *Success rate*: sessions that ended with a merged pull request
-    over all that finished, `success.runs`, rounded
+  - *Success rate*: sessions that ended with a merged pull request or
+    were marked complete, over all that finished, `success.runs`, rounded
     down in integers so 100% means exactly all succeeded; a dash when none finished. Each
     fraction is written out below.
   - *Total tokens used*: `cost.total_tokens` as "100K tokens", with the

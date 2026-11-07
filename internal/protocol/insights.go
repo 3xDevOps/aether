@@ -155,7 +155,7 @@ type InsightsMemberOutcome struct {
 }
 
 // InsightsSuccess counts what finished in the range and how much of it ended
-// with a merged pull request.
+// with a merged pull request or was marked complete.
 type InsightsSuccess struct {
 	Runs InsightsSuccessCount `json:"runs"`
 }
