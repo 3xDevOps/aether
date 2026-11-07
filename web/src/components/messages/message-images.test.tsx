@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MessageAttachments } from '@/components/messages/message-images'
 import { api } from '@/lib/api'
 
@@ -49,7 +49,10 @@ test('an image larger than the window switches between fit and actual size, from
   const toggle = within(dialog).getByRole('button', { name: 'Actual size' })
   expect(toggle.getAttribute('aria-pressed')).toBe('false')
   fireEvent.click(frameOf(dialog))
+  expect(toggle.getAttribute('aria-pressed')).toBe('false')
+  fireEvent.click(within(dialog).getByRole('img'))
   expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  expect(frameOf(dialog).getAttribute('aria-label')).toBe('Image 1 of 2, zoomed to 100%')
   expect(width(dialog)).toBe('2400px')
   expect(within(dialog).getByText('100%')).toBeDefined()
   fireEvent.click(toggle)
@@ -105,7 +108,7 @@ test('an image that already fits offers no zoom', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [320, 180])
   expect(within(dialog).queryByRole('button', { name: 'Actual size' })).toBeNull()
-  fireEvent.click(frameOf(dialog))
+  fireEvent.click(within(dialog).getByRole('img'))
   expect(width(dialog)).toBe('')
 })
 
@@ -196,4 +199,37 @@ test('stepping keeps keyboard focus in the viewer, on the next image\'s frame', 
   fireEvent.keyDown(frame, { key: 'ArrowRight' })
   const next = screen.getByRole('dialog', { name: 'Image 2 of 3' })
   await waitFor(() => expect(document.activeElement).toBe(frameOf(next)))
+})
+
+test('Control with the zero key fits again on any layout, by its key code', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  fireEvent.keyDown(dialog, { key: '=', ctrlKey: true })
+  fireEvent.keyDown(dialog, { key: 'à', code: 'Digit0', ctrlKey: true })
+  expect(width(dialog)).toBe('')
+})
+
+test('a Safari gesture during a two-finger touch pinch does not zoom a second time', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  const frame = frameOf(dialog)
+  const fingers = (gap: number) => [{ clientX: 400 - gap / 2, clientY: 300 }, { clientX: 400 + gap / 2, clientY: 300 }]
+  fireEvent.touchStart(frame, { touches: fingers(100), changedTouches: fingers(100) })
+  frame.dispatchEvent(Object.assign(new Event('gesturestart', { cancelable: true }), { scale: 1 }))
+  fireEvent.touchMove(frame, { touches: fingers(200), changedTouches: fingers(200) })
+  act(() => {
+    frame.dispatchEvent(Object.assign(new Event('gesturechange', { cancelable: true }), { scale: 2, clientX: 400, clientY: 300 }))
+  })
+  expect(zoomOf(dialog)).toBeCloseTo(2)
+})
+
+test('a Safari trackpad gesture zooms by its scale', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  const frame = frameOf(dialog)
+  frame.dispatchEvent(Object.assign(new Event('gesturestart', { cancelable: true }), { scale: 1 }))
+  const change = Object.assign(new Event('gesturechange', { cancelable: true }), { scale: 1.5, clientX: 400, clientY: 300 })
+  frame.dispatchEvent(change)
+  expect(change.defaultPrevented).toBe(true)
+  await waitFor(() => expect(zoomOf(dialog)).toBeCloseTo(1.5))
 })

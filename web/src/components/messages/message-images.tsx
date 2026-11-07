@@ -37,6 +37,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
 }) {
   // Pixels drawn per natural pixel; undefined while the image is fitted to the frame.
   const [scale, setScale] = useState<number>()
+  const pending = useRef<number>(undefined)
   const [natural, setNatural] = useState<{ width: number; height: number }>()
   const [zoomable, setZoomable] = useState(false)
   const frame = useRef<HTMLDivElement>(null)
@@ -60,22 +61,27 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
     const box = el.getBoundingClientRect()
     const x = clientX ?? box.left + el.clientWidth / 2
     const y = clientY ?? box.top + el.clientHeight / 2
-    const point = pointOnImage(picture, x, y, scale === undefined)
+    // Measure on what is drawn: several wheel events can land before the next render.
+    const point = pointOnImage(picture, x, y, picture.classList.contains('object-scale-down'))
     anchor.current = { ...point, left: x - box.left, top: y - box.top }
-    const fit = fitScale()
-    setScale(next === undefined || next <= fit * 1.001 ? undefined : Math.min(maxScale, next))
+    pending.current = next === undefined || next <= fitScale() * 1.001 ? undefined : Math.min(maxScale, next)
+    setScale(pending.current)
   }
-  const zoomBy = (factor: number, clientX?: number, clientY?: number) => zoomTo((scale ?? fitScale()) * factor, clientX, clientY)
+  const zoomBy = (factor: number, clientX?: number, clientY?: number) => zoomTo((pending.current ?? fitScale()) * factor, clientX, clientY)
   const zoomRef = useRef(zoomBy)
   zoomRef.current = zoomBy
 
   useLayoutEffect(() => {
     zoomed.current = scale !== undefined
     const el = frame.current
-    if (!el) return
+    const picture = img.current
+    if (!el || !picture) return
+    // Scroll by how far the anchored point sits from where it belongs; the picture may be centred, not at 0.
     const { x, y, left, top } = anchor.current
-    el.scrollLeft = x * el.scrollWidth - (left < 0 ? el.clientWidth / 2 : left)
-    el.scrollTop = y * el.scrollHeight - (top < 0 ? el.clientHeight / 2 : top)
+    const box = el.getBoundingClientRect()
+    const drawn = picture.getBoundingClientRect()
+    el.scrollLeft += drawn.left + x * drawn.width - (box.left + (left < 0 ? el.clientWidth / 2 : left))
+    el.scrollTop += drawn.top + y * drawn.height - (box.top + (top < 0 ? el.clientHeight / 2 : top))
   }, [scale, zoomed])
 
   // A trackpad pinch arrives as a ctrl wheel (Safari: gesture events); React's wheel listener is passive and cannot
@@ -98,6 +104,8 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
     const change = (event: Event) => {
       const { scale: next, clientX, clientY } = event as Gesture
       event.preventDefault()
+      // iOS Safari reports a touch pinch as touches and gestures both; the touch handlers zoom it.
+      if (pinch.current) return
       zoomRef.current(next / gesture, clientX, clientY)
       gesture = next
     }
@@ -121,7 +129,10 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
       ref={img}
       src={url}
       alt={name}
-      className={scale === undefined ? 'size-full object-scale-down' : 'max-w-none shrink-0'}
+      className={cn(
+        scale === undefined ? 'size-full object-scale-down' : 'max-w-none shrink-0 cursor-zoom-out',
+        scale === undefined && zoomable && 'cursor-zoom-in',
+      )}
       style={scale === undefined || !natural ? undefined : { width: natural.width * scale, height: natural.height * scale }}
       onLoad={(event) => {
         const { naturalWidth: width, naturalHeight: height } = event.currentTarget
@@ -134,7 +145,11 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
 
   const onKey = (event: React.KeyboardEvent) => {
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return
-    const by = event.key === '=' || event.key === '+' ? keyStep : event.key === '-' ? 1 / keyStep : event.key === '0' ? 0 : undefined
+    const { key, code } = event
+    const by = key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd' ? keyStep
+      : key === '-' || code === 'Minus' || code === 'NumpadSubtract' ? 1 / keyStep
+      : key === '0' || code === 'Digit0' || code === 'Numpad0' ? 0
+      : undefined
     if (by === undefined) return
     event.preventDefault()
     if (by === 0) zoomTo(undefined)
@@ -193,13 +208,14 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
         ref={frame}
         tabIndex={0}
         role="group"
-        aria-label={`${name}, scroll to move around it`}
+        aria-label={`${name}, ${scale === undefined ? 'fitted' : `zoomed to ${Math.round(scale * 100)}%`}`}
         className={cn(
           'flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control border border-seam bg-canvas outline-none',
           'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus',
-          scale !== undefined ? 'cursor-zoom-out' : zoomable && 'cursor-zoom-in',
         )}
         onClick={(event) => {
+          // Only the picture: a click on the frame's own scrollbar must not reset the zoom.
+          if (event.target !== img.current) return
           if (scale !== undefined) zoomTo(undefined)
           else if (zoomable) zoomTo(1, event.clientX, event.clientY)
         }}
