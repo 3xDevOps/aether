@@ -23,16 +23,18 @@ function pointOn(img: HTMLImageElement | null, clientX: number, clientY: number)
   }
 }
 
-function ImageViewer({ url, name, gallery, zoomed, onStep }: {
+function ImageViewer({ url, name, gallery, zoomed, refocus, onStep }: {
   url: string
   name: string
   gallery: boolean
   zoomed: React.RefObject<boolean>
+  refocus: boolean
   onStep: (by: 1 | -1) => void
 }) {
   const [actual, setActual] = useState(false)
   const [zoomable, setZoomable] = useState(false)
   const frame = useRef<HTMLDivElement>(null)
+  const zoom = useRef<HTMLButtonElement>(null)
   const focus = useRef({ x: 0.5, y: 0.5 })
   const swipe = useRef<{ x: number; y: number }>(undefined)
 
@@ -43,6 +45,11 @@ function ImageViewer({ url, name, gallery, zoomed, onStep }: {
     el.scrollLeft = focus.current.x * el.scrollWidth - el.clientWidth / 2
     el.scrollTop = focus.current.y * el.scrollHeight - el.clientHeight / 2
   }, [actual, zoomed])
+
+  // Stepping remounts the viewer, which removes the control that had focus.
+  useEffect(() => {
+    if (refocus) zoom.current?.focus()
+  }, [refocus, zoomable])
 
   const toggle = (point = { x: 0.5, y: 0.5 }) => {
     focus.current = point
@@ -102,6 +109,7 @@ function ImageViewer({ url, name, gallery, zoomed, onStep }: {
       >
         {zoomable ? (
           <button
+            ref={zoom}
             type="button"
             aria-label={actual ? 'Fit image to window' : 'Show image at actual size'}
             className={cn('outline-none', actual ? 'm-auto cursor-zoom-out' : 'size-full cursor-zoom-in')}
@@ -185,7 +193,9 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
   const list = useRef<HTMLDivElement>(null)
   const lastShown = useRef<string>(undefined)
   const zoomed = useRef(false)
-  const show = (id: string) => {
+  const refocus = useRef(false)
+  const show = (id: string, keepFocus = false) => {
+    refocus.current = keepFocus
     lastShown.current = id
     setOpenID(id)
   }
@@ -197,7 +207,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
   const step = (by: 1 | -1) => {
     const next = ids.slice(by > 0 ? shown + 1 : 0, by > 0 ? undefined : shown).filter((id) => urls[id])
     const id = by > 0 ? next[0] : next.at(-1)
-    if (id) show(id)
+    if (id) show(id, document.activeElement?.closest('[data-slot=dialog-content]') != null)
   }
 
   return (
@@ -227,7 +237,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
       ))}
       <Dialog open={url !== undefined} onOpenChange={(open) => !open && setOpenID(undefined)}>
         <DialogContent
-          className="inset-4 h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:rounded-none max-md:border-0 max-md:pt-[calc(1rem+var(--safe-top))]"
+          className="inset-4 h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:rounded-none max-md:border-0 max-md:pt-[calc(1rem+var(--safe-top))] max-md:[&>button:last-child]:top-[calc(0.5rem+var(--safe-top))]"
           onKeyDown={(event) => {
             // Zoomed in, the arrows scroll the picture instead.
             if (zoomed.current || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
@@ -245,7 +255,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
           }}
         >
           {url && openID && (
-            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} onStep={step} />
+            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} refocus={refocus.current} onStep={step} />
           )}
         </DialogContent>
       </Dialog>

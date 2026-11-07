@@ -137,3 +137,14 @@ test('the dialog closes, and stays closed, when the image it shows is reloaded',
   await screen.findByRole('button', { name: 'Open image 1 of 2 full size' })
   expect(screen.queryByRole('dialog')).toBeNull()
 })
+
+test('stepping keeps keyboard focus in the viewer, on the next image\'s zoom button', async () => {
+  const dialog = await open('Image 1 of 3', three)
+  load(dialog, [2400, 1400])
+  const zoom = within(dialog).getByRole('button', { name: 'Show image at actual size' })
+  zoom.focus()
+  fireEvent.keyDown(zoom, { key: 'ArrowRight' })
+  const next = screen.getByRole('dialog', { name: 'Image 2 of 3' })
+  load(next, [2400, 1400])
+  await waitFor(() => expect(document.activeElement).toBe(within(next).getByRole('button', { name: 'Show image at actual size' })))
+})
