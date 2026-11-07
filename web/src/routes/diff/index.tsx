@@ -12,7 +12,7 @@ import { extraRepoCount } from '@/lib/repos'
 import { coarsePointer, useElementSize, useMediaQuery } from '@/lib/hooks'
 import { DiffSkeleton } from '@/routes/diff/diff-skeleton'
 import { FileList } from '@/routes/diff/file-list'
-import { isLargeDiff, scrollToTop, useOffsetTop } from '@/routes/diff/large-diff'
+import { isLargeDiff, scrollWithin, useOffsetTop } from '@/routes/diff/large-diff'
 import { Land } from '@/routes/diff/land'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
 import { collapsedByDefault, FilePatch } from '@/routes/diff/patch-view'
@@ -116,7 +116,7 @@ function PrimaryChanges({ runID, agent, agentName }: { runID: string; agent: Age
     const index = files.findIndex((file) => file.path === path)
     requestAnimationFrame(() => {
       if (virtual) list.current?.scrollToIndex(index, { align: 'start', offset: -toolbar.height })
-      else scrollToTop(scroller.current, document.getElementById(`${ids}-${index}`), toolbar.height)
+      else scrollWithin(scroller.current, document.getElementById(`${ids}-${index}`), toolbar.height)
     })
   }, [files, virtual, ids, toolbar.height])
 
