@@ -23,3 +23,9 @@ export function useOffsetTop(content: HTMLElement | null, element: HTMLElement |
   }, [content, element])
   return top
 }
+
+/** Unlike scrollIntoView, never scrolls `scroller`'s ancestors, which would push the session header out of view. */
+export function scrollWithin(scroller: HTMLElement | null, element: HTMLElement | null, offset: number) {
+  if (!scroller || !element) return
+  scroller.scrollTo({ top: scroller.scrollTop + element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset })
+}
