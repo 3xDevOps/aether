@@ -9,20 +9,6 @@ import { cn, focusRingInset } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { MessageImageRef } from '@/store/session-rows'
 
-/** Where a point falls on the picture an object-fit box draws, from 0 to 1 on each axis. */
-function pointOn(img: HTMLImageElement | null, clientX: number, clientY: number) {
-  if (!img?.naturalWidth || !img.naturalHeight) return undefined
-  const box = img.getBoundingClientRect()
-  const scale = Math.min(1, box.width / img.naturalWidth, box.height / img.naturalHeight)
-  const width = img.naturalWidth * scale
-  const height = img.naturalHeight * scale
-  const clamp = (n: number) => Math.min(1, Math.max(0, n))
-  return {
-    x: clamp((clientX - box.left - (box.width - width) / 2) / width),
-    y: clamp((clientY - box.top - (box.height - height) / 2) / height),
-  }
-}
-
 function ImageViewer({ url, name, gallery, zoomed, refocus, onStep }: {
   url: string
   name: string
@@ -113,10 +99,21 @@ function ImageViewer({ url, name, gallery, zoomed, refocus, onStep }: {
             type="button"
             variant="quiet"
             aria-label={actual ? 'Fit image to window' : 'Show image at actual size'}
-            className={cn('rounded-none outline-none', actual ? 'm-auto cursor-zoom-out' : 'size-full cursor-zoom-in')}
+            className={cn('rounded-none outline-none', actual ? 'm-auto cursor-zoom-out' : 'size-full cursor-zoom-in coarse:h-full')}
             onClick={(event) => {
+              const img = event.currentTarget.querySelector('img')
               // Enter and Space report no pointer position; zoom on the middle then.
-              toggle(event.detail === 0 ? undefined : pointOn(event.currentTarget.querySelector('img'), event.clientX, event.clientY))
+              if (event.detail === 0 || !img?.naturalWidth || !img.naturalHeight) return toggle()
+              // Where the click falls on the picture object-fit draws, from 0 to 1 on each axis.
+              const box = img.getBoundingClientRect()
+              const scale = Math.min(1, box.width / img.naturalWidth, box.height / img.naturalHeight)
+              const width = img.naturalWidth * scale
+              const height = img.naturalHeight * scale
+              const clamp = (n: number) => Math.min(1, Math.max(0, n))
+              toggle({
+                x: clamp((event.clientX - box.left - (box.width - width) / 2) / width),
+                y: clamp((event.clientY - box.top - (box.height - height) / 2) / height),
+              })
             }}
           >
             {image}
@@ -167,7 +164,7 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
         <>
           {!loaded && <span role="status" className="absolute p-3 text-ui-sm text-muted">Loading {name.toLowerCase()}…</span>}
           {url && (
-            <Button type="button" variant="quiet" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-zoom-in', focusRingInset)} onClick={onOpen}>
+            <Button type="button" variant="quiet" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-zoom-in coarse:h-full', focusRingInset)} onClick={onOpen}>
               <img
                 src={url}
                 alt={name}
