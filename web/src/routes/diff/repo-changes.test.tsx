@@ -118,6 +118,21 @@ it('groups every repo\'s changes under All repos and opens a file in its repo', 
   expect(useStore.getState().route.params).toEqual({ runId: multi.id, view: 'changes', file: 'guide.md', repo: docs.id })
 })
 
+it('scrolls a file opened in a cached repo below the toolbar measured after mount', async () => {
+  seed({ repo: 'all' })
+  renderDiff()
+  const docsSection = within(await screen.findByRole('region', { name: 'docs-site' }))
+  await docsSection.findByText('2 files')
+  const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    return { top: 0, height: this.classList.contains('sticky') ? 40 : 0 } as DOMRect
+  })
+  const scrollTo = vi.fn()
+  Element.prototype.scrollTo = scrollTo
+  fireEvent.click(docsSection.getByRole('button', { name: /index\.md/ }))
+  await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: -40 }))
+  rect.mockRestore()
+})
+
 it('keeps the selected repo in the address', () => {
   const route = { name: 'run', params: { runId: multi.id, view: 'changes', repo: docs.id } }
   expect(routeQuery(route).toString()).toBe(`run=${multi.id}&view=changes&repo=${docs.id}`)
