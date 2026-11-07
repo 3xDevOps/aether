@@ -9,118 +9,202 @@ import { cn, focusRingInset } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { MessageImageRef } from '@/store/session-rows'
 
-function ImageViewer({ url, name, gallery, zoomed, refocus, onStep }: {
+const maxScale = 4
+const keyStep = 1.25
+
+/** Where a client point falls on the picture an img draws, from 0 to 1 on each axis; a fitted img letterboxes it. */
+function pointOnImage(img: HTMLImageElement, clientX: number, clientY: number, fitted: boolean) {
+  const box = img.getBoundingClientRect()
+  const scale = fitted ? Math.min(1, box.width / img.naturalWidth, box.height / img.naturalHeight) : box.width / img.naturalWidth
+  const width = img.naturalWidth * scale
+  const height = img.naturalHeight * scale
+  if (!width || !height) return { x: 0.5, y: 0.5 }
+  const clamp = (n: number) => Math.min(1, Math.max(0, n))
+  return {
+    x: clamp((clientX - box.left - (box.width - width) / 2) / width),
+    y: clamp((clientY - box.top - (box.height - height) / 2) / height),
+  }
+}
+
+function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
   url: string
   name: string
   gallery: boolean
   zoomed: React.RefObject<boolean>
+  keys: React.RefObject<((event: React.KeyboardEvent) => void) | undefined>
   refocus: boolean
   onStep: (by: 1 | -1) => void
 }) {
-  const [actual, setActual] = useState(false)
+  // Pixels drawn per natural pixel; undefined while the image is fitted to the frame.
+  const [scale, setScale] = useState<number>()
+  const [natural, setNatural] = useState<{ width: number; height: number }>()
   const [zoomable, setZoomable] = useState(false)
   const frame = useRef<HTMLDivElement>(null)
-  const zoom = useRef<HTMLButtonElement>(null)
-  const focus = useRef({ x: 0.5, y: 0.5 })
+  const img = useRef<HTMLImageElement>(null)
+  // The picture point (0 to 1) to keep under a frame point (pixels) after the scale changes.
+  const anchor = useRef({ x: 0.5, y: 0.5, left: -1, top: -1 })
   const swipe = useRef<{ x: number; y: number }>(undefined)
+  const pinch = useRef<{ distance: number; scale: number }>(undefined)
+
+  const fitScale = () => {
+    const el = frame.current
+    if (!el || !natural) return 1
+    return Math.min(1, el.clientWidth / natural.width, el.clientHeight / natural.height)
+  }
+
+  /** Scale to `next` (undefined fits), keeping the picture under the client point, or the frame's middle, still. */
+  const zoomTo = (next: number | undefined, clientX?: number, clientY?: number) => {
+    const el = frame.current
+    const picture = img.current
+    if (!el || !picture?.naturalWidth) return
+    const box = el.getBoundingClientRect()
+    const x = clientX ?? box.left + el.clientWidth / 2
+    const y = clientY ?? box.top + el.clientHeight / 2
+    const point = pointOnImage(picture, x, y, scale === undefined)
+    anchor.current = { ...point, left: x - box.left, top: y - box.top }
+    const fit = fitScale()
+    setScale(next === undefined || next <= fit * 1.001 ? undefined : Math.min(maxScale, next))
+  }
+  const zoomBy = (factor: number, clientX?: number, clientY?: number) => zoomTo((scale ?? fitScale()) * factor, clientX, clientY)
+  const zoomRef = useRef(zoomBy)
+  zoomRef.current = zoomBy
 
   useLayoutEffect(() => {
-    zoomed.current = actual
+    zoomed.current = scale !== undefined
     const el = frame.current
     if (!el) return
-    el.scrollLeft = focus.current.x * el.scrollWidth - el.clientWidth / 2
-    el.scrollTop = focus.current.y * el.scrollHeight - el.clientHeight / 2
-  }, [actual, zoomed])
+    const { x, y, left, top } = anchor.current
+    el.scrollLeft = x * el.scrollWidth - (left < 0 ? el.clientWidth / 2 : left)
+    el.scrollTop = y * el.scrollHeight - (top < 0 ? el.clientHeight / 2 : top)
+  }, [scale, zoomed])
+
+  // A trackpad pinch arrives as a ctrl wheel (Safari: gesture events); React's wheel listener is passive and cannot
+  // keep the browser from zooming the whole page.
+  useEffect(() => {
+    const el = frame.current
+    if (!el) return
+    let gesture = 1
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return
+      event.preventDefault()
+      // A mouse wheel notch reports about 100; a trackpad pinch many small deltas.
+      zoomRef.current(Math.exp(-Math.max(-25, Math.min(25, event.deltaY)) * 0.01), event.clientX, event.clientY)
+    }
+    type Gesture = UIEvent & { scale: number; clientX: number; clientY: number }
+    const start = (event: Event) => {
+      event.preventDefault()
+      gesture = 1
+    }
+    const change = (event: Event) => {
+      const { scale: next, clientX, clientY } = event as Gesture
+      event.preventDefault()
+      zoomRef.current(next / gesture, clientX, clientY)
+      gesture = next
+    }
+    el.addEventListener('wheel', wheel, { passive: false })
+    el.addEventListener('gesturestart', start)
+    el.addEventListener('gesturechange', change)
+    return () => {
+      el.removeEventListener('wheel', wheel)
+      el.removeEventListener('gesturestart', start)
+      el.removeEventListener('gesturechange', change)
+    }
+  }, [])
 
   // Stepping remounts the viewer, which removes the control that had focus.
   useEffect(() => {
-    if (refocus) zoom.current?.focus()
-  }, [refocus, zoomable])
-
-  const toggle = (point = { x: 0.5, y: 0.5 }) => {
-    focus.current = point
-    setActual((on) => !on)
-  }
+    if (refocus) frame.current?.focus()
+  }, [refocus])
 
   const image = (
     <img
+      ref={img}
       src={url}
       alt={name}
-      className={actual ? 'max-w-none' : 'size-full object-scale-down'}
+      className={scale === undefined ? 'size-full object-scale-down' : 'max-w-none shrink-0'}
+      style={scale === undefined || !natural ? undefined : { width: natural.width * scale, height: natural.height * scale }}
       onLoad={(event) => {
-        const img = event.currentTarget
+        const { naturalWidth: width, naturalHeight: height } = event.currentTarget
         const el = frame.current
-        if (el) setZoomable(img.naturalWidth > el.clientWidth || img.naturalHeight > el.clientHeight)
+        setNatural({ width, height })
+        if (el) setZoomable(width > el.clientWidth || height > el.clientHeight)
       }}
     />
   )
+
+  const onKey = (event: React.KeyboardEvent) => {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+    const by = event.key === '=' || event.key === '+' ? keyStep : event.key === '-' ? 1 / keyStep : event.key === '0' ? 0 : undefined
+    if (by === undefined) return
+    event.preventDefault()
+    if (by === 0) zoomTo(undefined)
+    else zoomBy(by)
+  }
+  useLayoutEffect(() => {
+    keys.current = onKey
+  })
 
   return (
     <div
       className="contents"
       onTouchStart={(event) => {
-        const touch = event.touches[0]
-        swipe.current = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : undefined
+        const [a, b] = [event.touches[0], event.touches[1]]
+        pinch.current = event.touches.length === 2 && a && b
+          ? { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), scale: scale ?? fitScale() }
+          : undefined
+        swipe.current = event.touches.length === 1 && a ? { x: a.clientX, y: a.clientY } : undefined
+      }}
+      onTouchMove={(event) => {
+        const [a, b] = [event.touches[0], event.touches[1]]
+        const start = pinch.current
+        if (!start || event.touches.length !== 2 || !a || !b) return
+        const ratio = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / start.distance
+        zoomTo(start.scale * ratio, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2)
       }}
       onTouchEnd={(event) => {
-        const start = swipe.current
+        if (event.touches.length < 2) pinch.current = undefined
+        const begin = swipe.current
         const touch = event.changedTouches[0]
         swipe.current = undefined
         // A pinch-zoomed page pans under the finger; that drag is not a swipe.
-        if (actual || !start || !touch || (window.visualViewport?.scale ?? 1) > 1) return
-        const dx = touch.clientX - start.x
-        if (Math.abs(dx) > 48 && Math.abs(dx) > 2 * Math.abs(touch.clientY - start.y)) onStep(dx < 0 ? 1 : -1)
+        if (scale !== undefined || !begin || !touch || (window.visualViewport?.scale ?? 1) > 1) return
+        const dx = touch.clientX - begin.x
+        if (Math.abs(dx) > 48 && Math.abs(dx) > 2 * Math.abs(touch.clientY - begin.y)) onStep(dx < 0 ? 1 : -1)
       }}
     >
       <DialogHeader className="min-h-6 flex-row items-center justify-between gap-3 coarse:min-h-11 coarse:pr-12">
         <DialogTitle className="truncate">{name}</DialogTitle>
         <DialogDescription className="sr-only">
           {[
-            zoomable ? 'Switch between fitting the window and actual size.' : 'Shown at actual size.',
+            'Pinch, or press Command or Control with plus, minus or zero, to zoom.',
             gallery && 'Use the arrow keys or swipe to see the other images.',
           ].filter(Boolean).join(' ')}
         </DialogDescription>
-        {zoomable && (
-          <Button variant="ghost" size="sm" aria-pressed={actual} className="aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => toggle()}>
-            Actual size
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {scale !== undefined && <span className="text-ui-sm text-muted tabular-nums">{Math.round(scale * 100)}%</span>}
+          {zoomable && (
+            <Button variant="ghost" size="sm" aria-pressed={scale === 1} className="aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => zoomTo(scale === 1 ? undefined : 1)}>
+              Actual size
+            </Button>
+          )}
+        </div>
       </DialogHeader>
       <div
         ref={frame}
+        tabIndex={0}
+        role="group"
+        aria-label={`${name}, scroll to move around it`}
         className={cn(
-          'flex min-h-0 overflow-auto rounded-control border border-seam bg-canvas',
-          'has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 has-[:focus-visible]:outline-focus',
+          'flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control border border-seam bg-canvas outline-none',
+          'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus',
+          scale !== undefined ? 'cursor-zoom-out' : zoomable && 'cursor-zoom-in',
         )}
+        onClick={(event) => {
+          if (scale !== undefined) zoomTo(undefined)
+          else if (zoomable) zoomTo(1, event.clientX, event.clientY)
+        }}
       >
-        {zoomable ? (
-          <Button
-            ref={zoom}
-            type="button"
-            variant="quiet"
-            aria-label={actual ? 'Fit image to window' : 'Show image at actual size'}
-            className={cn('rounded-none outline-none', actual ? 'm-auto cursor-zoom-out' : 'size-full cursor-zoom-in coarse:h-full')}
-            onClick={(event) => {
-              const img = event.currentTarget.querySelector('img')
-              // Enter and Space report no pointer position; zoom on the middle then.
-              if (event.detail === 0 || !img?.naturalWidth || !img.naturalHeight) return toggle()
-              // Where the click falls on the picture object-fit draws, from 0 to 1 on each axis.
-              const box = img.getBoundingClientRect()
-              const scale = Math.min(1, box.width / img.naturalWidth, box.height / img.naturalHeight)
-              const width = img.naturalWidth * scale
-              const height = img.naturalHeight * scale
-              const clamp = (n: number) => Math.min(1, Math.max(0, n))
-              toggle({
-                x: clamp((event.clientX - box.left - (box.width - width) / 2) / width),
-                y: clamp((event.clientY - box.top - (box.height - height) / 2) / height),
-              })
-            }}
-          >
-            {image}
-          </Button>
-        ) : (
-          <div className="size-full">{image}</div>
-        )}
+        <div className={scale === undefined ? 'size-full' : 'm-auto shrink-0'}>{image}</div>
       </div>
     </div>
   )
@@ -191,6 +275,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
   const list = useRef<HTMLDivElement>(null)
   const lastShown = useRef<string>(undefined)
   const zoomed = useRef(false)
+  const keys = useRef<((event: React.KeyboardEvent) => void) | undefined>(undefined)
   const refocus = useRef(false)
   const show = (id: string, keepFocus = false) => {
     refocus.current = keepFocus
@@ -237,6 +322,8 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
         <DialogContent
           className="inset-4 h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:rounded-none max-md:border-0 max-md:pt-[calc(1rem+var(--safe-top))] max-md:[&>button:last-child]:top-[calc(0.5rem+var(--safe-top))]"
           onKeyDown={(event) => {
+            keys.current?.(event)
+            if (event.defaultPrevented) return
             // Zoomed in, the arrows scroll the picture instead.
             if (zoomed.current || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
             if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -253,7 +340,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
           }}
         >
           {url && openID && (
-            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} refocus={refocus.current} onStep={step} />
+            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} keys={keys} refocus={refocus.current} onStep={step} />
           )}
         </DialogContent>
       </Dialog>

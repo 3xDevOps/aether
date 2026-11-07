@@ -38,24 +38,75 @@ test('a lone image is the attached image', async () => {
   expect(api.roomImage).toHaveBeenCalledWith('run_1', 'm1', 3, expect.any(AbortSignal))
 })
 
-test('an image larger than the window switches between fit and actual size, from the image or the header', async () => {
+const frameOf = (dialog: HTMLElement) => within(dialog).getByRole('group')
+const width = (dialog: HTMLElement) => within(dialog).getByRole('img').style.width
+/** The drawn width as a multiple of the fitted width: an 800x600 frame fits 2400x1400 at a third. */
+const zoomOf = (dialog: HTMLElement) => parseFloat(width(dialog)) / 800
+
+test('an image larger than the window switches between fit and actual size, from a click or the header', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [2400, 1400])
   const toggle = within(dialog).getByRole('button', { name: 'Actual size' })
   expect(toggle.getAttribute('aria-pressed')).toBe('false')
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Show image at actual size' }))
+  fireEvent.click(frameOf(dialog))
   expect(toggle.getAttribute('aria-pressed')).toBe('true')
-  expect(within(dialog).getByRole('img').className).toContain('max-w-none')
+  expect(width(dialog)).toBe('2400px')
+  expect(within(dialog).getByText('100%')).toBeDefined()
   fireEvent.click(toggle)
-  expect(within(dialog).getByRole('button', { name: 'Show image at actual size' })).toBeDefined()
+  expect(width(dialog)).toBe('')
+  expect(within(dialog).queryByText('100%')).toBeNull()
+})
+
+test('Command or Control with plus, minus and zero zoom in steps from the fitted size, and back to fit', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  fireEvent.keyDown(dialog, { key: '=', metaKey: true })
+  expect(zoomOf(dialog)).toBeCloseTo(1.25)
+  fireEvent.keyDown(dialog, { key: '=', ctrlKey: true })
+  fireEvent.keyDown(dialog, { key: '-', ctrlKey: true })
+  expect(zoomOf(dialog)).toBeCloseTo(1.25)
+  fireEvent.keyDown(dialog, { key: '0', metaKey: true })
+  expect(width(dialog)).toBe('')
+  for (let i = 0; i < 20; i++) fireEvent.keyDown(dialog, { key: '+', metaKey: true })
+  expect(width(dialog)).toBe(`${2400 * 4}px`)
+})
+
+test('zooming out never goes below fitted', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  fireEvent.keyDown(dialog, { key: '-', ctrlKey: true })
+  expect(width(dialog)).toBe('')
+})
+
+test('a trackpad pinch, a ctrl wheel, zooms the image and keeps the page from zooming', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  const pinch = new WheelEvent('wheel', { deltaY: -50, ctrlKey: true, bubbles: true, cancelable: true })
+  frameOf(dialog).dispatchEvent(pinch)
+  expect(pinch.defaultPrevented).toBe(true)
+  await waitFor(() => expect(width(dialog)).not.toBe(''))
+  const scroll = new WheelEvent('wheel', { deltaY: -50, bubbles: true, cancelable: true })
+  frameOf(dialog).dispatchEvent(scroll)
+  expect(scroll.defaultPrevented).toBe(false)
+})
+
+test('spreading two fingers zooms the image', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  const frame = frameOf(dialog)
+  const fingers = (gap: number) => [{ clientX: 400 - gap / 2, clientY: 300 }, { clientX: 400 + gap / 2, clientY: 300 }]
+  fireEvent.touchStart(frame, { touches: fingers(100), changedTouches: fingers(100) })
+  fireEvent.touchMove(frame, { touches: fingers(200), changedTouches: fingers(200) })
+  expect(zoomOf(dialog)).toBeCloseTo(2)
+  fireEvent.touchEnd(frame, { touches: [], changedTouches: fingers(200) })
 })
 
 test('an image that already fits offers no zoom', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [320, 180])
   expect(within(dialog).queryByRole('button', { name: 'Actual size' })).toBeNull()
-  expect(within(dialog).queryByRole('button', { name: 'Show image at actual size' })).toBeNull()
-  expect(within(dialog).getByRole('img', { name: 'Image 1 of 2' })).toBeDefined()
+  fireEvent.click(frameOf(dialog))
+  expect(width(dialog)).toBe('')
 })
 
 test('reopening an image starts fitted again', async () => {
@@ -138,13 +189,11 @@ test('the dialog closes, and stays closed, when the image it shows is reloaded',
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
-test('stepping keeps keyboard focus in the viewer, on the next image\'s zoom button', async () => {
+test('stepping keeps keyboard focus in the viewer, on the next image\'s frame', async () => {
   const dialog = await open('Image 1 of 3', three)
-  load(dialog, [2400, 1400])
-  const zoom = within(dialog).getByRole('button', { name: 'Show image at actual size' })
-  zoom.focus()
-  fireEvent.keyDown(zoom, { key: 'ArrowRight' })
+  const frame = frameOf(dialog)
+  frame.focus()
+  fireEvent.keyDown(frame, { key: 'ArrowRight' })
   const next = screen.getByRole('dialog', { name: 'Image 2 of 3' })
-  load(next, [2400, 1400])
-  await waitFor(() => expect(document.activeElement).toBe(within(next).getByRole('button', { name: 'Show image at actual size' })))
+  await waitFor(() => expect(document.activeElement).toBe(frameOf(next)))
 })
