@@ -39,7 +39,7 @@ export function ListRow({
         {...props}
       >
         {leading}
-        <span className="min-w-0 flex-1 truncate">{children}</span>
+        <span className="relative min-w-0 flex-1 truncate">{children}</span>
         {trailing !== undefined && (
           <span className={cn('shrink-0 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>{trailing}</span>
         )}
