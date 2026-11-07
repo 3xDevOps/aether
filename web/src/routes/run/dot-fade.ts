@@ -2,23 +2,11 @@ import { useEffect, type RefObject } from 'react'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useMediaQuery, useReducedMotion } from '@/lib/hooks'
 
-export const RADIUS_PX = 80
+const RADIUS_PX = 80
 /** The share of the radius over which opacity climbs back to full; the rest is held at MIN_OPACITY. */
-export const FALLOFF = 1
-export const MIN_OPACITY = 0
-export const RETURN_MS = 600
-
-export function fadesDots({ finePointer, phoneWidth, reducedMotion }: {
-  finePointer: boolean
-  phoneWidth: boolean
-  reducedMotion: boolean
-}): boolean {
-  return finePointer && !phoneWidth && !reducedMotion
-}
-
-export function dotFadeVars(clientX: number, clientY: number, rect: Pick<DOMRect, 'left' | 'top'>): Record<'--dot-px' | '--dot-py', string> {
-  return { '--dot-px': `${clientX - rect.left}px`, '--dot-py': `${clientY - rect.top}px` }
-}
+const FALLOFF = 1
+const MIN_OPACITY = 0
+const RETURN_MS = 600
 
 export const dotFadeShape = {
   '--dot-radius': `${RADIUS_PX}px`,
@@ -29,11 +17,10 @@ export const dotFadeShape = {
 
 /** Fades the strip's `.control-matrix` dots around a fine pointer; static on touch, phones and reduced motion. */
 export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
-  const enabled = fadesDots({
-    finePointer: useMediaQuery('(hover: hover) and (pointer: fine)'),
-    phoneWidth: useIsMobile(),
-    reducedMotion: useReducedMotion(),
-  })
+  const finePointer = useMediaQuery('(hover: hover) and (pointer: fine)')
+  const phoneWidth = useIsMobile()
+  const reducedMotion = useReducedMotion()
+  const enabled = finePointer && !phoneWidth && !reducedMotion
   useEffect(() => {
     const strip = ref.current
     if (!enabled || !strip) return
@@ -45,7 +32,8 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       const rect = strip.getBoundingClientRect()
       // ControlButton captures the pointer during a hold, so moves keep arriving once it has left the strip.
       const inside = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      for (const [name, value] of Object.entries(dotFadeVars(x, y, rect))) strip.style.setProperty(name, value)
+      strip.style.setProperty('--dot-px', `${x - rect.left}px`)
+      strip.style.setProperty('--dot-py', `${y - rect.top}px`)
       strip.style.setProperty('--dot-fade', inside ? '1' : '0')
     }
     const move = (event: PointerEvent) => {
