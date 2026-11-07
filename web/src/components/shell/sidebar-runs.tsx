@@ -323,7 +323,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
   const open = () => {
     if (waiting) {
       const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
-      navigate(route.name, route.params)
+      navigate(route.name, route.params, { remember: false })
     } else navigate('run', { runId: run.id })
   }
   const unopened = run.finish_unopened === true && (state === 'ready' || groupOf({ state }) === 'finished')
@@ -440,10 +440,10 @@ function AnswerButton({ run }: { run: RunRecord }) {
       size="sm"
       tabIndex={-1}
       onClick={() => {
-        if (action.kind === 'reply') navigate('run', { runId: run.id, view: 'session', focus: 'composer' })
+        if (action.kind === 'reply') navigate('run', { runId: run.id, view: 'session', focus: 'composer' }, { remember: false })
         else {
           const route = needsYouRoute(run, ctx)
-          navigate(route.name, route.params)
+          navigate(route.name, route.params, { remember: false })
         }
       }}
     >

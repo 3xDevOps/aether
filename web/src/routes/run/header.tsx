@@ -37,12 +37,13 @@ import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import { useHeaderPrimary, useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+import type { NavigateOptions } from '@/store/ui'
 import { agentState } from '@/store/subagents'
 import { stateContextOf } from '@/store/selectors'
 import { runWatch } from '@/store/watches'
 
 export interface RunNavigation {
-  go: (view: RunView) => void
+  go: (view: RunView, options?: NavigateOptions) => void
   reveal: (cardID: string) => void
   focusComposer: () => void
   focusRequest: () => void
@@ -63,7 +64,7 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   // A finished run asks nothing of anyone, so Review is not a needs-you action.
   if (!condition) {
     return shown.state === 'ready' && run.member_id === selfID && view !== 'changes'
-      ? { label: 'Review', act: () => nav.go('changes') }
+      ? { label: 'Review', act: () => nav.go('changes', { remember: false }) }
       : null
   }
 
@@ -71,12 +72,12 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   const openTerminal = (): FrameAction | null =>
     !agent.hasAgentTerminal || view === 'terminal'
       ? null
-      : { label: action.label, act: () => { nav.go('terminal'); if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl() } }
+      : { label: action.label, act: () => { nav.go('terminal', { remember: false }); if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl() } }
 
   if (action.kind === 'reply') return { label: action.label, act: nav.focusComposer }
   switch (condition.target) {
     case 'changes':
-      return view === 'changes' ? null : { label: action.label, act: () => nav.go('changes') }
+      return view === 'changes' ? null : { label: action.label, act: () => nav.go('changes', { remember: false }) }
     case 'notes': {
       const question = unansweredQuestions(room ?? []).find((m) => m.actor_id !== run.member_id)
       return { label: action.label, act: () => nav.reveal(question ? requestCardID.question(question.id) : 'details-needs-you') }

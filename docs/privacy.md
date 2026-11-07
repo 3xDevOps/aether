@@ -42,7 +42,8 @@ request ([What an edge stores](#what-an-edge-stores)).
   collapsed, whether a session's Details panel is open, the embedded
   Environment terminal's height, terminal font size, line wrapping in
   Changes, whether single-key shortcuts are on); where you were (the
-  workspace you last opened, whether the sidebar lists only your own sessions);
+  workspace you last opened, whether the sidebar lists only your own sessions,
+  and the view you last chose for each of your last 200 sessions, by session id);
   the mode you last launched each agent in; which update notices you
   dismissed, by version; and the onboarding wizard's progress. The dashboard writes these
   preferences in origin-local `aether.ui` storage: they are separate for each

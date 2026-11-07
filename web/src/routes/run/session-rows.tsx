@@ -151,7 +151,7 @@ export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavi
     hasAgentTerminal: agent.hasAgentTerminal,
     openTerminal: () => {
       const { agent: current, nav: to } = latest.current
-      to.go('terminal')
+      to.go('terminal', { remember: false })
       if (!current.localControl && !current.controlUnavailable) current.session.takeControl()
     },
     reveal: (id) => latest.current.nav.reveal(id),

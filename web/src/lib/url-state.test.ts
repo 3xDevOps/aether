@@ -95,6 +95,22 @@ describe('bindRouteToUrl', () => {
     })
   })
 
+  it('shows the view an entry names on back without remembering it', () => {
+    window.history.replaceState(null, '', '/?run=run_1&view=terminal')
+    const store = createRootStore()
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+
+    act(() => store.getState().navigate('run', { runId: 'run_1', view: 'changes' }))
+    act(() => {
+      window.history.back()
+    })
+    return vi.waitFor(() => {
+      expect(store.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'terminal' } })
+      expect(store.getState().runViewMemory).toEqual({ run_1: 'changes' })
+    })
+  })
+
   it('leaves the history alone when the route does not change the address', () => {
     const store = createRootStore()
     const stop = bindRouteToUrl(store)

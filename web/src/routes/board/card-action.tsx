@@ -12,7 +12,7 @@ import type { BoardCard } from '@/routes/board/selectors'
 import { runRoute, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
-import type { Route } from '@/store/ui'
+import type { UiSlice, Route } from '@/store/ui'
 
 const conditionOf = (card: BoardCard) => needsYouConditions.find((c) => c.id === card.needsYou)
 
@@ -53,9 +53,9 @@ export function targetRoute(run: Pick<RunRecord, 'id'>, target: NeedsYouTarget |
   return runRoute(run.id, target && targetView[target])
 }
 
-export function openCard(card: BoardCard, navigate: (name: string, params?: Record<string, string>) => void) {
+export function openCard(card: BoardCard, navigate: UiSlice['navigate']) {
   const route = targetRoute(card.run, conditionOf(card)?.target)
-  navigate(route.name, route.params)
+  navigate(route.name, route.params, { remember: false })
 }
 
 export function CardActionButton({

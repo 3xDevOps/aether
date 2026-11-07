@@ -177,7 +177,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
   const { inputs, sudo, sessionRequests, steers, questions } = useRunRequests(run)
   const name = (id: string, snapshot?: string) => memberNameOr({ members, mergedInto }, id, snapshot)
   const openTerminal = () => {
-    nav.go('terminal')
+    nav.go('terminal', { remember: false })
     if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl()
   }
 

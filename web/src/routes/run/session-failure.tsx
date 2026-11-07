@@ -129,7 +129,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
 function LoginActions({ run, command, methods, shells, nav }: { run: RunRecord; command: string | undefined; methods: AuthMethod[]; shells: RunShells; nav: RunNavigation }) {
   const terminal = methods.filter((method) => method.type === 'terminal')
   const openShell = async (typed?: string) => {
-    nav.go('terminal')
+    nav.go('terminal', { remember: false })
     const tab = await shells.open()
     const lease = sessionLease(useStore, run.id)
     if (!tab || !typed || !lease) return
