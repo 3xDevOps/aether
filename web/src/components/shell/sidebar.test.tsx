@@ -435,6 +435,16 @@ describe('run rows', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
   })
 
+  it('opens a disconnected session on Terminal and reopens it later on the view the member chose', () => {
+    useStore.getState().upsertRun(run({ id: 'run_5', task: 'lost its agent', status: 'needs-attention', state: 'disconnected' }))
+    act(() => useStore.getState().navigate('run', { runId: 'run_5', view: 'changes' }))
+    render(<AppShell />)
+    fireEvent.click(runList().getByRole('button', { name: /lost its agent/ }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_5', view: 'terminal' } })
+    expect(useStore.getState().runViewMemory.run_5).toBe('changes')
+    useStore.setState({ runViewMemory: {} })
+  })
+
   it('walks on from the open run when focus is outside the list', () => {
     act(() => useStore.getState().navigate('run', { runId: 'run_2' }))
     render(<AppShell />)

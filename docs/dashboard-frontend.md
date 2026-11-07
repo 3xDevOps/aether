@@ -617,7 +617,7 @@ and Delete are the same commands, with the same confirmations, as on
 desktop.
 
 Without a `view` in the address a phone lands on `defaultView`, never on the
-view this tab last showed: Chat for an Enhanced session, Terminal for a
+view the member last chose: Chat for an Enhanced session, Terminal for a
 Standard one. A link that names a view still opens it. A tab switch replaces
 the history entry instead of pushing one. Each history entry records its
 depth, and an entry of a session records the depth at which that session
@@ -2843,9 +2843,20 @@ written to the address as `?run=<id>&view=<view>`; the old `?view=diff` reads
 as `changes`.
 Every way into a session navigates to `run`: board card, sidebar row, session list,
 palette, feed entry, approval, conflict chip, template, and the launch and
-onboarding forms. A view the address does not name is the one this tab last
-showed for the session (`runViewMemory`, not persisted; a phone skips it, see
-[Phone session](#phone-session)), else `defaultView`:
+onboarding forms. A view the address does not name is the one the member last
+chose for the session, else `defaultView`. Choosing a view means picking a tab
+(click, `[` or `]`) or following a link or command that names a
+view, such as Review changes or a file path. A Needs you target does not
+count: a sidebar or board row, the Needs you list, `u`, the header's primary
+action and a request's Open terminal show Terminal or Changes for a session
+that waits there, and the session reopens on its chosen view once it stops
+waiting. Back and forward show the view their entry names without choosing
+it. `runViewMemory` holds the choices, the newest 200 sessions per signed-in
+member, saved under `aether.ui` in `savedRunViews` by identity key; deleting a
+session drops its entry. A chosen view the session no longer has, such as
+Files without a checkout, gives way to `defaultView`. A phone skips the
+memory, see [Phone session](#phone-session).
+`defaultView` is
 Session for an Enhanced session or any session that streams a session (`acp: true`),
 Terminal otherwise. Trace follows Chat for a session with `acp: true` only.
 Files is in the list while the session still has its

@@ -35,6 +35,7 @@ beforeEach(async () => {
     paletteRunID: null,
     sidebarWidth: 280,
     runViewMemory: {},
+    savedRunViews: {},
     navigate: realNavigate,
   })
   await hydrate(useStore, fakeApi())

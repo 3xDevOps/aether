@@ -1,6 +1,6 @@
 import { mobileScreen } from '@/lib/breakpoints'
 import { isRunView, runRoute } from '@/routes/run/views'
-import type { Route } from '@/store/ui'
+import type { NavigateOptions, Route } from '@/store/ui'
 
 const renamedViews: Record<string, string> = { diff: 'changes' }
 
@@ -202,7 +202,7 @@ export function pushedEntry(route: Route, previous: Route): EntryState {
 }
 
 interface RouteStore {
-  getState: () => { route: Route; navigate: (name: string, params?: Record<string, string>) => void }
+  getState: () => { route: Route; navigate: (name: string, params?: Record<string, string>, options?: NavigateOptions) => void }
   subscribe: (listener: (state: { route: Route }, previous: { route: Route }) => void) => () => void
 }
 
@@ -234,7 +234,7 @@ export function bindRouteToUrl(store: RouteStore, onAddress?: (query: URLSearchP
       window.history.replaceState(window.history.state, '', clean.toString())
     }
     const route = addressedRoute(query)
-    store.getState().navigate(route.name, route.params)
+    store.getState().navigate(route.name, route.params, { remember: false })
   }
   window.addEventListener('popstate', pop)
   const stopHanded = onHandedLink(() => store.getState().navigate('onboarding'))

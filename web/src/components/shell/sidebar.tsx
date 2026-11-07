@@ -45,7 +45,7 @@ function openNextNeedsYou() {
   })
   const next = waiting[(current + 1) % waiting.length]!
   const route = needsYouRoute(next.run, ctx)
-  s.navigate(route.name, route.params)
+  s.navigate(route.name, route.params, { remember: false })
 }
 
 export function Sidebar() {
