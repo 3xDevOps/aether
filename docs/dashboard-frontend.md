@@ -3494,7 +3494,11 @@ ACP row whose `resource_link` URIs name attached files matches the room
 message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
 URLs when identity, session or row changes, and shows each other file as a chip
-named by its basename with the path as its title. Attachments sit outside the
+named by its basename with the path as its title. Each image thumbnail is a
+button that opens the same blob in a `Dialog` (a bottom sheet on a phone),
+fitted to the window; a click or `Enter` on the image switches to its actual
+size inside a scrolling frame, centred on the clicked point, and back. Closing
+the dialog resets it to fitted. Attachments sit outside the
 text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider

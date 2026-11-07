@@ -1,14 +1,50 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { File as FileIcon } from '@/components/icons'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { cn, focusRingInset } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { MessageImageRef } from '@/store/session-rows'
+
+function ZoomableImage({ url, alt }: { url: string; alt: string }) {
+  const [actual, setActual] = useState(false)
+  const area = useRef<HTMLDivElement>(null)
+  const focus = useRef({ x: 0.5, y: 0.5 })
+
+  useLayoutEffect(() => {
+    const el = area.current
+    if (!el) return
+    el.scrollLeft = focus.current.x * el.scrollWidth - el.clientWidth / 2
+    el.scrollTop = focus.current.y * el.scrollHeight - el.clientHeight / 2
+  }, [actual])
+
+  return (
+    <div ref={area} className="flex max-h-[calc(85dvh-9rem)] overflow-auto rounded-control border border-seam bg-canvas md:max-h-[calc(100dvh-10rem)]">
+      <button
+        type="button"
+        aria-label={actual ? 'Fit image to window' : 'Show image at actual size'}
+        className={cn('m-auto block', focusRingInset, actual ? 'cursor-zoom-out' : 'cursor-zoom-in')}
+        onClick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect()
+          // Enter and Space report no pointer position; zoom on the middle then.
+          focus.current = event.detail === 0
+            ? { x: 0.5, y: 0.5 }
+            : { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height }
+          setActual((on) => !on)
+        }}
+      >
+        <img src={url} alt={alt} className={actual ? 'max-w-none' : 'max-h-[calc(85dvh-9rem)] max-w-full object-contain md:max-h-[calc(100dvh-10rem)]'} />
+      </button>
+    </div>
+  )
+}
 
 function MessageImage({ runID, messageID, index }: MessageImageRef & { runID: string }) {
   const [url, setURL] = useState<string>()
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string>()
+  const alt = `Attached image ${index + 1}`
   useEffect(() => {
     const abort = new AbortController()
     let objectURL: string | undefined
@@ -33,13 +69,26 @@ function MessageImage({ runID, messageID, index }: MessageImageRef & { runID: st
         <>
           {!loaded && <span role="status" className="absolute p-3 text-ui-sm text-muted">Loading image {index + 1}…</span>}
           {url && (
-            <img
-              src={url}
-              alt={`Attached image ${index + 1}`}
-              className="size-full object-contain"
-              onLoad={() => setLoaded(true)}
-              onError={() => setError('The downloaded image could not be decoded.')}
-            />
+            <Dialog>
+              <DialogTrigger asChild>
+                <button type="button" aria-label={`View image ${index + 1} full size`} className={cn('size-full cursor-zoom-in', focusRingInset)}>
+                  <img
+                    src={url}
+                    alt={alt}
+                    className="size-full object-contain"
+                    onLoad={() => setLoaded(true)}
+                    onError={() => setError('The downloaded image could not be decoded.')}
+                  />
+                </button>
+              </DialogTrigger>
+              <DialogContent className="w-max min-w-[min(24rem,calc(100%-2rem))] max-w-[calc(100%-2rem)]">
+                <DialogHeader>
+                  <DialogTitle>{alt}</DialogTitle>
+                  <DialogDescription>Click the image to switch between fit and actual size.</DialogDescription>
+                </DialogHeader>
+                <ZoomableImage url={url} alt={alt} />
+              </DialogContent>
+            </Dialog>
           )}
         </>
       )}
