@@ -118,6 +118,20 @@ function savedLaunch(s: RootState, next: LaunchDefaults): Pick<UiSlice, 'launchD
   return { launchDefaults: next, savedLaunchDefaults: s.identityKey ? { ...s.savedLaunchDefaults, [s.identityKey]: next } : s.savedLaunchDefaults }
 }
 
+const rememberedRuns = 200
+
+/** `runViewMemory` with `view` as `runId`'s newest entry, the oldest dropped past the bound, saved under the signed-in member. */
+function rememberedView(s: RootState, runId: string, view: RunView): Pick<UiSlice, 'runViewMemory' | 'savedRunViews'> {
+  const { [runId]: _, ...others } = s.runViewMemory
+  const next = Object.fromEntries([...Object.entries(others), [runId, view] as const].slice(-rememberedRuns))
+  return { runViewMemory: next, savedRunViews: s.identityKey ? { ...s.savedRunViews, [s.identityKey]: next } : s.savedRunViews }
+}
+
+/** `remember: false` shows a run view a member did not pick, such as a Needs you target, without making the run reopen on it. */
+export interface NavigateOptions {
+  remember?: boolean
+}
+
 export interface UiSlice {
   theme: Theme
   textSize: TextSize
@@ -162,8 +176,10 @@ export interface UiSlice {
   /** Each member's `launchDefaults` on this browser, by identity key, so another member never launches with them. */
   savedLaunchDefaults: Record<string, LaunchDefaults>
   route: Route
-  /** The view each run was last shown in during this visit; never persisted. */
+  /** The view the signed-in member last chose for each run, oldest first. */
   runViewMemory: Record<string, RunView>
+  /** Each member's `runViewMemory` on this browser, by identity key. */
+  savedRunViews: Record<string, Record<string, RunView>>
   detailsOpen: boolean
   /** Whether a run's Workflow rail is open on a wide window. */
   workflowOpen: boolean
@@ -216,7 +232,7 @@ export interface UiSlice {
   setBoardMapFolded: (runKey: string, folded: boolean) => void
   rememberLaunch: (agent: string, mode: LaunchMode, model?: string) => void
   setLaunchDefault: (agent: string, mode: LaunchMode) => void
-  navigate: (name: string, params?: Record<string, string>) => void
+  navigate: (name: string, params?: Record<string, string>, options?: NavigateOptions) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
   clearDismissedUpdates: () => void
   dismissSysboxNudge: () => void
@@ -270,6 +286,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   savedLaunchDefaults: {},
   route: initialRoute(),
   runViewMemory: {},
+  savedRunViews: {},
   detailsOpen: true,
   workflowOpen: false,
   browserBeside: false,
@@ -350,11 +367,11 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   // Keeps `at`, which ranks the agent the launch dialog preselects.
   setLaunchDefault: (agent, mode) =>
     set((s) => savedLaunch(s, { ...s.launchDefaults, [agent]: { ...s.launchDefaults[agent], mode, at: s.launchDefaults[agent]?.at ?? 0 } })),
-  navigate: (name, params = {}) => {
+  navigate: (name, params = {}, options) => {
     set((s) => ({
       route: { name, params },
-      ...(name === 'run' && params.runId && isRunView(params.view)
-        ? { runViewMemory: { ...s.runViewMemory, [params.runId]: params.view } }
+      ...(name === 'run' && params.runId && isRunView(params.view) && options?.remember !== false
+        ? rememberedView(s, params.runId, params.view)
         : {}),
       ...(s.route.name === 'onboarding' && name !== 'onboarding'
         ? { onboarded: true, onboardingStep: s.onboardingFurthest }

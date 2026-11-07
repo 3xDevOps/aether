@@ -117,6 +117,7 @@ const persistedUi = (s: RootState) => ({
   laneHidden: s.laneHidden,
   sessionsLanes: s.sessionsLanes,
   savedLaunchDefaults: s.savedLaunchDefaults,
+  savedRunViews: s.savedRunViews,
   dismissedUpdates: s.dismissedUpdates,
   sysboxNudgeDismissed: s.sysboxNudgeDismissed,
   onboarded: s.onboarded,

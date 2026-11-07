@@ -47,7 +47,7 @@ function useOpen(item: AttentionItem) {
   const navigate = useStore((s) => s.navigate)
   return () => {
     const route = targetRoute({ id: item.run_id }, needsYouConditions.find((c) => c.id === item.kind)?.target)
-    navigate(route.name, route.params)
+    navigate(route.name, route.params, { remember: false })
   }
 }
 

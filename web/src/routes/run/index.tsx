@@ -40,6 +40,7 @@ import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+import type { NavigateOptions } from '@/store/ui'
 
 /** Inactive views stay laid out but invisible: a terminal hidden with
  * display:none measures zero and would resize the shared PTY. */
@@ -165,9 +166,9 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   }, [Boolean(agentID)])
 
   // A phone's tabs swap the view in place, so back leaves the session instead of stepping through them.
-  const go = useCallback((next: RunView) => {
+  const go = useCallback((next: RunView, options?: NavigateOptions) => {
     if (mobile) replaceRouteKeepingFocus(runRoute(run.id, next))
-    else navigate('run', { runId: run.id, view: next })
+    else navigate('run', { runId: run.id, view: next }, options)
   }, [mobile, navigate, run.id])
   useEffect(() => {
     if (browserRequest !== undefined && browser && !docked) go('browser')

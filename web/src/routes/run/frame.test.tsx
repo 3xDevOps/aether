@@ -122,6 +122,22 @@ describe('run frame', () => {
     expect(useStore.getState().runViewMemory.run_1).toBe('terminal')
   })
 
+  it('keeps the chosen view across a mode switch while the session still has it', () => {
+    const View = lookupRoute('run')!
+    useStore.setState({ runViewMemory: { run_1: 'changes' } })
+    const view = open({ mode: 'tui' })
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_1', view: 'changes' })
+    act(() => useStore.getState().upsertRun(run({ mode: 'acp', acp: true })))
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_1', view: 'changes' })
+
+    view.rerender(rerouted('trace'))
+    act(() => useStore.getState().upsertRun(run({ mode: 'tui', acp: false })))
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    view.rerender(<View params={{ runId: 'run_1' }} />)
+    expect(useStore.getState().runViewMemory.run_1).toBe('trace')
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_1', view: 'terminal' })
+  })
+
   it('asks for control only once the owner shows the agent terminal', () => {
     const view = open({}, 'session')
     attached()
@@ -397,6 +413,14 @@ describe('the header primary action', () => {
     expect(screen.getByText('Permission: answer in the terminal')).toBeDefined()
     fireEvent.click(within(screen.getByRole('toolbar', { name: 'Session actions' })).getByRole('button', { name: 'Open terminal' }))
     expect(useStore.getState().route.params.view).toBe('terminal')
+  })
+
+  it('opens the terminal for a request without making it the view the session reopens on', () => {
+    useStore.setState({ runViewMemory: { run_1: 'changes' } })
+    open({ status: 'needs-attention', pending_inputs: [{ id: 'in_1', session_id: 's', kind: 'permission' }] }, 'session')
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Session actions' })).getByRole('button', { name: 'Open terminal' }))
+    expect(useStore.getState().route.params.view).toBe('terminal')
+    expect(useStore.getState().runViewMemory.run_1).toBe('changes')
   })
 
   it('allows a sudo command from the Details card it reveals', async () => {

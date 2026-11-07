@@ -160,7 +160,10 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
   removeRun: (runID) =>
     set((s) => {
       const other = (id: string) => id !== runID
+      const { [runID]: _, ...runViewMemory } = s.runViewMemory
       return {
+        runViewMemory,
+        savedRunViews: Object.fromEntries(Object.entries(s.savedRunViews).map(([who, { [runID]: __, ...views }]) => [who, views])),
         runs: pruneRuns(s.runs, other),
         deletingRuns: pruneRuns(s.deletingRuns, other),
         terminalWriteIntents: pruneRuns(s.terminalWriteIntents, other),
