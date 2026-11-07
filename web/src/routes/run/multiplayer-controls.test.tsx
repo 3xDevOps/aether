@@ -37,6 +37,7 @@ it('fades the dots around a mouse without blocking the strip’s buttons', () =>
   const dots = strip.querySelector('.control-matrix')!
   expect(dots.getAttribute('aria-hidden')).toBe('true')
   expect(strip.dataset.dotFade).toBe('true')
+  strip.getBoundingClientRect = () => ({ left: 0, top: 0, right: 800, bottom: 32 }) as DOMRect
 
   const button = screen.getByRole('button', { name: /Release/ })
   fireEvent.pointerMove(button, { pointerType: 'mouse', clientX: 40, clientY: 12 })
@@ -54,12 +55,20 @@ it('fades the dots around a mouse without blocking the strip’s buttons', () =>
   fireEvent.click(screen.getByRole('button', { name: /Multiplayer/ }))
   expect(people).toHaveBeenCalledTimes(1)
 
+  fireEvent.pointerMove(button, { pointerType: 'mouse', clientX: 60, clientY: 90 })
+  act(() => frames.splice(0).forEach((frame) => frame(0)))
+  expect(strip.style.getPropertyValue('--dot-fade')).toBe('0')
+
+  fireEvent.pointerMove(strip, { pointerType: 'mouse', clientX: 20, clientY: 10 })
+  act(() => frames.splice(0).forEach((frame) => frame(0)))
+  expect(strip.style.getPropertyValue('--dot-fade')).toBe('1')
   fireEvent.pointerLeave(strip, { pointerType: 'mouse' })
   expect(strip.style.getPropertyValue('--dot-fade')).toBe('0')
 
   fireEvent.pointerMove(strip, { pointerType: 'mouse', clientX: 10, clientY: 10 })
   view.unmount()
   expect(frames.filter(Boolean)).toHaveLength(0)
+  expect(strip.style.getPropertyValue('--dot-px')).toBe('')
 })
 
 it('keeps the dots static for touch', () => {

@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react'
+import { useIsMobile } from '@/lib/breakpoints'
 import { useMediaQuery, useReducedMotion } from '@/lib/hooks'
 
 export const RADIUS_PX = 100
@@ -30,7 +31,7 @@ export const dotFadeShape = {
 export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
   const enabled = fadesDots({
     finePointer: useMediaQuery('(hover: hover) and (pointer: fine)'),
-    phoneWidth: useMediaQuery('(max-width: 639px)'),
+    phoneWidth: useIsMobile(),
     reducedMotion: useReducedMotion(),
   })
   useEffect(() => {
@@ -41,8 +42,11 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
     let y = 0
     const paint = () => {
       frame = 0
-      for (const [name, value] of Object.entries(dotFadeVars(x, y, strip.getBoundingClientRect()))) strip.style.setProperty(name, value)
-      strip.style.setProperty('--dot-fade', '1')
+      const rect = strip.getBoundingClientRect()
+      // ControlButton captures the pointer during a hold, so moves keep arriving once it has left the strip.
+      const inside = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+      for (const [name, value] of Object.entries(dotFadeVars(x, y, rect))) strip.style.setProperty(name, value)
+      strip.style.setProperty('--dot-fade', inside ? '1' : '0')
     }
     const move = (event: PointerEvent) => {
       if (event.pointerType !== 'mouse') return
@@ -61,7 +65,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       strip.removeEventListener('pointermove', move)
       strip.removeEventListener('pointerleave', leave)
       cancelAnimationFrame(frame)
-      strip.style.removeProperty('--dot-fade')
+      for (const name of ['--dot-px', '--dot-py', '--dot-fade']) strip.style.removeProperty(name)
     }
   }, [enabled, ref])
   return enabled
