@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import type { PatchFile } from '@/routes/diff/parse'
 import { DiffSkeleton } from '@/routes/diff/diff-skeleton'
 import { ChangedFileRow, FileList } from '@/routes/diff/file-list'
-import { isLargeDiff, useOffsetTop } from '@/routes/diff/large-diff'
+import { isLargeDiff, scrollToTop, useOffsetTop } from '@/routes/diff/large-diff'
 import { collapsedByDefault, Counts, FilePatch } from '@/routes/diff/patch-view'
 import { PublishDialog } from '@/routes/diff/publish-dialog'
 import { RepoPR } from '@/routes/diff/repo-pr'
@@ -141,7 +141,7 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
     const index = files.findIndex((file) => file.path === path)
     requestAnimationFrame(() => {
       if (virtual) list.current?.scrollToIndex(index, { align: 'start', offset: -toolbar.height })
-      else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
+      else scrollToTop(scroller.current, document.getElementById(`${ids}-${index}`), toolbar.height)
     })
   }
   const asked = isRunRoute(route, run.id) ? route.params.file : undefined
