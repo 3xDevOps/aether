@@ -3041,6 +3041,11 @@ and below 30rem **Multiplayer** keeps only its icon. The controller summary
 truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
+With a mouse on a layout at least 640px wide and motion allowed, the strip's
+dots fade to nothing under the pointer and return to full about 100px away:
+`useDotFade` (`routes/run/dot-fade.ts`) writes the pointer position into a
+`mask-image` on `.control-matrix` from one `pointermove` listener, batched per
+frame, and eases the mask out over 400ms on `pointerleave`.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates

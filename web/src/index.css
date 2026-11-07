@@ -136,6 +136,20 @@
   color: color-mix(in srgb, var(--text) 24%, transparent);
 }
 
+@property --dot-fade {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+[data-dot-fade] {
+  transition: --dot-fade var(--dot-return) ease-out;
+}
+
+[data-dot-fade] > .control-matrix {
+  mask-image: radial-gradient(circle var(--dot-radius) at var(--dot-px, 0) var(--dot-py, 0), rgb(0 0 0 / calc(1 - var(--dot-fade) * (1 - var(--dot-min)))) var(--dot-inner), #000);
+}
+
 :has(> .control-matrix) .text-muted {
   color: var(--text);
 }
