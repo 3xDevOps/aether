@@ -2,10 +2,8 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -13,37 +11,18 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// checkMountInodes confirms the container sees each subpath mount's own
-// file or directory at its target, and each bind whose target checks (the
-// labelInodeChecks JSON array) lists its source's own, by mount point and
-// inode, never content. A mount the engine or container runtime leaves out,
-// or that was detached, shows the container whatever the parent mount holds
-// there instead: for a shared account's login, the launcher's own.
-func (d *Docker) checkMountInodes(ctx context.Context, id ID, mounts []mount.Mount, checks string) error {
-	var checked []string
-	if checks != "" {
-		if err := json.Unmarshal([]byte(checks), &checked); err != nil {
-			return fmt.Errorf("runtime: read the container's %s label: %w", labelInodeChecks, err)
-		}
-	}
+// checkSubpathMounts confirms the container sees each subpath mount's own
+// file or directory at its target, by mount point and inode, never content.
+// A mount the engine or container runtime leaves out, or that was detached,
+// shows the container whatever the parent mount holds there instead: for a
+// shared account's login, the launcher's own.
+func (d *Docker) checkSubpathMounts(ctx context.Context, id ID, mounts []mount.Mount) error {
 	for _, m := range mounts {
-		var want uint64
-		var source string
-		var err error
-		switch {
-		case m.Type == mount.TypeVolume && m.VolumeOptions != nil && m.VolumeOptions.Subpath != "" && m.VolumeOptions.DriverConfig != nil:
-			base, sub := m.VolumeOptions.DriverConfig.Options["device"], m.VolumeOptions.Subpath
-			source = sub + " in " + base
-			want, err = subpathInode(base, sub)
-		case m.Type == mount.TypeBind && slices.Contains(checked, m.Target):
-			source = m.Source
-			var info os.FileInfo
-			if info, err = os.Lstat(m.Source); err == nil {
-				want, err = fileInode(info)
-			}
-		default:
+		if m.Type != mount.TypeVolume || m.VolumeOptions == nil || m.VolumeOptions.Subpath == "" || m.VolumeOptions.DriverConfig == nil {
 			continue
 		}
+		base, sub := m.VolumeOptions.DriverConfig.Options["device"], m.VolumeOptions.Subpath
+		want, err := subpathInode(base, sub)
 		if err != nil {
 			return fmt.Errorf("runtime: check the mount at %s: %w", m.Target, err)
 		}
@@ -60,8 +39,8 @@ func (d *Docker) checkMountInodes(ctx context.Context, id ID, mounts []mount.Mou
 			return fmt.Errorf("runtime: %s is not a mount point in the container; %s", m.Target, d.mountListed(ctx, id, m.Target))
 		}
 		if fields[0] != strconv.FormatUint(want, 10) {
-			return fmt.Errorf("runtime: %s in the container is inode %s, not %s (inode %d); %s",
-				m.Target, fields[0], source, want, d.mountListed(ctx, id, m.Target))
+			return fmt.Errorf("runtime: %s in the container is inode %s, not %s in %s (inode %d); %s",
+				m.Target, fields[0], sub, base, want, d.mountListed(ctx, id, m.Target))
 		}
 	}
 	return nil

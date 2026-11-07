@@ -307,46 +307,6 @@ After you first share a `claude` or `gemini` account, restart your environment
 (**Stop environment** in **Profile**, then **Open** on **Environment**, or
 `aether terminal stop` and `aether terminal`) so recipients get your refreshes.
 
-### Session login copies
-
-An admin can list accounts whose `claude` and `codex` shares give each
-recipient session a copy of the owner's login instead of the login file
-itself:
-
-```sh
-sudo aether-server config set session-login-accounts <member-id>,<member-id>
-sudo systemctl restart aether-server
-```
-
-A `claude` or `codex` session on a listed account mounts
-`<data-dir>/scheduler/logins/<session-id>/<account-member-id>/.credentials.json`
-(or `auth.json`) read-only at the agent's login path, never the owner's file.
-The copy holds the access token and the plan, never the refresh token, so the
-session cannot keep, revoke or overwrite your login. Like any share, it needs
-Docker Engine 26.0 or newer. The server:
-
-- refreshes your login when its access token is within 15 minutes of expiry
-  and a recipient session is live, under the lock your own CLIs refresh
-  under (`~/.claude/.oauth_refresh.lock`, `~/.codex/auth.lock`), writes
-  the result back in place in your home, and logs
-  `scheduler: refreshed the account's login for session logins`;
-- rewrites every recipient's copy within 30 seconds of your login changing;
-- writes a signed-out copy (`{}`) while your login is not a Claude Code or
-  Codex ChatGPT sign-in, for example signed out or a Codex API key, and at
-  its next pass after a revoke: within 30 seconds, or about a minute when a
-  refresh of your login is in flight. The revoke itself moves or stops the
-  recipient's sessions at once. Claude Code rereads the file before each
-  request and shows `Not logged in`; Codex rereads it only on a 401 or near
-  expiry, so it runs until its access token expires. The access token stays
-  valid at the vendor until then.
-
-A refresh the vendor refuses leaves your login file untouched and is logged
-as `scheduler: refresh the account's login for session logins`; sign in again
-in your environment. The server checks that the container sees the copy
-before the agent starts, or the launch fails with `runtime: <login path> in
-the container is inode <n>, not <copy> (inode <m>)`. An unlisted account and
-every other agent keep the mount described above.
-
 ## GitHub credentials and signing keys
 
 Connecting GitHub, from the dashboard or with `gh auth login` and `aether
