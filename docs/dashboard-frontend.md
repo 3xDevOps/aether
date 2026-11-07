@@ -3500,8 +3500,11 @@ thumbnail is a button that opens the same blob in a `Dialog` filling the window
 (the whole screen on a phone), fitted to it. When the image is larger than that
 frame, **Actual size** in the header, or a click, `Enter` or `Space` on the
 image, switches to actual size in a scrolling frame centred on the clicked
-point, and back; an image that already fits offers no toggle. Closing the
-dialog resets it to fitted. Attachments sit outside the
+point, and back; an image that already fits offers no toggle. One dialog serves the
+row: while the image is fitted, `ArrowLeft` and `ArrowRight`, or a horizontal
+swipe, step to the previous or next image that loaded, stopping at either end;
+zoomed in, they scroll the picture instead. Each image opens fitted, and
+closing returns focus to the thumbnail of the image last shown. Attachments sit outside the
 text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider
