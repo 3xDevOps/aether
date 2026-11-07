@@ -50,7 +50,6 @@ export function PhoneLaunchSheet({
   onWorkspace: (id: string) => void
   /** What still matches your newest session, which the sheet starts from. */
   lastSession: 'repository and agent' | 'repository' | 'none'
-  /** The shared account the launch runs on; absent for the caller's own. */
   accountName?: string
   onAddWorkspace: () => void
   /** Permission, mode, model, limits and the rest of the desktop form. */

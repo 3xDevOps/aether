@@ -483,7 +483,23 @@ describe('new run', () => {
       await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', fallback_account_member_ids: ['mem_carol', vera.id] }))
     })
 
-    it('leaves the account a launch moved off unticked in a reordered fallback list', async () => {
+    it('keeps a fallback account ticked while it is the launch account and the list is edited', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
+      vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 1, defaults: { fallback: { policy: 'ordered', order: [bob.id, vera.id] } } })
+      useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+      await open()
+      const accounts = () => within(screen.getByRole('radiogroup', { name: 'Account' }))
+      await userEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
+      await userEvent.click(accounts().getByRole('radio', { name: /^Bob/ }))
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Vera/ }))
+      await userEvent.click(accounts().getByRole('radio', { name: /^Alice/ }))
+      await waitFor(() => expect(launchButton().disabled).toBe(false))
+      fireEvent.click(launchButton())
+      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ fallback_account_member_ids: [bob.id] })))
+      expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).not.toHaveProperty('account_member_id')
+    })
+
+    it('keeps the account a launch moved off ticked, last, in a list reordered from automatic', async () => {
       vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
       await open()
       await userEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
@@ -491,10 +507,10 @@ describe('new run', () => {
       await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ }))
       const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
       const rows = () => within(fallbacks).getAllByRole('checkbox').map((box) => [box.closest('li')?.querySelector('.truncate')?.textContent, box.getAttribute('aria-checked')])
-      await waitFor(() => expect(rows()).toEqual([['Vera', 'true'], ['Alice', 'false']]))
+      await waitFor(() => expect(rows()).toEqual([['Vera', 'true'], ['Alice', 'true']]))
       await waitFor(() => expect(launchButton().disabled).toBe(false))
       fireEvent.click(launchButton())
-      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ account_member_id: bob.id, fallback_account_member_ids: [vera.id] })))
+      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ account_member_id: bob.id, fallback_account_member_ids: [vera.id, alice.id] })))
     })
 
     it('gives the server\'s reasons an installed agent cannot launch there', async () => {

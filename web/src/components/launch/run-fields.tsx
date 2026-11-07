@@ -107,7 +107,6 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   const noAgents = agents !== null && agentError === null && !agents.some((item) => item.installed)
   return {
     agents,
-    /** The last list read, shown dimmed while `agents` is read again. */
     lastAgents: listed?.agents ?? null,
     agentError,
     agent,
@@ -146,9 +145,7 @@ export function RunFields({
   disabled?: boolean
   autoFocus?: boolean
   shared?: boolean
-  /** The account picker, under the agents it rates and above the modes and models it decides. */
   account?: React.ReactNode
-  /** A shared account's owner. */
   owner?: string
 }) {
   const { agents, lastAgents, harness, mode, noAgents } = choice

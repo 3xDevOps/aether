@@ -31,7 +31,6 @@ export function fallbackParams(fallback: Fallback, accounts: Member[], skip: str
   return ids.length ? { fallback_account_member_ids: ids } : { no_fallback: true }
 }
 
-/** Where a launch moves when its account's usage runs out; each row carries `status`, as the account list does. */
 export function FallbackOptions({
   accounts,
   ownAccountID,
@@ -50,8 +49,17 @@ export function FallbackOptions({
   const ids = candidates(fallback, accounts, account)
   const owner = accounts.find((member) => member.id === account)?.display_name ?? account
   const params = fallbackParams(fallback, accounts, account)
-  // Accounts the order does not hold join it unticked, so a reorder never ticks them.
-  const ordered = (order: string[]) => ({ order, excluded: [...fallback.excluded, ...ids.filter((id) => !ticked(fallback, id) && !fallback.excluded.includes(id))] })
+  // Editing the shown list keeps the hidden launch account's place and tick
+  // (last, ticked, coming from automatic), and leaves every account it did
+  // not show ticked unticked.
+  const ordered = (shown: string[]) => {
+    const all = fallback.order?.includes(account) ? candidates(fallback, accounts, '') : [...shown, account]
+    let next = 0
+    return {
+      order: all.map((id) => (id === account ? id : shown[next++])),
+      excluded: [...fallback.excluded, ...all.filter((id) => !fallback.excluded.includes(id) && !ticked(fallback, id))],
+    }
+  }
   const move = (index: number, by: number) => {
     const order = [...ids]
     ;[order[index], order[index + by]] = [order[index + by], order[index]]
@@ -89,7 +97,7 @@ export function FallbackOptions({
                           <span className="min-w-0 truncate">{name}</span>
                           {member && <span className="shrink-0 text-ui-sm text-muted">{accessLabel(member, ownAccountID)}</span>}
                         </span>
-                        {member && <ReadinessText ready={asFallback(status(member))} className="ml-0 truncate" />}
+                        {member && <ReadinessText ready={asFallback(status(member))} className="ml-0 max-w-full" />}
                       </span>
                     </label>
                     <Button type="button" variant="ghost" size="icon-sm" label={`Move ${name} up`} disabled={index === 0} onClick={() => move(index, -1)}>

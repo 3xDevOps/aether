@@ -2766,7 +2766,9 @@ tooltip when its last read failed), else "Sign in after launch" when
 `login_found` is false, else "Ready". A failed `agent.list` reads "Not
 checked" with the error as the tooltip; a failed `account.usage` puts its
 error on the status's tooltip. Expired windows drop on the half-minute
-clock. A shared selection says "Uses <owner>'s <agent> login and quota. Runs
+clock. A status takes at most 60% of its row, here and in the agent list,
+and clips an owner name past 13 characters, whole in the tooltip. A shared
+selection says "Uses <owner>'s <agent> login and quota. Runs
 in your environment with your GitHub login; the session stays yours.", and
 sends its ID as `account_member_id` on `agent.list` and `run.launch`;
 `run.launch` refuses an account not shared with the caller with the server's
@@ -2811,8 +2813,10 @@ the list was changed. Untouched, the form sends neither field and the server
 orders by usage left. After a reorder or untick it sends the ticked accounts
 in order as `fallback_account_member_ids`; with the checkbox off, or every
 account unticked, it sends `no_fallback: true`. The list leaves out the
-selected account. Once the list was changed, an account it did not hold,
-such as the one a new selection left, joins it unticked.
+selected account but keeps its place and tick, so selecting another account
+and editing the list never drops it; changed from automatic, the list adds
+it last, ticked. An account the changed list did not hold, such as one
+shared since, joins it unticked.
 
 The launch form does not ask which workspace to launch into: it takes
 `activeWorkspace` and says where the session will land, naming the workspace and its

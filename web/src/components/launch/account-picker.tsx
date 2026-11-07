@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
-import { customAgent } from '@/components/launch/agent-picker'
+import { customAgent, needsLogin } from '@/components/launch/agent-picker'
 import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -8,13 +8,11 @@ import type { AgentInfo, Member, UsageProvider } from '@/lib/types'
 import { cn, focusRingInset } from '@/lib/utils'
 import { currentWindows, tone } from '@/routes/settings/usage'
 
-/** What `agent.list` and `account.usage` said for one account, or why each read failed; a field stays absent until its read settles. */
 export type AccountStatus = { agents?: AgentInfo[]; agentsError?: string; usage?: UsageProvider[]; usageError?: string }
 
 /** The connector's bound on account reads in flight, so they leave the gateway's connections to the launch itself. */
 const statusReads = 4
 
-/** Reads every account's agents and usage once per account list, so each row can say whether the chosen agent launches there. */
 export function useAccountStatus(accounts: Member[], ownAccountID: string, client: Pick<Api, 'agentList' | 'accountUsage'> = api): Record<string, AccountStatus> {
   const [status, setStatus] = useState<Record<string, AccountStatus>>({})
   const ids = accounts.length > 1 ? accounts.map((member) => member.id).join(' ') : ''
@@ -42,18 +40,16 @@ export function useAccountStatus(accounts: Member[], ownAccountID: string, clien
   return status
 }
 
-/** `title` carries a failed read's error. */
-/** `refused` marks a launch the server refuses there, which usage fallback skips too; `signIn` an own account with no login file. */
+/** `refused`: the server refuses a launch there, so usage fallback skips it too. */
 export type Readiness = { text: string; className: string; title?: string; refused?: boolean; signIn?: boolean }
 
-/** What a launch of `harness` on the account would meet, known only once its `agent.list` settled; `owner` names a shared account's owner. */
 export function readiness(status: AccountStatus | undefined, harness: string, owner: string | undefined, now: number): Readiness | null {
   if (!status || !harness || harness === customAgent) return null
   if (status.agentsError) return { text: 'Not checked', className: 'text-state-failed', title: status.agentsError }
   if (!status.agents) return null
   const agent = status.agents.find((item) => item.name === harness)
   if (!agent?.installed) return { text: 'Not installed', className: 'text-muted', refused: true }
-  if (agent.login_missing) return { text: `Needs ${owner ?? 'the owner'}'s login`, className: 'text-state-needs-you', refused: true }
+  if (agent.login_missing) return { text: needsLogin(owner), title: needsLogin(owner, false), className: 'text-state-needs-you', refused: true }
   if (agent.own_account_only) return { text: 'Your account only', className: 'text-muted', refused: true }
   if (agent.unavailable) return { text: 'Unavailable', className: 'text-state-failed', title: agent.unavailable, refused: true }
   const provider = status.usage?.find((item) => item.provider === harness)
@@ -72,7 +68,6 @@ export function readiness(status: AccountStatus | undefined, harness: string, ow
   return { text: 'Ready', className: 'text-text', title: usageError }
 }
 
-/** The same status on a fallback row: usage fallback never moves a launch where it would be refused. */
 export function asFallback(ready: Readiness | null): Readiness | null {
   if (ready?.refused) return { ...ready, text: `Skipped: ${ready.text.charAt(0).toLowerCase()}${ready.text.slice(1)}`, className: 'text-muted' }
   if (ready?.signIn) return { ...ready, text: 'Sign in when used' }
@@ -85,16 +80,14 @@ export function accessLabel(member: Member, ownAccountID: string): string {
 
 export function ReadinessText({ ready, className }: { ready: Readiness | null; className?: string }) {
   if (!ready) return null
-  return <span title={ready.title} className={cn('ml-auto shrink-0 text-ui-sm tabular-nums', ready.className, className)}>{ready.text}</span>
+  return <span title={ready.title ?? ready.text} className={cn('ml-auto max-w-[60%] shrink-0 truncate text-ui-sm tabular-nums', ready.className, className)}>{ready.text}</span>
 }
 
-/** The account a launch runs on: the caller's own and each one shared with them, each with `status`. */
 export function AccountPicker({ accounts, ownAccountID, value, onChange, agentName, status, disabled = false }: {
   accounts: Member[]
   ownAccountID: string
   value: string
   onChange: (account: string) => void
-  /** The chosen agent's display name. */
   agentName: string
   status: (member: Member) => Readiness | null
   disabled?: boolean
@@ -113,7 +106,7 @@ export function AccountPicker({ accounts, ownAccountID, value, onChange, agentNa
               value={member.id}
               className={cn(focusRingInset, 'flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control px-2 text-left disabled:cursor-not-allowed')}
             >
-              <span className="min-w-0 truncate text-ui text-text">{member.display_name}</span>
+              <span title={member.display_name} className="min-w-0 truncate text-ui text-text">{member.display_name}</span>
               <span className="shrink-0 text-ui-sm text-muted">{accessLabel(member, ownAccountID)}</span>
               <ReadinessText ready={status(member)} />
             </RadioGroupPrimitive.Item>

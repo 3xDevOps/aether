@@ -13,7 +13,7 @@ describe('readiness', () => {
   it.each([
     ['Not installed', { agents: [claude({ installed: false })] }, { className: 'text-muted', refused: true }],
     ['Not installed', { agents: [] }, { className: 'text-muted', refused: true }],
-    ["Needs Bob's login", { agents: [claude({ login_missing: true })], usage: usage(10) }, { className: 'text-state-needs-you', refused: true }],
+    ["Needs Bob's login", { agents: [claude({ login_missing: true })], usage: usage(10) }, { className: 'text-state-needs-you', refused: true, title: "Needs Bob's login" }],
     ['Your account only', { agents: [claude({ own_account_only: true })] }, { className: 'text-muted', refused: true }],
     ['Unavailable', { agents: [claude({ unavailable: hardLink })] }, { className: 'text-state-failed', title: hardLink, refused: true }],
     ['Sign in after launch', { agents: [claude({ login_found: false })] }, { className: 'text-muted', signIn: true }],
@@ -38,6 +38,11 @@ describe('readiness', () => {
     expect(asFallback(readiness({ agents: [claude({ unavailable: hardLink })] }, 'claude', 'Bob', now))).toMatchObject({ text: 'Skipped: unavailable', className: 'text-muted', title: hardLink })
     expect(asFallback(readiness({ agents: [claude({ login_found: false })] }, 'claude', undefined, now))?.text).toBe('Sign in when used')
     expect(asFallback(readiness({ agents: [claude()] }, 'claude', undefined, now))?.text).toBe('Ready')
+  })
+
+  it('clips a long owner name in the status and keeps it whole in the title', () => {
+    const owner = 'o'.repeat(64)
+    expect(readiness({ agents: [claude({ login_missing: true })] }, 'claude', owner, now)).toMatchObject({ text: `Needs ${'o'.repeat(12)}…'s login`, title: `Needs ${owner}'s login` })
   })
 
   it('says nothing for the pinned custom agent', () => {
