@@ -5,7 +5,27 @@
 
 'use strict'
 
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webFrame } = require('electron')
+
+// The shell has no View menu, so it zooms the window itself: Cmd on macOS,
+// Ctrl elsewhere, in Electron's own half-level steps. It listens last, after
+// the page: a key the page already claimed, like terminal zoom, is left alone.
+const zoomSteps = { Equal: 0.5, NumpadAdd: 0.5, Minus: -0.5, NumpadSubtract: -0.5 }
+window.addEventListener('keydown', (event) => {
+  const command = process.platform === 'darwin' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+  if (event.defaultPrevented || !command || event.altKey) return
+  if (event.code === 'Digit0' || event.code === 'Numpad0') {
+    if (event.shiftKey) return
+    webFrame.setZoomLevel(0)
+  } else if (event.code in zoomSteps) {
+    // Shift+= is how a keyboard without a numpad types +.
+    if (event.shiftKey && event.code !== 'Equal') return
+    webFrame.setZoomLevel(webFrame.getZoomLevel() + zoomSteps[event.code])
+  } else {
+    return
+  }
+  event.preventDefault()
+})
 
 // Which CLI built this shell. `aether gui build` stamps its own version into
 // the shell's package.json and main.js appends it to the renderer's argv: a
