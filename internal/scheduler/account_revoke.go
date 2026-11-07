@@ -115,11 +115,7 @@ func (s *Scheduler) leaveRevokedAccounts(ctx context.Context, match func(*domain
 // launcher's account, so the new owner's shares do not count. A row from
 // before shares were narrowed records no launcher; its owner stands in.
 func (s *Scheduler) accountRevoked(ctx context.Context, run *domain.Run) (bool, error) {
-	launcher := run.HomeMemberID
-	if launcher == "" {
-		launcher = run.MemberID
-	}
-	_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, launcher, string(run.AccountMember()))
+	err := s.resolveRunAccount(ctx, run)
 	switch {
 	case errors.Is(err, permissions.ErrDenied) || errors.Is(err, store.ErrNotFound):
 		return true, nil
@@ -127,6 +123,17 @@ func (s *Scheduler) accountRevoked(ctx context.Context, run *domain.Run) (bool, 
 		return false, err
 	}
 	return false, nil
+}
+
+// resolveRunAccount refuses the run's account as a launch by its launcher
+// would be refused now.
+func (s *Scheduler) resolveRunAccount(ctx context.Context, run *domain.Run) error {
+	launcher := run.HomeMemberID
+	if launcher == "" {
+		launcher = run.MemberID
+	}
+	_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, launcher, string(run.AccountMember()))
+	return err
 }
 
 // leaveRevokedAccount claims a run on a revoked account and moves it to

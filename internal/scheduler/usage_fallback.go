@@ -930,6 +930,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	if run.ACP {
 		if err := s.acp.openError(run.ID); err != nil {
 			s.clearAccountSwap(entry, swap)
+			s.leaveIfRevoked(ctx, entry, &next)
 			return usageNoFallback, fmt.Sprintf("%sthe session is on %s's account and its conversation could not be restored: %v", m.stopped(fromName), toName, err)
 		}
 	}
@@ -952,6 +953,10 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	case run.Mode == domain.LaunchTUI:
 		s.goMove(func() { s.continueStandard(entry, again) })
 	}
+	// A follow-up move may give up and keep the container, so the share is
+	// checked whether or not one is pending; whichever claims the run first
+	// moves it.
+	s.leaveIfRevoked(ctx, entry, &next)
 	return usageContinued, ""
 }
 
