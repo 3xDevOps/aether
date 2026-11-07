@@ -260,14 +260,6 @@ func historySegmentIncarnation(path, name string) (int64, bool) {
 	return castSegmentIncarnation(path, name)
 }
 
-func historySegmentName(path, name string) bool {
-	if name == filepath.Base(path) {
-		return true
-	}
-	_, ok := historySegmentIncarnation(path, name)
-	return ok
-}
-
 func historySegmentOrder(rootPath, name string) (int64, bool) {
 	if order, ok := historySegmentIncarnation(rootPath, name); ok {
 		return order, true

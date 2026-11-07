@@ -371,12 +371,12 @@ func TestReadCastTailDecodesOutputAndIgnoresOtherEvents(t *testing.T) {
 	if cerr := w.close(); cerr != nil {
 		t.Fatalf("close: %v", cerr)
 	}
-	got, err := readCastTail(path, 6)
+	got, _, err := readCastTailWindow(path, 6, 48)
 	if err != nil {
-		t.Fatalf("readCastTail: %v", err)
+		t.Fatalf("readCastTailWindow: %v", err)
 	}
 	if string(got) != "two\n" {
-		t.Fatalf("readCastTail = %q, want %q", got, "two\n")
+		t.Fatalf("readCastTailWindow = %q, want %q", got, "two\n")
 	}
 }
 

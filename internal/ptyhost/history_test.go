@@ -558,14 +558,14 @@ func TestHistoryCursorResolvesDottedRunSegmentDirectly(t *testing.T) {
 	if err != nil || len(priors) != 1 {
 		t.Fatalf("prior segments = %v, %v", priors, err)
 	}
-	if name := filepath.Base(priors[0]); !historySegmentName(path, name) {
-		t.Fatalf("stable segment name %q was not recognized", name)
+	if _, ok := historySegmentIncarnation(path, filepath.Base(priors[0])); !ok {
+		t.Fatalf("stable segment name %q was not recognized", filepath.Base(priors[0]))
 	}
 
 	stem := strings.TrimSuffix(path, ".cast")
 	for i := 0; i < 32; i++ {
 		name := stem + ".9" + strconv.Itoa(i) + ".cast"
-		if historySegmentName(path, filepath.Base(name)) {
+		if _, ok := historySegmentIncarnation(path, filepath.Base(name)); ok {
 			t.Fatalf("dotted sibling %q was mistaken for a history segment", name)
 		}
 		if err = os.WriteFile(name, []byte("malformed\n"), 0o644); err != nil {
@@ -574,7 +574,7 @@ func TestHistoryCursorResolvesDottedRunSegmentDirectly(t *testing.T) {
 	}
 	for _, suffix := range []string{"01", "+1", "0", "-1", "not-a-number"} {
 		name := stem + ".~" + suffix + ".cast"
-		if historySegmentName(path, filepath.Base(name)) {
+		if _, ok := historySegmentIncarnation(path, filepath.Base(name)); ok {
 			t.Fatalf("noncanonical segment %q was accepted", name)
 		}
 		if err = os.WriteFile(name, []byte("malformed\n"), 0o644); err != nil {

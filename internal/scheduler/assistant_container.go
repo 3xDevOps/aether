@@ -146,7 +146,7 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	if image == "" {
 		return runtime.Spec{}, errors.New("scheduler: standard image is required")
 	}
-	user, err := s.resolveContainerUser(ctx, image, harness.Profile{})
+	user, err := s.resolveContainerUser(ctx, image)
 	if err != nil {
 		return runtime.Spec{}, fmt.Errorf("scheduler: resolve the assistant's user: %w", err)
 	}
@@ -316,7 +316,7 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 	if err = os.WriteFile(filepath.Join(dir, "package.json"), manifest, 0o644); err != nil {
 		return fmt.Errorf("scheduler: write the assistant's package.json: %w", err)
 	}
-	user, err := s.resolveContainerUser(ctx, s.cfg.StandardImage, harness.Profile{})
+	user, err := s.resolveContainerUser(ctx, s.cfg.StandardImage)
 	if err != nil {
 		return fmt.Errorf("scheduler: resolve the assistant's user: %w", err)
 	}

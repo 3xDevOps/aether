@@ -168,7 +168,7 @@ func (e *Engine) checkCaptureBounds(ctx context.Context, run domain.RunID, check
 }
 
 // checkEvidenceSnapshotBounds validates the immutable tree produced by
-// writeSnapshotTree. The live checkout can change after the conservative
+// writeSnapshotTreeLocked. The live checkout can change after the conservative
 // preflight above, but a tree's blob sizes cannot change once Git has written
 // it, so this is the authoritative capture bound.
 func (e *Engine) checkEvidenceSnapshotBounds(ctx context.Context, run domain.RunID, checkout, tree string) error {
@@ -234,17 +234,6 @@ func (e *Engine) checkSnapshotBounds(ctx context.Context, checkout, index, tree 
 		return fmt.Errorf("%w: insufficient free disk for staged input", limitErr)
 	}
 	return nil
-}
-
-// writeSnapshotTree stages the whole checkout into the run's snapshot store
-// and writes the resulting tree, returning its object id. Every caller uses
-// the same per-run lock so the persistent scratch index and its lock cannot
-// be raced by the diff watcher and evidence capture.
-func (e *Engine) writeSnapshotTree(ctx context.Context, run domain.RunID, checkout string) (string, error) {
-	lock := e.snapshotLock(run)
-	lock.Lock()
-	defer lock.Unlock()
-	return e.writeSnapshotTreeLocked(ctx, run, checkout)
 }
 
 func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, checkout string) (result string, resultErr error) {

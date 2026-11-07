@@ -48,9 +48,6 @@ type Options struct {
 	LocalDir string
 	// Dial opens the SSH subsystem stream to the run worktree (beta).
 	Dial Dialer
-	// DataDir is the mutagen data directory for this invocation. Empty
-	// means a fresh temp dir, removed on Close.
-	DataDir string
 }
 
 // Session is one live overlay: an embedded mutagen manager owning
@@ -61,7 +58,6 @@ type Session struct {
 	manager    *synchronization.Manager
 	sessionID  string
 	dataDir    string
-	ownsData   bool
 	stateIndex uint64
 }
 
@@ -115,31 +111,24 @@ func NewSession(opts Options) (*Session, error) {
 	} else if !info.IsDir() {
 		return nil, fmt.Errorf("overlay: %s is not a directory", localDir)
 	}
-	dataDir, ownsData := opts.DataDir, false
-	if dataDir == "" {
-		if dataDir, err = os.MkdirTemp("", "aether-overlay-*"); err != nil {
-			return nil, fmt.Errorf("overlay: data dir: %w", err)
-		}
-		ownsData = true
+	dataDir, err := os.MkdirTemp("", "aether-overlay-*")
+	if err != nil {
+		return nil, fmt.Errorf("overlay: data dir: %w", err)
 	}
 	// Mutagen resolves its data directory through this env var on every
 	// path computation; per-invocation isolation keeps `aether sync`
 	// stateless.
 	if err = os.Setenv("MUTAGEN_DATA_DIRECTORY", dataDir); err != nil {
-		if ownsData {
-			_ = os.RemoveAll(dataDir)
-		}
+		_ = os.RemoveAll(dataDir)
 		return nil, fmt.Errorf("overlay: set data dir: %w", err)
 	}
 	synchronization.ProtocolHandlers[url.Protocol_SSH] = &streamProtocolHandler{dial: opts.Dial}
 	manager, err := synchronization.NewManager(logging.NewLogger(logging.LevelError, io.Discard))
 	if err != nil {
-		if ownsData {
-			_ = os.RemoveAll(dataDir)
-		}
+		_ = os.RemoveAll(dataDir)
 		return nil, fmt.Errorf("overlay: manager: %w", err)
 	}
-	return &Session{localDir: localDir, manager: manager, dataDir: dataDir, ownsData: ownsData}, nil
+	return &Session{localDir: localDir, manager: manager, dataDir: dataDir}, nil
 }
 
 // Start creates and connects the mutagen session: alpha is the local
@@ -190,7 +179,7 @@ func (s *Session) Close() {
 		s.manager.Shutdown()
 		s.manager = nil
 	}
-	if s.ownsData && s.dataDir != "" {
+	if s.dataDir != "" {
 		_ = os.RemoveAll(s.dataDir)
 		s.dataDir = ""
 	}

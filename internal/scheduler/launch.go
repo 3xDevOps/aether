@@ -30,7 +30,7 @@ type imageUserResolver interface {
 
 // resolveContainerUser resolves root to "" (the image default) so
 // Spec.User is only set when it matters.
-func (s *Scheduler) resolveContainerUser(ctx context.Context, image string, profile harness.Profile) (string, error) {
+func (s *Scheduler) resolveContainerUser(ctx context.Context, image string) (string, error) {
 	var imageUser string
 	if r, ok := s.cfg.Runtime.(imageUserResolver); ok {
 		u, err := r.ImageUser(ctx, image)
@@ -39,7 +39,7 @@ func (s *Scheduler) resolveContainerUser(ctx context.Context, image string, prof
 		}
 		imageUser = u
 	}
-	user, err := harness.ResolveUser(profile.User, imageUser)
+	user, err := harness.ResolveUser(imageUser)
 	if err != nil {
 		return "", err
 	}

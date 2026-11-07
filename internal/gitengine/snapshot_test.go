@@ -36,9 +36,9 @@ func TestRunPatchRendersSnapshotInterval(t *testing.T) {
 	}
 	snap := func() string {
 		t.Helper()
-		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		tree, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 		if err != nil {
-			t.Fatalf("writeSnapshotTree: %v", err)
+			t.Fatalf("writeSnapshotTreeLocked: %v", err)
 		}
 		return tree
 	}
@@ -175,9 +175,9 @@ func TestSnapshotStoreSurvivesAStaleIndexLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	first, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	first, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 	if err != nil {
-		t.Fatalf("writeSnapshotTree: %v", err)
+		t.Fatalf("writeSnapshotTreeLocked: %v", err)
 	}
 
 	store, err := e.snapshotStorePath("run1")
@@ -191,9 +191,9 @@ func TestSnapshotStoreSurvivesAStaleIndexLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	second, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 	if err != nil {
-		t.Fatalf("writeSnapshotTree over a stale lock: %v", err)
+		t.Fatalf("writeSnapshotTreeLocked over a stale lock: %v", err)
 	}
 	if second == first {
 		t.Error("the snapshot after the stale lock did not see the edit")
@@ -230,9 +230,9 @@ func TestSnapshotLeavesTheCheckoutGitAlone(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		tree, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 		if err != nil {
-			t.Fatalf("writeSnapshotTree: %v", err)
+			t.Fatalf("writeSnapshotTreeLocked: %v", err)
 		}
 		trees = append(trees, tree)
 	}
@@ -261,9 +261,9 @@ func TestRangePatchRefusesACommitID(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	tree, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 	if err != nil {
-		t.Fatalf("writeSnapshotTree: %v", err)
+		t.Fatalf("writeSnapshotTreeLocked: %v", err)
 	}
 	head, err := e.git(ctx, checkout, "rev-parse", "HEAD")
 	if err != nil {

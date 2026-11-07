@@ -39,7 +39,7 @@ func TestSnapshotHistorySurvivesCheckoutCleanupAndExplicitDeletion(t *testing.T)
 		if _, err := e.CommitAll(ctx, "run1", fmt.Sprintf("version %d", i), domain.GitIdentity{}, nil); err != nil {
 			t.Fatal(err)
 		}
-		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		tree, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -295,7 +295,7 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 		}
 	}
 	for range 3 {
-		if _, err := e.writeSnapshotTree(ctx, "run1", checkout); err != nil {
+		if _, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -421,7 +421,7 @@ func TestEvidenceCopyAndRangeReadersSurviveConcurrentSnapshots(t *testing.T) {
 						return
 					}
 				case 1:
-					_, err := e.writeSnapshotTree(ctx, "run1", checkout)
+					_, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", nil)
 					if err != nil {
 						t.Error(err)
 						return
@@ -611,7 +611,7 @@ func TestSnapshotHistorySurvivesFormerByteLimit(t *testing.T) {
 		if err := errors.Join(copyErr, closeErr); err != nil {
 			t.Fatal(err)
 		}
-		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		tree, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -634,7 +634,7 @@ func TestSnapshotCheckoutCleanupWaitsForReadableHistoryLog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("keep until history is durable\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	tree, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 	if err != nil {
 		t.Fatal(err)
 	}

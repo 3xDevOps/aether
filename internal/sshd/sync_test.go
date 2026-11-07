@@ -229,7 +229,7 @@ func startOverlay(t *testing.T, e *testEnv, run domain.RunID, localDir string) (
 		}
 		return &bufferedPipe{r: r, pipe: pipe}, nil
 	}
-	sess, err := overlay.NewSession(overlay.Options{LocalDir: localDir, Dial: dial, DataDir: t.TempDir()})
+	sess, err := overlay.NewSession(overlay.Options{LocalDir: localDir, Dial: dial})
 	if err != nil {
 		t.Fatalf("overlay.NewSession: %v", err)
 	}
