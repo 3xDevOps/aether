@@ -7,7 +7,6 @@ import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { agentInfo, alice, bob, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
-import { pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -665,9 +664,7 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('New session…'))
-    const options = await screen.findByRole('button', { name: /^Options/ })
-    if (options.getAttribute('aria-expanded') === 'false') await userEvent.click(options)
-    await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+    await userEvent.click(within(await screen.findByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ }))
     await waitFor(() => expect(screen.getByRole('radio', { name: /^bob-agent/ }).getAttribute('aria-checked')).toBe('true'))
     await launchReady()
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))

@@ -444,8 +444,22 @@ launch. A member's **agent account** is that vendor login and the subscription
 behind it. One member can let a collaborator launch sessions on theirs.
 
 The owner shares under **Profile → Agent account sharing → Share account**. The
-recipient selects **New session → Options → Account** and picks `<name> (shared)`
-From the CLI:
+recipient picks the owner under **New session → Account**, below the agent.
+Each row there is marked **You** or **Shared** and says what a launch of the
+chosen agent on that account meets:
+
+| Status | Meaning |
+| --- | --- |
+| `<n>% used` | Launches; the fullest usage window, `· stale` when the last read failed |
+| **Ready** | Launches; no usage is measured for it |
+| **Sign in after launch** | Your own account has no login file for the agent; it launches and the agent asks you to sign in |
+| **Needs `<owner>`'s login** | The owner has no login for the agent; the launch is refused |
+| **Not installed**, **Your account only**, **Unavailable** | The launch is refused; hover **Unavailable** for the reason |
+| **Not checked** | The dashboard could not read the account's agents; hover for the error |
+
+Only your own account and accounts shared with you are listed, and the
+server refuses any other with `permission denied: member <id> has not
+shared their account with you`. From the CLI:
 
 ```sh
 aether account share <member-id>      # owner
@@ -475,7 +489,7 @@ lists exactly what is shared.
   another reason [security.md](security.md#account-sharing) lists.
 - An agent you defined with `aether agent add` runs only on your own account. A
   shared account shows it disabled as **Your account only**.
-- An owner with no login shows **Not logged in**. A CLI launch fails with `Grace
+- An owner with no login shows **Needs `<owner>`'s login**. A CLI launch fails with `Grace
   is not logged in to claude: no login at ~/.claude/.credentials.json in their
   home; Grace logs in to claude in their own environment terminal`.
 - Every member's containers mount their own Claude Code and Gemini login files
@@ -507,8 +521,13 @@ cannot be read (an API-key login, signed out, or a vendor read over 3 seconds).
 
 Candidates are your own account and every account shared with you whose owner is
 logged in to the agent. The one with the most usage left wins. In the launch
-dialog, **Options → Fall back to another account** turns it off and lists
-**Fallback accounts**, which you untick or reorder. From the CLI:
+dialog, **Fallback → Fall back to another account** turns it off and lists
+**Fallback accounts**, which you untick or reorder; an account a launch could
+not run on reads **Skipped:** and the reason. Your own account with no login
+file for the agent reads **No saved login**: a launch may still fall back to
+it, last, and the agent asks you to sign in, but a running session moves
+there only if an API key (`ANTHROPIC_API_KEY`, or `CODEX_API_KEY` in
+Background) signs the agent in. From the CLI:
 
 ```sh
 # If Grace's account is exhausted, try Lin's, then your own
@@ -562,7 +581,7 @@ The dashboard's launch panel opens on them, the right half of **New session**
 launches the last agent, mode, model and permission tier at once, and the
 panel saves the agent, mode and model of each launch, and the permission tier
 as soon as you change it. It saves the account and fallback only when you select
-**Save as my default** under **Options**. **Settings → Launch** shows them,
+**Save as my default** under **Account**. **Settings → Launch** shows them,
 with each invalid choice and its reason, and changes or clears them.
 
 `launch.defaults.get` returns your choices with a `revision`, which is 0 when

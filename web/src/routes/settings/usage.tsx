@@ -39,7 +39,7 @@ function failureOf(error: unknown): Failure {
   return { kind: 'error', message: 'The usage service did not respond.' }
 }
 
-function currentWindows(provider: UsageProvider | undefined, now: number): UsageWindow[] {
+export function currentWindows(provider: UsageProvider | undefined, now: number): UsageWindow[] {
   if (!provider || (provider.status !== 'ok' && provider.status !== 'stale')) return []
   return provider.windows.filter((window) => {
     if (!Number.isFinite(window.used_percent) || window.used_percent < 0 || window.used_percent > 100) return false
@@ -60,7 +60,7 @@ function resetsIn(resetsAt: string | undefined, now: number): string | null {
 
 type MeterTone = Extract<Tone, 'failed' | 'needs-you' | 'done'>
 
-function tone(percent: number): MeterTone {
+export function tone(percent: number): MeterTone {
   if (percent >= 100) return 'failed'
   if (percent >= 80) return 'needs-you'
   return 'done'

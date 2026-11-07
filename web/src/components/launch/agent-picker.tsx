@@ -20,12 +20,17 @@ function rank(agent: AgentInfo): number {
   return launchable(agent) ? 0 : 1
 }
 
-function status(agent: AgentInfo): string {
-  if (agent.login_missing) return 'Not logged in'
+/** Display names run to 64 characters, so `clip` keeps a row's own name in view. */
+export function needsLogin(owner = 'the owner', clip = true): string {
+  return `Needs ${clip && owner.length > 13 ? `${owner.slice(0, 12)}…` : owner}'s login`
+}
+
+function status(agent: AgentInfo, owner: string | undefined): string {
+  if (agent.login_missing) return needsLogin(owner)
   if (agent.own_account_only) return 'Your account only'
   if (agent.unavailable) return 'Unavailable'
   if (agent.source !== 'shipped' || agent.login_found === undefined) return ''
-  return agent.login_found ? 'Login found' : 'No login found'
+  return agent.login_found ? 'Ready' : 'Sign in after launch'
 }
 
 export function AgentPicker({
@@ -34,6 +39,7 @@ export function AgentPicker({
   value,
   onChange,
   onSetUp,
+  owner,
   disabled = false,
 }: {
   label: string
@@ -41,14 +47,15 @@ export function AgentPicker({
   value: string
   onChange: (name: string) => void
   onSetUp?: () => void
+  owner?: string
   disabled?: boolean
 }) {
   const phone = useMediaQuery(phoneScreen)
   const [browsing, setBrowsing] = useState(false)
   const sorted = agents.filter((agent) => agent.installed).sort((a, b) => rank(a) - rank(b))
   const rows = [
-    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent), enabled: launchable(agent) })),
-    { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', enabled: true },
+    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent, owner), title: agent.login_missing ? needsLogin(owner, false) : status(agent, owner), enabled: launchable(agent) })),
+    { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', title: 'Server-defined', enabled: true },
   ]
   const chosen = rows.find((row) => row.name === value)
   const collapsed = phone && !browsing && chosen !== undefined
@@ -88,7 +95,7 @@ export function AgentPicker({
               >
                 <AgentGlyph agent={row.glyph} colored={row.enabled} className="size-4" />
                 <span className={cn('min-w-0 truncate text-ui', row.enabled ? 'text-text' : 'text-muted')}>{row.label}</span>
-                <span className={cn('ml-auto shrink-0 text-ui-sm', selected ? 'text-text' : 'text-muted')}>{row.status}</span>
+                <span title={row.title} className={cn('ml-auto max-w-[60%] shrink-0 truncate text-ui-sm', selected ? 'text-text' : 'text-muted')}>{row.status}</span>
               </RadioGroupPrimitive.Item>
             </div>
           )
@@ -103,7 +110,7 @@ export function AgentPicker({
   )
 }
 
-export function RefusalNotes({ agents, accountName }: { agents: AgentInfo[]; accountName: string }) {
+export function RefusalNotes({ agents, accountName, accountPlace }: { agents: AgentInfo[]; accountName: string; accountPlace: string }) {
   const loggedOut = agents.filter((agent) => agent.installed && agent.login_missing)
   const ownOnly = agents.filter((agent) => agent.installed && agent.own_account_only)
   const unavailable = agents.filter((agent) => agent.installed && agent.unavailable)
@@ -118,7 +125,7 @@ export function RefusalNotes({ agents, accountName }: { agents: AgentInfo[]; acc
       )}
       {ownOnly.length > 0 && (
         <p>
-          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account, marked (you), under Account.
+          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account under {accountPlace}.
         </p>
       )}
       {unavailable.map((agent) => (

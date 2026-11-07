@@ -2594,11 +2594,13 @@ session with `template.launch`, sending the name and the filled-in parameters,
 then reveals it. A refusal shows the server's error and any setup output.
 
 The launch form lives in `components/launch/`. It asks for a
-task, an agent, a mode and a model; an account appears only when one is shared with the
-caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
-in its colour, the display name, and "Login found" or "No login found" for a
-shipped agent (`login_found` checks the launch home for login files, not for a
-working session; a server that does not report it shows nothing). An agent
+task, an agent, an account when one is shared with the caller, a mode and a
+model. The agent picker is a list of rows from `agent.list`: the vendor glyph
+in its colour, the display name, and "Ready" or "Sign in after launch"
+for a shipped agent (`login_found` checks the launch home for login files, not
+for a working session; a server that does not report it shows nothing). While
+the list is read again for another account the last one stays, dimmed and
+disabled, and Launch stays off until it answers. An agent
 that is not installed is not listed. **Install more agents...** below the
 list closes the dialog and opens Agents. The last row is `custom`, the escape hatch that
 `agent.list` never returns and that only launches where the deployment pinned
@@ -2611,9 +2613,10 @@ shows its error and no setup button, and Launch stays disabled.
 Below 768px the same form is a bottom sheet (`phone-launch.tsx`): **Task**
 first, focused, with one-word help; then the **Repository** chip, the base
 branch as muted text ("from main"; sessions always start from it) and the
-**Agent** chip; then **Launch** pinned under the form. Permission, Mode, Model,
-Effort, Resource limits, Subsessions, extra repositories and the account sit
-under **More options**, whose caption names the mode, with **Install more
+**Agent** chip; then **Launch** pinned under the form. Permission, the
+account and fallback, Mode, Model, Effort, Resource limits, Subsessions and
+extra repositories sit under **More options**, whose caption names the mode
+and, on a shared account, "<owner>'s account", only the name truncated, with **Install more
 agents...** at its end. Closing the sheet returns focus to what opened it. The repository starts
 on the workspace of your newest session that you started yourself (not a
 subsession or a connector launch) in a workspace that still exists, read once
@@ -2719,7 +2722,7 @@ failed save shows "Launch choices not saved: " and the server's error. The
 saved account is preselected when `account.list` still lists it and `get`
 does not mark it invalid, and the saved fallback policy fills the fallback
 list, keeping only listed accounts. A launch never saves the account or the
-fallback; **Save as my default** under **Options** does, and says "Saved
+fallback; **Save as my default** under **Account** does, and says "Saved
 for every device." until the account or fallback changes again. It saves the fallback list as the session sends
 it, without the selected account. **Session**, **Default mode** and **Set up** on
 Agents, and the onboarding wizard, save their agent and mode the same way
@@ -2749,10 +2752,28 @@ old one open on the same choices. The form starts over when a different
 member signs in while it is open. An Enhanced or remembered mode the agent cannot
 use (no Enhanced support, or its adapter not installed) shows as Standard.
 
-**Options** appears when `account.list` returns more than the caller and
-holds the **Account** select: the caller first as "(you)", then accounts
-shared with them as "(shared)". A shared selection sends its ID as
-`account_member_id` on `agent.list` and `run.launch`. `agent.list` still
+**Account** (`account-picker.tsx`), below Agent and above Mode, appears when
+`account.list` returns more than the caller. It is a radio list: the caller
+first, marked "You", then each account shared with them, marked "Shared".
+Each row ends with what a launch of the chosen agent there meets, read once
+per open with `agent.list` and `account.usage` for every account, four reads
+at a time, and nothing until that account's `agent.list` answers: "Not
+installed", "Needs <owner>'s login", "Your account only" or "Unavailable"
+(its error as the tooltip) from the `agent.list` fields below, else the
+agent's fullest current usage window as "<n>% used" (amber from 80%, red at
+100%, as on Settings > **Usage**; "· stale" with the provider's error as the
+tooltip when its last read failed), else "Sign in after launch" when
+`login_found` is false, else "Ready". A failed `agent.list` reads "Not
+checked" with the error as the tooltip; a failed `account.usage` puts its
+error on the status's tooltip. Expired windows drop on the half-minute
+clock. A status takes at most 60% of its row, here and in the agent list,
+and clips an owner name past 13 characters, whole in the tooltip. A shared
+selection says "Uses <owner>'s <agent> login and quota. Runs
+in your environment with your GitHub login; the session stays yours.", and
+sends its ID as `account_member_id` on `agent.list` and `run.launch`;
+`run.launch` refuses an account not shared with the caller with the server's
+error under "Launch failed". Under the list sit **Fallback** and **Save as my
+default**. `agent.list` still
 returns the caller's own agents and installations, since the session executes
 in the caller's environment, and marks each agent the account's owner has no
 login for with `login_missing`, each name that resolves to the caller's own
@@ -2761,10 +2782,11 @@ login exists but cannot be shared with `unavailable` and the launch's own
 error. The form takes the reason from those fields, never from `source`: a
 member-defined name that is also a server-wide definition launches the
 server-wide one, so it can be `login_missing`. Refused rows are disabled
-("Not logged in", "Your account only", "Unavailable"), and one note under
+("Needs <owner>'s login", "Your account only", "Unavailable"), and one note under
 the picker says "<owner> is not logged in to <agent>" and that the owner logs
 in from their own Environment, that the caller's own definitions run only
-on their own account, and "<agent> cannot launch on this account: " with
+on their own account (choose your own under Account, or More options →
+Account on a phone), and "<agent> cannot launch on this account: " with
 the server's error unchanged. On a shared account with nothing installed the
 heading reads "Neither you nor <owner> has an agent installed." and the note
 says the session uses the owner's login and the caller's installation, or the
@@ -2775,21 +2797,28 @@ sessions** select: **Use my setting** (naming it, "(off)"), **Allow for this
 session** and **Off for this session**, sent as `run.launch` `subsessions: "on"` or
 `"off"`; the first sends nothing.
 
-Below the select, **Options** holds the [usage
+The collapsed **Fallback** under the account list, whose caption reads
+"Automatic", "Ordered" or "Off", then "if <owner> runs out" with only the
+name truncated, holds the [usage
 fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
-each account with a checkbox and
-**Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "The
-session starts on the account here with the most usage left if `<owner>`'s
-usage is at 95% or more at launch, and continues there if the vendor
-reports the limit mid-session.", with "the first ticked account, top to bottom,
-with usage left" in place of "the account here with the most usage left"
-once the list was changed. Untouched, the
-form sends neither field and the server orders by usage left. After a
-reorder or untick it sends the ticked accounts in order as
-`fallback_account_member_ids`; with the checkbox off, or every account
-unticked, it sends `no_fallback: true` and the summary adds "· Fallback
-off". The list leaves out the selected account.
+each account with a checkbox, "You" or "Shared", the account list's status
+("Skipped: <status>" where a launch would be refused, which usage fallback
+skips too, and "No saved login" for "Sign in after launch", whose tooltip
+says a launch may still fall back there, last, but a running session moves
+there only with an API key),
+and **Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "If
+<owner>'s usage is 95% or more at launch, or the vendor reports the limit
+mid-session, the session moves to the ticked account with the most usage
+left.", with "the first ticked account, top to bottom, with usage left" once
+the list was changed. Untouched, the form sends neither field and the server
+orders by usage left. After a reorder or untick it sends the ticked accounts
+in order as `fallback_account_member_ids`; with the checkbox off, or every
+account unticked, it sends `no_fallback: true`. The list leaves out the
+selected account but keeps its place and tick, so selecting another account
+and editing the list never drops it; changed from automatic, the list adds
+it last, ticked. An account the changed list did not hold, such as one
+shared since, joins it unticked.
 
 The launch form does not ask which workspace to launch into: it takes
 `activeWorkspace` and says where the session will land, naming the workspace and its

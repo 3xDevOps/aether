@@ -9,6 +9,7 @@ import { ModelPicker } from '@/components/launch/model-picker'
 import { initialMode, modeRefusal, refusals } from '@/components/launch/modes'
 import { Callout } from '@/components/ui/callout'
 import { FormField } from '@/components/ui/form-field'
+import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -51,8 +52,9 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   pick?: number
   client?: Api
 }) {
-  const [listed, setListed] = useState<{ account: string; agents: AgentInfo[] } | null>(null)
-  const agents = listed?.account === account ? listed.agents : null
+  // current turns false while a new read runs, so the last list can stay on screen until it answers.
+  const [listed, setListed] = useState<{ account: string; agents: AgentInfo[]; current: boolean } | null>(null)
+  const agents = listed?.current && listed.account === account ? listed.agents : null
   const [agentError, setAgentError] = useState<string | null>(null)
   const [harness, setHarness] = useState('')
   const [mode, setMode] = useState<LaunchMode>('tui')
@@ -74,13 +76,13 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
 
   useEffect(() => {
     let live = true
-    setListed(null)
+    setListed((last) => last && { ...last, current: false })
     setAgentError(null)
     client.agentList(account && account !== ownAccountID ? account : undefined).then((list) => {
-      if (live) setListed({ account, agents: list })
+      if (live) setListed({ account, agents: list, current: true })
     }).catch((err) => {
       if (!live) return
-      setListed({ account, agents: [] })
+      setListed({ account, agents: [], current: true })
       setAgentError(message(err))
     })
     return () => { live = false }
@@ -101,10 +103,11 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
     else if (modeRefusal(agents.find((item) => item.name === current.harness), current.harness, current.mode)) setMode('tui')
   }, [agents, agentError, savedReady, hold, pick, choose])
 
-  const agent = agents?.find((item) => item.name === harness)
+  const agent = (agents ?? listed?.agents)?.find((item) => item.name === harness)
   const noAgents = agents !== null && agentError === null && !agents.some((item) => item.installed)
   return {
     agents,
+    lastAgents: listed?.agents ?? null,
     agentError,
     agent,
     accountMemberID: account && account !== ownAccountID ? account : undefined,
@@ -131,6 +134,8 @@ export function RunFields({
   disabled = false,
   autoFocus = false,
   shared = false,
+  account,
+  owner,
 }: {
   choice: ReturnType<typeof useAgentChoice>
   task: string
@@ -140,23 +145,35 @@ export function RunFields({
   disabled?: boolean
   autoFocus?: boolean
   shared?: boolean
+  account?: React.ReactNode
+  owner?: string
 }) {
-  const { agents, harness, mode, noAgents } = choice
+  const { agents, lastAgents, harness, mode, noAgents } = choice
+  const shown = agents ?? lastAgents
   return (
     <>
       <TaskField mode={mode} task={task} onTask={onTask} autoFocus={autoFocus} shared={shared} />
-      {agents === null ? (
-        <p className="text-ui-sm text-muted">Loading agents…</p>
+      {shown === null ? (
+        <div className="flex flex-col gap-1">
+          <Label asChild>
+            <p>Agent</p>
+          </Label>
+          <p role="status" className="flex h-8 items-center px-2 text-ui-sm text-muted coarse:h-11">Loading agents…</p>
+        </div>
       ) : (
-        <AgentPicker
-          label="Agent"
-          agents={agents}
-          value={harness}
-          onChange={(name) => { onChoice?.(); choice.choose(name) }}
-          onSetUp={noAgents ? undefined : onSetUp}
-          disabled={disabled}
-        />
+        <div aria-busy={agents === null} className={cn(agents === null && 'opacity-60')}>
+          <AgentPicker
+            label="Agent"
+            agents={shown}
+            value={harness}
+            onChange={(name) => { onChoice?.(); choice.choose(name) }}
+            onSetUp={noAgents ? undefined : onSetUp}
+            owner={owner}
+            disabled={disabled || agents === null}
+          />
+        </div>
       )}
+      {account}
       <AgentOptions choice={choice} onSetUp={onSetUp} onChoice={onChoice} disabled={disabled} />
     </>
   )

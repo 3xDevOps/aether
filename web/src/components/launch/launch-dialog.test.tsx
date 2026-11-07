@@ -23,6 +23,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   vi.mocked(api.agentList).mockResolvedValue([claude()])
   vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
+  vi.mocked(api.accountUsage).mockResolvedValue({ account_member_id: alice.id, providers: [] })
   vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 0, defaults: {} })
   useLaunchDefaults.setState({ result: null, error: null })
   useStore.setState({
@@ -133,8 +134,8 @@ describe('new run', () => {
     ])
     await open()
 
-    expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeLogin found')
-    expect(agentRow(/^Codex/).textContent).toBe('CodexNo login found')
+    expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeReady')
+    expect(agentRow(/^Codex/).textContent).toBe('CodexSign in after launch')
     expect(screen.queryByRole('radio', { name: /^Pi/ })).toBeNull()
     expect(agentRow(/^custom/).disabled).toBe(false)
 
@@ -425,20 +426,40 @@ describe('new run', () => {
       vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
     })
 
-    it('hides Options without a shared account', async () => {
+    it('hides Account and Fallback without a shared account', async () => {
       vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
       await open()
-      expect(screen.queryByText('Options')).toBeNull()
+      expect(screen.queryByRole('radiogroup', { name: 'Account' })).toBeNull()
+      expect(screen.queryByRole('button', { name: /^Fallback/ })).toBeNull()
     })
 
-    it('launches on the account chosen under Options', async () => {
+    it('lists each account with its access and the chosen agent\'s usage or readiness there', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === vera.id ? [claude({ login_missing: true })] : [claude()])
+      vi.mocked(api.accountUsage).mockImplementation(async (params = {}) => ({
+        account_member_id: params.account_member_id ?? alice.id,
+        providers: params.account_member_id === bob.id
+          ? [{ provider: 'claude', status: 'ok', checked_at: '2026-11-06T00:00:00Z', windows: [{ id: '5h', label: '5 hours', used_percent: 12 }, { id: '7d', label: '7 days', used_percent: 96.4 }] }]
+          : [],
+      }))
+      await open()
+      const accounts = screen.getByRole('radiogroup', { name: 'Account' })
+      await waitFor(() => expect(within(accounts).getAllByRole('radio').map((row) => row.textContent)).toEqual([
+        'AliceYouReady',
+        'BobShared96% used',
+        "VeraSharedNeeds Vera's login",
+      ]))
+      expect(within(accounts).getByRole('radio', { name: /^Alice/ }).getAttribute('aria-checked')).toBe('true')
+      expect(api.accountUsage).toHaveBeenCalledWith({ account_member_id: bob.id })
+    })
+
+    it('launches on the shared account chosen under Account', async () => {
       vi.mocked(api.agentList).mockImplementation(async (account?: string) =>
         account === bob.id ? [agentInfo({ name: 'bob-agent', source: 'member', install_script: undefined })] : [claude()])
       await open()
-      await userEvent.click(await screen.findByRole('button', { name: /^Options/ }))
-      await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+      await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ }))
       await waitFor(() => expect(agentRow(/^bob-agent/).getAttribute('aria-checked')).toBe('true'))
-      expect(screen.getByText(/^Uses Bob's agent login and vendor quota/)).toBeDefined()
+      expect(screen.getByText("Uses Bob's bob-agent login and quota. Runs in your environment with your GitHub login; the session stays yours.")).toBeDefined()
       fireEvent.click(launchButton())
 
       await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'bob-agent', mode: 'tui', account_member_id: bob.id }))
@@ -448,16 +469,48 @@ describe('new run', () => {
     it('sends the ticked fallback accounts in the order shown once one is moved or unticked', async () => {
       vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera, { ...alice, id: 'mem_carol', display_name: 'Carol' }], shared_with: [] })
       await open()
-      await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
+      await userEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
       const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
-      expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['Bob (shared)', 'Vera (shared)', 'Carol (shared)'])
-      expect(screen.getByText("The session starts on the account here with the most usage left if Alice's usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-session.")).toBeDefined()
+      await waitFor(() => expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['BobSharedReady', 'VeraSharedReady', 'CarolSharedReady']))
+      expect(screen.getByRole('button', { name: /^Fallback/ }).textContent).toBe('Fallback· Automatic · ifAliceruns out')
+      expect(screen.getByText("If Alice's usage is 95% or more at launch, or the vendor reports the limit mid-session, the session moves to the ticked account with the most usage left.")).toBeDefined()
 
-      await userEvent.click(screen.getByRole('button', { name: 'Move Carol (shared) up' }))
-      await userEvent.click(screen.getByRole('checkbox', { name: 'Bob (shared)' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Move Carol up' }))
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Bob/ }))
+      expect(screen.getByText(/the session moves to the first ticked account, top to bottom, with usage left\.$/)).toBeDefined()
       fireEvent.click(launchButton())
 
       await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', fallback_account_member_ids: ['mem_carol', vera.id] }))
+    })
+
+    it('keeps a fallback account ticked while it is the launch account and the list is edited', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
+      vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 1, defaults: { fallback: { policy: 'ordered', order: [bob.id, vera.id] } } })
+      useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+      await open()
+      const accounts = () => within(screen.getByRole('radiogroup', { name: 'Account' }))
+      await userEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
+      await userEvent.click(accounts().getByRole('radio', { name: /^Bob/ }))
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Vera/ }))
+      await userEvent.click(accounts().getByRole('radio', { name: /^Alice/ }))
+      await waitFor(() => expect(launchButton().disabled).toBe(false))
+      fireEvent.click(launchButton())
+      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ fallback_account_member_ids: [bob.id] })))
+      expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).not.toHaveProperty('account_member_id')
+    })
+
+    it('keeps the account a launch moved off ticked, last, in a list reordered from automatic', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
+      await open()
+      await userEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
+      await userEvent.click(screen.getByRole('button', { name: 'Move Vera up' }))
+      await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ }))
+      const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
+      const rows = () => within(fallbacks).getAllByRole('checkbox').map((box) => [box.closest('li')?.querySelector('.truncate')?.textContent, box.getAttribute('aria-checked')])
+      await waitFor(() => expect(rows()).toEqual([['Vera', 'true'], ['Alice', 'true']]))
+      await waitFor(() => expect(launchButton().disabled).toBe(false))
+      fireEvent.click(launchButton())
+      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ account_member_id: bob.id, fallback_account_member_ids: [vera.id, alice.id] })))
     })
 
     it('gives the server\'s reasons an installed agent cannot launch there', async () => {
@@ -470,16 +523,15 @@ describe('new run', () => {
           ]
         : [claude()])
       await open()
-      await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
-      await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+      await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ }))
 
       const notes = await screen.findByRole('status')
       expect(notes.textContent).toBe(
         'Bob is not logged in to Claude Code, so it cannot launch on this account. Bob logs in from their own Environment terminal; then open this dialog again.'
-          + 'Your own agent definitions run only on your own account: myagent. To launch one, choose your own account, marked (you), under Account.'
+          + 'Your own agent definitions run only on your own account: myagent. To launch one, choose your own account under Account.'
           + `codex cannot launch on this account: ${refusal}`,
       )
-      expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeNot logged in')
+      expect(agentRow(/^Claude Code/).textContent).toBe("Claude CodeNeeds Bob's login")
       expect(agentRow(/^codex/).disabled).toBe(true)
       expect(agentRow(/^myagent/).textContent).toBe('myagentYour account only')
       expect(launchButton().disabled).toBe(true)
@@ -653,8 +705,8 @@ describe('saved launch defaults', () => {
   it('saves the account and fallback with Save as my default', async () => {
     vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
     await open()
-    fireEvent.click(screen.getByRole('button', { name: /^Options/ }))
-    await pickOption(screen.getByRole('combobox', { name: 'Account' }), `${bob.display_name} (shared)`)
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: new RegExp(`^${bob.display_name}`) }))
+    fireEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'Fall back to another account' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save as my default' }))
     await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { account_member_id: bob.id, fallback: { policy: 'off' } }, revision: 0 }))
@@ -705,8 +757,8 @@ describe('saved launch defaults across devices', () => {
   it('saves the Run tab\'s fallback without the account it runs on', async () => {
     vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
     await open()
-    fireEvent.click(screen.getByRole('button', { name: /^Options/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: `${vera.display_name} (shared)` }))
+    fireEvent.click(screen.getByRole('button', { name: /^Fallback/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(`^${vera.display_name}`) }))
     fireEvent.click(screen.getByRole('button', { name: 'Save as my default' }))
     await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { account_member_id: '', fallback: { policy: 'ordered', order: [bob.id] } }, revision: 0 }))
   })
