@@ -534,8 +534,6 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
       items.push({ at: m.created_at, order, row: {
         ...base, kind: 'user', authorID: m.actor_id, via: m.via, body: m.body, images: roomImages(m), files: roomFiles(m), ...deliveryOf(m),
       } })
-    } else if (m.kind === 'comment') {
-      items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, authorName: m.actor_display_name, via: m.via, body: m.body, pending: isProvisional(m) } })
     } else if (m.kind === 'question' && m.actor_id === run.member_id) {
       items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, authorName: m.actor_display_name, via: m.via, body: m.body, question: true, pending: isProvisional(m) } })
     } else if (m.kind === 'question') {

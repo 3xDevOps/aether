@@ -24,6 +24,7 @@ import { StallCallout } from '@/routes/run/stall-recovery'
 import { RequestDock } from '@/routes/run/request-dock'
 import { requestAnnouncement } from '@/routes/run/session-requests'
 import { EnteringRow, rowGap, sessionColumn, TimelineRow, useArrivals, useFlatRows, useRowContext, type FlatRow, type OpenPolicy } from '@/routes/run/session-rows'
+import { NotesRail, NotesStrip } from '@/routes/run/session-notes'
 import type { RunShells } from '@/routes/run/shells'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -200,7 +201,7 @@ function SessionWelcome({ run, agentName }: { run: RunRecord; agentName: string 
   )
 }
 
-export function SessionView({ run, agent, agentName, room, nav, active, textarea, focusComposer, onComposing, shells, switchable }: {
+export function SessionView({ run, agent, agentName, room, nav, active, textarea, focusComposer, onComposing, shells, switchable, notesWide }: {
   run: RunRecord
   agent: AgentTerminal
   agentName: string
@@ -212,6 +213,8 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   onComposing: (composing: boolean) => void
   shells: RunShells
   switchable: boolean
+  /** Whether the Chat pane is wide enough for the sticky rail instead of the notes strip. */
+  notesWide: boolean
 }) {
   useRefuseStrayFileDrops()
   const enhanced = run.acp === true
@@ -449,6 +452,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
             </EnteringRow>
           )}
         </VList>
+        {notesWide && <NotesRail run={run} room={room} />}
       </div>
       {enhanced && (
         <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
@@ -456,6 +460,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
           <StallCallout run={run} agent={agent} rows={rows} nav={nav} />
         </div>
       )}
+      {!notesWide && <NotesStrip run={run} room={room} className={cn(sessionColumn, 'pb-2')} />}
       <ChangesBar run={run} />
       <CompletionPrompt run={run} className={cn(sessionColumn, 'pb-2')} />
       <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} />

@@ -77,6 +77,11 @@ if (!Element.prototype.animate) {
   }
 }
 if (!Element.prototype.getAnimations) Element.prototype.getAnimations = () => []
+// jsdom implements every SVG element as the base SVGElement, with no
+// geometry support; the scratch-off animation only needs a positive length
+// to animate toward.
+const svgProto = SVGElement.prototype as unknown as { getTotalLength?: () => number }
+if (!svgProto.getTotalLength) svgProto.getTotalLength = () => 100
 globalThis.ResizeObserver = class {
   observe() {}
   unobserve() {}

@@ -74,6 +74,37 @@ func (s *Service) Deny(ctx context.Context, id string, by domain.MemberID, sessi
 	return msg, nil
 }
 
+// Resolve lets a comment's author, the run's owner, or an admin complete or
+// delete it. Retrying with the same outcome replays the stored result
+// instead of erroring.
+func (s *Service) Resolve(ctx context.Context, id string, by domain.MemberID, outcome store.RoomResolution) (*store.RoomMessage, error) {
+	if id == "" || by == "" || !outcome.Valid() {
+		return nil, ErrInvalidRequest
+	}
+	msg, err := s.cfg.Store.GetRoomMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Kind != store.RoomMessageComment {
+		return nil, ErrInvalidRequest
+	}
+	run, actor, _, err := s.scope(ctx, msg.WorkspaceID, msg.RunID, by)
+	if err != nil {
+		return nil, err
+	}
+	if by != run.MemberID && by != msg.ActorID && actor.Role != domain.RoleAdmin {
+		return nil, ErrUnauthorizedDecision
+	}
+	resolved, err := s.cfg.Store.ResolveRoomMessage(ctx, id, outcome, by, s.now())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.publishMessage(ctx, resolved); err != nil {
+		return resolved, err
+	}
+	return resolved, nil
+}
+
 func (s *Service) messageActorRun(ctx context.Context, id string, actorID domain.MemberID) (*store.RoomMessage, *domain.Run, error) {
 	if id == "" || actorID == "" {
 		return nil, nil, ErrInvalidRequest

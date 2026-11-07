@@ -131,6 +131,47 @@ describe('collaboration slice', () => {
     expect(store.getState().evidenceNextBefore.run_evidence).toBeUndefined()
     expect(store.getState().evidencePagination.run_evidence.exhausted).toBe(true)
   })
+
+  it('never keeps a deleted comment, even when the resolve answer lands after its event', () => {
+    const store = createRootStore()
+    const note = roomMessage({ id: 'gone', kind: 'comment', body: 'deleted body' })
+    store.getState().upsertRoomMessage(note)
+    store.getState().dropRoomMessage(note.run_id, note.id)
+    store.getState().upsertRoomMessage({ ...note, resolution: 'deleted' })
+    expect(store.getState().roomMessages[note.run_id]).toEqual([])
+
+    store.getState().upsertRoomMessage(note)
+    store.getState().setRoomMessageResolution(note.run_id, note.id, 'deleted', 'mem_alice', createdAt)
+    expect(store.getState().roomMessages[note.run_id]).toEqual([])
+  })
+
+  it('does not let a list response issued before a delete add the row back', () => {
+    const store = createRootStore()
+    const note = roomMessage({ id: 'gone', kind: 'comment', body: 'deleted body' })
+    store.getState().setRoomPage(note.run_id, [note])
+    store.getState().dropRoomMessage(note.run_id, note.id)
+    // An in-flight list request started before the delete event answers with the pre-delete copy.
+    store.getState().setRoomPage(note.run_id, [note])
+    expect(store.getState().roomMessages[note.run_id]).toEqual([])
+    // A later page that correctly omits the row must not resurrect it either.
+    store.getState().setRoomPage(note.run_id, [], undefined, true)
+    expect(store.getState().roomMessages[note.run_id]).toEqual([])
+  })
+
+  it('drops a retry\'s provisional card and settles its note state when the saved row is already deleted', () => {
+    const store = createRootStore()
+    const runID = 'run_1'
+    const key = 'key_1'
+    store.getState().noteSending(runID, 'hello', key)
+    store.getState().upsertRoomMessage(roomMessage({ id: key, idempotency_key: key, kind: 'comment', body: 'hello' }))
+    expect(store.getState().roomMessages[runID].map((m) => m.id)).toEqual([key])
+
+    // The retry's answer: the saved row, already deleted by a teammate.
+    store.getState().upsertRoomMessage(roomMessage({ id: 'saved_1', idempotency_key: key, kind: 'comment', body: 'hello', resolution: 'deleted' }))
+
+    expect(store.getState().roomMessages[runID]).toEqual([])
+    expect(store.getState().noteKeys[runID]).toEqual({})
+  })
 })
 
 describe('repliesByQuestion', () => {

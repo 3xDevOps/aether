@@ -29,6 +29,7 @@ import { MultiplayerControls, useSharedPresence } from '@/routes/run/multiplayer
 import { useKeyboardFold } from '@/routes/run/phone-header'
 import { dockedRequestID } from '@/routes/run/request-dock'
 import { useRunRoom } from '@/routes/run/room'
+import { notesRailMinWidth } from '@/routes/run/session-notes'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
 import { WorkflowChip, WorkflowPanel, workflowPanelID } from '@/routes/run/workflow-panel'
@@ -95,6 +96,10 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const [frameRef, frame] = useElementSize<HTMLDivElement>()
   const splittable = browser && frame.width >= 2 * minBesideWidth
   const docked = splittable && beside
+  const [paneRef, pane] = useElementSize<HTMLDivElement>()
+  // The pane, not the frame: a docked Browser takes its share of the frame.
+  const notesWide = pane.width >= notesRailMinWidth
+
   const files = hasFiles(run, cap)
   const views = runViews.filter((view) =>
     (view !== 'browser' || (browser && !docked)) && (view !== 'files' || files) && (view !== 'trace' || run.acp === true))
@@ -241,8 +246,11 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
     } : undefined,
   })
 
+  // Chat's rail only shows open comments while Chat itself is on screen;
+  // otherwise Details must keep showing them, or they appear nowhere.
+  const notesShownInRail = view === 'session' && notesWide
   const details = (inset: boolean) => (
-    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteFocus={noteFocus} />
+    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteFocus={noteFocus} notesWide={notesShownInRail} />
   )
   const requesterID = agent.takeover.review?.requester_member_id
   const holding = !agent.localControl ? agent.takeover.interaction.phase : undefined
@@ -285,7 +293,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
         />
         {run.mode === 'acp' && view !== 'browser' && view !== 'files' && (!mobile || (shared && !keyboard && view !== 'terminal')) && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div ref={frameRef} className="flex min-h-0 flex-1">
-          <div className="relative min-h-0 min-w-0 flex-1">
+          <div ref={paneRef} className="relative min-h-0 min-w-0 flex-1">
             {visited.has('session') && (
               <TabsContent value="session" forceMount inert={view !== 'session'} className={cn(panel, view !== 'session' && 'invisible')}>
                 <SessionView
@@ -302,6 +310,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
                   }}
                   shells={shells}
                   switchable={switchable}
+                  notesWide={notesWide}
                 />
               </TabsContent>
             )}

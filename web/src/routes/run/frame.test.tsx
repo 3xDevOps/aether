@@ -235,11 +235,12 @@ describe('the Files view', () => {
 describe('the Browser view', () => {
   const views = () => within(screen.getByRole('tablist', { name: 'Session views' }))
   /** Lays the run's frame out at `width`, which jsdom never does. */
-  function measured(width: number) {
+  function measured(width: number | ((target: Element) => number)) {
     vi.stubGlobal('ResizeObserver', class {
       constructor(private readonly report: ResizeObserverCallback) {}
       observe(target: Element) {
-        this.report([{ target, contentRect: { width, height: 700 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
+        const contentRect = { width: typeof width === 'number' ? width : width(target), height: 700 }
+        this.report([{ target, contentRect } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
       }
       unobserve() {}
       disconnect() {}
@@ -329,6 +330,17 @@ describe('the Browser view', () => {
     expect(useStore.getState().browserBeside).toBe(false)
     expect(views().getByRole('tab', { name: 'Browser' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByRole('separator', { name: 'Resize the Browser' })).toBeNull()
+  })
+
+  it('moves notes from the rail to the strip when it narrows the Chat pane', async () => {
+    // The frame is wide enough for the rail; the views' pane beside the Browser is not.
+    measured((target) => (target.classList.contains('relative') ? 800 : 1400))
+    useStore.setState({ browserBeside: true })
+    vi.mocked(api.runRoomList).mockResolvedValue({ messages: [roomMessage({ id: 'c1', kind: 'comment', actor_id: bob.id, body: 'look here' })] })
+    open({ mode: 'acp' }, 'session')
+    expect(await screen.findByRole('button', { name: '1 note' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Browser' })).toBeDefined()
+    expect(screen.queryByRole('list', { name: 'Notes' })).toBeNull()
   })
 
   it('stays a tab, with no toggle, on a frame too narrow for two panes', async () => {

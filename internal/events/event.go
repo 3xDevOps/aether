@@ -529,6 +529,9 @@ type RoomMessagePayload struct {
 	CorrelationID   string             `json:"correlation_id,omitempty"`
 	AttachmentCount int                `json:"attachment_count,omitempty"`
 	HasAnchor       bool               `json:"has_anchor,omitempty"`
+	// Resolution lets a client without the message cached tell a completed
+	// or deleted comment apart from one whose state alone did not change.
+	Resolution string `json:"resolution,omitempty"`
 }
 
 func (RoomMessagePayload) EventType() Type { return TypeRoomMessage }

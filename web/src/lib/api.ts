@@ -72,6 +72,8 @@ import type {
   RepoFastForwardResult,
   RepoPushResult,
   RoomDecideResult,
+  RoomResolution,
+  RoomResolveResult,
   RunChildrenResult,
   RunChildrenSetting,
   RoomMessageListResult,
@@ -735,6 +737,8 @@ export const api = {
     control_session_id: string
     control_generation: number
   }) => call<RoomDecideResult>('run.room.decide', params),
+  runRoomResolve: (params: { message_id: string; outcome: RoomResolution }) =>
+    call<RoomResolveResult>('run.room.resolve', params),
   runEvidenceList: (params: {
     workspace_id: string
     run_id: string

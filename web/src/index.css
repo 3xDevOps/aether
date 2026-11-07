@@ -864,6 +864,18 @@
       opacity: 0.55;
     }
   }
+
+  /* Sticky note colors derive from accent-fill/control-light so dark and
+     light themes both track the live theme rather than a fixed palette. */
+  .sticky-note {
+    --scratch-stroke: #ff9b8a;
+    background: color-mix(in srgb, var(--accent-fill) 30%, var(--canvas));
+    border-color: color-mix(in srgb, var(--control-light) 38%, transparent);
+  }
+
+  .sticky-note__header {
+    color: color-mix(in srgb, var(--control-light) 65%, var(--text));
+  }
 }
 
 /* Radix sets popper placement inline on the wrapper. */

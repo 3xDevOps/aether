@@ -105,6 +105,14 @@ func TestRoomImageRejectsForeignMissingAndMixedSelectors(t *testing.T) {
 	if err := e.store.CreateRoomMessage(t.Context(), mismatched); err != nil {
 		t.Fatal(err)
 	}
+	deleted := handlerRoomMessage("deleted-comment", e.ws.ID, e.run.ID, e.member.ID)
+	deleted.Kind, deleted.State, deleted.Attachments = store.RoomMessageComment, store.RoomMessageSent, message.Attachments
+	if err := e.store.CreateRoomMessage(t.Context(), deleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.ResolveRoomMessage(t.Context(), deleted.ID, store.RoomResolutionDeleted, e.member.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	var reads atomic.Int32
 	e.runs.readImage = func(context.Context, domain.RunID, string) ([]byte, string, error) {
 		reads.Add(1)
@@ -118,6 +126,7 @@ func TestRoomImageRejectsForeignMissingAndMixedSelectors(t *testing.T) {
 		{"foreign run", func(r *protocol.DevArtifactDownloadRequest) { r.RunID = string(otherRun.ID) }, protocol.CodeNotFound},
 		{"foreign message", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, foreign.ID, 0) }, protocol.CodeNotFound},
 		{"mismatched workspace", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, mismatched.ID, 0) }, protocol.CodeNotFound},
+		{"deleted comment", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, deleted.ID, 0) }, protocol.CodeNotFound},
 		{"missing message", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, "missing", 0) }, protocol.CodeNotFound},
 		{"missing session", func(r *protocol.DevArtifactDownloadRequest) { r.RunID = "missing" }, protocol.CodeNotFound},
 		{"foreign index", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, message.ID, 1) }, protocol.CodeNotFound},

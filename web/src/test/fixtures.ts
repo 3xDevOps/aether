@@ -611,6 +611,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     runRoomPost: vi.fn(async () => ({ message: roomMessage() })),
     runRoomDecide: vi.fn(async () => ({ message: roomMessage({ state: 'denied' }) })),
+    runRoomResolve: vi.fn(async () => ({ message: roomMessage({ resolution: 'done' }) })),
     runEvidenceList: vi.fn(async () => ({ packets: [] })),
     runEvidenceGet: vi.fn(async () => ({ packet: evidencePacket() })),
     runEvidencePatch: vi.fn(async () => ({ packet: evidencePacket(), patch: '', truncated: false })),

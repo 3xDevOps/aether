@@ -39,7 +39,12 @@ func (s *Service) publishMessage(ctx context.Context, msg *store.RoomMessage) er
 		v := msg.DecidedAt.UTC().Format(time.RFC3339Nano)
 		decidedAt = &v
 	}
-	_, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: msg.WorkspaceID, RunID: msg.RunID, ActorID: msg.ActorID, Payload: events.RoomMessagePayload{MessageID: msg.ID, WorkspaceID: msg.WorkspaceID, RunID: msg.RunID, ActorID: msg.ActorID, Kind: string(msg.Kind), State: string(msg.State), DeliverAfter: deliverAfter, DecidedBy: msg.DecidedBy, DecidedAt: decidedAt, CorrelationID: msg.CorrelationID, AttachmentCount: len(msg.Attachments), HasAnchor: msg.Anchor != nil}})
+	// A resolution is the resolver's act, not a second post by the author.
+	actor := msg.ActorID
+	if msg.Resolution != "" {
+		actor = msg.ResolvedBy
+	}
+	_, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: msg.WorkspaceID, RunID: msg.RunID, ActorID: actor, Payload: events.RoomMessagePayload{MessageID: msg.ID, WorkspaceID: msg.WorkspaceID, RunID: msg.RunID, ActorID: msg.ActorID, Kind: string(msg.Kind), State: string(msg.State), DeliverAfter: deliverAfter, DecidedBy: msg.DecidedBy, DecidedAt: decidedAt, CorrelationID: msg.CorrelationID, AttachmentCount: len(msg.Attachments), HasAnchor: msg.Anchor != nil, Resolution: string(msg.Resolution)}})
 	if err != nil {
 		return fmt.Errorf("collab: publish room message %q in state %q: %w", msg.ID, msg.State, err)
 	}
