@@ -3367,11 +3367,12 @@ running, and a later follow-up opens a new autonomous turn. With text typed
 the pill is **Send**, which starts a turn, so a reply to the question still
 goes out. `Enter` does what the pill says and nothing without text or
 images, `Shift+Enter` adds a line and `Mod+Shift+Enter` queues; on touch only
-the pill sends. With the caret on the first line, `ArrowUp` fills the box
-with the last prompt you sent in this session and each further press the one
-before; `ArrowDown` steps forward again and, past the newest, restores what
-you had typed. Editing a recalled prompt ends the walk
-(`composer-history.ts`). `Enter` is a plain key, which the shortcut table stands down
+the pill sends. With the box empty or the caret at the very start,
+`ArrowUp` fills the box with the last prompt you sent in this session and each
+further press the one before; `ArrowDown` steps forward again and, past the
+newest, restores what you had typed. Anywhere else the arrows move the caret,
+so a wrapped draft is never replaced. The walk uses the prompts as they were
+when it started, and any edit ends it (`composer-history.ts`). `Enter` is a plain key, which the shortcut table stands down
 for inside a field, so the textarea answers it itself through `isPress`; the
 binding stays registered so the shortcuts reference lists it. A key still composing in an input method
 never sends. The shared upload state in

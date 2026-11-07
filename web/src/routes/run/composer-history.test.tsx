@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { usePromptHistory } from '@/routes/run/composer-history'
 import { saveComposerDraft, useComposerDraft } from '@/routes/run/composer-state'
 import { useStore } from '@/store'
@@ -61,17 +61,36 @@ describe('usePromptHistory', () => {
     expect(box.value).toBe('half typed')
   })
 
-  it('leaves the arrows to the caret below the first line and after an edit', () => {
-    const box = mount('line one\nline two')
-    box.setSelectionRange(12, 12)
+  it('leaves the arrows to the caret unless the box is empty or the caret is at the start', () => {
+    const box = mount('a long paragraph that wraps')
+    box.setSelectionRange(20, 20)
     press(box, 'ArrowUp')
-    expect(box.value).toBe('line one\nline two')
+    expect(box.value).toBe('a long paragraph that wraps')
 
     box.setSelectionRange(0, 0)
     press(box, 'ArrowUp')
     expect(box.value).toBe('third')
+  })
+
+  it('ends the walk on an edit even if the text is restored', () => {
+    const box = mount('')
+    press(box, 'ArrowUp')
     fireEvent.change(box, { target: { value: 'third, edited' } })
     press(box, 'ArrowDown')
     expect(box.value).toBe('third, edited')
+    fireEvent.change(box, { target: { value: 'third' } })
+    box.setSelectionRange(0, 0)
+    press(box, 'ArrowUp')
+    expect(box.value).toBe('third')
+  })
+
+  it('keeps walking the prompts it started with when a new one arrives', () => {
+    const box = mount('')
+    press(box, 'ArrowUp')
+    act(() => {
+      useStore.setState((s) => ({ roomMessages: { [runID]: [...s.roomMessages[runID]!, sent('6', 'newest')] } }))
+    })
+    press(box, 'ArrowUp')
+    expect(box.value).toBe('second\nwith two lines')
   })
 })
