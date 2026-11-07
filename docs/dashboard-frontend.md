@@ -2846,7 +2846,7 @@ palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one the member last
 chose for the session, else `defaultView`. Choosing a view means picking a tab
 (click, `[` or `]`) or following a link or command that names a
-view, such as Review changes, a file path or a `?view=` address. Reply is not a choice. A Needs you target does not
+view, such as Review changes or a file path; an opened `?view=` address shows its view without choosing it, since a reload reopens one too. Reply is not a choice. A Needs you target does not
 count: a sidebar or board row, the Needs you list, `u`, the header's primary
 action and a request's Open terminal show Terminal or Changes for a session
 that waits there, and the session reopens on its chosen view once it stops

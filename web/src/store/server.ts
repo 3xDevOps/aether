@@ -1,8 +1,6 @@
 import { bareVersion } from '@/lib/format'
 import { compareVersions } from '@/lib/version'
 import type { ConnectionState } from '@/lib/stream'
-import { isRunView } from '@/routes/run/views'
-import { rememberedView } from '@/store/ui'
 import type {
   AgentInfo,
   EdgePath,
@@ -247,19 +245,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     setAgentList: (identity, agents) => set({ agentList: { identity, agents } }),
     setInfo: (info) => set({ info }),
     // Text shared to the last member's launch form is not the next member's.
-    setIdentityKey: (identityKey) =>
-      set((s) => {
-        const runViewMemory = s.savedRunViews[identityKey] ?? {}
-        const { runId, view } = s.route.params
-        // A link that names a view is the member's choice for that session once the member is known.
-        const linked = s.identityKey === null && s.route.name === 'run' && runId && isRunView(view)
-        return {
-          identityKey,
-          launchDefaults: s.savedLaunchDefaults[identityKey] ?? {},
-          ...(linked ? rememberedView({ ...s, identityKey, runViewMemory }, runId, view) : { runViewMemory }),
-          ...(s.identityKey !== identityKey && { paletteLaunchTask: '' }),
-        }
-      }),
+    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {}, runViewMemory: s.savedRunViews[identityKey] ?? {}, ...(s.identityKey !== identityKey && { paletteLaunchTask: '' }) })),
     setCapabilities: (capabilities) => set({ capabilities }),
     setConnection: (connection) => set({ connection }),
     noteSeq: (seq) =>
