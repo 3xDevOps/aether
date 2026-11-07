@@ -73,7 +73,8 @@ function ImageViewer({ url, name, gallery, zoomed, onStep }: {
         const start = swipe.current
         const touch = event.changedTouches[0]
         swipe.current = undefined
-        if (actual || !start || !touch) return
+        // A pinch-zoomed page pans under the finger; that drag is not a swipe.
+        if (actual || !start || !touch || (window.visualViewport?.scale ?? 1) > 1) return
         const dx = touch.clientX - start.x
         if (Math.abs(dx) > 48 && Math.abs(dx) > 2 * Math.abs(touch.clientY - start.y)) onStep(dx < 0 ? 1 : -1)
       }}
@@ -208,7 +209,10 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
             <MessageImage
               runID={runID}
               name={name(position)}
-              onURL={(next) => setURLs(({ [id]: _, ...rest }) => (next ? { ...rest, [id]: next } : rest))}
+              onURL={(next) => {
+                setURLs(({ [id]: _, ...rest }) => (next ? { ...rest, [id]: next } : rest))
+                if (!next) setOpenID((open) => (open === id ? undefined : open))
+              }}
               onOpen={() => show(id)}
               {...image}
             />
@@ -226,7 +230,8 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
           className="inset-4 h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:rounded-none max-md:border-0 max-md:pt-[calc(1rem+var(--safe-top))]"
           onKeyDown={(event) => {
             // Zoomed in, the arrows scroll the picture instead.
-            if (zoomed.current || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return
+            if (zoomed.current || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
             event.preventDefault()
             step(event.key === 'ArrowRight' ? 1 : -1)
           }}

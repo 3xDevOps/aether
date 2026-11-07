@@ -119,3 +119,21 @@ test('closing returns focus to the thumbnail of the image last shown', async () 
   fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open image 2 of 3 full size' })))
 })
+
+test('a modifier key with an arrow is left to the browser', async () => {
+  const dialog = await open('Image 1 of 3', three)
+  fireEvent.keyDown(dialog, { key: 'ArrowRight', altKey: true })
+  expect(screen.getByRole('dialog', { name: 'Image 1 of 3' })).toBe(dialog)
+})
+
+test('the dialog closes, and stays closed, when the image it shows is reloaded', async () => {
+  const images = [{ messageID: 'm1', index: 0 }, { messageID: 'm1', index: 1 }]
+  const { rerender } = render(<MessageAttachments runID="run_1" images={images} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Open image 1 of 2 full size' }))
+  expect(await screen.findByRole('dialog')).toBeDefined()
+  rerender(<MessageAttachments runID="run_1" images={[]} />)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  rerender(<MessageAttachments runID="run_1" images={images} />)
+  await screen.findByRole('button', { name: 'Open image 1 of 2 full size' })
+  expect(screen.queryByRole('dialog')).toBeNull()
+})

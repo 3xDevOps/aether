@@ -3503,7 +3503,9 @@ image, switches to actual size in a scrolling frame centred on the clicked
 point, and back; an image that already fits offers no toggle. One dialog serves the
 row: while the image is fitted, `ArrowLeft` and `ArrowRight`, or a horizontal
 swipe, step to the previous or next image that loaded, stopping at either end;
-zoomed in, they scroll the picture instead. Each image opens fitted, and
+zoomed in, or with a modifier key held or the page pinch-zoomed, they do not
+switch. Losing an image's blob, as on reconnect, closes the dialog if it was
+showing that image. Each image opens fitted, and
 closing returns focus to the thumbnail of the image last shown. Attachments sit outside the
 text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
