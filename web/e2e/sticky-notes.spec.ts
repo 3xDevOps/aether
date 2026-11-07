@@ -8,7 +8,7 @@ import { seedWorkspace } from './harness/setup'
 test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('completing and deleting a sticky note', async ({ page, aether }, testInfo) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.setViewportSize({ width: 1920, height: 1080 })
   const alice = await aether.member('Alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -18,8 +18,9 @@ test('completing and deleting a sticky note', async ({ page, aether }, testInfo)
     harness: 'claude',
     task: 'sticky note demo',
   })
-  await page.goto(`${alice.url}&run=${run.id}`)
+  await page.goto(`${alice.url}&run=${run.id}&view=session`)
   await expect(page.getByRole('heading', { name: 'sticky note demo', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Hide details', exact: true }).click()
 
   const post = (body: string, idempotencyKey: string) =>
     alice.api.rpc('run.room.post', {
