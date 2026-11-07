@@ -18,7 +18,7 @@ function candidates(fallback: Fallback, accounts: Member[], skip: string): strin
   return [...order, ...accounts.map((member) => member.id).filter((id) => !order.includes(id))].filter((id) => id !== skip)
 }
 
-/** Ticked; once reordered, an account the order does not hold, such as the one the launch left, stays unticked until ticked. */
+/** Once the list was changed, an account the order does not hold stays unticked until ticked. */
 function ticked(fallback: Fallback, id: string): boolean {
   return !fallback.excluded.includes(id) && (!fallback.order || fallback.order.includes(id))
 }
