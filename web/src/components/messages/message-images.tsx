@@ -55,13 +55,13 @@ function ImageViewer({ url, name }: { url: string; name: string }) {
 
   return (
     <>
-      <DialogHeader className="min-h-6 flex-row items-center justify-between gap-3 coarse:min-h-11">
+      <DialogHeader className="min-h-6 flex-row items-center justify-between gap-3 coarse:min-h-11 coarse:pr-12">
         <DialogTitle className="truncate">{name}</DialogTitle>
         <DialogDescription className="sr-only">
           {zoomable ? 'Switch between fitting the window and actual size.' : 'Shown at actual size.'}
         </DialogDescription>
         {zoomable && (
-          <Button variant="ghost" size="sm" aria-pressed={actual} className="aria-pressed:bg-hover-chrome aria-pressed:text-text" onClick={() => toggle()}>
+          <Button variant="ghost" size="sm" aria-pressed={actual} className="aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => toggle()}>
             Actual size
           </Button>
         )}
