@@ -2,11 +2,11 @@ import { useEffect, type RefObject } from 'react'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useMediaQuery, useReducedMotion } from '@/lib/hooks'
 
-export const RADIUS_PX = 100
+export const RADIUS_PX = 80
 /** The share of the radius over which opacity climbs back to full; the rest is held at MIN_OPACITY. */
-export const FALLOFF = 0.75
+export const FALLOFF = 1
 export const MIN_OPACITY = 0
-export const RETURN_MS = 400
+export const RETURN_MS = 600
 
 export function fadesDots({ finePointer, phoneWidth, reducedMotion }: {
   finePointer: boolean
