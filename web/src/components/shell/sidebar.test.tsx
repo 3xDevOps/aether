@@ -435,6 +435,15 @@ describe('run rows', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
   })
 
+  it('replies without making Session the view the session reopens on', () => {
+    useStore.setState({ runViewMemory: { run_2: 'changes' } })
+    render(<AppShell />)
+    const row = runList().getByRole('button', { name: /^Needs you · answer the schema question/ })
+    fireEvent.click(within(row.closest('[data-slot="list-row"]') as HTMLElement).getByRole('button', { name: 'Reply' }))
+    expect(useStore.getState().runViewMemory.run_2).toBe('changes')
+    useStore.setState({ runViewMemory: {} })
+  })
+
   it('opens a disconnected session on Terminal and reopens it later on the view the member chose', () => {
     useStore.getState().upsertRun(run({ id: 'run_5', task: 'lost its agent', status: 'needs-attention', state: 'disconnected' }))
     act(() => useStore.getState().navigate('run', { runId: 'run_5', view: 'changes' }))

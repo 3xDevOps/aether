@@ -206,12 +206,12 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
       }))
     },
     focusComposer: () => {
-      go('session')
+      go('session', { remember: false })
       requestAnimationFrame(() => textarea.current?.focus())
     },
     focusRequest: () => {
       if (!inline) setOverlayDetails(false)
-      go('session')
+      go('session', { remember: false })
       requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(dockedRequestID)?.focus()))
     },
   }

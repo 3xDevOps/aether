@@ -423,6 +423,14 @@ describe('the header primary action', () => {
     expect(useStore.getState().runViewMemory.run_1).toBe('changes')
   })
 
+  it('replies from the header without making Session the view the session reopens on', () => {
+    useStore.setState({ runViewMemory: { run_1: 'changes' } })
+    open({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason: 'turn interrupted' }, 'changes')
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Session actions' })).getByRole('button', { name: 'Reply' }))
+    expect(useStore.getState().route.params.view).toBe('session')
+    expect(useStore.getState().runViewMemory.run_1).toBe('changes')
+  })
+
   it('allows a sudo command from the Details card it reveals', async () => {
     vi.mocked(api.runInputRespond).mockResolvedValue({ status: 'answered' })
     const title = 'Session as root in /workspace: apt-get install -y jq'

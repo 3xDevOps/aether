@@ -257,6 +257,15 @@ describe('run view memory', () => {
     forget()
   })
 
+  it('saves the view a link names as the choice once the member is known', () => {
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1', view: 'terminal' } }, savedRunViews: { [alice]: { run_1: 'changes' } } })
+    useStore.getState().setIdentityKey(alice)
+    expect(useStore.getState().runViewMemory).toEqual({ run_1: 'terminal' })
+    expect(useStore.getState().savedRunViews[alice]).toEqual({ run_1: 'terminal' })
+    forget()
+    useStore.setState({ route: { name: 'board', params: {} } })
+  })
+
   it('shows a view without remembering it when the navigation does not choose it', () => {
     useStore.getState().navigate('run', { runId: 'run_1', view: 'changes' })
     useStore.getState().navigate('run', { runId: 'run_1', view: 'terminal' }, { remember: false })

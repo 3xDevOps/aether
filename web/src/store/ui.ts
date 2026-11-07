@@ -121,7 +121,7 @@ function savedLaunch(s: RootState, next: LaunchDefaults): Pick<UiSlice, 'launchD
 const rememberedRuns = 200
 
 /** `runViewMemory` with `view` as `runId`'s newest entry, the oldest dropped past the bound, saved under the signed-in member. */
-function rememberedView(s: RootState, runId: string, view: RunView): Pick<UiSlice, 'runViewMemory' | 'savedRunViews'> {
+export function rememberedView(s: RootState, runId: string, view: RunView): Pick<UiSlice, 'runViewMemory' | 'savedRunViews'> {
   const { [runId]: _, ...others } = s.runViewMemory
   const next = Object.fromEntries([...Object.entries(others), [runId, view] as const].slice(-rememberedRuns))
   return { runViewMemory: next, savedRunViews: s.identityKey ? { ...s.savedRunViews, [s.identityKey]: next } : s.savedRunViews }

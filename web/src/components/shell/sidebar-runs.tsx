@@ -440,7 +440,7 @@ function AnswerButton({ run }: { run: RunRecord }) {
       size="sm"
       tabIndex={-1}
       onClick={() => {
-        if (action.kind === 'reply') navigate('run', { runId: run.id, view: 'session', focus: 'composer' })
+        if (action.kind === 'reply') navigate('run', { runId: run.id, view: 'session', focus: 'composer' }, { remember: false })
         else {
           const route = needsYouRoute(run, ctx)
           navigate(route.name, route.params, { remember: false })
