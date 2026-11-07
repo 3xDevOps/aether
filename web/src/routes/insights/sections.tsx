@@ -26,7 +26,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 
 function fraction(count: InsightsSuccessCount, unit: string): string {
-  return count.finished === 0 ? `No ${unit}s finished` : `${count.succeeded} of ${plural(count.finished, unit)} merged a pull request or were marked done`
+  return count.finished === 0 ? `No ${unit}s finished` : `${count.succeeded} of ${plural(count.finished, unit)} merged a pull request or were marked complete`
 }
 
 function Tiles({ result, agentNames }: { result: InsightsResult; agentNames: Record<string, string> }) {

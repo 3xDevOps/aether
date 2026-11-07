@@ -447,7 +447,7 @@ export interface InsightsCost extends Omit<InsightsCostAgent, 'harness'> {
   by_agent: InsightsCostAgent[]
 }
 
-/** Finished work with a merged pull request, out of all that finished. */
+/** Finished work with a merged pull request or marked complete, out of all that finished. */
 export interface InsightsSuccessCount {
   succeeded: number
   finished: number
