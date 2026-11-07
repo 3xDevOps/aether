@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import type { PatchFile } from '@/routes/diff/parse'
 import { DiffSkeleton } from '@/routes/diff/diff-skeleton'
 import { ChangedFileRow, FileList } from '@/routes/diff/file-list'
-import { isLargeDiff, useOffsetTop } from '@/routes/diff/large-diff'
+import { isLargeDiff, scrollWithin, useOffsetTop } from '@/routes/diff/large-diff'
 import { collapsedByDefault, Counts, FilePatch } from '@/routes/diff/patch-view'
 import { PublishDialog } from '@/routes/diff/publish-dialog'
 import { RepoPR } from '@/routes/diff/repo-pr'
@@ -133,6 +133,8 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
   const [start, setStart] = useState<HTMLDivElement | null>(null)
   const startMargin = useOffsetTop(content, start)
   const [setToolbar, toolbar] = useElementSize<HTMLDivElement>()
+  const toolbarHeight = useRef(0)
+  toolbarHeight.current = toolbar.height
   const [focusedFile, setFocusedFile] = useState<number | null>(null)
 
   const jump = (path: string) => {
@@ -140,8 +142,8 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
     setCollapsed((all) => ({ ...all, [path]: false }))
     const index = files.findIndex((file) => file.path === path)
     requestAnimationFrame(() => {
-      if (virtual) list.current?.scrollToIndex(index, { align: 'start', offset: -toolbar.height })
-      else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
+      if (virtual) list.current?.scrollToIndex(index, { align: 'start', offset: -toolbarHeight.current })
+      else scrollWithin(scroller.current, document.getElementById(`${ids}-${index}`), toolbarHeight.current)
     })
   }
   const asked = isRunRoute(route, run.id) ? route.params.file : undefined

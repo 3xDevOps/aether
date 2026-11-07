@@ -42,12 +42,12 @@ export function AppShell() {
       </a>
       {!stacked && <TopBar />}
       <StaleBanner />
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 overflow-clip">
         <Sidebar />
         <main
           id="main"
           tabIndex={-1}
-          className={cn('min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] outline-none md:pb-[env(safe-area-inset-bottom)]', stacked && 'pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]')}
+          className={cn('min-h-0 min-w-0 flex-1 overflow-clip bg-canvas pr-[env(safe-area-inset-right)] outline-none md:pb-[env(safe-area-inset-bottom)]', stacked && 'pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]')}
         >
           <CenterView />
         </main>
