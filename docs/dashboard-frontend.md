@@ -1010,11 +1010,16 @@ native menu - **Check for Updates…**, Minimize, Maximize or Restore, Close -
 from the window's `system-context-menu` event on a drag region and from
 `controls.showMenu(x, y)` elsewhere on the row.
 
-No platform has a View menu, so `desktop/preload.js` zooms the window: Cmd
-on macOS and Ctrl on Windows and Linux, with `=` or `+` to zoom in, `-` to
-zoom out and `0` to return to 100%. It acts only on a key the page has not
-claimed with `preventDefault`, so inside a terminal the same keys zoom the
-terminal instead.
+No platform has a View menu, so the shell zooms the window: Cmd on macOS
+and Ctrl on Windows and Linux, with `=` or `+` to zoom in, `-` to zoom out
+and `0` to return to 100%, matched on the character typed.
+`desktop/preload.js` acts only on a key the page has not claimed with
+`preventDefault`, so inside a terminal the same keys zoom the terminal
+instead. `desktop/zoom.js` scales the window's 960×600 minimum size with
+the zoom, so the layout never narrows into the phone toolbar, which has no
+window controls or drag region. It refuses a zoom whose minimum would not fit
+the display, and on macOS moves the traffic lights to stay centred in the
+row, stopping at 91% where the logo would reach them.
 
 On macOS, the shell keeps the native traffic lights, centers them in the
 44px navigation row and reserves 80px before the logo. The row uses

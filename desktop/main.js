@@ -18,6 +18,7 @@ const readline = require('node:readline')
 const { boundCli } = require('./cli-binding')
 const notify = require('./notify')
 const { sidecarExitAction } = require('./sidecar-exit')
+const zoom = require('./zoom')
 
 // The full CLI build identity is separate from package.json's npm-valid
 // version: git-describe and dev builds cannot use their identities there.
@@ -326,7 +327,13 @@ function main() {
   ipcMain.on('window:menu', (event, point) => {
     const target = senderWindow(event)
     if (!target || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return
-    popupWindowMenu(target, point.x, point.y)
+    // The page reports CSS pixels; the menu is placed in window pixels.
+    const factor = target.webContents.getZoomFactor()
+    popupWindowMenu(target, point.x * factor, point.y * factor)
+  })
+  ipcMain.on('window:zoom', (event, step) => {
+    const target = senderWindow(event)
+    if (target && (step === 'in' || step === 'out' || step === 'reset')) zoom.zoomWindow(target, step)
   })
 
   ipcMain.on('updates:notify', (_event, update) => {
@@ -421,13 +428,11 @@ function main() {
     win = new BrowserWindow({
       width: 1280,
       height: 840,
-      // The floor the dashboard's own layout is designed against; see
-      // docs/dashboard-frontend.md.
-      minWidth: 960,
-      minHeight: 600,
+      minWidth: zoom.MIN_WIDTH,
+      minHeight: zoom.MIN_HEIGHT,
       // Keep native macOS traffic lights centered in the 44px navigation row.
       ...(process.platform === 'darwin'
-        ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 16 } }
+        ? { titleBarStyle: 'hidden', trafficLightPosition: zoom.TRAFFIC_LIGHTS }
         : { frame: false }),
       // The dashboard's default dark --canvas, so a frameless window does not
       // flash another colour before the SPA paints.

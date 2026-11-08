@@ -5,27 +5,19 @@
 
 'use strict'
 
-const { contextBridge, ipcRenderer, webFrame } = require('electron')
+const { contextBridge, ipcRenderer } = require('electron')
 
-// The shell has no View menu, so it zooms the window itself: Cmd on macOS,
-// Ctrl elsewhere, in Electron's own half-level steps. It listens last, after
-// the page: a key the page already claimed, like terminal zoom, is left alone.
-const zoomSteps = { Equal: 0.5, NumpadAdd: 0.5, Minus: -0.5, NumpadSubtract: -0.5 }
+// The shell has no View menu, so Cmd (macOS) or Ctrl with =, + or - zooms the
+// window and 0 resets it, matched on the character typed as browsers do. It
+// listens after the page: a key the page already claimed, like terminal zoom,
+// is left alone.
+const zoomKeys = new Map([['=', 'in'], ['+', 'in'], ['-', 'out'], ['0', 'reset']])
 window.addEventListener('keydown', (event) => {
   const command = process.platform === 'darwin' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
-  if (event.defaultPrevented || !command || event.altKey) return
-  // With Num Lock off the keypad 0 is Insert, and Ctrl+Insert is copy.
-  if (event.code === 'Digit0' || (event.code === 'Numpad0' && event.key === '0')) {
-    if (event.shiftKey) return
-    webFrame.setZoomLevel(0)
-  } else if (event.code in zoomSteps) {
-    // Shift+= is how a keyboard without a numpad types +.
-    if (event.shiftKey && event.code !== 'Equal') return
-    webFrame.setZoomLevel(webFrame.getZoomLevel() + zoomSteps[event.code])
-  } else {
-    return
-  }
+  const step = zoomKeys.get(event.key)
+  if (event.defaultPrevented || !command || event.altKey || !step) return
   event.preventDefault()
+  ipcRenderer.send('window:zoom', step)
 })
 
 // Which CLI built this shell. `aether gui build` stamps its own version into
