@@ -249,7 +249,7 @@ again.
 
 A turn that ends normally (`end_turn`) without an outcome report gets one more
 prompt from the server:
-`Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn.`,
+`Report your state with aether_report or aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn.`,
 naming only the outcomes the session's role may use. It appears in the Session
 view as a message. The turn it starts is never
 reminded, so an agent that still does not report parks with

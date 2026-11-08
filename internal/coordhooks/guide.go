@@ -70,7 +70,7 @@ const (
 )
 
 // ReportReminderLead starts ReportReminder.
-const ReportReminderLead = "Report your state with aether-internal report"
+const ReportReminderLead = "Report your state with aether_report or aether-internal report"
 
 // ReportReminder is what Aether tells an agent of g whose turn is ending
 // without a report, naming only the outcomes g may report.
