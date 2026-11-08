@@ -30,7 +30,8 @@ describe('resend last prompt', () => {
     vi.spyOn(useStore.getState(), 'upsertRoomMessage').mockImplementation(() => {})
     renderCallout([
       { kind: 'user', id: 'a', at, body: 'fix the login bug', files: ['/workspace/.aether/terminal-files/0123456789abcdef0123456789abcdef/log.txt'], delivery: 'Sent' },
-      { kind: 'user', id: 'b', at, body: 'Report your state with aether-internal report (answered, waiting) before ending the turn.' },
+      { kind: 'user', id: 'b', at, body: 'Report your state with aether_report or aether-internal report (answered, waiting) before ending the turn.' },
+      { kind: 'user', id: 'b2', at, body: 'Report your state with aether-internal report (answered, waiting) before ending the turn.' },
       { kind: 'user', id: 'c', at, body: 'and add a test', delivery: 'Queued' },
     ])
     expect(await screen.findByText('awaiting-first-event')).toBeDefined()

@@ -444,7 +444,10 @@ var profiles = map[string]Profile{
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
 		// Claude Code refuses --dangerously-skip-permissions as root unless the
 		// environment declares a sandbox; the run container is one.
-		Env:             map[string]string{"IS_SANDBOX": "1"},
+		// Claude Code reruns a model call that ended without text, as Aether's
+		// end-of-turn report does, unless a tool listed here succeeded since
+		// the last user message.
+		Env:             map[string]string{"IS_SANDBOX": "1", "CLAUDE_CODE_TERMINAL_MCP_TOOLS": "mcp__aether__aether_report"},
 		CredentialPaths: []string{".claude/.credentials.json"},
 		// The native installer links ~/.local/bin/claude, by absolute
 		// path, to ~/.local/share/claude/versions/<version>.

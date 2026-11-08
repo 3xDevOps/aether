@@ -233,6 +233,16 @@ subscription logins.
 Claude Code refuses `--dangerously-skip-permissions` as root, so every `claude`
 session gets `IS_SANDBOX=1`.
 
+Claude Code reruns a model call that ends without text, adding the hidden
+prompt `[Your previous response had no visible output...]`. An Aether turn ends
+with a report and no text after it, so every `claude` session gets
+`CLAUDE_CODE_TERMINAL_MCP_TOOLS=mcp__aether__aether_report`, which exempts a
+turn in which `aether_report` succeeded since the last user message. A report
+through `aether-internal report` runs as the shell tool and still gets the
+extra call, so the role card names `aether_report` first. Only Enhanced
+sessions have the `aether_report` tool, and a running session picks the
+variable up when its container is next launched.
+
 #### Codex
 
 Run `codex login --device-auth`. It prints a URL and a one-time code and needs

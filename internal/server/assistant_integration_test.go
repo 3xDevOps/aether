@@ -323,7 +323,7 @@ func TestIntegrationAssistant(t *testing.T) {
 	if len(execs) != 1 {
 		t.Fatalf("%d adapters started, want 1", len(execs))
 	}
-	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 IS_SANDBOX=1" {
+	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_TERMINAL_MCP_TOOLS=mcp__aether__aether_report IS_SANDBOX=1" {
 		t.Fatalf("adapter env = %q", got)
 	}
 	if execs[0].spec.WorkingDir != scheduler.AssistantCwd {
