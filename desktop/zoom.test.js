@@ -66,6 +66,19 @@ test('refuses a zoom whose minimum size would not fit the display', () => {
   assert.ok(win.minimum[0] <= 1280 && win.minimum[1] <= 800)
 })
 
+test('zooms out on a display smaller than the zoomed minimum', () => {
+  on('linux')
+  workArea = { x: 0, y: 0, width: 1920, height: 1080 }
+  const win = fakeWindow({ x: 0, y: 0, width: 1920, height: 1080 })
+  for (let i = 0; i < 6; i++) zoomWindow(win, 'in')
+  assert.equal(win.level(), 3)
+  workArea = { x: 0, y: 0, width: 1280, height: 800 }
+  zoomWindow(win, 'out')
+  assert.equal(win.level(), 2.5)
+  zoomWindow(win, 'in')
+  assert.equal(win.level(), 2.5)
+})
+
 test('leaves a maximized window its size', () => {
   on('win32')
   workArea = { x: 0, y: 0, width: 1920, height: 1080 }

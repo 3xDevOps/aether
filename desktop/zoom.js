@@ -23,8 +23,9 @@ const SMALLEST = Math.log(0.25) / Math.log(1.2)
 
 // The window's minimum size grows with the zoom so the layout never drops
 // below the width it is designed against, where the phone layout would
-// take the title bar's window controls and drag region away. A step that
-// would push that minimum past the display's work area is refused.
+// take the title bar's window controls and drag region away. Zooming in
+// past what the display's work area holds is refused; zooming out is not,
+// so a window moved to a smaller display can still come back down.
 function zoomWindow(target, step) {
   const contents = target.webContents
   let level = 0
@@ -33,7 +34,8 @@ function zoomWindow(target, step) {
     const factor = Math.pow(1.2, level)
     const { workArea } = screen.getDisplayMatching(target.getBounds())
     const smallest = process.platform === 'darwin' ? SMALLEST_DARWIN : SMALLEST
-    if (level < smallest || MIN_WIDTH * factor > workArea.width || MIN_HEIGHT * factor > workArea.height) return
+    if (level < smallest) return
+    if (step === 'in' && (MIN_WIDTH * factor > workArea.width || MIN_HEIGHT * factor > workArea.height)) return
   }
   contents.setZoomLevel(level)
   const factor = contents.getZoomFactor()
