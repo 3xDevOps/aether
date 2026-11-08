@@ -16,7 +16,10 @@ afterEach(() => {
 function load(dialog: HTMLElement, natural: [number, number], frame: [number, number] = [800, 600]) {
   const image = within(dialog).getByRole('img')
   Object.defineProperties(image, { naturalWidth: { value: natural[0] }, naturalHeight: { value: natural[1] } })
-  Object.defineProperties(image.closest('.overflow-auto')!, { clientWidth: { value: frame[0] }, clientHeight: { value: frame[1] } })
+  Object.defineProperties(image.closest('.overflow-auto')!, {
+    clientWidth: { value: frame[0], configurable: true },
+    clientHeight: { value: frame[1], configurable: true },
+  })
   fireEvent.load(image)
 }
 
@@ -232,4 +235,50 @@ test('a Safari trackpad gesture zooms by its scale', async () => {
   frame.dispatchEvent(change)
   expect(change.defaultPrevented).toBe(true)
   await waitFor(() => expect(zoomOf(dialog)).toBeCloseTo(1.5))
+})
+
+test('the keypad 0 with Num Lock off is Insert, and Mod+Insert stays copy', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  fireEvent.keyDown(dialog, { key: '=', ctrlKey: true })
+  const insert = fireEvent.keyDown(dialog, { key: 'Insert', code: 'Numpad0', ctrlKey: true })
+  expect(insert).toBe(true)
+  expect(zoomOf(dialog)).toBeCloseTo(1.25)
+})
+
+test('a click zooms to actual size with the clicked point kept under the pointer', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  const frame = frameOf(dialog)
+  const image = within(dialog).getByRole('img')
+  const rect = (width: number, height: number) => ({ left: 0, top: 0, width, height }) as DOMRect
+  frame.getBoundingClientRect = () => rect(800, 600)
+  image.getBoundingClientRect = () => (image.style.width ? rect(parseFloat(image.style.width), parseFloat(image.style.height)) : rect(800, 600))
+  const scroll = { left: 0, top: 0 }
+  Object.defineProperties(frame, {
+    scrollLeft: { get: () => scroll.left, set: (v: number) => (scroll.left = v) },
+    scrollTop: { get: () => scroll.top, set: (v: number) => (scroll.top = v) },
+  })
+  // Fitted, 2400x1400 draws 800x466.67, letterboxed 66.67 from the top; this is its bottom-right quarter point.
+  fireEvent.click(image, { clientX: 600, clientY: 66.67 + 466.67 * 0.75 })
+  expect(scroll.left).toBeCloseTo(2400 * 0.75 - 600, 0)
+  expect(scroll.top).toBeCloseTo(1400 * 0.75 - (66.67 + 466.67 * 0.75), 0)
+})
+
+test('the zoom controls follow the frame as the window resizes', async () => {
+  const observed: ResizeObserverCallback[] = []
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) {
+      observed.push(callback)
+    }
+    observe() {}
+    disconnect() {}
+  })
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [1000, 500], [1200, 700])
+  expect(within(dialog).queryByRole('button', { name: 'Actual size' })).toBeNull()
+  Object.defineProperties(frameOf(dialog), { clientWidth: { value: 600 }, clientHeight: { value: 400 } })
+  act(() => observed.forEach((callback) => callback([], {} as ResizeObserver)))
+  expect(within(dialog).getByRole('button', { name: 'Actual size' })).toBeDefined()
+  vi.unstubAllGlobals()
 })

@@ -12,20 +12,6 @@ import type { MessageImageRef } from '@/store/session-rows'
 const maxScale = 4
 const keyStep = 1.25
 
-/** Where a client point falls on the picture an img draws, from 0 to 1 on each axis; a fitted img letterboxes it. */
-function pointOnImage(img: HTMLImageElement, clientX: number, clientY: number, fitted: boolean) {
-  const box = img.getBoundingClientRect()
-  const scale = fitted ? Math.min(1, box.width / img.naturalWidth, box.height / img.naturalHeight) : box.width / img.naturalWidth
-  const width = img.naturalWidth * scale
-  const height = img.naturalHeight * scale
-  if (!width || !height) return { x: 0.5, y: 0.5 }
-  const clamp = (n: number) => Math.min(1, Math.max(0, n))
-  return {
-    x: clamp((clientX - box.left - (box.width - width) / 2) / width),
-    y: clamp((clientY - box.top - (box.height - height) / 2) / height),
-  }
-}
-
 function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
   url: string
   name: string
@@ -61,9 +47,21 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
     const box = el.getBoundingClientRect()
     const x = clientX ?? box.left + el.clientWidth / 2
     const y = clientY ?? box.top + el.clientHeight / 2
-    // Measure on what is drawn: several wheel events can land before the next render.
-    const point = pointOnImage(picture, x, y, picture.classList.contains('object-scale-down'))
-    anchor.current = { ...point, left: x - box.left, top: y - box.top }
+    // Where the point falls on the picture, 0 to 1 on each axis, measured on what is drawn since several wheel
+    // events can land before the next render. A fitted img letterboxes its picture.
+    const drawn = picture.getBoundingClientRect()
+    const shown = picture.classList.contains('object-scale-down')
+      ? Math.min(1, drawn.width / picture.naturalWidth, drawn.height / picture.naturalHeight)
+      : drawn.width / picture.naturalWidth
+    const width = picture.naturalWidth * shown
+    const height = picture.naturalHeight * shown
+    const clamp = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.5)
+    anchor.current = {
+      x: clamp((x - drawn.left - (drawn.width - width) / 2) / width),
+      y: clamp((y - drawn.top - (drawn.height - height) / 2) / height),
+      left: x - box.left,
+      top: y - box.top,
+    }
     pending.current = next === undefined || next <= fitScale() * 1.001 ? undefined : Math.min(maxScale, next)
     setScale(pending.current)
   }
@@ -119,6 +117,17 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
     }
   }, [])
 
+  // Whether the picture outgrows the frame changes as the window does.
+  useEffect(() => {
+    const el = frame.current
+    if (!el || !natural) return
+    const measure = () => setZoomable(natural.width > el.clientWidth || natural.height > el.clientHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [natural])
+
   // Stepping remounts the viewer, which removes the control that had focus.
   useEffect(() => {
     if (refocus) frame.current?.focus()
@@ -134,21 +143,18 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
         scale === undefined && zoomable && 'cursor-zoom-in',
       )}
       style={scale === undefined || !natural ? undefined : { width: natural.width * scale, height: natural.height * scale }}
-      onLoad={(event) => {
-        const { naturalWidth: width, naturalHeight: height } = event.currentTarget
-        const el = frame.current
-        setNatural({ width, height })
-        if (el) setZoomable(width > el.clientWidth || height > el.clientHeight)
-      }}
+      onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
     />
   )
 
   const onKey = (event: React.KeyboardEvent) => {
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return
     const { key, code } = event
-    const by = key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd' ? keyStep
-      : key === '-' || code === 'Minus' || code === 'NumpadSubtract' ? 1 / keyStep
-      : key === '0' || code === 'Digit0' || code === 'Numpad0' ? 0
+    // A layout can put another character on these keys (AZERTY's 0 is à), so the key's place counts too; not the
+    // keypad's, whose 0 with Num Lock off is Insert, and Mod+Insert copies.
+    const by = key === '=' || key === '+' || code === 'Equal' ? keyStep
+      : key === '-' || code === 'Minus' ? 1 / keyStep
+      : key === '0' || code === 'Digit0' ? 0
       : undefined
     if (by === undefined) return
     event.preventDefault()
