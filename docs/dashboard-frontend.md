@@ -3070,7 +3070,7 @@ component is a neutral dot layer, one `radial-gradient` tile, under a
 colored copy of the same dots. The bars give each group of text and
 buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
 shadow of the same colour that hides the dots under the group and fades
-them back in around it. A `:has(> .control-matrix)` rule turns
+them back in around it. A rule on the matrix's siblings turns
 `text-muted` on the bar to `--text`. The copy is clipped from the left by
 `--control-reach`, a registered `@property` number (1 empty, 0 full), so it
 is revealed from the right edge, where the control button sits. The
