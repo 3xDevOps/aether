@@ -56,7 +56,9 @@ test('an Enhanced session opens on Chat and takes a message from the pinned comp
   await box.fill('hello from the phone')
   await page.getByRole('button', { name: 'Send', exact: true }).tap()
   await expect(log.getByText('hello from the phone')).toBeVisible()
-  await expect(log.getByText('pong')).toHaveCount(2, { timeout: 60_000 })
+  // Chat mounts only the rows near the view, so earlier replies may be gone: look for a reply after this message.
+  await expect(log.getByText('hello from the phone').locator('xpath=following::*[normalize-space(text())="pong"]').first())
+    .toBeVisible({ timeout: 60_000 })
   await restore()
 
   // iOS shrinks only the visual viewport, so the composer rides --keyboard-inset above its keyboard.
