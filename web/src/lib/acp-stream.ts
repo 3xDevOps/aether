@@ -59,6 +59,7 @@ interface SessionEndpoint {
 export function connectSessionStream(runID: string, h: SessionStreamHandlers, endpoint?: SessionEndpoint): SessionStream {
   let socket: WebSocket | null = null
   let acked = false
+  let replay: { values: unknown[]; owed: number } | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
   let closed = false
@@ -80,6 +81,7 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers, en
     }
     socket = ws
     acked = false
+    replay = null
     ws.onopen = () => {
       if (endpoint) {
         ws.send(JSON.stringify(endpoint.header(h.afterSeq())))
@@ -98,6 +100,18 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers, en
         parsed = parse(msg.data)
       } catch {
         return
+      }
+      // The ack and the items it replays apply together, so the conversation never paints half loaded.
+      if (!acked && !replay) {
+        const ack = parsed[0] as SessionStreamAck | undefined
+        if (ack?.ok && ack.replay > 0) replay = { values: [], owed: ack.replay }
+      }
+      if (replay) {
+        replay.values.push(...parsed)
+        replay.owed -= parsed.filter((value) => (value as SessionFrame).item !== undefined).length
+        if (replay.owed > 0) return
+        parsed = replay.values
+        replay = null
       }
       const frames: SessionFrame[] = []
       for (const value of parsed) {
@@ -163,6 +177,7 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers, en
     const ws = socket
     socket = null
     acked = false
+    replay = null
     if (!ws) return
     ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
     ws.close()
@@ -179,7 +194,7 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers, en
   })
 
   const send = (frame: Record<string, unknown>): boolean => {
-    if (!socket || !acked) return false
+    if (!socket || (!acked && !replay)) return false
     socket.send(JSON.stringify({ ...frame, request_id: ++requestID }))
     return true
   }

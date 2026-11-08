@@ -3187,7 +3187,12 @@ and mode, branch, owner and creation time. The title and each metadata row
 are centered in the conversation pane, including when long metadata needs
 scrolling. The overview gives way to the conversation as rows arrive. History
 errors and their **Retry** action remain visible above it; the overview does
-not imply that the agent is connected.
+not imply that the agent is connected. While the stream first connects, a
+session with nothing held shows neither the overview nor the people's
+messages: after ~200ms a skeleton of three exchanges stands in, announced as
+"Loading the conversation…". It gives way to the conversation, or to the
+overview when the replay holds no rows or the first connection fails. A
+session switching mode opens no stream and shows the overview.
 
 Screenshots with fixture data: [desktop](media/acp-session-desktop.png),
 [phone](media/acp-session-phone.png),
@@ -3208,7 +3213,10 @@ or reloading the tab, releases a held lease before the stream closes, so a
 reload takes it straight back. Navigating away waits up to 2 s for the release's answer, because the
 server commits it on the stream's context. Closing the stream resets the
 session's stream and lease state. Frames go through `batchNotifications`, so a
-burst re-renders once per frame.
+burst re-renders once per frame. The client holds the ack until the `replay`
+items it announces have arrived and applies them together, so a conversation
+never paints half loaded or shows a finished turn as live. A stream that closes
+mid-replay drops what arrived, and the next subscribe replays it again.
 
 An ack or history page's `truncated_before` displays the expired-prefix
 boundary. The page's `oldest_seq` stops older-page requests at the actual
@@ -3226,7 +3234,8 @@ at a time, along with older room messages, and repeats until that much is
 loaded above the viewport or history ends. A page shorter than the request
 does not end paging, so a server with a lower `limit` cap still pages to the
 start. If the loaded rows do not fill the viewport, paging continues until
-they do or history ends. Inactive views and failed reads do not auto-page;
+they do or history ends; that paging keeps a view that follows the newest row
+following. Inactive views and failed reads do not auto-page;
 failures keep the server's error with **Retry**. While older items remain, a
 room message or agent message from before the oldest item held stays hidden
 until the items around it load; a message the agent has not taken yet always
@@ -3238,7 +3247,9 @@ While every row below the top visible one keeps its key, it anchors the page
 from the end. That keeps the distance from the end, which moves with any row
 that resizes below the reader, so an unpinned view also restores the first
 visible row that survives, by key and offset; that alone places the view when
-live rows arrive with the page. A closed
+live rows arrive with the page. A view at the end follows the newest row, also
+while a streamed reply grows its row in place; only the reader's own scrolling
+stops it. A closed
 turn's rows are derived once and kept; only the open turn re-derives. At most
 three sessions stay whole; the least recently
 opened others keep their newest 200 items. Rows: `user` (a
