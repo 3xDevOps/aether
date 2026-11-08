@@ -25,7 +25,6 @@ function on(name) {
   Object.defineProperty(process, 'platform', { ...platform, value: name })
 }
 
-/** Presses a key and returns the zoom step it sent, or null. */
 function press(key, modifiers = {}) {
   sent.length = 0
   const event = {
