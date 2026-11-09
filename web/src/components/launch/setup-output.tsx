@@ -10,8 +10,8 @@ export function setupOutput(err: unknown): string | null {
 }
 
 export function mirrorPending(err: unknown): boolean {
-  const data = err instanceof ApiError ? (err.data as { kind?: unknown } | undefined) : undefined
-  return data?.kind === 'no-candidate'
+  const data = err instanceof ApiError ? (err.data as { kind?: unknown; observed_commit?: unknown } | undefined) : undefined
+  return data?.kind === 'no-candidate' && typeof data.observed_commit === 'string' && data.observed_commit !== ''
 }
 
 export function SetupOutput({ output }: { output: string }) {

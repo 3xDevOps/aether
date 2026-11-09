@@ -399,12 +399,23 @@ describe('new run', () => {
 
   it('tells a non-admin to ask an admin to adopt the source mirror', async () => {
     useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'collaborator' } } })
-    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error('gitengine: mirror no-candidate'), { data: { kind: 'no-candidate' } }))
+    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error('gitengine: mirror no-candidate'), { data: { kind: 'no-candidate', observed_commit: 'abc123' } }))
     await open()
     fireEvent.click(launchButton())
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('Ask an admin to adopt it: Repository → Advanced → Review source mirror → Adopt candidate.')
+    expect(within(alert).queryByRole('button')).toBeNull()
+  })
+
+  it('offers no adopt step when the pending mirror has no candidate yet', async () => {
+    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error('gitengine: mirror no-candidate'), { data: { kind: 'no-candidate' } }))
+    await open()
+    fireEvent.click(launchButton())
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('gitengine: mirror no-candidate')
+    expect(alert.textContent).not.toContain('Adopt candidate')
     expect(within(alert).queryByRole('button')).toBeNull()
   })
 

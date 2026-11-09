@@ -39,11 +39,12 @@ function expectNoPush() {
 
 describe('workspace repository ownership', () => {
   it.each([
-    { role: 'admin', copy: 'Choose Advanced → Review source mirror → Adopt candidate.' },
-    { role: 'collaborator', copy: 'Ask an admin to adopt it: Advanced → Review source mirror → Adopt candidate.' },
-  ] as const)('names the adopt controls to a $role when the source copy is pending', async ({ role, copy }) => {
+    { role: 'admin', observed: 'a'.repeat(40), copy: 'Choose Advanced → Review source mirror → Adopt candidate.' },
+    { role: 'collaborator', observed: 'a'.repeat(40), copy: 'Ask an admin to adopt it: Advanced → Review source mirror → Adopt candidate.' },
+    { role: 'admin', observed: undefined, copy: 'Open Advanced to review it.' },
+  ] as const)('names the next step to a $role when the source copy is pending with candidate $observed', async ({ role, observed, copy }) => {
     seed({ info: { ...serverInfo, member: { ...bob, role } } })
-    const client = fakeApi({ workspaceMirrorStatus: vi.fn(async () => ({ ...mirrored, status: 'pending' as const })) })
+    const client = fakeApi({ workspaceMirrorStatus: vi.fn(async () => ({ ...mirrored, status: 'pending' as const, observed_commit: observed })) })
     render(<WorkspaceRepository client={client} caps={caps} workspace={workspace} />)
     expect((await screen.findByText(/Sessions start once it is verified and adopted/)).textContent).toContain(copy)
   })

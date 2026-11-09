@@ -88,7 +88,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const [task, setTask] = useState(shared)
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
-  const [unadopted, setUnadopted] = useState(false)
+  const [unadopted, setUnadopted] = useState<string | null>(null)
   const isAdmin = useIsAdmin()
   const [launching, setLaunching] = useState(false)
   const late = usePastDeadline(launching)
@@ -186,7 +186,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     setLaunching(true)
     setError(null)
     setSetup(null)
-    setUnadopted(false)
+    setUnadopted(null)
     try {
       await launchRun()
     } catch (err) {
@@ -195,7 +195,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       setLaunching(false)
       setError(message(err))
       setSetup(setupOutput(err))
-      setUnadopted(mirrorPending(err))
+      setUnadopted(mirrorPending(err) ? workspaceID : null)
     }
   }
 
@@ -251,7 +251,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       role="alert"
       title="Launch failed"
       actions={unadopted && (isAdmin
-        ? <Button size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: workspaceID }) }}>Review source mirror</Button>
+        ? <Button size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: unadopted }) }}>Review source mirror</Button>
         : <span className="text-ui-sm text-muted">Ask an admin to adopt it: Repository → Advanced → Review source mirror → Adopt candidate.</span>)}
     >
       {error}{setup && <SetupOutput output={setup} />}

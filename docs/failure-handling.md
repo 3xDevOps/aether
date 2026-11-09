@@ -400,10 +400,11 @@ moved since. To repair the mirror itself (admins):
    that the key is still installed upstream.
 3. Refresh with `aether workspace mirror refresh --workspace <workspace>`.
 
-A new mirror stays `pending` until an admin adopts its first revision, and
-every launch is refused until then. The refusal ends with the adopt command,
-and `aether workspace mirror status` and `aether workspace mirror refresh`
-print it with the workspace's values filled in:
+A new or reconfigured mirror stays `pending` until an admin adopts a revision
+of its current generation, and every launch is refused until then. The
+refusal ends with the adopt command, and `aether workspace mirror status` and
+`aether workspace mirror refresh` print it with the workspace's values filled
+in:
 
 ```text
 sessions cannot launch until an admin adopts revision <sha>
