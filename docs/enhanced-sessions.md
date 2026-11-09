@@ -363,11 +363,14 @@ belongs to the session's user with owner `rwx`. A root command in any of your
 sessions can change that and lock every agent on the home out of its login
 and its `~/.local/bin`. Aether gives the home back and shows **Home restored**
 with the owner and mode it found
-([security.md](security.md#permission-tiers)). An agent that is running and
-never refused keeps failing until something restarts it: **Retry Enhanced**
-does. If it cannot, the session parks
-with `enhanced session failed: the agent cannot read its home: ...`, naming
-the home, its owner and mode, and the error.
+([security.md](security.md#permission-tiers)). An agent that stays
+connected and is never refused gets no restore, so its tools keep failing:
+run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in
+that session's **Terminal** tab, which runs as the session's user; a Default
+session's `sudo` waits for your approval. If restoring fails, the session parks
+with
+`enhanced session failed: the agent cannot read its home: ...`, naming the
+home, its owner and mode, and the error.
 
 If the adapter fails to start or exits, the container and login shell stay
 available. The log shows the real error and the end of the adapter's stderr, and

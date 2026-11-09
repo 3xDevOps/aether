@@ -3,6 +3,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -21,7 +22,7 @@ func (s *Scheduler) applyRunOwnership(_ *domain.Workspace, _ *domain.Run, _ doma
 
 // restoreHomeRoot has nothing to restore: applyRunOwnership refused a
 // non-root user.
-func (s *Scheduler) restoreHomeRoot(_ *supervised) (string, error) {
+func (s *Scheduler) restoreHomeRoot(_ context.Context, _ *supervised) (string, error) {
 	return "", nil
 }
 

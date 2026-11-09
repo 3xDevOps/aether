@@ -130,8 +130,8 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 // launch's ownership pass never revisits: a root command in another of the
 // member's sessions can have taken the home since, leaving the agent unable
 // to read its login or even run.
-func (d *acpDriver) restoreHome(entry *supervised) error {
-	was, err := d.s.restoreHomeRoot(entry)
+func (d *acpDriver) restoreHome(ctx context.Context, entry *supervised) error {
+	was, err := d.s.restoreHomeRoot(ctx, entry)
 	if err != nil {
 		return fmt.Errorf("the agent cannot read its home: %w", err)
 	}
