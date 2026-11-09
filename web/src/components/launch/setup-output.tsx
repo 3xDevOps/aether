@@ -2,7 +2,7 @@
 // script refused, and protocol.MirrorFailure's adopt_command. Only the
 // launching caller gets them.
 
-import { useRef } from 'react'
+import { Fragment, useRef } from 'react'
 import { CodeBlock } from '@/components/ui/code'
 import { CopyButton } from '@/components/ui/copy-button'
 import { ApiError } from '@/lib/api'
@@ -21,7 +21,9 @@ export function AdoptCommand({ command }: { command: string }) {
   const code = useRef<HTMLPreElement>(null)
   return (
     <div className="mt-2 flex min-w-0 items-start gap-1">
-      <CodeBlock ref={code} aria-label="Adopt command" className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{command}</CodeBlock>
+      <CodeBlock ref={code} aria-label="Adopt command" className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {command.split(' ').map((token, i) => <Fragment key={i}>{i > 0 && ' '}{token.startsWith('-') ? <span className="whitespace-nowrap">{token}</span> : token}</Fragment>)}
+      </CodeBlock>
       <CopyButton text={command} label="Copy the adopt command" source={code} />
     </div>
   )
