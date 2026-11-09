@@ -85,6 +85,7 @@ type MirrorError struct {
 	Branch      string
 	Base        string
 	Observed    string
+	Generation  int64
 	Cause       error
 }
 
@@ -105,7 +106,19 @@ func (e *MirrorError) Error() string {
 		_, diagnostic := mirrorFetchProblem(failure)
 		message += ": " + diagnostic
 	}
+	if adopt := e.AdoptCommand(); adopt != "" {
+		message += fmt.Sprintf(": revision %s is waiting for an admin to adopt it; check that it is the upstream commit you expect, then run: %s", e.Observed, adopt)
+	}
 	return message
+}
+
+// AdoptCommand is the CLI step that adopts the observed revision of a
+// pending generation, or empty when there is none to adopt.
+func (e *MirrorError) AdoptCommand() string {
+	if e == nil || e.Kind != MirrorErrorNoCandidate || e.WorkspaceID == "" || e.Generation <= 0 || e.Observed == "" || !domain.ValidMirrorSHA(e.Observed) {
+		return ""
+	}
+	return domain.MirrorAdoptCommand(e.WorkspaceID, e.Generation, e.Observed)
 }
 
 func (e *MirrorError) Unwrap() error { return e.Cause }

@@ -48,7 +48,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
   return <section aria-label="Workspace repository" className="flex min-w-0 flex-col gap-4">
     {notReady && (
       <Callout tone="needs-you" title={`The server's copy is ${source.status ?? 'pending'}`}>
-        {source.last_error || 'Sessions start once it is verified and adopted. Open Advanced to review it.'}
+        {source.last_error || ('Sessions start once it is verified and adopted. ' + (source.status !== 'pending' || !source.observed_commit ? 'Open Advanced to review it.' : isAdmin ? 'Adopt it with Review source mirror → Adopt candidate under Advanced.' : 'Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced.'))}
       </Callout>
     )}
     {!packaged && <div className="flex flex-col items-start gap-2">

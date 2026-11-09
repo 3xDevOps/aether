@@ -396,6 +396,12 @@ func printWorkspaceMirror(w io.Writer, ws protocol.Workspace, result protocol.Wo
 			return err
 		}
 	}
+	if result.Status == string(domain.MirrorStatusPending) && result.ObservedCommit != "" && result.AcceptedCommit == "" && result.Generation > 0 {
+		if _, err := fmt.Fprintf(w, "sessions cannot launch until an admin adopts revision %s\ncheck that it is the upstream commit you expect on %s, then run:\n  %s\n",
+			result.ObservedCommit, result.Branch, domain.MirrorAdoptCommand(domain.WorkspaceID(ws.ID), result.Generation, result.ObservedCommit)); err != nil {
+			return err
+		}
+	}
 	return printMirrorWarning(w, result.Warning)
 }
 

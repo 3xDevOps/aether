@@ -26,13 +26,13 @@ function useSourceCheck(client: Api, workspaceID: string | undefined) {
     if (!workspaceID) return
     void (async () => {
       try {
-        if (caps.hasMethod('files.tree')) await client.filesTree({ workspace_id: workspaceID, path: '' })
         if (caps.hasMethod('workspace.mirror.status')) {
           const source = await client.workspaceMirrorStatus(workspaceID)
           if (source.enabled && (source.status !== 'ready' || !source.accepted_commit)) {
-            throw new Error(source.last_error || `Source is ${source.status ?? 'pending'}; ${isAdmin ? 'verify and adopt the candidate' : 'ask an administrator to verify and adopt the candidate'} in repository setup before launching.`)
+            throw new Error(source.last_error || `Source is ${source.status ?? 'pending'}; ${isAdmin ? 'verify and adopt the candidate' : 'ask an administrator to verify and adopt the candidate'} before launching: Review source mirror → Adopt candidate under Advanced on the Repository page.`)
           }
         }
+        if (caps.hasMethod('files.tree')) await client.filesTree({ workspace_id: workspaceID, path: '' })
         if (live) setCheck({ workspace: workspaceID, error: null })
       } catch (cause) {
         if (live) setCheck({ workspace: workspaceID, error: message(cause) })

@@ -142,6 +142,7 @@ func mirrorFailure(err error) *protocol.MirrorFailure {
 		failure.Kind = string(mirrorErr.Kind)
 		failure.BaseCommit = mirrorErr.Base
 		failure.ObservedCommit = mirrorErr.Observed
+		failure.AdoptCommand = mirrorErr.AdoptCommand()
 		if failure.Source == "" {
 			failure.Source = mirrorErr.SourceURL
 		}

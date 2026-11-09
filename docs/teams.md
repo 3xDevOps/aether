@@ -286,7 +286,9 @@ aether workspace mirror refresh --workspace myproject
 `--auth` is `public`, `github` (your own GitHub login on the server, read access
 is enough) or `deploy-key` (Aether prints a public key to add as a read-only
 deploy key). A new mirror starts pending: verify it and adopt its first revision
-before the first session. Fast-forward updates apply on their own. If upstream
+before the first session. While it is pending, `refresh`, `status` and every
+refused launch print the exact `aether workspace mirror adopt` command for the
+observed revision. Fast-forward updates apply on their own. If upstream
 rewrote history, the base stays put until an admin reviews the candidate and sessions
 `aether workspace mirror adopt --workspace myproject --generation <n> --commit
 <reviewed-sha> --yes`. `aether workspace mirror status` shows where it stands.

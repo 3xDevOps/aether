@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	mirrorservice "github.com/3xDevOps/Aether/internal/mirror"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
 func workspaceImportGit(t *testing.T, dir string, args ...string) string {
@@ -304,5 +306,34 @@ func TestWorkspaceImportAcceptedBaseRewriteNeedsAdoption(t *testing.T) {
 	base, err := engine.WorkspaceBranchCommit(t.Context(), domain.WorkspaceID(imported.Workspace.ID), "main")
 	if err != nil || base != accepted || state.AcceptedCommit != accepted || state.ObservedCommit != candidate || state.Status != string(domain.MirrorStatusRewritten) {
 		t.Fatalf("rewritten source moved accepted base: base=%s state=%+v error=%v", base, state, err)
+	}
+}
+
+func TestWorkspaceImportPendingLaunchRefusalNamesAWorkingAdoptCommand(t *testing.T) {
+	e, engine, _, commit := workspaceImportEnv(t, true)
+	client := controlClient(t, e)
+	var imported protocol.WorkspaceImportResult
+	if err := client.Call(protocol.MethodWorkspaceImport, workspaceImportParams("unadopted"), &imported); err != nil {
+		t.Fatal(err)
+	}
+	id := domain.WorkspaceID(imported.Workspace.ID)
+	base, err := e.srv.cfg.Services.Mirrors.Capture(t.Context(), id, "")
+	refusal := rpcError(&scheduler.BaseCaptureError{Capture: base, Err: err})
+	want := fmt.Sprintf(`gitengine: mirror no-candidate for branch "main": revision %s is waiting for an admin to adopt it; `+
+		"check that it is the upstream commit you expect, then run: aether workspace mirror adopt --workspace %s --generation %d --commit %s --yes",
+		commit, id, imported.Mirror.Generation, commit)
+	if refusal.Code != protocol.CodeInvalidState || refusal.Message != want {
+		t.Fatalf("pending launch refusal = %d %q\nwant %q", refusal.Code, refusal.Message, want)
+	}
+	var failure protocol.MirrorFailure
+	if err := json.Unmarshal(refusal.Data, &failure); err != nil || failure.Kind != "no-candidate" || failure.ObservedCommit != commit || !strings.HasSuffix(want, ": "+failure.AdoptCommand) {
+		t.Fatalf("refusal data = %s, %v, want kind, observed commit and adopt command", refusal.Data, err)
+	}
+	var adopted protocol.WorkspaceMirrorResult
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(id), Generation: imported.Mirror.Generation, ExpectedCommit: commit}, &adopted); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := engine.WorkspaceBranchCommit(t.Context(), id, "main"); err != nil || got != commit {
+		t.Fatalf("base after the named adopt = %q, %v, want %s", got, err, commit)
 	}
 }
