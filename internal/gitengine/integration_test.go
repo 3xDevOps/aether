@@ -1108,9 +1108,9 @@ func TestDiffWatchQuiescence(t *testing.T) {
 		t.Fatalf("bare branch tip = %s, want %s", got, head)
 	}
 
-	// after.txt may miss the snapshot that carried the commit and land in a
-	// later one, so wait for the snapshot that lists it: stopping earlier
-	// would make the final snapshot StopDiffWatch takes report it instead.
+	// The commit alone changes no tree, so the only snapshot left is the one
+	// that lists after.txt. Wait for it: stopping earlier would make the
+	// final snapshot StopDiffWatch takes publish it instead.
 	for seen := false; !seen; {
 		dev, ok := nextEvent(t, diffs, 5*time.Second)
 		if !ok {
