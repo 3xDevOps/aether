@@ -326,8 +326,8 @@ func TestWorkspaceImportPendingLaunchRefusalNamesAWorkingAdoptCommand(t *testing
 		t.Fatalf("pending launch refusal = %d %q\nwant %q", refusal.Code, refusal.Message, want)
 	}
 	var failure protocol.MirrorFailure
-	if err := json.Unmarshal(refusal.Data, &failure); err != nil || failure.Kind != "no-candidate" || failure.ObservedCommit != commit || failure.Generation != imported.Mirror.Generation {
-		t.Fatalf("refusal data = %s, %v, want kind, observed commit and generation", refusal.Data, err)
+	if err := json.Unmarshal(refusal.Data, &failure); err != nil || failure.Kind != "no-candidate" || failure.ObservedCommit != commit || !strings.HasSuffix(want, ": "+failure.AdoptCommand) {
+		t.Fatalf("refusal data = %s, %v, want kind, observed commit and adopt command", refusal.Data, err)
 	}
 	var adopted protocol.WorkspaceMirrorResult
 	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(id), Generation: imported.Mirror.Generation, ExpectedCommit: commit}, &adopted); err != nil {

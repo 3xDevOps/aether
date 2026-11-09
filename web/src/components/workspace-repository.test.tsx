@@ -39,8 +39,8 @@ function expectNoPush() {
 
 describe('workspace repository ownership', () => {
   it.each([
-    { role: 'admin', observed: 'a'.repeat(40), copy: 'Choose Advanced → Review source mirror → Adopt candidate.' },
-    { role: 'collaborator', observed: 'a'.repeat(40), copy: 'Ask an admin to adopt it: Advanced → Review source mirror → Adopt candidate.' },
+    { role: 'admin', observed: 'a'.repeat(40), copy: 'Adopt it with Review source mirror → Adopt candidate under Advanced.' },
+    { role: 'collaborator', observed: 'a'.repeat(40), copy: 'Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced.' },
     { role: 'admin', observed: undefined, copy: 'Open Advanced to review it.' },
   ] as const)('names the next step to a $role when the source copy is pending with candidate $observed', async ({ role, observed, copy }) => {
     seed({ info: { ...serverInfo, member: { ...bob, role } } })

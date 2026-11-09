@@ -384,27 +384,30 @@ describe('new run', () => {
     expect(within(alert).getByLabelText('Setup script output').textContent).toBe('npm error code E401\n')
   })
 
-  it('leads an admin from an unadopted source mirror to Review source mirror', async () => {
-    const text = 'gitengine: mirror no-candidate for branch "dev": revision abc123 is waiting for an admin to adopt it'
-    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error(text), { data: { kind: 'no-candidate', observed_commit: 'abc123', generation: 3 } }))
+  it('gives an admin the adopt command and the way to the Repository page', async () => {
+    const command = 'aether workspace mirror adopt --workspace ' + workspace.id + ' --generation 3 --commit ' + 'a'.repeat(40) + ' --yes'
+    const text = 'gitengine: mirror no-candidate for branch "dev": revision ' + 'a'.repeat(40) + ' is waiting for an admin to adopt it; check that it is the upstream commit you expect, then run: ' + command
+    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error(text), { data: { kind: 'no-candidate', adopt_command: command } }))
     await open()
     fireEvent.click(launchButton())
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain(text)
-    fireEvent.click(within(alert).getByRole('button', { name: 'Review source mirror' }))
+    expect(within(alert).getByLabelText('Adopt command').textContent).toBe(command)
+    fireEvent.click(within(alert).getByRole('button', { name: 'Open Repository' }))
     expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })
     expect(useStore.getState().paletteDialog).toBeNull()
   })
 
   it('tells a non-admin to ask an admin to adopt the source mirror', async () => {
     useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'collaborator' } } })
-    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error('gitengine: mirror no-candidate'), { data: { kind: 'no-candidate', observed_commit: 'abc123' } }))
+    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error('gitengine: mirror no-candidate'), { data: { kind: 'no-candidate', adopt_command: 'aether workspace mirror adopt' } }))
     await open()
     fireEvent.click(launchButton())
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('Ask an admin to adopt it: Repository → Advanced → Review source mirror → Adopt candidate.')
+    expect(within(alert).queryByLabelText('Adopt command')).toBeNull()
     expect(within(alert).queryByRole('button')).toBeNull()
   })
 

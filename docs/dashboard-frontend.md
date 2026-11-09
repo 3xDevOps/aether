@@ -6518,11 +6518,11 @@ When the setup script fails a launch, the New session and template launch
 dialogs show the server's reason and, under **Setup script output**, what
 the script printed (`components/launch/setup-output.tsx`, from the error's
 `setup_output`).
-When the refusal is a source mirror whose first revision was never adopted
-(error data `kind` `no-candidate`), the New session dialog keeps the server's
-reason, which ends with the `aether workspace mirror adopt` command, and adds
-**Review source mirror** for an admin, which opens the workspace's Repository
-page. Other members read where an admin adopts it instead.
+When the refusal is a pending source mirror with a revision to adopt (error
+data `adopt_command`), the New session dialog keeps the server's reason. An
+admin also gets the `aether workspace mirror adopt` command in a code block
+with a copy button, and **Open Repository**, which leads to **Review source
+mirror → Adopt candidate**. Other members read where an admin adopts it.
 
 The source mirror dialog reports local-only, pending, ready or failure,
 including the configured source, branch, accepted SHA and last check time.

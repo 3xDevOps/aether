@@ -13,7 +13,7 @@ import { PhoneLaunchSheet } from '@/components/launch/phone-launch'
 import { AgentOptions, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
 import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
-import { mirrorPending, SetupOutput, setupOutput } from '@/components/launch/setup-output'
+import { AdoptCommand, adoptCommand, SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { LoaderCircle, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -88,7 +88,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const [task, setTask] = useState(shared)
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
-  const [unadopted, setUnadopted] = useState<string | null>(null)
+  const [unadopted, setUnadopted] = useState<{ workspace: string; command: string } | null>(null)
   const isAdmin = useIsAdmin()
   const [launching, setLaunching] = useState(false)
   const late = usePastDeadline(launching)
@@ -195,7 +195,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       setLaunching(false)
       setError(message(err))
       setSetup(setupOutput(err))
-      setUnadopted(mirrorPending(err) ? workspaceID : null)
+      const command = adoptCommand(err)
+      setUnadopted(command ? { workspace: workspaceID, command } : null)
     }
   }
 
@@ -251,10 +252,10 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       role="alert"
       title="Launch failed"
       actions={unadopted && (isAdmin
-        ? <Button size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: unadopted }) }}>Review source mirror</Button>
-        : <span className="text-ui-sm text-muted">Ask an admin to adopt it: Repository → Advanced → Review source mirror → Adopt candidate.</span>)}
+        ? <Button size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: unadopted.workspace }) }}>Open Repository</Button>
+        : <span className="text-ui-sm text-text">Ask an admin to adopt it: Repository → Advanced → Review source mirror → Adopt candidate.</span>)}
     >
-      {error}{setup && <SetupOutput output={setup} />}
+      {error}{setup && <SetupOutput output={setup} />}{unadopted && isAdmin && <AdoptCommand command={unadopted.command} />}
     </Callout>
   )
   const launchLabel = (
