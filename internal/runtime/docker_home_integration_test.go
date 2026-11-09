@@ -24,7 +24,7 @@ func TestDockerSystemdTmpfilesLeavesTheSharedHome(t *testing.T) {
 	d := newTestDocker(t)
 	image := fmt.Sprintf("aether-it-systemd:%d", os.Getpid())
 	build := exec.CommandContext(t.Context(), "docker", "build", "-t", image, "-")
-	build.Stdin = strings.NewReader("FROM ubuntu:24.04\nRUN apt-get update && apt-get install -y --no-install-recommends systemd sudo && rm -rf /var/lib/apt/lists/*\n")
+	build.Stdin = strings.NewReader("FROM ubuntu:24.04\nRUN printf 'http://archive.ubuntu.com/ubuntu/\\nhttp://azure.archive.ubuntu.com/ubuntu/\\nhttp://mirrors.edge.kernel.org/ubuntu/\\n' > /etc/apt/mirrors.txt && sed -i 's#http://archive.ubuntu.com/ubuntu/#mirror+file:/etc/apt/mirrors.txt#' /etc/apt/sources.list.d/ubuntu.sources && apt-get update && apt-get install -y --no-install-recommends systemd sudo && rm -rf /var/lib/apt/lists/*\n")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build %s: %v\n%s", image, err, out)
 	}
