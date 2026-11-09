@@ -563,7 +563,7 @@ jobs:
       # suite.
       - name: Install the browser
         run: |
-          printf 'https://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
+          printf 'https://archive.ubuntu.com/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu/\nhttps://mirrors.edge.kernel.org/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
           bunx playwright install --with-deps chromium
         working-directory: web
       # Built from the caches the browser and smoke jobs write on main, never
@@ -657,7 +657,7 @@ jobs:
             npm-${{ runner.os }}-${{ runner.environment }}-
       - name: Install desktop validation tools
         run: |
-          printf 'https://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
+          printf 'https://archive.ubuntu.com/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu/\nhttps://mirrors.edge.kernel.org/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y desktop-file-utils
       - name: Build the CLI
