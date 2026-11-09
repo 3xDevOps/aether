@@ -73,4 +73,16 @@ func TestDockerSystemdTmpfilesLeavesTheSharedHome(t *testing.T) {
 	if err != nil || code != 0 || out != "signed in\n" {
 		t.Fatalf("other session reading its home: code %d, %q, %v", code, out, err)
 	}
+
+	// Naming the shipped file bypasses the mask, so the home must change:
+	// otherwise the check above proves nothing.
+	if _, out, _, err = d.execCombined(t.Context(), root, []string{"sudo", "systemd-tmpfiles", "--create", "/usr/lib/tmpfiles.d/provision.conf"}, "", "1000:1000"); err != nil {
+		t.Fatalf("unmasked systemd-tmpfiles: %v: %s", err, out)
+	}
+	if info, err = os.Stat(home); err != nil {
+		t.Fatal(err)
+	}
+	if st := info.Sys().(*syscall.Stat_t); st.Uid != 0 {
+		t.Fatalf("home owner = %d:%d after the unmasked provision.conf, want uid 0: the scenario did not reach the home", st.Uid, st.Gid)
+	}
 }

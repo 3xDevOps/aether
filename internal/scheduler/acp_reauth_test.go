@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -86,8 +87,18 @@ func TestEnhancedAuthRefusalRestoresATakenHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.Stat(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err = os.Chmod(home, 0o500); err != nil {
 		t.Fatal(err)
+	}
+	// Only root can take the home as a container's root does.
+	if os.Geteuid() == 0 {
+		if err = os.Lchown(home, 0, 0); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	rt.fixture.RefuseNext.Store(1)
@@ -101,6 +112,10 @@ func TestEnhancedAuthRefusalRestoresATakenHome(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o700 {
 		t.Fatalf("home mode = %04o, want 0700", got)
+	}
+	got, want := info.Sys().(*syscall.Stat_t), before.Sys().(*syscall.Stat_t)
+	if got.Uid != want.Uid || got.Gid != want.Gid {
+		t.Fatalf("home owner = %d:%d, want %d:%d", got.Uid, got.Gid, want.Uid, want.Gid)
 	}
 	waitFor(t, "the restarted agent", func() bool { return e.sched.acp.session(run.ID) != nil })
 	if _, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {

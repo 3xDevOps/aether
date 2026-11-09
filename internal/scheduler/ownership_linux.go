@@ -137,11 +137,15 @@ func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID
 	return nil
 }
 
-// restoreHomeRoot gives member's home directory back to user, with its owner
-// permissions, when root in one of the member's containers took it: every
-// container mounts the same directory, so all of them lose the home at once.
-// It returns the owner and mode it replaced, or "" when they were right.
-func (s *Scheduler) restoreHomeRoot(member domain.MemberID, user string) (string, error) {
+// restoreHomeRoot gives entry's home directory back to its container user,
+// with its owner permissions, when root in one of the member's containers
+// took it: every container mounts the same directory, so all of them lose
+// the home at once. It returns the owner and mode it replaced, or "" when
+// they were right or entry no longer holds the home's mapping.
+func (s *Scheduler) restoreHomeRoot(entry *supervised) (string, error) {
+	s.mu.Lock()
+	member, user := entry.memberID, entry.runUser
+	s.mu.Unlock()
 	if user == "" || user == unknownRecoveryRunUser {
 		return "", nil
 	}
@@ -156,6 +160,16 @@ func (s *Scheduler) restoreHomeRoot(member domain.MemberID, user string) (string
 	lock := s.homeLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	// A container launched since the snapshot may have been handed the
+	// home with another mapping; this chown must not take it back.
+	s.mu.Lock()
+	s.syncRunUserReservationsLocked()
+	current := s.runs[entry.runID] == entry && entry.runUser == user &&
+		s.reservationConflictLocked(member, "", user, "live session "+string(entry.runID)) == nil
+	s.mu.Unlock()
+	if !current {
+		return "", nil
+	}
 	info, err := os.Lstat(home)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: check home: %w", err)

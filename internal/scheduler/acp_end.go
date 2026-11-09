@@ -131,16 +131,16 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 // member's sessions can have taken the home since, leaving the agent unable
 // to read its login or even run.
 func (d *acpDriver) restoreHome(entry *supervised) error {
-	d.s.mu.Lock()
-	member, user := entry.memberID, entry.runUser
-	d.s.mu.Unlock()
-	was, err := d.s.restoreHomeRoot(member, user)
+	was, err := d.s.restoreHomeRoot(entry)
 	if err != nil {
 		return fmt.Errorf("the agent cannot read its home: %w", err)
 	}
 	if was == "" {
 		return nil
 	}
+	d.s.mu.Lock()
+	member, user := entry.memberID, entry.runUser
+	d.s.mu.Unlock()
 	slog.Warn("scheduler: restored a member home a container had taken", "run", entry.runID, "member", member, "was", was, "now", user)
 	d.notice(entry.runID, "warning", "Home restored", fmt.Sprintf("The home this session shares with your other sessions was owned by %s (uid:gid mode), so no agent on it could read its login or run. A root command in one of your sessions changed it; a package that runs systemd-tmpfiles does. Aether gave it back to %s before starting the agent.", was, user))
 	return nil
