@@ -1108,11 +1108,16 @@ func TestDiffWatchQuiescence(t *testing.T) {
 		t.Fatalf("bare branch tip = %s, want %s", got, head)
 	}
 
-	// Drain the run.diff snapshot that accompanied the commit before
-	// checking that a stopped watch stays silent.
-	for {
-		if _, ok := nextEvent(t, diffs, 600*time.Millisecond); !ok {
-			break
+	// after.txt may miss the snapshot that carried the commit and land in a
+	// later one, so wait for the snapshot that lists it: stopping earlier
+	// would make the final snapshot StopDiffWatch takes report it instead.
+	for seen := false; !seen; {
+		dev, ok := nextEvent(t, diffs, 5*time.Second)
+		if !ok {
+			t.Fatal("no run.diff event listing after.txt")
+		}
+		for _, f := range dev.Payload.(events.RunDiffPayload).Files {
+			seen = seen || f.Path == "after.txt"
 		}
 	}
 
