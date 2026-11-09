@@ -252,7 +252,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       role="alert"
       title="Launch failed"
       actions={unadopted && (isAdmin
-        ? <Button size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: unadopted.workspace }) }}>Open Repository</Button>
+        ? <Button type="button" size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: unadopted.workspace }) }}>Open Repository</Button>
         : <span className="text-ui-sm text-text">Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the Repository page.</span>)}
     >
       {unadopted && error.endsWith(' ' + unadopted.command) ? error.slice(0, -unadopted.command.length - 1) : error}
