@@ -1,8 +1,10 @@
 package scheduler
 
 import (
+	"os"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -69,4 +71,55 @@ func TestEnhancedAuthRefusalAfterARestartShowsTheFailure(t *testing.T) {
 	if n := len(rt.all()); n != before+1 {
 		t.Fatalf("agent processes = %d, want exactly one restart after %d", n, before)
 	}
+}
+
+// A root command in another session that takes the shared home leaves the
+// agent unable to read its login; the restart gives the home back and says
+// what it found.
+func TestEnhancedAuthRefusalRestoresATakenHome(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	rt.fixture.RefuseNext = new(atomic.Int32)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	home, err := e.sched.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(home, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	// Only root can take the home as a container's root does.
+	if os.Geteuid() == 0 {
+		if err = os.Lchown(home, 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rt.fixture.RefuseNext.Store(1)
+	if _, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err == nil {
+		t.Fatal("Inject of a refused prompt succeeded")
+	}
+	waitItems(t, e.sched, run.ID, "the restore notice", noticeTitled("Home restored"))
+	info, err := os.Stat(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("home mode = %04o, want 0700", got)
+	}
+	got, want := info.Sys().(*syscall.Stat_t), before.Sys().(*syscall.Stat_t)
+	if got.Uid != want.Uid || got.Gid != want.Gid {
+		t.Fatalf("home owner = %d:%d, want %d:%d", got.Uid, got.Gid, want.Uid, want.Gid)
+	}
+	waitFor(t, "the restarted agent", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if _, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
+		t.Fatalf("message after the restart: %v", err)
+	}
+	waitItems(t, e.sched, run.ID, "the answered turn", assistantSaid("pong"))
 }

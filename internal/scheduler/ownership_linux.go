@@ -137,6 +137,61 @@ func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID
 	return nil
 }
 
+// restoreHomeRoot gives entry's home directory back to its container user,
+// with its owner permissions, when root in one of the member's containers
+// took it: every container mounts the same directory, so all of them lose
+// the home at once. It returns the owner and mode it replaced, or "" when
+// they were right or entry no longer holds the home's mapping.
+func (s *Scheduler) restoreHomeRoot(entry *supervised) (string, error) {
+	s.mu.Lock()
+	member, user := entry.memberID, entry.runUser
+	s.mu.Unlock()
+	if user == "" || user == unknownRecoveryRunUser {
+		return "", nil
+	}
+	uid, gid, err := parseNumericUser(user)
+	if err != nil {
+		return "", err
+	}
+	home, err := s.cfg.Homes.Path(member)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: resolve home: %w", err)
+	}
+	lock := s.homeLock(member)
+	lock.Lock()
+	defer lock.Unlock()
+	// A container launched since the snapshot may have been handed the
+	// home with another mapping; this chown must not take it back.
+	s.mu.Lock()
+	s.syncRunUserReservationsLocked()
+	current := s.runs[entry.runID] == entry && entry.runUser == user &&
+		s.reservationConflictLocked(member, "", user, "live session "+string(entry.runID)) == nil
+	s.mu.Unlock()
+	if !current {
+		return "", nil
+	}
+	info, err := os.Lstat(home)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: check home: %w", err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("scheduler: check home %s: no ownership information", home)
+	}
+	mode := info.Mode().Perm()
+	if int(st.Uid) == uid && int(st.Gid) == gid && mode&0o700 == 0o700 {
+		return "", nil
+	}
+	was := fmt.Sprintf("%d:%d %04o", st.Uid, st.Gid, mode)
+	if err := os.Lchown(home, uid, gid); err != nil {
+		return was, fmt.Errorf("scheduler: home %s is %s, not %s, and restoring it failed: %w", home, was, user, err)
+	}
+	if err := os.Chmod(home, mode|0o700); err != nil {
+		return was, fmt.Errorf("scheduler: home %s was %s and giving its owner rwx back failed: %w", home, was, err)
+	}
+	return was, nil
+}
+
 // homeLock returns the lock every ownership pass holds while it chowns inside
 // member's home. Take it before s.mu, never while holding s.mu.
 func (s *Scheduler) homeLock(member domain.MemberID) *sync.Mutex {

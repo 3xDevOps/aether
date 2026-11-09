@@ -358,6 +358,17 @@ restarted agent refuses again within 5 minutes, the session parks with
 That container's copy of the login is stale or unreadable; a new session's
 container mounts the current one.
 
+Each time it starts or restarts an adapter, Aether checks that your home still
+belongs to the session's user with owner `rwx`. A root command in any of your
+sessions can change that and lock every agent on the home out of its login
+and its `~/.local/bin`. Aether gives the home back and shows **Home restored**
+with the owner and mode it found
+([security.md](security.md#permission-tiers)). An agent that is running and
+never refused keeps failing until something restarts it: **Retry Enhanced**
+does. If it cannot, the session parks
+with `enhanced session failed: the agent cannot read its home: ...`, naming
+the home, its owner and mode, and the error.
+
 If the adapter fails to start or exits, the container and login shell stay
 available. The log shows the real error and the end of the adapter's stderr, and
 the session parks:

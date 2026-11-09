@@ -503,6 +503,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	case keeper != nil:
 		_, _ = stderr.Write([]byte(keeper.State().Stderr))
 	default:
+		if err = d.restoreHome(entry); err != nil {
+			return err
+		}
 		d.stopStaleExec(ctx, entry)
 		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter)
 		if err == nil {
