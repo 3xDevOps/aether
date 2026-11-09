@@ -20,12 +20,9 @@ export function adoptCommand(err: unknown): string | null {
 export function AdoptCommand({ command }: { command: string }) {
   const code = useRef<HTMLPreElement>(null)
   return (
-    <div className="mt-2 flex min-w-0 flex-col gap-1">
-      <p className="text-ui-sm text-muted">Check the revision against upstream, then run:</p>
-      <div className="flex min-w-0 items-start gap-1">
-        <CodeBlock ref={code} aria-label="Adopt command" className="min-w-0 flex-1 whitespace-pre-wrap break-all">{command}</CodeBlock>
-        <CopyButton text={command} label="Copy the adopt command" source={code} />
-      </div>
+    <div className="mt-2 flex min-w-0 items-start gap-1">
+      <CodeBlock ref={code} aria-label="Adopt command" className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{command}</CodeBlock>
+      <CopyButton text={command} label="Copy the adopt command" source={code} />
     </div>
   )
 }

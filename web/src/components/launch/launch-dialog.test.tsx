@@ -392,7 +392,8 @@ describe('new run', () => {
     fireEvent.click(launchButton())
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain(text)
+    expect(alert.textContent).toContain(text.slice(0, -command.length - 1))
+    expect(alert.textContent?.split(command)).toHaveLength(2)
     expect(within(alert).getByLabelText('Adopt command').textContent).toBe(command)
     fireEvent.click(within(alert).getByRole('button', { name: 'Open Repository' }))
     expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })
@@ -406,9 +407,9 @@ describe('new run', () => {
     fireEvent.click(launchButton())
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('Ask an admin to adopt it: Repository → Advanced → Review source mirror → Adopt candidate.')
-    expect(within(alert).queryByLabelText('Adopt command')).toBeNull()
-    expect(within(alert).queryByRole('button')).toBeNull()
+    expect(alert.textContent).toContain('Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the Repository page.')
+    expect(within(alert).getByLabelText('Adopt command').textContent).toBe('aether workspace mirror adopt')
+    expect(within(alert).queryByRole('button', { name: 'Open Repository' })).toBeNull()
   })
 
   it('offers no adopt step when the pending mirror has no candidate yet', async () => {

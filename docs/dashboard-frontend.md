@@ -6519,10 +6519,11 @@ dialogs show the server's reason and, under **Setup script output**, what
 the script printed (`components/launch/setup-output.tsx`, from the error's
 `setup_output`).
 When the refusal is a pending source mirror with a revision to adopt (error
-data `adopt_command`), the New session dialog keeps the server's reason. An
-admin also gets the `aether workspace mirror adopt` command in a code block
-with a copy button, and **Open Repository**, which leads to **Review source
-mirror → Adopt candidate**. Other members read where an admin adopts it.
+data `adopt_command`), the New session dialog shows the server's reason with
+its closing `aether workspace mirror adopt` command moved into a code block
+with a copy button. An admin also gets **Open Repository**, which leads to
+**Review source mirror → Adopt candidate**; other members read where an admin
+adopts it.
 
 The source mirror dialog reports local-only, pending, ready or failure,
 including the configured source, branch, accepted SHA and last check time.
