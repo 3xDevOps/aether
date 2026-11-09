@@ -1109,16 +1109,17 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	}
 
 	// The commit alone changes no tree, so the only snapshot left is the one
-	// that lists after.txt. Wait for it: stopping earlier would make the
-	// final snapshot StopDiffWatch takes publish it instead.
+	// that records after.txt. Wait for a recorded interval whose patch holds
+	// the finished write (the stats can lag the tree): stopping earlier would
+	// make the final snapshot StopDiffWatch takes publish it instead.
 	for seen := false; !seen; {
 		dev, ok := nextEvent(t, diffs, 5*time.Second)
 		if !ok {
-			t.Fatal("no run.diff event listing after.txt")
+			t.Fatal("no run.diff event recording after.txt")
 		}
-		for _, f := range dev.Payload.(events.RunDiffPayload).Files {
-			seen = seen || f.Path == "after.txt"
-		}
+		pl := dev.Payload.(events.RunDiffPayload)
+		p, err := e.RunPatch(ctx, "run1", PatchRequest{From: pl.ParentTree, To: pl.Tree})
+		seen = err == nil && strings.Contains(p.Text, "+done")
 	}
 
 	e.StopDiffWatch("run1")
