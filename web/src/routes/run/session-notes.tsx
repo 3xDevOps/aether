@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Check, ChevronDown, X } from '@/components/icons'
 import { Avatar } from '@/components/ui/avatar'
@@ -135,7 +135,9 @@ function StickyCard({ note, index, run, error, retryable, onResolve, onDismissEr
 
   // A refusal reaches this same card mid-exit or already collapsed: stop the
   // exit and undo the scratch and the collapse so the card shows its error.
-  useEffect(() => {
+  // A layout effect, so no animation callback runs between the commit that
+  // shows the error and this cancel.
+  useLayoutEffect(() => {
     if (!error || !started.current) return
     started.current = false
     generation.current += 1
