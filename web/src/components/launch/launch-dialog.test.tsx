@@ -395,6 +395,7 @@ describe('new run', () => {
     expect(alert.textContent).toContain(text.slice(0, -command.length - 1))
     expect(alert.textContent?.split(command)).toHaveLength(2)
     expect(within(alert).getByLabelText('Adopt command').textContent).toBe(command)
+    fireEvent.click(within(alert).getByRole('button', { name: 'Copy the adopt command' }))
     fireEvent.click(within(alert).getByRole('button', { name: 'Open Repository' }))
     expect(api.runLaunch).toHaveBeenCalledTimes(1)
     expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })

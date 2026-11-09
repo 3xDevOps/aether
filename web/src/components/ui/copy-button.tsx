@@ -16,6 +16,7 @@ export function CopyButton({ text, label, source, reveal }: { text: string; labe
   const [copied, confirm] = useTimedFlag(copiedHold)
   return (
     <Button
+      type="button"
       variant="ghost"
       size="icon-sm"
       label={copied ? 'Copied' : label}
