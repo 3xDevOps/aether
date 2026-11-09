@@ -38,6 +38,16 @@ function expectNoPush() {
 }
 
 describe('workspace repository ownership', () => {
+  it.each([
+    { role: 'admin', copy: 'Choose Advanced → Review source mirror → Adopt candidate.' },
+    { role: 'collaborator', copy: 'Ask an admin to adopt it: Advanced → Review source mirror → Adopt candidate.' },
+  ] as const)('names the adopt controls to a $role when the source copy is pending', async ({ role, copy }) => {
+    seed({ info: { ...serverInfo, member: { ...bob, role } } })
+    const client = fakeApi({ workspaceMirrorStatus: vi.fn(async () => ({ ...mirrored, status: 'pending' as const })) })
+    render(<WorkspaceRepository client={client} caps={caps} workspace={workspace} />)
+    expect((await screen.findByText(/Sessions start once it is verified and adopted/)).textContent).toContain(copy)
+  })
+
   it.each(['admin', 'collaborator'] as const)('allows %s linking without base pushes when source status is unavailable', async (role) => {
     const client = fakeApi()
     seed({ onboardingRepo: null, info: { ...serverInfo, member: { ...bob, role } } })

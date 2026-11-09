@@ -502,6 +502,12 @@ func ValidMirrorBranch(branch string) bool {
 	return true
 }
 
+// MirrorAdoptCommand is the CLI step an admin runs to adopt a pending
+// mirror revision after checking it against the upstream.
+func MirrorAdoptCommand(workspace WorkspaceID, generation int64, commit string) string {
+	return fmt.Sprintf("aether workspace mirror adopt --workspace %s --generation %d --commit %s --yes", workspace, generation, commit)
+}
+
 // ValidMirrorSHA accepts empty or a full SHA-1 or SHA-256 object ID.
 func ValidMirrorSHA(sha string) bool {
 	if sha == "" {

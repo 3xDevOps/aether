@@ -13,7 +13,7 @@ import { PhoneLaunchSheet } from '@/components/launch/phone-launch'
 import { AgentOptions, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
 import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
-import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
+import { mirrorPending, SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { LoaderCircle, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -29,7 +29,7 @@ import { cn, surface } from '@/lib/utils'
 import { type RootState, sameIdentity, useStore } from '@/store'
 import { useChildSettings, useChildSettingsRead } from '@/store/children'
 import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
-import { useCapability, useSelf } from '@/store/hooks'
+import { useCapability, useIsAdmin, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 /** `open` turns false when the panel starts to leave; the host unmounts it after the slide. */
@@ -88,6 +88,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const [task, setTask] = useState(shared)
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
+  const [unadopted, setUnadopted] = useState(false)
+  const isAdmin = useIsAdmin()
   const [launching, setLaunching] = useState(false)
   const late = usePastDeadline(launching)
 
@@ -184,6 +186,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     setLaunching(true)
     setError(null)
     setSetup(null)
+    setUnadopted(false)
     try {
       await launchRun()
     } catch (err) {
@@ -192,6 +195,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       setLaunching(false)
       setError(message(err))
       setSetup(setupOutput(err))
+      setUnadopted(mirrorPending(err))
     }
   }
 
@@ -240,7 +244,19 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     </div>
   )
 
-  const failure = error && <Callout ref={errorCallout} tone="failed" role="alert" title="Launch failed">{error}{setup && <SetupOutput output={setup} />}</Callout>
+  const failure = error && (
+    <Callout
+      ref={errorCallout}
+      tone="failed"
+      role="alert"
+      title="Launch failed"
+      actions={unadopted && (isAdmin
+        ? <Button size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: workspaceID }) }}>Review source mirror</Button>
+        : <span className="text-ui-sm text-muted">Ask an admin to adopt it: Repository → Advanced → Review source mirror → Adopt candidate.</span>)}
+    >
+      {error}{setup && <SetupOutput output={setup} />}
+    </Callout>
+  )
   const launchLabel = (
     <>
       {launching && <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}

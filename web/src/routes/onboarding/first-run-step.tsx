@@ -30,7 +30,7 @@ function useSourceCheck(client: Api, workspaceID: string | undefined) {
         if (caps.hasMethod('workspace.mirror.status')) {
           const source = await client.workspaceMirrorStatus(workspaceID)
           if (source.enabled && (source.status !== 'ready' || !source.accepted_commit)) {
-            throw new Error(source.last_error || `Source is ${source.status ?? 'pending'}; ${isAdmin ? 'verify and adopt the candidate' : 'ask an administrator to verify and adopt the candidate'} in repository setup before launching.`)
+            throw new Error(source.last_error || `Source is ${source.status ?? 'pending'}; ${isAdmin ? 'verify and adopt the candidate' : 'ask an administrator to verify and adopt the candidate'} before launching: Repository → Advanced → Review source mirror → Adopt candidate.`)
           }
         }
         if (live) setCheck({ workspace: workspaceID, error: null })

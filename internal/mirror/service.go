@@ -515,7 +515,10 @@ func (s *Service) Capture(ctx context.Context, workspace domain.WorkspaceID, cac
 	}
 	commit := result.Mirror.AcceptedCommit
 	if commit == "" {
-		return CaptureResult{WorkspaceID: workspace, Commit: m.AcceptedCommit, Branch: m.Branch, Source: m.SourceURL, Configured: true}, &gitengine.MirrorError{Kind: gitengine.MirrorErrorNoCandidate, WorkspaceID: workspace}
+		return CaptureResult{WorkspaceID: workspace, Commit: m.AcceptedCommit, Branch: m.Branch, Source: m.SourceURL, Configured: true}, &gitengine.MirrorError{
+			Kind: gitengine.MirrorErrorNoCandidate, WorkspaceID: workspace, Branch: m.Branch,
+			Observed: result.Mirror.ObservedCommit, Generation: result.Mirror.Generation,
+		}
 	}
 	checked := s.now().UTC()
 	return captureResult(workspace, commit, m.Branch, m.SourceURL, checked, true, false), nil

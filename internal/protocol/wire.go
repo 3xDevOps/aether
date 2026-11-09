@@ -156,12 +156,14 @@ func RunRepos(r *domain.Run, primaryName string) []RunRepo {
 }
 
 // MirrorFailure lets a caller retry a failed base capture with the exact
-// accepted commit returned by the mirror.
+// accepted commit returned by the mirror, or adopt the observed commit of a
+// pending generation.
 type MirrorFailure struct {
 	Kind           string `json:"kind"`
 	AcceptedCommit string `json:"accepted_commit,omitempty"`
 	BaseCommit     string `json:"base_commit,omitempty"`
 	ObservedCommit string `json:"observed_commit,omitempty"`
+	Generation     int64  `json:"generation,omitempty"`
 	Source         string `json:"source,omitempty"`
 	Branch         string `json:"branch,omitempty"`
 }

@@ -159,6 +159,30 @@ func TestPrintWorkspaceMirrorStates(t *testing.T) {
 	}
 }
 
+func TestPrintWorkspaceMirrorPendingNamesTheAdoptStep(t *testing.T) {
+	ws := protocol.Workspace{ID: "ws_1", Name: "app"}
+	observed := strings.Repeat("a", 40)
+	result := protocol.WorkspaceMirrorResult{Enabled: true, Branch: "dev", Status: "pending", Generation: 3, ObservedCommit: observed}
+	var out strings.Builder
+	if err := printWorkspaceMirror(&out, ws, result); err != nil {
+		t.Fatal(err)
+	}
+	want := "sessions cannot launch until an admin adopts revision " + observed + "\n" +
+		"check that it is the upstream commit you expect on dev, then run:\n" +
+		"  aether workspace mirror adopt --workspace ws_1 --generation 3 --commit " + observed + " --yes\n"
+	if !strings.HasSuffix(out.String(), want) {
+		t.Fatalf("pending output = %q, want suffix %q", out.String(), want)
+	}
+	result.ObservedCommit = ""
+	out.Reset()
+	if err := printWorkspaceMirror(&out, ws, result); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "adopt") {
+		t.Fatalf("pending output without a candidate = %q, want no adopt step", out.String())
+	}
+}
+
 func TestMirrorDeployKeyInstructionsAndGitHubURL(t *testing.T) {
 	result := protocol.WorkspaceMirrorResult{PublicKey: "ssh-ed25519 AAAA-public", SourceURL: "ssh://git@github.com/acme/app.git"}
 	var out strings.Builder

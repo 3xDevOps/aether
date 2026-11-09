@@ -9,6 +9,11 @@ export function setupOutput(err: unknown): string | null {
   return typeof data?.setup_output === 'string' && data.setup_output !== '' ? data.setup_output : null
 }
 
+export function mirrorPending(err: unknown): boolean {
+  const data = err instanceof ApiError ? (err.data as { kind?: unknown } | undefined) : undefined
+  return data?.kind === 'no-candidate'
+}
+
 export function SetupOutput({ output }: { output: string }) {
   return (
     <div className="mt-2 flex min-w-0 flex-col gap-1">

@@ -400,6 +400,22 @@ moved since. To repair the mirror itself (admins):
    that the key is still installed upstream.
 3. Refresh with `aether workspace mirror refresh --workspace <workspace>`.
 
+A new mirror stays `pending` until an admin adopts its first revision, and
+every launch is refused until then. The refusal ends with the adopt command,
+and `aether workspace mirror status` and `aether workspace mirror refresh`
+print it with the workspace's values filled in:
+
+```text
+sessions cannot launch until an admin adopts revision <sha>
+check that it is the upstream commit you expect on <branch>, then run:
+  aether workspace mirror adopt --workspace <workspace-id> --generation <n> --commit <sha> --yes
+```
+
+Compare `<sha>` with the upstream branch, for example with
+`git ls-remote <source> <branch>`, before you adopt it. In the dashboard the
+same step is **Repository → Advanced → Review source mirror → Adopt
+candidate**.
+
 An upstream that was rewritten or diverged stays held (`rewritten` or
 `diverged`) until an admin reviews it and adopts the new revision with
 `aether workspace mirror adopt --workspace <workspace> --generation <n>

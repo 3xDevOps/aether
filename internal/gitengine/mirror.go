@@ -85,6 +85,7 @@ type MirrorError struct {
 	Branch      string
 	Base        string
 	Observed    string
+	Generation  int64
 	Cause       error
 }
 
@@ -104,6 +105,10 @@ func (e *MirrorError) Error() string {
 	if errors.As(e.Cause, &failure) {
 		_, diagnostic := mirrorFetchProblem(failure)
 		message += ": " + diagnostic
+	}
+	if e.Kind == MirrorErrorNoCandidate && e.WorkspaceID != "" && e.Generation > 0 && e.Observed != "" && domain.ValidMirrorSHA(e.Observed) {
+		message += fmt.Sprintf(": revision %s is waiting for an admin to adopt it; check that it is the upstream commit you expect, then run: %s",
+			e.Observed, domain.MirrorAdoptCommand(e.WorkspaceID, e.Generation, e.Observed))
 	}
 	return message
 }
