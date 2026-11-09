@@ -283,6 +283,9 @@ func TestUnknownReservationResolvesAtHomeRestore(t *testing.T) {
 	if err = os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if was, restoreErr := recovered.restoreHomeRoot(ctx, live); was != "" || restoreErr != nil {
+		t.Fatalf("restore of an intact home = %q, %v; want nothing to do", was, restoreErr)
+	}
 	if err = os.Chmod(home, 0o500); err != nil {
 		t.Fatal(err)
 	}

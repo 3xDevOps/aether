@@ -161,6 +161,18 @@ func (s *Scheduler) restoreHomeRoot(ctx context.Context, entry *supervised) (str
 	lock := s.homeLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	info, err := os.Lstat(home)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: check home: %w", err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("scheduler: check home %s: no ownership information", home)
+	}
+	mode := info.Mode().Perm()
+	if int(st.Uid) == uid && int(st.Gid) == gid && mode&0o700 == 0o700 {
+		return "", nil
+	}
 	// A container launched since the snapshot may have been handed the
 	// home with another mapping; this chown must not take it back.
 	lookupErr := s.resolveStaleRunUsers(ctx, member, "", user)
@@ -176,18 +188,6 @@ func (s *Scheduler) restoreHomeRoot(ctx context.Context, entry *supervised) (str
 		if lookupErr != nil {
 			return "", withLookupError(conflict, lookupErr)
 		}
-		return "", nil
-	}
-	info, err := os.Lstat(home)
-	if err != nil {
-		return "", fmt.Errorf("scheduler: check home: %w", err)
-	}
-	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "", fmt.Errorf("scheduler: check home %s: no ownership information", home)
-	}
-	mode := info.Mode().Perm()
-	if int(st.Uid) == uid && int(st.Gid) == gid && mode&0o700 == 0o700 {
 		return "", nil
 	}
 	was := fmt.Sprintf("%d:%d %04o", st.Uid, st.Gid, mode)
