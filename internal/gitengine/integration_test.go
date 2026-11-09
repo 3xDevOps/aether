@@ -1108,12 +1108,18 @@ func TestDiffWatchQuiescence(t *testing.T) {
 		t.Fatalf("bare branch tip = %s, want %s", got, head)
 	}
 
-	// Drain the run.diff snapshot that accompanied the commit before
-	// checking that a stopped watch stays silent.
-	for {
-		if _, ok := nextEvent(t, diffs, 600*time.Millisecond); !ok {
-			break
+	// The commit alone changes no tree, so the only snapshot left is the one
+	// that records after.txt. Wait for a recorded interval whose patch holds
+	// the finished write (the stats can lag the tree): stopping earlier would
+	// make the final snapshot StopDiffWatch takes publish it instead.
+	for seen := false; !seen; {
+		dev, ok := nextEvent(t, diffs, 5*time.Second)
+		if !ok {
+			t.Fatal("no run.diff event recording after.txt")
 		}
+		pl := dev.Payload.(events.RunDiffPayload)
+		p, err := e.RunPatch(ctx, "run1", PatchRequest{From: pl.ParentTree, To: pl.Tree})
+		seen = err == nil && strings.Contains(p.Text, "+done")
 	}
 
 	e.StopDiffWatch("run1")
