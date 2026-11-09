@@ -250,3 +250,57 @@ func TestEvidenceNoteKeepsTheReasonsCause(t *testing.T) {
 		t.Fatalf("public reason = %q, want the cause and the note within %d runes", got, maxPublicRunStatusReason)
 	}
 }
+
+// A pending cleanup recovery could not identify must not stop a live
+// session getting its home back once the runtime confirms the container gone.
+func TestUnknownReservationResolvesAtHomeRestore(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run := syntheticDestroyPendingRun(t, e, "runtime down at boot")
+
+	lookupErr := errors.New("runtime API unavailable")
+	flaky := &creationKeyFailureRuntime{Runtime: e.rt, findErr: lookupErr}
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	recovered.cfg.Runtime = flaky
+	if err := recovered.recoverRuns(ctx); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+	if c := e.rt.byName(string(run.ID)); c != nil {
+		if err := e.rt.Destroy(ctx, c.id); err != nil {
+			t.Fatalf("remove container: %v", err)
+		}
+	}
+
+	live := &supervised{runID: "run-live", memberID: e.member.ID, runUser: fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())}
+	recovered.mu.Lock()
+	recovered.runs[live.runID] = live
+	recovered.mu.Unlock()
+	home, err := recovered.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(home, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(home, 0o700) })
+
+	if _, err = recovered.restoreHomeRoot(ctx, live); err == nil || !strings.Contains(err.Error(), lookupErr.Error()) {
+		t.Fatalf("restore while the pending container's identity is unknown: %v, want the lookup error", err)
+	}
+	flaky.clearFindErr()
+	was, err := recovered.restoreHomeRoot(ctx, live)
+	if err != nil || was == "" {
+		t.Fatalf("restore after the runtime confirmed the container gone = %q, %v; want the replaced mode", was, err)
+	}
+	info, err := os.Stat(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("home mode = %04o, want 0700", got)
+	}
+}

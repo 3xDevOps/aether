@@ -3,6 +3,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -142,7 +143,7 @@ func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID
 // took it: every container mounts the same directory, so all of them lose
 // the home at once. It returns the owner and mode it replaced, or "" when
 // they were right or entry no longer holds the home's mapping.
-func (s *Scheduler) restoreHomeRoot(entry *supervised) (string, error) {
+func (s *Scheduler) restoreHomeRoot(ctx context.Context, entry *supervised) (string, error) {
 	s.mu.Lock()
 	member, user := entry.memberID, entry.runUser
 	s.mu.Unlock()
@@ -162,12 +163,19 @@ func (s *Scheduler) restoreHomeRoot(entry *supervised) (string, error) {
 	defer lock.Unlock()
 	// A container launched since the snapshot may have been handed the
 	// home with another mapping; this chown must not take it back.
+	lookupErr := s.resolveStaleRunUsers(ctx, member, "", user)
 	s.mu.Lock()
 	s.syncRunUserReservationsLocked()
-	current := s.runs[entry.runID] == entry && entry.runUser == user &&
-		s.reservationConflictLocked(member, "", user, "live session "+string(entry.runID)) == nil
+	current := s.runs[entry.runID] == entry && entry.runUser == user
+	conflict := s.reservationConflictLocked(member, "", user, "live session "+string(entry.runID))
 	s.mu.Unlock()
 	if !current {
+		return "", nil
+	}
+	if conflict != nil {
+		if lookupErr != nil {
+			return "", withLookupError(conflict, lookupErr)
+		}
 		return "", nil
 	}
 	info, err := os.Lstat(home)
