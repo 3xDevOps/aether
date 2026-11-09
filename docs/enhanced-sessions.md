@@ -366,8 +366,9 @@ with the owner and mode it found
 ([security.md](security.md#permission-tiers)). An agent that stays
 connected and is never refused gets no restore, so its tools keep failing:
 run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in
-your environment terminal or a Root access session's terminal. If restoring
-fails, the session parks with
+that session's **Terminal** tab, which runs as the session's user; a Default
+session's `sudo` waits for your approval. If restoring fails, the session parks
+with
 `enhanced session failed: the agent cannot read its home: ...`, naming the
 home, its owner and mode, and the error.
 
