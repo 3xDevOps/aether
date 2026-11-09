@@ -121,6 +121,17 @@ member who may launch a session may pick any tier.
   before each container starts, and gives the uid a passwd entry whose home
   is `/root`: git, `ssh` and `ssh-keygen` refuse to run without one, and
   `ssh` reads `~/.ssh` from it rather than `$HOME`.
+- Every container of yours mounts the same home, so root in one session can
+  take it from all of them. The start step links
+  `/etc/tmpfiles.d/provision.conf` to `/dev/null`: without that, installing
+  a package that pulls in systemd (Playwright's `--with-deps` browser
+  libraries do) runs `systemd-tmpfiles --create`, whose Ubuntu
+  `provision.conf` hands `/root` to root. If root changes the home's owner
+  or removes its owner permissions anyway, every agent on it loses its login
+  and its executables until the server gives the home back. It restores the
+  owner and the owner's `rwx` before it starts or restarts an Enhanced agent,
+  with the notice **Home restored**, and the owner before each new container
+  starts.
 - Default and Isolated sessions get Docker's `no-new-privileges`, so no setuid
   binary raises the agent.
 - A Root access run and your environment terminal get a sudoers entry for

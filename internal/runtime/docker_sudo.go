@@ -19,6 +19,11 @@ import (
 // reads ~/.ssh from the passwd home, never $HOME. With $3 set it also lets
 // the uid sudo without a password; the sudoers file is checked before it
 // goes live, since sudo refuses to run at all with a broken one.
+//
+// The home at /root is the member's, shared by every container they run,
+// and systemd's postinst runs systemd-tmpfiles, whose provision.conf hands
+// /root to root: installing any package that pulls in systemd would take
+// the home from all of them. The /etc entry masks it.
 const userScript = `uid=${1%%:*} gid=${1#*:}
 if grep -q "^[^:]*:[^:]*:$uid:" /etc/passwd; then
 	awk -F: -v OFS=: -v u="$uid" -v h="$2" '$3 == u { $6 = h } { print }' /etc/passwd > /etc/passwd.aether && cat /etc/passwd.aether > /etc/passwd && rm -f /etc/passwd.aether || exit 1
@@ -26,6 +31,7 @@ else
 	echo "aether:x:$uid:$gid::$2:/bin/sh" >> /etc/passwd || exit 1
 fi
 grep -q "^[^:]*:[^:]*:$gid:" /etc/group || echo "aether:x:$gid:" >> /etc/group || exit 1
+mkdir -p /etc/tmpfiles.d && ln -sfn /dev/null /etc/tmpfiles.d/provision.conf || exit 1
 [ -n "$3" ] || exit 0
 mkdir -p /etc/sudoers.d
 printf '#%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$uid" > /etc/sudoers.d/.aether.new
