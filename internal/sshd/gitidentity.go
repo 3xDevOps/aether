@@ -13,7 +13,8 @@ func init() {
 }
 
 // memberGit sets the git identity commits are authored as. Members may set
-// their own; setting anyone else's requires the admin role. An empty name
+// their own; setting anyone else's is for a super admin, or an admin for
+// a member below admin. An empty name
 // or email clears that half back to its fallback.
 func (s *Server) memberGit(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.MemberGitParams](params)
@@ -27,11 +28,11 @@ func (s *Server) memberGit(ctx context.Context, member domain.MemberID, params j
 		return nil, invalidParams("invalid git email: want one address of the form user@example.com")
 	}
 	target := member
-	if p.MemberID != "" && p.MemberID != string(member) {
+	if p.MemberID != "" {
 		target = domain.MemberID(p.MemberID)
-		if aerr := s.requireAdmin(ctx, member, protocol.MethodMemberGit); aerr != nil {
-			return nil, aerr
-		}
+	}
+	if aerr := s.actingOn(ctx, member, target, protocol.MethodMemberGit); aerr != nil {
+		return nil, aerr
 	}
 	m, gerr := s.cfg.Store.GetMember(ctx, target)
 	if gerr != nil {

@@ -90,6 +90,9 @@ type Store interface {
 	// UpdateMemberGitIdentity sets only the member's git author name and
 	// address. Either may be empty, restoring that half's fallback.
 	UpdateMemberGitIdentity(ctx context.Context, id domain.MemberID, name, email string) error
+	// UpdateMemberDisplayName and UpdateMemberColor set only that field.
+	UpdateMemberDisplayName(ctx context.Context, id domain.MemberID, name string) error
+	UpdateMemberColor(ctx context.Context, id domain.MemberID, color string) error
 	// ListMembers returns every member but those a merge absorbed.
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	UpdateMember(ctx context.Context, m *domain.Member) error

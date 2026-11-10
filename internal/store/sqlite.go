@@ -709,6 +709,24 @@ func (d *DB) UpdateMemberGitIdentity(ctx context.Context, id domain.MemberID, na
 	return err
 }
 
+func (d *DB) UpdateMemberDisplayName(ctx context.Context, id domain.MemberID, name string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE members SET display_name = ? WHERE id = ?`, name, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: update member display name: %w", err)
+	}
+	return err
+}
+
+func (d *DB) UpdateMemberColor(ctx context.Context, id domain.MemberID, color string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE members SET color = ? WHERE id = ?`, color, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: update member color: %w", err)
+	}
+	return err
+}
+
 // UpdateMemberImage sets only the member's saved environment image.
 func (d *DB) UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error {
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
