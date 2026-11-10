@@ -181,6 +181,13 @@ func TestEnhancedRunReportsTheModelItKeepsAfterARefusal(t *testing.T) {
 		return err == nil && stored.Model == "sonnet" && stored.RefusedModel == "opus" &&
 			strings.HasPrefix(stored.ModelError, `The agent refused "opus", so the session runs on "sonnet": `)
 	})
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err = e.sched.ACPSetOption(t.Context(), run.ID, e.sched.acp.session(run.ID).ModelOptionID(), "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := e.cfg.Store.GetRun(t.Context(), run.ID); err != nil || stored.Model != "sonnet" || stored.RefusedModel != "" || stored.ModelError != "" {
+		t.Fatalf("after choosing the model it runs on = %+v, %v, want the refusal cleared", stored, err)
+	}
 }
 
 func TestComposerModelChoiceIsRecorded(t *testing.T) {

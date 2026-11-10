@@ -345,6 +345,25 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		return result, nil
 	case acp.AgentMethodSessionSetMode:
 		return map[string]any{}, nil
+	case "session/set_model":
+		var p struct {
+			ModelID string `json:"modelId"`
+		}
+		var r struct {
+			Models struct {
+				AvailableModels []struct {
+					ModelID string `json:"modelId"`
+				} `json:"availableModels"`
+			} `json:"models"`
+		}
+		_ = json.Unmarshal(params, &p)
+		_ = json.Unmarshal(a.fix.SessionNew, &r)
+		for _, m := range r.Models.AvailableModels {
+			if m.ModelID == p.ModelID {
+				return map[string]any{}, nil
+			}
+		}
+		return nil, acp.NewInvalidParams(map[string]any{"modelId": p.ModelID})
 	case acp.AgentMethodSessionSetConfigOption:
 		var o struct {
 			ConfigID string `json:"configId"`
