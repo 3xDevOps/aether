@@ -706,8 +706,8 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (_ *MemberMerge, er
 	if !role.Admin() {
 		for _, side := range []MergeSnapshot{plan.Minted, plan.Proposer} {
 			if len(side.OwnedWorkspaces) > 0 {
-				return nil, refuseMerge("member %s owns workspaces %s, and the merged member would be %s, which cannot own one; give each a new owner first with aether workspace owner <workspace> <member-id>, or keep it admin with --keep-admin",
-					side.Member.ID, joinIDs(side.OwnedWorkspaces), role)
+				return nil, refuseMerge("member %s owns workspaces %v, and the merged member would be %s, which cannot own one; give each a new owner first with aether workspace owner <workspace> <member-id>, or keep it admin with --keep-admin",
+					side.Member.ID, side.OwnedWorkspaces, role)
 			}
 		}
 	}
@@ -783,14 +783,6 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (_ *MemberMerge, er
 	}
 	committed = true
 	return merge, nil
-}
-
-func joinIDs[T ~string](ids []T) string {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		out[i] = string(id)
-	}
-	return strings.Join(out, ", ")
 }
 
 func identityName(id *domain.Identity) string {

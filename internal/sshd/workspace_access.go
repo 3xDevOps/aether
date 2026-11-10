@@ -170,16 +170,29 @@ func (s *Server) workspaceAccessRevoke(ctx context.Context, member domain.Member
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	var inWorkspace []*domain.Run
 	var sessions, schedules []string
+	hidden := 0
 	for _, r := range active {
 		if _, extra := r.ExtraRepo(ws); r.WorkspaceID != ws && !extra {
 			continue
 		}
 		inWorkspace = append(inWorkspace, r)
-		if r.MemberID == id || r.HomeMember() == id || r.AccountMember() == id {
-			sessions = append(sessions, string(r.ID))
+		if r.MemberID != id && r.HomeMember() != id && r.AccountMember() != id {
+			continue
 		}
+		if actor.Reaches(r.WorkspaceID) {
+			sessions = append(sessions, string(r.ID))
+		} else {
+			hidden++
+		}
+	}
+	if hidden > 0 {
+		sessions = append(sessions, fmt.Sprintf("%d in workspaces you cannot see", hidden))
 	}
 	if ts, ok := s.cfg.Store.(store.TemplateStore); ok {
 		all, err := ts.ListSchedules(ctx, ws)

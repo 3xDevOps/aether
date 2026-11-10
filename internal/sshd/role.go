@@ -129,7 +129,12 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	}
 	noteChange(ctx)
 	s.accessChanged()
-	s.publishRoleChange(ctx, member, m.ID)
+	// The change is committed, so a failed notice is logged, not returned;
+	// the member's streams also reload their access on the next tick.
+	if _, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: events.ServerScope, ActorID: member,
+		Payload: events.MemberAccessPayload{MemberID: m.ID, Action: events.AccessGranted}}); err != nil {
+		slog.Warn("sshd: publish member.access", "member", m.ID, "error", err)
+	}
 	s.notifyDirectory()
 	slog.Info("sshd: member role changed",
 		"actor", member, "member", m.ID, "from", was, "to", role)
@@ -145,17 +150,4 @@ func memberGuardError(err error, id domain.MemberID, verb, gerund string) *proto
 		return ownerRefusal(gerund, id, owns.Workspaces)
 	}
 	return rpcError(err)
-}
-
-// publishRoleChange tells the member their role changed, so their dashboard
-// reloads it and the workspace roles derived from it.
-func (s *Server) publishRoleChange(ctx context.Context, actor, changed domain.MemberID) {
-	ev := events.Event{
-		WorkspaceID: events.ServerScope,
-		ActorID:     actor,
-		Payload:     events.MemberAccessPayload{MemberID: changed, Action: events.AccessGranted},
-	}
-	if _, err := s.cfg.Bus.Publish(ctx, ev); err != nil {
-		slog.Warn("sshd: publish "+string(ev.Payload.EventType()), "member", changed, "error", err)
-	}
 }

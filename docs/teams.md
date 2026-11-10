@@ -248,11 +248,26 @@ requires the admin role`.
 ### After an upgrade
 
 A server that predates workspace access migrates once, when it first starts the
-new version. The earliest admin becomes the super admin and owns every existing
-workspace. Every other admin stays an admin, and every approved member
-keeps every workspace as a grant, so nobody loses access. Members still pending
-get no grants. A super admin trims access afterwards with `aether workspace
-revoke`.
+new version:
+
+- The earliest approved admin becomes the super admin and owns every existing
+  workspace.
+- Every approved member, other admins included, keeps every workspace as a
+  grant, so nobody loses access. Members still pending get no grants.
+- Other admins keep the admin role but administer no existing workspace: in
+  one they don't own they act as a collaborator, with no settings, budget,
+  grants or delete. The super admin hands each workspace to its admin with
+  `aether workspace owner <workspace> <member-id>`, and trims access with
+  `aether workspace revoke`.
+
+A server with no approved admin before the upgrade gets no super admin. Every
+member keeps their access, but nobody can administer the server until you
+promote an approved member on the server itself. Find their member id with
+`aether member list` from that member's own sign-in, then run:
+
+```sh
+sudo aether-server member role <member-id> super_admin
+```
 
 To limit who can control sessions:
 

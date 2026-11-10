@@ -395,6 +395,7 @@ func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *
 		agentErr = s.cfg.Signing.StopAgent(merge.AbsorbedID)
 	}
 	s.notifyDirectory()
+	s.accessChanged()
 	ev := events.Event{WorkspaceID: events.ServerScope, ActorID: merge.SurvivorID,
 		Payload: events.MemberMergedPayload{MergeID: merge.ID, SurvivorID: merge.SurvivorID, AbsorbedID: merge.AbsorbedID}}
 	// The merge is committed, so a failed publish is logged, not returned,

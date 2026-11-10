@@ -500,7 +500,7 @@ func TestMergeRefusesDemotingAWorkspaceOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	accept := MergeAccept{ProposalID: pm.ProposalID, Caller: owner.ID, Digest: plan.Digest, Now: now}
-	if _, err = db.AcceptMerge(ctx, accept); !isRefusal(err, "owns workspaces "+string(w.ID)) {
+	if _, err = db.AcceptMerge(ctx, accept); !isRefusal(err, "owns workspaces ["+string(w.ID)+"]") {
 		t.Fatalf("merge demoting an owner = %v, want refused naming %s", err, w.ID)
 	}
 	accept.KeepAdmin = true

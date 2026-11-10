@@ -1081,9 +1081,12 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	// follows the sender's view of the conversation. A recipient in another
 	// workspace is left out of both, so neither names a run to members who
 	// cannot reach it.
-	toWorkspace, err := s.runWorkspace(ctx, pub.ToRun)
-	if err != nil {
-		return err
+	var toWorkspace domain.WorkspaceID
+	switch to, err := s.cfg.Store.GetRun(ctx, pub.ToRun); {
+	case err == nil:
+		toWorkspace = to.WorkspaceID
+	case !errors.Is(err, store.ErrNotFound):
+		return fmt.Errorf("coord: read session %s for its message event: %w", pub.ToRun, err)
 	}
 	switch {
 	case pub.EventType == store.CoordAuditMessage && pub.EventID == store.CoordAuditEventID(pub.MessageID):
@@ -1110,18 +1113,6 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 		return err
 	}
 	return outbox.MarkCoordAuditPublished(ctx, pub.EventID)
-}
-
-// runWorkspace is run's workspace, empty when the run no longer exists.
-func (s *Service) runWorkspace(ctx context.Context, run domain.RunID) (domain.WorkspaceID, error) {
-	r, err := s.cfg.Store.GetRun(ctx, run)
-	if errors.Is(err, store.ErrNotFound) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("coord: read session %s for its message event: %w", run, err)
-	}
-	return r.WorkspaceID, nil
 }
 
 // heldChild reports whether run is an attached child run a member controls,
