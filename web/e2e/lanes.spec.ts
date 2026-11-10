@@ -9,21 +9,23 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 const minute = 60_000
 
-interface Lanes {
-  workspace: string
-  member: string
-  /** Sessions between Reviewer and Tester, to push Tester below the fold. */
-  between?: number
-}
-
-async function stubLanes(page: Page, { workspace, member, between = 0 }: Lanes) {
+/**
+ * Alice's workspace with three working sessions, Lead, Reviewer and Tester,
+ * newest first, and one message from Lead to Tester. `between` sessions go
+ * between Reviewer and Tester, to push Tester below the fold.
+ */
+async function setUp(page: Page, aether: Aether, between = 0) {
+  const alice = await aether.member('alice')
+  await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('shop'), 'shop')
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  const workspace = workspaces[0].id
+  const member = await memberID(alice)
   const now = Date.now()
   const iso = (minutesAgo: number) => new Date(now - minutesAgo * minute).toISOString()
   const run = (id: string, task: string, minutesAgo: number) => ({
     id, workspace_id: workspace, member_id: member, account_member_id: member, task, harness: 'claude', mode: 'tui',
     status: 'running', state: 'working', status_seq: 0, branch: `aether/${id}`, created_at: iso(minutesAgo), started_at: iso(minutesAgo), finished_at: null,
   })
-  // Newest first in Working: Lead, then Reviewer, then Tester.
   const runs = [
     run('run-lanes-lead', 'Lead the checkout rewrite', 20),
     run('run-lanes-reviewer', 'Review the checkout rewrite', 30),
@@ -36,20 +38,14 @@ async function stubLanes(page: Page, { workspace, member, between = 0 }: Lanes) 
   }
   await page.route('**/api/v1/run.list', (route) => route.fulfill({ json: { runs } }))
   await page.route('**/api/v1/workspace.timeline', (route) => route.fulfill({ json: { events: [mail], next_seq: 2, more: false } }))
-}
-
-async function setUp(page: Page, aether: Aether, between = 0) {
-  const alice = await aether.member('alice')
-  await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('shop'), 'shop')
-  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
-  await stubLanes(page, { workspace: workspaces[0].id, member: await memberID(alice), between })
-  return openLanes(page, alice.url)
-}
-
-async function openLanes(page: Page, url: string) {
-  await page.goto(url)
-  await page.getByRole('tab', { name: 'Lanes' }).click()
-  return page.getByRole('tree', { name: 'Session lanes' })
+  await page.goto(alice.url)
+  // The view choice is kept per workspace; a click before the workspace settles can be undone.
+  const tree = page.getByRole('tree', { name: 'Session lanes' })
+  await expect(async () => {
+    await page.getByRole('tab', { name: 'Lanes' }).click()
+    await expect(tree.getByRole('treeitem').first()).toBeVisible({ timeout: 2000 })
+  }).toPass()
+  return tree
 }
 
 test('a lane popover keeps its lane while the pointer travels to it and rests on it', async ({ page, aether }) => {

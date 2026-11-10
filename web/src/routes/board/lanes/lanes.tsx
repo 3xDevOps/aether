@@ -48,29 +48,6 @@ function inTriangle(p: { x: number; y: number }, a: { x: number; y: number }, b:
   return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
 }
 
-/** Whether the move from `from` to `to` stays in the cone from `from` to any of `targets`. */
-function headingFor(from: { x: number; y: number }, to: { x: number; y: number }, targets: Iterable<Element>): boolean {
-  if (from.x === to.x && from.y === to.y) return false
-  for (const el of targets) {
-    const r = el.getBoundingClientRect()
-    const tl = { x: r.left, y: r.top }
-    const tr = { x: r.right, y: r.top }
-    const bl = { x: r.left, y: r.bottom }
-    const br = { x: r.right, y: r.bottom }
-    if (inTriangle(to, from, tl, br) || inTriangle(to, from, tr, bl)) return true
-  }
-  return false
-}
-
-function distanceTo(p: { x: number; y: number }, targets: Iterable<Element>): number {
-  let best = Infinity
-  for (const el of targets) {
-    const r = el.getBoundingClientRect()
-    best = Math.min(best, Math.hypot(Math.max(r.left - p.x, 0, p.x - r.right), Math.max(r.top - p.y, 0, p.y - r.bottom)))
-  }
-  return best
-}
-
 /** An estimate of one axis character at text-ui-xs; tabular digits keep it close. */
 const tickCharWidth = 7
 
@@ -331,9 +308,18 @@ export function LanesView(props: LanesViewProps) {
     pointer.current = at
     const next = laneAt(at.y - event.currentTarget.getBoundingClientRect().top)
     // On its way to the hovered lane's pinned button the pointer crosses other lanes. They wait while it keeps closing in, for at most aimMaxMs.
-    const buttons = !popRef.current && hovered && next !== hovered && left.current ? content.current?.querySelectorAll('[data-mail-pinned]') ?? [] : []
-    if (left.current && headingFor(left.current, at, buttons)) {
-      const gap = distanceTo(at, buttons)
+    const from = left.current
+    const buttons = !popRef.current && hovered && next !== hovered && from ? content.current?.querySelectorAll('[data-mail-pinned]') ?? [] : []
+    let heading = false
+    let gap = Infinity
+    for (const el of buttons) {
+      const r = el.getBoundingClientRect()
+      const [tl, tr, bl, br] = [{ x: r.left, y: r.top }, { x: r.right, y: r.top }, { x: r.left, y: r.bottom }, { x: r.right, y: r.bottom }]
+      // The two triangles from where the pointer left the lane to the button's diagonals cover the cone towards it.
+      heading ||= inTriangle(at, from!, tl, br) || inTriangle(at, from!, tr, bl)
+      gap = Math.min(gap, Math.hypot(Math.max(r.left - at.x, 0, at.x - r.right), Math.max(r.top - at.y, 0, at.y - r.bottom)))
+    }
+    if (heading) {
       aim.current ??= { since: Date.now(), gap: Infinity }
       if (Date.now() - aim.current.since < aimMaxMs) {
         if (gap < aim.current.gap) {
@@ -351,7 +337,10 @@ export function LanesView(props: LanesViewProps) {
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const target = event.target as Element
-    if (target.closest('[data-mail-control]')) clearTimeout(settle.current)
+    if (target.closest('[data-mail-control]')) {
+      clearTimeout(settle.current)
+      aim.current = null
+    }
     // React bubbles the portalled popover's events here: the pointer is on the popover, not on the lane under it.
     else if (!event.currentTarget.contains(target)) hover(null)
     else hoverAt(event)
@@ -456,7 +445,7 @@ export function LanesView(props: LanesViewProps) {
 
   const onPick = useCallback((lane: Lane, x: number | undefined, chevron: boolean) => {
     if (drag.current?.moved) return
-    const again = popRef.current?.kind === 'lane' && popRef.current.key === lane.key && !chevron
+    const again = popRef.current?.kind === 'lane' && popRef.current.key === lane.key && !chevron && (lane.kind === 'run' || x !== undefined)
     setPop(null)
     if (!again) latestActivate.current(lane, x, chevron)
   }, [])
@@ -548,8 +537,10 @@ export function LanesView(props: LanesViewProps) {
   const focusBelow = focusTalks.filter((c) => offscreen(c, false))
   const focusOutside = focusTalks.filter((c) => !c.lane)
   const jump = (key: string) => {
-    jumped.current = key
-    setPop(null)
+    if (popRef.current) {
+      jumped.current = key
+      setPop(null)
+    }
     setHovered(null)
     setActiveKey(key)
     focusLaneEl(key)
