@@ -100,8 +100,7 @@ func reachesAll(actor permissions.Actor, workspaces []domain.WorkspaceID) bool {
 }
 
 // runScopes caches the workspaces of the runs one reader's events name. A
-// run's extra repositories are written once, while it provisions, so a run
-// is cached once it has them or is past provisioning.
+// run's extra repositories are stored with the run and never change.
 type runScopes struct {
 	st   store.Store
 	runs map[domain.RunID][]domain.WorkspaceID
@@ -125,9 +124,7 @@ func (c *runScopes) reaches(ctx context.Context, actor permissions.Actor, id dom
 			return false
 		}
 		workspaces = runWorkspaces(run)
-		if len(run.Extras) > 0 || (run.Status != domain.RunQueued && run.Status != domain.RunProvisioning) {
-			c.runs[id] = workspaces
-		}
+		c.runs[id] = workspaces
 	}
 	return reachesAll(actor, workspaces)
 }

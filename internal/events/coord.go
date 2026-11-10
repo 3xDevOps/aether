@@ -20,6 +20,13 @@ type CoordMessagePayload struct {
 
 func (CoordMessagePayload) EventType() Type { return TypeCoordMessage }
 
+func (p CoordMessagePayload) NamedRuns() []domain.RunID {
+	if p.ToRunID == "" {
+		return nil
+	}
+	return []domain.RunID{p.ToRunID}
+}
+
 type CoordMessageAckedPayload struct {
 	MessageID string       `json:"message_id"`
 	ToRunID   domain.RunID `json:"to_run_id"`

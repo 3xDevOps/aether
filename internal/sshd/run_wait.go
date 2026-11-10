@@ -11,6 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/watch"
 )
 
@@ -48,7 +49,11 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 		return fmt.Errorf("read the runs' wait conditions: %w", err)
 	}
 	actor, actorErr := resolveActor(ctx, s.cfg.Store, member)
-	visible, err := s.waitVisibility(ctx, actor, byRun)
+	prs := false
+	for _, waits := range byRun {
+		prs = prs || slices.ContainsFunc(waits, func(w protocol.WaitCondition) bool { return w.Repo != "" })
+	}
+	visible, err := s.waitVisibility(ctx, actor, prs)
 	if err != nil {
 		return err
 	}
@@ -64,17 +69,14 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 	return nil
 }
 
-// waitVisibility reports which of byRun's conditions actor may read: a
-// run_finished condition whose session they reach in every workspace, and
-// a pull request condition unless its repository is the origin or mirror
-// source only of workspaces actor does not reach.
-func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, byRun map[domain.RunID][]protocol.WaitCondition) (func(protocol.WaitCondition) bool, error) {
+// waitVisibility reports which conditions actor may read: a run_finished
+// condition whose session they reach in every workspace, and a pull
+// request condition unless its repository is the origin or mirror source
+// only of workspaces actor does not reach. prs says whether it will be
+// asked about pull request conditions.
+func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, prs bool) (func(protocol.WaitCondition) bool, error) {
 	if actor.Role == domain.RoleSuperAdmin {
 		return func(protocol.WaitCondition) bool { return true }, nil
-	}
-	prs := false
-	for _, waits := range byRun {
-		prs = prs || slices.ContainsFunc(waits, func(w protocol.WaitCondition) bool { return w.Repo != "" })
 	}
 	repos := map[string][]domain.WorkspaceID{}
 	if prs {
@@ -103,9 +105,29 @@ func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, by
 		if w.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(w.RunID)) {
 			return false
 		}
+		if w.Repo != "" && !prs {
+			return false
+		}
 		owners := repos[w.Repo]
 		return len(owners) == 0 || slices.ContainsFunc(owners, actor.Reaches)
 	}, nil
+}
+
+// storedWait is wait id's condition as waitVisibility judges it, and the
+// run that waits on it; ok is false when no run waits on id.
+func (s *Server) storedWait(ctx context.Context, id string) (cond protocol.WaitCondition, owner domain.RunID, ok bool, err error) {
+	waits, has := s.cfg.Store.(store.RunWaitStore)
+	if !has || id == "" {
+		return cond, "", false, nil
+	}
+	w, err := waits.GetRunWait(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return cond, "", false, nil
+	}
+	if err != nil {
+		return cond, "", false, err
+	}
+	return protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.TargetRun)}, w.OwnerRunID, true, nil
 }
 
 // redactWait leaves out of w what only the run's owner and admins read:
@@ -145,6 +167,23 @@ func (s *Server) runWaitCancel(ctx context.Context, member domain.MemberID, para
 	p, perr := decodeParams[protocol.RunWaitCancelParams](params)
 	if perr != nil {
 		return nil, perr
+	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	stored, owner, ok, err := s.storedWait(ctx, p.WaitID)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if ok && owner == domain.RunID(p.RunID) {
+		var visible func(protocol.WaitCondition) bool
+		if visible, err = s.waitVisibility(ctx, actor, stored.Repo != ""); err != nil {
+			return nil, rpcError(err)
+		}
+		if !visible(stored) {
+			return nil, rpcError(fmt.Errorf("store: wait %s: %w", p.WaitID, store.ErrNotFound))
+		}
 	}
 	w, err := svc.CancelRunWait(ctx, domain.RunID(p.RunID), p.WaitID, member)
 	if errors.Is(err, watch.ErrInvalid) {

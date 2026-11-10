@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ type RoomService interface {
 // EvidenceService is the transport seam for retained evidence metadata and
 // bounded supporting objects. It deliberately exposes no artifact paths.
 type EvidenceService interface {
-	List(context.Context, domain.WorkspaceID, domain.RunID, string, int) (protocol.EvidencePacketListResult, error)
+	List(context.Context, domain.WorkspaceID, domain.RunID, string, int, func(domain.RunID) bool) (protocol.EvidencePacketListResult, error)
 	Get(context.Context, domain.WorkspaceID, string) (protocol.EvidencePacket, error)
 	RenderPatch(context.Context, domain.WorkspaceID, string, int) (gitengine.Patch, error)
 	ReadTranscript(context.Context, domain.WorkspaceID, string, int) ([]byte, bool, error)
@@ -367,18 +366,17 @@ func (s *Server) runEvidenceList(ctx context.Context, member domain.MemberID, ra
 	if err := validateCollaborationPage(p.Before, p.Limit); err != nil {
 		return nil, err
 	}
-	result, err := ev.List(ctx, domain.WorkspaceID(p.WorkspaceID), domain.RunID(p.RunID), p.Before, p.Limit)
-	if err != nil {
-		return nil, collaborationRPCError(err)
-	}
 	actor, err := resolveActor(ctx, s.cfg.Store, member)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	runs := newRunScopes(s.cfg.Store)
-	result.Packets = slices.DeleteFunc(result.Packets, func(packet protocol.EvidencePacket) bool {
-		return !runs.reaches(ctx, actor, domain.RunID(packet.RunID))
+	result, err := ev.List(ctx, domain.WorkspaceID(p.WorkspaceID), domain.RunID(p.RunID), p.Before, p.Limit, func(run domain.RunID) bool {
+		return runs.reaches(ctx, actor, run)
 	})
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
 	return result, nil
 }
 

@@ -418,6 +418,56 @@ func TestAuditLeavesOutTheUnreachableWorkspaceOfARefusedCall(t *testing.T) {
 	}
 }
 
+// A workspace owner's audit view leaves out another member's entries about
+// a session they do not reach in every workspace, or that no longer
+// exists, and fills each page with the entries it shows.
+func TestAuditLeavesOutSessionsTheReaderDoesNotReach(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	gone := &domain.Run{WorkspaceID: w.wsA.ID, MemberID: w.u.ID, Task: "gone", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunCompleted}
+	if err := w.e.db.CreateRun(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	as := w.e.store.(store.AuditStore)
+	for _, target := range []domain.RunID{w.runUA.ID, w.runA.ID, gone.ID} {
+		if err := as.AddAudit(ctx, &store.AuditEntry{At: time.Now(), Member: w.e.member.ID, Via: ViaConnector, Method: protocol.MethodRunPause,
+			WorkspaceID: string(w.wsA.ID), Target: string(target)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.e.db.DeleteRun(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	audit := func(who string, p protocol.AuditListParams) protocol.AuditListResult {
+		t.Helper()
+		var res protocol.AuditListResult
+		if err := w.call(t, who, protocol.MethodAuditList, p, &res); err != nil {
+			t.Fatalf("%s audit.list: %v", who, err)
+		}
+		return res
+	}
+	targets := func(res protocol.AuditListResult) []string {
+		var out []string
+		for _, e := range res.Entries {
+			if e.Method == protocol.MethodRunPause {
+				out = append(out, e.Target)
+			}
+		}
+		return out
+	}
+	if got, want := targets(audit("S", protocol.AuditListParams{})), []string{string(gone.ID), string(w.runA.ID), string(w.runUA.ID)}; !slices.Equal(got, want) {
+		t.Fatalf("S audit targets = %v, want %v", got, want)
+	}
+	if got, want := targets(audit("A", protocol.AuditListParams{})), []string{string(w.runUA.ID)}; !slices.Equal(got, want) {
+		t.Fatalf("A audit targets = %v, want %v", got, want)
+	}
+	first := audit("A", protocol.AuditListParams{Limit: 1})
+	if got := targets(first); len(got) != 1 || got[0] != string(w.runUA.ID) || first.NextBefore != first.Entries[0].Seq {
+		t.Fatalf("A's first page of one = %+v, want the reachable entry and a cursor at it", first)
+	}
+}
+
 func TestWorkspaceScopeUnreachableReadsAsMissing(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
@@ -583,6 +633,83 @@ func TestASessionWithAnUnreachableRepoDoesNotExist(t *testing.T) {
 			if leaked != (who == "S") {
 				t.Errorf("%s %s %+v shows A's run = %v, want %v: %s", who, c.method, c.params, leaked, who == "S", res)
 			}
+		}
+	}
+}
+
+// A session's extra repositories are part of it from creation, so one still
+// provisioning, or whose checkout failed, is no more visible than one running.
+func TestASessionBeforeItsCheckoutHasItsWholeScope(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	for _, status := range []domain.RunStatus{domain.RunProvisioning, domain.RunFailed} {
+		r := &domain.Run{WorkspaceID: w.wsA.ID, MemberID: w.a.ID, Task: "private " + string(status), Harness: "claude", Mode: domain.LaunchTUI,
+			Status: status, Extras: []domain.RunRepo{{WorkspaceID: w.wsB.ID, Name: "b", Path: "/repos/b", BaseBranch: "main"}}}
+		if err := w.e.db.CreateRun(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+		got := w.call(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(r.ID)}, nil)
+		missing := w.call(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: noRun}, nil)
+		if got == nil || missing == nil || wireErrOf(t, got).Code != wireErrOf(t, missing).Code ||
+			strings.ReplaceAll(wireErrOf(t, got).Message, string(r.ID), noRun) != wireErrOf(t, missing).Message {
+			t.Fatalf("U run.get of a %s run with a wsB repo = %v, missing = %v; want them identical", status, got, missing)
+		}
+		var list json.RawMessage
+		if err := w.call(t, "U", protocol.MethodRunList, protocol.RunListParams{WorkspaceID: string(w.wsA.ID)}, &list); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(list), string(r.ID)) {
+			t.Fatalf("U run.list shows the %s run with a wsB repo: %s", status, list)
+		}
+		if err := w.call(t, "S", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(r.ID)}, nil); err != nil {
+			t.Fatalf("S run.get of the %s run: %v", status, err)
+		}
+	}
+}
+
+// A coordination message between two sessions of one workspace names its
+// recipient, so it reaches only readers who reach the recipient's every
+// workspace too.
+func TestAMessageToASessionWithAnUnreachableRepoStaysUnseen(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	publish := func(to domain.RunID) uint64 {
+		t.Helper()
+		ev, err := w.bus.Publish(ctx, events.Event{WorkspaceID: w.wsA.ID, RunID: w.runUA.ID, Payload: events.CoordMessagePayload{
+			MessageID: "msg-" + string(to), WorkspaceID: w.wsA.ID, FromRunID: w.runUA.ID, ToRunID: to, Kind: "message",
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ev.Seq
+	}
+	plain := publish(w.runUA.ID)
+	hidden := publish(w.runA.ID)
+	for who, want := range map[string][]uint64{"S": {plain, hidden}, "A": {plain}, "U": {plain}} {
+		var timeline protocol.WorkspaceTimelineResult
+		if err := w.call(t, who, protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{WorkspaceID: string(w.wsA.ID)}, &timeline); err != nil {
+			t.Fatalf("%s timeline: %v", who, err)
+		}
+		var changes protocol.ChangesListResult
+		if err := w.call(t, who, protocol.MethodChangesList, protocol.ChangesListParams{Cursor: "0", WorkspaceID: string(w.wsA.ID)}, &changes); err != nil {
+			t.Fatalf("%s changes.list: %v", who, err)
+		}
+		var fromTimeline, fromChanges []uint64
+		for _, ev := range timeline.Events {
+			if ev.Seq == plain || ev.Seq == hidden {
+				fromTimeline = append(fromTimeline, ev.Seq)
+			}
+		}
+		for _, c := range changes.Changes {
+			if c.Seq == plain || c.Seq == hidden {
+				fromChanges = append(fromChanges, c.Seq)
+			}
+		}
+		slices.Sort(fromTimeline)
+		slices.Sort(fromChanges)
+		if !slices.Equal(fromTimeline, want) || !slices.Equal(fromChanges, want) {
+			t.Errorf("%s coord.message events: timeline %v, changes %v, want %v", who, fromTimeline, fromChanges, want)
 		}
 	}
 }

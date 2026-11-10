@@ -3,7 +3,6 @@ package sshd
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -38,28 +37,55 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 	if perr := validateCollaborationPage(p.Before, p.Limit); perr != nil {
 		return nil, perr
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	runs := newRunScopes(s.cfg.Store)
+	var (
+		visible func(protocol.WaitCondition) bool
+		hideErr error
+	)
 	page, err := s.cfg.Store.ListRunMessages(ctx, store.RunMessageFilter{
 		WorkspaceID:   domain.WorkspaceID(p.WorkspaceID),
 		RunID:         domain.RunID(p.RunID),
 		CorrelationID: p.CorrelationID,
 		Before:        p.Before,
 		Limit:         p.Limit,
+		Shows: func(m *store.ListedRunMessage) bool {
+			if hideErr != nil || !runs.reaches(ctx, actor, m.FromRun) || !runs.reaches(ctx, actor, m.ToRun) {
+				return false
+			}
+			if !waitWake(m) {
+				return true
+			}
+			var (
+				wait protocol.WaitCondition
+				ok   bool
+			)
+			wait, _, ok, hideErr = s.storedWait(ctx, m.CorrelationID)
+			if hideErr == nil && ok && visible == nil {
+				visible, hideErr = s.waitVisibility(ctx, actor, true)
+			}
+			return hideErr == nil && (!ok || visible(wait))
+		},
 	})
+	if err == nil {
+		err = hideErr
+	}
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	runs := newRunScopes(s.cfg.Store)
-	page.Items = slices.DeleteFunc(page.Items, func(m *store.ListedRunMessage) bool {
-		return !runs.reaches(ctx, actor, m.FromRun) || !runs.reaches(ctx, actor, m.ToRun)
-	})
 	if err := s.redactWaitWakes(ctx, member, page.Items); err != nil {
 		return nil, rpcError(err)
 	}
 	return protocol.CoordMessagesPageFromStore(page), nil
+}
+
+// waitWake reports whether m is a wait's wake: a session's message to
+// itself, correlated with the wait.
+func waitWake(m *store.ListedRunMessage) bool {
+	return m.FromRun == m.ToRun && strings.HasPrefix(m.CorrelationID, "wat-")
 }
 
 // redactWaitWakes cuts a wait's wake, a session's message to itself, to
@@ -68,7 +94,7 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 func (s *Server) redactWaitWakes(ctx context.Context, member domain.MemberID, items []*store.ListedRunMessage) error {
 	sees := map[domain.RunID]bool{}
 	for _, m := range items {
-		if m.FromRun != m.ToRun || !strings.HasPrefix(m.CorrelationID, "wat-") {
+		if !waitWake(m) {
 			continue
 		}
 		full, ok := sees[m.ToRun]
