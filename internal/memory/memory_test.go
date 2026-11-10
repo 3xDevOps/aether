@@ -723,7 +723,7 @@ func TestMemberNotesYieldOnlyToTheWorkspacesAdmin(t *testing.T) {
 	}
 	owner := f.member("Ada", domain.RoleAdmin)
 	guest := f.member("Bo", domain.RoleAdmin)
-	if serr := f.db.SetWorkspaceOwner(ctx, f.ws.ID, owner.ID); serr != nil {
+	if _, serr := f.db.SetWorkspaceOwner(ctx, f.ws.ID, owner.ID, ""); serr != nil {
 		t.Fatal(serr)
 	}
 	for _, m := range []*domain.Member{guest, f.dana} {

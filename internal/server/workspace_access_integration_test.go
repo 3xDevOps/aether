@@ -211,7 +211,8 @@ func newWSAEnv(ctx context.Context, t *testing.T) *wsaEnv {
 		}
 		if added.Workspace.OwnerMemberID != m.id {
 			setupStep(t, "workspace.add owner", fmt.Errorf("%s is owned by %q, want its creator %s", name, added.Workspace.OwnerMemberID, m.id), func() error {
-				return st.SetWorkspaceOwner(ctx, domain.WorkspaceID(added.Workspace.ID), domain.MemberID(m.id))
+				_, err := st.SetWorkspaceOwner(ctx, domain.WorkspaceID(added.Workspace.ID), domain.MemberID(m.id), "")
+				return err
 			})
 		}
 		return added.Workspace.ID

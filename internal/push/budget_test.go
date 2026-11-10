@@ -33,7 +33,7 @@ func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 			t.Fatalf("UpdateMember: %v", err)
 		}
 	}
-	if err := h.db.SetWorkspaceOwner(h.ctx, h.ws.ID, h.ada.ID); err != nil {
+	if _, err := h.db.SetWorkspaceOwner(h.ctx, h.ws.ID, h.ada.ID, ""); err != nil {
 		t.Fatalf("SetWorkspaceOwner: %v", err)
 	}
 	adas, carols, bobs, dans := h.subscribe(h.ada), h.subscribe(carol), h.subscribe(h.bob), h.subscribe(dan)

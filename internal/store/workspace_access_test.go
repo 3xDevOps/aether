@@ -118,11 +118,57 @@ func TestWorkspaceGrants(t *testing.T) {
 	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second revoke = %v, want ErrNotFound", err)
 	}
-	if err := db.SetWorkspaceOwner(ctx, w.ID, user.ID); err != nil {
-		t.Fatalf("SetWorkspaceOwner: %v", err)
+}
+
+// Changing an owner is one transaction: the new owner's grant goes, a
+// previous owner below super admin keeps a grant, and a target who is not
+// an approved admin changes nothing.
+func TestSetWorkspaceOwner(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	owner := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+	next := &domain.Member{DisplayName: "Bo", PublicKey: testKey(t, "bo"), Color: "#3cb44b", Role: domain.RoleAdmin}
+	super := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#ffe119", Role: domain.RoleSuperAdmin}
+	user := &domain.Member{DisplayName: "Cam", PublicKey: testKey(t, "cam"), Color: "#4363d8", Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{owner, next, super, user} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if ws, err := db.GetWorkspace(ctx, w.ID); err != nil || ws.OwnerID != user.ID {
-		t.Fatalf("owner after set = %+v, %v", ws, err)
+	w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GrantWorkspace(ctx, w.ID, next.ID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetWorkspaceOwner(ctx, w.ID, user.ID, super.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("collaborator as owner = %v, want ErrConflict", err)
+	}
+	if _, err := db.SetWorkspaceOwner(ctx, "ws_missing", next.ID, super.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("owner of a missing workspace = %v, want ErrNotFound", err)
+	}
+	previous, err := db.SetWorkspaceOwner(ctx, w.ID, next.ID, super.ID)
+	if err != nil || previous != owner.ID {
+		t.Fatalf("SetWorkspaceOwner = %s, %v; want previous %s", previous, err, owner.ID)
+	}
+	if ws, gerr := db.GetWorkspace(ctx, w.ID); gerr != nil || ws.OwnerID != next.ID {
+		t.Fatalf("owner after set = %+v, %v", ws, gerr)
+	}
+	grants, err := db.ListWorkspaceGrants(ctx, w.ID)
+	if err != nil || len(grants) != 1 || grants[0].MemberID != owner.ID || grants[0].GrantedBy != super.ID {
+		t.Fatalf("grants after transfer = %+v, %v; want only the previous owner's, by %s", grants, err, super.ID)
+	}
+	if _, err = db.SetWorkspaceOwner(ctx, w.ID, super.ID, super.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.SetWorkspaceOwner(ctx, w.ID, owner.ID, super.ID); err != nil {
+		t.Fatal(err)
+	}
+	grants, err = db.ListWorkspaceGrants(ctx, w.ID)
+	if err != nil || len(grants) != 1 || grants[0].MemberID != next.ID {
+		t.Fatalf("grants after two more transfers = %+v, %v; want only %s's, none for the super admin", grants, err, next.ID)
 	}
 }
 

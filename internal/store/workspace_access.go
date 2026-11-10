@@ -23,7 +23,12 @@ type WorkspaceAccessStore interface {
 	// RevokeWorkspaceGrant removes member's grant on ws; ErrNotFound when
 	// there is none.
 	RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, member domain.MemberID) error
-	SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner domain.MemberID) error
+	// SetWorkspaceOwner makes owner, an approved admin or super admin,
+	// the owner of ws and returns the previous owner, in one transaction:
+	// owner's grant on ws goes, and a previous owner who is not a super
+	// admin keeps reaching ws through a grant by by. ErrConflict when
+	// owner is not an approved admin.
+	SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner, by domain.MemberID) (domain.MemberID, error)
 	// JoinMember creates m, which has a public key, with a grant on each
 	// of workspaces that still exists and issuer administers.
 	JoinMember(ctx context.Context, m *domain.Member, workspaces []domain.WorkspaceID, issuer domain.MemberID) error
@@ -107,13 +112,50 @@ func (d *DB) RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, me
 	return err
 }
 
-func (d *DB) SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner domain.MemberID) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE workspaces SET owner_member_id = ? WHERE id = ?`, owner, ws))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("store: set workspace owner: %w", err)
+func (d *DB) SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner, by domain.MemberID) (domain.MemberID, error) {
+	at, err := encodeTime(time.Now())
+	if err != nil {
+		return "", fmt.Errorf("store: set workspace owner: %w", err)
 	}
-	return err
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("store: begin set workspace owner: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var previous domain.MemberID
+	err = tx.QueryRowContext(ctx, `SELECT owner_member_id FROM workspaces WHERE id = ?`, ws).Scan(&previous)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: set workspace owner: %w", err)
+	}
+	if previous == owner {
+		return previous, nil
+	}
+	err = notFoundOnZeroRows(tx.ExecContext(ctx,
+		`UPDATE workspaces SET owner_member_id = ?1 WHERE id = ?2 AND EXISTS (SELECT 1 FROM members
+		 WHERE id = ?1 AND role IN ('admin', 'super_admin') AND pending = 0 AND merged_into = '')`, owner, ws))
+	if errors.Is(err, ErrNotFound) {
+		return "", fmt.Errorf("%w: %s is not an approved admin or super admin", ErrConflict, owner)
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: set workspace owner: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM workspace_grants WHERE workspace_id = ? AND member_id = ?`, ws, owner); err != nil {
+		return "", fmt.Errorf("store: set workspace owner: remove the new owner's grant: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO workspace_grants (workspace_id, member_id, granted_by, created_at)
+		 SELECT ?, id, ?, ? FROM members WHERE id = ? AND role <> 'super_admin' AND merged_into = ''`,
+		ws, by, at, previous); err != nil {
+		return "", fmt.Errorf("store: set workspace owner: grant the previous owner: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("store: commit set workspace owner: %w", err)
+	}
+	return previous, nil
 }
 
 func (d *DB) JoinMember(ctx context.Context, m *domain.Member, workspaces []domain.WorkspaceID, issuer domain.MemberID) error {
