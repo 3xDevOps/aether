@@ -164,14 +164,21 @@ export function EdgePopover({ edge, now }: { edge: LaneEdge; now: number }) {
 }
 
 /** Escape returns focus to the lane; a click elsewhere leaves it where the click put it. */
-export function LanePopoverContent({ label, children, returnFocus }: { label: string; children: ReactNode; returnFocus: () => void }) {
+export function LanePopoverContent({ label, children, returnFocus, keep }: {
+  label: string
+  children: ReactNode
+  returnFocus: () => void
+  /** Whether a press outside belongs to something that replaces this popover itself. */
+  keep: (target: Element) => boolean
+}) {
   const leftOutside = useRef(false)
   return (
     <PopoverContent
       aria-label={label}
       className="w-[min(340px,calc(100vw-16px))]"
-      onInteractOutside={() => {
-        leftOutside.current = true
+      onInteractOutside={(event) => {
+        if (event.target instanceof Element && keep(event.target)) event.preventDefault()
+        else leftOutside.current = true
       }}
       onCloseAutoFocus={(event) => {
         event.preventDefault()

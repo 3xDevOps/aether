@@ -112,6 +112,7 @@ export function OffscreenMail({ above, below, outside, g, top, bottom, nameOf, o
   const hint = (list: Conversation[], y: number, Icon: typeof ArrowUp) => (
     <Button
       {...mailControl}
+      data-mail-pinned
       variant="secondary"
       size="sm"
       tabIndex={-1}

@@ -1947,14 +1947,23 @@ lane (sessions it talks with), `→2 ←1` on each of them. Sessions past the
 scrolled rows get a pinned **↑**/**↓** button that moves to them, and mail with
 sessions outside the view gets a dashed note. File overlaps draw for the
 focused lane only, at the now line. Moving the pointer onto a link, mark or
-pinned button keeps the lane that drew it. Clicking a mark or link opens its
+pinned button keeps the lane that drew it. While the pointer heads for one of
+the lane's pinned buttons and keeps closing in, the lanes it crosses wait:
+one it rests on for 150ms, or crosses after a second and a half, takes the
+hover. An
+open popover keeps the lane it opened from in focus: lanes the pointer
+crosses, or that lie under the popover, show only the hover band until it
+closes. Clicking a mark or link opens its
 facts, every bundle a merged mark holds;
 a mail link reads the bodies through `coord.messages.list` (the thread, else
 each sender's newest page, since a mark on a folded lane can bundle several
 senders) and shows them with `MessageRow`. [Styles: Lanes](styles.md#lanes)
 has the colour coding.
 
-**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover:
+**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover
+(with one open, one click on another lane, mark or link moves it there,
+clicking its own lane again closes it, and dragging the track or a pinned
+button closes it):
 "agent · state · elapsed", the title, the reason, next step, branch and diff,
 unread mail, pending inputs, overlaps and the state span under the pointer,
 then the card's primary action (Reply opens the same composer as a card),
@@ -7905,7 +7914,11 @@ device cards an admin and a member see.
 history, section order and folding, axis ticks and link
 bundling; the board test's `lanes view` cases cover the tree keyboard, the
 session popover and its links, a popover whose lane folds away, an empty
-window, bundled mail bodies and failed history reads.
+window, bundled mail bodies and failed history reads. `e2e/lanes.spec.ts`
+moves a real pointer over Lanes, with sessions and mail answered in the
+browser: from a lane to its popover and off it, one click from one lane's
+popover to another's, a drag and a pinned button closing it, and from a lane
+to its pinned button, on a held clock.
 
 `src/a11y.test.tsx` exercises the session tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,
