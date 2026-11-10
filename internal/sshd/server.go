@@ -201,6 +201,9 @@ type Server struct {
 	handoffSeq      atomic.Uint64
 	// accessGen counts workspace access changes; see accessChanged.
 	accessGen atomic.Uint64
+	// accessWake is closed by the next accessChanged; see accessChange.
+	accessWakeMu sync.Mutex
+	accessWake   chan struct{}
 
 	// Workspace gates fence repository access and live overlays against
 	// deletion. Keep each gate stable even after deletion so queued readers

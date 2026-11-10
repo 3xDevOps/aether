@@ -234,6 +234,59 @@ func TestGitTransportNeedsTheWorkspace(t *testing.T) {
 	}
 }
 
+// stalledGit advertises refs and then waits for its context, as a
+// receive-pack does while the client holds back its pack.
+type stalledGit struct {
+	fakeGit
+	started chan struct{}
+}
+
+func (g *stalledGit) ReceivePack(ctx context.Context, _ domain.WorkspaceID, _ io.Reader, stdout, _ io.Writer) (int, error) {
+	if _, err := io.WriteString(stdout, pktLine(testAdvertisedSHA+" refs/heads/main\x00report-status\n")+"0000"); err != nil {
+		return 128, err
+	}
+	close(g.started)
+	<-ctx.Done()
+	return 128, ctx.Err()
+}
+
+// A push left waiting ends when its member's grant is revoked, without
+// waiting for the periodic re-check.
+func TestGitPushEndsWhenAccessIsRevoked(t *testing.T) {
+	t.Parallel()
+	git := &stalledGit{started: make(chan struct{})}
+	w := newScopedWorld(t, func(c *Config) {
+		c.Git = git
+		c.revalidateInterval = time.Hour
+	})
+	signer, u := w.granted(t, "Una", domain.RoleCollaborator, w.foreign.ID)
+	pushed := make(chan string, 1)
+	go func() {
+		stderr, _ := runGit(t, w.testEnv, signer, "receive-pack", w.foreign.ID)
+		pushed <- stderr
+	}()
+	select {
+	case <-git.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("receive-pack did not start")
+	}
+	raw, err := json.Marshal(protocol.WorkspaceAccessRevokeParams{WorkspaceID: string(w.foreign.ID), MemberID: string(u.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := w.srv.workspaceAccessRevoke(t.Context(), w.member.ID, raw); perr != nil {
+		t.Fatalf("revoke: %+v", perr)
+	}
+	select {
+	case stderr := <-pushed:
+		if !strings.Contains(stderr, "access ended") || !strings.Contains(stderr, store.ErrNotFound.Error()) {
+			t.Fatalf("push stderr = %q, want access ended, not found", stderr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("receive-pack still runs after its member's grant was revoked")
+	}
+}
+
 // A launch needs every workspace it names, and a shared account's owner
 // must reach them too.
 func TestLaunchNeedsEveryWorkspace(t *testing.T) {
