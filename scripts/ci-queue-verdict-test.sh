@@ -40,7 +40,7 @@ fail() {
 
 run_json() {
 	jq -n --arg sha "$sha" --argjson id "$1" --argjson number "$2" --arg path "${3:-.github/workflows/ci.yml}" --arg repo "${4:-o/r}" \
-		--arg status "${5:-completed}" --arg conclusion "${6:-success}" '{
+		--arg status "${5:-completed}" --arg conclusion "${6-success}" '{
 		id: $id, run_number: $number, path: $path, event: "merge_group", head_sha: $sha,
 		status: $status, conclusion: (if $conclusion == "" then null else $conclusion end),
 		repository: {full_name: $repo}, head_repository: {full_name: $repo},
@@ -90,6 +90,7 @@ grep -q 'merge queue run 2 is completed/cancelled' "$tmp/err" || fail "a cancell
 
 { run_json 1 10; run_json 2 11 .github/workflows/ci.yml o/r in_progress ''; } | jq -s '{workflow_runs: .}' >"$tmp/runs.json"
 expect ''
+grep -q "merge queue run 2 is in_progress/null" "$tmp/err" || fail "a run in progress was not named: $(cat "$tmp/err")"
 
 { run_json 1 10; run_json 2 11; } | jq -s '{workflow_runs: .}' >"$tmp/runs.json"
 expect https://github.com/o/r/actions/runs/2

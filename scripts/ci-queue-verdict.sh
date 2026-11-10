@@ -1,5 +1,5 @@
 #!/bin/sh
-# Print the URL of the merge queue CI run whose `CI gate` passed on this exact
+# Print the URL of the merge queue CI run that succeeded on this exact
 # commit, when a push to main may reuse that verdict; print nothing when it
 # must run the full suite. The queue moves main to the commit its group
 # tested, so that verdict covers the push.
@@ -8,9 +8,9 @@
 # Only the newest merge_group run of ci.yml for the commit counts, and only
 # its latest attempt, which must have completed with conclusion success and
 # a passed `CI gate`: a job that a cancellation kept from starting reports
-# skipped, so the gate alone does not prove the suite ran. A push that changes a file a cache key hashes
-# (ci-classify-areas.sh caches) never reuses one: only a run on main can save
-# the caches the queue restores. A failed lookup, or a compare at GitHub's
+# skipped, so the gate alone does not prove the suite ran. A push that
+# changes a file a cache key hashes (ci-classify-areas.sh caches) never
+# reuses one: only a run on main can save the caches the queue restores. A failed lookup, or a compare at GitHub's
 # 300-file limit, prints nothing and exits 0.
 set -eu
 

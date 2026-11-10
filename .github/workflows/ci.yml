@@ -273,9 +273,9 @@ jobs:
     uses: ./.github/workflows/ci-suite.yml
 
   # The one required check on main, for pull requests and merge queue
-  # entries. It fails when any job failed or was cancelled; a job its own
-  # rule skipped passes. A job missing from needs does not gate main; the
-  # jobs in ci-suite.yml gate it through suite.
+  # entries. It fails when any job failed or was cancelled; outside the merge
+  # queue, a job its own rule skipped passes. A job missing from needs does
+  # not gate main; the jobs in ci-suite.yml gate it through suite.
   ci-gate:
     name: CI gate
     if: ${{ always() }}

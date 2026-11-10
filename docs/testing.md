@@ -747,19 +747,19 @@ suite runs once per change, on the merge result, before `main` moves; a
 failure there removes the pull request from the queue.
 
 The queue moves `main` to the commit it tested, so a push to `main` reuses
-that verdict: `scripts/ci-queue-verdict.sh` finds the merge queue run that
-completed with conclusion success, its `CI gate` passed, on the same commit, and the push runs only `changes` and
-`CI gate`, whose summary links that run. The push runs every job when no
-such run exists, when a lookup fails, when the push touches 300 files or
-more (GitHub's compare limit), or when it changes a file a cache key hashes
-(`ci-classify-areas.sh caches`). Caches save only from runs on `main`,
-because a merge queue run's caches are scoped to its own queue branch; the
-nightly run refreshes them, so between nightly runs a session restores
-compiler caches up to a day old. It also tests `main` against the newest
-agent CLIs and the latest published release; its result gates nothing, so
-read a red nightly `CI gate` on the `main` tip yourself. A merge queue run
-re-run after its push reused it does not change that push's verdict:
-re-run the push session too.
+that verdict: `scripts/ci-queue-verdict.sh` finds the merge queue run on the
+same commit that completed with conclusion success and whose `CI gate`
+passed, and the push runs only `changes` and `CI gate`, whose summary links
+that run. The push runs every job when no such run exists, when a lookup
+fails, when the push touches 300 files or more (GitHub's compare limit), or
+when it changes a file a cache key hashes (`ci-classify-areas.sh caches`).
+Caches save only from runs on `main`, because a merge queue run's caches are
+scoped to its own queue branch; the nightly run refreshes them, so between
+nightly runs a session restores compiler caches up to a day old. It also
+tests `main` against the newest agent CLIs and the latest published release;
+its result gates nothing, so read a red nightly `CI gate` on the `main` tip
+yourself. A merge queue run re-run after its push reused it does not change
+that push's verdict: re-run the push session too.
 
 `CI gate` is the one required check: it passes when
 every other job passed or was skipped by its own rule, and fails when any
