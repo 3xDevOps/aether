@@ -1,6 +1,7 @@
 #!/bin/sh
 # ci-queue-verdict.sh: prints the newest merge queue run of the commit only
-# when its CI gate passed and the push changed no cache key input, and
+# when that run succeeded, its CI gate passed and the push changed no cache
+# key input, and
 # nothing on any other answer, a failed lookup or a truncated file list.
 # Only the gh boundary is replaced.
 set -eu
@@ -38,8 +39,10 @@ fail() {
 }
 
 run_json() {
-	jq -n --arg sha "$sha" --argjson id "$1" --argjson number "$2" --arg path "${3:-.github/workflows/ci.yml}" --arg repo "${4:-o/r}" '{
+	jq -n --arg sha "$sha" --argjson id "$1" --argjson number "$2" --arg path "${3:-.github/workflows/ci.yml}" --arg repo "${4:-o/r}" \
+		--arg status "${5:-completed}" --arg conclusion "${6-success}" '{
 		id: $id, run_number: $number, path: $path, event: "merge_group", head_sha: $sha,
+		status: $status, conclusion: (if $conclusion == "" then null else $conclusion end),
 		repository: {full_name: $repo}, head_repository: {full_name: $repo},
 		html_url: "https://github.com/o/r/actions/runs/\($id)"
 	}'
@@ -80,6 +83,17 @@ printf '%s\n' '{"files": []}' >"$tmp/compare.json"
 expect ''
 
 changed internal/store/store.go
+
+{ run_json 1 10; run_json 2 11 .github/workflows/ci.yml o/r completed cancelled; } | jq -s '{workflow_runs: .}' >"$tmp/runs.json"
+expect ''
+grep -q 'merge queue run 2 is completed/cancelled' "$tmp/err" || fail "a cancelled run with a passed gate was reused"
+
+{ run_json 1 10; run_json 2 11 .github/workflows/ci.yml o/r in_progress ''; } | jq -s '{workflow_runs: .}' >"$tmp/runs.json"
+expect ''
+grep -q "merge queue run 2 is in_progress/null" "$tmp/err" || fail "a run in progress was not named: $(cat "$tmp/err")"
+
+{ run_json 1 10; run_json 2 11; } | jq -s '{workflow_runs: .}' >"$tmp/runs.json"
+expect https://github.com/o/r/actions/runs/2
 
 gate 2 failure
 expect ''
