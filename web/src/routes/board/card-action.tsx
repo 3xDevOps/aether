@@ -124,7 +124,9 @@ export function ReplyComposer({
       const label = `Message ${deliveryLabel(result).toLowerCase()}`
       if (state === 'not_sent' || state === 'uncertain') toast.error(label)
       else toast.success(label)
-      if (current()) onDone()
+      if (!current()) return
+      setReplying(runId, false)
+      onDone()
     } catch (err) {
       if (current()) saveReply({ sending: undefined, error: `Send failed: ${message(err)}` })
     }
@@ -155,7 +157,9 @@ export function ReplyComposer({
           aria-label="Message to the agent"
           placeholder="Message to the agent"
           value={text}
-          onChange={(event) => saveReply({ text: event.target.value })}
+          onChange={(event) => {
+            if (useReply.getState().reply?.runId === runId) saveReply({ text: event.target.value })
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               event.preventDefault()
