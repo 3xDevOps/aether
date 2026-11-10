@@ -49,7 +49,7 @@ func (w *scopedWorld) granted(t *testing.T, name string, role domain.Role, works
 	t.Helper()
 	signer, m := addMember(t, w.testEnv, name, role, false)
 	for _, ws := range workspaces {
-		if err := w.db.GrantWorkspace(context.Background(), ws, m.ID, w.member.ID, true); err != nil {
+		if err := w.db.GrantWorkspace(context.Background(), ws, m.ID, w.member.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -135,14 +135,14 @@ func TestEventsCarryOnlyReachableWorkspaces(t *testing.T) {
 	publish(w.ws.ID, w.run.ID)
 	expect("before the grant", w.run.ID)
 
-	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID, true); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	w.srv.accessChanged()
 	publish(w.foreign.ID, w.foreignRun.ID)
 	expect("after the grant", w.foreignRun.ID)
 
-	if err := w.db.RevokeWorkspaceGrant(ctx, w.foreign.ID, u.ID, true); err != nil {
+	if err := w.db.RevokeWorkspaceGrant(ctx, w.foreign.ID, u.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	w.srv.accessChanged()
@@ -175,7 +175,7 @@ func TestAttachAndACPOfAForeignRunAreNotFound(t *testing.T) {
 	if err != nil || !ack.OK {
 		t.Fatalf("read-only attach in a granted workspace: ack=%+v err=%v", ack, err)
 	}
-	if err := w.db.RevokeWorkspaceGrant(ctx, w.ws.ID, u.ID, true); err != nil {
+	if err := w.db.RevokeWorkspaceGrant(ctx, w.ws.ID, u.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -326,7 +326,7 @@ func TestLaunchNeedsEveryWorkspace(t *testing.T) {
 	if calls := w.runs.Calls(); len(calls) != 0 {
 		t.Fatalf("scheduler calls after refused launches = %v, want none", calls)
 	}
-	if err := w.db.GrantWorkspace(ctx, w.ws.ID, owner.ID, w.member.ID, true); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.ws.ID, owner.ID, w.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if perr := launch(protocol.RunLaunchParams{WorkspaceID: string(w.ws.ID), AccountMemberID: string(owner.ID)}); perr != nil {
@@ -350,7 +350,7 @@ func TestHandoffNeedsARecipientWithTheWorkspace(t *testing.T) {
 	if err := handoff(); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams || !strings.Contains(pe.Message, "no access") {
 		t.Fatalf("handoff to a member without the workspace = %v, want refused", err)
 	}
-	if err := w.db.GrantWorkspace(ctx, w.ws.ID, n.ID, w.member.ID, true); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.ws.ID, n.ID, w.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := handoff(); err != nil {
@@ -425,7 +425,7 @@ func TestRunWithAnUnreachableExtraRepoIsNotFound(t *testing.T) {
 		t.Fatalf("development authority = %v, want ErrNoAccess", err)
 	}
 
-	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID, true); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, ack, err := w.srv.Local(u.ID).Attach(ctx, protocol.AttachRequest{RunID: string(w.run.ID), ReadOnly: true, Cols: 80, Rows: 24}); err != nil || !ack.OK {

@@ -35,7 +35,7 @@ func TestScheduleFireNeedsTheCreatorsAccessToTheWorkspace(t *testing.T) {
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err = db.GrantWorkspace(ctx, ws.ID, m.ID, "", true); err != nil {
+	if err = db.GrantWorkspace(ctx, ws.ID, m.ID, ""); err != nil {
 		t.Fatalf("grant workspace: %v", err)
 	}
 	tpl := &store.Template{WorkspaceID: ws.ID, Name: "hourly", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
@@ -64,7 +64,7 @@ func TestScheduleFireNeedsTheCreatorsAccessToTheWorkspace(t *testing.T) {
 	if n := runs.count(); n != 1 {
 		t.Fatalf("launches while the creator reaches the workspace = %d, want one", n)
 	}
-	if err = db.RevokeWorkspaceGrant(ctx, ws.ID, m.ID, true); err != nil {
+	if err = db.RevokeWorkspaceGrant(ctx, ws.ID, m.ID, ""); err != nil {
 		t.Fatalf("revoke grant: %v", err)
 	}
 	fireAt(time.Date(2026, 8, 13, 5, 0, 1, 0, time.UTC))

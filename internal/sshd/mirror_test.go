@@ -138,7 +138,7 @@ func TestWorkspaceMirrorStatusReadAccess(t *testing.T) {
 				WorkspaceID: string(e.ws.ID), Generation: 7, ExpectedCommit: configured.ObservedCommit,
 			}, nil), "mirror adopt")
 
-			if err := e.store.DeleteMember(context.Background(), member.ID); err != nil {
+			if err := e.store.DeleteMember(context.Background(), member.ID, ""); err != nil {
 				t.Fatalf("delete member: %v", err)
 			}
 			wantDenied(t, client.Call(protocol.MethodWorkspaceMirrorStatus, params, nil), "revoked member mirror status")

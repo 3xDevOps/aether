@@ -238,7 +238,12 @@ sudo aether-server member role <id> super_admin   # on the server
 server's database, like `aether-server device approve`. Use it from a script or
 to restore a locked-out server. The role applies to connections that are
 already open: a demoted member's live attach drops with `detached: you can no
-longer control this session`. Member approvals, removals and role changes,
+longer control this session`. An approval, removal, role or owner change,
+grant, revocation or session limit change that was already running re-reads
+its caller's role as it writes, so a demotion landing first refuses it with
+`aether: rpc error -32003: store: conflict: member <id> is no longer a super
+admin` (or `... no longer an admin`, `... no longer administers workspace
+<id>`). Member approvals, removals and role changes,
 account shares and connector writes are kept in the audit history; `aether
 audit` shows yours, or everyone's to a super admin
 ([connectors.md](connectors.md#audit-history)).

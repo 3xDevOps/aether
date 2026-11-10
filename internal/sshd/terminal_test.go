@@ -119,7 +119,7 @@ func TestTerminalHistoryRevalidatesOpenControlChannelMembershipBeforePTY(t *test
 
 	// member.remove would close this connection outright; deleting the row
 	// underneath it exercises the per-request revalidation instead.
-	if err := e.store.DeleteMember(context.Background(), member.ID); err != nil {
+	if err := e.store.DeleteMember(context.Background(), member.ID, ""); err != nil {
 		t.Fatalf("delete member: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestExpiredTerminalCursorDoesNotBypassPermissionOrRestart(t *testing.T) {
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable || history.calls != 1 || history.before != params.Before {
 		t.Fatalf("expired page = %+v, err=%v, calls=%d, before=%q", got, err, history.calls, history.before)
 	}
-	if deleteErr := e.store.DeleteMember(context.Background(), member.ID); deleteErr != nil {
+	if deleteErr := e.store.DeleteMember(context.Background(), member.ID, ""); deleteErr != nil {
 		t.Fatal(deleteErr)
 	}
 	err = c.Call(protocol.MethodTerminalHistory, params, &got)

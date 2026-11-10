@@ -69,7 +69,7 @@ func TestPushSubscriptions(t *testing.T) {
 	if err := db.DeletePushSubscription(ctx, ada.ID, phone.Endpoint); err != nil {
 		t.Fatalf("DeletePushSubscription: %v", err)
 	}
-	if err := db.DeleteMember(ctx, ada.ID); err != nil {
+	if err := db.DeleteMember(ctx, ada.ID, ""); err != nil {
 		t.Fatalf("DeleteMember: %v", err)
 	}
 	if got, err := db.ListPushSubscriptions(ctx, ada.ID); err != nil || len(got) != 0 {

@@ -193,7 +193,7 @@ func TestWorkspaceGrants(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	for range 2 {
-		if err := db.GrantWorkspace(ctx, w.ID, user.ID, owner.ID, true); err != nil {
+		if err := db.GrantWorkspace(ctx, w.ID, user.ID, owner.ID); err != nil {
 			t.Fatalf("GrantWorkspace: %v", err)
 		}
 	}
@@ -205,13 +205,13 @@ func TestWorkspaceGrants(t *testing.T) {
 	if err != nil || !got.Access.Granted[w.ID] || len(got.Access.Owned) != 0 {
 		t.Fatalf("user access = %+v, %v; want granted %s", got.Access, err, w.ID)
 	}
-	if err := db.GrantWorkspace(ctx, "ws_missing", user.ID, owner.ID, true); !errors.Is(err, ErrNotFound) {
+	if err := db.GrantWorkspace(ctx, "ws_missing", user.ID, owner.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("grant on a missing workspace = %v, want ErrNotFound", err)
 	}
-	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, true); err != nil {
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, ""); err != nil {
 		t.Fatalf("RevokeWorkspaceGrant: %v", err)
 	}
-	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, true); !errors.Is(err, ErrNotFound) {
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second revoke = %v, want ErrNotFound", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestWorkspaceGrantsBelowSuperAdminRefuseAdmins(t *testing.T) {
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	if err := db.GrantWorkspace(ctx, w.ID, user.ID, owner.ID, false); err != nil {
+	if err := db.GrantWorkspace(ctx, w.ID, user.ID, owner.ID); err != nil {
 		t.Fatalf("grant a collaborator: %v", err)
 	}
 	for _, id := range []domain.MemberID{user.ID, other.ID} {
@@ -243,20 +243,20 @@ func TestWorkspaceGrantsBelowSuperAdminRefuseAdmins(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, false); !errors.Is(err, ErrConflict) {
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, owner.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("revoke a promoted admin's grant = %v, want ErrConflict", err)
 	}
-	if err := db.GrantWorkspace(ctx, w.ID, other.ID, owner.ID, false); !errors.Is(err, ErrConflict) {
+	if err := db.GrantWorkspace(ctx, w.ID, other.ID, owner.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("grant a promoted admin = %v, want ErrConflict", err)
 	}
 	grants, err := db.ListWorkspaceGrants(ctx, w.ID)
 	if err != nil || len(grants) != 1 || grants[0].MemberID != user.ID {
 		t.Fatalf("grants = %+v, %v; want only %s's, untouched", grants, err, user.ID)
 	}
-	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, true); err != nil {
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, ""); err != nil {
 		t.Fatalf("super admin's revoke: %v", err)
 	}
-	if err := db.GrantWorkspace(ctx, w.ID, other.ID, owner.ID, true); err != nil {
+	if err := db.GrantWorkspace(ctx, w.ID, other.ID, ""); err != nil {
 		t.Fatalf("super admin's grant: %v", err)
 	}
 }
@@ -320,7 +320,7 @@ func TestSetWorkspaceOwner(t *testing.T) {
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.GrantWorkspace(ctx, w.ID, next.ID, owner.ID, true); err != nil {
+	if err := db.GrantWorkspace(ctx, w.ID, next.ID, super.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SetWorkspaceOwner(ctx, w.ID, user.ID, super.ID); !errors.Is(err, ErrConflict) {
@@ -417,9 +417,9 @@ func TestDeleteMemberGuards(t *testing.T) {
 		name string
 		fn   func(*DB, domain.MemberID) error
 	}{
-		{"DeleteMember", func(db *DB, id domain.MemberID) error { return db.DeleteMember(ctx, id) }},
+		{"DeleteMember", func(db *DB, id domain.MemberID) error { return db.DeleteMember(ctx, id, "") }},
 		{"DeleteMemberWithPreferences", func(db *DB, id domain.MemberID) error {
-			return db.DeleteMemberWithPreferences(ctx, id, func([]string) error { return nil })
+			return db.DeleteMemberWithPreferences(ctx, id, "", func([]string) error { return nil })
 		}},
 	} {
 		t.Run(del.name, func(t *testing.T) {
@@ -633,19 +633,22 @@ func TestApproveMemberBelowAdminIsGuardedInTheWrite(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	pending := &domain.Member{DisplayName: "Pat", PublicKey: testKey(t, "pat"), Color: "#e6194b", Role: domain.RoleCollaborator, Pending: true}
-	if err := db.CreateMember(ctx, pending); err != nil {
-		t.Fatal(err)
+	admin := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#3cb44b", Role: domain.RoleAdmin}
+	for _, m := range []*domain.Member{pending, admin} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := db.SetMemberRole(ctx, pending.ID, domain.RoleSuperAdmin, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.ApproveMember(ctx, pending.ID, false); !errors.Is(err, ErrConflict) {
+	if err := db.ApproveMember(ctx, pending.ID, admin.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("approving a promoted member below admin only = %v, want ErrConflict", err)
 	}
 	if m, err := db.GetMember(ctx, pending.ID); err != nil || !m.Pending {
 		t.Fatalf("member after the refused approval = %+v, %v; want still pending", m, err)
 	}
-	if err := db.ApproveMember(ctx, pending.ID, true); err != nil {
+	if err := db.ApproveMember(ctx, pending.ID, ""); err != nil {
 		t.Fatalf("a super admin's approval: %v", err)
 	}
 }
@@ -675,5 +678,88 @@ func TestSetMemberRoleChecksTheCallerInTheTransaction(t *testing.T) {
 	}
 	if _, err := db.SetMemberRole(ctx, target.ID, domain.RoleSuperAdmin, other.ID); err != nil {
 		t.Fatalf("a super admin's promotion: %v", err)
+	}
+}
+
+// Every write whose authority is the caller's role reads that role in the
+// write, so a console demotion, or a lost ownership, landing between the
+// RPC's check and the write is refused and changes nothing.
+func TestPrivilegedWritesCheckTheCallerInTheWrite(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	sam := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#e6194b", Role: domain.RoleSuperAdmin}
+	sue := &domain.Member{DisplayName: "Sue", PublicKey: testKey(t, "sue"), Color: "#3cb44b", Role: domain.RoleSuperAdmin}
+	ada := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#ffe119", Role: domain.RoleAdmin}
+	bo := &domain.Member{DisplayName: "Bo", PublicKey: testKey(t, "bo"), Color: "#4363d8", Role: domain.RoleAdmin}
+	dee := &domain.Member{DisplayName: "Dee", PublicKey: testKey(t, "dee"), Color: "#f58231", Role: domain.RoleCollaborator}
+	pat := &domain.Member{DisplayName: "Pat", PublicKey: testKey(t, "pat"), Color: "#911eb4", Role: domain.RoleCollaborator, Pending: true}
+	for _, m := range []*domain.Member{sam, sue, ada, bo, dee, pat} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := &domain.Workspace{Name: "web", OwnerID: ada.ID}
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GrantWorkspace(ctx, w.ID, dee.ID, sue.ID); err != nil {
+		t.Fatal(err)
+	}
+	pids, fewer := int64(64), int64(1)
+	if _, err := db.UpdateServerRunLimits(ctx, sue.ID, nil, nil, &pids); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetMemberRole(ctx, sam.ID, domain.RoleAdmin, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetMemberRole(ctx, bo.ID, domain.RoleCollaborator, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	refused := map[string]error{
+		"GrantWorkspace":       db.GrantWorkspace(ctx, w.ID, pat.ID, sam.ID),
+		"RevokeWorkspaceGrant": db.RevokeWorkspaceGrant(ctx, w.ID, dee.ID, sam.ID),
+		"DeleteMember":         db.DeleteMember(ctx, dee.ID, sam.ID),
+		"DeleteMemberWithPreferences": db.DeleteMemberWithPreferences(ctx, dee.ID, sam.ID,
+			func([]string) error { return nil }),
+		"ApproveMember": db.ApproveMember(ctx, pat.ID, bo.ID),
+	}
+	_, refused["SetWorkspaceOwner"] = db.SetWorkspaceOwner(ctx, w.ID, sam.ID, sam.ID)
+	_, refused["UpdateServerRunLimits"] = db.UpdateServerRunLimits(ctx, sam.ID, nil, nil, &fewer)
+	for name, err := range refused {
+		if !errors.Is(err, ErrConflict) {
+			t.Errorf("%s by a demoted caller = %v, want ErrConflict", name, err)
+		}
+	}
+
+	if ws, err := db.GetWorkspace(ctx, w.ID); err != nil || ws.OwnerID != ada.ID {
+		t.Fatalf("workspace after the refused owner change = %+v, %v; want owner %s", ws, err, ada.ID)
+	}
+	grants, err := db.ListWorkspaceGrants(ctx, w.ID)
+	if err != nil || len(grants) != 1 || grants[0].MemberID != dee.ID {
+		t.Fatalf("grants after the refused changes = %+v, %v; want only %s's", grants, err, dee.ID)
+	}
+	if m, err := db.GetMember(ctx, pat.ID); err != nil || !m.Pending {
+		t.Fatalf("member after the refused approval = %+v, %v; want still pending", m, err)
+	}
+	if limits, err := db.ServerRunLimits(ctx); err != nil || limits.Pids != pids {
+		t.Fatalf("limits after the refused update = %+v, %v; want pids %d", limits, err, pids)
+	}
+
+	if err := db.GrantWorkspace(ctx, w.ID, bo.ID, ada.ID); err != nil {
+		t.Fatalf("the owner's grant: %v", err)
+	}
+	if _, err := db.SetWorkspaceOwner(ctx, w.ID, sue.ID, sue.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, bo.ID, ada.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("revoke by a former owner = %v, want ErrConflict", err)
+	}
+	if err := db.ApproveMember(ctx, pat.ID, ada.ID); err != nil {
+		t.Fatalf("an admin's approval of a collaborator: %v", err)
+	}
+	if err := db.DeleteMember(ctx, dee.ID, sue.ID); err != nil {
+		t.Fatalf("a super admin's removal: %v", err)
 	}
 }

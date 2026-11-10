@@ -275,7 +275,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			if prefs := s.cfg.Services.Preferences; prefs != nil {
 				deleteMember = prefs.DeleteMember
 			}
-			if err := deleteMember(ctx, id); err != nil {
+			if err := deleteMember(ctx, id, member); err != nil {
 				return memberGuardError(err, id, "delete", "removing")
 			}
 			deleted = true

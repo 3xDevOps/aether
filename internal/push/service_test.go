@@ -170,7 +170,7 @@ func (h *harness) member(name string) *domain.Member {
 	if err := h.db.CreateMember(h.ctx, m); err != nil {
 		h.t.Fatalf("create member: %v", err)
 	}
-	if err := h.db.GrantWorkspace(h.ctx, h.ws.ID, m.ID, "", true); err != nil {
+	if err := h.db.GrantWorkspace(h.ctx, h.ws.ID, m.ID, ""); err != nil {
 		h.t.Fatalf("grant workspace: %v", err)
 	}
 	return m

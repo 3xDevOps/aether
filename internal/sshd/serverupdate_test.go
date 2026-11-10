@@ -317,7 +317,7 @@ func TestServerUpdateRemovedMemberIsDenied(t *testing.T) {
 	e := updateEnv(t, &stubUpdates{})
 	signer, member := addMember(t, e, "Gone", domain.RoleAdmin, false)
 	c := controlAs(t, e, signer)
-	if err := e.store.DeleteMember(context.Background(), member.ID); err != nil {
+	if err := e.store.DeleteMember(context.Background(), member.ID, ""); err != nil {
 		t.Fatalf("delete member: %v", err)
 	}
 	wantDenied(t, c.Call(protocol.MethodServerUpdate,

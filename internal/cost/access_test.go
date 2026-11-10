@@ -41,7 +41,7 @@ func TestAdmitNeedsTheWorkspace(t *testing.T) {
 	if err = svc.Admit(ctx, ws.ID, member.ID); !errors.Is(err, permissions.ErrNoAccess) {
 		t.Fatalf("Admit without a grant = %v, want ErrNoAccess", err)
 	}
-	if err = db.GrantWorkspace(ctx, ws.ID, member.ID, "", true); err != nil {
+	if err = db.GrantWorkspace(ctx, ws.ID, member.ID, ""); err != nil {
 		t.Fatalf("GrantWorkspace: %v", err)
 	}
 	if err = svc.Admit(ctx, ws.ID, member.ID); err != nil {

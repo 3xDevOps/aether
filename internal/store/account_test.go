@@ -52,7 +52,7 @@ func TestAccountSharesAreDirectionalAndCascade(t *testing.T) {
 	if _, err = db.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = db.DeleteMember(ctx, grantee.ID); err != nil {
+	if err = db.DeleteMember(ctx, grantee.ID, ""); err != nil {
 		t.Fatalf("DeleteMember: %v", err)
 	}
 	shared, err = db.AccountSharedWith(ctx, owner.ID, grantee.ID)
@@ -78,7 +78,7 @@ func TestSharedRunKeepsAccountMemberInUse(t *testing.T) {
 	if err := db.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := db.DeleteMember(ctx, account.ID); !errors.Is(err, ErrInUse) {
+	if err := db.DeleteMember(ctx, account.ID, ""); !errors.Is(err, ErrInUse) {
 		t.Fatalf("DeleteMember account with dependent run: %v, want ErrInUse", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestRunHomeMemberIsTheLauncherAndSurvivesHandoff(t *testing.T) {
 	if got.MemberID != owner.ID || got.HomeMemberID != launcher.ID || got.HomeMember() != launcher.ID {
 		t.Fatalf("after handoffs owner/home = %s/%s (%s), want %s/%s", got.MemberID, got.HomeMemberID, got.HomeMember(), owner.ID, launcher.ID)
 	}
-	if err = db.DeleteMember(ctx, launcher.ID); !errors.Is(err, ErrInUse) {
+	if err = db.DeleteMember(ctx, launcher.ID, ""); !errors.Is(err, ErrInUse) {
 		t.Fatalf("DeleteMember of a run's home member: %v, want ErrInUse", err)
 	}
 }

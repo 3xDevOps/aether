@@ -700,9 +700,11 @@ func (d *DB) GetMemberByTailnetLogin(ctx context.Context, login string) (*domain
 	return m, nil
 }
 
-func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID, anyRole bool) error {
+func (d *DB) ApproveMember(ctx context.Context, id, by domain.MemberID) error {
 	res, err := d.db.ExecContext(ctx,
-		`UPDATE members SET pending = 0 WHERE id = ?1 AND (?2 OR role NOT IN ('admin', 'super_admin'))`, id, anyRole)
+		`UPDATE members SET pending = 0 WHERE id = ?1 AND (?2 = '' OR EXISTS (SELECT 1 FROM members c
+		 WHERE c.id = ?2 AND c.pending = 0 AND c.merged_into = ''
+		 AND (c.role = 'super_admin' OR (c.role = 'admin' AND members.role NOT IN ('admin', 'super_admin')))))`, id, by)
 	if err != nil {
 		return fmt.Errorf("store: approve member: %w", err)
 	}
@@ -713,6 +715,14 @@ func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID, anyRole bool
 	}
 	if _, err := d.GetMember(ctx, id); err != nil {
 		return err
+	}
+	var role domain.Role
+	if err := d.db.QueryRowContext(ctx,
+		`SELECT COALESCE((SELECT role FROM members WHERE id = ? AND pending = 0 AND merged_into = ''), '')`, by).Scan(&role); err != nil {
+		return fmt.Errorf("store: approve member: read the role of %s: %w", by, err)
+	}
+	if !role.Admin() {
+		return fmt.Errorf("%w: member %s is no longer an admin", ErrConflict, by)
 	}
 	return fmt.Errorf("%w: member %s is an admin or super admin now; only a super admin approves them", ErrConflict, id)
 }
@@ -789,13 +799,13 @@ func (d *DB) UpdateMember(ctx context.Context, m *domain.Member) error {
 }
 
 // DeleteMember deletes member id and, recording each, its connectors.
-func (d *DB) DeleteMember(ctx context.Context, id domain.MemberID) error {
+func (d *DB) DeleteMember(ctx context.Context, id, by domain.MemberID) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin delete member: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = refuseRemoval(ctx, tx, id); err != nil {
+	if err = refuseRemoval(ctx, tx, id, by); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return err
 		}

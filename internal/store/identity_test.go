@@ -469,7 +469,7 @@ func TestDeleteMemberRemovesIdentitiesDevicesAndInvitations(t *testing.T) {
 	mustInvite(t, db, m.ID, domain.Invitation{Email: "c@example.com", Role: domain.RoleViewer})
 	mustInvite(t, db, admin.ID, domain.Invitation{Email: "m@example.com", Member: m.ID})
 
-	if err := db.DeleteMember(ctx, m.ID); err != nil {
+	if err := db.DeleteMember(ctx, m.ID, ""); err != nil {
 		t.Fatalf("DeleteMember: %v", err)
 	}
 	if _, err := db.GetMemberByIdentity(ctx, "github", "42"); !errors.Is(err, ErrNotFound) {

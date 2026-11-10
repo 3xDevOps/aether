@@ -727,7 +727,7 @@ func TestMemberNotesYieldOnlyToTheWorkspacesAdmin(t *testing.T) {
 		t.Fatal(serr)
 	}
 	for _, m := range []*domain.Member{guest, f.dana} {
-		if gerr := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, owner.ID, true); gerr != nil {
+		if gerr := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, ""); gerr != nil {
 			t.Fatal(gerr)
 		}
 	}
@@ -764,7 +764,7 @@ func TestCapabilitiesFollowTheOwnersReach(t *testing.T) {
 	}
 	viewer, outsider := f.member("Vic", domain.RoleViewer), f.member("Cy", domain.RoleCollaborator)
 	for _, m := range []*domain.Member{f.dana, viewer} {
-		if gerr := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, "", true); gerr != nil {
+		if gerr := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, ""); gerr != nil {
 			t.Fatal(gerr)
 		}
 	}
@@ -803,7 +803,7 @@ func TestMemoryLeavesOutSessionsWithAnUnreachableWorkspace(t *testing.T) {
 		ws domain.WorkspaceID
 		m  *domain.Member
 	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
-		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, "", true); err != nil {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -882,7 +882,7 @@ func TestMemoryWritesLeaveHiddenSessionsNotesAlone(t *testing.T) {
 		ws domain.WorkspaceID
 		m  *domain.Member
 	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
-		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, "", true); err != nil {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -939,7 +939,7 @@ func TestMemoryAddKeepsHiddenDuplicatesHidden(t *testing.T) {
 		ws domain.WorkspaceID
 		m  *domain.Member
 	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
-		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, "", true); err != nil {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -992,7 +992,7 @@ func TestAHiddenReplacementIsNotLinked(t *testing.T) {
 		ws domain.WorkspaceID
 		m  *domain.Member
 	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
-		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, "", true); err != nil {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

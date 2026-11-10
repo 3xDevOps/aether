@@ -61,7 +61,7 @@ func TestWaitConditionsLeaveOutTheOwnersReadsForOthers(t *testing.T) {
 	if err := db.CreateWorkspace(t.Context(), ws); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.GrantWorkspace(t.Context(), ws.ID, members["owner"].ID, "", true); err != nil {
+	if err := db.GrantWorkspace(t.Context(), ws.ID, members["owner"].ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	run := &domain.Run{WorkspaceID: ws.ID, MemberID: members["owner"].ID, Task: "t", Harness: "claude", Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}

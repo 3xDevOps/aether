@@ -114,7 +114,7 @@ func newScopeWorld(t *testing.T) *scopeWorld {
 		return ws
 	}
 	w.wsA, w.wsB = workspace("a", w.a.ID), workspace("b", w.b.ID)
-	if err := e.db.GrantWorkspace(ctx, w.wsA.ID, w.u.ID, w.a.ID, true); err != nil {
+	if err := e.db.GrantWorkspace(ctx, w.wsA.ID, w.u.ID, w.a.ID); err != nil {
 		t.Fatal(err)
 	}
 	run := func(ws *domain.Workspace, owner domain.MemberID, status domain.RunStatus) *domain.Run {
@@ -521,7 +521,7 @@ func TestScheduleReplaceAndDeleteNeedItsCreatorOrTheWorkspaceAdmin(t *testing.T)
 	t.Parallel()
 	w := newScopeWorld(t)
 	a := string(w.wsA.ID)
-	if err := w.e.db.GrantWorkspace(t.Context(), w.wsA.ID, w.n.ID, w.a.ID, true); err != nil {
+	if err := w.e.db.GrantWorkspace(t.Context(), w.wsA.ID, w.n.ID, w.a.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.call(t, "A", protocol.MethodTemplateSave, protocol.TemplateSaveParams{

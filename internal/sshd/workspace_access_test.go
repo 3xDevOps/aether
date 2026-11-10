@@ -46,7 +46,7 @@ func (e *accessEnv) introduce(t *testing.T, admin domain.MemberID, members ...do
 	t.Helper()
 	ws := ownedWorkspace(t, e.testEnv, "shared-"+string(admin), admin)
 	for _, m := range members {
-		if err := e.db.GrantWorkspace(context.Background(), ws.ID, m, e.member.ID, true); err != nil {
+		if err := e.db.GrantWorkspace(context.Background(), ws.ID, m, e.member.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -531,7 +531,7 @@ func TestRelaunchNeedsTheHomeMemberInEveryWorkspace(t *testing.T) {
 	_, launcher := addMember(t, e.testEnv, "L", domain.RoleCollaborator, false)
 	_, account := addMember(t, e.testEnv, "O", domain.RoleCollaborator, false)
 	for _, m := range []domain.MemberID{launcher.ID, account.ID, e.u.ID} {
-		if err := e.db.GrantWorkspace(ctx, e.wsA.ID, m, e.member.ID, true); err != nil {
+		if err := e.db.GrantWorkspace(ctx, e.wsA.ID, m, e.member.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -546,7 +546,7 @@ func TestRelaunchNeedsTheHomeMemberInEveryWorkspace(t *testing.T) {
 	if _, err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.RevokeWorkspaceGrant(ctx, e.wsA.ID, launcher.ID, true); err != nil {
+	if err := e.db.RevokeWorkspaceGrant(ctx, e.wsA.ID, launcher.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	u := controlAs(t, e.testEnv, e.uKey)
@@ -557,7 +557,7 @@ func TestRelaunchNeedsTheHomeMemberInEveryWorkspace(t *testing.T) {
 	if calls := e.runs.Calls(); len(calls) != 0 {
 		t.Fatalf("scheduler calls after the refused relaunch = %v, want none", calls)
 	}
-	if err := e.db.GrantWorkspace(ctx, e.wsA.ID, launcher.ID, e.member.ID, true); err != nil {
+	if err := e.db.GrantWorkspace(ctx, e.wsA.ID, launcher.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := u.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: string(run.ID)}, nil); err != nil {
@@ -578,7 +578,7 @@ func TestWorkspaceDeleteNotifiesEveryoneItLetIn(t *testing.T) {
 		_, err := e.bus.Publish(ctx, events.Event{WorkspaceID: id, ActorID: actor, Payload: events.WorkspaceDeletedPayload{}})
 		return err
 	}
-	if err := e.db.GrantWorkspace(ctx, e.wsA.ID, e.u.ID, e.a.ID, true); err != nil {
+	if err := e.db.GrantWorkspace(ctx, e.wsA.ID, e.u.ID, e.a.ID); err != nil {
 		t.Fatal(err)
 	}
 	feed := func(m domain.MemberID) <-chan protocol.Event {

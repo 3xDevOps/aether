@@ -158,11 +158,7 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	caller, err := s.cfg.Store.GetMember(ctx, member)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	if approveErr := s.cfg.Store.ApproveMember(ctx, id, caller.Role == domain.RoleSuperAdmin); approveErr != nil {
+	if approveErr := s.cfg.Store.ApproveMember(ctx, id, member); approveErr != nil {
 		return nil, rpcError(approveErr)
 	}
 	if before.Pending {

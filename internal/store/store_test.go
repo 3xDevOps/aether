@@ -411,7 +411,7 @@ func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
 		t.Fatalf("UpdateMemberImage missing member = %v, want ErrNotFound", err)
 	}
 
-	if err := db.DeleteMember(ctx, m.ID); err != nil {
+	if err := db.DeleteMember(ctx, m.ID, ""); err != nil {
 		t.Fatalf("DeleteMember: %v", err)
 	}
 	if _, err := db.GetMember(ctx, m.ID); !errors.Is(err, ErrNotFound) {
@@ -538,7 +538,7 @@ func TestMemberTailnetIdentity(t *testing.T) {
 		t.Fatal("CreateMember accepted a member with no identity at all")
 	}
 
-	if approveErr := db.ApproveMember(ctx, m.ID, true); approveErr != nil {
+	if approveErr := db.ApproveMember(ctx, m.ID, ""); approveErr != nil {
 		t.Fatalf("ApproveMember: %v", approveErr)
 	}
 	got, err = db.GetMember(ctx, m.ID)
@@ -551,7 +551,7 @@ func TestMemberTailnetIdentity(t *testing.T) {
 	if got.TailnetLogin != m.TailnetLogin || got.DisplayName != m.DisplayName {
 		t.Errorf("ApproveMember touched other fields: %+v", got)
 	}
-	if err := db.ApproveMember(ctx, "m_missing", true); !errors.Is(err, ErrNotFound) {
+	if err := db.ApproveMember(ctx, "m_missing", ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ApproveMember unknown id: %v, want ErrNotFound", err)
 	}
 }
@@ -849,7 +849,7 @@ func TestForeignKeyEnforcement(t *testing.T) {
 	if err := db.DeleteWorkspace(ctx, w.ID); !errors.Is(err, ErrInUse) {
 		t.Fatalf("DeleteWorkspace with dependent runs: %v, want ErrInUse", err)
 	}
-	if err := db.DeleteMember(ctx, m.ID); !errors.Is(err, ErrInUse) {
+	if err := db.DeleteMember(ctx, m.ID, ""); !errors.Is(err, ErrInUse) {
 		t.Fatalf("DeleteMember with dependent runs: %v, want ErrInUse", err)
 	}
 }

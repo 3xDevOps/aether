@@ -81,7 +81,7 @@ func TestIntegrationWorkspaceEnvironment(t *testing.T) {
 	if err = srv.Store().CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err = srv.Store().GrantWorkspace(ctx, ws.ID, launcher.ID, admin.ID, true); err != nil {
+	if err = srv.Store().GrantWorkspace(ctx, ws.ID, launcher.ID, admin.ID); err != nil {
 		t.Fatalf("grant workspace: %v", err)
 	}
 

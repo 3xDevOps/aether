@@ -17,8 +17,9 @@ type PreferenceService interface {
 	Add(ctx context.Context, member domain.MemberID, text, workspaceID, source, ref string) (protocol.PreferenceResult, error)
 	Update(ctx context.Context, member domain.MemberID, p protocol.PreferenceUpdateParams, source, ref string) (protocol.PreferenceResult, error)
 	Delete(ctx context.Context, member domain.MemberID, p protocol.PreferenceDeleteParams) (protocol.PreferenceDeleteResult, error)
-	// DeleteMember deletes the member together with their preferences.
-	DeleteMember(ctx context.Context, member domain.MemberID) error
+	// DeleteMember deletes the member together with their preferences on
+	// behalf of by, refused as store.Store.DeleteMember refuses.
+	DeleteMember(ctx context.Context, member, by domain.MemberID) error
 }
 
 func init() {

@@ -466,7 +466,7 @@ func TestDeletedMemberStaysDeletedInARestoredDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
-	if err = f.svc.DeleteMember(ctx, f.alice); err != nil {
+	if err = f.svc.DeleteMember(ctx, f.alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.db.Close(); err != nil {
@@ -554,11 +554,11 @@ func TestFailedMemberDeleteKeepsPreferences(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	f.add(t, "Prefer table output")
-	if err := f.svc.DeleteMember(ctx, "mem-missing"); !errors.Is(err, store.ErrNotFound) {
+	if err := f.svc.DeleteMember(ctx, "mem-missing", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("DeleteMember of a missing member = %v", err)
 	}
 	failing := New(f.db, filepath.Join(f.dir, "no-such-dir", "preference-tombstones"))
-	if err := failing.DeleteMember(ctx, f.alice); err == nil {
+	if err := failing.DeleteMember(ctx, f.alice, ""); err == nil {
 		t.Fatal("DeleteMember with no tombstone file succeeded")
 	}
 	if got, _ := f.svc.List(ctx, f.alice, protocol.PreferenceListParams{}); len(got.Preferences) != 1 {

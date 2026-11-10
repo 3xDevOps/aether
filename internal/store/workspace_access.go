@@ -22,20 +22,23 @@ type WorkspaceAccessStore interface {
 	// included, with the members whose account or home a session there
 	// uses.
 	WorkspaceMembers(ctx context.Context, workspaces []domain.WorkspaceID) ([]domain.MemberID, error)
-	// GrantWorkspace lets member into ws; granting an existing grant is a
-	// no-op. ErrNotFound when either does not exist. Unless anyRole, an
-	// admin or super admin member is refused with ErrConflict, decided in
-	// the write itself.
-	GrantWorkspace(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID, anyRole bool) error
-	// RevokeWorkspaceGrant removes member's grant on ws; ErrNotFound when
-	// there is none. Unless anyRole, an admin or super admin member is
-	// refused with ErrConflict, decided in the write itself.
-	RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, member domain.MemberID, anyRole bool) error
+	// GrantWorkspace lets member into ws on behalf of by; granting an
+	// existing grant is a no-op. ErrNotFound when either does not exist.
+	// The write itself decides by's authority, refusing with ErrConflict
+	// unless by is an approved super admin, or an approved admin who owns
+	// ws granting a member below admin. An empty by is the machine
+	// administrator.
+	GrantWorkspace(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID) error
+	// RevokeWorkspaceGrant removes member's grant on ws on behalf of by,
+	// whose authority is decided as for GrantWorkspace; ErrNotFound when
+	// there is no grant.
+	RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID) error
 	// SetWorkspaceOwner makes owner, an approved admin or super admin,
 	// the owner of ws and returns the previous owner, in one transaction:
 	// owner's grant on ws goes, and a previous owner who is not a super
 	// admin keeps reaching ws through a grant by by. ErrConflict when
-	// owner is not an approved admin.
+	// owner is not an approved admin, or by, unless empty, is not an
+	// approved super admin.
 	SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner, by domain.MemberID) (domain.MemberID, error)
 	// JoinMember creates m, which has a public key, with a grant on each
 	// of workspaces that still exists and issuer administers.
@@ -135,15 +138,22 @@ func (d *DB) WorkspaceMembers(ctx context.Context, workspaces []domain.Workspace
 	return out, nil
 }
 
-func (d *DB) GrantWorkspace(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID, anyRole bool) error {
+// grantAuthority is the SQL condition that ?2, changing the grant of
+// member row m on workspace ?1, administers ?1 for m at this moment.
+const grantAuthority = `(?2 = '' OR EXISTS (SELECT 1 FROM members c
+	WHERE c.id = ?2 AND c.pending = 0 AND c.merged_into = ''
+	AND (c.role = 'super_admin' OR (c.role = 'admin' AND m.role NOT IN ('admin', 'super_admin')
+		AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = ?1 AND w.owner_member_id = c.id)))))`
+
+func (d *DB) GrantWorkspace(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID) error {
 	at, err := encodeTime(time.Now())
 	if err != nil {
 		return fmt.Errorf("store: grant workspace: %w", err)
 	}
 	res, err := d.db.ExecContext(ctx,
 		`INSERT INTO workspace_grants (workspace_id, member_id, granted_by, created_at)
-		 SELECT ?1, id, ?2, ?3 FROM members WHERE id = ?4 AND (?5 OR role NOT IN ('admin', 'super_admin'))
-		 ON CONFLICT (workspace_id, member_id) DO NOTHING`, ws, by, at, member, anyRole)
+		 SELECT ?1, m.id, ?2, ?3 FROM members m WHERE m.id = ?4 AND `+grantAuthority+`
+		 ON CONFLICT (workspace_id, member_id) DO NOTHING`, ws, by, at, member)
 	if err != nil {
 		return fmt.Errorf("store: grant workspace: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -158,16 +168,13 @@ func (d *DB) GrantWorkspace(ctx context.Context, ws domain.WorkspaceID, member, 
 	if err != nil {
 		return err
 	}
-	if !anyRole && m.Role.Admin() {
-		return adminGranteeError(m)
-	}
-	return nil
+	return d.grantRefusal(ctx, ws, m, by)
 }
 
-func (d *DB) RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, member domain.MemberID, anyRole bool) error {
+func (d *DB) RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID) error {
 	res, err := d.db.ExecContext(ctx,
-		`DELETE FROM workspace_grants WHERE workspace_id = ?1 AND member_id = ?2
-		 AND (?3 OR EXISTS (SELECT 1 FROM members WHERE id = ?2 AND role NOT IN ('admin', 'super_admin')))`, ws, member, anyRole)
+		`DELETE FROM workspace_grants WHERE workspace_id = ?1 AND member_id = ?3
+		 AND EXISTS (SELECT 1 FROM members m WHERE m.id = ?3 AND `+grantAuthority+`)`, ws, by, member)
 	if err != nil {
 		return fmt.Errorf("store: revoke workspace grant: %w", err)
 	}
@@ -190,11 +197,39 @@ func (d *DB) RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, me
 	if err != nil {
 		return err
 	}
-	return adminGranteeError(m)
+	if err := d.grantRefusal(ctx, ws, m, by); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: member %s's grant on %s changed meanwhile; retry", ErrConflict, member, ws)
 }
 
-func adminGranteeError(m *domain.Member) error {
-	return fmt.Errorf("%w: member %s is %s now; only a super admin grants or revokes an admin", ErrConflict, m.ID, m.Role)
+// grantRefusal explains why grantAuthority refused by changing m's grant
+// on ws, read after the refused write; nil when it no longer refuses.
+func (d *DB) grantRefusal(ctx context.Context, ws domain.WorkspaceID, m *domain.Member, by domain.MemberID) error {
+	if by == "" {
+		return nil
+	}
+	var (
+		role         domain.Role
+		exists, owns bool
+	)
+	if err := d.db.QueryRowContext(ctx,
+		`SELECT COALESCE((SELECT role FROM members WHERE id = ?2 AND pending = 0 AND merged_into = ''), ''),
+		 EXISTS (SELECT 1 FROM workspaces WHERE id = ?1),
+		 EXISTS (SELECT 1 FROM workspaces WHERE id = ?1 AND owner_member_id = ?2)`, ws, by).Scan(&role, &exists, &owns); err != nil {
+		return fmt.Errorf("store: read the authority of %s on %s: %w", by, ws, err)
+	}
+	switch {
+	case role == domain.RoleSuperAdmin:
+		return nil
+	case !exists:
+		return ErrNotFound
+	case role != domain.RoleAdmin || !owns:
+		return fmt.Errorf("%w: member %s no longer administers workspace %s", ErrConflict, by, ws)
+	case m.Role.Admin():
+		return fmt.Errorf("%w: member %s is %s now; only a super admin grants or revokes an admin", ErrConflict, m.ID, m.Role)
+	}
+	return nil
 }
 
 func (d *DB) SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner, by domain.MemberID) (domain.MemberID, error) {
@@ -207,6 +242,9 @@ func (d *DB) SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner
 		return "", fmt.Errorf("store: begin set workspace owner: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = requireSuperAdmin(ctx, tx, by); err != nil {
+		return "", err
+	}
 	var previous domain.MemberID
 	err = tx.QueryRowContext(ctx, `SELECT owner_member_id FROM workspaces WHERE id = ?`, ws).Scan(&previous)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -117,7 +117,7 @@ func TestSelect(t *testing.T) {
 				if name == tc.outside {
 					continue
 				}
-				if grantErr := db.GrantWorkspace(ctx, ws.ID, id, "", true); grantErr != nil {
+				if grantErr := db.GrantWorkspace(ctx, ws.ID, id, ""); grantErr != nil {
 					t.Fatal(grantErr)
 				}
 			}

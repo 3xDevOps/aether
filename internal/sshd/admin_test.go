@@ -165,7 +165,8 @@ func TestRefuseDeletingLastSuperAdmin(t *testing.T) {
 }
 
 // A console demotion landing after member.remove counted the other super
-// admin must not let the removal take the last one.
+// admin must not let the removal take the last one: the delete re-reads
+// the demoted caller's role and refuses.
 func TestMemberRemoveRechecksTheLastSuperAdminWhenDeleting(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -178,8 +179,9 @@ func TestMemberRemoveRechecksTheLastSuperAdminWhenDeleting(t *testing.T) {
 	}
 	c := controlClient(t, e)
 	var pe *protocol.Error
-	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(second.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied || pe.Message != "refusing to delete the last super admin" {
-		t.Fatalf("remove the super admin left after a console demotion = %v, want the last-super-admin denial", err)
+	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(second.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeConflict ||
+		!strings.Contains(pe.Message, "member "+string(e.member.ID)+" is no longer a super admin") {
+		t.Fatalf("remove the super admin left after a console demotion = %v, want the demoted caller refused", err)
 	}
 	if got, err := e.db.GetMember(context.Background(), second.ID); err != nil || got.Role != domain.RoleSuperAdmin {
 		t.Fatalf("last super admin after the refused removal = %+v, %v", got, err)

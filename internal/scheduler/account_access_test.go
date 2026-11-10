@@ -20,10 +20,10 @@ func TestSweepMovesARunWhoseAccountOwnerLostTheWorkspace(t *testing.T) {
 		enhancedClaude(cfg)
 		cfg.Store = cfg.Store.(storetest.Unscoped).DB
 	})
-	if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, e.member.ID, "", true); err != nil {
+	if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, e.member.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, e.owner.ID, "", true); err != nil {
+	if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, e.owner.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.share(t)
@@ -34,7 +34,7 @@ func TestSweepMovesARunWhoseAccountOwnerLostTheWorkspace(t *testing.T) {
 		t.Fatalf("run while its account owner reaches the workspace = %+v, %v; want it kept on Grace's account", row, err)
 	}
 
-	if err := e.db.RevokeWorkspaceGrant(t.Context(), e.ws.ID, e.owner.ID, true); err != nil {
+	if err := e.db.RevokeWorkspaceGrant(t.Context(), e.ws.ID, e.owner.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.leaveRevokedAccounts(t.Context(), nil)
@@ -52,7 +52,7 @@ func TestSweepStopsAHandedOffRunWhoseLauncherLostTheWorkspace(t *testing.T) {
 	})
 	lin := e.addRecipient(t)
 	for _, m := range []domain.MemberID{e.member.ID, lin.ID} {
-		if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, m, "", true); err != nil {
+		if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, m, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,7 +75,7 @@ func TestSweepStopsAHandedOffRunWhoseLauncherLostTheWorkspace(t *testing.T) {
 		t.Fatalf("handed-off run while its launcher reaches the workspace = %+v, %v; want it kept", row, err)
 	}
 
-	if err := e.db.RevokeWorkspaceGrant(t.Context(), e.ws.ID, e.member.ID, true); err != nil {
+	if err := e.db.RevokeWorkspaceGrant(t.Context(), e.ws.ID, e.member.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.leaveRevokedAccounts(t.Context(), nil)
@@ -94,7 +94,7 @@ func unscopedFallbackEnv(t *testing.T) *shareEnv {
 		enhancedClaude(cfg)
 		cfg.Store = cfg.Store.(storetest.Unscoped).DB
 	})
-	if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, e.member.ID, "", true); err != nil {
+	if err := e.db.GrantWorkspace(t.Context(), e.ws.ID, e.member.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -102,7 +102,7 @@ func unscopedFallbackEnv(t *testing.T) *shareEnv {
 
 func (e *shareEnv) revokeWorkspace(t *testing.T) {
 	t.Helper()
-	if err := e.db.RevokeWorkspaceGrant(t.Context(), e.ws.ID, e.member.ID, true); err != nil {
+	if err := e.db.RevokeWorkspaceGrant(t.Context(), e.ws.ID, e.member.ID, ""); err != nil {
 		t.Error(err)
 	}
 }

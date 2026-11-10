@@ -578,7 +578,7 @@ func TestRunSSHEndsWhenAuthorizationOrTheRunGoes(t *testing.T) {
 			}
 		},
 		"member removed": func(t *testing.T, e *testEnv, _ *runSSHTestService, bo *domain.Member) {
-			if err := e.store.DeleteMember(t.Context(), bo.ID); err != nil {
+			if err := e.store.DeleteMember(t.Context(), bo.ID, ""); err != nil {
 				t.Fatal(err)
 			}
 		},

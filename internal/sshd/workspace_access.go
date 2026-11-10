@@ -125,7 +125,7 @@ func (s *Server) workspaceAccessGrant(ctx context.Context, member domain.MemberI
 		}
 	}
 	for _, id := range grant {
-		if err := s.cfg.Store.GrantWorkspace(ctx, ws, id, member, actor.Role == domain.RoleSuperAdmin); err != nil {
+		if err := s.cfg.Store.GrantWorkspace(ctx, ws, id, member); err != nil {
 			return nil, rpcError(err)
 		}
 		s.publishAccess(ctx, member, ws, id, events.AccessGranted)
@@ -222,7 +222,7 @@ func (s *Server) workspaceAccessRevoke(ctx context.Context, member domain.Member
 		if revoked {
 			return nil
 		}
-		if err := s.cfg.Store.RevokeWorkspaceGrant(ctx, ws, id, actor.Role == domain.RoleSuperAdmin); err != nil {
+		if err := s.cfg.Store.RevokeWorkspaceGrant(ctx, ws, id, member); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: member %s has no grant on workspace %s", method, id, ws)}
 			}

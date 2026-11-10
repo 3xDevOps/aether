@@ -297,7 +297,7 @@ func TestRetainedArtifactBlockedStreamStopsOnMembershipRevocation(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer func() { _ = stream.Close() }()
-	if removeErr := e.store.DeleteMember(t.Context(), viewer.ID); removeErr != nil {
+	if removeErr := e.store.DeleteMember(t.Context(), viewer.ID, ""); removeErr != nil {
 		t.Fatal(removeErr)
 	}
 	_, err = stream.Read(make([]byte, 1))
@@ -472,7 +472,7 @@ func TestRetainedArtifactStalledSSHTransportReleasesSource(t *testing.T) {
 			timeout := 3 * time.Second
 			switch cause {
 			case "membership during data", "membership during status":
-				if err := e.store.DeleteMember(t.Context(), viewer.ID); err != nil {
+				if err := e.store.DeleteMember(t.Context(), viewer.ID, ""); err != nil {
 					t.Fatal(err)
 				}
 			case "expiry during data":
@@ -537,7 +537,7 @@ func TestRetainedArtifactResponsiveSSHDownloadAndRevocation(t *testing.T) {
 					t.Fatalf("download = %q, %v", data, err)
 				}
 			case "membership":
-				if err := e.store.DeleteMember(t.Context(), viewer.ID); err != nil {
+				if err := e.store.DeleteMember(t.Context(), viewer.ID, ""); err != nil {
 					t.Fatal(err)
 				}
 				status = protocol.AttachExitMembershipRevoked

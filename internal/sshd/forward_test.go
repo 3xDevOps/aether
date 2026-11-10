@@ -347,7 +347,7 @@ func TestDirectTCPIPTerminalRevokesOnMembershipChange(t *testing.T) {
 		{
 			name: "removed",
 			revoke: func(t *testing.T, e *testEnv, member *domain.Member) {
-				if err := e.store.DeleteMember(t.Context(), member.ID); err != nil {
+				if err := e.store.DeleteMember(t.Context(), member.ID, ""); err != nil {
 					t.Fatalf("remove member: %v", err)
 				}
 			},

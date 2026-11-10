@@ -34,15 +34,8 @@ func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.
 		return "", fmt.Errorf("store: begin set member role: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if by != "" {
-		var super bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM members
-			WHERE id = ? AND role = 'super_admin' AND pending = 0 AND merged_into = '')`, by).Scan(&super); err != nil {
-			return "", fmt.Errorf("store: set member role: %w", err)
-		}
-		if !super {
-			return "", fmt.Errorf("%w: member %s is no longer a super admin", ErrConflict, by)
-		}
+	if err = requireSuperAdmin(ctx, tx, by); err != nil {
+		return "", err
 	}
 	var was domain.Role
 	err = tx.QueryRowContext(ctx, `SELECT role FROM members WHERE id = ? AND merged_into = ''`, id).Scan(&was)
@@ -84,6 +77,24 @@ func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.
 	return was, nil
 }
 
+// requireSuperAdmin refuses a write whose authority is by's super admin
+// role unless by, read in the write's transaction, is still an approved
+// super admin. An empty by is the machine administrator.
+func requireSuperAdmin(ctx context.Context, q queryRower, by domain.MemberID) error {
+	if by == "" {
+		return nil
+	}
+	var super bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM members
+		WHERE id = ? AND role = 'super_admin' AND pending = 0 AND merged_into = '')`, by).Scan(&super); err != nil {
+		return fmt.Errorf("store: read the role of %s: %w", by, err)
+	}
+	if !super {
+		return fmt.Errorf("%w: member %s is no longer a super admin", ErrConflict, by)
+	}
+	return nil
+}
+
 func refuseLastSuperAdmin(ctx context.Context, tx *sql.Tx, id domain.MemberID) error {
 	var others int
 	if err := tx.QueryRowContext(ctx,
@@ -97,9 +108,13 @@ func refuseLastSuperAdmin(ctx context.Context, tx *sql.Tx, id domain.MemberID) e
 	return nil
 }
 
-// refuseRemoval is deleting member id's guard, in the deleting
-// transaction: the last approved super admin and a workspace owner stay.
-func refuseRemoval(ctx context.Context, tx *sql.Tx, id domain.MemberID) error {
+// refuseRemoval is deleting member id's guard on behalf of by, in the
+// deleting transaction: by must still be a super admin, and the last
+// approved super admin and a workspace owner stay.
+func refuseRemoval(ctx context.Context, tx *sql.Tx, id, by domain.MemberID) error {
+	if err := requireSuperAdmin(ctx, tx, by); err != nil {
+		return err
+	}
 	var role domain.Role
 	err := tx.QueryRowContext(ctx, `SELECT role FROM members WHERE id = ?`, id).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -138,7 +138,7 @@ func TestMemberVisibilityKeepsRevokedRunAuthor(t *testing.T) {
 	signer, v := addMember(t, e, "V", domain.RoleCollaborator, false)
 	w.clients["V"] = controlAs(t, e, signer)
 	for _, m := range []domain.MemberID{v.ID, w.n.ID} {
-		if err := e.db.GrantWorkspace(ctx, w.wsB.ID, m, w.b.ID, true); err != nil {
+		if err := e.db.GrantWorkspace(ctx, w.wsB.ID, m, w.b.ID); err != nil {
 			t.Fatal(err)
 		}
 	}

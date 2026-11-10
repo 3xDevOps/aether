@@ -467,7 +467,7 @@ func TestPendingMemberOversizedLineRefused(t *testing.T) {
 
 	// The same member, once approved, keeps the large-line budget the
 	// profile push needs.
-	if err := e.store.ApproveMember(context.Background(), pending.ID, true); err != nil {
+	if err := e.store.ApproveMember(context.Background(), pending.ID, ""); err != nil {
 		t.Fatalf("approve member: %v", err)
 	}
 	approved := controlAs(t, e, pat)
@@ -495,7 +495,7 @@ func TestPendingConnectionUnblockedByApproval(t *testing.T) {
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, nil); err == nil {
 		t.Fatal("pending workspace.list succeeded")
 	}
-	if err := e.store.ApproveMember(context.Background(), pending.ID, true); err != nil {
+	if err := e.store.ApproveMember(context.Background(), pending.ID, ""); err != nil {
 		t.Fatalf("approve member: %v", err)
 	}
 	var wl protocol.WorkspaceListResult

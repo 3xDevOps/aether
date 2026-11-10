@@ -82,10 +82,12 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error)
 	GetMemberByTailnetLogin(ctx context.Context, login string) (*domain.Member, error)
-	// ApproveMember clears only the member's pending flag. Unless anyRole, it
-	// does so only for a member below admin, decided in the same write as
-	// the approval so a role change cannot land between check and approval.
-	ApproveMember(ctx context.Context, id domain.MemberID, anyRole bool) error
+	// ApproveMember clears only the member's pending flag on behalf of by:
+	// an approved super admin approves anyone, an approved admin a member
+	// below admin, and an empty by is the machine administrator. Both
+	// roles are read in the approving write, so a role change cannot land
+	// between check and approval; ErrConflict when by may not approve id.
+	ApproveMember(ctx context.Context, id, by domain.MemberID) error
 	// UpdateMemberImage sets only the member's saved environment image.
 	UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error
 	// UpdateMemberGitIdentity sets only the member's git author name and
@@ -107,8 +109,10 @@ type Store interface {
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	// DeleteMember refuses, in its own transaction, removing the last
 	// approved super admin (ErrLastSuperAdmin) or a member who owns
-	// workspaces (*OwnsWorkspacesError).
-	DeleteMember(ctx context.Context, id domain.MemberID) error
+	// workspaces (*OwnsWorkspacesError), and removal on behalf of by,
+	// unless empty, when by is no longer an approved super admin
+	// (ErrConflict).
+	DeleteMember(ctx context.Context, id, by domain.MemberID) error
 
 	// ShareAccount and RevokeAccountShare report whether the grant changed:
 	// false for one that already existed or was already absent.
