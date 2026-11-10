@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { memberName as storeMemberName } from '@/lib/member-name'
 import { needsInputPrefix, plainReason } from '@/lib/reasons'
 import { isSudo } from '@/lib/run-requests'
@@ -91,7 +92,7 @@ function condition(spec: Spec): NeedsYouCondition {
     since: (run, ctx) => spec.since?.(run, ctx) ?? run.stateChangedAt,
     applies: (run, ctx) => {
       if (!ctx.viewerID || !holds(run, ctx)) return false
-      if (spec.admins && ctx.viewerRole === 'admin') return true
+      if (spec.admins && isAdminRole(ctx.viewerRole)) return true
       return spec.resolvers(run, ctx).includes(ctx.viewerID)
     },
     waitsOn: (run, ctx) =>
@@ -314,7 +315,7 @@ export function deviceNeeds(
   viewer: Pick<StateContext, 'viewerID' | 'viewerRole'>,
   accessPolicy: ServerEdge['access_policy'] | undefined,
 ): DeviceNeed[] {
-  const admin = viewer.viewerRole === 'admin'
+  const admin = isAdminRole(viewer.viewerRole)
   const waiting = (device: Device) =>
     admin
       ? device.status === 'pending' || (device.status === 'registered' && accessPolicy === 'approved-devices')

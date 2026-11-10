@@ -20,7 +20,7 @@ const ownerless: ServerEdge = {
 }
 const desktop = ['edge.status', 'edge.login', 'edge.claim']
 
-function seed(role: 'admin' | 'collaborator', edge: ServerEdge, local: string[] = desktop) {
+function seed(role: 'super_admin' | 'collaborator', edge: ServerEdge, local: string[] = desktop) {
   useStore.setState({
     info: { ...serverInfo, member: { ...serverInfo.member, role } },
     capabilities: { gateway: 'local', methods: ['*'], ws: ['events'], local },
@@ -54,14 +54,14 @@ it('offers Connect my GitHub account only to an admin of a server with no owner'
   expect(screen.queryByRole('button', { name: 'Connect my GitHub account' })).toBeNull()
   unmount()
 
-  seed('admin', ownerless, [])
+  seed('super_admin', ownerless, [])
   render(<RemoteAccessSection client={api()} />)
   expect(screen.queryByRole('button', { name: 'Connect my GitHub account' })).toBeNull()
   expect(screen.getByText('Run aether edge connect from a linked terminal')).toBeTruthy()
 })
 
 it('claims with the code server.edge.claimcode issues and shows the new owner', async () => {
-  seed('admin', ownerless, [...desktop, 'link.status'])
+  seed('super_admin', ownerless, [...desktop, 'link.status'])
   useStore.setState({ linkStatus: null })
   const client = api({
     localLinkStatus: vi.fn(async () => ({ server_configured: true, linked: true, addr: 'edge.example:22', user: 'aether', repo: '', edge_url: edgeURL })),
@@ -81,7 +81,7 @@ it('claims with the code server.edge.claimcode issues and shows the new owner', 
 })
 
 it('says when the server is slow to issue the claim', async () => {
-  seed('admin', ownerless)
+  seed('super_admin', ownerless)
   const client = api({
     localEdgeStatus: vi.fn(async () => ({ edges: [{ edge: edgeURL, account: { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' } }] })),
     serverEdgeClaimCode: vi.fn(() => new Promise<never>(() => {})),
@@ -101,7 +101,7 @@ it('says when the server is slow to issue the claim', async () => {
 })
 
 it('refuses to claim when the gateway now reaches another server', async () => {
-  seed('admin', ownerless)
+  seed('super_admin', ownerless)
   const client = api({
     localEdgeStatus: vi.fn(async () => ({ edges: [{ edge: edgeURL, account: { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' } }] })),
     serverEdgeClaimCode: vi.fn(async () => ({ code: 'abcdefghijklmnopqrstuvwxyz-abcdefghijklmnop', expires_at: '2026-10-12T10:30:00Z' })),
@@ -113,7 +113,7 @@ it('refuses to claim when the gateway now reaches another server', async () => {
 })
 
 it('signs in afresh when the edge revoked the saved token, then claims', async () => {
-  seed('admin', ownerless)
+  seed('super_admin', ownerless)
   const stale = { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' }
   const login = { state: 'pending' as const, edge: edgeURL, signin_origin: edgeURL, user_code: 'WDJB-MJHT', verification_uri: `${edgeURL}/device` }
   const revoked = new ApiError(503, 'the edge revoked this device token; sign in again', undefined, { refusal: { kind: 'token-revoked' } })
@@ -139,7 +139,7 @@ it('signs in afresh when the edge revoked the saved token, then claims', async (
 })
 
 it('refreshes the owner and shows remote_error when the clone remote was not updated', async () => {
-  seed('admin', ownerless)
+  seed('super_admin', ownerless)
   const client = api({
     localEdgeStatus: vi.fn(async () => ({ edges: [{ edge: edgeURL, account: { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' } }] })),
     serverEdgeClaimCode: vi.fn(async () => ({ code: 'wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop', expires_at: '2026-10-12T10:30:00Z' })),

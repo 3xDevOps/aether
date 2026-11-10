@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { RunRetention } from '@/components/run-retention'
@@ -196,7 +197,7 @@ function Explain({ warning, run, onLeave }: { warning: CloseWarning; run: Run | 
       return <>Waiting for it to finish: <Runs ids={warning.run_ids ?? []} onLeave={onLeave} />. Closing wakes them with its outcome.</>
     case 'protected':
       if (run && self.id === run.member_id) return 'Protected. You can still close it as its owner.'
-      if (self.role === 'admin') return 'Protected. You can still close it as an admin.'
+      if (isAdminRole(self.role)) return 'Protected. You can still close it as an admin.'
       return `${warning.detail}.`
     case 'cleanup_pending':
       return `${warning.detail}. Cleanup keeps retrying after the close; the container may stay until it succeeds.`

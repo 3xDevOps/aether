@@ -25,7 +25,7 @@ import type { Api } from '@/lib/api'
 import type { UpdateApplyResult, UpdateBuildStatus, UpdateStatus } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useIsAdmin } from '@/store/hooks'
+import { useIsSuperAdmin } from '@/store/hooks'
 import { applyClientUpdate, installTarget, type ClientApply } from '@/store/updates'
 
 /**
@@ -167,7 +167,7 @@ export function CliBanner({
   client: Api
   serverBehind: boolean
 }) {
-  const isAdmin = useIsAdmin()
+  const superAdmin = useIsSuperAdmin()
   const latest = update.cli.latest ?? ''
   const dismissed = useStore((s) => s.dismissedUpdates.cli)
   const apply = useStore((s) => s.clientApply)
@@ -199,7 +199,7 @@ export function CliBanner({
     installed !== '' && flow.name !== 'applied' && flow.name !== 'rebuilt'
   // The gateway refuses update.apply while server_first is set.
   const serverFirst = update.server_first === true
-  const serverHint = isAdmin
+  const serverHint = superAdmin
     ? serverFirst || serverBehind
       ? 'Update the server first, from its row above or with aether server update; this client updates after it.'
       : ''

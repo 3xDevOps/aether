@@ -15,16 +15,17 @@ import type { AccountAccess, Member } from '@/lib/types'
 import { useFailure } from '@/components/failure'
 import { useStore } from '@/store'
 import { nextMemberOrder, type MemberPatch } from '@/store/members'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsAdmin, useIsSuperAdmin } from '@/store/hooks'
 import { optimistic } from '@/store/optimistic'
 import { onlineMembers } from '@/store/presence'
 
-export const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
+export const roles: Member['role'][] = ['viewer', 'collaborator', 'admin', 'super_admin']
 
 export const roleLabel: Record<Member['role'], string> = {
   viewer: 'Viewer',
   collaborator: 'Collaborator',
   admin: 'Admin',
+  super_admin: 'Super admin',
 }
 
 function accountWords(id: string, access: AccountAccess | null): string {
@@ -44,6 +45,7 @@ export function Roster({ client }: { client: Api }) {
   const self = useStore((s) => s.info?.member)
   const caps = useCapability()
   const isAdmin = useIsAdmin()
+  const superAdmin = useIsSuperAdmin()
   const [access, setAccess] = useState<AccountAccess | null>(null)
   const [removing, setRemoving] = useState<Member | null>(null)
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
@@ -82,8 +84,8 @@ export function Roster({ client }: { client: Api }) {
 
   const changeRole = (member: Member, role: Member['role']) => {
     if (role === member.role) return
-    // Losing your own admin role locks you out at once; the server guards the rest.
-    if (member.id === self?.id && role !== 'admin') {
+    // Losing your own super admin role locks you out at once; the server guards the rest.
+    if (member.id === self?.id && role !== 'super_admin') {
       setDemoting(role)
       return
     }
@@ -95,8 +97,8 @@ export function Roster({ client }: { client: Api }) {
   const all = Object.values(members)
   const roster = all.filter((m) => !m.pending)
   const pending = all.filter((m) => m.pending)
-  const canRole = isAdmin && caps.hasMethod('member.role')
-  const canRemove = isAdmin && caps.hasMethod('member.remove')
+  const canRole = superAdmin && caps.hasMethod('member.role')
+  const canRemove = superAdmin && caps.hasMethod('member.remove')
   const canApprove = isAdmin && caps.hasMethod('member.approve')
 
   return (
@@ -197,8 +199,8 @@ export function Roster({ client }: { client: Api }) {
       )}
       {demoting && self && (
         <Confirm
-          title="Give up your admin role?"
-          description={`You become ${roleLabel[demoting].toLowerCase()} and lose admin access at once. Another admin has to hand it back.`}
+          title="Give up your super admin role?"
+          description={`You become ${roleLabel[demoting].toLowerCase()} and lose server-wide admin access at once. Another super admin has to hand it back.`}
           action={`Become ${roleLabel[demoting].toLowerCase()}`}
           pending={`Becoming ${roleLabel[demoting].toLowerCase()}…`}
           onConfirm={() => client.memberRole(self.id, demoting)}

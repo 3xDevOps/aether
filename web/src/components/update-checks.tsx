@@ -146,7 +146,7 @@ export function UpdateChecks({ client = api }: { client?: Api }) {
       const s = useStore.getState()
       const server = serverTarget(s, Date.now())
       const cli = clientTarget(s)
-      const admin = s.info?.member.role === 'admin'
+      const admin = s.info?.member.role === 'super_admin'
       const offer =
         admin && server.state === 'available'
           ? { key: `server:${server.latest}`, title: `Server ${bareVersion(server.latest)} is available`, body: `The server runs ${server.version}. Open Aether to update it.` }

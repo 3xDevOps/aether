@@ -16,7 +16,7 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { ChildLimitsRow } from '@/routes/settings/children'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsWorkspaceAdmin } from '@/store/hooks'
 
 function budgetWords(report: BudgetReport | undefined): string {
   if (!report?.budget) return 'No budget set. A budget warns and reports; it never stops a session.'
@@ -30,7 +30,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const budget = useStore((s) => s.budgets[workspaceID])
   const caps = useCapability()
-  const isAdmin = useIsAdmin()
+  const isAdmin = useIsWorkspaceAdmin(workspaceID)
   const [dialog, setDialog] = useState<'budget' | 'settings' | null>(null)
   const [settingsClosed, setSettingsClosed] = useState(0)
 

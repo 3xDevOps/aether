@@ -10,6 +10,7 @@ export const eventLabel = {
   'run.title': 'Session title',
   'run.deleted': 'Session deleted',
   'workspace.deleted': 'Workspace deleted',
+  'workspace.access': 'Workspace access',
   'run.protected': 'Session protection',
   'run.children': 'Subsessions',
   'run.wait.changed': 'Wait conditions',
