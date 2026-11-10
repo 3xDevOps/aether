@@ -69,7 +69,7 @@ test('a click on an image larger than the window switches between fit and actual
   fireEvent.click(frameOf(dialog))
   expect(screen.getByRole('dialog')).toBe(dialog)
   fireEvent.click(within(dialog).getByRole('img'))
-  expect(width(dialog)).toBe('')
+  expect(width(dialog)).toBe('800px')
 })
 
 test('clicking the outer gutters closes the viewer while zoomed frame clicks do not', async () => {
@@ -119,7 +119,7 @@ test('Command or Control with plus, minus and zero zoom in steps from the fitted
   fireEvent.keyDown(dialog, { key: '-', ctrlKey: true })
   expect(zoomOf(dialog)).toBeCloseTo(1.25)
   fireEvent.keyDown(dialog, { key: '0', metaKey: true })
-  expect(width(dialog)).toBe('')
+  expect(width(dialog)).toBe('800px')
   for (let i = 0; i < 20; i++) fireEvent.keyDown(dialog, { key: '+', metaKey: true })
   expect(width(dialog)).toBe(`${2400 * 4}px`)
 })
@@ -128,7 +128,7 @@ test('zooming out never goes below fitted', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [2400, 1400])
   fireEvent.keyDown(dialog, { key: '-', ctrlKey: true })
-  expect(width(dialog)).toBe('')
+  expect(width(dialog)).toBe('800px')
 })
 
 test('a trackpad pinch, a ctrl wheel, zooms the image and keeps the page from zooming', async () => {
@@ -154,11 +154,20 @@ test('spreading two fingers zooms the image', async () => {
   fireEvent.touchEnd(frame, { touches: [], changedTouches: fingers(200) })
 })
 
-test('an image that already fits offers no zoom', async () => {
+test('a small image scales up to fit the frame and can zoom further', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [320, 180])
-  fireEvent.click(within(dialog).getByRole('img'))
-  expect(width(dialog)).toBe('')
+  const image = within(dialog).getByRole('img')
+  expect(image.style.width).toBe('800px')
+  expect(image.style.height).toBe('450px')
+  expect(frameOf(dialog).getAttribute('aria-label')).toBe('Image 1 of 2, fitted')
+  fireEvent.keyDown(dialog, { key: '=', metaKey: true })
+  expect(image.style.width).toBe('1000px')
+  fireEvent.keyDown(dialog, { key: '0', metaKey: true })
+  expect(image.style.width).toBe('800px')
+  fireEvent.click(image)
+  expect(image.style.width).toBe('1000px')
+  expect(frameOf(dialog).getAttribute('aria-label')).toBe('Image 1 of 2, zoomed to 313%')
 })
 
 test('reopening an image starts fitted again', async () => {
@@ -169,7 +178,7 @@ test('reopening an image starts fitted again', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Open image 1 of 2 full size' }))
   const reopened = await screen.findByRole('dialog')
   load(reopened, [2400, 1400])
-  expect(width(reopened)).toBe('')
+  expect(width(reopened)).toBe('800px')
 })
 
 test('an image that fails to load shows the error instead of a button', async () => {
@@ -274,7 +283,7 @@ test('Control with the zero key fits again on any layout, by its key code', asyn
   load(dialog, [2400, 1400])
   fireEvent.keyDown(dialog, { key: '=', ctrlKey: true })
   fireEvent.keyDown(dialog, { key: 'à', code: 'Digit0', ctrlKey: true })
-  expect(width(dialog)).toBe('')
+  expect(width(dialog)).toBe('800px')
 })
 
 test('a Safari gesture during a two-finger touch pinch does not zoom a second time', async () => {
@@ -318,7 +327,7 @@ test('a click zooms to actual size with the clicked point kept under the pointer
   const image = within(dialog).getByRole('img')
   const rect = (width: number, height: number, top = 0) => ({ left: 0, top, width, height }) as DOMRect
   frame.getBoundingClientRect = () => rect(800, 600)
-  image.getBoundingClientRect = () => (image.style.width ? rect(parseFloat(image.style.width), parseFloat(image.style.height)) : rect(800, 466.67, 66.67))
+  image.getBoundingClientRect = () => rect(parseFloat(image.style.width), parseFloat(image.style.height), image.style.width === '800px' ? 66.67 : 0)
   const scroll = { left: 0, top: 0 }
   Object.defineProperties(frame, {
     scrollLeft: { get: () => scroll.left, set: (v: number) => (scroll.left = v) },
@@ -330,7 +339,7 @@ test('a click zooms to actual size with the clicked point kept under the pointer
   expect(scroll.top).toBeCloseTo(1400 * 0.75 - (66.67 + 466.67 * 0.75), 0)
 })
 
-test('zoomability follows the frame as the window resizes', async () => {
+test('the fitted image follows the frame as the window resizes', async () => {
   const observed: ResizeObserverCallback[] = []
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: ResizeObserverCallback) {

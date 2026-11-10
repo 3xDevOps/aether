@@ -3564,15 +3564,16 @@ button that opens the same blob in a `Dialog` filling the window
 backdrop, with the composer's thin border and corner radius, at up to 80% of
 the viewport width and height. A top-bar row keeps the image clear of macOS
 window controls and holds a 44px Close button; the image name stays for screen
-readers. Zoom runs
-from fitted to 400% of the image's pixels, in a frame that scrolls and takes
-keyboard focus; the focus outline follows the image. A trackpad pinch (a ctrl
-wheel, or Safari's gesture events, both kept from zooming the page) or a
-two-finger touch pinch zooms about the fingers or pointer. `Mod+=`/`Mod+-` step
+readers. Each image fits the frame, enlarging small images when needed. Zoom
+runs from fitted to 400% of the larger of the image's native size or fitted
+size, in a frame that scrolls and takes keyboard focus; the focus outline
+follows the image. A trackpad pinch (a ctrl wheel, or Safari's gesture events,
+both kept from zooming the page) or a two-finger touch pinch zooms about the
+fingers or pointer. `Mod+=`/`Mod+-` step
 by 1.25 about the frame's centre while
-`Mod+0` fits again. When the image is larger than the frame, a click on it
-switches between fitted and 100% about the clicked point. A click beside a
-fitted image closes the dialog. In a multi-image gallery, Previous image and
+`Mod+0` fits again. A click on a fitted image zooms downscaled images to 100%
+or enlarged images to 125% of fit, preserving the clicked point. A click beside
+a fitted image closes the dialog. In a multi-image gallery, Previous image and
 Next image buttons appear on hover or keyboard focus; touch keeps them visible.
 They step through loaded images. `ArrowLeft` and `ArrowRight`, or a horizontal
 swipe, do the same while the image is fitted, stopping at either end;
@@ -3580,9 +3581,8 @@ zoomed in, or with a modifier key held or the page pinch-zoomed, they do not
 switch. With the image fitted, clicking beside it closes the dialog; while
 zoomed, the outer gutters close it and the frame remains scrollable. Losing an
 image's blob, as on reconnect, closes the dialog if it was showing that image.
-Each image opens fitted, and
-closing returns focus to the thumbnail of the image last shown. Attachments sit outside the
-text-collapse area and remain available through history and reconnect.
+Closing returns focus to the thumbnail of the image last shown. Attachments sit
+outside the text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider
 group with search by name, ID and description. Selections use

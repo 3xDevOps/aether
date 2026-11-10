@@ -30,8 +30,8 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
   const [scale, setScale] = useState<number>()
   const pending = useRef<number>(undefined)
   const [natural, setNatural] = useState<{ width: number; height: number }>()
-  const [zoomable, setZoomable] = useState(false)
   const [shortImage, setShortImage] = useState(false)
+  const [frameSize, setFrameSize] = useState({ width: 0, height: 0 })
   const frame = useRef<HTMLDivElement>(null)
   const img = useRef<HTMLImageElement>(null)
   // The picture point (0 to 1) to keep under a frame point (pixels) after the scale changes.
@@ -42,7 +42,10 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
   const fitScale = () => {
     const el = frame.current
     if (!el || !natural) return 1
-    return Math.min(1, el.clientWidth / natural.width, el.clientHeight / natural.height)
+    const width = frameSize.width || el.clientWidth
+    const height = frameSize.height || el.clientHeight
+    if (!width || !height) return 1
+    return Math.min(width / natural.width, height / natural.height)
   }
 
   /** Scale to `next` (undefined fits), keeping the picture under the client point, or the frame's middle, still. */
@@ -63,7 +66,8 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
       left: x - box.left,
       top: y - box.top,
     }
-    pending.current = next === undefined || next <= fitScale() * 1.001 ? undefined : Math.min(maxScale, next)
+    const fitted = fitScale()
+    pending.current = next === undefined || next <= fitted * 1.001 ? undefined : Math.min(Math.max(maxScale, fitted * maxScale), next)
     setScale(pending.current)
   }
   const zoomBy = (factor: number, clientX?: number, clientY?: number) => zoomTo((pending.current ?? fitScale()) * factor, clientX, clientY)
@@ -123,9 +127,10 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
     const el = frame.current
     if (!el || !natural) return
     const measure = () => {
-      const scale = Math.min(1, el.clientWidth / natural.width, el.clientHeight / natural.height)
-      setZoomable(scale < 1)
-      setShortImage(natural.height * scale < 144)
+      const width = el.clientWidth
+      const height = el.clientHeight
+      setFrameSize((size) => size.width === width && size.height === height ? size : { width, height })
+      setShortImage(natural.height * Math.min(width / natural.width, height / natural.height) < 144)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -147,10 +152,11 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
         'rounded-composer border border-seam',
         'group-focus-visible:outline-2 group-focus-visible:-outline-offset-2 group-focus-visible:outline-focus group-focus-visible:transition-none',
         scale === undefined ? 'max-h-full max-w-full' : 'max-w-none shrink-0 cursor-zoom-out',
-        scale === undefined && zoomable && 'cursor-zoom-in',
+        scale === undefined && 'cursor-zoom-in',
       )}
       style={natural ? {
-        ...(scale === undefined ? {} : { width: natural.width * scale, height: natural.height * scale }),
+        width: natural.width * (scale ?? fitScale()),
+        height: natural.height * (scale ?? fitScale()),
         borderRadius: `min(var(--radius-composer), ${Math.min(natural.width, natural.height) * (scale ?? fitScale()) / 4}px)`,
       } : undefined}
       onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
@@ -221,7 +227,10 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
             return
           }
           if (scale !== undefined) zoomTo(undefined)
-          else if (zoomable) zoomTo(1, event.clientX, event.clientY)
+          else {
+            const fitted = fitScale()
+            zoomTo(fitted < 1 ? 1 : fitted * 1.25, event.clientX, event.clientY)
+          }
         }}
       >
         <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
