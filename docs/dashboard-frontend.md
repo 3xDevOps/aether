@@ -3572,9 +3572,10 @@ two-finger touch pinch zooms about the fingers or pointer. `Mod+=`/`Mod+-` step
 by 1.25 about the frame's centre while
 `Mod+0` fits again. When the image is larger than the frame, a click on it
 switches between fitted and 100% about the clicked point. A click beside a
-fitted image closes the dialog. One dialog serves the
-row: while the image is fitted, `ArrowLeft` and `ArrowRight`, or a horizontal
-swipe, step to the previous or next image that loaded, stopping at either end;
+fitted image closes the dialog. In a multi-image gallery, Previous image and
+Next image buttons appear on hover or keyboard focus; touch keeps them visible.
+They step through loaded images. `ArrowLeft` and `ArrowRight`, or a horizontal
+swipe, do the same while the image is fitted, stopping at either end;
 zoomed in, or with a modifier key held or the page pinch-zoomed, they do not
 switch. Losing an image's blob, as on reconnect, closes the dialog if it was
 showing that image. Each image opens fitted, and

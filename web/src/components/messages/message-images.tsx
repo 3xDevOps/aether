@@ -1,7 +1,7 @@
 import type * as React from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { File as FileIcon, X } from '@/components/icons'
+import { ChevronLeft, ChevronRight, File as FileIcon, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
@@ -12,11 +12,14 @@ import type { MessageImageRef } from '@/store/session-rows'
 
 const maxScale = 4
 const keyStep = 1.25
+const viewerBounds = 'h-[min(80dvh,calc(100dvh_-_var(--top-bar-height)_-_var(--safe-top)_-_1rem))] w-[min(80vw,calc(100vw_-_2rem))]'
 
-function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClose }: {
+function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, keys, refocus, onStep, onClose }: {
   url: string
   name: string
   gallery: boolean
+  canStepBack: boolean
+  canStepForward: boolean
   zoomed: React.RefObject<boolean>
   keys: React.RefObject<((event: React.KeyboardEvent) => void) | undefined>
   refocus: boolean
@@ -28,6 +31,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
   const pending = useRef<number>(undefined)
   const [natural, setNatural] = useState<{ width: number; height: number }>()
   const [zoomable, setZoomable] = useState(false)
+  const [shortImage, setShortImage] = useState(false)
   const frame = useRef<HTMLDivElement>(null)
   const img = useRef<HTMLImageElement>(null)
   // The picture point (0 to 1) to keep under a frame point (pixels) after the scale changes.
@@ -118,7 +122,11 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
   useEffect(() => {
     const el = frame.current
     if (!el || !natural) return
-    const measure = () => setZoomable(natural.width > el.clientWidth || natural.height > el.clientHeight)
+    const measure = () => {
+      const scale = Math.min(1, el.clientWidth / natural.width, el.clientHeight / natural.height)
+      setZoomable(scale < 1)
+      setShortImage(natural.height * scale < 144)
+    }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(el)
@@ -169,7 +177,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
 
   return (
     <div
-      className="contents"
+      className="contents group/viewer"
       onTouchStart={(event) => {
         const [a, b] = [event.touches[0], event.touches[1]]
         pinch.current = event.touches.length === 2 && a && b
@@ -200,7 +208,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
         tabIndex={0}
         role="group"
         aria-label={`${name}, ${scale === undefined ? 'fitted' : `zoomed to ${Math.round(scale * 100)}%`}`}
-        className="group row-start-2 mx-auto mb-4 flex h-[min(80dvh,calc(100dvh_-_var(--top-bar-height)_-_var(--safe-top)_-_1rem))] w-[min(80vw,calc(100vw_-_2rem))] min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none"
+        className={cn('group col-start-1 row-start-2 mx-auto mb-4 flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none', viewerBounds)}
         onClick={(event) => {
           // A fitted picture leaves only empty space around it; zoomed, a click there may be on the frame's scrollbar.
           if (event.target !== img.current) {
@@ -213,12 +221,26 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
       >
         <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
       </div>
+      {gallery && (
+        <div className={cn('pointer-events-none relative z-10 col-start-1 row-start-2 mx-auto mb-4', viewerBounds)}>
+          {canStepBack && (
+            <Button variant="secondary" size="icon" label="Previous image" className={cn('pointer-events-auto absolute left-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(-1)}>
+              <ChevronLeft className="size-5" />
+            </Button>
+          )}
+          {canStepForward && (
+            <Button variant="secondary" size="icon" label="Next image" className={cn('pointer-events-auto absolute right-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(1)}>
+              <ChevronRight className="size-5" />
+            </Button>
+          )}
+        </div>
+      )}
       <div className="row-start-1 flex min-h-[calc(var(--top-bar-height)_+_var(--safe-top))] items-center justify-end px-2 pt-[var(--safe-top)]">
         <DialogTitle className="sr-only">{name}</DialogTitle>
         <DialogDescription className="sr-only">
           {[
             'Pinch, or press Command or Control with plus, minus or zero, to zoom.',
-            gallery && 'Use the arrow keys or swipe to see the other images.',
+            gallery && 'Use the Previous image and Next image buttons, arrow keys, or a horizontal swipe to see the other images.',
           ].filter(Boolean).join(' ')}
         </DialogDescription>
         <DialogPrimitive.Close asChild>
@@ -321,6 +343,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
   const shown = openID === undefined ? -1 : ids.indexOf(openID)
   const url = openID === undefined ? undefined : urls[openID]
   const viewable = ids.filter((id) => urls[id])
+  const shownInGallery = viewable.indexOf(openID ?? '')
   const step = (by: 1 | -1) => {
     const next = ids.slice(by > 0 ? shown + 1 : 0, by > 0 ? undefined : shown).filter((id) => urls[id])
     const id = by > 0 ? next[0] : next.at(-1)
@@ -376,7 +399,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
           }}
         >
           {url && openID && (
-            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} keys={keys} refocus={refocus.current} onStep={step} onClose={() => setOpenID(undefined)} />
+            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} canStepBack={shownInGallery > 0} canStepForward={shownInGallery >= 0 && shownInGallery < viewable.length - 1} zoomed={zoomed} keys={keys} refocus={refocus.current} onStep={step} onClose={() => setOpenID(undefined)} />
           )}
         </DialogContent>
       </Dialog>

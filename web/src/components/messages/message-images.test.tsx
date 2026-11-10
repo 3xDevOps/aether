@@ -72,17 +72,31 @@ test('a click on an image larger than the window switches between fit and actual
   expect(width(dialog)).toBe('')
 })
 
-test('the viewer shows only the picture and closes from its close button or beside a fitted picture', async () => {
+test('the viewer hides its title and closes from its close button or beside a fitted picture', async () => {
   const dialog = await open('Image 1 of 2')
   const close = within(dialog).getByRole('button', { name: 'Close' })
+  const next = await within(dialog).findByRole('button', { name: 'Next image' })
   expect(dialog.querySelector('[data-slot="dialog-title"]')?.className).toContain('sr-only')
   expect(close.className).toContain('size-11')
-  expect(within(dialog).getAllByRole('button')).toEqual([close])
+  expect(next.className).toContain('coarse:opacity-100')
+  expect(within(dialog).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Next image', 'Close'])
   fireEvent.click(close)
   expect(screen.queryByRole('dialog')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Open image 1 of 2 full size' }))
   fireEvent.click(frameOf(await screen.findByRole('dialog')))
   expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('pointer buttons step through loaded images in both directions', async () => {
+  const dialog = await open('Image 1 of 3', three)
+  fireEvent.click(await within(dialog).findByRole('button', { name: 'Next image' }))
+  const middle = await screen.findByRole('dialog', { name: 'Image 2 of 3' })
+  expect(within(middle).getByRole('button', { name: 'Previous image' })).toBeDefined()
+  fireEvent.click(within(middle).getByRole('button', { name: 'Next image' }))
+  const last = await screen.findByRole('dialog', { name: 'Image 3 of 3' })
+  expect(within(last).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Previous image', 'Close'])
+  fireEvent.click(within(last).getByRole('button', { name: 'Previous image' }))
+  expect(await screen.findByRole('dialog', { name: 'Image 2 of 3' })).toBeDefined()
 })
 
 test('Command or Control with plus, minus and zero zoom in steps from the fitted size, and back to fit', async () => {
