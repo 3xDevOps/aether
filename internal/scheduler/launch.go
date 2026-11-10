@@ -509,6 +509,12 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	entry.egress = plan.Egress
 	s.mu.Unlock()
 	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, unlockCaches)
+	for err != nil && s.markUnstartable(entry, actor, plan.Image, err) {
+		if plan, err = s.runPlan(ctx, entry, run, ws, actor, profile); err != nil {
+			return err
+		}
+		driver, err = s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, unlockCaches)
+	}
 	if err != nil {
 		return err
 	}
@@ -523,7 +529,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if entry.killRequested {
 		err = errKillRequested
 	} else {
-		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor.ID)
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, plan.ImageNotice, actor.ID)
 	}
 	s.mu.Unlock()
 	if err != nil {

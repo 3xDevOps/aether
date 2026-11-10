@@ -106,8 +106,11 @@ pushed to a registry.
 
 - New sessions, workspace shells and the next environment open use the saved image.
   Running containers keep theirs.
-- Each save replaces the previous one. To fix a bad save, repair it and save
-  again, or reset.
+- Each save replaces the previous one as your saved image. Aether keeps the
+  image it replaced on the server as your previous image, and removes older
+  ones. To fix a bad save, repair it and save again, or reset.
+- Every save is checked before it becomes your saved image
+  ([Saved image checks](#saved-image-checks)).
 - Saving needs a running terminal. If it is stopped, `aether env save` fails
   with `environment terminal is not running`. Open it with `aether terminal`,
   check your changes are there, then save.
@@ -128,11 +131,57 @@ pushed to a registry.
   session of yours holds your home as uid `1000`, since both cannot write it
   under different users. Save first to keep unsaved changes.
 
+### Saved image checks
+
+After the commit, Aether reads every file of the new image. An owner uid or
+gid above 65535 has no owner inside a container, and under Sysbox no
+container starts from such an image. If any file has one, the save fails,
+for example:
+
+```
+scheduler: save environment: nothing was saved, because the committed image would not start: 3 paths are owned by a uid or gid above 65535, which no container can map (3 owned by 231072:231072; for example /etc, /etc/passwd, /usr). Your environment and its unsaved changes are kept, and new sessions still start from your saved image <tag>. Run aether env save again; if it fails the same way, see "Saved image checks" in docs/environments.md
+```
+
+The rejected image is removed. Your saved image does not change, and your
+environment keeps running with its unsaved changes. Such owners are host
+uids, not ones a container sets: in this example `231072` is the host uid
+Sysbox maps container root to. If saving again fails the same way, report it to
+an admin. On the server host they can list such paths in any image, such as
+a saved image from before these checks:
+
+```sh
+c=$(docker create <tag> true)
+docker export "$c" | tar tvf - --numeric-owner | awk '{split($2,a,"/"); if (a[1]>65535||a[2]>65535) print}'
+docker rm "$c"
+```
+
+The check reads the whole image, so a large environment takes longer to
+save. If the check itself fails, the save fails with `could not be checked`
+and the check's error, and nothing changes.
+
+### When a saved image cannot start
+
+An image saved before these checks may still hold such owners. A session
+container from it then fails to start with
+`value too large for defined data type` or a root filesystem
+`permission denied`. Aether starts that session from your previous image, or
+from the standard image when there is none or it fails the same way, and
+shows the reason on the session:
+
+```
+Your saved environment image cannot start a container (value too large for defined data type), so this session uses your previous saved image <tag>. Run aether env reset to use the standard image.
+```
+
+Aether tries each image once, and remembers the failed images until the
+server restarts. Your environment terminal does not fall back: it fails with
+the runtime's error. Run `aether env reset`, then install your tools again
+and save.
+
 ## Reset to standard
 
 Open **Environment actions**, then **Reset to standard…** (offered once you
 have saved an image), or run `aether env reset`. Reset destroys the container,
-forgets your saved image and removes it from the server. Files outside your
+forgets your saved image and removes it and your previous image from the server. Files outside your
 home are lost. The next open and all new sessions use the standard image.
 
 On a terminal the command asks

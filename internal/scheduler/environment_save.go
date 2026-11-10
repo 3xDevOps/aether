@@ -38,12 +38,28 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if sup == nil {
 		return "", fmt.Errorf("%w: open it with `aether terminal` (or the dashboard), check your changes are there, then save", ErrTerminalNotRunning)
 	}
-	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
 	tag := memberImageRepo(member) + ":" + strings.ToLower(rand.Text())
 	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, tag); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
+	}
+	if checkErr := s.checkSavedImage(ctx, tag); checkErr != nil {
+		current := "the standard image"
+		if m.Image != "" {
+			current = "your saved image " + m.Image
+		}
+		problem := "could not be checked"
+		if _, ok := errors.AsType[*errImageOwners](checkErr); ok {
+			problem = "would not start"
+		}
+		err := fmt.Errorf("scheduler: save environment: nothing was saved, because the committed image %s: %w. Your environment and its unsaved changes are kept, and new sessions still start from %s. Run aether env save again; if it fails the same way, see \"Saved image checks\" in docs/environments.md", problem, checkErr, current)
+		if removeErr := s.cfg.Runtime.RemoveImage(context.WithoutCancel(ctx), tag); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("scheduler: remove the unusable image: %w", removeErr))
+		}
+		return "", err
 	}
 	if err := s.cfg.Store.UpdateMemberImage(ctx, member, tag); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: persist image: %w", err)
@@ -147,6 +163,13 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	repo := memberImageRepo(member)
 	tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
 	if err != nil {
+		return err
+	}
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	switch {
+	case err == nil:
+		refs[previousImage(tags, m.Image)] = true
+	case !errors.Is(err, store.ErrNotFound):
 		return err
 	}
 	var failures []error

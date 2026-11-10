@@ -407,6 +407,15 @@ func (r *e2eRuntime) ListImageTags(_ context.Context, repo string) ([]string, er
 	return tags, nil
 }
 
+func (r *e2eRuntime) ExportImage(_ context.Context, ref string) (io.ReadCloser, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.images[ref]; !ok {
+		return nil, fmt.Errorf("e2e runtime: no such image %q", ref)
+	}
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
 // RemoveImage is idempotent, matching the Docker implementation.
 func (r *e2eRuntime) RemoveImage(_ context.Context, ref string) error {
 	r.mu.Lock()

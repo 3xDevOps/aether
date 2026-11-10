@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -61,6 +62,15 @@ type fakeRuntime struct {
 	execRunCalls []fakeExecCall
 	attaches     int
 	images       map[string]string
+	// imageSeq orders committed images; ListImageTags lists them newest
+	// first, then the seeded ones by name.
+	imageSeq map[string]int
+	// exports are the tar streams ExportImage returns for an image committed
+	// from a container, by that container; any other image exports empty.
+	exports   map[runtime.ID][]byte
+	exportErr error
+	// imageStartErr fails Start of a container created from the image.
+	imageStartErr map[string]error
 }
 
 type fakeCommitCall struct {
@@ -200,6 +210,12 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 	c, err := r.get(id)
 	if err != nil {
 		return err
+	}
+	r.mu.Lock()
+	imageErr := r.imageStartErr[c.spec.Image]
+	r.mu.Unlock()
+	if imageErr != nil {
+		return imageErr
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -469,7 +485,23 @@ func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error
 		r.images = make(map[string]string)
 	}
 	r.images[tag] = string(id)
+	if r.imageSeq == nil {
+		r.imageSeq = make(map[string]int)
+	}
+	r.imageSeq[tag] = len(r.imageSeq) + 1
 	return nil
+}
+
+func (r *fakeRuntime) ExportImage(_ context.Context, tag string) (io.ReadCloser, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.exportErr != nil {
+		return nil, r.exportErr
+	}
+	if _, ok := r.images[tag]; !ok {
+		return nil, fmt.Errorf("fake runtime: no such image %q", tag)
+	}
+	return io.NopCloser(bytes.NewReader(r.exports[runtime.ID(r.images[tag])])), nil
 }
 
 func (r *fakeRuntime) commitCalls() []fakeCommitCall {
@@ -494,6 +526,7 @@ func (r *fakeRuntime) ListImageTags(_ context.Context, repo string) ([]string, e
 			tags = append(tags, tag)
 		}
 	}
+	slices.SortFunc(tags, func(a, b string) int { return cmp.Or(cmp.Compare(r.imageSeq[b], r.imageSeq[a]), cmp.Compare(a, b)) })
 	return tags, nil
 }
 

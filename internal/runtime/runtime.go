@@ -379,8 +379,12 @@ type Runtime interface {
 	Commit(ctx context.Context, id ID, tag string) error
 	// ImageExists reports whether an image reference exists locally.
 	ImageExists(ctx context.Context, ref string) (bool, error)
-	// ListImageTags returns the local tags under one repository.
+	// ListImageTags returns the local tags under one repository, newest
+	// image first.
 	ListImageTags(ctx context.Context, repo string) ([]string, error)
+	// ExportImage streams the filesystem of a local image as a tar, with
+	// owners as stored in the image.
+	ExportImage(ctx context.Context, ref string) (io.ReadCloser, error)
 	// RemoveImage untags a local image. Removing a tag that does not
 	// exist is not an error.
 	RemoveImage(ctx context.Context, tag string) error
