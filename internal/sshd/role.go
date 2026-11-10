@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -128,6 +129,7 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	}
 	noteChange(ctx)
 	s.accessChanged()
+	s.publishRoleChange(ctx, member, m.ID)
 	s.notifyDirectory()
 	slog.Info("sshd: member role changed",
 		"actor", member, "member", m.ID, "from", was, "to", role)
@@ -143,4 +145,17 @@ func roleError(err error, id domain.MemberID) *protocol.Error {
 		return ownerRefusal("demoting", id, owns.Workspaces)
 	}
 	return rpcError(err)
+}
+
+// publishRoleChange tells the member their role changed, so their dashboard
+// reloads it and the workspace roles derived from it.
+func (s *Server) publishRoleChange(ctx context.Context, actor, changed domain.MemberID) {
+	ev := events.Event{
+		WorkspaceID: events.ServerScope,
+		ActorID:     actor,
+		Payload:     events.MemberAccessPayload{MemberID: changed, Action: events.AccessGranted},
+	}
+	if _, err := s.cfg.Bus.Publish(ctx, ev); err != nil {
+		slog.Warn("sshd: publish "+string(ev.Payload.EventType()), "member", changed, "error", err)
+	}
 }

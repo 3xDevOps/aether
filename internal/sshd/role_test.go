@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -236,5 +237,30 @@ func TestConcurrentDemotionsKeepAnAdmin(t *testing.T) {
 	}
 	if admins == 0 {
 		t.Fatal("both demotions succeeded: the deployment has no admin left")
+	}
+}
+
+// A role change notifies the member it changed, so their dashboard reloads
+// its role and workspace roles.
+func TestMemberRoleNotifiesTheChangedMember(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
+	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	stream, err := e.srv.Local(bob.ID).Events(context.Background(), protocol.SubscribeRequest{})
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	t.Cleanup(func() { _ = stream.Close() })
+	feed := eventLines(t, stream)
+	if err := controlClient(t, e).Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(bob.ID), Role: string(domain.RoleAdmin),
+	}, nil); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	for {
+		if ev := nextEvent(t, feed); ev.Type == string(events.TypeMemberAccess) {
+			return
+		}
 	}
 }

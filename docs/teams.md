@@ -147,8 +147,11 @@ schedules, devices and accounts, and the lower of the two roles. The absorbed
 member's home moves to `<data-dir>/merged/<merge id>/home` and their private
 signing key to `signing-key` beside it. Both hold credentials, so remove the
 directory with `sudo rm -r` once nothing in it is needed. A merge is
-refused, with the reason, when either member is pending, owns workspaces or has an
-unfinished session or terminal. Nothing undoes a merge.
+refused, with the reason, when either member is pending or has an unfinished
+session or terminal. It is also refused when the merged role would be below
+admin and either member owns workspaces: reassign them with `aether workspace
+owner <workspace> <member-id>`, or keep the admin role with `--keep-admin`.
+Nothing undoes a merge.
 
 ### Remove access
 

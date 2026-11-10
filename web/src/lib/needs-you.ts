@@ -92,7 +92,7 @@ function condition(spec: Spec): NeedsYouCondition {
     since: (run, ctx) => spec.since?.(run, ctx) ?? run.stateChangedAt,
     applies: (run, ctx) => {
       if (!ctx.viewerID || !holds(run, ctx)) return false
-      if (spec.admins && isAdminRole(ctx.viewerRole)) return true
+      if (spec.admins && isAdminRole(ctx.workspaces[run.workspace_id]?.role ?? ctx.viewerRole)) return true
       return spec.resolvers(run, ctx).includes(ctx.viewerID)
     },
     waitsOn: (run, ctx) =>

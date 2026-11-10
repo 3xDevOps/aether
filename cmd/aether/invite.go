@@ -16,8 +16,8 @@ func init() {
 		name:  "invite",
 		short: "invite a GitHub account through the edge, or mint a one-time invite code",
 		usage: "aether invite [--ttl <seconds>] [--workspace <workspace>]...\n" +
-			"aether invite --github <login> [--role <admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
-			"aether invite --email <address> [--role <admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
+			"aether invite --github <login> [--role <super_admin|admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
+			"aether invite --email <address> [--role <super_admin|admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
 			"aether invite list\n" +
 			"aether invite revoke <invitation-id>",
 		example: "aether invite\n" +
@@ -78,7 +78,7 @@ func runInvite(args []string) error {
 }
 
 const inviteUsage = "usage: aether invite [--ttl <seconds>]\n" +
-	"       aether invite --github <login> | --email <address> [--role admin|collaborator|viewer]\n" +
+	"       aether invite --github <login> | --email <address> [--role super_admin|admin|collaborator|viewer]\n" +
 	"       aether invite ... [--workspace <workspace>]...\n" +
 	"       aether invite list | revoke <invitation-id>"
 
@@ -91,7 +91,7 @@ func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int
 	ttl := fs.Int("ttl", 86400, "lifetime of a one-time invite code in seconds")
 	github := fs.String("github", "", "invite this GitHub login; prints the link they join with")
 	email := fs.String("email", "", "invite the GitHub account whose verified primary email this is")
-	role := fs.String("role", "collaborator", "role of an invited account: admin, collaborator, or viewer")
+	role := fs.String("role", "collaborator", "role of an invited account: super_admin, admin, collaborator, or viewer")
 	var workspaces stringList
 	fs.Var(&workspaces, "workspace", "workspace the invited member is granted, by name or id (repeatable)")
 	if err := fs.Parse(args); err != nil {

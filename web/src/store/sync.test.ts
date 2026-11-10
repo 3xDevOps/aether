@@ -1932,6 +1932,21 @@ describe('applyEvent', () => {
     expect(store.getState().workspaces[workspace.id]).toBeUndefined()
   })
 
+  it('reloads the viewer role and members when a member.access notice arrives', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const info = { ...serverInfoFixture, member: { ...serverInfoFixture.member, role: 'admin' as const } }
+    const memberList = vi.fn(async () => ({ members: [{ ...alice, role: 'admin' as const }] }))
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.access',
+      payload: { workspace_id: '', member_id: serverInfoFixture.member.id, action: 'granted' },
+    }), fakeApi({ serverInfo: vi.fn(async () => info), workspaceListFull: vi.fn(async () => [{ ...workspace, role: 'admin' as const }]), memberList }))
+
+    expect(store.getState().info?.member.role).toBe('admin')
+    expect(store.getState().workspaces[workspace.id]?.role).toBe('admin')
+    expect(memberList).toHaveBeenCalled()
+  })
+
   it('brings back the sessions of a workspace the viewer regains', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]), runList: vi.fn(async () => []) }))
