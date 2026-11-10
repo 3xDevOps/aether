@@ -47,8 +47,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps
 ```
 
 It worked if `aether version` prints the release on your computer, and
-`aether-server version` (or `--version`) on the server. [install.md](install.md) covers every
-platform, `--role none` (binaries only), upgrades and removal.
+`aether-server version` (or `--version`) on the server.
+[install.md](install.md) covers every platform, `--role none` (binaries only),
+upgrades and removal.
 
 ## 2. Start the server
 
