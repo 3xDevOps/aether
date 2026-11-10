@@ -404,8 +404,8 @@ removes members.
 
 Members see each other through workspaces. A super admin sees every member.
 Anyone else sees themselves, the super admins, and every member who owns, was
-granted or has a session in a workspace they reach; an admin also sees members
-waiting for approval. A member you do not see is absent from `aether member
+granted or has a session in a workspace they reach, or whose account or home
+such a session uses; an admin also sees members waiting for approval. A member you do not see is absent from `aether member
 list`, device lists and attention. Naming them in `aether workspace grant`,
 `aether account share`, `aether member identities` or `aether member unlink`
 fails as for an id that never existed. An admin therefore grants only members

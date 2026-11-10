@@ -47,8 +47,8 @@ Capabilities with no workspace (`Target{}`):
 
 A super admin sees every member. Anyone else sees themselves, every super
 admin, every member who owns or was granted a workspace they reach, every
-member with a session in one (primary or extra repository), and, as an
-admin, every pending member. A session author whose grant was revoked stays
+member with a session in one (primary or extra repository) or whose account
+or home such a session uses, and, as an admin, every pending member. A session author whose grant was revoked stays
 visible there, since the workspace's history names them. A member the
 caller does not see is absent from member and device lists and reads as
 `not found` wherever an ID names them. An admin's device list shows a

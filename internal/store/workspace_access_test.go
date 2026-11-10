@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -212,6 +213,45 @@ func TestWorkspaceGrants(t *testing.T) {
 	}
 	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second revoke = %v, want ErrNotFound", err)
+	}
+}
+
+// A session names its launcher, the member whose account it uses and the
+// member whose home it mounts, so all three are members of its
+// workspaces, its extra repositories' included.
+func TestWorkspaceMembersIncludeSessionAccountsAndHomes(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	members := map[string]*domain.Member{}
+	for i, name := range []string{"launcher", "account", "home", "stranger"} {
+		members[name] = &domain.Member{DisplayName: name, PublicKey: testKey(t, name), Color: "#e6194b", Role: domain.RoleCollaborator}
+		if err := db.CreateMember(ctx, members[name]); err != nil {
+			t.Fatalf("CreateMember %d: %v", i, err)
+		}
+	}
+	primary, extra := &domain.Workspace{Name: "web"}, &domain.Workspace{Name: "api"}
+	for _, w := range []*domain.Workspace{primary, extra} {
+		if err := db.CreateWorkspace(ctx, w); err != nil {
+			t.Fatalf("CreateWorkspace: %v", err)
+		}
+	}
+	run := &domain.Run{WorkspaceID: primary.ID, MemberID: members["launcher"].ID, AccountMemberID: members["account"].ID,
+		HomeMemberID: members["home"].ID, Task: "t", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := db.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := db.SetRunRepos(ctx, run.ID, []domain.RunRepo{{WorkspaceID: extra.ID, Name: "api", Path: "/repos/api", Branch: "b", BaseBranch: "main"}}); err != nil {
+		t.Fatalf("SetRunRepos: %v", err)
+	}
+	want := []domain.MemberID{members["account"].ID, members["home"].ID, members["launcher"].ID}
+	slices.Sort(want)
+	for _, ws := range []domain.WorkspaceID{primary.ID, extra.ID} {
+		got, err := db.WorkspaceMembers(ctx, []domain.WorkspaceID{ws})
+		slices.Sort(got)
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("WorkspaceMembers(%s) = %v, %v; want %v", ws, got, err, want)
+		}
 	}
 }
 

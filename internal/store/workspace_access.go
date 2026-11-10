@@ -19,7 +19,8 @@ type WorkspaceAccessStore interface {
 	ListWorkspaceGrants(ctx context.Context, ws domain.WorkspaceID) ([]*domain.WorkspaceGrant, error)
 	// WorkspaceMembers returns the members who own, were granted, or have
 	// a session in any of workspaces, a session's extra repositories
-	// included.
+	// included, with the members whose account or home a session there
+	// uses.
 	WorkspaceMembers(ctx context.Context, workspaces []domain.WorkspaceID) ([]domain.MemberID, error)
 	// GrantWorkspace lets member into ws; granting an existing grant is a
 	// no-op. ErrNotFound when either does not exist.
@@ -103,11 +104,15 @@ func (d *DB) WorkspaceMembers(ctx context.Context, workspaces []domain.Workspace
 		return nil, fmt.Errorf("store: workspace members: %w", err)
 	}
 	rows, err := d.db.QueryContext(ctx,
-		`WITH ws(id) AS (SELECT value FROM json_each(?))
+		`WITH ws(id) AS (SELECT value FROM json_each(?)),
+		 rs AS (SELECT member_id, account_member_id, home_member_id FROM runs WHERE workspace_id IN ws
+		     UNION ALL SELECT r.member_id, r.account_member_id, r.home_member_id
+		     FROM run_repos rr JOIN runs r ON r.id = rr.run_id WHERE rr.workspace_id IN ws)
 		 SELECT owner_member_id FROM workspaces WHERE id IN ws AND owner_member_id <> ''
 		 UNION SELECT member_id FROM workspace_grants WHERE workspace_id IN ws
-		 UNION SELECT member_id FROM runs WHERE workspace_id IN ws
-		 UNION SELECT r.member_id FROM run_repos rr JOIN runs r ON r.id = rr.run_id WHERE rr.workspace_id IN ws`,
+		 UNION SELECT member_id FROM rs
+		 UNION SELECT account_member_id FROM rs WHERE account_member_id <> ''
+		 UNION SELECT home_member_id FROM rs WHERE home_member_id <> ''`,
 		string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("store: workspace members: %w", err)
