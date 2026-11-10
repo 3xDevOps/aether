@@ -176,3 +176,38 @@ func TestLosingAWorkspaceClosesRetriesInboxAndReplies(t *testing.T) {
 	_, replyErr := h.svc.Reply(ctx, target.ID, protocol.CoordReplyParams{QuestionID: asked.QuestionID, Body: "because", IdempotencyKey: "reply-after-revoke"})
 	want("reply", replyErr, protocol.MethodCoordReply)
 }
+
+// A run whose owner lost the workspace of one of its extra repositories
+// reads no inbox, as if it had lost the primary one.
+func TestLosingAnExtraWorkspaceClosesTheInbox(t *testing.T) {
+	h := newHarness(t, 0, func(c *Config) { c.Store = c.Mail.(*store.DB) })
+	ctx := context.Background()
+	extra := &domain.Workspace{Name: "extra", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(ctx, extra); err != nil {
+		t.Fatal(err)
+	}
+	owner := h.member(domain.RoleCollaborator)
+	for _, ws := range []domain.WorkspaceID{h.workspace, extra.ID} {
+		if err := h.db.GrantWorkspace(ctx, ws, owner.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := &domain.Run{WorkspaceID: h.workspace, MemberID: owner.ID, Task: "two repos", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := h.db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.SetRunRepos(ctx, run.ID, []domain.RunRepo{{WorkspaceID: extra.ID, Name: "extra", Path: "/repos/extra", Branch: "b", BaseBranch: "main"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Inbox(ctx, run.ID, protocol.CoordInboxParams{}); err != nil {
+		t.Fatalf("inbox while the owner reaches both workspaces: %v", err)
+	}
+	if err := h.db.RevokeWorkspaceGrant(ctx, extra.ID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.svc.Inbox(ctx, run.ID, protocol.CoordInboxParams{})
+	if err == nil || err.Code != protocol.CodeDenied ||
+		err.Message != protocol.MethodCoordInbox+": the session's owner "+string(owner.ID)+" no longer has access to its workspace" {
+		t.Errorf("inbox after the owner lost the extra workspace = %v, want refused", err)
+	}
+}

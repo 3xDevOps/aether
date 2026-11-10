@@ -76,7 +76,7 @@ func (s *Service) reachable(ctx context.Context, method string, sender, target *
 }
 
 // ownerReaches refuses a run socket call from a run whose owner no longer
-// reaches the run's workspace.
+// reaches every workspace of the run, its extra repositories' included.
 func (s *Service) ownerReaches(ctx context.Context, method string, run *domain.Run) *protocol.Error {
 	owner, err := s.cfg.Store.GetMember(ctx, run.MemberID)
 	switch {
@@ -84,8 +84,12 @@ func (s *Service) ownerReaches(ctx context.Context, method string, run *domain.R
 		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: the session's owner %s is no longer a member", method, run.MemberID)}
 	case err != nil:
 		return internalError(method, err)
-	case !permissions.ActorOf(owner).Reaches(run.WorkspaceID):
-		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: the session's owner %s no longer has access to its workspace", method, run.MemberID)}
+	}
+	actor := permissions.ActorOf(owner)
+	for _, ws := range append([]domain.WorkspaceID{run.WorkspaceID}, run.ExtraWorkspaces()...) {
+		if !actor.Reaches(ws) {
+			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: the session's owner %s no longer has access to its workspace", method, run.MemberID)}
+		}
 	}
 	return nil
 }
