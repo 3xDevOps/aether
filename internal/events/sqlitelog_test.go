@@ -325,3 +325,49 @@ func TestSQLiteLogReadsOneRunThroughIndexes(t *testing.T) {
 		t.Errorf("plan %q sorts its rows", plan)
 	}
 }
+
+func TestSQLiteLogReadsAndAppendsDoNotWaitForEachOther(t *testing.T) {
+	log := newTestLog(t)
+	appendN(t, log, logEvent(1, "w1", "r1", RunStatusPayload{To: domain.RunRunning}))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stored, err := log.Read(ctx, Filter{}, 0, 0, 1)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("read = %d events (err %v), want one", len(stored), err)
+	}
+
+	write, err := log.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := write.ExecContext(ctx, `INSERT INTO events (seq, id, ts, workspace_id, run_id, actor_id, type, payload)
+		VALUES (2, 'uncommitted', 0, 'w1', 'r1', 'm1', 'run.status', '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := log.Get(ctx, stored[0].ID); err != nil {
+		t.Errorf("get beside an open write: %v", err)
+	}
+	if got, err := log.Read(ctx, Filter{}, 0, 0, 10); err != nil || len(got) != 1 {
+		t.Errorf("read beside an open write = %d events (err %v), want the committed one", len(got), err)
+	}
+	if _, err := log.ReadBefore(ctx, Filter{}, 0, 3, 10); err != nil {
+		t.Errorf("read before beside an open write: %v", err)
+	}
+	if last, err := log.LastSeq(ctx); err != nil || last != 1 {
+		t.Errorf("last seq beside an open write = %d (err %v), want 1", last, err)
+	}
+	if err := write.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
+	for range readConns {
+		reader, err := log.reads.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reader.Close() //nolint:errcheck // returns the connection to the pool
+	}
+	if err := log.Append(ctx, logEvent(2, "w1", "r1", RunStatusPayload{To: domain.RunMerged})); err != nil {
+		t.Errorf("append beside busy readers: %v", err)
+	}
+}
