@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -546,8 +547,36 @@ func TestConcurrentPublishers(t *testing.T) {
 	}
 }
 
+// gatedLog holds its first n lookups until all n have read the log, so
+// every one of n concurrent publishers misses the event and races to
+// append it.
+type gatedLog struct {
+	*SQLiteLog
+	mu      sync.Mutex
+	pending int
+	open    chan struct{}
+}
+
+func (g *gatedLog) Get(ctx context.Context, id string) (Event, error) {
+	e, err := g.SQLiteLog.Get(ctx, id)
+	g.mu.Lock()
+	gated := g.pending > 0
+	if gated {
+		g.pending--
+		if g.pending == 0 {
+			close(g.open)
+		}
+	}
+	g.mu.Unlock()
+	if gated {
+		<-g.open
+	}
+	return e, err
+}
+
 func TestConcurrentDuplicatePublishesStoreOneEvent(t *testing.T) {
-	log := newTestLog(t)
+	const publishers = 8
+	log := &gatedLog{SQLiteLog: newTestLog(t), pending: publishers, open: make(chan struct{})}
 	b := newTestBus(t, log)
 	ctx := context.Background()
 	sub, err := b.Subscribe(ctx, SubscribeOptions{})
@@ -557,7 +586,6 @@ func TestConcurrentDuplicatePublishesStoreOneEvent(t *testing.T) {
 	defer sub.Close() //nolint:errcheck // test cleanup
 	e := statusEvent("w1", "r1", domain.RunRunning)
 	e.ID, e.Time = "coord-report:dup", time.Unix(0, 123).UTC()
-	const publishers = 8
 	got := make(chan Event, publishers)
 	errs := make(chan error, publishers)
 	for range publishers {
