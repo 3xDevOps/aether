@@ -18,8 +18,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// serveCompanion answers /health as the journaled companion and every other
-// request with post.
 func serveCompanion(t *testing.T, dir string, post http.HandlerFunc) {
 	t.Helper()
 	listener, err := net.Listen("unix", filepath.Join(dir, "control", "browser.sock"))

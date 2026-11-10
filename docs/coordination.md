@@ -953,7 +953,9 @@ before Chromium renders its replacement, then restarts an active screencast so
 a static page still streams a frame at the new size. On controller release,
 revocation or disconnect, the server clears held browser keys, buttons and
 touches before admitting another controller.
-If cleanup cannot be confirmed, new control remains fenced.
+If cleanup cannot be confirmed, new control remains fenced, unless the
+companion has exited or was recorded unavailable at server start: then control
+can be acquired only to `browser reset` it.
 
 Page inventories and physical-input acknowledgements use cached, best-effort
 titles without waiting for a DOM read. Inventories refresh titles asynchronously;
