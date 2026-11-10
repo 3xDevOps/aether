@@ -100,19 +100,30 @@ export function SelectContent({
 export function SelectItem({
   className,
   children,
+  detail,
+  description,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & { detail?: React.ReactNode; description?: React.ReactNode }) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
         focusRingInset,
         'relative flex h-7 cursor-default items-center gap-2 rounded-control pr-8 pl-2 text-ui text-text transition-colors duration-100 select-none motion-reduce:transition-none coarse:h-11 data-[highlighted]:bg-hover-chrome data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        description !== undefined && 'h-auto min-h-7 py-1 coarse:h-auto coarse:min-h-11',
         className,
       )}
       {...props}
     >
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {description === undefined ? (
+        <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      ) : (
+        <span className="flex min-w-0 flex-col">
+          <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+          <span className="text-ui-sm text-muted">{description}</span>
+        </span>
+      )}
+      {detail !== undefined && <span className="text-ui-sm text-muted">{detail}</span>}
       <SelectPrimitive.ItemIndicator className="absolute right-2 flex items-center">
         <Check className="size-3.5" />
       </SelectPrimitive.ItemIndicator>

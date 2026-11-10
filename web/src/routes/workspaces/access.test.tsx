@@ -70,14 +70,14 @@ describe('workspace access', () => {
     fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
     const list = within(await dialog.findByRole('list', { name: 'Members with access' }))
-    expect(list.getByText('Owner')).toBeTruthy()
+    expect(list.getByText('Owner · Admin')).toBeTruthy()
     expect(list.getByText('Bob')).toBeTruthy()
     await userEvent.click(dialog.getByLabelText('Add a member'))
     expect(await screen.findByRole('option', { name: /Vera/ })).toBeTruthy()
     expect(screen.queryByRole('option', { name: /Root/ })).toBeNull()
     expect(screen.queryByRole('option', { name: /Bob/ })).toBeNull()
     await userEvent.keyboard('{Escape}')
-    await pickOption(dialog.getByLabelText('Add a member'), 'Vera · Viewer')
+    await pickOption(dialog.getByLabelText('Add a member'), /^Vera/)
     fireEvent.click(dialog.getByRole('button', { name: 'Add' }))
     await waitFor(() => expect(api.workspaceAccessGrant).toHaveBeenCalledWith(workspace.id, [vera.id]))
     await waitFor(() => expect(api.workspaceListFull).toHaveBeenCalled())
@@ -102,9 +102,38 @@ describe('workspace access', () => {
     const dialog = within(await screen.findByRole('dialog', { name: 'Change owner of main-repo' }))
     await userEvent.click(dialog.getByLabelText('Owner'))
     expect(screen.queryByRole('option', { name: /Bob/ })).toBeNull()
+    expect(screen.getByRole('option', { name: /^Alice \(current\)/ })).toBeTruthy()
     await userEvent.keyboard('{Escape}')
-    await pickOption(dialog.getByLabelText('Owner'), 'Root · Super admin')
+    expect(dialog.queryByText(/keeps access/)).toBeNull()
+    await pickOption(dialog.getByLabelText('Owner'), /^Root/)
     fireEvent.click(dialog.getByRole('button', { name: 'Change owner' }))
+    expect(dialog.getByText('Alice keeps access as a granted member.')).toBeTruthy()
     await waitFor(() => expect(api.workspaceOwnerSet).toHaveBeenCalledWith(workspace.id, root.id))
+  })
+
+  it('never offers a super admin to add, and says so when everyone has access', async () => {
+    seed(admin, { owned: true })
+    const api = client({
+      memberList: vi.fn(async () => ({ members: [admin, bob, root] })),
+      workspaceAccessList: vi.fn(async () => ({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [{ member_id: bob.id, created_at: '2026-11-10T10:00:00Z' }] })),
+    })
+    render(<WorkspacesRoute params={{}} client={api} />)
+    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
+    expect(await dialog.findByText('Everyone already has access')).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: 'Add' })).toBeNull()
+  })
+
+  it('shows the owner on the row and says when no one else has access', async () => {
+    seed(admin, { owned: true })
+    const api = client({
+      workspaceAccessList: vi.fn(async () => ({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [] })),
+    })
+    render(<WorkspacesRoute params={{}} client={api} />)
+    expect(await screen.findByText(/Owner: you/)).toBeTruthy()
+    expect(screen.getByText(/Owner: Root/)).toBeTruthy()
+    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
+    expect(await dialog.findByText('No one else has access yet.')).toBeTruthy()
   })
 })

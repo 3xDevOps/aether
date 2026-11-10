@@ -5,7 +5,7 @@ import { MembersRoute } from '@/routes/members'
 import { administered, invitableRoles, workspacesValid } from '@/routes/members/workspace-picker'
 import { useStore } from '@/store'
 import { alice, bob, fakeApi, otherWorkspace, serverInfo, workspace } from '@/test/fixtures'
-import { openSelect } from '@/test/select'
+import { openSelect, pickOption } from '@/test/select'
 
 const admin: Member = { ...alice, role: 'admin' }
 const root: Member = { ...alice, id: 'mem_root', display_name: 'Root', role: 'super_admin' }
@@ -56,8 +56,8 @@ describe('invite workspace rules', () => {
     expect((dialog.getByRole('button', { name: 'Invite' }) as HTMLButtonElement).disabled).toBe(true)
 
     await openSelect(dialog.getByLabelText('Role'))
-    expect(screen.queryByRole('option', { name: 'Admin' })).toBeNull()
-    expect(screen.queryByRole('option', { name: 'Super admin' })).toBeNull()
+    expect(screen.queryByRole('option', { name: /^Admin/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /^Super admin/ })).toBeNull()
     await userEvent.keyboard('{Escape}')
 
     fireEvent.click(picker)
@@ -74,10 +74,34 @@ describe('invite workspace rules', () => {
 
     fireEvent.change(dialog.getByLabelText('GitHub login'), { target: { value: 'octocat' } })
     await openSelect(dialog.getByLabelText('Role'))
-    expect(await screen.findByRole('option', { name: 'Super admin' })).toBeTruthy()
+    expect(await screen.findByRole('option', { name: /^Super admin/ })).toBeTruthy()
     await userEvent.keyboard('{Escape}')
     fireEvent.click(dialog.getByRole('button', { name: 'Invite' }))
     await waitFor(() => expect(client.memberInvitationCreate).toHaveBeenCalledWith({ login: 'octocat', role: 'collaborator', workspace_ids: undefined }))
+  })
+
+  it('hides the workspace picker for a super admin invitee and sends no workspaces', async () => {
+    seed(root)
+    const created = { invitation: { id: 'inv_1', login: 'octocat', role: 'super_admin' as const, created_by: root.id, created_at: '', expires_at: '' }, link: 'https://edge.example/j', server_id: 's' }
+    const client = fakeApi({ memberInvitationCreate: vi.fn(async () => created) })
+    render(<MembersRoute params={{}} client={client} />)
+    const dialog = await inviteDialog()
+
+    fireEvent.change(dialog.getByLabelText('GitHub login'), { target: { value: 'octocat' } })
+    fireEvent.click(dialog.getByLabelText('main-repo'))
+    await pickOption(dialog.getByLabelText('Role'), /^Super admin/)
+    expect(dialog.queryByLabelText('main-repo')).toBeNull()
+    expect(dialog.getByText('A super admin can use every workspace.')).toBeTruthy()
+    fireEvent.click(dialog.getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(client.memberInvitationCreate).toHaveBeenCalledWith({ login: 'octocat', role: 'super_admin', workspace_ids: undefined }))
+  })
+
+  it('tells an admin who owns no workspace to ask a super admin', async () => {
+    seed(admin)
+    useStore.setState({ workspaces: { [grantedToAlice.id]: grantedToAlice } })
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+    const dialog = await inviteDialog()
+    expect(dialog.getByText('You can invite once you own a workspace. Ask a super admin.')).toBeTruthy()
   })
 
   it('applies the same rule to an invite code', async () => {
