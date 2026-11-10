@@ -108,6 +108,7 @@ export const serverInfo: ServerInfo = {
   protocol_version: '1',
   time: '2026-08-14T10:05:00Z',
   member: alice,
+  features: ['workspace-access'],
   disk: {
     used_bytes: 512 * 1024 * 1024,
     total_bytes: 2 * 1024 * 1024 * 1024,

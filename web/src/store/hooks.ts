@@ -136,6 +136,8 @@ export function useListedRuns(workspace: string): RunRow[] {
   return useMemo(() => listedRuns(workspace, ctx), [workspace, ctx])
 }
 
+const workspaceAccessFeature = 'workspace-access'
+
 export interface Capability {
   hasMethod: (method: string) => boolean
   hasLocal: (verb: string) => boolean
@@ -219,9 +221,16 @@ export function useIsAdmin(): boolean {
   return useStore((s) => isAdminRole(s.info?.member.role))
 }
 
-/** Whether the caller holds the server-wide super admin role. False until hydrated. */
+/**
+ * Whether the caller administers the server itself: a super admin, or an admin
+ * of a server that predates workspace-scoped access, which reports its
+ * administrator as admin. False until hydrated.
+ */
 export function useIsSuperAdmin(): boolean {
-  return useStore((s) => s.info?.member.role === 'super_admin')
+  return useStore((s) => {
+    const role = s.info?.member.role
+    return role === 'super_admin' || (role === 'admin' && !s.info?.features?.includes(workspaceAccessFeature))
+  })
 }
 
 /**

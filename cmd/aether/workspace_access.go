@@ -9,18 +9,17 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// memberNames maps member ids to display names for output. A failed member
-// list leaves the map empty and output falls back to ids.
-func memberNames(c *protocol.Client) map[string]string {
+// memberNames maps member ids to display names for output.
+func memberNames(c *protocol.Client) (map[string]string, error) {
 	var ml protocol.MemberListResult
 	if err := c.Call(protocol.MethodMemberList, struct{}{}, &ml); err != nil {
-		return nil
+		return nil, fmt.Errorf("list members: %w", err)
 	}
 	names := make(map[string]string, len(ml.Members))
 	for _, m := range ml.Members {
 		names[m.ID] = m.DisplayName
 	}
-	return names
+	return names, nil
 }
 
 func nameOrID(names map[string]string, id string) string {
@@ -43,7 +42,11 @@ func workspaceAccess(args []string) error {
 		if err := c.Call(protocol.MethodWorkspaceAccessList, protocol.WorkspaceAccessParams{WorkspaceID: id}, &res); err != nil {
 			return err
 		}
-		return printWorkspaceAccess(os.Stdout, res, memberNames(c))
+		names, err := memberNames(c)
+		if err != nil {
+			return err
+		}
+		return printWorkspaceAccess(os.Stdout, res, names)
 	})
 }
 

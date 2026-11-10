@@ -342,6 +342,11 @@ const FeatureMultiRepo = "multi-repo"
 // older one drops it and runs the agent as root.
 const FeaturePermission = "permission"
 
+// FeatureWorkspaceAccess marks a server with workspace-scoped access: it
+// reports its administrator as super_admin and serves workspace.access.*. An
+// older server reports admin for the same role.
+const FeatureWorkspaceAccess = "workspace-access"
+
 // CapabilityRunRepos is listed in a gateway's capability methods but is not an RPC method.
 const CapabilityRunRepos = "run.repos"
 

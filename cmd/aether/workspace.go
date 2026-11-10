@@ -92,7 +92,11 @@ func workspaceList(args []string) error {
 		if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
 			return err
 		}
-		return printWorkspaces(os.Stdout, list.Workspaces, memberNames(c))
+		names, err := memberNames(c)
+		if err != nil {
+			return err
+		}
+		return printWorkspaces(os.Stdout, list.Workspaces, names)
 	})
 }
 

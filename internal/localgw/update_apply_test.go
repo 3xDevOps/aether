@@ -490,3 +490,26 @@ func TestUpdateApplyLeavesTheServerFirst(t *testing.T) {
 		})
 	}
 }
+
+// A server that predates workspace-scoped access reports its administrator
+// as admin, and that role still moves the server first.
+func TestUpdateCheckLeavesTheServerFirstForAnOldServersAdmin(t *testing.T) {
+	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{results: map[string]json.RawMessage{
+		protocol.MethodServerInfo:         json.RawMessage(`{"server_version":"v1.2.8","member":{"role":"admin"}}`),
+		protocol.MethodServerUpdateStatus: json.RawMessage(`{"capable":true}`),
+	}}}
+	g := updateGateway(t, backend, false)
+	rec := do(g, http.MethodPost, "/local/v1/update.check", "{}", true)
+	var check struct {
+		TargetVersion string `json:"target_version"`
+		ServerFirst   bool   `json:"server_first"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &check); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("check status = %d: %s", rec.Code, rec.Body)
+	}
+	if !check.ServerFirst || check.TargetVersion != "" {
+		t.Fatalf("server_first = %v target_version = %q, want the server first", check.ServerFirst, check.TargetVersion)
+	}
+}

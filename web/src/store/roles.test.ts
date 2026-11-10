@@ -23,6 +23,13 @@ describe('role hooks', () => {
     expect(renderHook(() => useIsSuperAdmin()).result.current).toBe(true)
   })
 
+  it('keeps an old server\'s admin as its server administrator', () => {
+    useStore.setState({ info: { ...serverInfo, features: [], member: { ...alice, role: 'admin' } } })
+    expect(renderHook(() => useIsSuperAdmin()).result.current).toBe(true)
+    useStore.setState({ info: { ...serverInfo, features: [], member: { ...alice, role: 'collaborator' } } })
+    expect(renderHook(() => useIsSuperAdmin()).result.current).toBe(false)
+  })
+
   it('takes the workspace role from workspace.list, and the server role when it reports none', () => {
     seed('admin', 'collaborator')
     expect(renderHook(() => useWorkspaceRole(workspace.id)).result.current).toBe('collaborator')
