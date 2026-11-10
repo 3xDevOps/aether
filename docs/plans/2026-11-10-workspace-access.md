@@ -49,13 +49,13 @@ Capabilities with no workspace (`Target{}`):
 | --- | --- | --- | --- |
 | See and use a workspace | all | owned and granted | granted |
 | Create a workspace | yes, owns it | yes, owns it | no |
-| Delete, settings, environment, budget, templates, schedules, mirror refresh | any | owned | no |
+| Delete, settings, environment, budget, templates, schedules, mirror (public or GitHub source) | any | owned | no |
 | Grant or revoke members in a workspace | any member, any workspace | collaborators and viewers, owned workspaces | no |
 | Change a workspace's owner | yes | no | no |
 | Invite | any role, any workspaces | collaborator or viewer, at least one owned workspace, only owned workspaces | no |
 | Approve a pending member, approve a device | anyone's | members below admin, and their own | own devices |
 | Change a role, remove a member | yes | no | no |
-| Server update, run limits, Sysbox, edge claim code and owner transfer, mirror deploy keys (configure, adopt, disable), audit and system stats of everyone | yes | no | no |
+| Server update, run limits, Sysbox, edge claim code and owner transfer, a mirror with a deploy key, reviewer link, everyone's audit, disk and system stats | yes | no | no |
 
 ## Storage
 
@@ -143,6 +143,30 @@ sudo aether-server member role <member-id> super_admin   # on the server
   templates show only where the caller is the workspace's admin.
 - The dashboard's permission mirror (`web/src/lib/permissions.ts`) takes the
   caller's role per workspace from `workspace.list`.
+
+## Decisions made while building
+
+Each is a single check that is easy to change.
+
+- Granting a pending member is refused: `approve them first: aether member
+  approve <id>`.
+- `workspace.owner.set` keeps the previous owner, unless a super admin, on
+  the workspace as a grant, so their live sessions continue.
+- Revoking is `in use` while the member has a live session whose primary or
+  extra repository is in the workspace, or a schedule there.
+- An invitation or code grants, when it is used, only the named workspaces
+  its issuer still administers. A deleted workspace is skipped.
+- A launch, relaunch or handoff needs Launch in every workspace of the
+  session, extras included. A schedule fire re-checks its creator.
+- Coordination to a run in an unreachable workspace answers `unknown
+  session`, as for one that does not exist.
+- An event stream reloads the member's access when a grant, owner or role
+  changes, and at every revalidation tick.
+- Budget notices go to the workspace's owner and the super admins.
+- `changes.list` reports a deleted workspace only to super admins.
+- A session result lists only the repositories the caller reaches.
+- Edge ownership needs an admin or super admin; transfer and claim codes are
+  super admin only.
 
 ## Threat cases
 
