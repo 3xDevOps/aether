@@ -234,8 +234,8 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 
 // InputSessionGone is physical proof for a failed cleanup, not a health-check
 // fallback: an unreachable, paused or still-running companion is not gone. A
-// companion recorded unavailable counts as gone: no writer reaches it again,
-// and only Restart, which destroys it, follows.
+// companion recorded unavailable counts as gone: Reconcile refuses every
+// writer until Restart destroys it.
 func (m *Manager) InputSessionGone(ctx context.Context, status Status) bool {
 	if journal, err := loadStatus(m.journalDir(status.RunID)); err == nil && journal.CreationKey == status.CreationKey && journal.Unavailable != "" {
 		return true

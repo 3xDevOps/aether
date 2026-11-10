@@ -122,6 +122,9 @@ func TestStartupRecoversEverySessionWhenACompanionCannotReleaseInput(t *testing.
 		if status.Available || status.State != "unavailable" || !strings.Contains(status.Reason, "session "+string(run.ID)+" browser companion companion-"+string(run.ID)) {
 			t.Errorf("browser status of %s = %+v", run.ID, status)
 		}
+		if resumeErr := next.resumeDevelopmentBrowser(t.Context(), run.ID, next.developmentContainer(run.ID)); resumeErr != nil {
+			t.Errorf("resume %s with its browser unavailable: %v", run.ID, resumeErr)
+		}
 		// A reset needs the surface; a companion that cannot release input
 		// must not keep it fenced.
 		if _, _, acquireErr := e.cfg.Control.AcquireSurface(string(run.ID), browserSurface(status.SessionID), watcher, "control-session", false, 0, func() error { return nil }); acquireErr != nil {
