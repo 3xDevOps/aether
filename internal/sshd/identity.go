@@ -59,7 +59,7 @@ func (s *Server) actingAs(ctx context.Context, caller, owner domain.MemberID, ro
 	}
 	if m.Role == domain.RoleAdmin {
 		if owner != "" {
-			target, err := s.cfg.Store.GetMember(ctx, owner)
+			target, err := s.visibleMember(ctx, caller, owner)
 			if err != nil {
 				return rpcError(err)
 			}

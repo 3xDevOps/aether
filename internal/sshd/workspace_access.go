@@ -160,6 +160,9 @@ func (s *Server) workspaceAccessRevoke(ctx context.Context, member domain.Member
 	if perr := s.requireIn(ctx, member, permissions.WorkspaceAdmin, ws, method); perr != nil {
 		return nil, perr
 	}
+	if _, err := s.visibleMember(ctx, member, id); err != nil {
+		return nil, rpcError(err)
+	}
 	if _, perr := s.grantee(ctx, member, id, method); perr != nil {
 		return nil, perr
 	}
