@@ -232,12 +232,16 @@ radio can sleep. The window is that long because a server on a saturated
 host can stall for a minute or more under memory pressure and still be alive;
 dropping it would end every stream it carries. On Linux and Android a link
 to an address or tailnet name, not the edge, also sets `TCP_USER_TIMEOUT` to
-90 seconds: the kernel keeps acknowledging for a starved server, so only a dead
-network, such as a NAT timeout or a Wi-Fi switch, trips it, and that
-connection goes within about two minutes. A server that reads nothing for 90
-seconds while an upload fills its receive buffer trips it too. Elsewhere, and through the edge, a
-dead network takes up to six minutes, and the events stream shows nothing
-new meanwhile. Through the edge the longer window does not help either: the
+90 seconds: the kernel keeps acknowledging for a starved server, so a dead
+network, such as a NAT timeout or a Wi-Fi switch, trips it and that
+connection goes within about two minutes. On Linux 5.11 and newer, and older
+kernels that carry the backport of "tcp: fix TCP_USER_TIMEOUT with zero
+window", it also aborts a large upload (`home.upload`, `files.upload`,
+`terminal.file`) to a server that is alive but reads nothing for 90 seconds
+while the upload fills its receive buffer. Older kernels without that change,
+common on older Android phones, keep such a connection. Elsewhere, and through
+the edge, a dead network takes up to six minutes, and the events stream shows
+nothing new meanwhile. Through the edge the longer window does not help either: the
 edge marks a server offline after 60 seconds without control traffic.
 Every call and stream waiting on a dropped connection then fails or redials.
 A call already sent on it is replayed under the rule above; one that is not fails
