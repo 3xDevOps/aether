@@ -49,6 +49,7 @@ OOMScoreAdjust=-500
 # higher weights keep the server answering while they saturate CPU and disk.
 CPUWeight=1000
 IOWeight=1000
+# MemoryLow protects only once system.slice has MemoryLow too (docs/install.md).
 MemoryLow=1G
 # Runs as root. Two reasons, both deliberate (docs/security.md):
 #   1. The unit needs the Docker socket, and Docker socket access is already
