@@ -1241,7 +1241,7 @@ func grantEveryone(t *testing.T, db *store.DB, ws domain.WorkspaceID) {
 		t.Fatal(err)
 	}
 	for _, m := range members {
-		if err := db.GrantWorkspace(t.Context(), ws, m.ID, ""); err != nil {
+		if err := db.GrantWorkspace(t.Context(), ws, m.ID, "", true); err != nil {
 			t.Fatal(err)
 		}
 	}

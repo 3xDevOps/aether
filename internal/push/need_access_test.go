@@ -27,7 +27,7 @@ func TestANeedIsNotToldToAnOwnerWhoLostTheWorkspace(t *testing.T) {
 	phone.expect(t, want)
 	heard.expect(t, fmt.Sprintf("%s needs %q, answered by %q", run.ID, "which region?", ""))
 
-	if err := h.db.RevokeWorkspaceGrant(h.ctx, h.ws.ID, h.ada.ID); err != nil {
+	if err := h.db.RevokeWorkspaceGrant(h.ctx, h.ws.ID, h.ada.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
@@ -51,7 +51,7 @@ func TestADigestDropsARunWhoseOwnerLostTheWorkspace(t *testing.T) {
 	h.finish(run)
 	h.eventuallyQueued(h.ada, 1)
 
-	if err := h.db.RevokeWorkspaceGrant(h.ctx, h.ws.ID, h.ada.ID); err != nil {
+	if err := h.db.RevokeWorkspaceGrant(h.ctx, h.ws.ID, h.ada.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	h.clock.advance(30 * time.Minute)

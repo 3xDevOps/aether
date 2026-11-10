@@ -323,7 +323,7 @@ echo 'f00dfeed: end'
 	if err = server.srv.Store().CreateMember(ctx, cy); err != nil {
 		t.Fatal(err)
 	}
-	if err = server.srv.Store().GrantWorkspace(ctx, e.ws.ID, cy.ID, e.ada.id); err != nil {
+	if err = server.srv.Store().GrantWorkspace(ctx, e.ws.ID, cy.ID, e.ada.id, true); err != nil {
 		t.Fatal(err)
 	}
 	stranger := newSSHUser(t, aether, server.addr, cyKey)

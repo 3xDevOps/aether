@@ -269,7 +269,7 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 		if err := e.db.CreateMember(ctx, m); err != nil {
 			t.Fatal(err)
 		}
-		if err := e.db.GrantWorkspace(ctx, e.ws.ID, m.ID, domain.MemberID(info.Member.ID)); err != nil {
+		if err := e.db.GrantWorkspace(ctx, e.ws.ID, m.ID, domain.MemberID(info.Member.ID), true); err != nil {
 			t.Fatal(err)
 		}
 	}

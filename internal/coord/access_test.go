@@ -17,7 +17,7 @@ func TestMessagesStayInTheOwnersWorkspaces(t *testing.T) {
 	h := newHarness(t, 1, func(c *Config) { c.Store = c.Mail.(*store.DB) })
 	ctx := context.Background()
 	owner := h.runs[0].MemberID
-	if err := h.db.GrantWorkspace(ctx, h.workspace, owner, ""); err != nil {
+	if err := h.db.GrantWorkspace(ctx, h.workspace, owner, "", true); err != nil {
 		t.Fatal(err)
 	}
 	foreign := &domain.Workspace{Name: "foreign", BaseBranch: domain.DefaultBaseBranch}
@@ -25,7 +25,7 @@ func TestMessagesStayInTheOwnersWorkspaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	stranger := h.member(domain.RoleCollaborator)
-	if err := h.db.GrantWorkspace(ctx, foreign.ID, stranger.ID, ""); err != nil {
+	if err := h.db.GrantWorkspace(ctx, foreign.ID, stranger.ID, "", true); err != nil {
 		t.Fatal(err)
 	}
 	target := &domain.Run{WorkspaceID: foreign.ID, MemberID: stranger.ID, Task: "foreign", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
@@ -47,7 +47,7 @@ func TestMessagesStayInTheOwnersWorkspaces(t *testing.T) {
 		t.Fatalf("ask of a session in a foreign workspace = %v, want not found", err)
 	}
 
-	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, ""); err != nil {
+	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "hello")); err != nil {
@@ -71,7 +71,7 @@ func TestMessagesNeedEveryWorkspaceOfTheTarget(t *testing.T) {
 		ws domain.WorkspaceID
 		m  domain.MemberID
 	}{{h.workspace, owner}, {h.workspace, other.ID}, {foreign.ID, other.ID}} {
-		if err := h.db.GrantWorkspace(ctx, grant.ws, grant.m, ""); err != nil {
+		if err := h.db.GrantWorkspace(ctx, grant.ws, grant.m, "", true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -108,7 +108,7 @@ func TestMessagesNeedEveryWorkspaceOfTheTarget(t *testing.T) {
 		err.Code != missing.Code || err.Message != "coord.send: unknown session "+string(target.ID) {
 		t.Fatalf("send to an overlapping session with an extra repo the owner cannot reach = %v, want the missing session's answer", err)
 	}
-	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, ""); err != nil {
+	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if !listed() {
@@ -135,7 +135,7 @@ func TestLosingAWorkspaceClosesRetriesInboxAndReplies(t *testing.T) {
 		ws domain.WorkspaceID
 		m  domain.MemberID
 	}{{h.workspace, owner}, {foreign.ID, owner}, {foreign.ID, stranger.ID}} {
-		if err := h.db.GrantWorkspace(ctx, grant.ws, grant.m, ""); err != nil {
+		if err := h.db.GrantWorkspace(ctx, grant.ws, grant.m, "", true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestLosingAWorkspaceClosesRetriesInboxAndReplies(t *testing.T) {
 	}
 
 	for _, m := range []domain.MemberID{owner, stranger.ID} {
-		if err := h.db.RevokeWorkspaceGrant(ctx, foreign.ID, m); err != nil {
+		if err := h.db.RevokeWorkspaceGrant(ctx, foreign.ID, m, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -188,7 +188,7 @@ func TestLosingAnExtraWorkspaceClosesTheInbox(t *testing.T) {
 	}
 	owner := h.member(domain.RoleCollaborator)
 	for _, ws := range []domain.WorkspaceID{h.workspace, extra.ID} {
-		if err := h.db.GrantWorkspace(ctx, ws, owner.ID, ""); err != nil {
+		if err := h.db.GrantWorkspace(ctx, ws, owner.ID, "", true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -202,7 +202,7 @@ func TestLosingAnExtraWorkspaceClosesTheInbox(t *testing.T) {
 	if _, err := h.svc.Inbox(ctx, run.ID, protocol.CoordInboxParams{}); err != nil {
 		t.Fatalf("inbox while the owner reaches both workspaces: %v", err)
 	}
-	if err := h.db.RevokeWorkspaceGrant(ctx, extra.ID, owner.ID); err != nil {
+	if err := h.db.RevokeWorkspaceGrant(ctx, extra.ID, owner.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	_, err := h.svc.Inbox(ctx, run.ID, protocol.CoordInboxParams{})

@@ -67,7 +67,7 @@ func TestSlackActionsOnAnUnreachableSessionReadAsMissing(t *testing.T) {
 			t.Fatalf("CreateWorkspace: %v", err)
 		}
 	}
-	if err = h.db.GrantWorkspace(ctx, wsA.ID, cast["U"].ID, cast["A"].ID); err != nil {
+	if err = h.db.GrantWorkspace(ctx, wsA.ID, cast["U"].ID, cast["A"].ID, true); err != nil {
 		t.Fatalf("GrantWorkspace: %v", err)
 	}
 	runB := &domain.Run{Title: "Tidy b", WorkspaceID: wsB.ID, MemberID: cast["B"].ID, Harness: "claude",

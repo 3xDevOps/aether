@@ -51,7 +51,7 @@ func TestBudgetNoticesReachOnlyTheWorkspaceOwnerAndSuperAdmins(t *testing.T) {
 	if err := h.db.CreateWorkspace(h.ctx, wsB); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	if err := h.db.GrantWorkspace(h.ctx, wsA.ID, cast["U"].ID, cast["A"].ID); err != nil {
+	if err := h.db.GrantWorkspace(h.ctx, wsA.ID, cast["U"].ID, cast["A"].ID, true); err != nil {
 		t.Fatalf("GrantWorkspace: %v", err)
 	}
 
