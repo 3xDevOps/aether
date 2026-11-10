@@ -19,6 +19,10 @@ import (
 
 var ErrUnavailable = errors.New("browser companion unavailable; explicit restart required")
 
+// ErrReplaced reports that the journal no longer records the companion the
+// caller observed.
+var ErrReplaced = errors.New("browser companion was replaced")
+
 type Config struct {
 	Image            string
 	CPULimit         float64
@@ -310,7 +314,7 @@ func (m *Manager) create(ctx context.Context, run Run, entry *managedRun, dir st
 	return m.reconcile(ctx, run, entry, dir)
 }
 
-func (m *Manager) transition(ctx context.Context, run Run, action string) (Status, error) {
+func (m *Manager) transition(ctx context.Context, run Run, action, creationKey string) (Status, error) {
 	entry, dir, err := m.entry(run)
 	if err != nil {
 		return Status{}, err
@@ -320,6 +324,9 @@ func (m *Manager) transition(ctx context.Context, run Run, action string) (Statu
 	status, err := loadStatus(dir)
 	if err != nil {
 		return status, err
+	}
+	if creationKey != "" && status.CreationKey != creationKey {
+		return status, ErrReplaced
 	}
 	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
 		return status, errors.New("browser lifecycle session identity mismatch")
@@ -388,21 +395,31 @@ func (m *Manager) transition(ctx context.Context, run Run, action string) (Statu
 }
 
 func (m *Manager) Pause(ctx context.Context, run Run) (Status, error) {
-	return m.transition(ctx, run, "pause")
+	return m.transition(ctx, run, "pause", "")
 }
 func (m *Manager) Resume(ctx context.Context, run Run) (Status, error) {
-	return m.transition(ctx, run, "resume")
+	return m.transition(ctx, run, "resume", "")
 }
 func (m *Manager) Restart(ctx context.Context, run Run) (Status, error) {
-	return m.transition(ctx, run, "restart")
+	return m.transition(ctx, run, "restart", "")
 }
 
 // Remove destroys the session's recorded companion, whichever session
 // container it was created for, and deletes its journal.
 func (m *Manager) Remove(ctx context.Context, runID string) error {
+	return m.remove(ctx, runID, "")
+}
+
+// RemoveObserved is Remove that refuses with ErrReplaced once the session's
+// journal records a companion other than observed.
+func (m *Manager) RemoveObserved(ctx context.Context, observed Status) error {
+	return m.remove(ctx, observed.RunID, observed.CreationKey)
+}
+
+func (m *Manager) remove(ctx context.Context, runID, creationKey string) error {
 	status, err := loadStatus(m.journalDir(runID))
 	if err == nil {
-		_, err = m.transition(ctx, Run{ID: runID, ContainerID: status.RunContainer}, "remove")
+		_, err = m.transition(ctx, Run{ID: runID, ContainerID: status.RunContainer}, "remove", creationKey)
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

@@ -172,23 +172,23 @@ func (s *Scheduler) StopDevelopmentRun(ctx context.Context, id domain.RunID) err
 }
 
 func (s *Scheduler) removeDevelopmentBrowser(ctx context.Context, id domain.RunID) error {
-	lock := s.developmentState().lock(id)
+	d := s.developmentState()
+	lock := d.lock(id)
 	lock.Lock()
 	defer lock.Unlock()
-	return s.removeDevelopmentBrowserLocked(ctx, id)
-}
-
-func (s *Scheduler) removeDevelopmentBrowserLocked(ctx context.Context, id domain.RunID) error {
-	d := s.developmentState()
 	if d.manager != nil {
 		if err := d.manager.Remove(ctx, string(id)); err != nil {
 			return err
 		}
 	}
+	d.releaseBrowser(id)
+	return nil
+}
+
+func (d *developmentState) releaseBrowser(id domain.RunID) {
 	d.mu.Lock()
 	delete(d.reserved, id)
 	d.mu.Unlock()
-	return nil
 }
 
 // sweepBrowsers removes companions that no open session can use: their
@@ -223,10 +223,12 @@ func (s *Scheduler) sweepBrowsers(ctx context.Context) {
 		lock.Lock()
 		ended, err := s.browserSessionEnded(ctx, id, status.RunContainer)
 		if err == nil && ended {
-			err = s.removeDevelopmentBrowserLocked(ctx, id)
+			if err = d.manager.RemoveObserved(ctx, status); err == nil {
+				d.releaseBrowser(id)
+			}
 		}
 		lock.Unlock()
-		if err != nil {
+		if err != nil && !errors.Is(err, browser.ErrReplaced) {
 			slog.Warn("scheduler: remove ended session's browser companion", "run", id, "error", err)
 		}
 	}
