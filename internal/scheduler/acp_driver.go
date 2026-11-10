@@ -648,9 +648,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				slog.Warn("scheduler: record the model notice", "run", runID, "error", err)
 			}
 			if refused {
-				if err := d.s.cfg.Store.RefuseRunModel(ctx, runID, run.Model, reason); err != nil {
+				if changed, err := d.s.cfg.Store.RefuseRunModel(ctx, runID, run.Model, reason); err != nil {
 					slog.Warn("scheduler: record the refused model", "run", runID, "error", err)
-				} else {
+				} else if changed {
 					d.s.publish(ctx, events.Event{WorkspaceID: run.WorkspaceID, RunID: runID, Payload: events.RunModelPayload{}})
 				}
 			}
