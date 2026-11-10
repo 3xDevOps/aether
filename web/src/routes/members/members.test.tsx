@@ -35,7 +35,8 @@ async function pickMenu(trigger: string, item: string, role: 'menuitem' | 'menui
   screen.getByRole('button', { name: trigger }).focus()
   await userEvent.keyboard('{Enter}')
   const menu = await screen.findByRole('menu')
-  fireEvent.click(within(menu).getByRole(role, { name: item }))
+  const name = role === 'menuitemradio' ? new RegExp(`^${item}`) : item
+  fireEvent.click(within(menu).getByRole(role, { name }))
 }
 
 const row = (name: string) => within(screen.getByRole('region', { name: 'Roster' })).getByText(name).closest('tr')!
@@ -168,7 +169,7 @@ describe('members page', () => {
     const menu = await screen.findByRole('menu')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Admin' }))
+      fireEvent.click(within(menu).getByRole('menuitemradio', { name: /^Admin/ }))
       act(() => useStore.getState().setMembers([alice, { ...bob, role: 'admin' }]))
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       await act(async () => {})

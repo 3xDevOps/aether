@@ -6,6 +6,7 @@ import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { type Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -32,6 +33,14 @@ function useMembers(client: Api): Member[] {
   return Object.values(members).filter((m) => !m.pending)
 }
 
+function useSelfID(): string | undefined {
+  return useStore((s) => s.info?.member.id)
+}
+
+function PickerName({ member, selfID }: { member: Member; selfID: string | undefined }) {
+  return <>{member.display_name}{member.id === selfID ? ' (you)' : ''}</>
+}
+
 function MemberLine({ member, id, detail }: { member?: Member; id: string; detail: string }) {
   return (
     <>
@@ -53,6 +62,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [pick, setPick] = useState('')
+  const selfID = useSelfID()
   const returnFocus = useReturnFocus()
 
   const load = useCallback(async () => {
@@ -81,8 +91,9 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
     }
   }
 
+  const ownerMember = access ? byID.get(access.owner_member_id) : undefined
   const granted = new Set([access?.owner_member_id, ...(access?.grants.map((g) => g.member_id) ?? [])])
-  const addable = members.filter((m) => !granted.has(m.id) && (superAdmin || !isAdminRole(m.role)))
+  const addable = members.filter((m) => !granted.has(m.id) && m.role !== 'super_admin' && (superAdmin || !isAdminRole(m.role)))
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -90,15 +101,20 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
         <DialogHeader>
           <DialogTitle>Access to {workspace?.name ?? 'this workspace'}</DialogTitle>
           <DialogDescription>
-            The owner and every granted member reach this workspace. A granted member acts with their server role. Super admins reach every workspace without a grant.
+            The owner and the members listed here can use this workspace, each with their role from Members. Super admins can use every workspace.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-3">
           {error && <Callout tone="failed" role="alert">{error}</Callout>}
+          {!access && !error && (
+            <div role="status" aria-label="Loading access" className="flex flex-col gap-0.5">
+              {[0, 1].map((row) => <Skeleton key={row} className="h-7" />)}
+            </div>
+          )}
           {access && (
             <InsetList aria-label="Members with access">
               <InsetListItem>
-                <MemberLine member={byID.get(access.owner_member_id)} id={access.owner_member_id} detail="Owner" />
+                <MemberLine member={byID.get(access.owner_member_id)} id={access.owner_member_id} detail={ownerMember ? `Owner · ${roleLabel[ownerMember.role]}` : 'Owner'} />
               </InsetListItem>
               {access.grants.map((grant) => {
                 const member = byID.get(grant.member_id)
@@ -120,13 +136,17 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
               })}
             </InsetList>
           )}
+          {access?.grants.length === 0 && <p className="text-ui-sm text-muted">No one else has access yet.</p>}
+          {addable.length === 0 ? (
+            <p className="text-ui-sm text-muted">Everyone already has access</p>
+          ) : (
           <div className="flex min-w-0 items-end gap-2">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <Label htmlFor="access-member">Add a member</Label>
               <Select value={pick} onValueChange={setPick}>
-                <SelectTrigger id="access-member"><SelectValue placeholder={addable.length === 0 ? 'No one to add' : 'Choose a member'} /></SelectTrigger>
+                <SelectTrigger id="access-member"><SelectValue placeholder="Choose a member" /></SelectTrigger>
                 <SelectContent>
-                  {addable.map((m) => <SelectItem key={m.id} value={m.id}>{m.display_name} · {roleLabel[m.role]}</SelectItem>)}
+                  {addable.map((m) => <SelectItem key={m.id} value={m.id} detail={roleLabel[m.role]}><PickerName member={m} selfID={selfID} /></SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -140,6 +160,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
               Add
             </Button>
           </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Done</Button>
@@ -152,7 +173,10 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
 export function WorkspaceOwnerDialog({ workspaceID, client, onClose }: { workspaceID: string; client: Api; onClose: () => void }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const members = useMembers(client).filter((m) => isAdminRole(m.role))
-  const [owner, setOwner] = useState(workspace?.owner_member_id ?? '')
+  const current = workspace?.owner_member_id ?? ''
+  const [owner, setOwner] = useState(current)
+  const selfID = useSelfID()
+  const previous = members.find((m) => m.id === current)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const returnFocus = useReturnFocus()
@@ -184,10 +208,19 @@ export function WorkspaceOwnerDialog({ workspaceID, client, onClose }: { workspa
             <Select value={owner} onValueChange={setOwner}>
               <SelectTrigger id="workspace-owner"><SelectValue placeholder="Choose an admin" /></SelectTrigger>
               <SelectContent>
-                {members.map((m) => <SelectItem key={m.id} value={m.id}>{m.display_name} · {roleLabel[m.role]}</SelectItem>)}
+                {members.map((m) => (
+                  <SelectItem key={m.id} value={m.id} detail={roleLabel[m.role]}>
+                    <PickerName member={m} selfID={selfID} />{m.id === current ? ' (current)' : ''}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+          {previous && owner !== '' && owner !== current && (
+            <p className="text-ui-sm text-muted">
+              {previous.display_name} keeps access as {previous.role === 'super_admin' ? 'a super admin' : 'a granted member'}.
+            </p>
+          )}
           {error && <Callout tone="failed" role="alert">{error}</Callout>}
         </div>
         <DialogFooter>

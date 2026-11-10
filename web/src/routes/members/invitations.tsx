@@ -24,7 +24,7 @@ import { useReturnFocus } from '@/lib/hooks'
 import { memberName } from '@/lib/member-name'
 import type { Invitation, InvitationResult, Member } from '@/lib/types'
 import { draftKey, useFailure } from '@/components/failure'
-import { roleLabel } from '@/routes/members/roster'
+import { roleDescription, roleLabel } from '@/routes/members/roster'
 import { administered, invitableRoles, WorkspacePicker, workspacesValid } from '@/routes/members/workspace-picker'
 import { sameIdentity, useStore } from '@/store'
 import { useCapability, useSelfRole } from '@/store/hooks'
@@ -258,7 +258,7 @@ function AccountInvite({ draft, error, pending, onClose, onInvite }: {
       className="flex min-w-0 flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
-        onInvite({ by, who, role, workspaceIDs: picked })
+        onInvite({ by, who, role, workspaceIDs: role === 'super_admin' ? [] : picked })
       }}
     >
       <div className="grid min-w-0 gap-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
@@ -285,13 +285,15 @@ function AccountInvite({ draft, error, pending, onClose, onInvite }: {
       <div className="flex min-w-0 flex-col gap-1">
         <Label htmlFor="invite-role">Role</Label>
         <Select value={role} onValueChange={(value) => setRole(value as Member['role'])}>
-          <SelectTrigger id="invite-role" className="w-44"><SelectValue /></SelectTrigger>
+          <SelectTrigger id="invite-role" className="w-full sm:w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {invitableRoles(selfRole).map((r) => <SelectItem key={r} value={r}>{roleLabel[r]}</SelectItem>)}
+            {invitableRoles(selfRole).map((r) => <SelectItem key={r} value={r} description={roleDescription[r]}>{roleLabel[r]}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
-      <WorkspacePicker workspaces={choices} picked={picked} required={selfRole !== 'super_admin'} onChange={setPicked} />
+      {role === 'super_admin'
+        ? <p className="text-ui-sm text-muted">A super admin can use every workspace.</p>
+        : <WorkspacePicker workspaces={choices} picked={picked} required={selfRole !== 'super_admin'} onChange={setPicked} />}
       <Collapsible>
         <CollapsibleTrigger><span className="text-muted">Learn more</span></CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-2 pt-1 pl-4">
@@ -309,7 +311,7 @@ function AccountInvite({ draft, error, pending, onClose, onInvite }: {
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
       <DialogFooter>
         <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={pending || !who.trim() || !workspacesValid(selfRole, picked)}>{late ? stillWaiting : pending ? 'Inviting…' : 'Invite'}</Button>
+        <Button type="submit" disabled={pending || !who.trim() || !(role === 'super_admin' || workspacesValid(selfRole, picked))}>{late ? stillWaiting : pending ? 'Inviting…' : 'Invite'}</Button>
       </DialogFooter>
     </form>
   )

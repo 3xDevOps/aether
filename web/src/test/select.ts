@@ -16,7 +16,7 @@ export async function openSelect(trigger: HTMLElement): Promise<HTMLElement> {
  * Enter on the focused option, not a bare click: Radix reads the pointer type
  * it last saw, and a click with no pointer events before it takes the touch
  * path instead of either of the two this app is driven by. */
-export async function pickOption(trigger: HTMLElement, option: string): Promise<void> {
+export async function pickOption(trigger: HTMLElement, option: string | RegExp): Promise<void> {
   await openSelect(trigger)
   const item = await screen.findByRole('option', { name: option })
   item.focus()

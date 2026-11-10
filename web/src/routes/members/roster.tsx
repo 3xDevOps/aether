@@ -28,6 +28,13 @@ export const roleLabel: Record<Member['role'], string> = {
   super_admin: 'Super admin',
 }
 
+export const roleDescription: Record<Member['role'], string> = {
+  viewer: 'Reads the workspaces they are granted',
+  collaborator: 'Works in the workspaces they are granted',
+  admin: 'Owns and runs their own workspaces',
+  super_admin: 'Every workspace, members and server settings',
+}
+
 function accountWords(id: string, access: AccountAccess | null): string {
   if (!access) return ''
   const theirs = access.accounts.some((m) => m.id === id)
@@ -164,7 +171,7 @@ export function Roster({ client }: { client: Api }) {
                           <MenuContent align="end">
                             <MenuLabel>Role</MenuLabel>
                             <MenuRadioGroup value={member.role} onValueChange={(role) => changeRole(member, role as Member['role'])}>
-                              {roles.map((role) => <MenuRadioItem key={role} value={role}>{roleLabel[role]}</MenuRadioItem>)}
+                              {roles.map((role) => <MenuRadioItem key={role} value={role} description={roleDescription[role]}>{roleLabel[role]}</MenuRadioItem>)}
                             </MenuRadioGroup>
                             {canRemove && !you && (
                               <>

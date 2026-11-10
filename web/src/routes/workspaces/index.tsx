@@ -68,7 +68,12 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   }, [refetch])
 
   const administers = (workspace: Workspace) => isAdminRole(workspace.role ?? selfRole)
-  const ownerOf = (workspace: Workspace) => (workspace.owner_member_id ? members[workspace.owner_member_id]?.display_name ?? workspace.owner_member_id : '')
+  const selfID = useStore((s) => s.info?.member.id)
+  const ownerOf = (workspace: Workspace) => {
+    const id = workspace.owner_member_id
+    if (!id) return ''
+    return id === selfID ? 'you' : members[id]?.display_name ?? id
+  }
 
   const open = (workspace: Workspace) => {
     useStore.getState().setActiveWorkspace(workspace.id)
@@ -125,7 +130,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                     <ListRow
                       aria-label={`Open ${workspace.name}`}
                       leading={<FolderGit2 />}
-                      trailing={[workspace.id === active ? `Current · ${workspace.base_branch}` : workspace.base_branch, ownerOf(workspace) && `owner ${ownerOf(workspace)}`].filter(Boolean).join(' · ')}
+                      trailing={[workspace.id === active ? `Current · ${workspace.base_branch}` : workspace.base_branch, ownerOf(workspace) && `Owner: ${ownerOf(workspace)}`].filter(Boolean).join(' · ')}
                       onClick={() => open(workspace)}
                       hoverAction={(
                         <Menu>

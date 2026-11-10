@@ -30,9 +30,9 @@ export function WorkspacePicker({ workspaces, picked, required, onChange }: {
     <fieldset className="flex min-w-0 flex-col gap-1.5">
       <legend className="mb-1 text-ui-sm font-medium text-text">Workspaces</legend>
       <p className="text-ui-sm text-muted">
-        {required ? 'The member reaches only the workspaces you pick. Pick at least one.' : 'The member reaches only the workspaces you pick. None gives access to none.'}
+        {required ? 'The member reaches only the workspaces you pick. Pick at least one.' : 'Leave all unchecked to grant workspaces later from Manage workspaces.'}
       </p>
-      {workspaces.length === 0 && <p className="text-ui-sm text-muted">You administer no workspace.</p>}
+      {workspaces.length === 0 && <p className="text-ui-sm text-muted">You can invite once you own a workspace. Ask a super admin.</p>}
       <div className="flex max-h-40 min-w-0 flex-col gap-1.5 overflow-y-auto">
         {workspaces.map((workspace) => (
           <div key={workspace.id} className="flex min-w-0 items-center gap-2">
