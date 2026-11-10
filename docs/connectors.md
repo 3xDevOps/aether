@@ -740,13 +740,13 @@ SEQ  TIME                 MEMBER          VIA                                MET
 813  2026-10-26 14:01:40  mem-4f8x2kq9vd  connector ChatGPT con-7k2m9q4xbd    run.launch  run-d6ay38tj8j  ok
 ```
 
-You see your own entries; an admin sees everyone's. The `audit.list` RPC
+You see your own entries; a super admin sees everyone's. The `audit.list` RPC
 returns the same entries, at most 200 a page. The server keeps each member's
 newest 10,000 call entries and, apart from them, their newest 10,000 connector,
 account, member and Slack changes that took effect, so a flood of calls cannot
 push a security change out of the history. A call that changed nothing, such
 as revoking a share that does not exist, is a call entry. After a member merge, the absorbed member's entries
-keep their id, so only admins see them.
+keep their id, so only super admins see them.
 
 ## Revoke a connector
 

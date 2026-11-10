@@ -13,10 +13,13 @@ that runs coding agents for you and your team. If you are new, start with the
 | Dashboard | The web app for sessions, agents, files and settings. The desktop app, `aether gui` and the Android app show it, and the server can host it on a tailnet. | [networking.md](networking.md#the-dashboard) |
 | Tailnet | A private network made with Tailscale. On a tailnet the server can sign people in by their Tailscale login and host the dashboard. | [networking.md](networking.md) |
 | Edge | A relay with GitHub sign-in that servers and clients both dial out to, so neither needs an open port. The project runs one at `https://edge.onaether.dev`, and you can run your own. | [edge.md](edge.md) |
-| Claim link | The link `aether-server setup` prints. Whoever uses it first, in the desktop app or with `aether link --claim`, becomes the server's administrator. | [quickstart.md](quickstart.md#2-start-the-server) |
-| Member | A person with an account on a server. Each member has a role: viewer, collaborator (the default) or admin. | [teams.md](teams.md) |
-| Administrator | A member with the admin role, who manages members, workspaces and settings. The first person to link a fresh server becomes one. | [teams.md](teams.md) |
-| Workspace | One repository and its base branch (the branch new sessions start from), plus the sessions, notes and history that belong to it. | [teams.md](teams.md) |
+| Claim link | The link `aether-server setup` prints. Whoever uses it first, in the desktop app or with `aether link --claim`, becomes the server's super admin. | [quickstart.md](quickstart.md#2-start-the-server) |
+| Member | A person with an account on a server. Each member has a role: viewer, collaborator (the default), admin or super admin. | [teams.md](teams.md#roles) |
+| Super admin | A member with the super admin role: admin in every workspace, and the only one who manages members, roles and the server itself. The first person to link a fresh server becomes one. | [teams.md](teams.md#roles) |
+| Admin | A member who administers the workspaces they own and uses the ones they are granted. | [teams.md](teams.md#roles) |
+| Workspace owner | The admin or super admin who owns a workspace. A workspace has exactly one, the member who created it until a super admin changes it. | [teams.md](teams.md#workspace-access) |
+| Grant | Lets one member into one workspace. Without a grant, a collaborator or viewer cannot see the workspace at all. | [teams.md](teams.md#workspace-access) |
+| Workspace | One repository and its base branch (the branch new sessions start from), plus the sessions, notes and history that belong to it. Members reach only the workspaces they own or were granted. | [teams.md](teams.md) |
 | Source mirror | A workspace imported from GitHub or another Git host follows that repository: the server's mirror fetches it read-only and moves the base branch forward. A workspace without one is local-only, and collaborators push its base branch. | [teams.md](teams.md#source-mirror) |
 | Publish destination | The repository sessions push their branches to, shown as **Publish changes to**: the source repository, a fork, or none. | [teams.md](teams.md#workspaces) |
 | Session | One agent working on one task in its own container, with its own checkout of the workspace and optionally of other workspaces ([extra repos](quickstart.md#working-across-repos)). A closed session keeps its container for 7 days, so you can relaunch it. | [quickstart.md](quickstart.md) |
