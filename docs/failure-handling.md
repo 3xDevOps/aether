@@ -240,7 +240,7 @@ poll and before refusing a launch, in this order, until it is back above:
    `--checkout-ttl` is negative.
 3. Other members' stopped environment containers. Anything they installed and
    did not save with `aether env save` is lost; their homes are kept.
-4. Caches and the standard images.
+4. Caches and unused standard and browser images.
 5. Leftover scratch directories.
 
 If that is not enough, the launch is refused:

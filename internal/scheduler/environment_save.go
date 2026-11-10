@@ -109,7 +109,7 @@ func (s *Scheduler) sweepMemberImages(ctx context.Context, member domain.MemberI
 }
 
 func (s *Scheduler) currentImageReferences(ctx context.Context) (map[string]bool, error) {
-	refs := map[string]bool{s.cfg.StandardImage: true, s.cfg.DefaultStandardImage: true, s.cfg.BrowserImage: true}
+	refs := map[string]bool{s.cfg.StandardImage: true, s.cfg.DefaultStandardImage: true, s.cfg.BrowserImage: true, s.cfg.DefaultBrowserImage: true}
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return nil, err
@@ -161,32 +161,43 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	return errors.Join(failures...)
 }
 
-// sweepStandardImages untags every tag of Aether's standard image repository
-// that nothing references, so the images a server upgrade replaced do not stay
-// on disk. Only the default repository is swept: a custom --standard-image may
-// share its repository with images Aether does not own. Docker refuses to
-// remove an image a container uses; that tag is kept until a later sweep.
-func (s *Scheduler) sweepStandardImages(ctx context.Context) {
-	repo := imageRepo(s.cfg.DefaultStandardImage)
-	if repo == "" {
-		return
+// sweepUnusedImages untags every tag of Aether's standard and browser image
+// repositories that nothing references, so the images a server upgrade replaced
+// do not stay on disk. Only the default repositories are swept: a custom
+// --standard-image may share its repository with images Aether does not own;
+// a browser image pinned by --browser-image (a tag, digest or image ID) is never
+// swept, since removing the last tag of a pinned ID deletes the image; and a
+// source build's browser image is built locally, not pulled. Docker refuses to remove an image a container uses; that tag is kept
+// until a later sweep.
+func (s *Scheduler) sweepUnusedImages(ctx context.Context) {
+	repos := []string{imageRepo(s.cfg.DefaultStandardImage)}
+	if s.cfg.BrowserImage == s.cfg.DefaultBrowserImage && releaseTagged(s.cfg.DefaultBrowserImage) {
+		repos = append(repos, imageRepo(s.cfg.DefaultBrowserImage))
 	}
-	refs, err := s.currentImageReferences(ctx)
-	if err != nil {
-		slog.Warn("scheduler: list standard image references", "error", err)
-		return
-	}
-	tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
-	if err != nil {
-		slog.Warn("scheduler: list standard image tags", "repo", repo, "error", err)
-		return
-	}
-	for _, tag := range tags {
-		if refs[tag] {
+	var refs map[string]bool
+	for _, repo := range repos {
+		if repo == "" {
 			continue
 		}
-		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil && !cerrdefs.IsConflict(err) {
-			slog.Warn("scheduler: remove unused standard image", "tag", tag, "error", err)
+		if refs == nil {
+			var err error
+			if refs, err = s.currentImageReferences(ctx); err != nil {
+				slog.Warn("scheduler: list image references", "error", err)
+				return
+			}
+		}
+		tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
+		if err != nil {
+			slog.Warn("scheduler: list image tags", "repo", repo, "error", err)
+			continue
+		}
+		for _, tag := range tags {
+			if refs[tag] {
+				continue
+			}
+			if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil && !cerrdefs.IsConflict(err) {
+				slog.Warn("scheduler: remove unused image", "tag", tag, "error", err)
+			}
 		}
 	}
 }
