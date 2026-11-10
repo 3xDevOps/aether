@@ -415,7 +415,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		}
 		if err := permissions.Check(permissions.Steer,
 			permissions.ActorOf(freshActor),
-			permissions.Target{Workspace: freshWS.ID, Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: freshWS.SteerOthers}); err != nil {
+			permissions.Target{Workspace: freshWS.ID, Extra: freshRun.ExtraWorkspaces(), Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: freshWS.SteerOthers}); err != nil {
 			return err
 		}
 		run, actor, ws = freshRun, freshActor, freshWS
