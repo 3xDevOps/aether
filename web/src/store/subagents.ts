@@ -1,4 +1,4 @@
-import type { SessionItem, SessionToolCall } from '@/lib/session-types'
+import type { BackgroundTask, SessionItem, SessionToolCall } from '@/lib/session-types'
 import { isLaunch, toolLabel, toolStatus, type Rehome, type SessionRow, type Turn } from '@/store/session-rows'
 
 /** A background task's own status wins; otherwise done and failed come from
@@ -323,6 +323,19 @@ export function agentState(agent: Subagent): AgentState {
   return agent.turnEndedSeq !== undefined && (agent.activeSeq ?? -1) < agent.turnEndedSeq ? 'stopped' : 'running'
 }
 
+/** Whether a live subagent or workflow task was launched before the loaded
+ * history: no call held from oldestSeq on started it and no launch of an
+ * open turn still waits for its task, so its card shows only once older
+ * history is read. */
+export function launchUnloaded(index: AgentIndex, tasks: BackgroundTask[] | undefined, oldestSeq: number): boolean {
+  const live = (tasks ?? []).filter((task) => /agent|workflow/.test(task.type ?? ''))
+  if (live.length === 0) return false
+  const agents = Object.values(index.agents)
+  if (agents.some((agent) => !agent.parentID && agent.turnEndedSeq === undefined && agent.call && !agent.call.task && !callSettled(agent.call))) return false
+  const held = new Set(agents.filter((agent) => Math.max(agent.launchSeq ?? -1, agent.callSeq ?? -1) >= oldestSeq).map((agent) => agent.call?.task?.id))
+  return live.some((task) => !held.has(task.id))
+}
+
 function rawInput(agent: Subagent): Record<string, unknown> {
   const raw = agent.call?.raw_input
   return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
@@ -346,6 +359,14 @@ export function agentReport(agent: Subagent): string | undefined {
   if ((state !== 'done' && state !== 'failed') || agent.call?.task) return undefined
   const report = (agent.call?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n\n').trim()
   return report || undefined
+}
+
+/** The text of a subagent's last message, which reports what a background
+ * subagent did: its launching call returned once it started. */
+export function agentLastMessage(agent: Subagent): string | undefined {
+  const id = agent.items.filter((item) => item.kind === 'message' && item.message?.role === 'assistant').at(-1)?.message?.message_id
+  if (!id) return undefined
+  return agent.items.filter((item) => item.kind === 'message' && item.message?.message_id === id).map((item) => item.message!.text).join('').trim() || undefined
 }
 
 export function agentPrompt(agent: Subagent): string | undefined {

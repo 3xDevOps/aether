@@ -69,8 +69,10 @@ first prompt. An agent with no ACP command is refused:
 scheduler: harness "custom" has no command for mode "acp"
 ```
 
-`--model` is set after the session opens. If the agent rejects it, the Session
-view shows a **Model not set** error notice with the agent's error. A model you
+`--model` is set after the session opens. If the agent rejects it, the session
+runs on the agent's default model and the Session view shows a **Model not
+set** error notice with the agent's error, such as `Invalid value for config
+option model: claude-fable-5-2` from a Claude Code that predates the model. A model you
 pick later from the composer menu becomes the session's recorded model and survives a
 reopen, a server restart and a switch to Standard. A model id Aether cannot
 store (whitespace, a leading `-`, or over 128 bytes) shows a **Model not
@@ -225,6 +227,10 @@ on its own, the Chat view shows it as an autonomous turn. The session reason rea
 `working in background: <n> tasks`, or `waiting-agents` or `waiting-tools`
 between turns.
 
+- Claude Code runs the main agent's `Agent` calls in the background: the call
+  returns at once and its subagent's card follows the task until it reports. A
+  reload reads up to 5,000 earlier items to keep the card of a subagent that
+  still runs; past that, scroll up to load its launch.
 - A shell such as a dev server does not hold the session, because it may never end.
 - Stop cancels an autonomous turn and parks the session with `turn cancelled`. The
   tasks keep running in Claude Code.

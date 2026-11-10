@@ -273,7 +273,7 @@ func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.P
 	if err := ids.TouchDevice(ctx, dev.ID, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("sshd: edge auth: %w", err)
 	}
-	slog.Info("sshd: edge auth", "member", m.ID, "device", dev.ID, "status", dev.Status,
+	slog.Debug("sshd: edge auth", "member", m.ID, "device", dev.ID, "status", dev.Status,
 		"provider", grant.Account.Provider, "subject", grant.Account.Subject, "pending", m.Pending)
 	return devicePermissions(m.ID, dev), nil
 }

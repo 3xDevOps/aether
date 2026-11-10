@@ -205,7 +205,7 @@ func TestDockerBrowserJoinsNestedDockerRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := browser.Run{ID: "nested-docker-run", ContainerID: app}
-	t.Cleanup(func() { _ = manager.Remove(context.Background(), run) })
+	t.Cleanup(func() { _ = manager.Remove(context.Background(), run.ID) })
 	status, control, err := manager.Ensure(ctx, run)
 	if err != nil {
 		t.Fatalf("browser companion joining a sysbox run container: %v", err)

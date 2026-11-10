@@ -182,7 +182,7 @@ change (Go, dashboard, scripts, desktop, Android, edge) to its suite.
 
 CI on a pull request runs only the fast jobs, and one that changes only
 `docs/` or root-level `*.md` files runs the public audit and nothing else. The
-merge queue and `main` run the full suite
+merge queue runs the full suite on every change before it reaches `main`
 ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
 Aether run, unset the session's `AETHER_*` variables before testing, or some
 tests fail
@@ -278,12 +278,13 @@ git switch --detach origin/main
 make build                          # or: DEPLOY_HOST=user@host make deploy
 ```
 
-CI also keeps the binaries of each push to `main` for seven days, as
-`binaries-go` (Linux and macOS) and `binaries-go-windows`. They are unsigned,
-come with no checksums, and nothing installs them for you:
+CI also keeps the binaries of each merge queue run for seven days, as
+`binaries-go` (Linux and macOS) and `binaries-go-windows`; the run that
+tested the commit `main` points at has them. They are unsigned, come with no
+checksums, and nothing installs them for you:
 
 ```sh
-gh run list --workflow ci.yml --branch main --event push --status success --limit 1
+gh run list --workflow ci.yml --event merge_group --commit "$(git rev-parse origin/main)" --status success --limit 1
 gh run download <session-id> --name binaries-go --dir aether-main
 ```
 

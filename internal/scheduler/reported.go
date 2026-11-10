@@ -32,22 +32,34 @@ const (
 	exitedCompletedReason         = "agent exited; results committed"
 	exitedFailedReasonPrefix      = "agent exited "
 	evidenceUnavailableReason     = "evidence unavailable: session checkout missing"
+	evidenceOverLimitReason       = "evidence unavailable: evidence storage limit exceeded"
 )
 
-// withoutEvidenceUnavailable strips the evidence-unavailable note so the
-// retention reasons below still match exactly.
-func withoutEvidenceUnavailable(reason string) (string, bool) {
-	if reason == evidenceUnavailableReason {
-		return "", true
+// cleanupNotes are the notes checkout cleanup appends to a terminal reason.
+var cleanupNotes = []string{evidenceUnavailableReason, evidenceOverLimitReason}
+
+// withoutCleanupNote strips the note checkout cleanup appended, returning it,
+// so the retention reasons below still match exactly.
+func withoutCleanupNote(reason string) (string, string) {
+	for _, note := range cleanupNotes {
+		if reason == note {
+			return "", note
+		}
+		if base, ok := strings.CutSuffix(reason, "; "+note); ok {
+			return base, note
+		}
 	}
-	return strings.CutSuffix(reason, "; "+evidenceUnavailableReason)
+	return reason, ""
 }
 
-func withEvidenceUnavailable(reason string) string {
-	if reason == "" {
-		return evidenceUnavailableReason
+func withCleanupNote(reason, note string) string {
+	if note == "" {
+		return reason
 	}
-	return reason + "; " + evidenceUnavailableReason
+	if reason == "" {
+		return note
+	}
+	return reason + "; " + note
 }
 
 // closeSpec is what ending a run through closeRun records.
@@ -86,7 +98,7 @@ func reportedClose(outcome domain.RunStatus) closeSpec {
 // retainedReason reports whether a terminal row promises a retained,
 // relaunchable container.
 func retainedReason(status domain.RunStatus, reason string) bool {
-	reason, _ = withoutEvidenceUnavailable(reason)
+	reason, _ = withoutCleanupNote(reason)
 	switch status {
 	case domain.RunMerged, domain.RunAbandoned:
 		return reason == retainedCloseReason
@@ -107,7 +119,7 @@ func retentionValid(mode domain.LaunchMode, status domain.RunStatus, reason stri
 // releasedReason is the reason a retained run keeps once its container is
 // gone, and whether the row needs it.
 func releasedReason(status domain.RunStatus, reason, closed string) (string, bool) {
-	reason, unavailable := withoutEvidenceUnavailable(reason)
+	reason, note := withoutCleanupNote(reason)
 	var released string
 	switch {
 	case status == domain.RunCompleted && reason == reportedSuccessRetainedReason:
@@ -120,10 +132,7 @@ func releasedReason(status domain.RunStatus, reason, closed string) (string, boo
 	default:
 		return "", false
 	}
-	if unavailable {
-		released = withEvidenceUnavailable(released)
-	}
-	return released, true
+	return withCleanupNote(released, note), true
 }
 
 // relabelLocked rewrites a terminal run's reason without changing its status.
@@ -376,7 +385,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	if !r.Status.Terminal() {
 		return fmt.Errorf("scheduler: finish reported session %s: the session is %s and has no live container yet", run, r.Status)
 	}
-	base, unavailable := withoutEvidenceUnavailable(r.Reason)
+	base, note := withoutCleanupNote(r.Reason)
 	exited := (r.Status == domain.RunCompleted && base == exitedCompletedReason) ||
 		(r.Status == domain.RunFailed && strings.HasPrefix(base, exitedFailedReasonPrefix))
 	if !exited {
@@ -394,11 +403,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 			return nil
 		}
 	}
-	reason := reportedClose(outcome).reason
-	if unavailable {
-		reason = withEvidenceUnavailable(reason)
-	}
-	reason = publicRunStatusReason(reason)
+	reason := publicRunStatusReason(withCleanupNote(reportedClose(outcome).reason, note))
 	stamp, writeErr := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, "", nil, nil)
 	if writeErr != nil {
 		return fmt.Errorf("scheduler: finish reported session %s over its exit: %w", run, writeErr)

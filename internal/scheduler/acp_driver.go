@@ -459,6 +459,11 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if profile.ACPEffortArgs {
 		adapter = append(slices.Clone(adapter), profile.EffortLaunchArgs(run.Effort)...)
 	}
+	var cli string
+	if tui := argv[domain.LaunchTUI]; len(tui) > 0 {
+		cli = tui[0]
+	}
+	command := profile.ACPCommand(adapter, cli)
 	managed, ok := d.s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
 		return fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
@@ -507,7 +512,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			return err
 		}
 		d.stopStaleExec(ctx, entry)
-		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter)
+		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter[0], command)
 		if err == nil {
 			break
 		}
@@ -517,7 +522,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		// A container staged before keepers existed has a binary without
 		// one: its adapter runs as before and ends with this process.
 		slog.Warn("scheduler: run the agent's ACP server under a keeper", "run", entry.runID, "error", err)
-		if exec, err = d.startDirect(ctx, entry, managed, cid, adapter, stderr); err != nil {
+		if exec, err = d.startDirect(ctx, entry, managed, cid, adapter[0], command, stderr); err != nil {
 			return err
 		}
 		stdout, stdin = exec.Attachment().Stdout(), exec.Attachment().Stdin()

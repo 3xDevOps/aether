@@ -24,8 +24,8 @@ import (
 )
 
 // preAccessSchemaVersion is the last schema without workspace-scoped
-// access; v109 adds owners and grants.
-const preAccessSchemaVersion = 108
+// access; v110 adds owners and grants.
+const preAccessSchemaVersion = 109
 
 // migrationsThrough reads the first n migrations out of
 // internal/store/migrate.go, which appends versions and never edits one

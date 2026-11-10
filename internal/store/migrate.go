@@ -2578,7 +2578,16 @@ ALTER TABLE room_messages ADD COLUMN resolved_at INTEGER;
 ALTER TABLE room_messages ADD COLUMN resolved_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE room_messages ADD COLUMN resolution TEXT NOT NULL DEFAULT '' CHECK (resolution IN ('', 'done', 'deleted'));
 `,
-	// v109: workspace-scoped access. A workspace has an owner and members
+	// v109: type-filtered event reads, such as a replaying subscriber, a
+	// run's diff snapshots or a workspace's timeline, scanned every event
+	// in their range for their types. internal/events.readQuery names these
+	// indexes.
+	`
+CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
+CREATE INDEX IF NOT EXISTS idx_events_run_type ON events (run_id, type);
+CREATE INDEX IF NOT EXISTS idx_events_workspace_type ON events (workspace_id, type);
+`,
+	// v110: workspace-scoped access. A workspace has an owner and members
 	// reach it through a grant. The earliest live admin, the server's
 	// creator, becomes super admin and owns every existing workspace, and
 	// every approved member keeps the access they had, which was every

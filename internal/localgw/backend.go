@@ -59,13 +59,15 @@ const dialTimeout = 90 * time.Second
 // intervals pass without a byte from the server; a keepalive is sent only
 // after an interval without one, so an idle phone's radio can sleep.
 // keepaliveTimeout bounds the probe of a connection a stream failed to
-// open on. Variables so a test can shorten them.
+// open on. Both leave a server stalled by memory pressure on a saturated
+// host time to answer: tearing down a live connection ends every stream.
+// Variables so a test can shorten them.
 var (
 	keepaliveInterval = 30 * time.Second
-	keepaliveTimeout  = 10 * time.Second
+	keepaliveTimeout  = 60 * time.Second
 )
 
-const keepaliveCount = 3
+const keepaliveCount = 10
 
 var (
 	errClosed   = errors.New("the gateway is closing")
@@ -464,9 +466,10 @@ func (b *sshBackend) alive(conn *cli.Conn) bool {
 	return conn.Ping(ctx) == nil || conn.LastRead().After(start)
 }
 
-// stream opens one subsystem channel. Errors the server answered pass through
-// (attach/sync ack refusals are untyped, hence the keepalive probe); only a
-// dead connection is invalidated, redialed and retried once.
+// stream opens one subsystem channel. Errors the server answered (attach/sync
+// ack refusals are untyped, hence the keepalive probe) and any error once ctx
+// ends pass through; only a dead connection is invalidated, redialed and
+// retried once.
 func stream[T any](ctx context.Context, b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
 	conn, _, err := b.live(ctx)
 	if err != nil {
@@ -475,7 +478,7 @@ func stream[T any](ctx context.Context, b *sshBackend, open func(*cli.Conn) (T, 
 	}
 	out, oerr := open(conn)
 	var perr *protocol.Error
-	if oerr == nil || errors.As(oerr, &perr) || b.alive(conn) {
+	if oerr == nil || errors.As(oerr, &perr) || ctx.Err() != nil || b.alive(conn) {
 		return out, oerr
 	}
 	b.invalidate(conn)

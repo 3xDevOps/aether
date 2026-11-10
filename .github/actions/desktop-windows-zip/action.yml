@@ -13,7 +13,7 @@ inputs:
     description: "amd64 or arm64"
     required: true
   save-npm-cache:
-    description: "Save npm's, Electron's and electron-builder's caches after a push to main, from the one job that owns them"
+    description: "Save npm's, Electron's and electron-builder's caches on a run on main, from the one job that owns them"
     default: 'false'
 outputs:
   zip:
@@ -70,14 +70,14 @@ runs:
         npm ci --no-audit --no-fund
     - name: Check for a saved npm cache
       id: saved-npm
-      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: inputs.save-npm-cache == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.npm.outputs.dir }}
         key: npm-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
         lookup-only: true
     - name: Save npm's cache
-      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-npm.outputs.cache-hit != 'true'
+      if: inputs.save-npm-cache == 'true' && github.ref == 'refs/heads/main' && steps.saved-npm.outputs.cache-hit != 'true'
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.npm.outputs.dir }}
@@ -143,28 +143,28 @@ runs:
         echo "app=$BUILD/${apps[0]}" >> "$GITHUB_OUTPUT"
     - name: Check for saved Electron downloads
       id: saved-electron
-      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: inputs.save-npm-cache == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/AppData/Local/electron/Cache
         key: electron-zip-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
         lookup-only: true
     - name: Save Electron downloads
-      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-electron.outputs.cache-hit != 'true'
+      if: inputs.save-npm-cache == 'true' && github.ref == 'refs/heads/main' && steps.saved-electron.outputs.cache-hit != 'true'
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/AppData/Local/electron/Cache
         key: electron-zip-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
     - name: Check for saved electron-builder downloads
       id: saved-electron-builder
-      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: inputs.save-npm-cache == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/AppData/Local/electron-builder/Cache
         key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
         lookup-only: true
     - name: Save electron-builder downloads
-      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-electron-builder.outputs.cache-hit != 'true'
+      if: inputs.save-npm-cache == 'true' && github.ref == 'refs/heads/main' && steps.saved-electron-builder.outputs.cache-hit != 'true'
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/AppData/Local/electron-builder/Cache

@@ -978,14 +978,13 @@ type AgentModel struct {
 }
 
 const (
-	ModelSourceAgent    = "agent"
-	ModelSourceCache    = "cache"
-	ModelSourceFallback = "fallback"
-	ModelSourceNone     = "none"
+	ModelSourceAgent = "agent"
+	ModelSourceCache = "cache"
+	ModelSourceNone  = "none"
 )
 
 // AgentModelsResult.Error is the last failed discovery's error, also when
-// Models holds an older or fallback list.
+// Models holds the last list that worked.
 type AgentModelsResult struct {
 	Models       []AgentModel `json:"models"`
 	DefaultLabel string       `json:"default_label,omitempty"`

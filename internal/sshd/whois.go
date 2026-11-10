@@ -151,7 +151,7 @@ func (s *Server) authenticateTailnet(cm ssh.ConnMetadata) (*ssh.Permissions, err
 	if err != nil {
 		return nil, err
 	}
-	slog.Info("sshd: tailnet auth",
+	slog.Debug("sshd: tailnet auth",
 		"member", m.ID, "login", id.Login, "node", id.NodeID,
 		"user", cm.User(), "method", "tailnet", "pending", m.Pending)
 	return &ssh.Permissions{Extensions: map[string]string{memberIDExtension: string(m.ID)}}, nil

@@ -121,11 +121,40 @@ func TestManagerRefusesRemovingAnotherRunCompanion(t *testing.T) {
 	if err := saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, ContainerID: "companion", CreationKey: "creation"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Remove(t.Context(), run); err == nil {
+	if err := manager.Remove(t.Context(), run.ID); err == nil {
 		t.Fatal("removed a companion owned by another run")
 	}
 	if runtime.destroyed {
 		t.Fatal("ownership failure reached destruction")
+	}
+}
+
+func TestManagerRemoveObservedKeepsAReplacementCompanion(t *testing.T) {
+	runtime := &recoveryRuntime{info: containerruntime.BrowserInfo{RunContainer: "new-container", CreationKey: "new", State: "running"}}
+	manager, err := NewManager(t.TempDir(), runtime, Config{Image: "aether/browser:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := manager.journalDir("run")
+	if err = os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = saveStatus(dir, Status{RunID: "run", RunContainer: "new-container", ContainerID: "companion", CreationKey: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	observed := Status{RunID: "run", RunContainer: "old-container", ContainerID: "old-companion", CreationKey: "old"}
+	if err = manager.RemoveObserved(t.Context(), observed); !errors.Is(err, ErrReplaced) {
+		t.Fatalf("remove of a replaced observation: %v, want ErrReplaced", err)
+	}
+	if runtime.destroyed {
+		t.Fatal("removing a stale observation destroyed the replacement companion")
+	}
+	current, err := loadStatus(dir)
+	if err != nil {
+		t.Fatalf("replacement journal: %v", err)
+	}
+	if err = manager.RemoveObserved(t.Context(), current); err != nil || !runtime.destroyed {
+		t.Fatalf("remove of the current observation: %v, destroyed %v", err, runtime.destroyed)
 	}
 }
 

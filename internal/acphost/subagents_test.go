@@ -7,11 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 )
 
 func shortenAnnounceWait(t *testing.T) {
@@ -340,5 +343,64 @@ func TestCursorLaunchIsLabelledAtOnce(t *testing.T) {
 		case "child-read":
 			t.Fatalf("the subagent's first item came before its launch was labelled: %+v", its)
 		}
+	}
+}
+
+// TestBackgroundAgentsOutliveTheReplayWindow plays Claude Code's Agent calls
+// as Claude's adapter reports them and keeps the main agent busy: a
+// subscribe then replays no launch, while the state still lists both
+// subagents for the dashboard to read older history for.
+func TestBackgroundAgentsOutliveTheReplayWindow(t *testing.T) {
+	mockDelay(t, 50*time.Millisecond)
+	s, _ := startReal(t, Config{ClaudeCode: true})
+	if _, err := s.Prompt(context.Background(), textPrompt(acpmock.PromptBackgroundAgents), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the turn end", func() bool { return len(ofKind(items(t, s), KindTurnEnd)) > 0 })
+	launches := map[string]Item{}
+	for _, it := range ofKind(items(t, s), KindToolCall) {
+		if strings.HasSuffix(it.ToolCall.ID, "-call") && it.ToolCall.Task != nil {
+			launches[it.ToolCall.Task.ID] = it
+		}
+	}
+	replay, _, cancel, err := s.Subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	tasks := s.State().Tasks
+	for _, id := range acpmock.BackgroundAgentIDs {
+		launch, ok := launches[id]
+		if !ok || launch.ToolCall.Task.Status != "running" || launch.ToolCall.Subagent == nil || launch.ToolCall.Status != "completed" {
+			t.Fatalf("launch of %s: %+v", id, launch.ToolCall)
+		}
+		if replay.OldestSeq <= launch.Seq {
+			t.Fatalf("the replay from %d holds the launch of %s at %d", replay.OldestSeq, id, launch.Seq)
+		}
+		if !slices.ContainsFunc(tasks, func(task Task) bool { return task.ID == id && task.Type == "local_agent" && task.Holds }) {
+			t.Fatalf("state tasks %+v lack %s", tasks, id)
+		}
+	}
+
+	if _, err := s.Prompt(context.Background(), textPrompt(acpmock.PromptFinishAgents), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the second turn to end", func() bool { return len(ofKind(items(t, s), KindTurnEnd)) > 1 && len(s.State().Tasks) == 0 })
+	ended := map[string]string{}
+	reads := map[string]string{}
+	for _, it := range ofKind(items(t, s), KindToolCall) {
+		if c := it.ToolCall; c.Task != nil {
+			ended[c.Task.ID] = c.Task.Status
+		} else if strings.HasSuffix(c.ID, "-read") {
+			reads[c.ParentID] = c.Status
+		}
+	}
+	for _, id := range acpmock.BackgroundAgentIDs {
+		if ended[id] != "completed" || reads[id+"-call"] != "completed" {
+			t.Fatalf("%s ended %q, its read %q", id, ended[id], reads[id+"-call"])
+		}
+	}
+	if got := messageText(items(t, s), "assistant"); !strings.Contains(got, "Report from "+acpmock.BackgroundAgentIDs[1]+".") {
+		t.Fatalf("assistant text %q", got)
 	}
 }

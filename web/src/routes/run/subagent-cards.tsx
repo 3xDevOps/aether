@@ -1,16 +1,20 @@
-import { memo, useId } from 'react'
+import { memo, useEffect, useId, useRef } from 'react'
 import { AgentCard, AgentEntry, duration, WorkGroup } from '@/components/ui/timeline'
 import { Shimmer } from '@/components/ui/shimmer'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
+import { api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { redirectRoute } from '@/lib/url-state'
 import { useStore } from '@/store'
+import { loadOlderItems } from '@/store/session-stream'
 import {
   activityLabel,
   agentLabel,
+  agentLastMessage,
   agentReport,
   agentState,
   agentType,
+  launchUnloaded,
   type AgentState,
   type Subagent,
 } from '@/store/subagents'
@@ -26,6 +30,24 @@ const tones: Record<AgentState, { tone: Tone; pulse?: boolean; word: string }> =
 
 export const agentStateWord = (state: AgentState) => tones[state].word
 export const agentTone = (state: AgentState) => tones[state].tone
+
+const launchPages = 5
+
+/** Reads older history until every live subagent's launch is held: a reload
+ * replays only the newest items, which can leave out a launch that still runs. */
+export function useLiveLaunches(runID: string, enabled: boolean) {
+  const paged = useRef({ generation: -1, pages: 0 })
+  const generation = useStore((s) => {
+    const session = s.acpSessions[runID]
+    const missing = enabled && session !== undefined && session.more && !session.olderLoading && !session.olderError && launchUnloaded(session.agents, session.state?.tasks, session.oldestSeq)
+    return missing ? session.historyGeneration : undefined
+  })
+  useEffect(() => {
+    if (generation === undefined) return
+    if (paged.current.generation !== generation) paged.current = { generation, pages: 0 }
+    if (paged.current.pages++ < launchPages) void loadOlderItems(useStore, api, runID)
+  }, [generation, runID])
+}
 
 /** replace swaps the open subagent without a history entry. */
 export function openAgent(runID: string, id: string, replace = false) {
@@ -66,7 +88,7 @@ function firstLine(text: string | undefined): string | undefined {
 
 function Progress({ runID, agent, state }: { runID: string; agent: Subagent; state: AgentState }) {
   const more = useStore((s) => s.acpSessions[runID]?.more ?? false)
-  const report = firstLine(agentReport(agent))
+  const report = state === 'done' || state === 'failed' ? firstLine(agentReport(agent) ?? (agent.call?.task && !agent.workflow ? agentLastMessage(agent) : undefined)) : undefined
   const activity = agent.latest ? activityLabel(agent.latest) : undefined
   switch (state) {
     case 'running':

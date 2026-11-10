@@ -189,6 +189,10 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 		}
 		s.publishTimeline(context.Background(), workspace, runID, "", events.TimelineNote, msg+" to "+after+" for the next launch")
 	}
+	// A failed update may still have replaced the CLI before a later step failed.
+	if err != nil || after != before {
+		s.expireAgentModels(domain.MemberID(filepath.Base(spec.Mounts[0].HostPath)), profile.Name)
+	}
 	s.mu.Lock()
 	state.next = s.cfg.Now().Add(next)
 	state.running = nil

@@ -94,7 +94,7 @@ func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant, slots chan struc
 		_ = rc.Close()
 		return
 	}
-	slog.Info("edge: relayed connection", "conn", m.ConnID, "kind", m.Kind, "client", m.ClientAddr,
+	slog.Debug("edge: relayed connection", "conn", m.ConnID, "kind", m.Kind, "client", m.ClientAddr,
 		"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
 	switch m.Kind {
 	case edgeproto.KindHTTP:

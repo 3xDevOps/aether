@@ -218,18 +218,33 @@ handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
 in particular, busy retention admission requires an explicit retry, not
 automatic replay. Streams have a separate guard: a channel that fails to open
-triggers a redial only when a keepalive shows the connection is actually gone,
-because tearing down a healthy connection would kill its other live streams.
+triggers a redial only when a keepalive, given 60 seconds to answer, shows the
+connection is actually gone, because tearing down a healthy connection would
+kill its other live streams.
 
 A network that goes away without a reset, as when a phone sleeps or moves
 between Wi-Fi and mobile data, leaves the connection open and silent. Any
 byte from the server, a keepalive reply or a stream's data, proves the
 connection alive, so a large download on a slow link is never mistaken for
 a dead one. After 30 seconds without one the gateway sends an SSH keepalive,
-and after 90 seconds without one it drops the connection, so an idle phone's
-radio can sleep and a dead connection goes within two minutes. Every call
-and stream waiting on a dropped connection then fails or redials. A call
-already sent on it is replayed under the rule above; one that is not fails
+and after 5 minutes without one it drops the connection, so an idle phone's
+radio can sleep. The window is that long because a server on a saturated
+host can stall for a minute or more under memory pressure and still be alive;
+dropping it would end every stream it carries. On Linux and Android a link
+to an address or tailnet name, not the edge, also sets `TCP_USER_TIMEOUT` to
+90 seconds: the kernel keeps acknowledging for a starved server, so a dead
+network, such as a NAT timeout or a Wi-Fi switch, trips it and that
+connection goes within about two minutes. On Linux 5.11 and newer, and older
+kernels that carry the backport of "tcp: fix TCP_USER_TIMEOUT with zero
+window", it also aborts a large upload (`home.upload`, `files.upload`,
+`terminal.file`) to a server that is alive but reads nothing for 90 seconds
+while the upload fills its receive buffer. Older kernels without that change,
+common on older Android phones, keep such a connection. Elsewhere, and through
+the edge, a dead network takes up to six minutes, and the events stream shows
+nothing new meanwhile. Through the edge the longer window does not help either: the
+edge marks a server offline after 60 seconds without control traffic.
+Every call and stream waiting on a dropped connection then fails or redials.
+A call already sent on it is replayed under the rule above; one that is not fails
 with `-32004` and `the server stopped answering keepalives`. Requests that
 arrive while a dial is in progress wait for that one dial, each only as long
 as its own request lasts, and a dial gives up after 90 seconds. A dial
@@ -1124,7 +1139,7 @@ The dashboard also calls these methods through the same route:
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
 | `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000,"by_agent":[{"harness":"claude","metered_runs":3,"unmetered_runs":0,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000}]},"pull_requests":{"opened":2,"merged":1},"success":{"runs":{"succeeded":4,"finished":9}},"outcomes":{"runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}],"members":[{"member_id":"...","display_name":"...","color":"#e6194b","runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}]}]},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Outcome` is `{"done","failed","abandoned"}`; `outcomes.members` is filled only for `scope` `everyone`. `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
 | `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent sessions, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
-| `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"fallback"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds an older or fallback list. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#choose-a-model) |
+| `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour and until Aether updates the agent; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds the last list that worked (`fetched_at` says when); a failure is retried after a minute. `cache` is Codex's own `~/.codex/models_cache.json`; `none` lists nothing. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#choose-a-model) |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
 | `agent.remove` | `{"name":"claude"}` | `{"removed":["~/.local/bin/claude","~/.local/bin/claude-agent-acp"]}` - removes an agent from the caller's own environment so new sessions cannot start it. A shipped name (it wins over a member's definition of the same name; `custom` is not removable) deletes its `~/.local/bin` links, the Enhanced adapter's too; `removed` lists those that existed, and none existing answers `-32602` `agent "claude" is not installed in your environment: ~/.local/bin/claude does not exist`. Any other name deletes the caller's definition and answers `{}`, or `-32602` `you have no agent "x"; aether agent list shows yours`. `-32004` `persistent homes are not enabled` without member homes. Needs the launch capability; refused with `-32003` while an install or a harness update runs in the home. Package files, logins and settings stay. Not replayed on a transport failure |
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
@@ -2503,10 +2518,13 @@ its PTY are not reopened by either event.
 
 Every live socket - `events`, `attach`, `acp`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
-**10**. A client that changed networks or went to sleep leaves a half-open
-connection that reads as live on both ends; the ping is what releases the PTY
-client it was holding, whose geometry may be clamping every other viewer. The SPA
-reconnects on its normal path.
+**60**. The server's own HTTPS dashboard sends these pings from the server,
+and a starved server reads the pong late; `aether gui` pings from your
+machine. A client that
+changed networks or went to sleep leaves a half-open connection that reads as
+live on both ends; the ping is what releases the PTY client it was holding,
+whose geometry may be clamping every other viewer. The SPA reconnects on its
+normal path.
 
 ### `GET /ws/events`
 

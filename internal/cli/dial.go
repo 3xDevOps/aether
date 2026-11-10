@@ -104,7 +104,7 @@ func dial(ctx context.Context, cfg Config, user string, requireAuth bool) (*Conn
 		BannerCallback: auth.Banner,
 		Timeout:        dialTimeout,
 	}
-	nc, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", cfg.Addr)
+	nc, err := (&net.Dialer{Timeout: dialTimeout, Control: dialControl}).DialContext(ctx, "tcp", cfg.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("cli: dial %s: %w", cfg.Addr, err)
 	}

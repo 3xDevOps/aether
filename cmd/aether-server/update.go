@@ -23,9 +23,24 @@ const (
 	updateUnit    = "aether-server"
 	updateJournal = "sudo journalctl -u aether-server -n 50"
 	// updateTimeout covers a new binary's whole trial: up to three starts
-	// and the rollback after them.
+	// and the rollback after them. Time the active unit spends migrating
+	// the database does not count.
 	updateTimeout = 8 * time.Minute
 )
+
+// migrating reports whether the active unit is still migrating database
+// to schema want, printing the progress once per schema version it sees.
+func migrating(database string, want int, seen *int) bool {
+	current, err := store.ReadSchemaVersion(database)
+	if err != nil || current >= want || unitState() != "active" {
+		return false
+	}
+	if current != *seen {
+		*seen = current
+		fmt.Printf("aether-server is migrating the database at schema %d to %d; waiting for it\n", current, want)
+	}
+	return true
+}
 
 // updateCmd moves this host to a release the way the server's own update
 // does, then restarts the systemd unit onto it and waits for the new
@@ -82,7 +97,7 @@ func updateCmd(args []string) error {
 		return err
 	}
 	if target == version.Version {
-		return restartIfStale(self, *o.addr)
+		return restartIfStale(self, *o.addr, database)
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
 
@@ -107,7 +122,7 @@ func updateCmd(args []string) error {
 	if err := restartOnto(staged); err != nil {
 		return err
 	}
-	return awaitUpdate(stateDir, target, staged.Binaries, before)
+	return awaitUpdate(stateDir, database, target, staged, before)
 }
 
 // updateTarget is the tag to install: the one asked for, or the latest
@@ -166,9 +181,10 @@ func restartOnto(staged *serverupdate.Staged) error {
 
 // awaitUpdate waits for the new binary to commit or be rolled back and
 // prints one line per component.
-func awaitUpdate(stateDir, target string, binaries []string, pidBefore string) error {
+func awaitUpdate(stateDir, database, target string, staged *serverupdate.Staged, pidBefore string) error {
 	deadline := time.Now().Add(updateTimeout)
 	var out serverupdate.Outcome
+	seen := -1
 	for {
 		var err error
 		if out, err = serverupdate.ReadOutcome(stateDir); err != nil {
@@ -177,8 +193,11 @@ func awaitUpdate(stateDir, target string, binaries []string, pidBefore string) e
 		if out.Settled {
 			break
 		}
+		if migrating(database, staged.Schema, &seen) {
+			deadline = time.Now().Add(updateTimeout)
+		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s did not finish its first start within %s: unit %s, update record %q\n%s",
+			return fmt.Errorf("%s did not finish its first start within %s, not counting database migration: unit %s, update record %q\n%s",
 				target, updateTimeout, unitState(), out.Phase, updateJournal)
 		}
 		time.Sleep(time.Second)
@@ -187,7 +206,7 @@ func awaitUpdate(stateDir, target string, binaries []string, pidBefore string) e
 		return fmt.Errorf("the update to %s was rolled back: %s\n%s", target, out.Error, updateJournal)
 	}
 	fmt.Printf("aether-server  %s -> %s  restarted (pid %s -> %s)\n", version.Version, target, pidBefore, unitPID())
-	for _, path := range binaries[1:] {
+	for _, path := range staged.Binaries[1:] {
 		fmt.Printf("%-14s %s  %s\n", filepath.Base(path), path, target)
 	}
 	return nil
@@ -227,8 +246,8 @@ func unitServe() (string, *serveOptions, error) {
 // the binary installed at self, as after `aether update` replaced it, and
 // starts it when it runs nothing. The unit is Type=simple, so a new PID
 // only means the process started; it serves once it accepts connections on
-// addr.
-func restartIfStale(self, addr string) error {
+// addr, within 2 minutes of migrating database.
+func restartIfStale(self, addr, database string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("--addr %q: %w", addr, err)
@@ -259,7 +278,11 @@ func restartIfStale(self, addr string) error {
 	}
 	deadline := time.Now().Add(2 * time.Minute)
 	started := ""
+	seen := -1
 	for time.Now().Before(deadline) {
+		if started != "" && migrating(database, store.SchemaVersion(), &seen) {
+			deadline = time.Now().Add(2 * time.Minute)
+		}
 		now, state := unitPID(), unitState()
 		switch {
 		case started == "" && now != pid && now != "0" && state == "active":
@@ -280,7 +303,7 @@ func restartIfStale(self, addr string) error {
 		}
 		time.Sleep(time.Second)
 	}
-	return fmt.Errorf("%s did not accept connections on %s within 2 minutes of the %s: unit %s\n%s", updateUnit, dial, verb, unitState(), updateJournal)
+	return fmt.Errorf("%s did not accept connections on %s within 2 minutes of the %s or of migrating the database: unit %s\n%s", updateUnit, dial, verb, unitState(), updateJournal)
 }
 
 func unitState() string {

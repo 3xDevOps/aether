@@ -59,7 +59,7 @@ Capabilities with no workspace (`Target{}`):
 
 ## Storage
 
-Migration v109 runs in one transaction:
+Migration v110 runs in one transaction:
 
 ```sql
 ALTER TABLE workspaces ADD COLUMN owner_member_id TEXT NOT NULL DEFAULT '';

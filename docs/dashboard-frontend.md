@@ -2681,8 +2681,9 @@ default**, sends no `model` and shows what that default resolves to when the
 agent reports it. The rest come from `agent.models` for the chosen agent and
 account, fetched when the field first shows and kept for the page session;
 the refresh button asks again with `refresh: true`. The list says when it is
-the agent's cache or a fallback list, and shows a failed discovery's error
-verbatim without blocking a choice. Search matches id, name and description;
+the agent's cache, and shows a failed discovery's error verbatim without
+blocking a choice, after **List from <age>** when it keeps the last list that
+worked. Search matches id, name and description;
 text that matches no id is offered as **Use “<text>”**, so any id works,
 including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is
@@ -3343,12 +3344,17 @@ Workflow call, or an Agent call with `run_in_background`, completes as soon
 as its work starts. When the call carries `tool_call.task`
 ([`internal/acphost/items.go`](../internal/acphost/items.go)), the card follows
 the task: running, then done, failed or stopped, with elapsed time to the
-snapshot that settled it. Without it, the card reads "Launched in the
+snapshot that settled it, and a settled subagent card's report is the first
+line of the subagent's last message. Without it, the card reads "Launched in the
 background", and running once a child item is logged after the call
 completed. The launch acknowledgement is never shown as a report. A workflow card lists the subagents whose items name it as parent.
 A subagent whose launch call is not loaded, or was trimmed, shows its card at
 its first held item until a history page brings the launch; without the
-call its state is unknown. A launch id seen again after
+call its state is unknown. When the session state lists a live subagent or
+workflow task that no held call started, the Chat and Trace views page
+`run.acp.history`, up to five pages, until one does or history ends: a reload
+replays only the newest 200 items, and leaving a session trims it, either of
+which can drop a launch that still runs. A launch id seen again after
 its call settled names a new subagent, keyed `<id>@<seq>`. While the main
 agent only waits on its subagents, the live steps header reads "Waiting on 2
 subagents". A fallback launch shows a card with no nested items;
