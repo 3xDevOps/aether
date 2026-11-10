@@ -418,6 +418,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		// What this build ships with, so the scheduler can tell a member
 		// whether a server update would move their environment image.
 		DefaultStandardImage: DefaultStandardImage,
+		DefaultBrowserImage:  DefaultBrowserImage,
 		Harnesses:            cfg.Harnesses,
 		StallThreshold:       cfg.StallThreshold,
 		FirstEventGrace:      cfg.FirstEventGrace,

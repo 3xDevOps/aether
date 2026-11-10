@@ -161,32 +161,42 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	return errors.Join(failures...)
 }
 
-// sweepStandardImages untags every tag of Aether's standard image repository
-// that nothing references, so the images a server upgrade replaced do not stay
-// on disk. Only the default repository is swept: a custom --standard-image may
-// share its repository with images Aether does not own. Docker refuses to
-// remove an image a container uses; that tag is kept until a later sweep.
-func (s *Scheduler) sweepStandardImages(ctx context.Context) {
-	repo := imageRepo(s.cfg.DefaultStandardImage)
-	if repo == "" {
-		return
+// sweepUnusedImages untags every tag of Aether's standard and browser image
+// repositories that nothing references, so the images a server upgrade replaced
+// do not stay on disk. Only the default repositories are swept: a custom
+// --standard-image or --browser-image may share its repository with images
+// Aether does not own, and a source build's browser image is built locally, not
+// pulled. Docker refuses to remove an image a container uses; that tag is kept
+// until a later sweep.
+func (s *Scheduler) sweepUnusedImages(ctx context.Context) {
+	repos := []string{imageRepo(s.cfg.DefaultStandardImage)}
+	if releaseTagged(s.cfg.DefaultBrowserImage) {
+		repos = append(repos, imageRepo(s.cfg.DefaultBrowserImage))
 	}
-	refs, err := s.currentImageReferences(ctx)
-	if err != nil {
-		slog.Warn("scheduler: list standard image references", "error", err)
-		return
-	}
-	tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
-	if err != nil {
-		slog.Warn("scheduler: list standard image tags", "repo", repo, "error", err)
-		return
-	}
-	for _, tag := range tags {
-		if refs[tag] {
+	var refs map[string]bool
+	for _, repo := range repos {
+		if repo == "" {
 			continue
 		}
-		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil && !cerrdefs.IsConflict(err) {
-			slog.Warn("scheduler: remove unused standard image", "tag", tag, "error", err)
+		if refs == nil {
+			var err error
+			if refs, err = s.currentImageReferences(ctx); err != nil {
+				slog.Warn("scheduler: list image references", "error", err)
+				return
+			}
+		}
+		tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
+		if err != nil {
+			slog.Warn("scheduler: list image tags", "repo", repo, "error", err)
+			continue
+		}
+		for _, tag := range tags {
+			if refs[tag] {
+				continue
+			}
+			if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil && !cerrdefs.IsConflict(err) {
+				slog.Warn("scheduler: remove unused image", "tag", tag, "error", err)
+			}
 		}
 	}
 }

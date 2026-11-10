@@ -216,7 +216,7 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 	if s.cfg.Homes == nil || ctx.Err() != nil {
 		return
 	}
-	s.sweepStandardImages(ctx)
+	s.sweepUnusedImages(ctx)
 	owners, err := s.cacheOwnershipSnapshot(ctx)
 	if err != nil {
 		slog.Warn("scheduler: cache cleanup ownership unavailable", "error", err)

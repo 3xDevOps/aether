@@ -118,6 +118,9 @@ type Config struct {
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
 	RunContainerTTL      time.Duration // default 1h; negative destroys on close/completion
+	// DefaultBrowserImage is this build's browser image; its repository is
+	// swept of unused tags.
+	DefaultBrowserImage string
 	// ExitProbeTimeout bounds the Wait probes that tell a running terminal or
 	// usage-moved container from an exited one.
 	ExitProbeTimeout time.Duration
