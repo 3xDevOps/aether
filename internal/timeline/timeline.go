@@ -60,7 +60,7 @@ type Filter struct {
 	// run.status.
 	NoRereads bool
 	// Reaches, when set, keeps only events of the workspaces it reports
-	// true for.
+	// true for, including an extra repository's workspace (events.Reachable).
 	Reaches func(domain.WorkspaceID) bool
 }
 
@@ -216,7 +216,7 @@ func (f Filter) keeps(e events.Event) bool {
 	if f.Member != "" && e.ActorID != f.Member {
 		return false
 	}
-	if f.Reaches != nil && !f.Reaches(e.WorkspaceID) {
+	if f.Reaches != nil && !events.Reachable(e, f.Reaches) {
 		return false
 	}
 	if p, ok := e.Payload.(events.TimelinePayload); ok && len(f.TimelineKinds) > 0 && !slices.Contains(f.TimelineKinds, p.Kind) {

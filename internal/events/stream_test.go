@@ -85,8 +85,10 @@ func TestStreamWireLeavesOutAnUnreachableExtraRepository(t *testing.T) {
 	for _, p := range []Payload{
 		GitBranchPayload{WorkspaceID: "ws-foreign", Repo: "ws-foreign", Branch: "foreign"},
 		RunDiffPayload{Repo: "ws-foreign"},
+		RunPRPayload{Repo: "ws-foreign", Number: 1},
 		GitBranchPayload{WorkspaceID: "ws-mine", Branch: "mine"},
 		RunDiffPayload{},
+		RunPRPayload{Number: 2},
 	} {
 		if _, err := bus.Publish(ctx, Event{WorkspaceID: "ws-mine", RunID: "run-1", Payload: p}); err != nil {
 			t.Fatal(err)
@@ -101,7 +103,7 @@ func TestStreamWireLeavesOutAnUnreachableExtraRepository(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got, ",") != string(TypeGitBranch)+","+string(TypeRunDiff) {
-		t.Fatalf("streamed %q, want only the primary repository's branch and diff", got)
+	if strings.Join(got, ",") != string(TypeGitBranch)+","+string(TypeRunDiff)+","+string(TypeRunPR) {
+		t.Fatalf("streamed %q, want only the primary repository's branch, diff and pull request", got)
 	}
 }

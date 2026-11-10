@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -92,21 +93,23 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	if run.Protected {
 		out = append(out, protectedWarning)
 	}
-	work, merged, err := s.workWarnings(ctx, run, outcome)
+	work, merged, err := s.workWarnings(ctx, actor, run, outcome)
 	if err != nil {
 		return nil, false, rpcError(err)
 	}
 	out = append(out, work...)
 	if deps.Messages > 0 {
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages, RunIDs: runIDStrings(deps.Senders),
+		senders, labels := s.visibleRuns(ctx, actor, known, deps.Senders)
+		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages, RunIDs: senders,
 			Detail: fmt.Sprintf("%d %s from %s %s unread or arrived in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"),
-				s.runLabels(ctx, known, deps.Senders), plural(deps.Messages, "is", "are"))})
+				labels, plural(deps.Messages, "is", "are"))})
 	}
 	tree := func(w domain.RunID) bool { return w == id || slices.Contains(deps.Children, w) }
-	out = append(out, s.awaitedWarnings(ctx, known, slices.DeleteFunc(deps.Awaiting, tree))...)
+	out = append(out, s.awaitedWarnings(ctx, actor, known, slices.DeleteFunc(deps.Awaiting, tree))...)
 	if len(deps.Children) > 0 {
-		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningSubsessions, Count: len(deps.Children), RunIDs: runIDStrings(deps.Children),
-			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), s.runLabels(ctx, known, deps.Children))})
+		children, labels := s.visibleRuns(ctx, actor, known, deps.Children)
+		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningSubsessions, Count: len(deps.Children), RunIDs: children,
+			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), labels)})
 	}
 	// A subsession closes as its parent does, so what closing it would
 	// affect is part of this close.
@@ -118,21 +121,21 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 				return nil, false, rpcError(err)
 			}
 		}
-		if child == nil {
+		if child == nil || !actor.Reaches(child.WorkspaceID) {
 			continue
 		}
 		waiters, err := s.cfg.Store.RunWaiters(ctx, childID)
 		if err != nil {
 			return nil, false, rpcError(err)
 		}
-		childWork, _, err := s.workWarnings(ctx, child, outcome)
+		childWork, _, err := s.workWarnings(ctx, actor, child, outcome)
 		if err != nil {
 			return nil, false, rpcError(err)
 		}
 		if child.Protected {
 			childWork = append(childWork, protectedWarning)
 		}
-		for _, w := range append(childWork, s.awaitedWarnings(ctx, known, slices.DeleteFunc(waiters, tree))...) {
+		for _, w := range append(childWork, s.awaitedWarnings(ctx, actor, known, slices.DeleteFunc(waiters, tree))...) {
 			w.Subsession = string(childID)
 			out = append(out, w)
 		}
@@ -151,7 +154,9 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 // workWarnings reads recorded pull request states as last observed; it
 // never asks GitHub, so a 50-run check stays fast. Recorded pull requests
 // carry no commit, so whether one holds the branch tip is judged by time.
-func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome domain.RunStatus) ([]protocol.CloseWarning, bool, error) {
+// A pull request of a repository in a workspace actor does not reach is
+// left out.
+func (s *Server) workWarnings(ctx context.Context, actor permissions.Actor, run *domain.Run, outcome domain.RunStatus) ([]protocol.CloseWarning, bool, error) {
 	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
 	if err != nil {
 		return nil, false, err
@@ -159,6 +164,9 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 	var out []protocol.CloseWarning
 	open, merged := false, false
 	for _, pr := range prs {
+		if !actor.Reaches(cmp.Or(pr.RepoWorkspace, run.WorkspaceID)) {
+			continue
+		}
 		primary := pr.RepoWorkspace == ""
 		switch pr.State {
 		case "merged":
@@ -181,47 +189,48 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 var protectedWarning = protocol.CloseWarning{Kind: protocol.CloseWarningProtected,
 	Detail: "Protected: only its owner or an admin can steer, message or close it"}
 
-func (s *Server) awaitedWarnings(ctx context.Context, known map[domain.RunID]*domain.Run, waiters []domain.RunID) []protocol.CloseWarning {
+func (s *Server) awaitedWarnings(ctx context.Context, actor permissions.Actor, known map[domain.RunID]*domain.Run, waiters []domain.RunID) []protocol.CloseWarning {
 	if len(waiters) == 0 {
 		return nil
 	}
-	return []protocol.CloseWarning{{Kind: protocol.CloseWarningAwaited, RunIDs: runIDStrings(waiters),
-		Detail: "Waiting for it to finish: " + s.runLabels(ctx, known, waiters)}}
+	ids, labels := s.visibleRuns(ctx, actor, known, waiters)
+	return []protocol.CloseWarning{{Kind: protocol.CloseWarningAwaited, RunIDs: ids, Detail: "Waiting for it to finish: " + labels}}
 }
 
-// runLabels reads each run once per check: known holds what the check
-// already read, and a nil entry a run with no record yet.
-func (s *Server) runLabels(ctx context.Context, known map[domain.RunID]*domain.Run, ids []domain.RunID) string {
-	labels := make([]string, len(ids))
-	for i, id := range ids {
+// visibleRuns is the IDs and labels of the runs in ids that actor reaches;
+// the rest are counted only, as "other sessions". It reads each run once
+// per check: known holds what the check already read, and a nil entry a
+// run with no record yet, which is a subsession still queued under the
+// checked run.
+func (s *Server) visibleRuns(ctx context.Context, actor permissions.Actor, known map[domain.RunID]*domain.Run, ids []domain.RunID) ([]string, string) {
+	visible, labels := []string{}, []string{}
+	for _, id := range ids {
 		r, read := known[id]
 		if !read {
 			var err error
 			r, err = s.cfg.Store.GetRun(ctx, id)
-			// A failed read only costs the label its title; the caller
-			// that needs the run reads it again and returns the error.
+			// A failed read hides the run here; the caller that needs it
+			// reads it again and returns the error.
 			if err == nil || errors.Is(err, store.ErrNotFound) {
 				known[id] = r
 			}
 		}
 		_, cached := known[id]
-		labels[i] = string(id)
+		label := string(id)
 		switch {
 		case cached && r == nil:
-			labels[i] += " (queued)"
-		case r != nil && r.Title != "":
-			labels[i] += " (" + r.Title + ")"
+			label += " (queued)"
+		case r == nil || !actor.Reaches(r.WorkspaceID):
+			continue
+		case r.Title != "":
+			label += " (" + r.Title + ")"
 		}
+		visible, labels = append(visible, string(id)), append(labels, label)
 	}
-	return strings.Join(labels, ", ")
-}
-
-func runIDStrings(ids []domain.RunID) []string {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		out[i] = string(id)
+	if hidden := len(ids) - len(visible); hidden > 0 {
+		labels = append(labels, fmt.Sprintf("%d other %s", hidden, plural(hidden, "session", "sessions")))
 	}
-	return out
+	return visible, strings.Join(labels, ", ")
 }
 
 func plural(n int, one, many string) string {

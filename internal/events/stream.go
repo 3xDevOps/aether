@@ -94,6 +94,12 @@ func deliverable(ev Event, member domain.MemberID, reaches func(domain.Workspace
 	if ev.WorkspaceID == ServerScope {
 		return true
 	}
+	return Reachable(ev, reaches)
+}
+
+// Reachable reports whether reaches allows ev's workspace and, for an
+// event about an extra repository of a run, that repository's workspace.
+func Reachable(ev Event, reaches func(domain.WorkspaceID) bool) bool {
 	if !reaches(ev.WorkspaceID) {
 		return false
 	}
