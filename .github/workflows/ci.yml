@@ -692,10 +692,8 @@ jobs:
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     uses: ./.github/workflows/windows-install.yml
 
-  # Everything a release ships, built: every release binary cross-compiled,
-  # the desktop shell built the way users build it (`aether gui build`
-  # unpacks the sources embedded in the CLI and runs electron-builder), and
-  # the unsigned Android app. Each part runs even when an earlier one failed.
+  # `aether gui build` unpacks the desktop sources embedded in the CLI and
+  # runs electron-builder, the way users build the desktop shell.
   release-build:
     name: release-build (binaries, desktop, android)
     needs: changes
@@ -846,10 +844,12 @@ jobs:
       # code nobody here has read. `v4` also trails its own line - it still
       # points at v4.4.3, while v4.4.4 is the current v4 release and carries
       # the newer known-wrapper checksums this step reads.
-      - if: ${{ !cancelled() }}
-        uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - name: Build and test unsigned Android artifacts
+      - id: gradle-wrapper
         if: ${{ !cancelled() }}
+        uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      # Never runs a wrapper jar that failed validation.
+      - name: Build and test unsigned Android artifacts
+        if: ${{ !cancelled() && steps.gradle-wrapper.outcome == 'success' }}
         env:
           ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
         run: make android
