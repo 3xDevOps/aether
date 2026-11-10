@@ -64,7 +64,7 @@ func main() {
 		return
 	}
 	switch cmd {
-	case "version":
+	case "version", "--version":
 		fmt.Println("aether-server", version.String())
 	case "mcp":
 		exitOn(mcp(args))
@@ -199,7 +199,7 @@ commands:
   device   approve <code> | review: approve or revoke members' edge devices
   slack    setup | remove: store or remove the Slack bot's tokens (docs/slack.md)
   dictation install [--gpu] | status | remove: speech-to-text for the dashboard (docs/dictation.md)
-  version  print the version
+  version  print the version (also --version)
 
 serve and install options, which are also the config file keys:
   %s
