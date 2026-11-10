@@ -109,7 +109,7 @@ func (s *Scheduler) sweepMemberImages(ctx context.Context, member domain.MemberI
 }
 
 func (s *Scheduler) currentImageReferences(ctx context.Context) (map[string]bool, error) {
-	refs := map[string]bool{s.cfg.StandardImage: true, s.cfg.DefaultStandardImage: true, s.cfg.BrowserImage: true}
+	refs := map[string]bool{s.cfg.StandardImage: true, s.cfg.DefaultStandardImage: true, s.cfg.BrowserImage: true, s.cfg.DefaultBrowserImage: true}
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return nil, err
@@ -164,13 +164,14 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 // sweepUnusedImages untags every tag of Aether's standard and browser image
 // repositories that nothing references, so the images a server upgrade replaced
 // do not stay on disk. Only the default repositories are swept: a custom
-// --standard-image or --browser-image may share its repository with images
-// Aether does not own, and a source build's browser image is built locally, not
-// pulled. Docker refuses to remove an image a container uses; that tag is kept
+// --standard-image may share its repository with images Aether does not own;
+// a browser image pinned by --browser-image (a tag, digest or image ID) is never
+// swept, since removing the last tag of a pinned ID deletes the image; and a
+// source build's browser image is built locally, not pulled. Docker refuses to remove an image a container uses; that tag is kept
 // until a later sweep.
 func (s *Scheduler) sweepUnusedImages(ctx context.Context) {
 	repos := []string{imageRepo(s.cfg.DefaultStandardImage)}
-	if releaseTagged(s.cfg.DefaultBrowserImage) {
+	if s.cfg.BrowserImage == s.cfg.DefaultBrowserImage && releaseTagged(s.cfg.DefaultBrowserImage) {
 		repos = append(repos, imageRepo(s.cfg.DefaultBrowserImage))
 	}
 	var refs map[string]bool

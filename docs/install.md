@@ -548,7 +548,9 @@ One from `v0.7.0-alpha.12` or older needs one restart by hand:
 
 ### What an update does not change
 
-- `/etc/aether/`, and a browser image pinned with `browser-image`.
+- `/etc/aether/`, and a browser image pinned with `browser-image`. Without a
+  pin, the server removes `aether-browser` tags from earlier releases that no
+  container uses.
 - The systemd unit. When the release ships a different one, the journal warns
   with the command that applies it:
   `sudo aether-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart aether-server`.

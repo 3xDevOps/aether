@@ -740,3 +740,17 @@ func TestSweepKeepsCustomAndLocalBrowserImages(t *testing.T) {
 		t.Fatalf("sweep removed a custom or locally built browser image: %v", e.rt.images)
 	}
 }
+
+func TestSweepKeepsPinnedBrowserImageRepo(t *testing.T) {
+	e := newTestEnv(t, nil)
+	repo := "registry.example/aether-browser"
+	def, old := repo+":v0.2.0", repo+":v0.1.0"
+	for _, pinned := range []string{"sha256:0123456789abcdef", repo + "@sha256:0123456789abcdef"} {
+		e.sched.cfg.BrowserImage, e.sched.cfg.DefaultBrowserImage = pinned, def
+		e.rt.images = map[string]string{def: "image", old: "image"}
+		e.sched.sweepCaches(t.Context(), false)
+		if !e.rt.hasImage(old) || !e.rt.hasImage(def) {
+			t.Fatalf("sweep removed a browser tag while %s is pinned", pinned)
+		}
+	}
+}
