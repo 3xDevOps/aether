@@ -587,6 +587,36 @@ func TestASessionWithAnUnreachableRepoDoesNotExist(t *testing.T) {
 	}
 }
 
+// A session's extra repositories are part of it from creation, so one still
+// provisioning, or whose checkout failed, is no more visible than one running.
+func TestASessionBeforeItsCheckoutHasItsWholeScope(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	for _, status := range []domain.RunStatus{domain.RunProvisioning, domain.RunFailed} {
+		r := &domain.Run{WorkspaceID: w.wsA.ID, MemberID: w.a.ID, Task: "private " + string(status), Harness: "claude", Mode: domain.LaunchTUI,
+			Status: status, Extras: []domain.RunRepo{{WorkspaceID: w.wsB.ID, Name: "b", Path: "/repos/b", BaseBranch: "main"}}}
+		if err := w.e.db.CreateRun(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+		got := w.call(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(r.ID)}, nil)
+		missing := w.call(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: noRun}, nil)
+		if got == nil || missing == nil || wireErrOf(t, got).Code != wireErrOf(t, missing).Code ||
+			strings.ReplaceAll(wireErrOf(t, got).Message, string(r.ID), noRun) != wireErrOf(t, missing).Message {
+			t.Fatalf("U run.get of a %s run with a wsB repo = %v, missing = %v; want them identical", status, got, missing)
+		}
+		var list json.RawMessage
+		if err := w.call(t, "U", protocol.MethodRunList, protocol.RunListParams{WorkspaceID: string(w.wsA.ID)}, &list); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(list), string(r.ID)) {
+			t.Fatalf("U run.list shows the %s run with a wsB repo: %s", status, list)
+		}
+		if err := w.call(t, "S", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(r.ID)}, nil); err != nil {
+			t.Fatalf("S run.get of the %s run: %v", status, err)
+		}
+	}
+}
+
 // A message from a session in a workspace the caller cannot reach is
 // counted in a close check but not named.
 func TestForeignSendersStayInTheirWorkspace(t *testing.T) {

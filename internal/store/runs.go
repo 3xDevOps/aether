@@ -108,7 +108,12 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 	if err != nil {
 		return fmt.Errorf("store: create session: fallback order: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx,
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: create session: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
@@ -123,6 +128,13 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		r.Limits.CPUs, r.Limits.MemoryBytes, r.Limits.Pids,
 	); err != nil {
 		return fmt.Errorf("store: create session: %w", mapConstraint(err, ErrNotFound))
+	}
+	// Readers judge a run by every workspace it touches, so its extras must exist as soon as it does.
+	if err := upsertRunRepos(ctx, tx, domain.RunID(id), r.Extras); err != nil {
+		return fmt.Errorf("store: create session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: create session: commit: %w", err)
 	}
 	r.ID, r.CreatedAt, r.StatusChangedAt = domain.RunID(id), ts, &ts
 	return nil

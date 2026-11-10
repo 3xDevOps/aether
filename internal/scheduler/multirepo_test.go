@@ -154,10 +154,31 @@ func TestLaunchNamesTheRepoThatFails(t *testing.T) {
 	})
 	e.sched.UseBaseCapture(bases)
 
+	var created domain.RunID
+	storedScope := func(id domain.RunID) []domain.WorkspaceID {
+		run, err := e.db.GetRun(t.Context(), id)
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		var ids []domain.WorkspaceID
+		for _, extra := range run.Extras {
+			ids = append(ids, extra.WorkspaceID)
+		}
+		return ids
+	}
+	var atCreate []domain.WorkspaceID
 	_, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "x", "fake", domain.LaunchTUI,
-		domain.LaunchOptions{ExtraWorkspaces: []domain.WorkspaceID{api.ID}})
+		domain.LaunchOptions{ExtraWorkspaces: []domain.WorkspaceID{api.ID}, Created: func(id domain.RunID) {
+			created, atCreate = id, storedScope(id)
+		}})
 	if err == nil || !strings.Contains(err.Error(), `repo "api"`) {
 		t.Fatalf("err = %v, want one naming repo \"api\"", err)
+	}
+	if len(atCreate) != 1 || atCreate[0] != api.ID {
+		t.Fatalf("extras stored with the new run = %v, want [%s]", atCreate, api.ID)
+	}
+	if got := storedScope(created); len(got) != 1 || got[0] != api.ID {
+		t.Fatalf("extras stored after the failed checkout = %v, want [%s]", got, api.ID)
 	}
 	if _, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "x", "fake", domain.LaunchTUI,
 		domain.LaunchOptions{ExtraWorkspaces: []domain.WorkspaceID{"missing"}}); err == nil || !strings.Contains(err.Error(), "missing") {
