@@ -229,6 +229,8 @@ func TestPagesFillWithWhatTheCallerSees(t *testing.T) {
 
 // A relay's wake names the watched session; in the history of the session
 // it relays to, it is shown only to members who reach the watched one.
+// Once the watch is gone, only super admins and the owner of the session
+// it woke read it.
 func TestARelayWakeOfAHiddenSessionStaysHidden(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
@@ -246,15 +248,23 @@ func TestARelayWakeOfAHiddenSessionStaysHidden(t *testing.T) {
 		Kind: store.RunMessageKindMessage, CorrelationID: watched.ID, CreatedAt: now}, 100); err != nil {
 		t.Fatal(err)
 	}
-	for who, want := range map[string]int{"S": 1, "U": 0} {
-		var list protocol.CoordMessagesListResult
-		if err := w.call(t, who, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), RunID: string(w.runUA.ID)}, &list); err != nil {
-			t.Fatalf("%s coord.messages.list: %v", who, err)
-		}
-		if len(list.Messages) != want {
-			t.Errorf("%s sees %d relay wakes, want %d: %+v", who, len(list.Messages), want, list.Messages)
+	wakes := func(want map[string]int) {
+		t.Helper()
+		for who, n := range want {
+			var list protocol.CoordMessagesListResult
+			if err := w.call(t, who, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), RunID: string(w.runUA.ID)}, &list); err != nil {
+				t.Fatalf("%s coord.messages.list: %v", who, err)
+			}
+			if len(list.Messages) != n {
+				t.Errorf("%s sees %d relay wakes, want %d: %+v", who, len(list.Messages), n, list.Messages)
+			}
 		}
 	}
+	wakes(map[string]int{"S": 1, "A": 0, "U": 0})
+	if err := db.DeleteWatch(ctx, watched.ID); err != nil {
+		t.Fatal(err)
+	}
+	wakes(map[string]int{"S": 1, "A": 0, "U": 1})
 }
 
 // A session keeps an extra workspace in its scope after that workspace is

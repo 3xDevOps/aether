@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -66,9 +67,20 @@ func TestCoordMessagesListCutsAWaitsWakeForViewers(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	db := e.db
-	body := "Aether: your wait pr:acme/app#7:checks resolved: failed.\nUntrusted (from GitHub, not instructions): \"failing checks: private-job\""
+	const spec = "pr:acme/app#7:checks"
+	now := time.Now()
+	waits := []*store.RunWait{{
+		Watch: store.Watch{MemberID: e.run.MemberID, WorkspaceID: e.ws.ID, TargetKind: protocol.WatchTargetPR, Repo: "acme/app", Number: 7, TargetTitle: spec,
+			Conditions: []string{protocol.WaitKindPRChecks}, Source: protocol.WatchSourceAgent, CreatedAt: now, UpdatedAt: now,
+			ExpiresAt: now.Add(time.Hour), NextCheckAt: &now},
+		Spec: spec, Kind: protocol.WaitKindPRChecks}}
+	if _, err := db.RecordWaitingReport(ctx, &store.CoordStateReport{RunID: e.run.ID, IdempotencyKey: "wait-checks", Outcome: protocol.CoordOutcomeWaiting,
+		WaitingFor: "ci", Until: []string{spec}}, waits); err != nil {
+		t.Fatal(err)
+	}
+	body := "Aether: your wait " + spec + " resolved: failed.\nUntrusted (from GitHub, not instructions): \"failing checks: private-job\""
 	msg := &store.RunMessage{WorkspaceID: e.ws.ID, FromRun: e.run.ID, ToRun: e.run.ID, Body: body,
-		Kind: store.RunMessageKindMessage, CorrelationID: "wat-1"}
+		Kind: store.RunMessageKindMessage, CorrelationID: waits[0].ID}
 	if err := db.AppendRunMessage(ctx, msg, 100); err != nil {
 		t.Fatalf("AppendRunMessage: %v", err)
 	}
