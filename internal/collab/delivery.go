@@ -116,7 +116,7 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		}
 		if permissions.Check(permissions.Steer,
 			permissions.ActorOf(freshActor),
-			permissions.Target{Workspace: ws.ID, Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: ws.SteerOthers}) != nil {
+			permissions.Target{Workspace: ws.ID, Extra: freshRun.ExtraWorkspaces(), Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: ws.SteerOthers}) != nil {
 			revoked = true
 			return nil
 		}

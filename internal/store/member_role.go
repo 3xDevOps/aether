@@ -10,8 +10,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// ErrLastSuperAdmin refuses a role change that would leave no approved
-// super admin to administer the server.
+// ErrLastSuperAdmin refuses a role change or removal that would leave no
+// approved super admin to administer the server.
 var ErrLastSuperAdmin = errors.New("store: refusing to demote the last approved super admin")
 
 // OwnsWorkspacesError refuses demoting Member below admin while they own
@@ -46,14 +46,8 @@ func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.
 		return was, nil
 	}
 	if was == domain.RoleSuperAdmin {
-		var others int
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM members WHERE role = 'super_admin' AND pending = 0 AND merged_into = '' AND id <> ?`,
-			id).Scan(&others); err != nil {
-			return "", fmt.Errorf("store: set member role: count super admins: %w", err)
-		}
-		if others == 0 {
-			return "", ErrLastSuperAdmin
+		if err := refuseLastSuperAdmin(ctx, tx, id); err != nil {
+			return "", fmt.Errorf("store: set member role: %w", err)
 		}
 	}
 	if !role.Admin() {
@@ -78,6 +72,45 @@ func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.
 		return "", fmt.Errorf("store: commit set member role: %w", err)
 	}
 	return was, nil
+}
+
+func refuseLastSuperAdmin(ctx context.Context, tx *sql.Tx, id domain.MemberID) error {
+	var others int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM members WHERE role = 'super_admin' AND pending = 0 AND merged_into = '' AND id <> ?`,
+		id).Scan(&others); err != nil {
+		return fmt.Errorf("count super admins: %w", err)
+	}
+	if others == 0 {
+		return ErrLastSuperAdmin
+	}
+	return nil
+}
+
+// refuseRemoval is deleting member id's guard, in the deleting
+// transaction: the last approved super admin and a workspace owner stay.
+func refuseRemoval(ctx context.Context, tx *sql.Tx, id domain.MemberID) error {
+	var role domain.Role
+	err := tx.QueryRowContext(ctx, `SELECT role FROM members WHERE id = ?`, id).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read role: %w", err)
+	}
+	if role == domain.RoleSuperAdmin {
+		if err := refuseLastSuperAdmin(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	owned, err := ownedWorkspaces(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if len(owned) > 0 {
+		return &OwnsWorkspacesError{Member: id, Workspaces: owned}
+	}
+	return nil
 }
 
 func ownedWorkspaces(ctx context.Context, tx *sql.Tx, id domain.MemberID) ([]string, error) {

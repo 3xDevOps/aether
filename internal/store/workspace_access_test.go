@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -78,6 +79,100 @@ func TestWorkspaceAccessMigrationKeepsTodaysAccess(t *testing.T) {
 	}
 	if !creator.Access.Owned["w1"] || !creator.Access.Owned["w2"] {
 		t.Fatalf("creator owns %v, want w1 and w2", creator.Access.Owned)
+	}
+}
+
+// Events written before the upgrade name a second workspace only the way
+// the publishers of the day did: a run.pr from an extra repository did not
+// say which, and a coordination message or ack named a run in another
+// workspace. The upgrade rewrites them as today's publishers would, so a
+// reader granted only the run's workspace replays none of it.
+func TestWorkspaceAccessMigrationRescopesOldEvents(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, len(migrations)-1)
+	if _, err := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, color, role, created_at)
+			VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
+		INSERT INTO workspaces (id, name, environment, base_branch, steer_others, origin, created_at)
+			VALUES ('w1', 'one', '{}', 'main', '', '', 1), ('w2', 'two', '{}', 'main', '', '', 2);
+		INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status, branch, worktree, created_at)
+			VALUES ('multi', 'w1', 'm1', 't', 'claude', 'tui', 'running', 'b1', 'w', 1),
+			       ('foreign', 'w2', 'm1', 't', 'claude', 'tui', 'running', 'b2', 'w', 2),
+			       ('local', 'w1', 'm1', 't', 'claude', 'tui', 'running', 'b3', 'w', 3);
+		INSERT INTO run_repos (run_id, position, workspace_id, name, mount_path, base_branch, base_commit)
+			VALUES ('multi', 1, 'w2', 'two', '/repos/two', 'main', 'c');
+		INSERT INTO run_pull_requests (run_id, workspace_id, repo_workspace_id, repo, number, url, state, created_at, checked_at)
+			VALUES ('multi', 'w1', '', 'o/one', 1, 'https://github.com/o/one/pull/1', 'open', 1, 1),
+			       ('multi', 'w1', 'w2', 'o/two', 1, 'https://github.com/o/two/pull/1', 'open', 1, 1);
+		INSERT INTO events (id, ts, workspace_id, run_id, actor_id, type, payload) VALUES
+			('pr-primary', 1, 'w1', 'multi', '', 'run.pr', '{"run_id":"multi","number":1,"url":"https://github.com/o/one/pull/1","state":"open"}'),
+			('pr-extra', 2, 'w1', 'multi', '', 'run.pr', '{"run_id":"multi","number":1,"url":"https://github.com/o/two/pull/1","state":"open"}'),
+			('pr-unknown', 3, 'w1', 'multi', '', 'run.pr', '{"run_id":"multi","number":2,"url":"https://github.com/o/two/pull/2","state":"open"}'),
+			('pr-single', 4, 'w1', 'local', '', 'run.pr', '{"run_id":"local","number":3,"url":"https://github.com/o/one/pull/3","state":"open"}'),
+			('msg-foreign', 5, 'w1', 'multi', '', 'coord.message', '{"message_id":"a","workspace_id":"w1","from_run_id":"multi","to_run_id":"foreign","kind":"message"}'),
+			('msg-local', 6, 'w1', 'multi', '', 'coord.message', '{"message_id":"b","workspace_id":"w1","from_run_id":"multi","to_run_id":"local","kind":"message"}'),
+			('ack-foreign', 7, 'w1', 'foreign', '', 'coord.message.acked', '{"message_id":"a","to_run_id":"foreign","acked_at":"2026-11-01T00:00:00Z"}'),
+			('ack-local', 8, 'w1', 'local', '', 'coord.message.acked', '{"message_id":"b","to_run_id":"local","acked_at":"2026-11-01T00:00:00Z"}');
+	`, testKey(t, "m1")); err != nil {
+		_ = raw.Close()
+		t.Fatalf("seed legacy events: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	type row struct {
+		runID string
+		repo  *string
+		to    *string
+	}
+	get := func(id string) (row, bool) {
+		t.Helper()
+		var r row
+		err := db.db.QueryRowContext(ctx,
+			`SELECT run_id, json_extract(payload, '$.repo'), json_extract(payload, '$.to_run_id') FROM events WHERE id = ?`, id).
+			Scan(&r.runID, &r.repo, &r.to)
+		if errors.Is(err, sql.ErrNoRows) {
+			return r, false
+		}
+		if err != nil {
+			t.Fatalf("event %s: %v", id, err)
+		}
+		return r, true
+	}
+	str := func(p *string) string {
+		if p == nil {
+			return "<none>"
+		}
+		return *p
+	}
+	for _, want := range []struct {
+		id, runID, repo, to string
+		gone                bool
+	}{
+		{id: "pr-primary", runID: "multi", repo: "<none>", to: "<none>"},
+		{id: "pr-extra", runID: "multi", repo: "w2", to: "<none>"},
+		{id: "pr-unknown", gone: true},
+		{id: "pr-single", runID: "local", repo: "<none>", to: "<none>"},
+		{id: "msg-foreign", runID: "multi", repo: "<none>", to: ""},
+		{id: "msg-local", runID: "multi", repo: "<none>", to: "local"},
+		{id: "ack-foreign", runID: "", repo: "<none>", to: ""},
+		{id: "ack-local", runID: "local", repo: "<none>", to: "local"},
+	} {
+		got, ok := get(want.id)
+		if ok == want.gone {
+			t.Fatalf("event %s kept = %v, want %v", want.id, ok, !want.gone)
+		}
+		if ok && (got.runID != want.runID || str(got.repo) != want.repo || str(got.to) != want.to) {
+			t.Fatalf("event %s = run %q repo %s to %s, want run %q repo %s to %s",
+				want.id, got.runID, str(got.repo), str(got.to), want.runID, want.repo, want.to)
+		}
 	}
 }
 
@@ -223,6 +318,59 @@ func TestSetMemberRoleGuards(t *testing.T) {
 	}
 	if _, err := db.SetMemberRole(ctx, "mem_missing", domain.RoleViewer); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("role of a missing member = %v, want ErrNotFound", err)
+	}
+}
+
+// Deleting a member re-checks, in its transaction, what a role change
+// may have changed since the caller looked: with two super admins, a
+// removal that counted the first must still refuse once the console
+// demoted it. A workspace owner is refused too.
+func TestDeleteMemberGuards(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, del := range []struct {
+		name string
+		fn   func(*DB, domain.MemberID) error
+	}{
+		{"DeleteMember", func(db *DB, id domain.MemberID) error { return db.DeleteMember(ctx, id) }},
+		{"DeleteMemberWithPreferences", func(db *DB, id domain.MemberID) error {
+			return db.DeleteMemberWithPreferences(ctx, id, func([]string) error { return nil })
+		}},
+	} {
+		t.Run(del.name, func(t *testing.T) {
+			db := openTestDB(t)
+			first := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#ffe119", Role: domain.RoleSuperAdmin}
+			second := &domain.Member{DisplayName: "Sue", PublicKey: testKey(t, "sue"), Color: "#3cb44b", Role: domain.RoleSuperAdmin}
+			owner := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+			for _, m := range []*domain.Member{first, second, owner} {
+				if err := db.CreateMember(ctx, m); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := db.SetMemberRole(ctx, first.ID, domain.RoleAdmin); err != nil {
+				t.Fatal(err)
+			}
+			if err := del.fn(db, second.ID); !errors.Is(err, ErrLastSuperAdmin) {
+				t.Fatalf("delete the last approved super admin = %v, want ErrLastSuperAdmin", err)
+			}
+			if _, err := db.GetMember(ctx, second.ID); err != nil {
+				t.Fatalf("last super admin after refused delete: %v", err)
+			}
+			w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
+			if err := db.CreateWorkspace(ctx, w); err != nil {
+				t.Fatal(err)
+			}
+			var owns *OwnsWorkspacesError
+			if err := del.fn(db, owner.ID); !errors.As(err, &owns) || len(owns.Workspaces) != 1 {
+				t.Fatalf("delete a workspace owner = %v, want OwnsWorkspacesError", err)
+			}
+			if err := del.fn(db, first.ID); err != nil {
+				t.Fatalf("delete an admin who owns nothing: %v", err)
+			}
+			if err := del.fn(db, "mem_missing"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("delete a missing member = %v, want ErrNotFound", err)
+			}
+		})
 	}
 }
 

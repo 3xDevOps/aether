@@ -242,6 +242,12 @@ func (d *DB) DeleteMemberWithPreferences(ctx context.Context, member domain.Memb
 		return fmt.Errorf("store: delete member: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if err = refuseRemoval(ctx, tx, member); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("store: delete member: %w", err)
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM member_preferences WHERE member_id = ?`, member)
 	if err != nil {
 		return fmt.Errorf("store: delete member: %w", err)

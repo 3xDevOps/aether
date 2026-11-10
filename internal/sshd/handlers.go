@@ -645,6 +645,23 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	} else if cerr != nil {
 		return nil, rpcError(cerr)
 	}
+	// The retained container mounts its launcher's home, which a handoff
+	// does not change.
+	if home := run.HomeMember(); home != member {
+		owner, herr := s.cfg.Store.GetMember(ctx, home)
+		if errors.Is(herr, store.ErrNotFound) {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: %s, whose home the session uses, is no longer a member", protocol.MethodRunRelaunch, home)}
+		}
+		if herr != nil {
+			return nil, rpcError(herr)
+		}
+		reach := permissions.ActorOf(owner)
+		for _, ws := range workspaces {
+			if !reach.Reaches(ws) {
+				return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: %s, whose home the session uses, has no access to workspace %s", protocol.MethodRunRelaunch, home, ws)}
+			}
+		}
+	}
 	if _, err = fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, member, string(run.AccountMember()), workspaces); err != nil {
 		return nil, rpcError(err)
 	}

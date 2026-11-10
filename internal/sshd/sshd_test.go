@@ -386,6 +386,9 @@ type fakeRuns struct {
 	acpPending     map[domain.RunID][]acphost.Request
 	sudo           map[domain.RunID][]domain.RunInputRequest
 	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
+	// whileTerminalStopped, when set, runs inside WithStoppedTerminal
+	// before its callback.
+	whileTerminalStopped func()
 }
 
 func (f *fakeRuns) Retention(run *domain.Run) (scheduler.RetentionInfo, error) {
@@ -834,6 +837,9 @@ func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error
 func (f *fakeRuns) WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error {
 	if err := f.StopTerminal(ctx, member); err != nil {
 		return err
+	}
+	if f.whileTerminalStopped != nil {
+		f.whileTerminalStopped()
 	}
 	return afterStop()
 }
