@@ -37,7 +37,8 @@ concurrency:
 # build-and-test owns Linux amd64 native Go and bun, windows owns Windows
 # amd64 native Go, arm64 owns Linux arm64 native Go, and the windows-install
 # arm64 update leg owns Windows arm64 Go. These four Go owners also save
-# modules for their host. desktop-windows owns the Windows npm caches.
+# modules for their host. Each windows-install update leg owns its
+# architecture's Windows npm caches.
 # runner.environment stays in every key so a self-hosted archive is never
 # restored onto a hosted VM.
 
@@ -235,11 +236,11 @@ jobs:
         with:
           mode: save
 
-  # Three jobs hold every amd64 Docker suite. Each builds only the images it
-  # uses, from the caches runs on main write, and runs its steps even when
-  # an earlier one failed so one run reports every failure. Tests run as
-  # root, like an installed server. server-flows runs its server tests in two
-  # processes:
+  # Two jobs hold every amd64 Docker suite, one per image they test on. Each
+  # builds only the images it uses, from the caches runs on main write, and
+  # runs its steps even when an earlier one failed so one run reports every
+  # failure. Tests run as root, like an installed server. The standard-image
+  # job runs the server flow tests in two processes:
   # TestIntegrationServerUpdateRollsBackAndCommits hangs for 120 s when it
   # follows the chaos tests in one.
   # The browser image and the browser, runtime and server-rest suites that use
@@ -297,17 +298,20 @@ jobs:
         if: ${{ !cancelled() }}
         run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
 
-  # The server's long flows, and the agent CLIs at today's vendor versions on
-  # the standard image, which is what runs actually execute on. The smoke
-  # image carries no credentials, which is what TestSmokeHeadlessNoLogin
-  # needs. It builds on the "default" builder, the one backed by the Docker
-  # daemon, because only that builder sees the standard image loaded here.
-  integration-server-flows:
-    name: integration (server-flows, smoke)
+  # Everything that runs on the standard image: the server's long flows, the
+  # scheduler and every other integration package, the agent CLIs at today's
+  # vendor versions, which is what runs actually execute on, and the pinned
+  # agent CLIs in real runs against a mock model. The smoke image carries no
+  # credentials, which is what TestSmokeHeadlessNoLogin needs. The smoke and
+  # agents images build on the "default" builder, the one backed by the
+  # Docker daemon, because only that builder sees the standard image loaded
+  # here.
+  integration:
+    name: integration (server-flows, scheduler, rest, agents, smoke)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -335,7 +339,7 @@ jobs:
           tags: aether-standard:ci
           cache-from: type=gha,scope=standard-amd64-main
           cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=standard-amd64-main' || '' }}
-      - name: Integration tests (real Docker, real git)
+      - name: Server flow integration tests (real Docker, real git)
         env:
           GOFLAGS: -v
         run: |
@@ -344,6 +348,16 @@ jobs:
               make test-integration INTEGRATION_PKGS=./internal/server INTEGRATION_RUN="$run" || status=1
           done
           exit "${status:-0}"
+      # Preserve the root suite as well as the separate non-root unit suite:
+      # ownership and recovery tests exercise different privilege branches.
+      - name: Integration tests of every other package (real Docker, real git)
+        if: ${{ !cancelled() }}
+        env:
+          GOFLAGS: -v
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+            make test-integration INTEGRATION_SKIP="./internal/harness ./internal/server" \
+              INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
       - name: Prove standard environment tools and native Git
         if: ${{ !cancelled() }}
         run: sh scripts/standard-image-smoke.sh aether-standard:ci
@@ -365,50 +379,6 @@ jobs:
           AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration INTEGRATION_PKGS=./internal/harness
-
-  # The scheduler and every other integration package, then the pinned agent
-  # CLIs in real runs against a mock model.
-  integration:
-    name: integration (scheduler, rest, agents)
-    needs: changes
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/free-disk
-      - uses: ./.github/actions/docker-mirror
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
-      - name: Build the standard environment image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/standard/Dockerfile
-          load: true
-          tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-amd64-main
-      - name: Integration tests (real Docker, real git)
-        env:
-          GOFLAGS: -v
-        # Preserve the root suite as well as the separate non-root unit suite:
-        # ownership and recovery tests exercise different privilege branches.
-        run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
-            make test-integration INTEGRATION_SKIP="./internal/harness ./internal/server" \
-              INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
       - name: Build the pinned agents image
         if: ${{ !cancelled() }}
         env:
@@ -652,129 +622,21 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
 
-  # The desktop shell is built the way users build it: `aether gui build`
-  # unpacks the sources embedded in the CLI and runs electron-builder.
-  desktop:
-    needs: changes
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # Both `aether gui build` steps below run npm install, the first with
-      # this system npm and the second with a Node the CLI downloads for
-      # itself; npm's cache directory defaults to ~/.npm regardless of which
-      # npm binary runs, so one cache covers both. Restored on every run and
-      # saved only on a run on main, same rule as the Go cache.
-      - uses: actions/cache/restore@v4
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
-          restore-keys: |
-            npm-${{ runner.os }}-${{ runner.environment }}-
-      - name: Install desktop validation tools
-        run: |
-          printf 'https://archive.ubuntu.com/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu/\nhttps://mirrors.edge.kernel.org/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y desktop-file-utils
-      - name: Build the CLI
-        run: mkdir -p web/dist && go build -o "$HOME/.local/bin/aether" ./cmd/aether
-      - name: aether gui build
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          aether gui build
-          desktop-file-validate ~/.local/share/applications/aether-desktop.desktop
-          test -x ~/.local/share/aether/desktop/aether-desktop
-      # Proves the app builds on a machine with no Node at all: with node,
-      # npm and npx off PATH, the CLI has to download its own copy into the
-      # cache directory and build with that. The directories that carry node
-      # also carry sh and the rest of the toolchain, so they are mirrored
-      # into a shadow of symlinks with those three names left out rather
-      # than dropped.
-      - name: aether gui build without Node on PATH
-        run: |
-          shadow="$RUNNER_TEMP/no-node"
-          mkdir -p "$shadow"
-          clean=""
-          IFS=:
-          for dir in $PATH; do
-            unset IFS
-            [ -d "$dir" ] || continue
-            if [ -x "$dir/node" ] || [ -x "$dir/npm" ] || [ -x "$dir/npx" ]; then
-              for tool in "$dir"/*; do
-                name="${tool##*/}"
-                case "$name" in node | npm | npx | corepack | '*') continue ;; esac
-                # -e is false for a dangling link, and two PATH directories
-                # can carry the same name, so a failed ln is expected and
-                # must not end the step. scripts/install-test.sh does the
-                # same for the same reason.
-                [ -e "$shadow/$name" ] || ln -s "$tool" "$shadow/$name" 2>/dev/null || true
-              done
-            else
-              clean="${clean:+$clean:}$dir"
-            fi
-          done
-          # No empty PATH entry: that would put the checkout's own directory
-          # on PATH when every directory carried node.
-          export PATH="$HOME/.local/bin:$shadow${clean:+:$clean}"
-          if command -v node; then echo "node is still on PATH" >&2; exit 1; fi
-          aether gui build
-          test -d ~/.cache/aether/node ||
-            { echo "no Node was downloaded into ~/.cache/aether/node" >&2; exit 1; }
-          find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
-            { echo "the downloaded Node has no executable node" >&2; exit 1; }
-          test -x ~/.local/share/aether/desktop/aether-desktop
-      - uses: actions/cache/save@v4
-        if: github.ref == 'refs/heads/main'
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
-
-  # The packaging and launch check release.yml runs for each tag, on both
-  # Windows architectures.
-  desktop-windows:
-    needs: changes
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: windows-latest
-          - arch: arm64
-            runner: windows-11-arm
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/desktop-windows-zip
-        with:
-          version: v0.0.0-ci
-          arch: ${{ matrix.arch }}
-          save-npm-cache: 'true'
-
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
-  # design and internal/gitengine does not compile for Windows.
+  # design and internal/gitengine does not compile for Windows. Then Defender
+  # scans the Windows binaries release-build produced, with the Defender
+  # build that ships on the runner. A detection there is the same failure a
+  # user hits: the download is blocked, or the client is quarantined on first
+  # run. It is signal, not a flake - the response is to submit the binary at
+  # https://www.microsoft.com/en-us/wdsi/filesubmission as a developer false
+  # positive, and to check what changed in the client's syscalls or embedded
+  # strings. See docs/install.md.
   windows:
-    needs: changes
+    needs: [changes, release-build]
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -802,11 +664,26 @@ jobs:
           pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
           mapfile -t packages <<< "$pkgs"
           go test ./cmd/aether "${packages[@]}"
+      # Saved before Defender is armed: archiving under its realtime scan
+      # took eight minutes.
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
           save-modules: 'true'
+      - name: Arm Defender before downloading binaries
+        if: ${{ !cancelled() && needs.release-build.result == 'success' }}
+        shell: powershell
+        run: ./scripts/windows-defender.ps1 -Mode Prepare
+      - uses: actions/download-artifact@v4
+        if: ${{ !cancelled() && needs.release-build.result == 'success' }}
+        with:
+          name: binaries-go-windows
+          path: dist
+      - name: Scan both Windows clients
+        if: ${{ !cancelled() && needs.release-build.result == 'success' }}
+        shell: powershell
+        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe
 
   # Reuse the installer lanes so their verdict is part of CI and therefore
   # the exact-commit CI success required by release authorization.
@@ -815,11 +692,17 @@ jobs:
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     uses: ./.github/workflows/windows-install.yml
 
+  # Everything a release ships, built: every release binary cross-compiled,
+  # the desktop shell built the way users build it (`aether gui build`
+  # unpacks the sources embedded in the CLI and runs electron-builder), and
+  # the unsigned Android app. Each part runs even when an earlier one failed.
   release-build:
+    name: release-build (binaries, desktop, android)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A wedged Gradle daemon must not hold the runner for the six-hour default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -864,22 +747,87 @@ jobs:
             !dist/aether-windows-*.exe
           if-no-files-found: error
           retention-days: 7
-
-  android:
-    needs: changes
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
-    runs-on: ubuntu-latest
-    # A wedged Gradle daemon must not hold the runner for the six-hour default.
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
+      # Both `aether gui build` steps below run npm install, the first with
+      # this system npm and the second with a Node the CLI downloads for
+      # itself; npm's cache directory defaults to ~/.npm regardless of which
+      # npm binary runs, so one cache covers both. Restored on every run and
+      # saved only on a run on main, same rule as the Go cache.
+      - uses: actions/cache/restore@v4
+        if: ${{ !cancelled() }}
         with:
-          persist-credentials: false
-          fetch-depth: 0 # full history so git describe can version the build
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-${{ runner.environment }}-
+      - name: Install desktop validation tools
+        if: ${{ !cancelled() }}
+        run: |
+          printf 'https://archive.ubuntu.com/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu/\nhttps://mirrors.edge.kernel.org/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y desktop-file-utils
+      # The release-binaries flags, so it compiles nothing that step did not.
+      - name: Build the CLI
+        if: ${{ !cancelled() }}
+        env:
+          CGO_ENABLED: '0'
+        run: mkdir -p web/dist && go build -trimpath -o "$HOME/.local/bin/aether" ./cmd/aether
+      - name: aether gui build
+        if: ${{ !cancelled() }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          aether gui build
+          desktop-file-validate ~/.local/share/applications/aether-desktop.desktop
+          test -x ~/.local/share/aether/desktop/aether-desktop
+      # Proves the app builds on a machine with no Node at all: with node,
+      # npm and npx off PATH, the CLI has to download its own copy into the
+      # cache directory and build with that. The directories that carry node
+      # also carry sh and the rest of the toolchain, so they are mirrored
+      # into a shadow of symlinks with those three names left out rather
+      # than dropped.
+      - name: aether gui build without Node on PATH
+        if: ${{ !cancelled() }}
+        run: |
+          shadow="$RUNNER_TEMP/no-node"
+          mkdir -p "$shadow"
+          clean=""
+          IFS=:
+          for dir in $PATH; do
+            unset IFS
+            [ -d "$dir" ] || continue
+            if [ -x "$dir/node" ] || [ -x "$dir/npm" ] || [ -x "$dir/npx" ]; then
+              for tool in "$dir"/*; do
+                name="${tool##*/}"
+                case "$name" in node | npm | npx | corepack | '*') continue ;; esac
+                # -e is false for a dangling link, and two PATH directories
+                # can carry the same name, so a failed ln is expected and
+                # must not end the step. scripts/install-test.sh does the
+                # same for the same reason.
+                [ -e "$shadow/$name" ] || ln -s "$tool" "$shadow/$name" 2>/dev/null || true
+              done
+            else
+              clean="${clean:+$clean:}$dir"
+            fi
+          done
+          # No empty PATH entry: that would put the checkout's own directory
+          # on PATH when every directory carried node.
+          export PATH="$HOME/.local/bin:$shadow${clean:+:$clean}"
+          if command -v node; then echo "node is still on PATH" >&2; exit 1; fi
+          aether gui build
+          test -d ~/.cache/aether/node ||
+            { echo "no Node was downloaded into ~/.cache/aether/node" >&2; exit 1; }
+          find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
+            { echo "the downloaded Node has no executable node" >&2; exit 1; }
+          test -x ~/.local/share/aether/desktop/aether-desktop
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
       # The pinned SDK container carries the Android toolchain. Keep only
       # Gradle's dependency and distribution caches, inside the workspace so
       # the archive restores at the same path. Only this main job writes it.
       - uses: actions/cache/restore@v4
+        if: ${{ !cancelled() }}
         with:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
@@ -893,8 +841,10 @@ jobs:
       # code nobody here has read. `v4` also trails its own line - it still
       # points at v4.4.3, while v4.4.4 is the current v4 release and carries
       # the newer known-wrapper checksums this step reads.
-      - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - if: ${{ !cancelled() }}
+        uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
       - name: Build and test unsigned Android artifacts
+        if: ${{ !cancelled() }}
         env:
           ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
         run: make android
@@ -909,6 +859,7 @@ jobs:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: binaries-android
           path: |
@@ -916,32 +867,6 @@ jobs:
             dist/aether-android-unsigned.aab
           if-no-files-found: error
           retention-days: 7
-
-  # Scans the Windows binaries release-build just produced with the Defender
-  # build that ships on the runner. A detection here is the same failure a
-  # user hits: the download is blocked, or the client is quarantined on first
-  # run. It is signal, not a flake - the response is to submit the binary at
-  # https://www.microsoft.com/en-us/wdsi/filesubmission as a developer false
-  # positive, and to check what changed in the client's syscalls or embedded
-  # strings. See docs/install.md.
-  windows-defender:
-    needs: release-build
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Arm Defender before downloading binaries
-        shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Prepare
-      - uses: actions/download-artifact@v4
-        with:
-          name: binaries-go-windows
-          path: dist
-      - name: Scan both Windows clients
-        shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe
 
   # The one required check on main, for pull requests and merge queue
   # entries. It fails when any job failed or was cancelled; a job its own
@@ -955,19 +880,14 @@ jobs:
       - lint
       - build-and-test
       - integration-server-rest
-      - integration-server-flows
       - integration
       - arm64
       - edge-image
       - dashboard
       - dashboard-e2e
-      - desktop
-      - desktop-windows
       - windows
       - windows-install
       - release-build
-      - android
-      - windows-defender
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

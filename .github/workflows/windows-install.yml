@@ -103,36 +103,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The dashboard every update leg embeds, built once: the arm64 runner has
-  # no native Bun.
-  dashboard:
-    name: dashboard (embedded by the update legs)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: web/.bun-version
-          no-cache: true
-      - working-directory: web
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-          retention-days: 1
-
   # What Linux cannot show: replacing aether.exe while it runs, and the
   # desktop app's helper swapping the app directory the running app holds,
   # under real-time Defender. docs/testing.md has the details.
   update:
     name: update (${{ matrix.arch }}, running aether.exe and desktop)
-    needs: dashboard
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     strategy:
@@ -166,10 +141,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          name: web-dist
-          path: web/dist
+          bun-version-file: web/.bun-version
+          no-cache: true
+      - name: Build the embedded dashboard
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # The script drives the running app over its debugging port; the
       # package alone is enough, with no browser download.
       - name: Install Playwright's CDP client
@@ -219,6 +201,7 @@ jobs:
         with:
           version: ${{ env.OLD_VERSION }}
           arch: ${{ matrix.arch }}
+          save-npm-cache: 'true'
       # What users have today: the newest published release's CLI, not built
       # from this checkout.
       - name: Download the latest published release
