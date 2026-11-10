@@ -294,7 +294,6 @@ export function LanesView(props: LanesViewProps) {
   /** Travel towards a pinned button: when it began and the closest the pointer has come. */
   const aim = useRef<{ since: number; gap: number } | null>(null)
   const settle = useRef<number | undefined>(undefined)
-  const onControl = useRef(false)
   useEffect(() => () => clearTimeout(settle.current), [])
   const hover = (key: string | null) => {
     clearTimeout(settle.current)
@@ -337,13 +336,16 @@ export function LanesView(props: LanesViewProps) {
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const target = event.target as Element
-    onControl.current = Boolean(target.closest('[data-mail-control]'))
-    if (onControl.current) {
+    pointer.current = { x: event.clientX, y: event.clientY }
+    if (target.closest('[data-mail-control]')) {
       clearTimeout(settle.current)
       aim.current = null
     }
     // React bubbles the portalled popover's events here: the pointer is on the popover, not on the lane under it.
-    else if (!event.currentTarget.contains(target)) hover(null)
+    else if (!event.currentTarget.contains(target)) {
+      pointer.current = null
+      hover(null)
+    }
     else hoverAt(event)
     const d = drag.current
     if (!d || d.id !== event.pointerId) return
@@ -368,7 +370,10 @@ export function LanesView(props: LanesViewProps) {
     const previous = before.current
     const el = scroller.current
     // Lanes are placed absolutely, so the browser cannot anchor the scroll: the lane at the top of the view stays put when lanes above it come or go.
-    const scroll = el?.scrollTop ?? 0
+    // At the bottom of shorter content the browser has already clamped scrollTop; the offset before the change is the one to correct.
+    const clamped = el !== null && el.scrollTop < viewport.top && el.scrollTop >= el.scrollHeight - el.clientHeight - 1
+    const scroll = clamped ? viewport.top : el?.scrollTop ?? 0
+    let moved = 0
     if (previous && el && scroll > 0) {
       // The lane at the top of the view, as a browser would anchor; if it left, the first lane that started in view.
       let top: [string, number] | undefined
@@ -378,12 +383,13 @@ export function LanesView(props: LanesViewProps) {
         if (y > scroll && layout.top.has(key) && (!below || y < below[1])) below = [key, y]
       }
       const anchor = top && layout.top.has(top[0]) ? top : below
-      const moved = anchor && layout.top.get(anchor[0])! - anchor[1]
-      if (moved) el.scrollTop = scroll + moved
+      moved = anchor ? layout.top.get(anchor[0])! - anchor[1] : 0
+      if (moved || clamped) el.scrollTop = scroll + moved
     }
     // A pointer at rest hovers the lane now under it once the lanes move; on a mark, link or pinned button it keeps the lane that drew it.
-    const shifted = hovered !== null && previous?.top.get(hovered) !== layout.top.get(hovered)
-    if (shifted && pointer.current && content.current && !popRef.current && !aim.current && !onControl.current) {
+    const shifted = hovered !== null && (moved !== 0 || previous?.top.get(hovered) !== layout.top.get(hovered))
+    const control = pointer.current && document.elementFromPoint(pointer.current.x, pointer.current.y)?.closest('[data-mail-control]')
+    if (shifted && pointer.current && content.current && !aim.current && !control) {
       const key = latestLaneAt.current(pointer.current.y - content.current.getBoundingClientRect().top)
       if (key !== hovered) hover(key)
     }
@@ -481,7 +487,9 @@ export function LanesView(props: LanesViewProps) {
   const onRetry = useCallback((runID: string) => latest.current.onRetryAgents(runID), [])
   const onWiden = useCallback(() => latest.current.onWiden(), [])
   const pickEdges = useCallback((edges: LaneEdge[], x: number, y: number) => {
-    if (!drag.current?.moved) setPop({ kind: 'edge', edges, x, y, focus: focusRef.current })
+    // The focused lane stays when the mail is its own; mail on another lane focuses the lane that drew it.
+    const focus = focusRef.current
+    if (!drag.current?.moved) setPop({ kind: 'edge', edges, x, y, focus: edges.some((edge) => edge.from.lane === focus || edge.to.lane === focus) ? focus : edges[0].from.lane || edges[0].to.lane })
   }, [])
   // Swapping the lane popover for the reply composer unmounts its content too; only a real close returns focus.
   // Moving to a lane from a popover's message list closes the popover there, not on the lane it opened from.
@@ -496,6 +504,11 @@ export function LanesView(props: LanesViewProps) {
   // The focused lane, kept so focus survives a live update that removes it: the browser drops it on the page.
   const focused = useRef<{ key: string; index: number; run?: string } | null>(null)
   const lost = focused.current && !byKey.has(focused.current.key) ? focused.current : null
+  // Lanes coming and going above the focused lane move it; its neighbour is found from where it is now.
+  useEffect(() => {
+    const now = focused.current
+    if (now && byKey.has(now.key)) now.index = model.lanes.findIndex((lane) => lane.key === now.key)
+  }, [model.lanes, byKey])
   useEffect(() => {
     if (!lost || popRef.current || (document.activeElement && document.activeElement !== document.body)) return
     focused.current = null
