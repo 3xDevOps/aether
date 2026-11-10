@@ -177,8 +177,8 @@ func TestEnhancedRunReportsTheModelItKeepsAfterARefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "the refused model recorded", func() bool {
-		stored, err := e.cfg.Store.GetRun(t.Context(), run.ID)
-		return err == nil && stored.Model == "sonnet" && stored.RefusedModel == "opus" &&
+		stored, getErr := e.cfg.Store.GetRun(t.Context(), run.ID)
+		return getErr == nil && stored.Model == "sonnet" && stored.RefusedModel == "opus" &&
 			strings.HasPrefix(stored.ModelError, `The agent refused "opus", so the session runs on "sonnet": `)
 	})
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
