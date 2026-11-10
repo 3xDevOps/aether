@@ -92,8 +92,6 @@ func (m *Manager) entry(run Run) (*managedRun, string, error) {
 	if run.ID == "" || run.ContainerID == "" {
 		return nil, "", errors.New("browser session and container identities are required")
 	}
-	digest := sha256.Sum256([]byte(run.ID))
-	name := hex.EncodeToString(digest[:16])
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry := m.runs[run.ID]
@@ -101,7 +99,12 @@ func (m *Manager) entry(run Run) (*managedRun, string, error) {
 		entry = &managedRun{}
 		m.runs[run.ID] = entry
 	}
-	return entry, filepath.Join(m.root, name), nil
+	return entry, m.journalDir(run.ID), nil
+}
+
+func (m *Manager) journalDir(runID string) string {
+	digest := sha256.Sum256([]byte(runID))
+	return filepath.Join(m.root, hex.EncodeToString(digest[:16]))
 }
 
 func loadStatus(dir string) (Status, error) {
@@ -393,10 +396,66 @@ func (m *Manager) Resume(ctx context.Context, run Run) (Status, error) {
 func (m *Manager) Restart(ctx context.Context, run Run) (Status, error) {
 	return m.transition(ctx, run, "restart")
 }
-func (m *Manager) Remove(ctx context.Context, run Run) error {
-	_, err := m.transition(ctx, run, "remove")
+
+// Remove destroys the session's recorded companion, whichever session
+// container it was created for, and deletes its journal.
+func (m *Manager) Remove(ctx context.Context, runID string) error {
+	status, err := loadStatus(m.journalDir(runID))
+	if err == nil {
+		_, err = m.transition(ctx, Run{ID: runID, ContainerID: status.RunContainer}, "remove")
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	return err
+}
+
+// Journals returns every recorded companion. A journal that cannot be read
+// is named in the error and left in place.
+func (m *Manager) Journals() ([]Status, error) {
+	entries, err := os.ReadDir(m.root)
+	if err != nil {
+		return nil, err
+	}
+	var out []Status
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		status, err := loadStatus(filepath.Join(m.root, entry.Name()))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			errs = append(errs, fmt.Errorf("browser journal %s: %w", entry.Name(), err))
+		default:
+			out = append(out, status)
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
+// Untracked returns companions that no journal records. The runtime is listed
+// before the journals are read and a journal is written before its companion
+// is created, so a companion being created is never reported.
+func (m *Manager) Untracked(ctx context.Context) ([]containerruntime.BrowserInfo, error) {
+	listed, err := m.browser.ListBrowsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	journals, err := m.Journals()
+	if err != nil {
+		return nil, err
+	}
+	recorded := make(map[string]bool, len(journals))
+	for _, status := range journals {
+		recorded[status.CreationKey] = true
+	}
+	var out []containerruntime.BrowserInfo
+	for _, info := range listed {
+		if !recorded[info.CreationKey] {
+			out = append(out, info)
+		}
+	}
+	return out, nil
 }

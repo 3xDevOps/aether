@@ -511,6 +511,13 @@ polling until it is reopened.
 | **Free container…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
 | **Delete run** (`aether delete <session-id>`) | Removed. | Removed with the transcript and records. | No. |
 
+Every row removes the session's browser companion, the Chromium container
+behind its Browser tab; a relaunched session opens a new one. A companion left
+behind by a crash or a failed cleanup step is removed at server start and then
+hourly: when its session has ended or is unknown to the server, or when the
+session container it shares a network with is gone. A companion of an open
+session is never removed.
+
 The session branch is published before a checkout is removed, so cleanup never
 loses committed work. When disk runs low, Aether removes both sooner
 ([Recover from disk pressure](#recover-from-disk-pressure)). Relaunching resumes

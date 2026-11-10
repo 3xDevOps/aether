@@ -726,6 +726,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		_ = limits.Close()
 		return recoveryError(err)
 	}
+	s.sweepBrowsers(ctx)
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
 	s.recovering.Store(false)
 	watchCtx, stopWatch := context.WithCancel(ctx)
@@ -776,6 +777,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			}
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepScratch(ctx)
+			s.sweepBrowsers(ctx)
 			s.sweepCaches(ctx, false)
 		}
 	}

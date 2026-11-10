@@ -27,6 +27,9 @@ func (r *recoveryRuntime) CreateBrowser(context.Context, containerruntime.Browse
 func (r *recoveryRuntime) InspectBrowser(context.Context, containerruntime.ID) (containerruntime.BrowserInfo, error) {
 	return r.info, r.inspectErr
 }
+func (r *recoveryRuntime) ListBrowsers(context.Context) ([]containerruntime.BrowserInfo, error) {
+	return []containerruntime.BrowserInfo{r.info}, nil
+}
 func (r *recoveryRuntime) FindByCreationKey(context.Context, string) (containerruntime.ID, error) {
 	return "companion", nil
 }
@@ -121,7 +124,7 @@ func TestManagerRefusesRemovingAnotherRunCompanion(t *testing.T) {
 	if err := saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, ContainerID: "companion", CreationKey: "creation"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Remove(t.Context(), run); err == nil {
+	if err := manager.Remove(t.Context(), run.ID); err == nil {
 		t.Fatal("removed a companion owned by another run")
 	}
 	if runtime.destroyed {

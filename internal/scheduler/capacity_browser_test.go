@@ -27,6 +27,10 @@ func (r *browserAdmissionRuntime) InspectBrowser(context.Context, runtime.ID) (r
 	return runtime.BrowserInfo{}, runtime.ErrNotFound
 }
 
+func (r *browserAdmissionRuntime) ListBrowsers(context.Context) ([]runtime.BrowserInfo, error) {
+	return nil, nil
+}
+
 func TestBrowserProvisioningCapacityAndNativeErrorMapping(t *testing.T) {
 	var browserRT *browserAdmissionRuntime
 	e, rt := newAdmissionEnv(t, func(cfg *Config) {

@@ -51,7 +51,7 @@ func TestDockerBrowserCompanion(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := browser.Run{ID: "integration-run", ContainerID: app}
-	t.Cleanup(func() { _ = manager.Remove(context.Background(), run) })
+	t.Cleanup(func() { _ = manager.Remove(context.Background(), run.ID) })
 	status, control, err := manager.Ensure(ctx, run)
 	if err != nil {
 		t.Fatalf("sandboxed companion startup (private UID 1000 bind requires server/root authority): %v", err)
@@ -63,6 +63,12 @@ func TestDockerBrowserCompanion(t *testing.T) {
 	}
 	if info.RunContainer != app || info.CreationKey != status.CreationKey || info.State != "running" || !strings.HasPrefix(info.Image, "sha256:") {
 		t.Fatalf("companion inspect: %+v", info)
+	}
+	listed, err := docker.ListBrowsers(ctx)
+	if err != nil || !slices.ContainsFunc(listed, func(b runtime.BrowserInfo) bool {
+		return b.ContainerID == status.ContainerID && b.RunContainer == app && b.CreationKey == status.CreationKey && b.State == "running"
+	}) {
+		t.Fatalf("companion list: %+v, %v", listed, err)
 	}
 	found, err := docker.FindByCreationKey(ctx, status.CreationKey)
 	if err != nil || found != status.ContainerID {

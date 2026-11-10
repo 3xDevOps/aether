@@ -19,6 +19,8 @@ const BrowserSharedMemoryBytes int64 = 256 << 20
 type BrowserRuntime interface {
 	CreateBrowser(context.Context, BrowserSpec) (ID, error)
 	InspectBrowser(context.Context, ID) (BrowserInfo, error)
+	// ListBrowsers returns every owned companion in any state.
+	ListBrowsers(context.Context) ([]BrowserInfo, error)
 }
 
 type BrowserSpec struct {
