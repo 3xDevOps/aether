@@ -336,23 +336,29 @@ func TestSQLiteLogReadsAndAppendsDoNotWaitForEachOther(t *testing.T) {
 		t.Fatalf("read = %d events (err %v), want one", len(stored), err)
 	}
 
-	writer, err := log.db.Conn(ctx)
+	write, err := log.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := write.ExecContext(ctx, `INSERT INTO events (seq, id, ts, workspace_id, run_id, actor_id, type, payload)
+		VALUES (2, 'uncommitted', 0, 'w1', 'r1', 'm1', 'run.status', '{}')`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := log.Get(ctx, stored[0].ID); err != nil {
-		t.Errorf("get beside a busy writer: %v", err)
+		t.Errorf("get beside an open write: %v", err)
 	}
-	if _, err := log.Read(ctx, Filter{}, 0, 0, 10); err != nil {
-		t.Errorf("read beside a busy writer: %v", err)
+	if got, err := log.Read(ctx, Filter{}, 0, 0, 10); err != nil || len(got) != 1 {
+		t.Errorf("read beside an open write = %d events (err %v), want the committed one", len(got), err)
 	}
-	if _, err := log.ReadBefore(ctx, Filter{}, 0, 2, 10); err != nil {
-		t.Errorf("read before beside a busy writer: %v", err)
+	if _, err := log.ReadBefore(ctx, Filter{}, 0, 3, 10); err != nil {
+		t.Errorf("read before beside an open write: %v", err)
 	}
-	if _, err := log.LastSeq(ctx); err != nil {
-		t.Errorf("last seq beside a busy writer: %v", err)
+	if last, err := log.LastSeq(ctx); err != nil || last != 1 {
+		t.Errorf("last seq beside an open write = %d (err %v), want 1", last, err)
 	}
-	_ = writer.Close()
+	if err := write.Rollback(); err != nil {
+		t.Fatal(err)
+	}
 
 	for range readConns {
 		reader, err := log.reads.Conn(ctx)
