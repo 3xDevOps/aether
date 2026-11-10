@@ -187,7 +187,7 @@ func TestWorkspaceMirrorLifecycleAndSanitizedTimeline(t *testing.T) {
 	if err := client.Call(protocol.MethodWorkspaceMirrorConfigure, configure, nil); err == nil || wireErrOf(t, err).Code != protocol.CodeDenied {
 		t.Fatalf("configure by the workspace's admin = %v, want denied", err)
 	}
-	makeSuperAdmin(t, e)
+	asSuperAdmin(t, e)
 	var configured protocol.WorkspaceMirrorResult
 	if err := client.Call(protocol.MethodWorkspaceMirrorConfigure, configure, &configured); err != nil {
 		t.Fatalf("configure: %v", err)
@@ -240,7 +240,7 @@ func TestWorkspaceMirrorInputValidation(t *testing.T) {
 	t.Parallel()
 	fake := &mirrorRPCFake{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Mirrors = fake })
-	makeSuperAdmin(t, e)
+	asSuperAdmin(t, e)
 	client := controlClient(t, e)
 	cases := []struct {
 		name   string

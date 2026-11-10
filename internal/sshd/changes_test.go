@@ -349,7 +349,7 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 	if !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound || perr.Message != store.ErrNotFound.Error() {
 		t.Fatalf("an admin's changes of a deleted workspace: err = %v, want not found", err)
 	}
-	makeSuperAdmin(t, e.testEnv)
+	asSuperAdmin(t, e.testEnv)
 	for _, p := range []protocol.ChangesListParams{
 		{WorkspaceID: string(gone.ID)},
 		{WorkspaceID: string(gone.ID), RunID: "run-in-gone"},

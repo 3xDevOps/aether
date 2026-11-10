@@ -22,13 +22,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
-// makeSuperAdmin promotes the env's seeded admin, for tests of what only a
-// super admin sees.
-func makeSuperAdmin(t *testing.T, e *testEnv) {
-	t.Helper()
-	setRole(t, e, domain.RoleSuperAdmin)
-}
-
 func setRole(t *testing.T, e *testEnv, role domain.Role) {
 	t.Helper()
 	m, err := e.db.GetMember(t.Context(), e.member.ID)

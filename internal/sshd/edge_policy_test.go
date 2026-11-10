@@ -509,7 +509,7 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitClosed(t, live)
-	makeSuperAdmin(t, e)
+	asSuperAdmin(t, e)
 	for _, c := range []*store.Connector{conn, signedIn} {
 		var audit protocol.AuditListResult
 		if err = controlClient(t, e).Call(protocol.MethodAuditList, protocol.AuditListParams{ConnectorID: c.ID}, &audit); err != nil ||
@@ -533,7 +533,8 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 	if members, _ := e.store.ListMembers(context.Background()); len(members) != 2 {
 		t.Fatalf("members after the notices = %d, want 2", len(members))
 	}
-	// The member kept no credential, and an admin still changes its role.
+	// The member kept no credential, and a super admin still changes its role.
+	asSuperAdmin(t, e)
 	if err := controlClient(t, e).Call(protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: m.ID, Role: "viewer"}, nil); err != nil {
 		t.Fatalf("demote the member left without a credential: %v", err)
 	}
