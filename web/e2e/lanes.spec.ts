@@ -237,7 +237,7 @@ test('the view, a card and the hover stay on their lanes as a session above them
   await expect(tree.getByRole('treeitem', { name: /^Helper 1,/ })).toHaveCount(0)
   await page.waitForTimeout(300)
   expect((await helper.boundingBox())!.y).toBe(before.y)
-  expect((await card.boundingBox())!.y - before.y).toBe(gap)
+  await expect.poll(async () => (await card.boundingBox())!.y - before.y).toBe(gap)
   expect((await page.locator('[data-lane-highlight="hover"]').boundingBox())!.y).toBe(resting.y)
 })
 
@@ -252,10 +252,32 @@ test('an open card follows its lane when the lanes above it change', async ({ pa
   const gap = (await card.boundingBox())!.y - before.y
   await liveStatus(page, 'run-lanes-new', 'running', 'A session that just started')
   await expect(tree.getByRole('treeitem', { name: /^A session that just started/ })).toBeAttached()
+  await expect.poll(async () => (await tester.boundingBox())!.y).toBe(before.y + before.height)
+  await expect.poll(async () => (await card.boundingBox())!.y - before.y - before.height).toBe(gap)
+})
+
+test('a resting pointer hovers the lane that moves under it, but keeps a pinned button', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 600 })
+  const tree = await setUp(page, aether, 16)
+  const reviewer = tree.getByRole('treeitem', { name: /^Review the checkout rewrite/ })
+  const box = (await reviewer.boundingBox())!
+  await page.mouse.move(box.x + 120, box.y + box.height / 2)
+  const band = page.locator('[data-lane-highlight="hover"]')
+  await expect.poll(async () => (await band.boundingBox())?.y).toBe(box.y)
+  await liveStatus(page, 'run-lanes-new', 'running', 'A session that just started')
+  await expect.poll(async () => (await reviewer.boundingBox())!.y).toBe(box.y + box.height)
+  // Lead moved down under the pointer: it takes the hover.
+  await expect.poll(async () => (await band.boundingBox())?.y).toBe(box.y)
+
+  const lead = (await tree.getByRole('treeitem', { name: /^Lead the checkout rewrite/ }).boundingBox())!
+  await page.mouse.move(lead.x + 300, lead.y + lead.height / 2)
+  const pinned = page.locator('[data-mail-pinned]')
+  await expect(pinned).toBeVisible()
+  await pinned.hover()
+  await liveStatus(page, 'run-lanes-newer', 'running', 'Another session that just started')
+  await expect(tree.getByRole('treeitem', { name: /^Another session that just started/ })).toBeAttached()
   await page.waitForTimeout(300)
-  const after = (await tester.boundingBox())!
-  expect(after.y).toBe(before.y + before.height)
-  expect((await card.boundingBox())!.y - after.y).toBe(gap)
+  await expect(pinned).toBeVisible()
 })
 
 test('keyboard focus moves to the lane that draws a session whose own lane leaves', async ({ page, aether }) => {

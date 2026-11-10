@@ -294,6 +294,7 @@ export function LanesView(props: LanesViewProps) {
   /** Travel towards a pinned button: when it began and the closest the pointer has come. */
   const aim = useRef<{ since: number; gap: number } | null>(null)
   const settle = useRef<number | undefined>(undefined)
+  const onControl = useRef(false)
   useEffect(() => () => clearTimeout(settle.current), [])
   const hover = (key: string | null) => {
     clearTimeout(settle.current)
@@ -336,7 +337,8 @@ export function LanesView(props: LanesViewProps) {
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const target = event.target as Element
-    if (target.closest('[data-mail-control]')) {
+    onControl.current = Boolean(target.closest('[data-mail-control]'))
+    if (onControl.current) {
       clearTimeout(settle.current)
       aim.current = null
     }
@@ -366,18 +368,27 @@ export function LanesView(props: LanesViewProps) {
     const previous = before.current
     const el = scroller.current
     // Lanes are placed absolutely, so the browser cannot anchor the scroll: the lane at the top of the view stays put when lanes above it come or go.
-    if (previous && el && viewport.top > 0) {
-      let top: [string, number] | undefined
-      for (const [key, y] of previous.top) if (y <= viewport.top && (!top || y > top[1])) top = [key, y]
-      const moved = top && layout.top.get(top[0])
-      if (top && moved !== undefined && moved !== top[1]) el.scrollTop = viewport.top + moved - top[1]
+    const scroll = el?.scrollTop ?? 0
+    if (previous && el && scroll > 0) {
+      // The first lane that still exists and started in view, else the nearest above it.
+      let below: [string, number] | undefined
+      let above: [string, number] | undefined
+      for (const [key, y] of previous.top) {
+        if (!layout.top.has(key)) continue
+        if (y >= scroll) { if (!below || y < below[1]) below = [key, y] }
+        else if (!above || y > above[1]) above = [key, y]
+      }
+      const anchor = below ?? above
+      const moved = anchor && layout.top.get(anchor[0])! - anchor[1]
+      if (moved) el.scrollTop = scroll + moved
     }
-    before.current = { top: layout.top, section: new Map([...tree].map(([key, t]) => [key, t.section])) }
-    // A pointer at rest hovers whatever lane is under it now.
-    if (pointer.current && content.current && !popRef.current && !aim.current) {
+    // A pointer at rest hovers the lane now under it once the lanes move; on a mark, link or pinned button it keeps the lane that drew it.
+    const shifted = hovered !== null && previous?.top.get(hovered) !== layout.top.get(hovered)
+    if (shifted && pointer.current && content.current && !popRef.current && !aim.current && !onControl.current) {
       const key = latestLaneAt.current(pointer.current.y - content.current.getBoundingClientRect().top)
       if (key !== hovered) hover(key)
     }
+    before.current = { top: layout.top, section: new Map([...tree].map(([key, t]) => [key, t.section])) }
     if (!previous || windowed || prefersReducedMotion() || !content.current) return
     let entering = 0
     for (const el of content.current.querySelectorAll<HTMLElement>('[data-glide-key]')) {
