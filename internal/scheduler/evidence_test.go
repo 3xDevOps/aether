@@ -732,7 +732,12 @@ func TestFailingCheckoutCleanupBacksOffThenSettles(t *testing.T) {
 	e.git.publishErr = nil
 	e.git.mu.Unlock()
 	published := e.git.publishedCount(run.ID)
-	advance(cleanupRetryMax)
+	advance(cleanupRetryMax - time.Minute)
+	sweep()
+	if e.git.publishedCount(run.ID) != published {
+		t.Fatal("a failed settling attempt retried before cleanupRetryMax")
+	}
+	advance(time.Minute)
 	sweep()
 	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) {
 		t.Fatalf("settled checkout was kept: %v", statErr)

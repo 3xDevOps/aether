@@ -242,8 +242,11 @@ type Scheduler struct {
 	evidenceUnavailable map[domain.RunID]struct{}
 	// cleanupRetries backs off checkout cleanups that failed. Guarded by mu.
 	cleanupRetries map[domain.RunID]cleanupRetry
-	titleMu        sync.Mutex
-	titleUpdates   map[domain.RunID]*pendingRunTitle
+	// checkoutSweepMu keeps the hourly and disk-pressure sweeps from both
+	// trying one checkout before either records its backoff.
+	checkoutSweepMu sync.Mutex
+	titleMu         sync.Mutex
+	titleUpdates    map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
 	// waits is nil when runs register no wait conditions.

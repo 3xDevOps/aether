@@ -696,6 +696,8 @@ func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
 // sweepCheckouts never removes the branch or transcript. It removes checkouts
 // of runs that finished at or before cutoff.
 func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
+	s.checkoutSweepMu.Lock()
+	defer s.checkoutSweepMu.Unlock()
 	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
 		slog.Warn("scheduler: checkout gc: list workspaces", "error", err)
@@ -715,13 +717,31 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 			inUse[a.Worktree] = true
 		}
 	}
+	withCheckout := make(map[domain.RunID]bool)
+	listed := true
+	defer func() {
+		if !listed {
+			return
+		}
+		s.mu.Lock()
+		for run := range s.cleanupRetries {
+			if !withCheckout[run] {
+				delete(s.cleanupRetries, run)
+			}
+		}
+		s.mu.Unlock()
+	}()
 	for _, ws := range workspaces {
 		runs, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
 		if err != nil {
+			listed = false
 			slog.Warn("scheduler: checkout gc: list runs", "workspace", ws.ID, "error", err)
 			continue
 		}
 		for _, r := range runs {
+			if r.Worktree != "" {
+				withCheckout[r.ID] = true
+			}
 			if !r.Status.Terminal() || r.Worktree == "" || r.FinishedAt == nil || r.FinishedAt.After(cutoff) {
 				continue
 			}
@@ -814,7 +834,9 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 				s.cleanupFailed(r.ID, *fresh.FinishedAt, gcErr)
 				continue
 			}
-			s.cleanupDone(r.ID)
+			s.mu.Lock()
+			delete(s.cleanupRetries, r.ID)
+			s.mu.Unlock()
 			var clearErr error
 			if clearer, ok := s.cfg.Store.(store.RunWorktreeStore); ok {
 				clearErr = clearer.ClearRunWorktree(ctx, fresh.ID, fresh.Worktree, fresh.Status)

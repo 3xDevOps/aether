@@ -78,16 +78,14 @@ func (s *Scheduler) cleanupFailed(run domain.RunID, finished time.Time, err erro
 		retry = cleanupRetry{finished: finished}
 	}
 	retry.attempts++
-	retry.next = s.cfg.Now().Add(min(cleanupRetryBase<<min(retry.attempts-1, 5), cleanupRetryMax))
+	delay := cleanupRetryMax
+	if retry.attempts < cleanupAttempts {
+		delay = cleanupRetryBase << (retry.attempts - 1)
+	}
+	retry.next = s.cfg.Now().Add(delay)
 	s.cleanupRetries[run] = retry
 	slog.Warn("scheduler: checkout gc: capture before cleanup", "run", run,
 		"attempt", retry.attempts, "retry_at", retry.next, "error", err)
-}
-
-func (s *Scheduler) cleanupDone(run domain.RunID) {
-	s.mu.Lock()
-	delete(s.cleanupRetries, run)
-	s.mu.Unlock()
 }
 
 // settleCheckoutCleanup removes the checkout of a run whose cleanup kept
@@ -105,17 +103,19 @@ func (s *Scheduler) settleCheckoutCleanup(ctx context.Context, r *domain.Run) er
 	if err := s.deleteDevelopment(removeCtx, r.ID); err != nil {
 		return err
 	}
-	note := cleanupSettledReason
 	if err := s.cfg.Git.RemoveRunCheckout(removeCtx, r.ID); err != nil {
 		slog.Warn("scheduler: checkout gc: keep only catalogued diff history", "run", r.ID, "error", err)
+		// The warning is durable before any history can go.
+		if noteErr := s.noteCleanup(ctx, r.ID, cleanupSalvagedReason); noteErr != nil {
+			return noteErr
+		}
 		salvageCtx, cancelSalvage := context.WithTimeout(context.WithoutCancel(ctx), checkoutCleanupTimeout)
 		defer cancelSalvage()
 		if err := s.cfg.Git.SalvageRunCheckout(salvageCtx, r.ID); err != nil {
 			return fmt.Errorf("scheduler: checkout gc: salvage session checkout: %w", err)
 		}
-		note = cleanupSalvagedReason
 	}
-	return s.noteCleanup(ctx, r.ID, note)
+	return s.noteCleanup(ctx, r.ID, cleanupSettledReason)
 }
 
 func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigger store.EvidenceTrigger, idempotency string, cleanup func(context.Context) error) error {
@@ -494,7 +494,7 @@ func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.Ru
 }
 
 // noteCleanup appends note to a terminal run's reason unless cleanup already
-// noted one there. Only a missing checkout is carried into the reason a run
+// noted one there; a history-loss note replaces any other. Only a missing checkout is carried into the reason a run
 // not yet terminal ends with.
 func (s *Scheduler) noteCleanup(ctx context.Context, run domain.RunID, note string) error {
 	s.mu.Lock()
@@ -516,10 +516,11 @@ func (s *Scheduler) noteCleanup(ctx context.Context, run domain.RunID, note stri
 		s.evidenceUnavailable[run] = struct{}{}
 		return nil
 	}
-	if _, noted := withoutCleanupNote(r.Reason); noted != "" {
+	base, noted := withoutCleanupNote(r.Reason)
+	if noted != "" && (note != cleanupSalvagedReason || noted == cleanupSalvagedReason) {
 		return nil
 	}
-	if err := s.relabelLocked(ctx, run, r.WorkspaceID, r.Status, withCleanupNote(r.Reason, note), ""); err != nil {
+	if err := s.relabelLocked(ctx, run, r.WorkspaceID, r.Status, withCleanupNote(base, note), ""); err != nil {
 		return fmt.Errorf("scheduler: record cleanup note: %w", err)
 	}
 	return nil

@@ -530,8 +530,8 @@ checkout first copies the session's diff history out of it into
 `checkouts/<run-id>.diffsnap/`, which stays; this reads the session's diff
 events from the event log. When checkout cleanup fails, the server logs
 `scheduler: checkout gc: capture before cleanup` with the session, the attempt
-and the error, and the next attempt waits 15 minutes, doubling up to 6 hours.
-The fifth attempt skips evidence capture: Aether commits and publishes the
+and the error. The next attempts wait 15, 30, 60 and 120 minutes. The fifth
+attempt skips evidence capture: Aether commits and publishes the
 checkout, removes it, and the session's reason, which `aether sessions
 <session-id>` and the dashboard show, gains `checkout removed after repeated
 cleanup failures`. If the diff history still cannot be copied, Aether keeps
