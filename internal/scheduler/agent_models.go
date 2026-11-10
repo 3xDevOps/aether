@@ -46,12 +46,12 @@ type agentModelsKey struct {
 	name    string
 }
 
-// agentModelsEntry.expired is when an agent update made it stale, so a
-// probe that started earlier stores its answer as stale too.
+// agentModelsEntry.updates counts the agent updates that made it stale, so a
+// probe that started before one stores its answer as stale too.
 type agentModelsEntry struct {
 	result  protocol.AgentModelsResult
 	probed  time.Time
-	expired time.Time
+	updates uint64
 }
 
 func (e agentModelsEntry) ttl() time.Duration {
@@ -144,7 +144,8 @@ func (s *Scheduler) expireAgentModels(account domain.MemberID, name string) {
 		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
 	}
 	entry := s.agentModels[key]
-	entry.probed, entry.expired = time.Time{}, s.cfg.Now().UTC()
+	entry.probed = time.Time{}
+	entry.updates++
 	s.agentModels[key] = entry
 }
 
@@ -152,6 +153,9 @@ func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, ex
 	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
 	defer cancel()
 	now := s.cfg.Now().UTC()
+	s.agentModelsMu.Lock()
+	updates := s.agentModels[key].updates
+	s.agentModelsMu.Unlock()
 	list, err := s.execAgentModels(ctx, key, executable, passthrough, start)
 	var result protocol.AgentModelsResult
 	if err == nil {
@@ -168,11 +172,11 @@ func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, ex
 	if s.agentModels == nil {
 		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
 	}
-	probed := now
-	if expired := s.agentModels[key].expired; !expired.IsZero() && !expired.Before(now) {
+	probed, current := now, s.agentModels[key].updates
+	if current != updates {
 		probed = time.Time{}
 	}
-	s.agentModels[key] = agentModelsEntry{result: result, probed: probed}
+	s.agentModels[key] = agentModelsEntry{result: result, probed: probed, updates: current}
 	s.agentModelsMu.Unlock()
 	return result
 }

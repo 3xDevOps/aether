@@ -82,10 +82,10 @@ func (p Profile) ACPCommand(adapter []string, cli string) []string {
 	if i == nil || i.CLIEnv == "" || cli == "" || adapter[0] != i.Binary {
 		return adapter
 	}
-	script := `if [ -z "${` + i.CLIEnv + `:-}" ] && cli=$(command -v "$1") && "$cli" --version 2>/dev/null | awk -v min="$2" '
+	script := `if [ -z "${` + i.CLIEnv + `:-}" ] && cli=$(command -v "$1") && timeout 10 "$cli" --version </dev/null 2>/dev/null | awk -v min="$2" '
 NR == 1 { split($1, have, "."); split(min, want, "."); ok = 1
 	for (n = 1; n <= 3; n++) { if (have[n] + 0 > want[n] + 0) break; if (have[n] + 0 < want[n] + 0) { ok = 0; break } } }
-END { exit !ok }'; then export ` + i.CLIEnv + `="$cli"; fi; shift 2; exec "$@"`
+END { exit !ok }' 2>/dev/null; then export ` + i.CLIEnv + `="$cli"; fi; shift 2; exec "$@"`
 	return append([]string{"/bin/sh", "-c", script, "sh", cli, i.CLIVersion}, adapter...)
 }
 

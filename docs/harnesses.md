@@ -216,8 +216,10 @@ run, by setting `CLAUDE_CODE_EXECUTABLE` to it. A `claude` in `~/.local/bin` is
 the one Aether [updates before launch](#updates-before-launch), so a new model
 reaches Enhanced sessions with the next Claude Code update, without an Aether
 release. The adapter runs its bundled copy instead when `claude` is not on
-`PATH` or `claude --version` is older than the bundled one; update it with
-`claude update` in `aether terminal`. A `CLAUDE_CODE_EXECUTABLE` set as a
+`PATH`, or `claude --version` is older than the bundled one or prints no
+version Aether can read within 10 seconds. Update a `claude` in your home with
+`claude update` in `aether terminal`, and one installed in the image by
+rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` set as a
 workspace variable wins.
 
 ### Per-agent setup
