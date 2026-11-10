@@ -396,6 +396,26 @@ func TestWorkspaceScopeLists(t *testing.T) {
 	}
 }
 
+// A refused call naming a workspace its caller cannot reach is audited
+// without it, so N can neither write into B's audit view nor learn B's
+// ids from it.
+func TestAuditLeavesOutTheUnreachableWorkspaceOfARefusedCall(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	if err := w.call(t, "N", protocol.MethodWorkspaceAccessRevoke, protocol.WorkspaceAccessRevokeParams{
+		WorkspaceID: string(w.wsB.ID), MemberID: string(w.u.ID),
+	}, nil); err == nil {
+		t.Fatal("N workspace.access.revoke in wsB succeeded")
+	}
+	entries, err := w.e.store.(store.AuditStore).ListAudit(t.Context(), store.AuditQuery{Member: w.n.ID, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Method != protocol.MethodWorkspaceAccessRevoke || entries[0].WorkspaceID != "" {
+		t.Fatalf("N's audit entries = %+v, want one revoke without a workspace", entries)
+	}
+}
+
 func TestWorkspaceScopeUnreachableReadsAsMissing(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)

@@ -147,6 +147,11 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 			workspace = string(r.WorkspaceID)
 		}
 	}
+	if workspace != "" && perr != nil {
+		if actor, err := resolveActor(ctx, s.cfg.Store, member); err != nil || !actor.Reaches(domain.WorkspaceID(workspace)) {
+			workspace = ""
+		}
+	}
 	e := &store.AuditEntry{At: time.Now(), Member: member, Via: via, ConnectorID: connector, Client: client, Method: method,
 		WorkspaceID: clipID(workspace), Target: clipID(target), Security: changed}
 	if perr != nil {
