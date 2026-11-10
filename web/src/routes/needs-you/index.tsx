@@ -252,7 +252,8 @@ function inline(item: AttentionItem, replies: boolean) {
 }
 
 function AttentionCard({ item }: { item: AttentionItem }) {
-  const open = useOpen(item)
+  const openAction = useOpen(item)
+  const navigate = useStore((s) => s.navigate)
   const run = useStore((s) => s.runs[item.run_id])
   const [error, setError] = useState<string>()
   const condition = needsYouConditions.find((c) => c.id === item.kind)
@@ -274,7 +275,7 @@ function AttentionCard({ item }: { item: AttentionItem }) {
         tone={tones[item.kind] ?? 'needs-you'}
         avatar={<IconTile aria-hidden><AgentGlyph agent={item.harness} className="size-4" /></IconTile>}
         title={(
-          <Button variant="quiet" onClick={open} className="text-left font-medium whitespace-normal text-text">
+          <Button variant="quiet" onClick={() => navigate('run', { runId: item.run_id })} className="text-left font-medium whitespace-normal text-text">
             <span className="line-clamp-2">{item.title}</span>
           </Button>
         )}
@@ -292,7 +293,7 @@ function AttentionCard({ item }: { item: AttentionItem }) {
             {holder && answers && <p className="text-ui-sm text-muted">{holderName} controls this session, so the request is theirs to answer.</p>}
             {Inline ? <Inline key={item.request?.id ?? item.message?.id ?? item.kind} item={item} onError={setError} /> : (
               <RequestActions>
-                <RequestAction label={action && action.kind === 'open' ? action.label : 'Open'} onClick={open} />
+                <RequestAction label={action && action.kind === 'open' ? action.label : 'Open'} onClick={openAction} />
               </RequestActions>
             )}
             {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
@@ -304,13 +305,13 @@ function AttentionCard({ item }: { item: AttentionItem }) {
 }
 
 function FinishedRow({ item }: { item: AttentionItem }) {
-  const open = useOpen(item)
+  const navigate = useStore((s) => s.navigate)
   return (
     <li>
       <ListRow
         leading={<StatusDot tone="review" />}
         trailing={item.since && <RelativeTime at={item.since} compact className="text-ui-sm text-muted" />}
-        onClick={open}
+        onClick={() => navigate('run', { runId: item.run_id })}
       >
         {item.title}
       </ListRow>

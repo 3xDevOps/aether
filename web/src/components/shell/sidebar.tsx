@@ -4,7 +4,7 @@ import { PanelLeft, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
 import { SplitNewRun } from '@/components/shell/new-run-button'
 import { SidebarFooter, UpdateNotice } from '@/components/shell/sidebar-footer'
-import { needsYouRoute, runRowSelector, SidebarRuns } from '@/components/shell/sidebar-runs'
+import { runRowSelector, SidebarRuns } from '@/components/shell/sidebar-runs'
 import { WorkspaceSwitcher } from '@/components/shell/workspace-switcher'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -44,8 +44,7 @@ function openNextNeedsYou() {
     return isRunRoute(s.route, row.run.id)
   })
   const next = waiting[(current + 1) % waiting.length]!
-  const route = needsYouRoute(next.run, ctx)
-  s.navigate(route.name, route.params, { remember: false })
+  s.navigate('run', { runId: next.run.id })
 }
 
 export function Sidebar() {

@@ -5,7 +5,7 @@ import type { AttentionItem, RoomPostResult } from '@/lib/types'
 import { useAttention } from '@/routes/needs-you/attention'
 import { useStore } from '@/store'
 import { hydrate } from '@/store/sync'
-import { fakeApi, roomMessage, workspace } from '@/test/fixtures'
+import { fakeApi, roomMessage, run, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
 Element.prototype.scrollIntoView = vi.fn()
@@ -31,6 +31,16 @@ async function showNeedsYou(items: AttentionItem[]) {
 }
 
 describe('Needs you cards', () => {
+  it('opens a session title on its last chosen tab', async () => {
+    const cards = await showNeedsYou([{
+      ...base, kind: 'disconnected', run_id: 'run_q', title: 'lost connection', reason: 'Agent disconnected',
+    }])
+    useStore.getState().upsertRun(run({ id: 'run_q', task: 'lost connection', state: 'disconnected' }))
+    useStore.setState({ runViewMemory: { run_q: 'changes' } })
+    fireEvent.click(cards.getByRole('button', { name: 'lost connection' }))
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_q', view: 'changes' })
+  })
+
   it('replies to a room question with run.room.post, correlated to the question', async () => {
     const posted: RoomPostResult = { message: roomMessage({ kind: 'reply', body: 'Use port 8080', state: 'sent' }) }
     const post = vi.spyOn(api, 'runRoomPost').mockResolvedValue(posted)
