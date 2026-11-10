@@ -443,7 +443,7 @@ func TestWorkspaceScopeUnreachableReadsAsMissing(t *testing.T) {
 	}
 }
 
-func TestScheduleDeleteNeedsItsCreatorOrTheWorkspaceAdmin(t *testing.T) {
+func TestScheduleReplaceAndDeleteNeedItsCreatorOrTheWorkspaceAdmin(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
 	a := string(w.wsA.ID)
@@ -462,6 +462,12 @@ func TestScheduleDeleteNeedsItsCreatorOrTheWorkspaceAdmin(t *testing.T) {
 	}
 	if err := w.call(t, "N", protocol.MethodScheduleDelete, remove, nil); err == nil || wireErrOf(t, err).Code != protocol.CodeDenied {
 		t.Fatalf("another collaborator's schedule.delete = %v, want denied", err)
+	}
+	if err := w.call(t, "N", protocol.MethodScheduleSave, schedule, nil); err == nil || wireErrOf(t, err).Code != protocol.CodeDenied {
+		t.Fatalf("another collaborator's schedule.save over it = %v, want denied", err)
+	}
+	if err := w.call(t, "U", protocol.MethodScheduleSave, schedule, nil); err != nil {
+		t.Fatalf("the creator's schedule.save over it: %v", err)
 	}
 	if err := w.call(t, "A", protocol.MethodScheduleDelete, remove, nil); err != nil {
 		t.Fatalf("the workspace admin's schedule.delete: %v", err)
