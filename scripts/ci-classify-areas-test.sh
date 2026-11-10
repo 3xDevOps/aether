@@ -47,7 +47,18 @@ expect go true scripts/install.sh
 expect go false android/README.md
 expect go true unknown/dir/file
 
-for mode in web go; do
+expect caches false internal/store/store.go web/src/app.tsx docs/testing.md
+expect caches false android/app/src/main/AndroidManifest.xml images
+expect caches true internal/store/store.go go.sum
+expect caches true .github/workflows/ci.yml
+expect caches true images/browser/Dockerfile
+expect caches true web/public/fonts/LICENSE-jetbrains-mono-nfm.txt
+expect caches true web/package.json
+expect caches true desktop/package-lock.json
+expect caches true android/app/build.gradle.kts
+expect caches true android/gradle/libs.versions.toml
+
+for mode in web go caches; do
 	got=$(sh "$script" "$mode" </dev/null)
 	if [ "$got" != true ]; then
 		echo "ci-classify-areas-test: $mode empty stdin gave $got, wanted true" >&2

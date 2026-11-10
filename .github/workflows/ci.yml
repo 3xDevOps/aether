@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
   # A pull request runs changes, audit, lint, build-and-test and dashboard
-  # only. The merge queue and pushes to main run every job.
+  # only. The merge queue and the nightly run on main run every job. A push to
+  # main runs only changes and CI gate when its commit passed the merge queue
+  # and changed nothing a cache key hashes.
   pull_request:
   merge_group:
+  # Refreshes the per-commit caches, which only a run on main can write, and
+  # tests main against today's agent CLIs, mirrors and published release.
+  schedule:
+    - cron: '0 8 * * *'
 
 permissions:
   contents: read
@@ -25,9 +31,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # GitHub-hosted runners are ephemeral, so untrusted pull request code does
-# not need an admin gate before checkout. Caches save only on pushes to
-# main. Go module archives are separate from compiler archives, whose keys
-# also include their native or cross-build lane. Each lane has one writer;
+# not need an admin gate before checkout. Caches save only on runs on main:
+# a merge-queue run's caches are scoped to its own queue branch. Go module
+# archives are separate from compiler archives, whose keys also include their native or cross-build lane. Each lane has one writer;
 # build-and-test owns Linux amd64 native Go and bun, windows owns Windows
 # amd64 native Go, arm64 owns Linux arm64 native Go, and the windows-install
 # arm64 update leg owns Windows arm64 Go. These four Go owners also save
@@ -36,8 +42,10 @@ concurrency:
 # restored onto a hosted VM.
 
 jobs:
-  # Lists changed files and decides whether the code jobs run. A push to
-  # main and a merge-queue entry always run them. On a pull request
+  # Lists changed files and decides whether the code jobs run. A merge-queue
+  # entry and the nightly run always run them. A push to main runs them
+  # unless scripts/ci-queue-verdict.sh finds the merge-queue run that passed
+  # on this commit and the push changed no cache key input. On a pull request
   # scripts/ci-classify-areas.sh sets go and web: a change confined to
   # docs/ and root-level markdown files skips both, one confined to web/
   # skips the Go jobs, and one that no dashboard input can see skips
@@ -59,6 +67,7 @@ jobs:
     outputs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
+      suite: ${{ steps.classify.outputs.suite }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,6 +75,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-areas.sh
+            scripts/ci-queue-verdict.sh
             scripts/ci-reap-queue-runs.sh
           sparse-checkout-cone-mode: false
       # The merge queue discards a group when an entry ahead of it leaves or
@@ -81,11 +91,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            verdict=$(sh scripts/ci-queue-verdict.sh "$GITHUB_REPOSITORY" "$BEFORE" "$GITHUB_SHA") || verdict=
+            if [ -n "$verdict" ]; then
+              echo "The merge queue passed this commit in $verdict; this push runs no other job." >> "$GITHUB_STEP_SUMMARY"
+              printf '%s\n' go=false web=false suite=false >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            printf '%s\n' go=true web=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true suite=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo suite=false >> "$GITHUB_OUTPUT"
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
@@ -102,6 +122,8 @@ jobs:
   # Runs on every pull request, including a docs-only one. This is the
   # docs-only gate.
   audit:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'pull_request' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -151,7 +173,7 @@ jobs:
       - name: Lint
         run: make lint
       - name: Save golangci-lint analysis cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/golangci-lint
@@ -204,17 +226,17 @@ jobs:
       # objects or downloaded modules, and a flaky suite would otherwise leave
       # every following run cold.
       - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
           save-modules: 'true'
       - uses: ./.github/actions/bun-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
 
   # Three jobs hold every amd64 Docker suite. Each builds only the images it
-  # uses, from the caches pushes to main write, and runs its steps even when
+  # uses, from the caches runs on main write, and runs its steps even when
   # an earlier one failed so one run reports every failure. Tests run as
   # root, like an installed server. server-flows runs its server tests in two
   # processes:
@@ -224,7 +246,8 @@ jobs:
   # it.
   integration-server-rest:
     name: integration (server-rest, browser)
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -253,7 +276,7 @@ jobs:
           load: true
           tags: aether/browser:test
           cache-from: type=gha,scope=browser-amd64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=browser-amd64-main' || '' }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=browser-amd64-main' || '' }}
       - name: Prove headless Chromium sandbox and companion behavior
         run: make browser-smoke
       # The installed server owns UID-1000 control directories as root.
@@ -281,7 +304,8 @@ jobs:
   # daemon, because only that builder sees the standard image loaded here.
   integration-server-flows:
     name: integration (server-flows, smoke)
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -310,7 +334,7 @@ jobs:
           load: true
           tags: aether-standard:ci
           cache-from: type=gha,scope=standard-amd64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-amd64-main' || '' }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=standard-amd64-main' || '' }}
       - name: Integration tests (real Docker, real git)
         env:
           GOFLAGS: -v
@@ -346,7 +370,8 @@ jobs:
   # CLIs in real runs against a mock model.
   integration:
     name: integration (scheduler, rest, agents)
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -393,12 +418,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
 
-  # Native arm64 builds and runs of the standard and browser images. Only a
-  # push to main and a merge-queue entry pay for it: nothing here depends on
-  # the architecture except the images' own base layers and downloads. This
+  # Native arm64 builds and runs of the standard and browser images. Only
+  # the full suite pays for it: nothing here depends on the architecture
+  # except the images' own base layers and downloads. This
   # job owns the Linux arm64 Go cache.
   arm64:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
@@ -427,7 +453,7 @@ jobs:
           load: true
           tags: aether-standard:ci
           cache-from: type=gha,scope=standard-arm64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-arm64-main' || '' }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=standard-arm64-main' || '' }}
       - name: Prove standard environment tools and native Git
         run: sh scripts/standard-image-smoke.sh aether-standard:ci
       - name: Build the agent smoke image
@@ -454,20 +480,21 @@ jobs:
           load: true
           tags: aether/browser:test
           cache-from: type=gha,scope=browser-arm64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=browser-arm64-main' || '' }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=browser-arm64-main' || '' }}
       - name: Prove headless Chromium sandbox and companion behavior
         run: make browser-smoke
       - name: Exercise the real browser runtime
         run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
       - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
           save-modules: 'true'
 
   # A workflow of its own so it can be started by hand on any branch.
   edge-image:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     permissions:
       contents: read
     uses: ./.github/workflows/edge-image.yml
@@ -507,7 +534,8 @@ jobs:
   # gate and this one starts containers.
   dashboard-e2e:
     name: dashboard-e2e (${{ matrix.shard }}/2)
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -545,8 +573,8 @@ jobs:
       # relative to the workspace, so an archive from another runner
       # environment unpacks somewhere else on a GitHub-hosted runner; the key
       # includes runner.environment so a self-hosted archive is never restored
-      # onto a hosted VM. Restored on every run and saved only after a push
-      # to main, same rule as the Go and bun caches: one job may save a given
+      # onto a hosted VM. Restored on every run and saved only on a run on
+      # main, same rule as the Go and bun caches: one job may save a given
       # key, and a pull-request cache can evict the default-branch cache.
       - name: Resolve the pinned Playwright version
         id: playwright
@@ -619,7 +647,7 @@ jobs:
           path: web/test-results/
           retention-days: 7
       - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && matrix.shard == 1 && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && matrix.shard == 1 && github.ref == 'refs/heads/main' }}
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
@@ -627,7 +655,8 @@ jobs:
   # The desktop shell is built the way users build it: `aether gui build`
   # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -648,7 +677,7 @@ jobs:
       # this system npm and the second with a Node the CLI downloads for
       # itself; npm's cache directory defaults to ~/.npm regardless of which
       # npm binary runs, so one cache covers both. Restored on every run and
-      # saved only after a push to main, same rule as the Go cache.
+      # saved only on a run on main, same rule as the Go cache.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.npm
@@ -708,7 +737,7 @@ jobs:
             { echo "the downloaded Node has no executable node" >&2; exit 1; }
           test -x ~/.local/share/aether/desktop/aether-desktop
       - uses: actions/cache/save@v4
-        if: github.event_name == 'push'
+        if: github.ref == 'refs/heads/main'
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
@@ -716,7 +745,8 @@ jobs:
   # The packaging and launch check release.yml runs for each tag, on both
   # Windows architectures.
   desktop-windows:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -741,7 +771,8 @@ jobs:
   # client's package closure is built and tested: the server is Linux-only by
   # design and internal/gitengine does not compile for Windows.
   windows:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -772,7 +803,7 @@ jobs:
           mapfile -t packages <<< "$pkgs"
           go test ./cmd/aether "${packages[@]}"
       - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
           save-modules: 'true'
@@ -780,11 +811,13 @@ jobs:
   # Reuse the installer lanes so their verdict is part of CI and therefore
   # the exact-commit CI success required by release authorization.
   windows-install:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     uses: ./.github/workflows/windows-install.yml
 
   release-build:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -813,7 +846,7 @@ jobs:
       - name: Cross-compile release binaries
         run: make release-binaries
       - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
           variant: release
@@ -833,7 +866,8 @@ jobs:
           retention-days: 7
 
   android:
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     # A wedged Gradle daemon must not hold the runner for the six-hour default.
     timeout-minutes: 45
@@ -870,7 +904,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: rm -rf .gradle-cache/daemon .gradle-cache/native
       - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
@@ -892,7 +926,6 @@ jobs:
   # strings. See docs/install.md.
   windows-defender:
     needs: release-build
-    if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
