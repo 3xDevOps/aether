@@ -120,11 +120,32 @@ func TestIntegrationWorkspaceAccessMatrix(t *testing.T) {
 			t.Run(name, func(t *testing.T) { w.assertLaunch(t, name) })
 		}
 	})
+	for _, check := range []struct {
+		name   string
+		assert func(*testing.T, string)
+	}{
+		{"writes", w.assertForeignWrites},
+		{"workspace roles", w.assertWorkspaceRoles},
+		{"memory", w.assertMemory},
+		{"counts", w.assertCounts},
+		{"connector", func(t *testing.T, name string) { w.assertTools(t, name, w.connectorSession(t, name)) }},
+		{"assistant", func(t *testing.T, name string) { w.assertTools(t, name, w.assistantSession(t, name)) }},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			for _, name := range wsaNames {
+				t.Run(name, func(t *testing.T) { check.assert(t, name) })
+			}
+		})
+	}
+	t.Run("account sharing", func(t *testing.T) { w.assertAccountSharing(t) })
 	t.Run("coordination", func(t *testing.T) { w.assertCoordination(ctx, t) })
 	t.Run("admin", func(t *testing.T) { w.assertAdminActions(t) })
 	t.Run("handoff", func(t *testing.T) { w.assertHandoff(t) })
+	t.Run("cli", func(t *testing.T) { w.assertCLI(t) })
 	t.Run("revoke in use", func(t *testing.T) { w.assertRevokeInUse(ctx, t) })
 	t.Run("roles", func(t *testing.T) { w.assertRoles(t) })
+	t.Run("self demotion", func(t *testing.T) { w.assertSelfDemotion(t) })
+	t.Run("children", func(t *testing.T) { w.assertChildren(ctx, t) })
 }
 
 func newWSAEnv(ctx context.Context, t *testing.T) *wsaEnv {

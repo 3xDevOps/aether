@@ -471,3 +471,29 @@ func TestAdminApprovesDevicesOnlyBelowAdmin(t *testing.T) {
 		t.Fatalf("octo's workspaces after accepting the invitation = %+v, %v; want wsA", access, err)
 	}
 }
+
+// A merge cannot take away the last approved super admin while the only
+// other super admin is still pending.
+func TestMergeKeepsTheLastSuperAdminBesideAPendingOne(t *testing.T) {
+	t.Parallel()
+	e, whois := mergeEnv(t, nil)
+	_, _ = addMember(t, e, "Pat", domain.RoleSuperAdmin, true)
+	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleCollaborator)
+	tc := tailnetDial(t, e, whois, tina.TailnetLogin)
+	admin := controlClient(t, e)
+
+	code := mergeStart(t, admin)
+	plan := mergePreview(t, tc, code)
+	if !plan.KeepAdminRequired || plan.Role != string(domain.RoleCollaborator) {
+		t.Fatalf("plan beside a pending super admin = %+v, want keep_admin required", plan)
+	}
+	proposal, err := mergePropose(tc, code, string(e.member.ID), plan.PlanDigest, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mergeAccept(admin, proposal, false)
+	wantRefusal(t, err, "last super admin")
+	if m, err := e.db.GetMember(context.Background(), e.member.ID); err != nil || m.Role != domain.RoleSuperAdmin {
+		t.Fatalf("super admin after the refused merge = %+v, %v", m, err)
+	}
+}
