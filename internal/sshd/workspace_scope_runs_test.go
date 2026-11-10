@@ -226,3 +226,33 @@ func TestPagesFillWithWhatTheCallerSees(t *testing.T) {
 		t.Errorf("S's first page of two messages = %+v, want the two newest and a cursor", all)
 	}
 }
+
+// A relay's wake names the watched session; in the history of the session
+// it relays to, it is shown only to members who reach the watched one.
+func TestARelayWakeOfAHiddenSessionStaysHidden(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	db := w.e.db
+	now := time.Now()
+	watched := &store.Watch{MemberID: w.e.member.ID, WorkspaceID: w.wsB.ID, TargetKind: protocol.WatchTargetRun, RunID: w.runB.ID,
+		TargetTitle: "B's session", Conditions: []string{"finished"}, Source: protocol.WatchSourceAgent, State: protocol.WatchActive, CreatedAt: now, UpdatedAt: now,
+		ExpiresAt: now.Add(time.Hour), NextCheckAt: &now}
+	if err := db.CreateWatch(ctx, watched); err != nil {
+		t.Fatal(err)
+	}
+	wake := "Aether: B's session finished"
+	if err := db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: w.wsA.ID, FromRun: w.runUA.ID, ToRun: w.runUA.ID, Body: wake,
+		Kind: store.RunMessageKindMessage, CorrelationID: watched.ID, CreatedAt: now}, 100); err != nil {
+		t.Fatal(err)
+	}
+	for who, want := range map[string]int{"S": 1, "U": 0} {
+		var list protocol.CoordMessagesListResult
+		if err := w.call(t, who, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), RunID: string(w.runUA.ID)}, &list); err != nil {
+			t.Fatalf("%s coord.messages.list: %v", who, err)
+		}
+		if len(list.Messages) != want {
+			t.Errorf("%s sees %d relay wakes, want %d: %+v", who, len(list.Messages), want, list.Messages)
+		}
+	}
+}

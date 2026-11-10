@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -64,6 +65,13 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 				ok   bool
 			)
 			wait, _, ok, hideErr = s.storedWait(ctx, m.CorrelationID)
+			if hideErr == nil && !ok {
+				// A relay's wake is correlated with its watch, not a wait.
+				wait, ok, hideErr = s.relayedWatch(ctx, m.CorrelationID)
+			}
+			if hideErr == nil && ok && wait.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(wait.RunID)) {
+				return false
+			}
 			if hideErr == nil && ok && visible == nil {
 				visible, hideErr = s.waitVisibility(ctx, actor, true)
 			}
@@ -80,6 +88,25 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 		return nil, rpcError(err)
 	}
 	return protocol.CoordMessagesPageFromStore(page), nil
+}
+
+// relayedWatch is the target of the watch a relay's wake names, as a wait
+// condition, so its wake is judged as a wait on the same target would be.
+func (s *Server) relayedWatch(ctx context.Context, id string) (protocol.WaitCondition, bool, error) {
+	watches, has := s.cfg.Store.(interface {
+		GetWatch(context.Context, string) (*store.Watch, error)
+	})
+	if !has {
+		return protocol.WaitCondition{}, false, nil
+	}
+	w, err := watches.GetWatch(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return protocol.WaitCondition{}, false, nil
+	}
+	if err != nil {
+		return protocol.WaitCondition{}, false, err
+	}
+	return protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.RunID)}, true, nil
 }
 
 // waitWake reports whether m is a wait's wake: a session's message to
