@@ -64,7 +64,6 @@ func checkLaunchIn(actor permissions.Actor, workspaces []domain.WorkspaceID) err
 	return nil
 }
 
-// runWorkspaces is the run's primary workspace followed by its extra ones.
 func runWorkspaces(run *domain.Run) []domain.WorkspaceID {
 	out := []domain.WorkspaceID{run.WorkspaceID}
 	for _, repo := range run.Extras {

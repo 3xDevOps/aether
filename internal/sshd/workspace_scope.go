@@ -9,8 +9,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// reachableWorkspaces is every workspace actor reaches, in ListWorkspaces
-// order.
 func (s *Server) reachableWorkspaces(ctx context.Context, actor permissions.Actor) ([]*domain.Workspace, error) {
 	all, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
@@ -67,8 +65,6 @@ func workspaceWire(actor permissions.Actor, w *domain.Workspace) protocol.Worksp
 	return out
 }
 
-// scopeRepos drops from a run snapshot the extra repositories in
-// workspaces actor does not reach.
 func scopeRepos(actor permissions.Actor, run *protocol.Run) {
 	if len(run.Repos) == 0 {
 		return

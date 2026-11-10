@@ -51,7 +51,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
   const hydrated = useStore((s) => s.hydrated)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspaces = useStore(useShallow((s) => Object.values(s.workspaces)))
-  const canWrite = allowed('push', useSelf())
+  const canWrite = allowed('push', useSelf(activeWorkspace))
   const hasPreferences = useCapability().hasMethod('preference.list')
   const problem = useConnectionProblem()
   const mobile = useIsMobile()

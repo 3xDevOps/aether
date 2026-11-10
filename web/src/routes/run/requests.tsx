@@ -122,7 +122,7 @@ function SteerCard({ steer, name, agent, room, openTerminal }: {
 }
 
 function SudoCard({ run, request }: { run: RunRecord; request: RunInputRequest }) {
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const mayAllow = allowed('sudo', self, { owner: run.member_id })
   const mayDeny = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })

@@ -62,8 +62,6 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 	return p, nil
 }
 
-// workspaces is the parent's primary workspace followed by its extra ones,
-// which a child launches into too.
 func (p *policy) workspaces() []domain.WorkspaceID {
 	out := []domain.WorkspaceID{p.parent.WorkspaceID}
 	for _, repo := range p.parent.Extras {

@@ -123,8 +123,6 @@ func inviteCode(c *protocol.Client, ttl int, workspaceIDs []string) error {
 	return nil
 }
 
-// resolveWorkspaces maps the workspace names or ids of --workspace flags to
-// ids.
 func resolveWorkspaces(c *protocol.Client, idsOrNames []string) ([]string, error) {
 	if len(idsOrNames) == 0 {
 		return nil, nil

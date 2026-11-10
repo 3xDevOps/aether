@@ -198,10 +198,10 @@ export function useSelfRole(): Member['role'] | null {
   return useStore((s) => s.info?.member.role ?? null)
 }
 
-/** Both null before hydration. */
-export function useSelf(): { id: string | null; role: Member['role'] | null } {
+/** Both null before hydration. With a workspace, the role is the caller's there, which is what allowed() must be asked. */
+export function useSelf(workspaceID?: string | null): { id: string | null; role: Member['role'] | null } {
   const id = useStore((s) => s.info?.member.id ?? null)
-  const role = useStore((s) => s.info?.member.role ?? null)
+  const role = useWorkspaceRole(workspaceID)
   return useMemo(() => ({ id, role }), [id, role])
 }
 

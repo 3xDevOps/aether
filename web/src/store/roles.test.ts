@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react'
 import { isAdminRole } from '@/lib/permissions'
 import type { Member } from '@/lib/types'
 import { useStore } from '@/store'
-import { useIsAdmin, useIsSuperAdmin, useIsWorkspaceAdmin, useWorkspaceRole } from '@/store/hooks'
+import { useIsAdmin, useSelf, useIsSuperAdmin, useIsWorkspaceAdmin, useWorkspaceRole } from '@/store/hooks'
 import { alice, serverInfo, workspace } from '@/test/fixtures'
 
 function seed(role: Member['role'], workspaceRole?: Member['role']) {
@@ -33,5 +33,11 @@ describe('role hooks', () => {
     expect(renderHook(() => useIsWorkspaceAdmin(workspace.id)).result.current).toBe(true)
     seed('collaborator')
     expect(renderHook(() => useIsWorkspaceAdmin(workspace.id)).result.current).toBe(false)
+  })
+
+  it('asks permissions with the role in the run\'s workspace', () => {
+    seed('admin', 'collaborator')
+    expect(renderHook(() => useSelf(workspace.id)).result.current.role).toBe('collaborator')
+    expect(renderHook(() => useSelf()).result.current.role).toBe('admin')
   })
 })

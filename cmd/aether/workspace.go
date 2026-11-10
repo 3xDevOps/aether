@@ -96,8 +96,6 @@ func workspaceList(args []string) error {
 	})
 }
 
-// printWorkspaces prints one row per workspace: its ID, which git remote
-// URLs need, its owner, and the caller's role there.
 func printWorkspaces(w io.Writer, workspaces []protocol.Workspace, names map[string]string) error {
 	if len(workspaces) == 0 {
 		_, err := fmt.Fprintln(w, "no workspaces")

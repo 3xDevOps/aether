@@ -367,15 +367,15 @@ Revoke them anyway so nobody approves one by mistake.
 
 ### Console recovery
 
-A super admin who reached the server only through the edge and lost that account is
-restored on the machine. The server must have no owner, as after the owner
+An admin or super admin who reached the server only through the edge and lost that
+account is restored on the machine. The server must have no owner, as after the owner
 deletes their account:
 
 ```sh
 sudo aether-server edge claim-code --admin <member id>
 ```
 
-This prints a claim link bound to that super admin. They open it signed in with
+This prints a claim link bound to that member. They open it signed in with
 the account they now use, or runs `aether link --claim <code>`. The server binds
 the account to that member, approves the device and becomes owned by that
 account. It creates no member and raises no role: a member who is not an admin is
@@ -384,8 +384,8 @@ bound to another member. Find the member id with `aether member list`.
 
 ### Ownership and deleting an account
 
-`aether member transfer <member-id>` hands ownership at the edge to another super admin
-with a linked GitHub account. It fails with `ownership report refused: <reason>`
+`aether member transfer <member-id>` hands ownership at the edge to an admin or super
+admin with a linked GitHub account. Only a super admin can run it. It fails with `ownership report refused: <reason>`
 when the edge refuses or does not answer within 10 seconds, and the server keeps
 its previous owner. It is refused while the server is not connected to the edge
 or has no owner, or when the target has two linked accounts (remove one with
