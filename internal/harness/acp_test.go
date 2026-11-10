@@ -191,3 +191,58 @@ mkdir -p "$dir" && printf '{"version":"%s"}' "${last##*@}" > "$dir/package.json"
 		t.Fatalf("stale adapter: npm ran %q", got)
 	}
 }
+
+// An Enhanced Claude Code session runs the claude on PATH, which Aether
+// updates, rather than the CLI bundled with the pinned adapter.
+func TestACPCommandRunsTheCLIOnPath(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("adapters run in Linux containers")
+	}
+	claude, _ := Lookup("claude")
+	run := func(t *testing.T, withCLI bool, env ...string) string {
+		t.Helper()
+		bin := t.TempDir()
+		stubs := map[string]string{"claude-agent-acp": "#!/bin/sh\necho \"cli=${CLAUDE_CODE_EXECUTABLE-unset} args=$*\"\n"}
+		if withCLI {
+			stubs["claude"] = "#!/bin/sh\n"
+		}
+		for name, body := range stubs {
+			if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		argv := claude.ACPCommand([]string{"claude-agent-acp", "--flag"})
+		cmd := exec.CommandContext(t.Context(), argv[0], argv[1:]...)
+		cmd.Env = append([]string{"PATH=" + bin + ":/usr/bin:/bin"}, env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", argv, err, out)
+		}
+		return strings.ReplaceAll(strings.TrimSpace(string(out)), bin, "$BIN")
+	}
+	for _, c := range []struct {
+		name    string
+		withCLI bool
+		env     []string
+		want    string
+	}{
+		{"cli on path", true, nil, "cli=$BIN/claude args=--flag"},
+		{"no cli", false, nil, "cli=unset args=--flag"},
+		{"already named", true, []string{"CLAUDE_CODE_EXECUTABLE=/opt/claude"}, "cli=/opt/claude args=--flag"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := run(t, c.withCLI, c.env...); got != c.want {
+				t.Fatalf("adapter saw %q, want %q", got, c.want)
+			}
+		})
+	}
+
+	custom := []string{"my-acp"}
+	if got := claude.ACPCommand(custom); !slices.Equal(got, custom) {
+		t.Fatalf("an overridden ACP command = %q, want it unchanged", got)
+	}
+	codex, _ := Lookup("codex")
+	if got := codex.ACPCommand(codex.ACPArgs); !slices.Equal(got, codex.ACPArgs) {
+		t.Fatalf("codex ACPCommand = %q, want its adapter unchanged", got)
+	}
+}

@@ -32,18 +32,18 @@ type keeperRecord struct {
 // cannot reach the keeper's socket, its token or its memory.
 const keeperUser = "0"
 
-// startKeeper starts adapter under a keeper and returns the keeper's exec
-// once it listens. The keeper starts adapter as the container's user, as an
-// exec without a user would run. The run records the exec and how to
+// startKeeper starts command, which serves the ACP server name, under a keeper
+// and returns the keeper's exec once it listens. The keeper starts command as
+// the container's user, as an exec without a user would run. The run records the exec and how to
 // reattach before the adapter can do anything.
-func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, adapter []string) (runtime.ManagedExec, error) {
+func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, name string, command []string) (runtime.ManagedExec, error) {
 	info, err := d.s.cfg.Runtime.Inspect(ctx, cid)
 	if err != nil {
 		return nil, fmt.Errorf("inspect the container's user: %w", err)
 	}
 	socket := path.Join(acpkeeper.SocketRoot, strings.ToLower(rand.Text()), "keeper.sock")
 	exec, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
-		Argv:        acpkeeper.ServeArgv(coordtransport.CLIPath, socket, normalizeRecoveryRunUser(info.User), adapter),
+		Argv:        acpkeeper.ServeArgv(coordtransport.CLIPath, socket, normalizeRecoveryRunUser(info.User), command),
 		User:        keeperUser,
 		WorkingDir:  d.s.cfg.WorktreeMount,
 		CreationKey: "acp-" + rand.Text(),
@@ -51,7 +51,7 @@ func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed 
 		Env: []string{coordtransport.EnhancedEnv + "=1", "NO_BROWSER=1"},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("start %s: %w", adapter[0], err)
+		return nil, fmt.Errorf("start %s: %w", name, err)
 	}
 	record := &keeperRecord{Socket: socket, Token: rand.Text()}
 	identity := exec.Identity()
@@ -64,7 +64,7 @@ func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed 
 	}
 	stderr, copied, err := keeperReady(ctx, exec, record.Token)
 	if err != nil {
-		err = fmt.Errorf("start %s under its keeper: %w", adapter[0], err)
+		err = fmt.Errorf("start %s under its keeper: %w", name, err)
 		if stopErr := d.stopExec(exec); stopErr != nil {
 			return nil, errors.Join(err, keeperNotStopped(stopErr))
 		}
@@ -124,15 +124,15 @@ type keeperOutputError struct{ line string }
 
 func (e *keeperOutputError) Error() string { return fmt.Sprintf("unexpected keeper output %q", e.line) }
 
-// startKept starts adapter under a new keeper and attaches to it.
-func (d *acpDriver) startKept(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, adapter []string) (runtime.ManagedExec, *acpkeeper.Client, runtime.ManagedExec, error) {
-	exec, err := d.startKeeper(ctx, entry, managed, cid, adapter)
+// startKept starts command under a new keeper and attaches to it.
+func (d *acpDriver) startKept(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, name string, command []string) (runtime.ManagedExec, *acpkeeper.Client, runtime.ManagedExec, error) {
+	exec, err := d.startKeeper(ctx, entry, managed, cid, name, command)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	keeper, bridge, err := d.attachKeeper(ctx, entry, managed, cid)
 	if err != nil {
-		err = fmt.Errorf("attach to %s's keeper: %w", adapter[0], err)
+		err = fmt.Errorf("attach to %s's keeper: %w", name, err)
 		if stopErr := d.stopExec(exec); stopErr != nil {
 			return nil, nil, nil, errors.Join(err, keeperNotStopped(stopErr))
 		}
@@ -142,15 +142,15 @@ func (d *acpDriver) startKept(ctx context.Context, entry *supervised, managed ru
 	return exec, keeper, bridge, nil
 }
 
-// startDirect starts adapter as a managed exec whose stdio is this server
+// startDirect starts command as a managed exec whose stdio is this server
 // process's.
-func (d *acpDriver) startDirect(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, adapter []string, stderr *tailBuffer) (runtime.ManagedExec, error) {
+func (d *acpDriver) startDirect(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, name string, command []string, stderr *tailBuffer) (runtime.ManagedExec, error) {
 	exec, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
-		Argv: adapter, WorkingDir: d.s.cfg.WorktreeMount, CreationKey: "acp-" + rand.Text(),
+		Argv: command, WorkingDir: d.s.cfg.WorktreeMount, CreationKey: "acp-" + rand.Text(),
 		Env: []string{coordtransport.EnhancedEnv + "=1", "NO_BROWSER=1"},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("start %s: %w", adapter[0], err)
+		return nil, fmt.Errorf("start %s: %w", name, err)
 	}
 	identity := exec.Identity()
 	d.record(entry, func() { entry.agentExec, entry.agentKeeper = &identity, nil })

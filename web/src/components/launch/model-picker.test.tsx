@@ -123,12 +123,12 @@ describe('ModelPicker', () => {
     expect(onChange).toHaveBeenCalledWith('typed')
   })
 
-  it('shows a discovery error from the result verbatim next to the fallback list', async () => {
-    vi.mocked(api.agentModels).mockResolvedValue({ source: 'fallback', models: discovered.models, error: 'claude: not logged in' })
+  it('shows a discovery error from the result verbatim next to the last list', async () => {
+    vi.mocked(api.agentModels).mockResolvedValue({ ...discovered, error: 'claude models: run in the environment terminal: context deadline exceeded' })
     const { trigger, onChange } = setup()
     await openPicker(trigger)
 
-    expect(await screen.findByText('claude: not logged in')).toBeDefined()
+    expect(await screen.findByText('claude models: run in the environment terminal: context deadline exceeded')).toBeDefined()
     await userEvent.click(await screen.findByRole('option', { name: /^Opus 4.1/ }))
     expect(onChange).toHaveBeenCalledWith('claude-opus-4-1')
   })

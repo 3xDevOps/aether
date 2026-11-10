@@ -34,7 +34,7 @@ function useAgentModels(harness: string, accountMemberID?: string) {
   return { ...entry, supported, refresh: () => load(true) }
 }
 
-const sourceNotes: Record<string, string> = { cache: "From the agent's cache", fallback: 'Fallback list' }
+const sourceNotes: Record<string, string> = { cache: "From the agent's cache" }
 
 /** A model for `harness`: "" is the agent's own default, and any typed id is accepted. */
 export function ModelPicker({ harness, accountMemberID, value, onChange, disabled = false, className, ...trigger }: {

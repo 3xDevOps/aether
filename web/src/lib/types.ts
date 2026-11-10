@@ -1264,11 +1264,11 @@ export interface AgentModel {
   description?: string
 }
 
-/** agent.models: `error` is the last failed discovery, even when `models` holds an older or fallback list. */
+/** agent.models: `error` is the last failed discovery, even when `models` holds an older list. */
 export interface AgentModelsResult {
   models: AgentModel[]
   default_label?: string
-  source: 'agent' | 'cache' | 'fallback' | 'none'
+  source: 'agent' | 'cache' | 'none'
   fetched_at?: string
   error?: string
 }

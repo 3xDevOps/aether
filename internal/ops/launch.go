@@ -348,11 +348,11 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 		if err := c.read(ctx, protocol.MethodAgentModels, protocol.AgentModelsParams{Name: in.Models, AccountMemberID: in.AccountMemberID}, &res); err != nil {
 			return "", nil, err
 		}
-		models := make([]string, 0, min(len(res.Models), maxRows))
+		models := make([]map[string]string, 0, min(len(res.Models), maxRows))
 		for _, m := range res.Models[:min(len(res.Models), maxRows)] {
-			models = append(models, clip(m.ID, maxReport))
+			models = append(models, map[string]string{"id": clip(m.ID, maxReport), "name": clip(m.Name, maxReport)})
 		}
-		listed := map[string]any{"agent": in.Models, "source": res.Source, "default": res.DefaultLabel, "ids": models, "fetched_at": res.FetchedAt}
+		listed := map[string]any{"agent": in.Models, "source": res.Source, "default": res.DefaultLabel, "models": models, "fetched_at": res.FetchedAt}
 		if res.Error != "" {
 			listed["error"] = clip(res.Error, maxReport)
 		}

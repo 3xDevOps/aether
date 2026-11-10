@@ -507,7 +507,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			return err
 		}
 		d.stopStaleExec(ctx, entry)
-		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter)
+		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter[0], profile.ACPCommand(adapter))
 		if err == nil {
 			break
 		}
@@ -517,7 +517,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		// A container staged before keepers existed has a binary without
 		// one: its adapter runs as before and ends with this process.
 		slog.Warn("scheduler: run the agent's ACP server under a keeper", "run", entry.runID, "error", err)
-		if exec, err = d.startDirect(ctx, entry, managed, cid, adapter, stderr); err != nil {
+		if exec, err = d.startDirect(ctx, entry, managed, cid, adapter[0], profile.ACPCommand(adapter), stderr); err != nil {
 			return err
 		}
 		stdout, stdin = exec.Attachment().Stdout(), exec.Attachment().Stdin()

@@ -69,8 +69,10 @@ first prompt. An agent with no ACP command is refused:
 scheduler: harness "custom" has no command for mode "acp"
 ```
 
-`--model` is set after the session opens. If the agent rejects it, the Session
-view shows a **Model not set** error notice with the agent's error. A model you
+`--model` is set after the session opens. If the agent rejects it, the session
+runs on the agent's default model and the Session view shows a **Model not
+set** error notice with the agent's error, such as `Invalid value for config
+option model: claude-fable-5-2` from a Claude Code that predates the model. A model you
 pick later from the composer menu becomes the session's recorded model and survives a
 reopen, a server restart and a switch to Standard. A model id Aether cannot
 store (whitespace, a leading `-`, or over 128 bytes) shows a **Model not

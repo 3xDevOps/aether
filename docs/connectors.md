@@ -373,9 +373,11 @@ text again on purpose, pass a new `idempotency_key`.
   defaults and tasks are under `untrusted`); pass `version` to
   `aether_launch_session` as `template_version` to refuse a template changed since.
   With `models` (an agent name) and
-  optionally `account_member_id`, that agent's model ids on that account, which
+  optionally `account_member_id`, that agent's models on that account, each
+  an `id` to launch with and its `name`, such as `fable` and `Fable 5.2`, which
   the server caches. `account_member_id` without `models` is refused. When it
-  lists none, launch without `model` for the agent's default.
+  lists none, launch without `model` for the agent's default, or pass the id
+  the agent takes.
 - `saved`: your [saved launch choices](teams.md#saved-launch-choices) as
   `launch.defaults.get` returns them, with `invalid` and `unknown` listing each
   choice a launch could not use or check, with the reason. `saved_error` holds
