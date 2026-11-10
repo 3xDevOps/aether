@@ -128,14 +128,16 @@ function RunBar({ lane, g, now }: { lane: RunLane; g: LaneGeometry; now: number 
   const needs = live && card.group === 'needs-you'
   const box = span(lane.start, lane.end, g)
   const after = box && lane.outcome ? box.left + box.width + 6 : undefined
+  const tagged = needs && box !== undefined && box.width > 200
   return (
     <>
       <Segments segments={lane.segments} outcome={lane.outcome} g={g} height={g.metrics.bar} className={working ? 'border-r-2 border-state-working' : undefined}>
-        <span className="relative flex h-full min-w-0 items-center gap-1.5 px-2 text-ui-sm font-medium whitespace-nowrap text-text">
+        {/* Clear of the Needs you tag when it shows; text that does not fit ends in an ellipsis, never mid-letter. */}
+        <span className={cn('relative flex h-full min-w-0 items-center gap-1.5 px-2 text-ui-sm font-medium whitespace-nowrap text-text', tagged && 'pr-24')}>
           <StatusDot tone={stateTone[card.state]} />
-          {working ? <Shimmer text={barText(lane)} className={cn('min-w-0 overflow-hidden', g.compact && 'text-ellipsis')} /> : <span className={cn('min-w-0 overflow-hidden', g.compact && 'text-ellipsis')}>{barText(lane)}</span>}
+          {working ? <Shimmer text={barText(lane)} className="min-w-0 overflow-hidden text-ellipsis" /> : <span className="min-w-0 overflow-hidden text-ellipsis">{barText(lane)}</span>}
         </span>
-        {needs && box && box.width > 200 && (
+        {tagged && (
           <span aria-hidden className="absolute top-1/2 right-1 flex h-4.5 -translate-y-1/2 items-center gap-1 rounded-chip bg-raised px-1.5 text-ui-xs font-medium text-state-needs-you shadow-button">
             <StatusDot tone="needs-you" pulse />
             Needs you
@@ -243,7 +245,7 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
       const before = lane.before > 0 && (
         <>
           <span className="min-w-0 truncate">{g.compact && '· '}{lane.before} ended before this window</span>
-          {widen && <Button variant="link" size="sm" tabIndex={-1} className="shrink-0" onClick={(event) => { event.stopPropagation(); onWiden() }}>Show {widen}</Button>}
+          {widen && <Button variant="link" size="sm" tabIndex={-1} className="min-h-6 shrink-0" onClick={(event) => { event.stopPropagation(); onWiden() }}>Show {widen}</Button>}
         </>
       )
       label = (
@@ -335,7 +337,8 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
       aria-label={name}
       className={cn(
         focusRingInset,
-        'absolute inset-x-0 flex cursor-default items-stretch outline-none',
+        'absolute inset-x-0 flex items-stretch outline-none',
+        lane.kind === 'note' ? 'cursor-default' : 'cursor-pointer',
         lane.kind === 'section' && 'border-t border-seam first:border-t-0',
       )}
       style={{ top, height }}

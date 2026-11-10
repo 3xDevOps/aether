@@ -65,11 +65,12 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
                 {count}
               </text>
             )}
+            {/* As wide as a bar is tall, and off the bar, so a press near a mark still reaches the bar. */}
             <rect
               {...mailControl}
-              x={x - 8}
-              y={y - 8}
-              width={16}
+              x={x - g.metrics.bar / 2}
+              y={y - 8 + dir * 4}
+              width={g.metrics.bar}
               height={16}
               fill="transparent"
               pointerEvents="all"
