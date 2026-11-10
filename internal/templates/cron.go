@@ -31,8 +31,9 @@ func (s *Service) Schedules(ctx context.Context, workspace domain.WorkspaceID) (
 // SaveSchedule creates or replaces the cron rule firing a template. member
 // is recorded as the schedule's owner: fires are attributed to them and
 // re-checked against their role, so this is not a way to launch runs as
-// somebody else.
-func (s *Service) SaveSchedule(ctx context.Context, workspace domain.WorkspaceID, template, spec string, member domain.MemberID) (*ScheduleInfo, error) {
+// somebody else. Unless replaceAny, it replaces only a schedule member
+// created and returns store.ErrScheduleOwner for another member's.
+func (s *Service) SaveSchedule(ctx context.Context, workspace domain.WorkspaceID, template, spec string, member domain.MemberID, replaceAny bool) (*ScheduleInfo, error) {
 	rule, err := cron.ParseStandard(spec)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cron %q: %s", ErrInvalidDefinition, spec, err)
@@ -53,20 +54,22 @@ func (s *Service) SaveSchedule(ctx context.Context, workspace domain.WorkspaceID
 		return nil, fmt.Errorf("%w: template %q cannot fire unattended: %s", ErrInvalidDefinition, template, err)
 	}
 	sc := &store.Schedule{TemplateID: t.ID, Cron: spec, MemberID: member}
-	if err := s.store.SaveSchedule(ctx, sc); err != nil {
+	if err := s.store.SaveSchedule(ctx, sc, replaceAny); err != nil {
 		return nil, fmt.Errorf("templates: schedule %s: %w", template, err)
 	}
 	sc.WorkspaceID, sc.Template = t.WorkspaceID, t.Name
 	return &ScheduleInfo{Schedule: sc, Next: s.seed(sc.ID, spec, rule)}, nil
 }
 
-// DeleteSchedule removes a template's cron rule, leaving the template.
-func (s *Service) DeleteSchedule(ctx context.Context, workspace domain.WorkspaceID, template string) error {
+// DeleteSchedule removes a template's cron rule, leaving the template. A
+// non-empty owner removes only a schedule owner created, and another
+// member's returns store.ErrScheduleOwner.
+func (s *Service) DeleteSchedule(ctx context.Context, workspace domain.WorkspaceID, template string, owner domain.MemberID) error {
 	t, err := s.store.GetTemplate(ctx, workspace, template)
 	if err != nil {
 		return fmt.Errorf("templates: unschedule %s: %w", template, err)
 	}
-	if err := s.store.DeleteSchedule(ctx, t.ID); err != nil {
+	if err := s.store.DeleteSchedule(ctx, t.ID, owner); err != nil {
 		return fmt.Errorf("templates: unschedule %s: %w", template, err)
 	}
 	return nil

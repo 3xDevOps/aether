@@ -42,7 +42,7 @@ func TestScheduleFireNeedsTheCreatorsAccessToTheWorkspace(t *testing.T) {
 	if err = db.SaveTemplate(ctx, tpl); err != nil {
 		t.Fatalf("save template: %v", err)
 	}
-	if err = db.SaveSchedule(ctx, &store.Schedule{TemplateID: tpl.ID, Cron: "0 * * * *", MemberID: m.ID, CreatedAt: time.Now()}); err != nil {
+	if err = db.SaveSchedule(ctx, &store.Schedule{TemplateID: tpl.ID, Cron: "0 * * * *", MemberID: m.ID, CreatedAt: time.Now()}, true); err != nil {
 		t.Fatalf("save schedule: %v", err)
 	}
 	clock := &fakeClock{t: time.Date(2026, 8, 13, 3, 30, 0, 0, time.UTC)}
