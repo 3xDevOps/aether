@@ -258,6 +258,15 @@ func TestWorkspaceImportDeployKeyPendingThenAdopt(t *testing.T) {
 	client := controlClient(t, e)
 	p := workspaceImportParams("private")
 	p.Auth = "deploy-key"
+	before, err := e.store.ListWorkspaces(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDenied(t, client.Call(protocol.MethodWorkspaceImport, p, nil), "an admin's deploy-key import")
+	if after, err := e.store.ListWorkspaces(t.Context()); err != nil || len(after) != len(before) {
+		t.Fatalf("workspaces after a refused deploy-key import = %d, %v; want %d", len(after), err, len(before))
+	}
+	asSuperAdmin(t, e)
 	var imported protocol.WorkspaceImportResult
 	if err := client.Call(protocol.MethodWorkspaceImport, p, &imported); err != nil {
 		t.Fatal(err)

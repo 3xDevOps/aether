@@ -50,6 +50,11 @@ func (s *Server) workspaceImport(ctx context.Context, member domain.MemberID, pa
 	if adminErr := s.requireIn(ctx, member, permissions.CreateWorkspace, "", protocol.MethodWorkspaceImport); adminErr != nil {
 		return nil, adminErr
 	}
+	if auth == domain.MirrorAuthDeployKey {
+		if adminErr := s.requireSuperAdmin(ctx, member, protocol.MethodWorkspaceImport+" with a deploy key"); adminErr != nil {
+			return nil, adminErr
+		}
+	}
 	request := mirrorservice.ConfigureRequest{
 		SourceURL: p.SourceURL, Branch: p.BaseBranch, Auth: auth, KnownHosts: p.KnownHosts,
 	}
