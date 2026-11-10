@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/browser"
@@ -141,14 +142,22 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 	if reconcileErr == nil {
 		return s.clearRecoveredBrowserInput(id, status, client)
 	}
+	// A companion recorded unavailable must not hold its session paused:
+	// it can be reset only once the session runs.
 	if status.State != "paused" {
+		if status.Unavailable != "" {
+			return nil
+		}
 		return reconcileErr
 	}
 	if err := s.reserveBrowser(id); err != nil {
 		return err
 	}
 	run := browser.Run{ID: string(id), ContainerID: cid}
-	if _, err := d.manager.Resume(ctx, run); err != nil {
+	if resumed, err := d.manager.Resume(ctx, run); err != nil {
+		if resumed.Unavailable != "" {
+			return nil
+		}
 		return err
 	}
 	status, client, reconcileErr = d.manager.Reconcile(ctx, run)
@@ -313,6 +322,12 @@ func (s *Scheduler) deleteDevelopment(ctx context.Context, id domain.RunID) erro
 	}
 	return err
 }
+
+// recoverDevelopment never fails startup for one session: a session whose
+// terminals or browser companion cannot be recovered is logged, and a
+// companion that cannot release held input is kept unavailable until the
+// session's browser is reset. Sessions recover concurrently, so hung
+// companions do not add up past the update trial's deadline.
 func (s *Scheduler) recoverDevelopment(ctx context.Context) error {
 	type recoveredDevelopment struct {
 		runID       domain.RunID
@@ -325,39 +340,68 @@ func (s *Scheduler) recoverDevelopment(ctx context.Context) error {
 		entries = append(entries, recoveredDevelopment{runID: entry.runID, containerID: entry.containerID, freeze: entry.paused || entry.retained || entry.status.Terminal()})
 	}
 	s.mu.Unlock()
-	d := s.developmentState()
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, browserRecoveryConcurrency)
 	for _, entry := range entries {
-		if err := s.RecoverDevelopmentTerminals(ctx, entry.runID); err != nil {
-			return err
-		}
-		if d.manager == nil || entry.containerID == "" {
-			continue
-		}
-		lock := d.lock(entry.runID)
-		lock.Lock()
-		status, client, err := d.manager.Reconcile(ctx, browser.Run{ID: string(entry.runID), ContainerID: entry.containerID})
-		if !errors.Is(err, os.ErrNotExist) {
-			d.mu.Lock()
-			d.reserved[entry.runID] = true
-			d.mu.Unlock()
-		}
-		if err == nil {
-			if clearErr := s.clearRecoveredBrowserInput(entry.runID, status, client); clearErr != nil {
-				lock.Unlock()
-				return clearErr
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			if ctx.Err() != nil {
+				return
 			}
-		}
-		// Unknown/lost sessions stay unavailable; no create/restart on recovery.
-		if entry.freeze && status.State == "running" {
-			_, err = d.manager.Pause(ctx, browser.Run{ID: string(entry.runID), ContainerID: entry.containerID})
-			if err != nil {
-				lock.Unlock()
-				return err
+			if err := s.RecoverDevelopmentTerminals(ctx, entry.runID); err != nil && ctx.Err() == nil {
+				slog.Warn("scheduler: recovery: session terminals unavailable", "run", entry.runID, "error", err)
 			}
-		}
-		lock.Unlock()
+			if err := s.recoverDevelopmentBrowser(ctx, entry.runID, entry.containerID, entry.freeze); err != nil && ctx.Err() == nil {
+				slog.Warn("scheduler: recovery: session browser", "run", entry.runID, "error", err)
+			}
+		})
 	}
-	return nil
+	wg.Wait()
+	return ctx.Err()
+}
+
+const (
+	browserRecoveryTimeout     = 30 * time.Second
+	browserRecoveryConcurrency = 8
+)
+
+func (s *Scheduler) recoverDevelopmentBrowser(parent context.Context, id domain.RunID, cid containerruntime.ID, freeze bool) error {
+	d := s.developmentState()
+	if d.manager == nil || cid == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(parent, browserRecoveryTimeout)
+	defer cancel()
+	lock := d.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	run := browser.Run{ID: string(id), ContainerID: cid}
+	status, client, err := d.manager.Reconcile(ctx, run)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	d.mu.Lock()
+	d.reserved[id] = true
+	d.mu.Unlock()
+	var releaseErr error
+	if err == nil {
+		releaseErr = s.clearRecoveredBrowserInput(id, status, client)
+	}
+	// Unknown/lost sessions stay unavailable; no create/restart on recovery.
+	var pauseErr error
+	if freeze && status.State == "running" {
+		if _, pauseErr = d.manager.Pause(ctx, run); pauseErr != nil {
+			pauseErr = fmt.Errorf("session %s browser companion %s: pause: %w", id, status.ContainerID, pauseErr)
+		}
+	}
+	if releaseErr == nil || parent.Err() != nil {
+		return pauseErr
+	}
+	if markErr := d.manager.MarkUnavailable(run, "startup recovery failed: "+releaseErr.Error()); markErr != nil {
+		releaseErr = errors.Join(releaseErr, fmt.Errorf("record the companion as unavailable: %w", markErr))
+	}
+	return errors.Join(releaseErr, pauseErr)
 }
 
 // RunCoAuthors shares the established run attribution convention with native

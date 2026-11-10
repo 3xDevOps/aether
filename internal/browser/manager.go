@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +44,9 @@ type Status struct {
 	ProcessID    string              `json:"process_id"`
 	State        string              `json:"state"`
 	Reason       string              `json:"reason,omitempty"`
+	// Unavailable keeps the companion out of use until a restart replaces
+	// its journal.
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 type managedRun struct {
@@ -184,6 +188,10 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 		return status, nil, errors.New("browser companion ownership mismatch")
 	}
 	status.State = info.State
+	if status.Unavailable != "" {
+		status.Reason = status.Unavailable
+		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Unavailable)
+	}
 	if info.State != "running" {
 		status.Reason = "Recorded companion is " + info.State
 		if status != persisted {
@@ -226,8 +234,13 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 }
 
 // InputSessionGone is physical proof for a failed cleanup, not a health-check
-// fallback: an unreachable, paused or still-running companion is not gone.
+// fallback: an unreachable, paused or still-running companion is not gone. A
+// companion recorded unavailable counts as gone: Reconcile refuses every
+// writer until Restart destroys it.
 func (m *Manager) InputSessionGone(ctx context.Context, status Status) bool {
+	if journal, err := loadStatus(m.journalDir(status.RunID)); err == nil && journal.CreationKey == status.CreationKey && journal.Unavailable != "" {
+		return true
+	}
 	info, err := m.browser.InspectBrowser(ctx, status.ContainerID)
 	if errors.Is(err, containerruntime.ErrNotFound) {
 		return true
@@ -392,6 +405,31 @@ func (m *Manager) transition(ctx context.Context, run Run, action, creationKey s
 		return current, err
 	}
 	return status, nil
+}
+
+// MarkUnavailable records reason against the session's companion, which
+// Reconcile then reports as unavailable until Restart replaces it.
+func (m *Manager) MarkUnavailable(run Run, reason string) error {
+	entry, dir, err := m.entry(run)
+	if err != nil {
+		return err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	status, err := loadStatus(dir)
+	if err != nil {
+		return err
+	}
+	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
+		return errors.New("browser lifecycle session identity mismatch")
+	}
+	// loadStatus refuses a journal over 16 KiB; a companion error alone
+	// may be 8 KiB.
+	if len(reason) > 2048 {
+		reason = strings.ToValidUTF8(reason[:2048], "")
+	}
+	status.Unavailable = reason
+	return saveStatus(dir, status)
 }
 
 func (m *Manager) Pause(ctx context.Context, run Run) (Status, error) {

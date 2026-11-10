@@ -923,6 +923,11 @@ requests.
 Browser status also reports `state`: `not_started`, `creating`, `running`,
 `paused`, `session_lost`, or `unavailable`. An unreachable or failed Chromium
 session reports `available: false`, `running: false`, and its actual error.
+When the server starts and cannot release a companion's held input, the
+server still starts: that session's browser reports `unavailable` with the
+error, naming the session and companion container, until a `browser reset`
+replaces the companion. A paused session resumes with its browser still
+unavailable.
 Failed initial creation may return an opaque
 `pending:` session ID. It is a recovery fence, not a usable page session.
 Acquire the browser surface with that exact incarnation, then explicitly
@@ -949,7 +954,9 @@ before Chromium renders its replacement, then restarts an active screencast so
 a static page still streams a frame at the new size. On controller release,
 revocation or disconnect, the server clears held browser keys, buttons and
 touches before admitting another controller.
-If cleanup cannot be confirmed, new control remains fenced.
+If cleanup cannot be confirmed, new control remains fenced, unless the
+companion has exited or was recorded unavailable at server start: then control
+can be acquired only to `browser reset` it.
 
 Page inventories and physical-input acknowledgements use cached, best-effort
 titles without waiting for a DOM read. Inventories refresh titles asynchronously;
