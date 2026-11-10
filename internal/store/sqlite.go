@@ -220,9 +220,9 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 		return fmt.Errorf("store: create workspace: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers, w.Origin,
+		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin, owner_member_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers, w.Origin, w.OwnerID,
 	); err != nil {
 		return fmt.Errorf("store: create workspace: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -236,7 +236,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 		environment string
 		createdAt   int64
 	)
-	if err := row.Scan(&w.ID, &w.Name, &createdAt, &environment, &w.BaseBranch, &w.SteerOthers, &w.Origin); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &createdAt, &environment, &w.BaseBranch, &w.SteerOthers, &w.Origin, &w.OwnerID); err != nil {
 		return nil, err
 	}
 	if environment != "" && environment != "{}" {
@@ -248,7 +248,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 	return &w, nil
 }
 
-const workspaceCols = `id, name, created_at, environment, base_branch, steer_others, origin`
+const workspaceCols = `id, name, created_at, environment, base_branch, steer_others, origin, owner_member_id`
 
 func (d *DB) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
 	w, err := scanWorkspace(d.db.QueryRowContext(ctx,
@@ -642,6 +642,9 @@ func (d *DB) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member,
 	}
 	if mergedInto != "" {
 		return nil, fmt.Errorf("%w: member %s was merged into %s", ErrNotFound, id, mergedInto)
+	}
+	if m.Access, err = d.MemberWorkspaces(ctx, id); err != nil {
+		return nil, fmt.Errorf("store: get member: %w", err)
 	}
 	return m, nil
 }

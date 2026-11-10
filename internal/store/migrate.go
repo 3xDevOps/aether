@@ -2578,6 +2578,33 @@ ALTER TABLE room_messages ADD COLUMN resolved_at INTEGER;
 ALTER TABLE room_messages ADD COLUMN resolved_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE room_messages ADD COLUMN resolution TEXT NOT NULL DEFAULT '' CHECK (resolution IN ('', 'done', 'deleted'));
 `,
+	// v109: workspace-scoped access. A workspace has an owner and members
+	// reach it through a grant. The earliest live admin, the server's
+	// creator, becomes super admin and owns every existing workspace, and
+	// every approved member keeps the access they had, which was every
+	// workspace, as grants. Pending members had none and get none. An
+	// invitation carries the workspaces it grants, a JSON array of ids.
+	`
+ALTER TABLE workspaces ADD COLUMN owner_member_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE identity_invitations ADD COLUMN workspaces TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE workspace_grants (
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	granted_by   TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, member_id)
+);
+CREATE INDEX idx_workspace_grants_member ON workspace_grants(member_id);
+UPDATE members SET role = 'super_admin' WHERE id = (
+	SELECT id FROM members WHERE role = 'admin' AND pending = 0 AND merged_into = ''
+	ORDER BY created_at, rowid LIMIT 1);
+UPDATE workspaces SET owner_member_id = COALESCE(
+	(SELECT id FROM members WHERE role = 'super_admin' ORDER BY created_at, rowid LIMIT 1), '');
+INSERT INTO workspace_grants (workspace_id, member_id, granted_by, created_at)
+	SELECT w.id, m.id, '', unixepoch() * 1000000000
+	FROM workspaces w, members m
+	WHERE m.pending = 0 AND m.merged_into = '' AND m.role <> 'super_admin';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

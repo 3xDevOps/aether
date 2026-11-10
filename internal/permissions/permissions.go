@@ -1,11 +1,17 @@
 // Package permissions is the pure capability policy for Aether: who may
 // view, steer, kill, message, hand off, protect, launch, and administer,
-// given the actor's role, run ownership, the run's protected flag, and the
-// workspace's steer-others setting. It performs no I/O - callers resolve
-// the actor and target from the store and map ErrDenied to the wire's
-// CodeDenied.
+// given the actor's role, the workspaces they reach, run ownership, the
+// run's protected flag, and the workspace's steer-others setting. It
+// performs no I/O - callers resolve the actor and target from the store and
+// map ErrDenied to the wire's CodeDenied and ErrNoAccess to CodeNotFound.
 //
-// The policy is the design doc's role table:
+// A target that names a workspace is first resolved to the actor's role in
+// it (Actor.RoleIn): a super admin is admin everywhere, an admin is admin in
+// the workspaces they own and a collaborator in those they were granted, and
+// a collaborator or viewer keeps their role in the workspaces they were
+// granted. No role there is ErrNoAccess, whatever the capability.
+//
+// That role then meets the role table:
 //
 //	| Role         | Own runs   | Others' runs        | Workspace              |
 //	|--------------|------------|---------------------|------------------------|
@@ -62,22 +68,60 @@ const (
 	// acts on the owner's home and credentials; owner or admin only.
 	Sudo Capability = "sudo"
 	// WorkspaceAdmin is workspace administration (membership, settings);
-	// admin only.
+	// admin in the target workspace only. Without a workspace it is
+	// refused to everyone but a super admin.
 	WorkspaceAdmin Capability = "workspace_admin"
+	// CreateWorkspace creates a workspace the actor then owns; admins and
+	// super admins.
+	CreateWorkspace Capability = "create_workspace"
+	// ServerAdmin is server-wide administration: roles, member removal,
+	// updates, server settings; super admins only.
+	ServerAdmin Capability = "server_admin"
 )
 
-// Actor is the member attempting the action.
+// Actor is the member attempting the action. An Actor built without
+// Access reaches no workspace unless it is a super admin.
 type Actor struct {
-	ID   domain.MemberID
-	Role domain.Role
+	ID     domain.MemberID
+	Role   domain.Role
+	Access domain.WorkspaceAccess
+}
+
+// ActorOf is the actor for a member read from the store.
+func ActorOf(m *domain.Member) Actor {
+	return Actor{ID: m.ID, Role: m.Role, Access: m.Access}
+}
+
+// RoleIn is the role the actor acts with in workspace ws, false when they
+// cannot reach it.
+func (a Actor) RoleIn(ws domain.WorkspaceID) (domain.Role, bool) {
+	switch {
+	case a.Role == domain.RoleSuperAdmin:
+		return domain.RoleAdmin, true
+	case a.Role == domain.RoleAdmin && a.Access.Owned[ws]:
+		return domain.RoleAdmin, true
+	case a.Role == domain.RoleAdmin && a.Access.Granted[ws]:
+		return domain.RoleCollaborator, true
+	case a.Role == domain.RoleAdmin:
+		return "", false
+	case a.Access.Granted[ws]:
+		return a.Role, true
+	}
+	return "", false
+}
+
+// Reaches reports whether the actor may see workspace ws at all.
+func (a Actor) Reaches(ws domain.WorkspaceID) bool {
+	_, ok := a.RoleIn(ws)
+	return ok
 }
 
 // Target describes the acted-on run and its workspace's policy. The zero
 // value is correct for capabilities that target no run (Launch,
 // WorkspaceAdmin).
 type Target struct {
-	// Workspace carries the workspace addressed by a resolver. Check does
-	// not consult it yet; it is retained for future per-workspace access.
+	// Workspace is the workspace the action is in. Check resolves the
+	// actor's role there and refuses with ErrNoAccess when they have none.
 	Workspace domain.WorkspaceID
 	// Owner is the targeted run's owning member; empty when no run is
 	// targeted.
@@ -94,6 +138,11 @@ type Target struct {
 // it to protocol.CodeDenied.
 var ErrDenied = errors.New("permission denied")
 
+// ErrNoAccess is Check's answer for a workspace the actor cannot reach.
+// The wire reports it exactly as a workspace that does not exist, so it
+// never confirms that one does.
+var ErrNoAccess = errors.New("not found")
+
 func deny(msg string) error {
 	return fmt.Errorf("%w: %s", ErrDenied, msg)
 }
@@ -103,15 +152,38 @@ func deny(msg string) error {
 // It is the single policy entrypoint; enforcement sites build the Actor
 // and Target and never re-implement rules.
 func Check(cap Capability, actor Actor, target Target) error {
-	if actor.Role == domain.RoleAdmin {
+	if actor.Role == domain.RoleSuperAdmin {
 		return nil
 	}
+	role := actor.Role
+	if target.Workspace != "" {
+		var ok bool
+		if role, ok = actor.RoleIn(target.Workspace); !ok {
+			return ErrNoAccess
+		}
+	}
+	switch cap {
+	case ServerAdmin:
+		return deny("this requires the super_admin role")
+	case CreateWorkspace:
+		if actor.Role == domain.RoleAdmin {
+			return nil
+		}
+		return deny("creating a workspace requires the admin role")
+	case WorkspaceAdmin:
+		if role == domain.RoleAdmin && target.Workspace != "" {
+			return nil
+		}
+		return deny("workspace administration requires the workspace's owner or a super admin")
+	}
+	if role == domain.RoleAdmin {
+		return nil
+	}
+	actor.Role = role
 	owner := actor.ID != "" && actor.ID == target.Owner
 	switch cap {
 	case View:
 		return nil
-	case WorkspaceAdmin:
-		return deny("workspace administration requires the admin role")
 	case Launch:
 		if actor.Role == domain.RoleCollaborator {
 			return nil

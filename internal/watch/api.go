@@ -144,7 +144,7 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		return "", "", nil, invalid("target kind %q is not one of run, pr", t.Kind)
 	}
 	if ws != "" {
-		actor := permissions.Actor{ID: member.ID, Role: member.Role}
+		actor := permissions.ActorOf(member)
 		if err := permissions.Check(permissions.View, actor, permissions.Target{Workspace: ws}); err != nil {
 			return "", "", nil, fmt.Errorf("%w: %w", ErrDenied, err)
 		}

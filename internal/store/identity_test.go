@@ -49,7 +49,7 @@ func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMemberByPublicKey: %v", err)
 	}
-	if m1.ID != "m1" || m1.Role != domain.RoleAdmin || m1.Image != "img:1" || m1.GitEmail != "ada@example.com" {
+	if m1.ID != "m1" || m1.Role != domain.RoleSuperAdmin || m1.Image != "img:1" || m1.GitEmail != "ada@example.com" {
 		t.Fatalf("m1 after migration = %+v", m1)
 	}
 	m2, err := db.GetMemberByTailnetLogin(ctx, "bob@example.com")

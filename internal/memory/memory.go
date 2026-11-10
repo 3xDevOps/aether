@@ -455,7 +455,7 @@ func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspa
 	if err != nil {
 		return nil, err
 	}
-	return m, permissions.Check(permissions.Push, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{Workspace: workspace})
+	return m, permissions.Check(permissions.Push, permissions.ActorOf(m), permissions.Target{Workspace: workspace})
 }
 
 // changed records each note's change for the activity feed. run is the

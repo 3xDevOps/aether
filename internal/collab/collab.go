@@ -414,7 +414,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 			return fmt.Errorf("%w: protected sessions do not accept steering requests", permissions.ErrDenied)
 		}
 		if err := permissions.Check(permissions.Steer,
-			permissions.Actor{ID: freshActor.ID, Role: freshActor.Role},
+			permissions.ActorOf(freshActor),
 			permissions.Target{Workspace: freshWS.ID, Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: freshWS.SteerOthers}); err != nil {
 			return err
 		}
@@ -744,7 +744,7 @@ func (s *Service) Protect(ctx context.Context, runID domain.RunID, by domain.Mem
 	if err != nil {
 		return err
 	}
-	if err := permissions.Check(permissions.Protect, permissions.Actor{ID: actor.ID, Role: actor.Role}, permissions.Target{Workspace: ws.ID, Owner: run.MemberID}); err != nil {
+	if err := permissions.Check(permissions.Protect, permissions.ActorOf(actor), permissions.Target{Workspace: ws.ID, Owner: run.MemberID}); err != nil {
 		return err
 	}
 	var cancelled []*store.RoomMessage
@@ -794,7 +794,7 @@ func (s *Service) Purge(ctx context.Context, runID domain.RunID, by domain.Membe
 	if err != nil {
 		return err
 	}
-	if err := permissions.Check(permissions.Protect, permissions.Actor{ID: actor.ID, Role: actor.Role}, permissions.Target{Workspace: ws.ID, Owner: run.MemberID}); err != nil {
+	if err := permissions.Check(permissions.Protect, permissions.ActorOf(actor), permissions.Target{Workspace: ws.ID, Owner: run.MemberID}); err != nil {
 		return err
 	}
 	return s.cancelQueued(ctx, runID, by)

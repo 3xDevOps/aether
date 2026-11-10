@@ -51,13 +51,14 @@ func (s *Server) checkPush(ctx context.Context, member domain.MemberID) error {
 	return permissions.Check(permissions.Push, actor, permissions.Target{})
 }
 
-// resolveActor loads the member's current role for a permission check.
+// resolveActor loads the member's current role and workspace access for a
+// permission check.
 func resolveActor(ctx context.Context, st store.Store, id domain.MemberID) (permissions.Actor, error) {
 	m, err := st.GetMember(ctx, id)
 	if err != nil {
 		return permissions.Actor{}, err
 	}
-	return permissions.Actor{ID: m.ID, Role: m.Role}, nil
+	return permissions.ActorOf(m), nil
 }
 
 // resolveRunTarget loads the run's ownership and protection plus its
@@ -77,4 +78,15 @@ func resolveRunTarget(ctx context.Context, st store.Store, id domain.RunID) (per
 		Protected:   run.Protected,
 		SteerOthers: ws.SteerOthers,
 	}, nil
+}
+
+// checkIn is Check of cap in workspace ws for member. A workspace member
+// cannot reach is permissions.ErrNoAccess, which rpcError reports exactly
+// as a workspace that does not exist.
+func checkIn(ctx context.Context, st store.Store, member domain.MemberID, cap permissions.Capability, ws domain.WorkspaceID) error {
+	actor, err := resolveActor(ctx, st, member)
+	if err != nil {
+		return err
+	}
+	return permissions.Check(cap, actor, permissions.Target{Workspace: ws})
 }

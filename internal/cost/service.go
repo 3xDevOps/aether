@@ -416,7 +416,7 @@ func (s *Service) checkLaunch(ctx context.Context, member domain.MemberID) error
 	if m.Pending {
 		return fmt.Errorf("%w: membership pending admin approval", permissions.ErrDenied)
 	}
-	if err := permissions.Check(permissions.Launch, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{}); err != nil {
+	if err := permissions.Check(permissions.Launch, permissions.ActorOf(m), permissions.Target{}); err != nil {
 		return err
 	}
 	return nil

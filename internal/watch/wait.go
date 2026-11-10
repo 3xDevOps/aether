@@ -176,7 +176,7 @@ func (s *Service) waitTargetVisible(ctx context.Context, owner *domain.Run, targ
 	if err != nil {
 		return err
 	}
-	if err := permissions.Check(permissions.View, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{Workspace: run.WorkspaceID}); err != nil {
+	if err := permissions.Check(permissions.View, permissions.ActorOf(m), permissions.Target{Workspace: run.WorkspaceID}); err != nil {
 		return invalid("until run:%s:finished: %v", target, err)
 	}
 	return nil

@@ -14,7 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/push"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // The push methods over a real control channel, against the real service
@@ -29,7 +28,7 @@ func TestPushSubscriptionsBelongToTheCaller(t *testing.T) {
 			t.Fatalf("cost.New: %v", err)
 		}
 		svc, err := push.New(push.Config{
-			Store: c.Store.(*store.DB), Bus: c.Bus, Runs: c.Runs, Budgets: costs,
+			Store: testDB(c.Store), Bus: c.Bus, Runs: c.Runs, Budgets: costs,
 			KeyPath: filepath.Join(t.TempDir(), "push", "vapid_key.pem"),
 		})
 		if err != nil {

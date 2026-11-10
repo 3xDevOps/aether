@@ -208,7 +208,7 @@ func (s *Service) allowed(ctx context.Context, member domain.MemberID) error {
 	if m.Pending {
 		return fmt.Errorf("member %s is awaiting admin approval", member)
 	}
-	if err := permissions.Check(permissions.Launch, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{}); err != nil {
+	if err := permissions.Check(permissions.Launch, permissions.ActorOf(m), permissions.Target{}); err != nil {
 		return fmt.Errorf("member %s may no longer launch sessions: %w", member, err)
 	}
 	return nil

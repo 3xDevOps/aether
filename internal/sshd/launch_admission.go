@@ -33,7 +33,7 @@ func AuthorizeLaunch(ctx context.Context, st store.Store, actorID domain.MemberI
 	if actor.Pending {
 		return LaunchAdmission{}, fmt.Errorf("%w: membership pending admin approval", permissions.ErrDenied)
 	}
-	if err = permissions.Check(permissions.Launch, permissions.Actor{ID: actor.ID, Role: actor.Role}, permissions.Target{}); err != nil {
+	if err = permissions.Check(permissions.Launch, permissions.ActorOf(actor), permissions.Target{}); err != nil {
 		return LaunchAdmission{}, err
 	}
 	accountID, err := fallback.ResolveLaunchAccount(ctx, st, actor.ID, requestedAccount)

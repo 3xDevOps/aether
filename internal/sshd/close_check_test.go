@@ -19,7 +19,7 @@ func TestRunCloseCheckKinds(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
-	db := e.store.(*store.DB)
+	db := e.db
 	committed := time.Now().Add(-2 * time.Hour)
 	observed := time.Date(2026, 11, 3, 18, 20, 0, 0, time.UTC)
 	newRun := func(title string, mod func(*domain.Run)) *domain.Run {
@@ -298,7 +298,7 @@ func TestRunCloseCheckChildReadFails(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
-	db := e.store.(*store.DB)
+	db := e.db
 	c, _, err := db.ReserveChild(ctx, &domain.ChildReservation{ParentRunID: e.run.ID, RootRunID: e.run.ID, TreeKey: string(e.run.ID),
 		WorkspaceID: e.ws.ID, OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "claude", Mode: domain.LaunchTUI, Purpose: "help",
 		Task: "help", IdempotencyKey: "kid", RequestHash: "h"})

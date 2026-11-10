@@ -173,7 +173,7 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []d
 
 func checkMessage(owner *domain.Member, ws *domain.Workspace, targetOwner domain.MemberID, protected bool) error {
 	return permissions.Check(permissions.Message,
-		permissions.Actor{ID: owner.ID, Role: owner.Role},
+		permissions.ActorOf(owner),
 		permissions.Target{Workspace: ws.ID, Owner: targetOwner, Protected: protected, SteerOthers: ws.SteerOthers})
 }
 

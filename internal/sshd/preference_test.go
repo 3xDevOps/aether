@@ -14,7 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func rpcCode(err error) int {
@@ -32,7 +31,7 @@ func rpcCode(err error) int {
 func TestPreferencesAreOwnerOnly(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) {
-		db, ok := c.Store.(*store.DB)
+		db, ok := testDBOK(c.Store)
 		if !ok {
 			t.Fatalf("store is %T, want *store.DB", c.Store)
 		}
@@ -100,7 +99,7 @@ func TestMemberRemoveRecordsPreferencesDeleted(t *testing.T) {
 	t.Parallel()
 	tombs := filepath.Join(t.TempDir(), "preference-tombstones")
 	e := newTestEnv(t, func(c *Config) {
-		db, ok := c.Store.(*store.DB)
+		db, ok := testDBOK(c.Store)
 		if !ok {
 			t.Fatalf("store is %T, want *store.DB", c.Store)
 		}
@@ -126,7 +125,7 @@ func TestMemberRemoveRecordsPreferencesDeleted(t *testing.T) {
 func TestPreferenceWritesRefuseADifferentMember(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) {
-		db, ok := c.Store.(*store.DB)
+		db, ok := testDBOK(c.Store)
 		if !ok {
 			t.Fatalf("store is %T, want *store.DB", c.Store)
 		}

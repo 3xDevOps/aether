@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -350,7 +351,8 @@ func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMember: %v", err)
 	}
-	if *got != *m {
+	got.Access = m.Access
+	if !reflect.DeepEqual(got, m) {
 		t.Fatalf("member round-trip: got %+v, want %+v", got, m)
 	}
 
@@ -375,7 +377,8 @@ func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMember after update: %v", err)
 	}
-	if *got != *m {
+	got.Access = m.Access
+	if !reflect.DeepEqual(got, m) {
 		t.Fatalf("member update round-trip: got %+v, want %+v", got, m)
 	}
 
@@ -504,7 +507,7 @@ func TestMemberTailnetIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMemberByTailnetLogin: %v", err)
 	}
-	if *got != *m {
+	if !reflect.DeepEqual(got, m) {
 		t.Fatalf("tailnet member round-trip: got %+v, want %+v", got, m)
 	}
 	if _, lookupErr := db.GetMemberByTailnetLogin(ctx, "nobody@example.com"); !errors.Is(lookupErr, ErrNotFound) {

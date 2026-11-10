@@ -642,7 +642,7 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	if recipient.Pending {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: membership is pending admin approval", recipient.DisplayName))
 	}
-	recipientActor := permissions.Actor{ID: recipient.ID, Role: recipient.Role}
+	recipientActor := permissions.ActorOf(recipient)
 	if derr := permissions.Check(permissions.Launch, recipientActor, permissions.Target{}); derr != nil {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own sessions", recipient.DisplayName))
 	}

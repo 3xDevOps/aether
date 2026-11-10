@@ -13,7 +13,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memory"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // TestMemoryMembersCurateAndViewersRead drives team memory the way members
@@ -167,7 +166,7 @@ func newMemoryEnv(t *testing.T) (*testEnv, *memory.Service, *events.SQLiteLog) {
 	var svc *memory.Service
 	e := newTestEnv(t, func(c *Config) {
 		c.Bus = bus
-		db, ok := c.Store.(*store.DB)
+		db, ok := testDBOK(c.Store)
 		if !ok {
 			t.Fatalf("store is %T, want *store.DB", c.Store)
 		}

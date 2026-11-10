@@ -200,7 +200,7 @@ func (s *Service) allowed(ctx context.Context, w *store.Watch) error {
 	} else if err != nil {
 		return err
 	}
-	actor := permissions.Actor{ID: m.ID, Role: m.Role}
+	actor := permissions.ActorOf(m)
 	if err := permissions.Check(permissions.View, actor, permissions.Target{Workspace: w.WorkspaceID}); err != nil {
 		return fmt.Errorf("%w: %w", errRevoked, err)
 	}

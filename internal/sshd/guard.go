@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -92,6 +93,9 @@ func registerGuarded(name string, cap permissions.Capability, resolve targetReso
 			}
 		}
 		if cerr := permissions.Check(cap, actor, target); cerr != nil {
+			if errors.Is(cerr, permissions.ErrNoAccess) {
+				return nil, rpcError(cerr)
+			}
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: name + ": " + cerr.Error()}
 		}
 		if target.Workspace != "" {

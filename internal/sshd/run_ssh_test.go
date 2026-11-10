@@ -28,7 +28,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // runSSHTestService stands in for the run's container: commands run as
@@ -673,7 +672,7 @@ func TestRunSSHFailsClosedWhenItsCheckCannotComplete(t *testing.T) {
 	// closes: here the store itself is gone.
 	closed := make(chan error, 1)
 	go func() { closed <- client.Wait() }()
-	if err = e.store.(*store.DB).Close(); err != nil {
+	if err = e.db.Close(); err != nil {
 		t.Fatal(err)
 	}
 	select {

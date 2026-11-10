@@ -341,18 +341,23 @@ type AccountFallback struct {
 	Order []MemberID
 }
 
-// Role is a member's role within the deployment.
+// Role is a member's role on the server. A super admin reaches every
+// workspace; everyone else reaches the workspaces they own or were granted.
 type Role string
 
 const (
 	RoleViewer       Role = "viewer"
 	RoleCollaborator Role = "collaborator"
 	RoleAdmin        Role = "admin"
+	RoleSuperAdmin   Role = "super_admin"
 )
 
 func (r Role) Valid() bool {
-	return r == RoleViewer || r == RoleCollaborator || r == RoleAdmin
+	return r == RoleViewer || r == RoleCollaborator || r == RoleAdmin || r == RoleSuperAdmin
 }
+
+// Admin reports whether r may own and administer workspaces.
+func (r Role) Admin() bool { return r == RoleAdmin || r == RoleSuperAdmin }
 
 // Workspace is a repo checkout, its server-owned environment definition,
 // and the shared context every run against it inherits: runs, costs,
@@ -368,7 +373,26 @@ type Workspace struct {
 	// Origin is the upstream git URL run checkouts push to; "" when the
 	// workspace has none, in which case a checkout keeps the origin its
 	// clone made.
-	Origin    string
+	Origin string
+	// OwnerID is the admin or super admin who owns the workspace and
+	// administers it.
+	OwnerID   MemberID
+	CreatedAt time.Time
+}
+
+// WorkspaceAccess is the workspaces a member owns and was granted.
+type WorkspaceAccess struct {
+	Owned   map[WorkspaceID]bool
+	Granted map[WorkspaceID]bool
+}
+
+// WorkspaceGrant lets a member into a workspace they do not own.
+type WorkspaceGrant struct {
+	WorkspaceID WorkspaceID
+	MemberID    MemberID
+	// GrantedBy is the member who granted it; empty for grants the
+	// upgrade to workspace-scoped access created.
+	GrantedBy MemberID
 	CreatedAt time.Time
 }
 
@@ -627,6 +651,9 @@ type Member struct {
 	// colorblind-safe palette; overridable.
 	Color string
 	Role  Role
+	// Access is the workspaces the member owns and was granted. GetMember
+	// loads it with the role, so a check sees both as they are now.
+	Access WorkspaceAccess `json:"-"`
 	// GitName and GitEmail are the identity commits made for this member
 	// are authored as. Empty falls back to GitIdentity's defaults.
 	GitName   string

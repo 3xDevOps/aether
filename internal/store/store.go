@@ -42,6 +42,8 @@ var (
 // has a PublicKey, a TailnetLogin or an edge identity (IdentityStore), and
 // may have any of them.
 type Store interface {
+	WorkspaceAccessStore
+
 	CreateWorkspace(ctx context.Context, w *domain.Workspace) error
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	ListWorkspaces(ctx context.Context) ([]*domain.Workspace, error)

@@ -88,6 +88,9 @@ var memberRefs = map[string]bool{
 	"server_update_state.pending_requested_by": false,
 	"workspace_budgets.updated_by":             false,
 	"workspace_mirrors.github_member_id":       false,
+	"workspace_grants.member_id":               true,
+	"workspace_grants.granted_by":              false,
+	"workspaces.owner_member_id":               true,
 }
 
 // notMemberRefs are the columns a member-reference name pattern matches

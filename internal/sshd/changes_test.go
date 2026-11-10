@@ -14,7 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
@@ -96,7 +95,7 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 	t.Parallel()
 	e := newChangesEnv(t, "")
 	ctx := t.Context()
-	db := e.store.(*store.DB)
+	db := e.db
 	secondRun := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "Ship the checkout", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
 	if err := db.CreateRun(ctx, secondRun); err != nil {
 		t.Fatalf("create run: %v", err)

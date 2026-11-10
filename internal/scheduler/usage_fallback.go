@@ -651,7 +651,7 @@ func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID) error {
 	if member.Pending {
 		return fmt.Errorf("%w: %s's membership is pending admin approval", permissions.ErrDenied, member.DisplayName)
 	}
-	return permissions.Check(permissions.Launch, permissions.Actor{ID: member.ID, Role: member.Role}, permissions.Target{})
+	return permissions.Check(permissions.Launch, permissions.ActorOf(member), permissions.Target{})
 }
 
 // chooseMove chooses the account under the authorization mutex and writes
