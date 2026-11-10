@@ -107,3 +107,26 @@ func TestStreamWireLeavesOutAnUnreachableExtraRepository(t *testing.T) {
 		t.Fatalf("streamed %q, want only the primary repository's branch, diff and pull request", got)
 	}
 }
+
+// An overlap set names its peers, so a reader who cannot fully reach one
+// peer gets none of it.
+func TestReachableJudgesEveryOverlapPeer(t *testing.T) {
+	hidden := domain.RunID("run-hidden")
+	scope := Scope{
+		Workspace: func(domain.WorkspaceID) bool { return true },
+		Run:       func(id domain.RunID) bool { return id != hidden },
+	}
+	ev := func(peers ...domain.RunID) Event {
+		var p OverlapPayload
+		for _, id := range peers {
+			p.With = append(p.With, OverlapPeer{RunID: id, Files: []string{"a.go"}})
+		}
+		return Event{WorkspaceID: "ws-a", RunID: "run-mine", Payload: p}
+	}
+	if !Reachable(ev("run-seen"), scope) {
+		t.Fatal("an overlap with a reachable peer was hidden")
+	}
+	if Reachable(ev("run-seen", hidden), scope) {
+		t.Fatal("an overlap naming a peer the reader cannot reach was delivered")
+	}
+}

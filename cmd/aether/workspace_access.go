@@ -39,7 +39,7 @@ func workspaceAccess(args []string) error {
 			return err
 		}
 		var res protocol.WorkspaceAccessResult
-		if err := c.Call(protocol.MethodWorkspaceAccessList, protocol.WorkspaceAccessParams{WorkspaceID: id}, &res); err != nil {
+		if err = c.Call(protocol.MethodWorkspaceAccessList, protocol.WorkspaceAccessParams{WorkspaceID: id}, &res); err != nil {
 			return err
 		}
 		names, err := memberNames(c)

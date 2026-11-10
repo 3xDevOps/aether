@@ -23,4 +23,14 @@ type OverlapPayload struct {
 
 func (OverlapPayload) EventType() Type { return TypeRunOverlap }
 
+// NamedRuns are the peers, so a reader who cannot fully reach one of them
+// gets no part of the overlap set.
+func (p OverlapPayload) NamedRuns() []domain.RunID {
+	ids := make([]domain.RunID, 0, len(p.With))
+	for _, peer := range p.With {
+		ids = append(ids, peer.RunID)
+	}
+	return ids
+}
+
 func init() { registerPayload[OverlapPayload](TypeRunOverlap) }
