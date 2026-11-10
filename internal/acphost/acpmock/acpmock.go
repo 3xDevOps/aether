@@ -100,6 +100,15 @@ const (
 	// the way Claude's adapter reports them: calls that complete once their
 	// work runs in the background, and the Agent's work after that.
 	PromptWorkflow = "workflow"
+	// PromptBackgroundAgents launches BackgroundAgentIDs in parallel as
+	// Claude's adapter reports Claude Code's Agent calls: each call
+	// completes once its subagent runs in the background. The main agent
+	// then runs BusyCalls commands, more items than a subscribe replays,
+	// and ends the turn; the subagents run until PromptFinishAgents.
+	PromptBackgroundAgents = "background subagents"
+	// PromptFinishAgents makes each subagent PromptBackgroundAgents started
+	// report and end.
+	PromptFinishAgents = "finish subagents"
 	// ReminderReply is the reply to Aether's report reminder, which the
 	// mock cannot act on.
 	ReminderReply = "nothing to report"
@@ -121,7 +130,14 @@ const (
 	DevServerTaskID = "mock-dev-server"
 	// HeldTaskID is the id of the workflow PromptHold starts.
 	HeldTaskID = "mock-held-task"
+	// BusyCalls is how many commands PromptBackgroundAgents runs after its
+	// launches.
+	BusyCalls = 120
 )
+
+// BackgroundAgentIDs are the tasks PromptBackgroundAgents starts; each
+// one's Agent call id is the task id with a "-call" suffix.
+var BackgroundAgentIDs = []string{"mock-agent-billing", "mock-agent-tests"}
 
 type Fixture struct {
 	Initialize json.RawMessage `json:"initialize"`
@@ -453,6 +469,16 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	case PromptDevServer:
 		a.launch(ctx, DevServerTaskID, "local_bash")
 		a.text(ctx, "started")
+		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptBackgroundAgents:
+		a.backgroundAgents(ctx)
+		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptFinishAgents:
+		for _, id := range BackgroundAgentIDs {
+			a.update(ctx, claudeUpdate(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": id + "-read", "status": "completed"}, id+"-call", "Read"))
+			a.update(ctx, claudeUpdate(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Report from " + id + "."}}, id+"-call", ""))
+			a.finish(id)
+		}
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptHold:
 		a.launch(ctx, HeldTaskID, "local_workflow")
@@ -795,6 +821,38 @@ func (a *Agent) sdk(ctx context.Context, message map[string]any) {
 	if frames {
 		_ = a.conn.SendNotification(ctx, "_claude/sdkMessage", map[string]any{"sessionId": session, "message": message})
 	}
+}
+
+func (a *Agent) backgroundAgents(ctx context.Context) {
+	descriptions := []string{"Audit the billing module", "Run the test suite"}
+	for i, id := range BackgroundAgentIDs {
+		call := id + "-call"
+		a.update(ctx, claudeUpdate(map[string]any{"sessionUpdate": "tool_call", "toolCallId": call, "kind": "think", "title": "Task", "status": "pending", "rawInput": map[string]any{}}, "", "Agent"))
+		a.update(ctx, claudeUpdate(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": call, "title": descriptions[i],
+			"rawInput": map[string]any{"description": descriptions[i], "prompt": descriptions[i] + ".", "subagent_type": "general-purpose"}}, "", "Agent"))
+		a.mu.Lock()
+		if a.live == nil {
+			a.live = map[string]string{}
+		}
+		a.live[id] = "local_agent"
+		a.mu.Unlock()
+		a.liveSet(ctx)
+	}
+	for _, id := range BackgroundAgentIDs {
+		u, _ := json.Marshal(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": id + "-call", "status": "completed",
+			"rawOutput": []any{map[string]any{"type": "text", "text": "Async agent launched successfully.\nagentId: " + id}},
+			"_meta":     map[string]any{"claudeCode": map[string]any{"toolName": "Agent", "toolResponse": map[string]any{"isAsync": true, "status": "async_launched", "agentId": id}}}})
+		a.update(ctx, u)
+	}
+	for _, id := range BackgroundAgentIDs {
+		a.update(ctx, claudeUpdate(map[string]any{"sessionUpdate": "tool_call", "toolCallId": id + "-read", "kind": "read", "title": "Read src/billing.js", "status": "pending"}, id+"-call", "Read"))
+	}
+	for i := range BusyCalls {
+		call := "busy-" + strconv.Itoa(i)
+		a.update(ctx, demoTool(call, "execute", "echo "+strconv.Itoa(i), "pending", nil))
+		a.update(ctx, demoTool(call, "execute", "echo "+strconv.Itoa(i), "completed", nil))
+	}
+	a.text(ctx, "The subagents are working.")
 }
 
 func (a *Agent) workflow(ctx context.Context) {

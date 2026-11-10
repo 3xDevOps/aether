@@ -227,6 +227,10 @@ on its own, the Chat view shows it as an autonomous turn. The session reason rea
 `working in background: <n> tasks`, or `waiting-agents` or `waiting-tools`
 between turns.
 
+- Claude Code runs the main agent's `Agent` calls in the background: the call
+  returns at once and its subagent's card follows the task until it reports. A
+  reload reads up to 5,000 earlier items to keep the card of a subagent that
+  still runs; past that, scroll up to load its launch.
 - A shell such as a dev server does not hold the session, because it may never end.
 - Stop cancels an autonomous turn and parks the session with `turn cancelled`. The
   tasks keep running in Claude Code.
