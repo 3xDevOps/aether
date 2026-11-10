@@ -84,11 +84,11 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 				if actor.Role == domain.RoleSuperAdmin {
 					return true
 				}
-				run, err := s.cfg.Store.GetRun(ctx, m.ToRun)
-				if err != nil && !errors.Is(err, store.ErrNotFound) {
-					hideErr = err
+				run, runErr := s.cfg.Store.GetRun(ctx, m.ToRun)
+				if runErr != nil && !errors.Is(runErr, store.ErrNotFound) {
+					hideErr = runErr
 				}
-				return err == nil && run.MemberID == actor.ID
+				return runErr == nil && run.MemberID == actor.ID
 			}
 			if wait.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(wait.RunID)) {
 				return false

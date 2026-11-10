@@ -795,7 +795,7 @@ func TestMemoryLeavesOutSessionsWithAnUnreachableWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	lib := &domain.Workspace{Name: "lib", BaseBranch: domain.DefaultBaseBranch}
-	if err := f.db.CreateWorkspace(ctx, lib); err != nil {
+	if err = f.db.CreateWorkspace(ctx, lib); err != nil {
 		t.Fatal(err)
 	}
 	ola, sam := f.member("Ola", domain.RoleCollaborator), f.member("Sam", domain.RoleSuperAdmin)
@@ -803,17 +803,17 @@ func TestMemoryLeavesOutSessionsWithAnUnreachableWorkspace(t *testing.T) {
 		ws domain.WorkspaceID
 		m  *domain.Member
 	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
-		if err := f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
 	hidden, live := f.run(ola, "claude", "Two repositories"), f.run(ola, "claude", "Still two")
 	for _, r := range []*domain.Run{hidden, live} {
-		if err := f.db.SetRunRepos(ctx, r.ID, []domain.RunRepo{{WorkspaceID: lib.ID, Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"}}); err != nil {
+		if err = f.db.SetRunRepos(ctx, r.ID, []domain.RunRepo{{WorkspaceID: lib.ID, Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := f.db.AppendCoordReport(ctx, &store.CoordReport{WorkspaceID: f.ws.ID, RunID: hidden.ID,
+	if err = f.db.AppendCoordReport(ctx, &store.CoordReport{WorkspaceID: f.ws.ID, RunID: hidden.ID,
 		Outcome: store.CoordOutcomeSuccess, Summary: "Shipped the private change.", IdempotencyKey: "success-1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -829,23 +829,24 @@ func TestMemoryLeavesOutSessionsWithAnUnreachableWorkspace(t *testing.T) {
 		who  *domain.Member
 		sees bool
 	}{{ola, true}, {sam, true}, {f.dana, false}} {
-		found, err := scoped.Search(ctx, tc.who.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID), Words: "private"})
-		if err != nil || (len(found.Items) == 1) != tc.sees {
-			t.Errorf("%s search = %+v, %v; want the report note %v", tc.who.DisplayName, found.Items, err, tc.sees)
+		found, searchErr := scoped.Search(ctx, tc.who.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID), Words: "private"})
+		if searchErr != nil || (len(found.Items) == 1) != tc.sees {
+			t.Errorf("%s search = %+v, %v; want the report note %v", tc.who.DisplayName, found.Items, searchErr, tc.sees)
 		}
 		_, err = scoped.Show(ctx, tc.who.ID, protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: report})
 		if (err == nil) != tc.sees || (err != nil && !strings.Contains(err.Error(), "not found")) {
 			t.Errorf("%s show = %v; want shown %v, else not found", tc.who.DisplayName, err, tc.sees)
 		}
-		text, err := scoped.Brief(ctx, f.ws.ID, tc.who.ID, tc.who.ID, "")
-		if err != nil || strings.Contains(text, hidden.Branch) != tc.sees {
-			t.Errorf("%s brief = %q, %v; want the hidden session %v", tc.who.DisplayName, text, err, tc.sees)
+		text, briefErr := scoped.Brief(ctx, f.ws.ID, tc.who.ID, tc.who.ID, "")
+		if briefErr != nil || strings.Contains(text, hidden.Branch) != tc.sees {
+			t.Errorf("%s brief = %q, %v; want the hidden session %v", tc.who.DisplayName, text, briefErr, tc.sees)
 		}
 		if !tc.sees && text != "" {
 			t.Errorf("%s brief = %q; want none, the hidden sessions and their note left out of the counts", tc.who.DisplayName, text)
 		}
 	}
-	if text, err := scoped.Brief(ctx, f.ws.ID, ola.ID, f.dana.ID, ""); err != nil || strings.Contains(text, hidden.Branch) {
+	text, err := scoped.Brief(ctx, f.ws.ID, ola.ID, f.dana.ID, "")
+	if err != nil || strings.Contains(text, hidden.Branch) {
 		t.Errorf("Ola's brief as Dana reads it = %q, %v; want the hidden session left out", text, err)
 	}
 	raw, err := json.Marshal(protocol.MemorySearchParams{Words: "private"})

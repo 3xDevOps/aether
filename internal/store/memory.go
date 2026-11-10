@@ -452,13 +452,13 @@ func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 	}
 	reached, args := "1", []any{workspace, id}
 	if workspaces != nil {
-		reach, err := reachArgs(workspaces)
-		if err != nil {
-			return nil, nil, fmt.Errorf("store: read memory note %s: %w", id, err)
+		reach, reachErr := reachArgs(workspaces)
+		if reachErr != nil {
+			return nil, nil, fmt.Errorf("store: read memory note %s: %w", id, reachErr)
 		}
 		reached, args = memoryReached, append(args, reach...)
 		var ok bool
-		if err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM memory m WHERE m.workspace_id = ? AND m.id = ? AND `+reached+`)`,
+		if err = d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM memory m WHERE m.workspace_id = ? AND m.id = ? AND `+reached+`)`,
 			args...).Scan(&ok); err != nil {
 			return nil, nil, fmt.Errorf("store: read memory note %s: %w", id, err)
 		}
