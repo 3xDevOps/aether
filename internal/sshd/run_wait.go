@@ -58,7 +58,7 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 		return err
 	}
 	for i, r := range runs {
-		waits := slices.DeleteFunc(byRun[r.ID], func(w protocol.WaitCondition) bool { return !visible(w) })
+		waits := slices.DeleteFunc(byRun[r.ID], func(w protocol.WaitCondition) bool { return !visible(w, r.MemberID) })
 		if r.MemberID != member && (actorErr != nil || !workspaceAdmin(actor, r.WorkspaceID)) {
 			for j := range waits {
 				redactWait(&waits[j])
@@ -69,14 +69,16 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 	return nil
 }
 
-// waitVisibility reports which conditions actor may read: a run_finished
+// waitVisibility reports which conditions actor may read, given waiter,
+// the member whose session registered the condition: a run_finished
 // condition whose session they reach in every workspace, and a pull
-// request condition unless its repository is the origin or mirror source
-// only of workspaces actor does not reach. prs says whether it will be
-// asked about pull request conditions.
-func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, prs bool) (func(protocol.WaitCondition) bool, error) {
+// request condition whose repository is the origin or mirror source of a
+// workspace actor reaches. A pull request condition whose repository no
+// workspace has now, its origin changed or cleared since, only waiter
+// reads. prs says whether it will be asked about pull request conditions.
+func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, prs bool) (func(w protocol.WaitCondition, waiter domain.MemberID) bool, error) {
 	if actor.Role == domain.RoleSuperAdmin {
-		return func(protocol.WaitCondition) bool { return true }, nil
+		return func(protocol.WaitCondition, domain.MemberID) bool { return true }, nil
 	}
 	repos := map[string][]domain.WorkspaceID{}
 	if prs {
@@ -101,33 +103,39 @@ func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, pr
 		}
 	}
 	runs := newRunScopes(s.cfg.Store)
-	return func(w protocol.WaitCondition) bool {
+	return func(w protocol.WaitCondition, waiter domain.MemberID) bool {
 		if w.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(w.RunID)) {
 			return false
 		}
-		if w.Repo != "" && !prs {
+		if w.Repo == "" {
+			return true
+		}
+		if !prs {
 			return false
 		}
-		owners := repos[w.Repo]
-		return len(owners) == 0 || slices.ContainsFunc(owners, actor.Reaches)
+		if owners := repos[w.Repo]; len(owners) > 0 {
+			return slices.ContainsFunc(owners, actor.Reaches)
+		}
+		return waiter != "" && waiter == actor.ID
 	}, nil
 }
 
-// storedWait is wait id's condition as waitVisibility judges it, and the
-// run that waits on it; ok is false when no run waits on id.
-func (s *Server) storedWait(ctx context.Context, id string) (cond protocol.WaitCondition, owner domain.RunID, ok bool, err error) {
+// storedWait is wait id's condition as waitVisibility judges it, the run
+// that waits on it and that run's member; ok is false when no run waits
+// on id.
+func (s *Server) storedWait(ctx context.Context, id string) (cond protocol.WaitCondition, owner domain.RunID, waiter domain.MemberID, ok bool, err error) {
 	waits, has := s.cfg.Store.(store.RunWaitStore)
 	if !has || id == "" {
-		return cond, "", false, nil
+		return cond, "", "", false, nil
 	}
 	w, err := waits.GetRunWait(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
-		return cond, "", false, nil
+		return cond, "", "", false, nil
 	}
 	if err != nil {
-		return cond, "", false, err
+		return cond, "", "", false, err
 	}
-	return protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.TargetRun)}, w.OwnerRunID, true, nil
+	return protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.TargetRun)}, w.OwnerRunID, w.MemberID, true, nil
 }
 
 // redactWait leaves out of w what only the run's owner and admins read:
@@ -172,16 +180,16 @@ func (s *Server) runWaitCancel(ctx context.Context, member domain.MemberID, para
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	stored, owner, ok, err := s.storedWait(ctx, p.WaitID)
+	stored, owner, waiter, ok, err := s.storedWait(ctx, p.WaitID)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	if ok && owner == domain.RunID(p.RunID) {
-		var visible func(protocol.WaitCondition) bool
+		var visible func(protocol.WaitCondition, domain.MemberID) bool
 		if visible, err = s.waitVisibility(ctx, actor, stored.Repo != ""); err != nil {
 			return nil, rpcError(err)
 		}
-		if !visible(stored) {
+		if !visible(stored, waiter) {
 			return nil, rpcError(fmt.Errorf("store: wait %s: %w", p.WaitID, store.ErrNotFound))
 		}
 	}

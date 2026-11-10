@@ -44,7 +44,7 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 	}
 	runs := newRunScopes(s.cfg.Store)
 	var (
-		visible func(protocol.WaitCondition) bool
+		visible func(protocol.WaitCondition, domain.MemberID) bool
 		hideErr error
 	)
 	page, err := s.cfg.Store.ListRunMessages(ctx, store.RunMessageFilter{
@@ -61,10 +61,11 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 				return true
 			}
 			var (
-				wait protocol.WaitCondition
-				ok   bool
+				wait   protocol.WaitCondition
+				waiter domain.MemberID
+				ok     bool
 			)
-			wait, _, ok, hideErr = s.storedWait(ctx, m.CorrelationID)
+			wait, _, waiter, ok, hideErr = s.storedWait(ctx, m.CorrelationID)
 			if watches, has := s.cfg.Store.(store.WatchStore); hideErr == nil && !ok && has {
 				// A relay's wake is correlated with its watch, not a wait.
 				var w *store.Watch
@@ -72,7 +73,7 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 				case errors.Is(hideErr, store.ErrNotFound):
 					hideErr = nil
 				case hideErr == nil:
-					wait, ok = protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.RunID)}, true
+					wait, waiter, ok = protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.RunID)}, w.MemberID, true
 				}
 			}
 			if hideErr != nil {
@@ -98,7 +99,7 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 					return false
 				}
 			}
-			return visible(wait)
+			return visible(wait, waiter)
 		},
 	})
 	if err == nil {

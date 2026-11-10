@@ -67,6 +67,9 @@ func TestCoordMessagesListCutsAWaitsWakeForViewers(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	db := e.db
+	if err := db.SetWorkspaceOrigin(ctx, e.ws.ID, "https://github.com/acme/app.git"); err != nil {
+		t.Fatal(err)
+	}
 	const spec = "pr:acme/app#7:checks"
 	now := time.Now()
 	waits := []*store.RunWait{{

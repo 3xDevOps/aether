@@ -440,7 +440,10 @@ A session with an extra repository in a workspace you cannot reach does not
 exist for you either: it is absent from `aether sessions`, attention, the recent
 sessions in insights, the overlap column, watches and your event feed, `aether
 timeline` and `aether changes`, and a command that names it fails as above.
-Insights and cost totals still count it. Once a session is deleted, its
+Insights and cost totals still count it. A session's wait on a pull request
+whose repository no workspace has any more, because the origin it named was
+changed or cleared, and the wait's wake message, reach only super admins and
+the member whose session waits. Once a session is deleted, its
 remaining events reach only super admins, apart from its deletion notice, which
 reaches everyone who reached the session. Events about a member you do not see,
 such as a rename, a device change or a merge, are left out the same way.

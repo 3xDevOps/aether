@@ -85,8 +85,10 @@ func TestWorkspaceListsLeaveOutSessionsWithAnUnreachableRepo(t *testing.T) {
 				t.Fatalf("%s %s: %v", who, c.method, err)
 			}
 			for _, kept := range c.kept {
-				if !strings.Contains(string(res), kept) {
-					t.Errorf("%s %s %+v = %s, want %s kept", who, c.method, c.params, res, kept)
+				// No workspace has acme/x, so its wait is U's, who waits on it, alone.
+				want := kept != "wat-x" || who != "A"
+				if strings.Contains(string(res), kept) != want {
+					t.Errorf("%s %s %+v = %s, want %s kept = %v", who, c.method, c.params, res, kept, want)
 				}
 			}
 			leaked := strings.Contains(string(res), string(runA.ID)) || strings.Contains(string(res), "acme/b")
@@ -163,6 +165,80 @@ func TestAHiddenWaitStaysHiddenInHistoryAndCancel(t *testing.T) {
 	var res protocol.RunWaitCancelResult
 	if err := w.call(t, "S", protocol.MethodRunWaitCancel, protocol.RunWaitCancelParams{RunID: string(ua.ID), WaitID: wait}, &res); err != nil || res.Wait.Repo != "acme/b" {
 		t.Errorf("S run.wait.cancel = %+v, %v; want the wait", res, err)
+	}
+}
+
+// A wait on a private workspace's repository stays hidden once that
+// workspace's origin changes and no workspace has the repository: only a
+// super admin and the member whose session waits read it and its wake,
+// not an admin of the session's workspace.
+func TestAWaitOnARepositoryNoWorkspaceHasIsItsWaitersAlone(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	db := w.e.db
+	ua := w.runUA
+	if err := db.SetWorkspaceOrigin(ctx, w.wsB.ID, "https://github.com/acme/b.git"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	const spec = "pr:acme/b#7:merged"
+	waits := []*store.RunWait{{
+		Watch: store.Watch{MemberID: w.u.ID, WorkspaceID: w.wsA.ID, TargetKind: protocol.WatchTargetPR, Repo: "acme/b", Number: 7, TargetTitle: spec,
+			Conditions: []string{protocol.WaitKindPRMerged}, Source: protocol.WatchSourceAgent, CreatedAt: now, UpdatedAt: now,
+			ExpiresAt: now.Add(time.Hour), NextCheckAt: &now},
+		Spec: spec, Kind: protocol.WaitKindPRMerged}}
+	if _, err := db.RecordWaitingReport(ctx, &store.CoordStateReport{RunID: ua.ID, IdempotencyKey: "wait-b", Outcome: protocol.CoordOutcomeWaiting,
+		WaitingFor: "ci", Until: []string{spec}}, waits); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkCoordStateReportApplied(ctx, ua.ID, "wait-b"); err != nil {
+		t.Fatal(err)
+	}
+	wait := waits[0].ID
+	wake := "Aether: your wait " + spec + " resolved: merged."
+	if err := db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: w.wsA.ID, FromRun: ua.ID, ToRun: ua.ID, Body: wake,
+		Kind: store.RunMessageKindMessage, CorrelationID: wait, CreatedAt: now}, 100); err != nil {
+		t.Fatal(err)
+	}
+	watches, err := watch.New(watch.Config{Store: db, Bus: w.bus, Runs: w.e.srv.cfg.Runs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.e.srv.cfg.Services.Watches = watches
+	if err = db.SetWorkspaceOrigin(ctx, w.wsB.ID, "https://github.com/acme/renamed.git"); err != nil {
+		t.Fatal(err)
+	}
+
+	for who, sees := range map[string]bool{"S": true, "U": true, "A": false} {
+		var run json.RawMessage
+		if err := w.call(t, who, protocol.MethodRunGet, protocol.RunIDParams{RunID: string(ua.ID)}, &run); err != nil {
+			t.Fatalf("%s run.get: %v", who, err)
+		}
+		if strings.Contains(string(run), wait) != sees {
+			t.Errorf("%s run.get shows the wait = %v, want %v: %s", who, !sees, sees, run)
+		}
+		var list protocol.CoordMessagesListResult
+		if err := w.call(t, who, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), RunID: string(ua.ID)}, &list); err != nil {
+			t.Fatalf("%s coord.messages.list: %v", who, err)
+		}
+		if got := len(list.Messages) == 1; got != sees {
+			t.Errorf("%s coord.messages.list = %+v, want the wake shown = %v", who, list.Messages, sees)
+		}
+	}
+	cancel := func(who, id string) error {
+		return w.call(t, who, protocol.MethodRunWaitCancel, protocol.RunWaitCancelParams{RunID: string(ua.ID), WaitID: id}, nil)
+	}
+	hidden, missing := cancel("A", wait), cancel("A", "wat-doesnotexist")
+	if hidden == nil || missing == nil || wireErrOf(t, hidden).Code != wireErrOf(t, missing).Code ||
+		strings.ReplaceAll(wireErrOf(t, hidden).Message, wait, "wat-doesnotexist") != wireErrOf(t, missing).Message {
+		t.Errorf("A run.wait.cancel of the hidden wait = %v, of a missing one = %v; want them identical", hidden, missing)
+	}
+	if got, err := db.GetRunWait(ctx, wait); err != nil || got.WaitState == protocol.WaitCancelled {
+		t.Errorf("the hidden wait after A's cancel = %+v, %v; want it untouched", got, err)
+	}
+	if err := cancel("U", wait); err != nil {
+		t.Errorf("U run.wait.cancel of their own wait: %v", err)
 	}
 }
 
