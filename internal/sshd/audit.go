@@ -54,6 +54,10 @@ var auditedMethods = map[string]bool{
 	protocol.MethodMemberMergeAccept:    true,
 	protocol.MethodSlackLink:            true,
 	protocol.MethodSlackUnlink:          true,
+
+	protocol.MethodWorkspaceAccessGrant:  true,
+	protocol.MethodWorkspaceAccessRevoke: true,
+	protocol.MethodWorkspaceOwnerSet:     true,
 }
 
 // assistantReads are the read-only methods the assistant calls that no
@@ -128,7 +132,7 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID
 	case protocol.MethodAccountShare, protocol.MethodAccountRevoke, protocol.MethodMemberRole, protocol.MethodMemberApprove,
-		protocol.MethodMemberRemove, protocol.MethodMemberIdentityRemove:
+		protocol.MethodMemberRemove, protocol.MethodMemberIdentityRemove, protocol.MethodWorkspaceAccessRevoke, protocol.MethodWorkspaceOwnerSet:
 		target = ids.MemberID
 	case protocol.MethodMemberDeviceRevoke:
 		target = ids.DeviceID

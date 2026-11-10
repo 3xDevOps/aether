@@ -218,7 +218,7 @@ func (s *Server) memberMergePending(ctx context.Context, member domain.MemberID,
 	return out, nil
 }
 
-// memberMergeAccept merges under registerMu, so the last-admin check
+// memberMergeAccept merges under registerMu, so the last-super-admin check
 // holds, and authorizationMu, so no run or terminal is admitted for
 // either member while their rows move. Nothing changes, no terminal stops
 // and no lease is fenced, until the proposal is the caller's to accept as
@@ -590,7 +590,7 @@ func (s *Server) memberMergeList(ctx context.Context, member domain.MemberID, _ 
 		return nil, rpcError(err)
 	}
 	survivor := member
-	if caller.Role == domain.RoleAdmin {
+	if caller.Role == domain.RoleSuperAdmin {
 		survivor = ""
 	}
 	merges, err := ms.ListMerges(ctx, survivor)
@@ -643,7 +643,7 @@ func (s *Server) planToWire(plan *store.MergePlan) (protocol.MemberMergePlan, *p
 	}
 	if keep := plan.Role(true, true); keep != role {
 		out.RoleWithKeepAdmin = string(keep)
-		out.KeepAdminRequired = plan.LeavesNoAdmin(role)
+		out.KeepAdminRequired = plan.LeavesNoSuperAdmin(role)
 	}
 	for _, side := range []store.MergeSnapshot{plan.Minted, plan.Proposer} {
 		m := side.Member
@@ -672,7 +672,13 @@ func snapshotToWire(snap store.MergeSnapshot, home, full bool) protocol.MergeMem
 	m := snap.Member
 	out := protocol.MergeMember{ID: string(m.ID), DisplayName: m.DisplayName, Role: string(m.Role), TailnetLogin: m.TailnetLogin,
 		Identities: []protocol.MergeIdentity{}, Devices: []protocol.MergeDevice{}, Runs: snap.Runs, Schedules: snap.Schedules,
-		Settings: settingsToWire(snap.Settings, home, full)}
+		Settings: settingsToWire(snap.Settings, home, full), OwnedWorkspaces: []string{}, GrantedWorkspaces: []string{}}
+	for _, w := range snap.OwnedWorkspaces {
+		out.OwnedWorkspaces = append(out.OwnedWorkspaces, string(w))
+	}
+	for _, w := range snap.GrantedWorkspaces {
+		out.GrantedWorkspaces = append(out.GrantedWorkspaces, string(w))
+	}
 	if m.PublicKey != "" {
 		out.PublicKeyFingerprint = fingerprintOf(m.PublicKey)
 	}

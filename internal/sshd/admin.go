@@ -3,13 +3,16 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -20,33 +23,55 @@ func init() {
 	registerMethod(protocol.MethodMemberRemove, (*Server).memberRemove)
 }
 
+// requireAdmin refuses method unless member is an admin or a super admin.
 func (s *Server) requireAdmin(ctx context.Context, member domain.MemberID, method string) *protocol.Error {
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
 		return rpcError(err)
 	}
-	if m.Role != domain.RoleAdmin {
+	if !m.Role.Admin() {
 		return &protocol.Error{Code: protocol.CodeDenied, Message: method + " requires the admin role"}
 	}
 	return nil
 }
 
+// requireSuperAdmin refuses method, a server-wide operation, unless
+// member is a super admin.
+func (s *Server) requireSuperAdmin(ctx context.Context, member domain.MemberID, method string) *protocol.Error {
+	return s.requireIn(ctx, member, permissions.ServerAdmin, "", method)
+}
+
+// requireIn refuses method unless member holds cap in workspace ws, or
+// outside any workspace when ws is empty. A workspace member cannot reach
+// is reported exactly as one that does not exist.
+func (s *Server) requireIn(ctx context.Context, member domain.MemberID, cap permissions.Capability, ws domain.WorkspaceID, method string) *protocol.Error {
+	err := checkIn(ctx, s.cfg.Store, member, cap, ws)
+	if errors.Is(err, permissions.ErrDenied) {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": " + err.Error()}
+	}
+	if err != nil {
+		return rpcError(err)
+	}
+	return nil
+}
+
 func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceAdd); err != nil {
+	if err := s.requireIn(ctx, member, permissions.CreateWorkspace, "", protocol.MethodWorkspaceAdd); err != nil {
 		return nil, err
 	}
 	p, perr := decodeParams[protocol.WorkspaceAddParams](params)
 	if perr != nil {
 		return nil, perr
 	}
-	w, err := s.createWorkspace(ctx, p, "")
+	w, err := s.createWorkspace(ctx, p, "", member)
 	if err != nil {
 		return nil, err
 	}
 	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
 }
 
-func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddParams, origin string) (*domain.Workspace, *protocol.Error) {
+// createWorkspace creates the workspace p describes, owned by owner.
+func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddParams, origin string, owner domain.MemberID) (*domain.Workspace, *protocol.Error) {
 	if p.Name == "" || !p.Environment.Valid() {
 		return nil, invalidParams("name and valid environment are required")
 	}
@@ -54,7 +79,7 @@ func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddPar
 	if base == "" {
 		base = domain.DefaultBaseBranch
 	}
-	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Origin: origin, Environment: domain.WorkspaceEnvironment{
+	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Origin: origin, OwnerID: owner, Environment: domain.WorkspaceEnvironment{
 		Variables:   p.Environment.Variables,
 		SetupPolicy: domain.SetupPolicy{Script: p.Environment.SetupPolicy.Script},
 	}}
@@ -65,9 +90,6 @@ func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddPar
 }
 
 func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
-		return nil, err
-	}
 	p, perr := decodeParams[protocol.WorkspaceDeleteParams](params)
 	if perr != nil {
 		return nil, perr
@@ -75,7 +97,11 @@ func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, pa
 	if p.WorkspaceID == "" {
 		return nil, invalidParams("workspace_id is required")
 	}
-	lock := s.workspaceLock(domain.WorkspaceID(p.WorkspaceID))
+	ws := domain.WorkspaceID(p.WorkspaceID)
+	if err := s.requireIn(ctx, member, permissions.WorkspaceAdmin, ws, protocol.MethodWorkspaceDelete); err != nil {
+		return nil, err
+	}
+	lock := s.workspaceLock(ws)
 	if !lock.TryLock() {
 		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "workspace operations are in progress; retry deletion when they finish"}
 	}
@@ -84,13 +110,13 @@ func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, pa
 		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "session admission is in progress; retry workspace deletion when it finishes"}
 	}
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
+	if err := s.requireIn(ctx, member, permissions.WorkspaceAdmin, ws, protocol.MethodWorkspaceDelete); err != nil {
 		return nil, err
 	}
 	if s.cfg.DeleteWorkspace == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace deletion is not configured"}
 	}
-	if err := s.cfg.DeleteWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID), member); err != nil {
+	if err := s.cfg.DeleteWorkspace(ctx, ws, member); err != nil {
 		return nil, rpcError(err)
 	}
 	return protocol.WorkspaceDeleteResult{OK: true}, nil
@@ -113,8 +139,15 @@ func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, param
 	if p.TTLSeconds < 0 {
 		return nil, invalidParams("ttl_seconds must not be negative")
 	}
+	workspaces := make([]domain.WorkspaceID, len(p.WorkspaceIDs))
+	for i, w := range p.WorkspaceIDs {
+		workspaces[i] = domain.WorkspaceID(w)
+	}
+	if perr := s.inviteWorkspaces(ctx, member, workspaces, protocol.MethodMemberInvite); perr != nil {
+		return nil, perr
+	}
 	ttl := time.Duration(p.TTLSeconds) * time.Second
-	code, expires, err := mintInvite(s.cfg.InvitesDir, ttl, member)
+	code, expires, err := mintInvite(s.cfg.InvitesDir, ttl, member, workspaces)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -122,7 +155,7 @@ func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, param
 }
 
 func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRemove); err != nil {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodMemberRemove); err != nil {
 		return nil, err
 	}
 	p, perr := decodeParams[protocol.MemberRemoveParams](params)
@@ -133,12 +166,13 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 		return nil, invalidParams("member_id is required")
 	}
 	// Same read-then-write hazard as member.role: without this lock a
-	// removal and a demotion racing each other can both see two admins.
+	// removal and a demotion racing each other can both see two super
+	// admins.
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRemove); err != nil {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodMemberRemove); err != nil {
 		return nil, err
 	}
 	id := domain.MemberID(p.MemberID)
@@ -146,14 +180,17 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if target.Role == domain.RoleAdmin {
-		admins, cerr := s.countAdmins(ctx)
+	if target.Role == domain.RoleSuperAdmin {
+		supers, cerr := s.countSuperAdmins(ctx)
 		if cerr != nil {
 			return nil, cerr
 		}
-		if admins <= 1 {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last admin"}
+		if supers <= 1 {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last super admin"}
 		}
+	}
+	if perr := s.refuseOwner(ctx, target, "removing"); perr != nil {
+		return nil, perr
 	}
 	ids, perr := s.rpcIdentityStore()
 	if perr != nil {
@@ -269,19 +306,62 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	return struct{}{}, nil
 }
 
-// countAdmins reports how many members currently hold the admin role. It
-// backs the last-admin invariant: the deployment must never lose its
-// ability to administer itself, whether through removal or demotion.
-func (s *Server) countAdmins(ctx context.Context) (int, *protocol.Error) {
+// countSuperAdmins reports how many members are super admins. It backs
+// the last-super-admin invariant: the server must never lose its ability
+// to administer itself, whether through removal or demotion.
+func (s *Server) countSuperAdmins(ctx context.Context) (int, *protocol.Error) {
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return 0, rpcError(err)
 	}
-	admins := 0
+	supers := 0
 	for _, m := range members {
-		if m.Role == domain.RoleAdmin {
-			admins++
+		if m.Role == domain.RoleSuperAdmin {
+			supers++
 		}
 	}
-	return admins, nil
+	return supers, nil
+}
+
+// refuseOwner refuses removing or demoting m below admin while m owns
+// workspaces: a workspace's owner is always an admin.
+func (s *Server) refuseOwner(ctx context.Context, m *domain.Member, action string) *protocol.Error {
+	all, err := s.cfg.Store.ListWorkspaces(ctx)
+	if err != nil {
+		return rpcError(err)
+	}
+	var owned []string
+	for _, w := range all {
+		if w.OwnerID == m.ID {
+			owned = append(owned, fmt.Sprintf("%s (%s)", w.Name, w.ID))
+		}
+	}
+	if len(owned) == 0 {
+		return nil
+	}
+	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+		"%s %s is refused while they own workspaces %s; give each a new owner first: aether workspace owner <workspace> <member-id>",
+		action, m.ID, strings.Join(owned, ", "))}
+}
+
+// inviteWorkspaces checks the workspaces an invitation from member grants:
+// a super admin names any, or none; an admin names at least one, and
+// only workspaces they own.
+func (s *Server) inviteWorkspaces(ctx context.Context, member domain.MemberID, workspaces []domain.WorkspaceID, method string) *protocol.Error {
+	caller, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
+		return rpcError(err)
+	}
+	if caller.Role != domain.RoleSuperAdmin && len(workspaces) == 0 {
+		return invalidParams(method + ": an admin's invitation names at least one workspace they own (--workspace <workspace>)")
+	}
+	for _, ws := range workspaces {
+		if perr := s.requireIn(ctx, member, permissions.WorkspaceAdmin, ws, method); perr != nil {
+			return perr
+		}
+		if _, err := s.cfg.Store.GetWorkspace(ctx, ws); err != nil {
+			return rpcError(err)
+		}
+	}
+	return nil
 }

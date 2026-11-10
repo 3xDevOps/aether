@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -122,5 +123,138 @@ func TestWorkspaceGrants(t *testing.T) {
 	}
 	if ws, err := db.GetWorkspace(ctx, w.ID); err != nil || ws.OwnerID != user.ID {
 		t.Fatalf("owner after set = %+v, %v", ws, err)
+	}
+}
+
+// Accepting an invitation, or joining with a code, creates the member with
+// a grant on each named workspace that still exists and its issuer still
+// administers: any for a super admin, the owned ones for an admin.
+func TestJoiningGrantsWhatTheIssuerAdministers(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	admin := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+	other := &domain.Member{DisplayName: "Bo", PublicKey: testKey(t, "bo"), Color: "#3cb44b", Role: domain.RoleAdmin}
+	super := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#ffe119", Role: domain.RoleSuperAdmin}
+	for _, m := range []*domain.Member{admin, other, super} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owned := &domain.Workspace{Name: "web", OwnerID: admin.ID}
+	others := &domain.Workspace{Name: "api", OwnerID: other.ID}
+	gone := &domain.Workspace{Name: "old", OwnerID: admin.ID}
+	for _, w := range []*domain.Workspace{owned, others, gone} {
+		if err := db.CreateWorkspace(ctx, w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	named := []domain.WorkspaceID{owned.ID, others.ID, gone.ID}
+	inv := &domain.Invitation{Provider: "github", Login: "dana", Role: domain.RoleCollaborator, Workspaces: named,
+		CreatedBy: admin.ID, ExpiresAt: now.Add(time.Hour)}
+	if err := db.CreateInvitation(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.GetInvitation(ctx, inv.ID); err != nil || len(got.Workspaces) != 3 {
+		t.Fatalf("stored invitation = %+v, %v; want its three workspaces", got, err)
+	}
+	if err := db.DeleteWorkspace(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	dana, err := db.AcceptInvitation(ctx, inv.ID, &domain.Identity{Provider: "github", Subject: "4004", Login: "dana"},
+		&domain.Member{DisplayName: "Dana", Color: "#4363d8"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access, err := db.MemberWorkspaces(ctx, dana.ID); err != nil || len(access.Granted) != 1 || !access.Granted[owned.ID] {
+		t.Fatalf("accepted member's workspaces = %+v, %v; want only the issuer's surviving one", access, err)
+	}
+
+	joined := &domain.Member{DisplayName: "Jo", PublicKey: testKey(t, "jo"), Color: "#f58231", Role: domain.RoleCollaborator}
+	if err := db.JoinMember(ctx, joined, []domain.WorkspaceID{owned.ID, others.ID}, super.ID); err != nil {
+		t.Fatal(err)
+	}
+	if access, err := db.MemberWorkspaces(ctx, joined.ID); err != nil || len(access.Granted) != 2 {
+		t.Fatalf("member a super admin's code admitted has %+v, %v; want both workspaces", access, err)
+	}
+	grants, err := db.ListWorkspaceGrants(ctx, others.ID)
+	if err != nil || len(grants) != 1 || grants[0].GrantedBy != super.ID {
+		t.Fatalf("grants on %s = %+v, %v; want one by the super admin", others.ID, grants, err)
+	}
+}
+
+// A merge that would leave a workspace owner below admin is refused,
+// naming the workspaces, unless the admin side keeps its role.
+func TestMergeRefusesDemotingAWorkspaceOwner(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	super := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#ffe119", Role: domain.RoleSuperAdmin}
+	owner := &domain.Member{DisplayName: "A", TailnetLogin: "a@", Color: "#3cb44b", Role: domain.RoleAdmin}
+	user := &domain.Member{DisplayName: "U", PublicKey: testKey(t, "u"), Color: "#e6194b", Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{super, owner, user} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateMergeCode(ctx, owner.ID, "code", now, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := db.PlanMerge(ctx, "code", user.ID, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Minted.OwnedWorkspaces) != 1 || plan.Minted.OwnedWorkspaces[0] != w.ID {
+		t.Fatalf("plan owned workspaces = %v, want %s", plan.Minted.OwnedWorkspaces, w.ID)
+	}
+	pm, err := db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: user.ID, Keep: user.ID, Digest: plan.Digest, Now: now, Expires: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept := MergeAccept{ProposalID: pm.ProposalID, Caller: owner.ID, Digest: plan.Digest, Now: now}
+	if _, err = db.AcceptMerge(ctx, accept); !isRefusal(err, "owns workspaces "+string(w.ID)) {
+		t.Fatalf("merge demoting an owner = %v, want refused naming %s", err, w.ID)
+	}
+	accept.KeepAdmin = true
+	merge, err := db.AcceptMerge(ctx, accept)
+	if err != nil || merge.RoleAfter != domain.RoleAdmin {
+		t.Fatalf("merge keeping admin = %+v, %v", merge, err)
+	}
+	if got, err := db.GetWorkspace(ctx, w.ID); err != nil || got.OwnerID != user.ID {
+		t.Fatalf("workspace after the merge = %+v, %v; want the survivor owning it", got, err)
+	}
+}
+
+// keep_admin keeps a super admin a super admin, and losing that role is a
+// demotion.
+func TestMergeKeepsSuperAdmin(t *testing.T) {
+	t.Parallel()
+	plan := &MergePlan{SuperAdmins: 2,
+		Minted:   MergeSnapshot{Member: domain.Member{ID: "s", Role: domain.RoleSuperAdmin}},
+		Proposer: MergeSnapshot{Member: domain.Member{ID: "u", Role: domain.RoleViewer}}}
+	for _, tc := range []struct {
+		minted, proposer bool
+		want             domain.Role
+	}{{false, false, domain.RoleViewer}, {true, false, domain.RoleSuperAdmin}, {false, true, domain.RoleViewer}} {
+		if got := plan.Role(tc.minted, tc.proposer); got != tc.want {
+			t.Errorf("Role(%v, %v) = %s, want %s", tc.minted, tc.proposer, got, tc.want)
+		}
+	}
+	plan.Proposer.Member.Role = domain.RoleAdmin
+	if got := plan.Role(false, true); got != domain.RoleAdmin {
+		t.Errorf("an admin proposer keeping its role = %s, want admin: it does not lift the super admin's", got)
+	}
+	if plan.LeavesNoSuperAdmin(domain.RoleAdmin) {
+		t.Error("a merge beside another super admin takes the last one")
+	}
+	plan.SuperAdmins = 1
+	if !plan.LeavesNoSuperAdmin(domain.RoleAdmin) || plan.LeavesNoSuperAdmin(domain.RoleSuperAdmin) {
+		t.Error("LeavesNoSuperAdmin does not guard the last super admin")
 	}
 }

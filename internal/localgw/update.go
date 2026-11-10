@@ -114,7 +114,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 // asked only when the rest of the rule holds, whether it can update
 // itself. A server that does not answer is not waited for.
 func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target string) bool {
-	admin := info.Member.Role == string(domain.RoleAdmin)
+	admin := info.Member.Role == string(domain.RoleSuperAdmin)
 	if target == "" || !cli.ServerFirst(info.ServerVersion, target, admin, true) {
 		return false
 	}

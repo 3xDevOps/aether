@@ -450,7 +450,7 @@ func TestUpdateApplyLeavesTheServerFirst(t *testing.T) {
 			pinVersion(t)
 			stubRebuild(t, "/bin/true", false)
 			backend := &verbStubBackend{apiStubBackend: apiStubBackend{results: map[string]json.RawMessage{
-				protocol.MethodServerInfo:         json.RawMessage(`{"server_version":"v1.2.8","member":{"role":"admin"}}`),
+				protocol.MethodServerInfo:         json.RawMessage(`{"server_version":"v1.2.8","member":{"role":"super_admin"}}`),
 				protocol.MethodServerUpdateStatus: json.RawMessage(fmt.Sprintf(`{"capable":%v}`, capable)),
 			}}}
 			g := updateGateway(t, backend, false)

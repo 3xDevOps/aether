@@ -35,6 +35,7 @@ func TestMemberRoleRequiresAdmin(t *testing.T) {
 func TestMemberRolePromoteAndDemote(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
 	ctx := context.Background()
@@ -79,6 +80,7 @@ func TestMemberRolePromoteAndDemote(t *testing.T) {
 func TestMemberRoleIdempotent(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
 
@@ -93,10 +95,11 @@ func TestMemberRoleIdempotent(t *testing.T) {
 	}
 }
 
-// The deployment must keep one member able to administer it.
-func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
+// The server must keep one member able to administer it.
+func TestMemberRoleRefusesDemotingLastSuperAdmin(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	adminC := controlClient(t, e)
 
 	var pe *protocol.Error
@@ -104,17 +107,17 @@ func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
 		MemberID: string(e.member.ID), Role: string(domain.RoleViewer),
 	}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("demote last admin = %v, want CodeDenied", err)
+		t.Fatalf("demote last super admin = %v, want CodeDenied", err)
 	}
-	if !strings.Contains(pe.Message, "last admin") {
-		t.Errorf("message %q does not mention last admin", pe.Message)
+	if !strings.Contains(pe.Message, "refusing to demote the last super admin") {
+		t.Errorf("message %q does not mention the last super admin", pe.Message)
 	}
 	got, gerr := e.store.GetMember(context.Background(), e.member.ID)
 	if gerr != nil {
 		t.Fatalf("get member: %v", gerr)
 	}
-	if got.Role != domain.RoleAdmin {
-		t.Errorf("role after refused demotion = %q, want admin", got.Role)
+	if got.Role != domain.RoleSuperAdmin {
+		t.Errorf("role after refused demotion = %q, want super_admin", got.Role)
 	}
 }
 
@@ -122,6 +125,7 @@ func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
 func TestMemberRolePendingMember(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, pending := addMember(t, e, "Pat", domain.RoleViewer, true)
 	adminC := controlClient(t, e)
 
@@ -140,6 +144,7 @@ func TestMemberRolePendingMember(t *testing.T) {
 func TestMemberRoleRejectsBadInput(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
 

@@ -120,17 +120,16 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 	if p.MemberID == "" {
 		return nil, invalidParams("member_id is required")
 	}
-	caller, err := s.cfg.Store.GetMember(ctx, member)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	if caller.Role != domain.RoleAdmin {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "member.approve requires the admin role"}
+	if perr := s.requireAdmin(ctx, member, protocol.MethodMemberApprove); perr != nil {
+		return nil, perr
 	}
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberApprove, false); perr != nil {
 		return nil, perr
 	}
 	id := domain.MemberID(p.MemberID)
+	if perr := s.actingOn(ctx, member, id, protocol.MethodMemberApprove); perr != nil {
+		return nil, perr
+	}
 	before, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
 		return nil, rpcError(err)

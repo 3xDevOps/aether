@@ -75,7 +75,7 @@ func TestBehindTrustedProxies(t *testing.T) {
 			h.join(ctl, bo, s, "collaborator")
 			for _, c := range []*client{al, bo} {
 				info := call[protocol.ServerInfoResult](t, h.control(c, s), protocol.MethodServerInfo, struct{}{})
-				if want := map[*client]string{al: "admin", bo: "collaborator"}[c]; info.Member.Role != want {
+				if want := map[*client]string{al: "super_admin", bo: "collaborator"}[c]; info.Member.Role != want {
 					t.Fatalf("%s over the relay: %+v, want %s", c.user.Login, info.Member, want)
 				}
 			}

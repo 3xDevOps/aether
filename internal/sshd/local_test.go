@@ -315,7 +315,7 @@ func TestTailnetMemberMapsAddressesLikeSSHAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Role != domain.RoleAdmin || first.Pending || first.TailnetLogin != "alice@example.com" {
+	if first.Role != domain.RoleSuperAdmin || first.Pending || first.TailnetLogin != "alice@example.com" {
 		t.Fatalf("first contact = %+v, want an approved admin", first)
 	}
 	again, err := e.srv.TailnetMember(ctx, "100.64.0.1:40001")

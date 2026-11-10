@@ -15,9 +15,10 @@ func init() {
 	registerMethod(protocol.MethodMemberRole, (*Server).memberRole)
 }
 
-// memberRole sets a member's role. Only admins may call it, and the last
-// admin can never be demoted: the deployment must keep at least one
-// member able to administer it.
+// memberRole sets a member's role. Only super admins may call it, and the
+// last super admin can never be demoted: the server must keep at least
+// one member able to administer it. A member who owns workspaces stays an
+// admin until each has a new owner.
 //
 // Every permission check resolves the actor's role from the store at the
 // moment of the call (resolveActor, gate.go), so a role change takes
@@ -27,7 +28,7 @@ func init() {
 // Approval and role are orthogonal: a pending member's role may be set,
 // and they remain pending until an admin approves them.
 func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
 		return nil, err
 	}
 	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberRole, false); err != nil {
@@ -42,18 +43,18 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	}
 	role := domain.Role(p.Role)
 	if !role.Valid() {
-		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, or admin", p.Role))
+		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, admin, or super_admin", p.Role))
 	}
-	// The last-admin check below reads the member table and then writes to
-	// it. Without serialization two admins demoting each other at once
-	// would both count two admins, both proceed, and leave the deployment
-	// with none and no way back. registerMu is the same lock bootstrap
-	// uses to keep its own read-then-write of this table honest.
+	// The last-super-admin check below reads the member table and then
+	// writes to it. Without serialization two super admins demoting each
+	// other at once would both count two, both proceed, and leave the
+	// server with none and no way back. registerMu is the same lock
+	// bootstrap uses to keep its own read-then-write of this table honest.
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
 		return nil, err
 	}
 
@@ -64,20 +65,25 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	if m.Role == role {
 		return protocol.MemberRoleResult{Member: protocol.MemberFromDomain(m)}, nil
 	}
-	if m.Role == domain.RoleAdmin {
-		admins, cerr := s.countAdmins(ctx)
+	if m.Role == domain.RoleSuperAdmin {
+		supers, cerr := s.countSuperAdmins(ctx)
 		if cerr != nil {
 			return nil, cerr
 		}
-		if admins <= 1 {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to demote the last admin"}
+		if supers <= 1 {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to demote the last super admin"}
+		}
+	}
+	if !role.Admin() {
+		if perr := s.refuseOwner(ctx, m, "demoting"); perr != nil {
+			return nil, perr
 		}
 	}
 	was := m.Role
-	// An invitation grants its role when accepted, and only admins create
-	// them, so a demoted admin's open invitations go with the role.
-	// createInvitation and acceptInvitation hold registerMu too.
-	if was == domain.RoleAdmin {
+	// An invitation grants its role and workspaces when accepted, and only
+	// admins create them, so an admin's open invitations go with any
+	// demotion. createInvitation and acceptInvitation hold registerMu too.
+	if was == domain.RoleSuperAdmin || (was == domain.RoleAdmin && !role.Admin()) {
 		ids, perr := s.rpcIdentityStore()
 		if perr != nil {
 			return nil, perr

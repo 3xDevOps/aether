@@ -36,6 +36,7 @@ func mergeEnv(t *testing.T, mod func(*Config)) (*testEnv, *fakeWhoIs) {
 			mod(c)
 		}
 	})
+	asSuperAdmin(t, e)
 	if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -345,8 +346,8 @@ func TestMergeRefusals(t *testing.T) {
 	wantRefusal(t, err, "is not open")
 }
 
-// Merging the server's only admin into a collaborator demotes it unless
-// the admin side asks to keep it admin, and keep_admin counts only from
+// Merging the server's only super admin into a collaborator demotes it
+// unless that side asks to keep its role, and keep_admin counts only from
 // that side. A merge that would leave the owner's GitHub account on a
 // member who is not an admin is refused.
 func TestMergeLastAdminNeedsKeepAdmin(t *testing.T) {
@@ -359,7 +360,7 @@ func TestMergeLastAdminNeedsKeepAdmin(t *testing.T) {
 
 	code := mergeStart(t, admin)
 	plan := mergePreview(t, tc, code)
-	if plan.Role != string(domain.RoleCollaborator) || plan.RoleWithKeepAdmin != string(domain.RoleAdmin) || !plan.KeepAdminRequired {
+	if plan.Role != string(domain.RoleCollaborator) || plan.RoleWithKeepAdmin != string(domain.RoleSuperAdmin) || !plan.KeepAdminRequired {
 		t.Fatalf("plan = %+v", plan)
 	}
 	_, err := mergePropose(tc, code, string(e.member.ID), plan.PlanDigest, true)
@@ -369,9 +370,9 @@ func TestMergeLastAdminNeedsKeepAdmin(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = mergeAccept(admin, proposal, false)
-	wantRefusal(t, err, "last admin")
+	wantRefusal(t, err, "last super admin")
 
-	_, _ = addMember(t, e, "Zed", domain.RoleAdmin, false)
+	_, _ = addMember(t, e, "Zed", domain.RoleSuperAdmin, false)
 	if err = identities(t, e).BindIdentity(ctx, &domain.Identity{Member: e.member.ID, Provider: octo.Provider, Subject: octo.Subject, Login: octo.Login}); err != nil {
 		t.Fatal(err)
 	}
@@ -392,10 +393,10 @@ func TestMergeLastAdminNeedsKeepAdmin(t *testing.T) {
 	_, err = mergeAccept(admin, proposal, false)
 	wantRefusal(t, err, "owns this server at its edge")
 	res, err := mergeAccept(admin, proposal, true)
-	if err != nil || res.Member.Role != string(domain.RoleAdmin) || res.Merge.RoleAfter != string(domain.RoleAdmin) {
+	if err != nil || res.Member.Role != string(domain.RoleSuperAdmin) || res.Merge.RoleAfter != string(domain.RoleSuperAdmin) {
 		t.Fatalf("keep_admin accept = %+v, %v", res, err)
 	}
-	if m := serverInfoMember(t, tailnetDial(t, e, whois, tina.TailnetLogin)); m.ID != string(e.member.ID) || m.Role != string(domain.RoleAdmin) {
+	if m := serverInfoMember(t, tailnetDial(t, e, whois, tina.TailnetLogin)); m.ID != string(e.member.ID) || m.Role != string(domain.RoleSuperAdmin) {
 		t.Fatalf("tailnet login now reaches the server as %+v", m)
 	}
 }
@@ -449,8 +450,9 @@ func TestInviteCodeDiesWithItsIssuersAdminRole(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
+	asSuperAdmin(t, e)
 	_, zed := addMember(t, e, "Zed", domain.RoleAdmin, false)
-	code, _, err := mintInvite(dir, time.Hour, zed.ID)
+	code, _, err := mintInvite(dir, time.Hour, zed.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,7 +552,7 @@ func TestInviteCodeFollowsAMergedIssuer(t *testing.T) {
 	e, _ := mergeEnv(t, nil)
 	ctx := context.Background()
 	ms := e.store.(store.MergeStore)
-	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleAdmin)
+	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleSuperAdmin)
 	now := time.Now().UTC()
 	if err := ms.CreateMergeCode(ctx, tina.ID, "code", now, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
@@ -567,7 +569,7 @@ func TestInviteCodeFollowsAMergedIssuer(t *testing.T) {
 	if _, err = ms.AcceptMerge(ctx, store.MergeAccept{ProposalID: pm.ProposalID, Caller: tina.ID, Digest: plan.Digest, Now: now}); err != nil {
 		t.Fatal(err)
 	}
-	if admin, err := e.srv.inviteIssuerAdmin(ctx, e.member.ID); err != nil || !admin {
+	if _, admin, err := e.srv.inviteIssuer(ctx, e.member.ID); err != nil || !admin {
 		t.Fatalf("issuer merged into an admin = %v, %v; want still an admin", admin, err)
 	}
 }
@@ -578,8 +580,8 @@ func TestDemotingMergeRevokesInviteCodes(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e, whois := mergeEnv(t, func(c *Config) { c.InvitesDir = dir })
-	_, _ = addMember(t, e, "Zed", domain.RoleAdmin, false)
-	code, _, err := mintInvite(dir, time.Hour, e.member.ID)
+	_, _ = addMember(t, e, "Zed", domain.RoleSuperAdmin, false)
+	code, _, err := mintInvite(dir, time.Hour, e.member.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

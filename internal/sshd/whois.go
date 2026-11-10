@@ -216,7 +216,7 @@ func (s *Server) WebIdentity() error {
 }
 
 // registerTailnetMember auto-registers an unknown tailnet login. The
-// first identity to contact a fresh server bootstraps as the admin;
+// first identity to contact a fresh server bootstraps as the super admin;
 // later identities join pending unless TailnetAutoJoin is set.
 func (s *Server) registerTailnetMember(ctx context.Context, id WhoIsIdentity) (*domain.Member, error) {
 	s.registerMu.Lock()
@@ -233,7 +233,7 @@ func (s *Server) registerTailnetMember(ctx context.Context, id WhoIsIdentity) (*
 		Pending:      !s.cfg.TailnetAutoJoin,
 	}
 	if len(members) == 0 {
-		m.Role = domain.RoleAdmin
+		m.Role = domain.RoleSuperAdmin
 		m.Pending = false
 	}
 	if err := s.cfg.Store.CreateMember(ctx, m); err != nil {
@@ -243,8 +243,8 @@ func (s *Server) registerTailnetMember(ctx context.Context, id WhoIsIdentity) (*
 		}
 		return nil, err
 	}
-	if m.Role == domain.RoleAdmin {
-		slog.Info("sshd: bootstrap: first member registered as admin",
+	if m.Role == domain.RoleSuperAdmin {
+		slog.Info("sshd: bootstrap: first member registered as super admin",
 			"member", m.ID, "login", id.Login, "node", id.NodeID, "method", "tailnet")
 	} else {
 		slog.Info("sshd: tailnet member auto-registered",

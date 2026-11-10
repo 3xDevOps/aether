@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	registerGuarded(protocol.MethodWorkspaceImport, permissions.WorkspaceAdmin, nil, (*Server).workspaceImport)
+	registerGuarded(protocol.MethodWorkspaceImport, permissions.CreateWorkspace, nil, (*Server).workspaceImport)
 }
 
 // workspaceImport creates exactly one workspace per request. Once creation has
@@ -47,7 +47,7 @@ func (s *Server) workspaceImport(ctx context.Context, member domain.MemberID, pa
 	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if adminErr := s.requireAdmin(ctx, member, protocol.MethodWorkspaceImport); adminErr != nil {
+	if adminErr := s.requireIn(ctx, member, permissions.CreateWorkspace, "", protocol.MethodWorkspaceImport); adminErr != nil {
 		return nil, adminErr
 	}
 	request := mirrorservice.ConfigureRequest{
@@ -68,7 +68,7 @@ func (s *Server) workspaceImport(ctx context.Context, member domain.MemberID, pa
 	}
 	workspace, perr := s.createWorkspace(ctx, protocol.WorkspaceAddParams{
 		Name: p.Name, Environment: p.Environment, BaseBranch: p.BaseBranch,
-	}, domain.NormalizeOrigin(p.Origin))
+	}, domain.NormalizeOrigin(p.Origin), member)
 	if perr != nil {
 		return nil, perr
 	}

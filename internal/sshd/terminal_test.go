@@ -520,6 +520,7 @@ func TestTerminalExecReturnsTheCommandResult(t *testing.T) {
 func TestTerminalAdmissionSerializesMemberRemoval(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	_, target := addMember(t, e, "Terminal user", domain.RoleCollaborator, false)
 	started, release := e.runs.blockEnsureTerminal()

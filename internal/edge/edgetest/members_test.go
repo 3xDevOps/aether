@@ -30,7 +30,7 @@ func TestInvitations(t *testing.T) {
 	// By GitHub login: bob sees the server, is refused until he presents
 	// the invitation's link, and joining by it makes him a member with the
 	// invited role and uses the invitation up.
-	link := inviteLogin(t, ctl, bo, a.id, "admin")
+	link := inviteLogin(t, ctl, bo, a.id, "super_admin")
 	_, err := h.dial(bo, h.link(a))
 	var refused *edgeproto.Refused
 	if !errors.As(err, &refused) || refused.Kind != edgeproto.RefusedInvitationNeedsLink {
@@ -52,7 +52,7 @@ func TestInvitations(t *testing.T) {
 	if invs, ierr := a.db.ListInvitations(ctx); ierr != nil || len(invs) != 1 || invs[0].Login != bob.Login {
 		t.Fatalf("invitations after bob without the link = %+v, %v; want bob's open", invs, ierr)
 	}
-	if res, jerr := h.joinBy(bo, link); jerr != nil || res.Info.Member.Role != "admin" {
+	if res, jerr := h.joinBy(bo, link); jerr != nil || res.Info.Member.Role != "super_admin" {
 		t.Fatalf("bob joined as %+v, %v", res.Info.Member, jerr)
 	}
 	if invs := call[protocol.MemberInvitationListResult](t, ctl, protocol.MethodMemberInvitationList, struct{}{}); len(invs.Invitations) != 0 {
@@ -133,9 +133,9 @@ func TestRoleChange(t *testing.T) {
 	deniedCall(t, bctl, protocol.MethodMemberInvitationCreate,
 		protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"}, "admin")
 
-	call[protocol.MemberRoleResult](t, ctl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(a.memberOf(t, bob).ID), Role: "admin"})
-	waitRole(t, bo, a.id, "admin")
-	if info := call[protocol.ServerInfoResult](t, bctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "admin" {
+	call[protocol.MemberRoleResult](t, ctl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(a.memberOf(t, bob).ID), Role: "super_admin"})
+	waitRole(t, bo, a.id, "super_admin")
+	if info := call[protocol.ServerInfoResult](t, bctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "super_admin" {
 		t.Fatalf("bob's live connection sees %+v", info.Member)
 	}
 	invite(t, bctl, protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"})

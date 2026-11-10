@@ -39,8 +39,8 @@ func TestAdmissionMatrix(t *testing.T) {
 	other := testServerID(t)
 	h.claim(t, id, "alpha", owner)
 	h.claim(t, other, "beta", edgeproto.Account{Provider: "github", Subject: "99"})
-	if role, err := h.svc.Admit(ctx, id, owner); err != nil || role != "admin" {
-		t.Fatalf("owner before any directory = %q, %v; want admin", role, err)
+	if role, err := h.svc.Admit(ctx, id, owner); err != nil || role != "super_admin" {
+		t.Fatalf("owner before any directory = %q, %v; want super_admin", role, err)
 	}
 	if err := h.svc.ReplaceDirectory(ctx, id, edgeproto.Directory{Entries: []edgeproto.DirectoryEntry{
 		{Kind: edgeproto.EntryMember, Provider: "github", Subject: "1", Role: "admin"},
@@ -194,7 +194,7 @@ func TestOwnershipComesFromServerReports(t *testing.T) {
 	if err := h.svc.TransferOwner(ctx, id, edgeproto.AccountPrincipal(heir)); err != nil {
 		t.Fatal(err)
 	}
-	if role, err := h.svc.Admit(ctx, id, heir); err != nil || role != "admin" {
+	if role, err := h.svc.Admit(ctx, id, heir); err != nil || role != "super_admin" {
 		t.Fatalf("new owner admitted as %q, %v", role, err)
 	}
 	if _, err := h.svc.Admit(ctx, id, owner); !errors.Is(err, edgeproto.RefusalNotMember) {
