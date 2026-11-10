@@ -466,9 +466,10 @@ func (b *sshBackend) alive(conn *cli.Conn) bool {
 	return conn.Ping(ctx) == nil || conn.LastRead().After(start)
 }
 
-// stream opens one subsystem channel. Errors the server answered pass through
-// (attach/sync ack refusals are untyped, hence the keepalive probe); only a
-// dead connection is invalidated, redialed and retried once.
+// stream opens one subsystem channel. Errors the server answered (attach/sync
+// ack refusals are untyped, hence the keepalive probe) and any error once ctx
+// ends pass through; only a dead connection is invalidated, redialed and
+// retried once.
 func stream[T any](ctx context.Context, b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
 	conn, _, err := b.live(ctx)
 	if err != nil {
@@ -477,7 +478,7 @@ func stream[T any](ctx context.Context, b *sshBackend, open func(*cli.Conn) (T, 
 	}
 	out, oerr := open(conn)
 	var perr *protocol.Error
-	if oerr == nil || errors.As(oerr, &perr) || b.alive(conn) {
+	if oerr == nil || errors.As(oerr, &perr) || ctx.Err() != nil || b.alive(conn) {
 		return out, oerr
 	}
 	b.invalidate(conn)

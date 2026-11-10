@@ -103,8 +103,9 @@ func TestSSHBackendKeepsAStalledServer(t *testing.T) {
 	if _, perr := b.Call(ctx, protocol.MethodServerInfo, nil); perr != nil {
 		t.Fatal(perr)
 	}
-	path.stall(keepaliveCount / 2 * keepaliveInterval)
-	time.Sleep(keepaliveCount / 2 * keepaliveInterval)
+	path.hold.Lock()
+	time.AfterFunc(5*keepaliveInterval, path.hold.Unlock)
+	time.Sleep(5 * keepaliveInterval)
 	if _, perr := b.Call(ctx, protocol.MethodServerInfo, nil); perr != nil {
 		t.Fatalf("call after a stall = %v, want it answered", perr)
 	}
@@ -415,8 +416,8 @@ func serveControl(t *testing.T, ln net.Listener, answer func(method string) json
 // silencer relays TCP to target, pausing pace after each 4 KiB toward the
 // client when pace is set, as a weak mobile link does. silence stops every
 // connection open so far from carrying anything, without closing it, as a
-// network that went away does; connections opened later work. stall holds
-// every byte for a while and then delivers it, as a starved server does.
+// network that went away does; connections opened later work. Holding hold
+// keeps every byte back until it is released, as a starved server does.
 type silencer struct {
 	ln     net.Listener
 	mu     sync.Mutex
@@ -456,11 +457,6 @@ func (s *silencer) silence() {
 	defer s.mu.Unlock()
 	close(s.silent)
 	s.silent = make(chan struct{})
-}
-
-func (s *silencer) stall(d time.Duration) {
-	s.hold.Lock()
-	time.AfterFunc(d, s.hold.Unlock)
 }
 
 func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Duration, hold *sync.RWMutex) {
