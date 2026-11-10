@@ -269,6 +269,9 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 		if err := e.db.CreateMember(ctx, m); err != nil {
 			t.Fatal(err)
 		}
+		if err := e.db.GrantWorkspace(ctx, e.ws.ID, m.ID, domain.MemberID(info.Member.ID)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := e.db.ShareAccount(ctx, grace.ID, domain.MemberID(info.Member.ID)); err != nil {
 		t.Fatal(err)
@@ -620,7 +623,7 @@ func newEnv(t *testing.T) *env {
 	if err = db.RegisterDevice(ctx, dev); err != nil {
 		t.Fatal(err)
 	}
-	ws := &domain.Workspace{Name: "proj", BaseBranch: "main"}
+	ws := &domain.Workspace{Name: "proj", BaseBranch: "main", OwnerID: member.ID}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatal(err)
 	}
