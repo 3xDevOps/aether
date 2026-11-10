@@ -223,6 +223,11 @@ func (s *Server) scheduleSave(ctx context.Context, member domain.MemberID, param
 	if p.Template == "" || p.Cron == "" {
 		return nil, invalidParams("template and cron are required")
 	}
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if perr = s.requireIn(ctx, member, permissions.Launch, workspace, protocol.MethodScheduleSave); perr != nil {
+		return nil, perr
+	}
 	admin, perr := s.scheduleAdmin(ctx, member, workspace)
 	if perr != nil {
 		return nil, perr
