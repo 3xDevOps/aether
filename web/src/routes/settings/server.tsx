@@ -230,8 +230,8 @@ function DockerInRunsRow({ client }: { client: Api }) {
 function RetainedContainersRow() {
   const ctx = useStateContext()
   const caps = useCapability()
-  const self = useSelf()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const self = useSelf(activeWorkspace)
   const workspaceName = useStore((s) => s.workspaces[s.activeWorkspace]?.name)
   const openDialog = useStore((s) => s.openPaletteDialog)
   if (!caps.hasMethod('run.release')) return null

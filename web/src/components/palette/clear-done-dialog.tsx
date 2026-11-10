@@ -21,7 +21,7 @@ function scope(): [string, StateContext] {
 
 export function ClearDoneDialog() {
   const cap = useCapability()
-  const self = useSelf()
+  const self = useSelf(useStore((s) => s.activeWorkspace))
   const close = useStore((s) => s.closePaletteDialog)
   const removeRun = useStore((s) => s.removeRun)
   const build = () => {
@@ -89,7 +89,7 @@ export function ClearDoneDialog() {
 
 export function ReleaseFinishedDialog() {
   const cap = useCapability()
-  const self = useSelf()
+  const self = useSelf(useStore((s) => s.activeWorkspace))
   const close = useStore((s) => s.closePaletteDialog)
   const [plan] = useState(() => releaseFinishedPlan(workspaceRuns(...scope()), cap, self))
   const [running, setRunning] = useState(false)

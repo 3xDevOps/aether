@@ -1968,6 +1968,18 @@ describe('applyEvent', () => {
     }
   })
 
+  it('re-reads the members on a workspace access change', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const memberList = vi.fn(async () => ({ members: [alice, bob] }))
+    await applyEvent(store, statusEvent({
+      run_id: '', type: 'workspace.access',
+      payload: { workspace_id: workspace.id, member_id: bob.id, action: 'granted' },
+    }), fakeApi({ memberList }))
+
+    expect(memberList).toHaveBeenCalledTimes(1)
+  })
+
   it('brings back the sessions of a workspace the viewer regains', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]), runList: vi.fn(async () => []) }))

@@ -232,8 +232,8 @@ function FinishedFooter({
 function FinishedMenu() {
   const ctx = useStateContext()
   const caps = useCapability()
-  const self = useSelf()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const self = useSelf(activeWorkspace)
   const admin = useIsWorkspaceAdmin(activeWorkspace)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const canArchive = clearDonePlan(finishedRuns(activeWorkspace, ctx), caps, self).eligible.length > 0 ||
