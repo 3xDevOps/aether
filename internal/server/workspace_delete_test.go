@@ -173,7 +173,7 @@ func TestWorkspaceDeleteRefusesPermissionsAndScheduledWork(t *testing.T) {
 	if err := s.db.SaveTemplate(ctx, template); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.SaveSchedule(ctx, &store.Schedule{TemplateID: template.ID, Cron: "0 * * * *", MemberID: member.ID}); err != nil {
+	if err := s.db.SaveSchedule(ctx, &store.Schedule{TemplateID: template.ID, Cron: "0 * * * *", MemberID: member.ID}, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := callWorkspaceDeletion(t, s, member.ID, ws.ID); err == nil || err.Code != protocol.CodeConflict || !strings.Contains(err.Message, "schedules") {
@@ -182,7 +182,7 @@ func TestWorkspaceDeleteRefusesPermissionsAndScheduledWork(t *testing.T) {
 	if _, err := s.db.GetTemplate(ctx, ws.ID, template.Name); err != nil {
 		t.Fatalf("refused deletion changed workspace: %v", err)
 	}
-	if err := s.db.DeleteSchedule(ctx, template.ID); err != nil {
+	if err := s.db.DeleteSchedule(ctx, template.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := callWorkspaceDeletion(t, s, member.ID, ws.ID); err != nil {
