@@ -15,7 +15,7 @@ type MemoryService interface {
 	Add(ctx context.Context, member domain.MemberID, p protocol.MemoryAddParams) (protocol.MemoryAddResult, error)
 	Search(ctx context.Context, member domain.MemberID, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error)
 	Show(ctx context.Context, member domain.MemberID, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error)
-	Brief(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, self domain.RunID) (string, error)
+	Brief(ctx context.Context, workspace domain.WorkspaceID, member, reader domain.MemberID, self domain.RunID) (string, error)
 	Pin(ctx context.Context, member domain.MemberID, p protocol.MemoryPinParams) (protocol.MemoryPinResult, error)
 	Unpin(ctx context.Context, member domain.MemberID, p protocol.MemoryUnpinParams) (protocol.MemoryUnpinResult, error)
 	Remove(ctx context.Context, member domain.MemberID, p protocol.MemoryRmParams) (protocol.MemoryRmResult, error)
@@ -87,7 +87,7 @@ func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw js
 		}
 		member = m.ID
 	}
-	text, err := svc.Brief(ctx, domain.WorkspaceID(p.WorkspaceID), member, "")
+	text, err := svc.Brief(ctx, domain.WorkspaceID(p.WorkspaceID), member, caller, "")
 	if err != nil {
 		return nil, rpcError(err)
 	}

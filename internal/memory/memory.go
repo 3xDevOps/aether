@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -477,24 +478,30 @@ func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspa
 	return m, permissions.Check(permissions.Push, permissions.ActorOf(m), permissions.Target{Workspace: workspace})
 }
 
-// reach is the workspaces member reaches, nil for a super admin, who
-// reaches all: a note of a session with a workspace outside them, and the
-// session itself, do not exist for member.
-func (s *Service) reach(ctx context.Context, member domain.MemberID) ([]domain.WorkspaceID, error) {
-	m, err := s.cfg.Store.GetMember(ctx, member)
-	if err != nil {
-		return nil, err
+// reach is the workspaces every one of members reaches, nil when they are
+// all super admins, who reach every workspace: a note of a session with a
+// workspace outside them, and the session itself, do not exist for them.
+func (s *Service) reach(ctx context.Context, members ...domain.MemberID) ([]domain.WorkspaceID, error) {
+	var actors []permissions.Actor
+	for _, id := range members {
+		m, err := s.cfg.Store.GetMember(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if actor := permissions.ActorOf(m); actor.Role != domain.RoleSuperAdmin {
+			actors = append(actors, actor)
+		}
 	}
-	actor := permissions.ActorOf(m)
-	if actor.Role == domain.RoleSuperAdmin {
+	if len(actors) == 0 {
 		return nil, nil
 	}
 	out := []domain.WorkspaceID{}
-	for _, set := range []map[domain.WorkspaceID]bool{actor.Access.Owned, actor.Access.Granted} {
+	for _, set := range []map[domain.WorkspaceID]bool{actors[0].Access.Owned, actors[0].Access.Granted} {
 		for ws := range set {
-			if actor.Reaches(ws) {
-				out = append(out, ws)
+			if slices.ContainsFunc(actors, func(a permissions.Actor) bool { return !a.Reaches(ws) }) {
+				continue
 			}
+			out = append(out, ws)
 		}
 	}
 	return out, nil

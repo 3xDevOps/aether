@@ -469,7 +469,7 @@ func TestBriefShape(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	ada := f.member("Ada", domain.RoleCollaborator)
-	if text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ""); err != nil || text != "" {
+	if text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ada.ID, ""); err != nil || text != "" {
 		t.Fatalf("empty workspace brief = %q, %v", text, err)
 	}
 	self := f.run(ada, "claude", "my own task")
@@ -495,7 +495,7 @@ func TestBriefShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, self.ID)
+	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ada.ID, self.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +556,7 @@ func TestBriefFitsFullPinBudgets(t *testing.T) {
 		f.finish(r, time.Duration(i+1)*time.Hour)
 	}
 
-	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, self.ID)
+	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ada.ID, self.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +588,7 @@ func TestBriefStripsControlCharacters(t *testing.T) {
 	f := newFixture(t)
 	pinned := f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention,
 		Text: "\x1b]0;owned\x07\x1b[2J Use bun\x7f\u009b in web/\tnever npm", Pin: true})
-	text, err := f.svc.Brief(context.Background(), f.ws.ID, f.dana.ID, "")
+	text, err := f.svc.Brief(context.Background(), f.ws.ID, f.dana.ID, f.dana.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +642,7 @@ func TestBriefDropsPinsOnlyPastBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, err := svc.Brief(ctx, f.ws.ID, f.dana.ID, "")
+	text, err := svc.Brief(ctx, f.ws.ID, f.dana.ID, f.dana.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,13 +837,16 @@ func TestMemoryLeavesOutSessionsWithAnUnreachableWorkspace(t *testing.T) {
 		if (err == nil) != tc.sees || (err != nil && !strings.Contains(err.Error(), "not found")) {
 			t.Errorf("%s show = %v; want shown %v, else not found", tc.who.DisplayName, err, tc.sees)
 		}
-		text, err := scoped.Brief(ctx, f.ws.ID, tc.who.ID, "")
+		text, err := scoped.Brief(ctx, f.ws.ID, tc.who.ID, tc.who.ID, "")
 		if err != nil || strings.Contains(text, hidden.Branch) != tc.sees {
 			t.Errorf("%s brief = %q, %v; want the hidden session %v", tc.who.DisplayName, text, err, tc.sees)
 		}
 		if !tc.sees && text != "" {
 			t.Errorf("%s brief = %q; want none, the hidden sessions and their note left out of the counts", tc.who.DisplayName, text)
 		}
+	}
+	if text, err := scoped.Brief(ctx, f.ws.ID, ola.ID, f.dana.ID, ""); err != nil || strings.Contains(text, hidden.Branch) {
+		t.Errorf("Ola's brief as Dana reads it = %q, %v; want the hidden session left out", text, err)
 	}
 	raw, err := json.Marshal(protocol.MemorySearchParams{Words: "private"})
 	if err != nil {

@@ -62,7 +62,7 @@ func (s *Service) HandleAgent(ctx context.Context, id domain.RunID, method strin
 		p.WorkspaceID = workspace
 		return s.Show(ctx, run.MemberID, p)
 	case protocol.MethodMemoryBrief:
-		text, err := s.Brief(ctx, run.WorkspaceID, run.MemberID, run.ID)
+		text, err := s.Brief(ctx, run.WorkspaceID, run.MemberID, run.MemberID, run.ID)
 		if err != nil {
 			return nil, err
 		}
