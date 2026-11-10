@@ -278,8 +278,6 @@ func (s *Server) workspaceOwnerSet(ctx context.Context, member domain.MemberID, 
 	return s.workspaceAccess(ctx, ws)
 }
 
-// publishAccess publishes a committed access change in its workspace; a
-// failed publish is logged, as for member.device.
 func (s *Server) publishAccess(ctx context.Context, actor domain.MemberID, ws domain.WorkspaceID, member domain.MemberID, action string) {
 	ev := events.Event{WorkspaceID: ws, ActorID: actor,
 		Payload: events.WorkspaceAccessPayload{WorkspaceID: ws, MemberID: member, Action: action}}

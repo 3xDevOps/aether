@@ -291,7 +291,7 @@ export function TreeDirectory({
 
 export function RunCheckoutTree({ source, client, ...props }: Omit<ComponentProps<typeof TreeDirectory>, 'source' | 'path' | 'action'> & { source: WorkspaceSource }) {
   const run = useStore((s) => s.runs[source.runID])
-  const self = useSelf()
+  const self = useSelf(source.workspaceID)
   const steerOthers = useStore((s) => s.workspaces[source.workspaceID]?.steer_others)
   const writable = useCapability().hasMethod('files.upload') && run !== undefined && isLiveRun(run) &&
     allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })

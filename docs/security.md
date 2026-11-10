@@ -795,7 +795,7 @@ is a member.
   proof from both sign-ins and a person's approval. A merged member keeps the
   lower role. Do not enter a merge code you did not ask for.
 - `sudo aether-server edge claim-code --admin <member-id>` recovers access for
-  an existing super admin and nothing else.
+  an existing admin or super admin and nothing else; it raises no role.
 - The first link pins the server's identity. A server id from `aether servers`
   comes from the edge: before you confirm, compare the id and fingerprint the
   CLI shows with `sudo aether-server edge status` on the server.

@@ -40,8 +40,6 @@ func checkSteer(ctx context.Context, st store.Store, member domain.MemberID, run
 	return permissions.Check(permissions.Steer, actor, target)
 }
 
-// checkRunView is View in the run's workspace: whether the member may
-// still see the run at all.
 func checkRunView(ctx context.Context, st store.Store, member domain.MemberID, run domain.RunID) error {
 	r, err := st.GetRun(ctx, run)
 	if err != nil {
@@ -58,8 +56,6 @@ func (s *Server) checkPush(ctx context.Context, member domain.MemberID, ws domai
 	return checkIn(ctx, s.cfg.Store, member, permissions.Push, ws)
 }
 
-// resolveActor loads the member's current role and workspace access for a
-// permission check.
 func resolveActor(ctx context.Context, st store.Store, id domain.MemberID) (permissions.Actor, error) {
 	m, err := st.GetMember(ctx, id)
 	if err != nil {

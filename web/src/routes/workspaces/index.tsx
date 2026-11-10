@@ -19,7 +19,7 @@ import { WorkspaceSettingsDialog } from '@/routes/admin-dialogs'
 import { WorkspaceAccessDialog, WorkspaceOwnerDialog } from '@/routes/workspaces/access-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { isAdminRole } from '@/lib/permissions'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useCapability, useIsAdmin, useIsSuperAdmin, useSelfRole } from '@/store/hooks'
 
 export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api }) {
@@ -47,8 +47,9 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
     const version = ++fetchVersion.current
     setError(null)
     try {
+      const same = sameIdentity()
       const fresh = await client.workspaceListFull()
-      if (version !== fetchVersion.current) return
+      if (version !== fetchVersion.current || !same()) return
       useStore.getState().setWorkspaces(fresh)
       setLoaded(true)
     } catch (err) {
@@ -59,7 +60,8 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   useEffect(() => {
     if (!caps.hasMethod('member.list')) return
     const { readMembers, setMemberList } = useStore.getState()
-    readMembers(client.memberList()).then(setMemberList, () => {})
+    const same = sameIdentity()
+    readMembers(client.memberList()).then((list) => same() && setMemberList(list), () => {})
   }, [caps, client])
 
   useEffect(() => {

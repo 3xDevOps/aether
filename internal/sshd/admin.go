@@ -23,7 +23,6 @@ func init() {
 	registerMethod(protocol.MethodMemberRemove, (*Server).memberRemove)
 }
 
-// requireAdmin refuses method unless member is an admin or a super admin.
 func (s *Server) requireAdmin(ctx context.Context, member domain.MemberID, method string) *protocol.Error {
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
@@ -70,7 +69,6 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
 }
 
-// createWorkspace creates the workspace p describes, owned by owner.
 func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddParams, origin string, owner domain.MemberID) (*domain.Workspace, *protocol.Error) {
 	if p.Name == "" || !p.Environment.Valid() {
 		return nil, invalidParams("name and valid environment are required")

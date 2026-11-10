@@ -136,4 +136,24 @@ describe('workspace access', () => {
     const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
     expect(await dialog.findByText('No one else has access yet.')).toBeTruthy()
   })
+
+  it('drops a workspace list that arrives after the identity changed', async () => {
+    seed(admin, { owned: true })
+    let release: (list: unknown[]) => void = () => {}
+    const api = client({
+      workspaceListFull: vi.fn()
+        .mockResolvedValueOnce(Object.values(useStore.getState().workspaces))
+        .mockImplementationOnce(() => new Promise((resolve) => { release = resolve })),
+    })
+    render(<WorkspacesRoute params={{}} client={api} />)
+    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
+    fireEvent.click(await dialog.findByRole('button', { name: 'Remove Bob' }))
+    await waitFor(() => expect(api.workspaceListFull).toHaveBeenCalledTimes(2))
+    useStore.setState({ identityKey: 'another-server' })
+    release([{ ...workspace, id: 'ws_stale' }])
+    await waitFor(() => expect(api.workspaceAccessRevoke).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(useStore.getState().workspaces.ws_stale).toBeUndefined()
+  })
 })

@@ -14,18 +14,21 @@ import { useReturnFocus } from '@/lib/hooks'
 import { isAdminRole } from '@/lib/permissions'
 import type { Member, WorkspaceAccess } from '@/lib/types'
 import { roleLabel } from '@/routes/members/roster'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useIsSuperAdmin } from '@/store/hooks'
 
 async function refreshWorkspaces(client: Api) {
-  useStore.getState().setWorkspaces(await client.workspaceListFull())
+  const same = sameIdentity()
+  const list = await client.workspaceListFull()
+  if (same()) useStore.getState().setWorkspaces(list)
 }
 
 function useMembers(client: Api): Member[] {
   const members = useStore((s) => s.members)
   useEffect(() => {
     let live = true
-    useStore.getState().readMembers(client.memberList()).then((list) => live && useStore.getState().setMemberList(list), () => {})
+    const same = sameIdentity()
+    useStore.getState().readMembers(client.memberList()).then((list) => live && same() && useStore.getState().setMemberList(list), () => {})
     return () => {
       live = false
     }
