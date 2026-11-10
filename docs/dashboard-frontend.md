@@ -6711,6 +6711,11 @@ Categories:
   rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
+- **Agents**, where the server offers `agent.list`: each agent's install and
+  login state for your account (`useAgentList`, rendered by the Agents page's
+  `AgentList`) and **Open Agents**. **Log in** or **Set up** on a row opens
+  the Agents page, which still owns install, sign-in, update and removal. Search
+  finds it by "sign in", "login", "Claude", "install" or "agents".
 - **Launch**, where the server offers `launch.defaults.get`: **Saved
   defaults** says who saved them (you or the assistant) and when, or
   "Nothing saved yet". It lists each agent's saved mode and model with
