@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -76,6 +77,87 @@ func scopeRepos(actor permissions.Actor, run *protocol.Run) {
 		}
 	}
 	run.Repos = kept
+}
+
+// reachesRun reports whether actor reaches every workspace of run, its
+// extra repositories' included: a member who does not may list the run but
+// is shown none of its events.
+func reachesRun(actor permissions.Actor, run *domain.Run) bool {
+	return reachesAll(actor, runWorkspaces(run))
+}
+
+func reachesAll(actor permissions.Actor, workspaces []domain.WorkspaceID) bool {
+	for _, ws := range workspaces {
+		if !actor.Reaches(ws) {
+			return false
+		}
+	}
+	return true
+}
+
+// runScopes caches the workspaces of the runs one reader's events name. A
+// run's extra repositories are written once, while it provisions, so a run
+// is cached once it has them or is past provisioning.
+type runScopes struct {
+	st   store.Store
+	runs map[domain.RunID][]domain.WorkspaceID
+}
+
+func newRunScopes(st store.Store) *runScopes {
+	return &runScopes{st: st, runs: map[domain.RunID][]domain.WorkspaceID{}}
+}
+
+// reaches reports whether actor reaches every workspace of run id. A run
+// that no longer exists leaves only the workspace of the event naming it
+// to check; one that cannot be read is reached by super admins alone.
+func (c *runScopes) reaches(ctx context.Context, actor permissions.Actor, id domain.RunID) bool {
+	if actor.Role == domain.RoleSuperAdmin {
+		return true
+	}
+	workspaces, ok := c.runs[id]
+	if !ok {
+		run, err := c.st.GetRun(ctx, id)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			return true
+		case err != nil:
+			return false
+		}
+		workspaces = runWorkspaces(run)
+		if len(run.Extras) > 0 || (run.Status != domain.RunQueued && run.Status != domain.RunProvisioning) {
+			c.runs[id] = workspaces
+		}
+	}
+	return reachesAll(actor, workspaces)
+}
+
+// eventScope is what one read of the event log may show actor.
+func (s *Server) eventScope(ctx context.Context, actor permissions.Actor) events.Scope {
+	runs := newRunScopes(s.cfg.Store)
+	var sees func(domain.MemberID) bool
+	return events.Scope{
+		Workspace: actor.Reaches,
+		Run:       func(id domain.RunID) bool { return runs.reaches(ctx, actor, id) },
+		Sees: func(id domain.MemberID) bool {
+			if sees == nil {
+				sees = s.memberSight(ctx, actor)
+			}
+			return sees(id)
+		},
+	}
+}
+
+// memberSight is visibleMembers for an event reader: an actor that could
+// not be loaded, or whose sight cannot be read, sees no one.
+func (s *Server) memberSight(ctx context.Context, actor permissions.Actor) func(domain.MemberID) bool {
+	if actor.ID == "" {
+		return func(domain.MemberID) bool { return false }
+	}
+	sees, err := s.visibleMembers(ctx, actor)
+	if err != nil {
+		return func(domain.MemberID) bool { return false }
+	}
+	return sees
 }
 
 // memberRunSnapshot is runSnapshot as member may see it: repos in

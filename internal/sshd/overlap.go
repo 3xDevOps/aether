@@ -39,7 +39,7 @@ func (s *Server) runOverlaps(ctx context.Context, member domain.MemberID, _ json
 		case err != nil:
 			return false, err
 		default:
-			reached[id] = actor.Reaches(run.WorkspaceID)
+			reached[id] = reachesRun(actor, run)
 		}
 		return reached[id], nil
 	}

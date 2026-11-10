@@ -259,7 +259,7 @@ func TestWorkspaceAccessRevokeNotifiesTheRevokedMember(t *testing.T) {
 		break
 	}
 	if _, err := e.bus.Publish(ctx, events.Event{WorkspaceID: events.ServerScope, ActorID: e.member.ID,
-		Payload: events.MemberDevicePayload{DeviceID: "marker", Status: "pending"}}); err != nil {
+		Payload: events.MemberDevicePayload{DeviceID: "marker", Status: "pending", MemberID: e.a.ID}}); err != nil {
 		t.Fatal(err)
 	}
 	for {

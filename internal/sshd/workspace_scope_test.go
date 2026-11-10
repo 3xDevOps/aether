@@ -51,6 +51,7 @@ type scopeWorld struct {
 	runUA, runUB  *domain.Run
 	a, b, u, n    *domain.Member
 	clients       map[string]*protocol.Client
+	signers       map[string]ssh.Signer
 	runOverlapsOf fixedOverlaps
 }
 
@@ -135,7 +136,9 @@ func newScopeWorld(t *testing.T) *scopeWorld {
 		{RunID: w.runB.ID, With: []overlap.Peer{{RunID: w.runUB.ID, MemberID: w.u.ID, Files: []string{"x.go"}}}},
 		{RunID: w.runUB.ID, With: []overlap.Peer{{RunID: w.runB.ID, MemberID: w.b.ID, Files: []string{"x.go"}}}},
 	}
-	w.clients = map[string]*protocol.Client{"S": controlClient(t, e)}
+	signers["S"] = e.signer
+	w.signers = signers
+	w.clients = map[string]*protocol.Client{}
 	for name, signer := range signers {
 		w.clients[name] = controlAs(t, e, signer)
 	}
@@ -294,7 +297,7 @@ func TestWorkspaceScopeLists(t *testing.T) {
 		t.Errorf("S insights = launched %d, %d members; want every run and member", got.Totals.Launched, len(got.Outcomes.Members))
 	}
 
-	for _, r := range []*domain.Run{w.runA, w.runB} {
+	for _, r := range []*domain.Run{w.runUA, w.runB} {
 		if _, err := w.bus.Publish(t.Context(), events.Event{WorkspaceID: r.WorkspaceID, RunID: r.ID, Payload: events.RunStatusPayload{To: domain.RunRunning}}); err != nil {
 			t.Fatal(err)
 		}

@@ -77,7 +77,7 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 			return nil, rpcError(err)
 		}
 		for _, run := range runs {
-			if run.ArchivedAt != nil {
+			if run.ArchivedAt != nil || !reachesRun(actor, run) {
 				continue
 			}
 			r, err := s.attentionRun(ctx, run)

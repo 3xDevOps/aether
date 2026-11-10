@@ -2079,10 +2079,14 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   to `edge.claim`.
 
 A device recorded pending, approved or revoked is published as the
-`member.device` event, `{"device_id":"...","status":"..."}`, and a merge
-as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`,
+`member.device` event, `{"device_id":"...","status":"...","member_id":"..."}`,
+and a merge as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`,
 under the workspace id `server`, which names no workspace, so a server without
-workspaces still reports it. The shapes are in
+workspaces still reports it. `member_id` is the member the device signs in
+as, or for a device waiting on an invitation the member it links or the
+invitation's creator. Either event reaches only a member who sees every
+member it names (`member.list`), and a device event without `member_id`
+only super admins. The shapes are in
 `internal/protocol/identity.go` and `internal/protocol/edge.go`, and
 [edge.md](edge.md) describes what each does. A workspace grant, revoke or
 owner change is also published under `server` as `member.access`,
