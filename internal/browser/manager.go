@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -187,6 +188,10 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 		return status, nil, errors.New("browser companion ownership mismatch")
 	}
 	status.State = info.State
+	if status.Unavailable != "" {
+		status.Reason = status.Unavailable
+		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Unavailable)
+	}
 	if info.State != "running" {
 		status.Reason = "Recorded companion is " + info.State
 		if status != persisted {
@@ -195,10 +200,6 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 			}
 		}
 		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Reason)
-	}
-	if status.Unavailable != "" {
-		status.Reason = status.Unavailable
-		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Unavailable)
 	}
 	if entry.client == nil {
 		entry.client = NewClient(filepath.Join(dir, "control", "browser.sock"))
@@ -422,7 +423,12 @@ func (m *Manager) MarkUnavailable(run Run, reason string) error {
 	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
 		return errors.New("browser lifecycle session identity mismatch")
 	}
-	status.Unavailable, status.Reason = reason, reason
+	// loadStatus refuses a journal over 16 KiB; a companion error alone
+	// may be 8 KiB.
+	if len(reason) > 2048 {
+		reason = strings.ToValidUTF8(reason[:2048], "")
+	}
+	status.Unavailable = reason
 	return saveStatus(dir, status)
 }
 
