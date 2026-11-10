@@ -17,7 +17,7 @@ func init() {
 	registerGuarded(protocol.MethodWorkspaceTimeline, permissions.View, workspaceTarget, (*Server).workspaceTimeline)
 }
 
-func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) workspaceTimeline(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	reader := s.cfg.Services.Timeline
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace.timeline: workspace history is not available"}
@@ -36,14 +36,18 @@ func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, param
 	if !p.Newest && p.BeforeSeq > 0 {
 		return nil, invalidParams("before_seq needs newest")
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	filter := timeline.Filter{
 		Workspace: domain.WorkspaceID(p.WorkspaceID),
 		Run:       domain.RunID(p.RunID),
 		Member:    domain.MemberID(p.MemberID),
 		Types:     types,
+		Reaches:   actor.Reaches,
 	}
 	var page timeline.Page
-	var err error
 	if p.Newest {
 		page, err = reader.Before(ctx, filter, p.BeforeSeq, p.Limit)
 	} else {

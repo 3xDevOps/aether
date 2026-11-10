@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -513,9 +514,8 @@ func TestRunResultLeavesOutUnreachableRepos(t *testing.T) {
 		t.Fatalf("S sees repos %+v, want the primary and B's", got.Run.Repos)
 	}
 	var res protocol.RunResult
-	params := protocol.RunCloseParams{RunID: string(w.runA.ID), Outcome: string(domain.RunAbandoned)}
-	if err := w.call(t, "U", protocol.MethodRunClose, params, &res); err != nil {
-		t.Fatalf("U closes A's run: %v", err)
+	if err := w.call(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(w.runA.ID)}, &res); err != nil {
+		t.Fatalf("U gets A's run: %v", err)
 	}
 	if res.Run.ID != string(w.runA.ID) {
 		t.Fatalf("U's result = %+v, want A's run", res.Run)
@@ -523,6 +523,60 @@ func TestRunResultLeavesOutUnreachableRepos(t *testing.T) {
 	for _, r := range res.Run.Repos {
 		if r.WorkspaceID == string(w.wsB.ID) {
 			t.Fatalf("U's result names B's repo: %+v", res.Run.Repos)
+		}
+	}
+	closeParams := func(id string) protocol.RunCloseParams {
+		return protocol.RunCloseParams{RunID: id, Outcome: string(domain.RunAbandoned)}
+	}
+	w.sameAsMissing(t, "U", protocol.MethodRunClose, closeParams(string(w.runA.ID)), closeParams(noRun))
+}
+
+func TestExtraRepoWorkAndForeignSendersStayInTheirWorkspace(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	ua := w.runUA
+	const url = "https://github.com/acme/b/pull/7"
+	if err := w.e.db.RecordRunPullRequest(ctx, &store.RunPullRequest{RunID: ua.ID, RepoWorkspace: w.wsB.ID, Repository: "acme/b", Number: 7,
+		URL: url, State: "open", ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.e.db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: w.wsB.ID, FromRun: w.runB.ID, ToRun: ua.ID, Body: "hi",
+		Kind: store.RunMessageKindMessage, CreatedAt: time.Now()}, 100); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []events.Payload{events.RunDiffPayload{Repo: w.wsB.ID}, events.RunPRPayload{RunID: ua.ID, Repo: w.wsB.ID, Number: 7, URL: url}} {
+		if _, err := w.bus.Publish(ctx, events.Event{WorkspaceID: w.wsA.ID, RunID: ua.ID, Payload: p}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	from, to := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	calls := []struct {
+		method string
+		params any
+	}{
+		{protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(ua.ID)}}},
+		{protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{WorkspaceID: string(w.wsA.ID), Types: []string{string(events.TypeRunDiff), string(events.TypeRunPR)}}},
+		{protocol.MethodChangesList, protocol.ChangesListParams{WorkspaceID: string(w.wsA.ID)}},
+		{protocol.MethodInsightsGet, protocol.InsightsParams{Scope: protocol.InsightsScopeEveryone, From: from, To: to, TimeZone: "UTC"}},
+	}
+	for _, who := range []string{"S", "A", "U"} {
+		for _, c := range calls {
+			var res json.RawMessage
+			if err := w.call(t, who, c.method, c.params, &res); err != nil {
+				t.Fatalf("%s %s: %v", who, c.method, err)
+			}
+			leaked := strings.Contains(string(res), url) || strings.Contains(string(res), string(w.wsB.ID)) || strings.Contains(string(res), string(w.runB.ID))
+			if c.method == protocol.MethodInsightsGet {
+				var insights protocol.InsightsResult
+				if err := json.Unmarshal(res, &insights); err != nil {
+					t.Fatal(err)
+				}
+				leaked = leaked || insights.PullRequests.Opened != 0
+			}
+			if leaked != (who == "S") {
+				t.Errorf("%s %s leaks wsB = %v, want %v: %s", who, c.method, leaked, who == "S", res)
+			}
 		}
 	}
 }

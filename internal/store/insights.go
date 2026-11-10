@@ -203,6 +203,15 @@ func (q InsightsQuery) ownerScope() string {
 	return where
 }
 
+// prScope keeps the pull requests of p whose repository is in scope: a
+// run's extra repository can be in a workspace the caller does not reach.
+func (q InsightsQuery) prScope() string {
+	if q.Workspaces == nil {
+		return "1"
+	}
+	return "(p.repo_workspace_id = '' OR p.repo_workspace_id IN " + insightsReachable + ")"
+}
+
 func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error {
 	at, merged, err := encodePullRequestTimes(pr)
 	if err != nil {
@@ -656,7 +665,7 @@ func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 			r.created_at, r.started_at, r.finished_at, COALESCE(p.url, ''), COALESCE(p.state, '')
 		FROM runs r
 		LEFT JOIN run_pull_requests p ON p.rowid = (
-			SELECT rowid FROM run_pull_requests WHERE run_id = r.id ORDER BY created_at DESC, rowid DESC LIMIT 1)
+			SELECT p.rowid FROM run_pull_requests p WHERE p.run_id = r.id AND `+q.prScope()+` ORDER BY p.created_at DESC, p.rowid DESC LIMIT 1)
 		WHERE `+q.ownerScope()+` AND `+insightsFinishedIn+`
 		ORDER BY r.finished_at DESC, r.id DESC LIMIT 50`, args...)
 	if err != nil {
@@ -692,7 +701,7 @@ func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 		SELECT COUNT(DISTINCT p.repo || '#' || p.number) FILTER (WHERE p.created_at >= :from AND p.created_at < :to),
 			COUNT(DISTINCT p.repo || '#' || p.number) FILTER (WHERE p.state = 'merged' AND p.merged_at >= :from AND p.merged_at < :to)
 		FROM run_pull_requests p JOIN runs r ON r.id = p.run_id
-		WHERE `+q.ownerScope(), args...,
+		WHERE `+q.ownerScope()+` AND `+q.prScope(), args...,
 	).Scan(&out.PullRequests.Opened, &out.PullRequests.Merged)
 	if err != nil {
 		return fmt.Errorf("store: insights: pull requests: %w", err)
@@ -705,7 +714,7 @@ func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 func insightsSuccess(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE r.status = 'merged' OR r.review = 'accepted' OR EXISTS (
-			SELECT 1 FROM run_pull_requests p WHERE p.run_id = r.id AND p.state = 'merged'))
+			SELECT 1 FROM run_pull_requests p WHERE p.run_id = r.id AND p.state = 'merged' AND `+q.prScope()+`))
 		FROM runs r WHERE `+q.ownerScope()+` AND `+insightsFinishedIn, args...,
 	).Scan(&out.Success.RunsFinished, &out.Success.RunsSucceeded)
 	if err != nil {

@@ -123,6 +123,10 @@ type Target struct {
 	// Workspace is the workspace the action is in. Check resolves the
 	// actor's role there and refuses with ErrNoAccess when they have none.
 	Workspace domain.WorkspaceID
+	// Extra is every other workspace the action reaches into, such as a
+	// run's extra repositories. The actor must reach each one, or Check
+	// refuses with ErrNoAccess.
+	Extra []domain.WorkspaceID
 	// Owner is the targeted run's owning member; empty when no run is
 	// targeted.
 	Owner domain.MemberID
@@ -159,6 +163,11 @@ func Check(cap Capability, actor Actor, target Target) error {
 	if target.Workspace != "" {
 		var ok bool
 		if role, ok = actor.RoleIn(target.Workspace); !ok {
+			return ErrNoAccess
+		}
+	}
+	for _, ws := range target.Extra {
+		if !actor.Reaches(ws) {
 			return ErrNoAccess
 		}
 	}

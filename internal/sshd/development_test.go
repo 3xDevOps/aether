@@ -266,8 +266,7 @@ func TestRetainedArtifactRejectsWrongRunMissingCaptureAndExpiredPacket(t *testin
 				EvidencePacketID:     tc.packet,
 			}
 			_, _, _, err := e.srv.openDevelopmentArtifact(t.Context(), e.member.ID, req)
-			var perr *protocol.Error
-			if !errors.As(err, &perr) || perr.Code != tc.code {
+			if err == nil || rpcError(err).Code != tc.code {
 				t.Fatalf("retained capture authority = %v, want %d", err, tc.code)
 			}
 		})

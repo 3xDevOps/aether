@@ -378,7 +378,7 @@ func (s *Server) recordPR(ctx context.Context, call runRepoCall, pr *runrepo.Pul
 		return
 	}
 	if opened && prior == nil || prior != nil && prChanged(prior, pr.State, pr.MergedAt) {
-		s.publishRunPR(ctx, run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+		s.publishRunPR(ctx, run, call.repoOwner(), pr.Number, pr.URL, pr.State, pr.MergedAt)
 	}
 }
 
@@ -390,12 +390,12 @@ func prChanged(recorded *store.RunPullRequest, state string, mergedAt *time.Time
 
 // publishRunPR tells clients to re-read a run's pull request. A failure is
 // only logged, like recordPR's: the GitHub side already happened.
-func (s *Server) publishRunPR(ctx context.Context, run domain.Run, number int, url, state string, mergedAt *time.Time) {
+func (s *Server) publishRunPR(ctx context.Context, run domain.Run, repo domain.WorkspaceID, number int, url, state string, mergedAt *time.Time) {
 	if s.cfg.Bus == nil {
 		return
 	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: run.WorkspaceID, RunID: run.ID, Payload: events.RunPRPayload{
-		RunID: run.ID, Number: number, URL: url, State: state, MergedAt: mergedAt,
+		RunID: run.ID, Repo: repo, Number: number, URL: url, State: state, MergedAt: mergedAt,
 	}}); err != nil {
 		slog.Warn("sshd: publish run pull request", "run", run.ID, "error", err)
 	}
@@ -436,7 +436,7 @@ func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p proto
 			return protocol.RunPRStatusResult{}, rpcError(err)
 		}
 		if changed {
-			s.publishRunPR(ctx, call.run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+			s.publishRunPR(ctx, call.run, pr.RepoWorkspace, pr.Number, pr.URL, pr.State, pr.MergedAt)
 		}
 	}
 	latest := prs[0]

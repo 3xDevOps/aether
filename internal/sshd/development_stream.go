@@ -229,6 +229,9 @@ func (s *Server) openDevelopmentArtifact(ctx context.Context, member domain.Memb
 	if !ok {
 		return protocol.DevArtifact{}, nil, nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "retained capture service unavailable"}
 	}
+	if err := checkRunView(ctx, s.cfg.Store, member, domain.RunID(req.RunID)); err != nil {
+		return protocol.DevArtifact{}, nil, nil, err
+	}
 	initial, lookupErr := s.cfg.Store.GetEvidencePacket(ctx, req.EvidencePacketID)
 	if lookupErr != nil {
 		return protocol.DevArtifact{}, nil, nil, lookupErr
@@ -245,14 +248,14 @@ func (s *Server) openDevelopmentArtifact(ctx context.Context, member domain.Memb
 			return err
 		}
 		if packet.RunID != domain.RunID(req.RunID) || packet.WorkspaceID != workspace {
-			return &protocol.Error{Code: protocol.CodeNotFound, Message: "evidence packet not found"}
+			return store.ErrNotFound
 		}
 		target, err := resolveRunTarget(ctx, s.cfg.Store, packet.RunID)
 		if err != nil {
 			return err
 		}
 		if target.Workspace != packet.WorkspaceID {
-			return &protocol.Error{Code: protocol.CodeNotFound, Message: "evidence packet not found"}
+			return store.ErrNotFound
 		}
 		actor, err := resolveActor(ctx, s.cfg.Store, member)
 		if err != nil {
@@ -284,13 +287,16 @@ func (s *Server) openDevelopmentArtifact(ctx context.Context, member domain.Memb
 // Room images use persisted message references and View, not the live
 // development session's Steer/account-use authority.
 func (s *Server) openRoomImage(ctx context.Context, member domain.MemberID, req protocol.DevArtifactDownloadRequest) (protocol.DevArtifact, io.ReadCloser, func(context.Context) error, error) {
+	if err := checkRunView(ctx, s.cfg.Store, member, domain.RunID(req.RunID)); err != nil {
+		return protocol.DevArtifact{}, nil, nil, err
+	}
 	index := *req.AttachmentIndex
 	message, lookupErr := s.cfg.Store.GetRoomMessage(ctx, req.RoomMessageID)
 	if lookupErr != nil {
 		return protocol.DevArtifact{}, nil, nil, lookupErr
 	}
 	if message.RunID != domain.RunID(req.RunID) || message.Resolution == store.RoomResolutionDeleted || index >= len(message.Attachments) {
-		return protocol.DevArtifact{}, nil, nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
+		return protocol.DevArtifact{}, nil, nil, store.ErrNotFound
 	}
 	workspace, reference := message.WorkspaceID, message.Attachments[index]
 	authorize := func(ctx context.Context) error {
@@ -303,14 +309,14 @@ func (s *Server) openRoomImage(ctx context.Context, member domain.MemberID, req 
 		}
 		if current.RunID != domain.RunID(req.RunID) || current.WorkspaceID != workspace || current.Resolution == store.RoomResolutionDeleted ||
 			index >= len(current.Attachments) || current.Attachments[index] != reference {
-			return &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
+			return store.ErrNotFound
 		}
 		target, err := resolveRunTarget(ctx, s.cfg.Store, current.RunID)
 		if err != nil {
 			return err
 		}
 		if target.Workspace != workspace {
-			return &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
+			return store.ErrNotFound
 		}
 		actor, err := resolveActor(ctx, s.cfg.Store, member)
 		if err != nil {

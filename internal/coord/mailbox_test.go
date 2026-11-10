@@ -483,6 +483,55 @@ func TestSendAndAckPublishTypedMessageEvents(t *testing.T) {
 	}
 }
 
+type publishedOutbox struct{ store.CoordAuditStore }
+
+func (publishedOutbox) MarkCoordAuditPublished(context.Context, string) error { return nil }
+
+func TestMessageEventsKeepARecipientInAnotherWorkspaceOutOfTheSenders(t *testing.T) {
+	h := newHarness(t, 1)
+	ctx := context.Background()
+	a := h.runs[0]
+	other := &domain.Workspace{Name: "other", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	b := &domain.Run{WorkspaceID: other.ID, MemberID: a.MemberID, Task: "elsewhere", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := h.db.CreateRun(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := h.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeCoordMessage, events.TypeCoordMessageAcked}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close() //nolint:errcheck // test cleanup
+	at := h.clock
+	for _, pub := range []*store.CoordAuditPublication{
+		{EventID: store.CoordAuditEventID("msg-1"), EventType: store.CoordAuditMessage, MessageID: "msg-1", WorkspaceID: h.workspace,
+			FromRun: a.ID, ToRun: b.ID, Kind: protocol.CoordMessageKindMessage, CreatedAt: at},
+		{EventID: store.CoordAuditAckedEventID("msg-1"), EventType: store.CoordAuditAcked, MessageID: "msg-1", WorkspaceID: h.workspace,
+			FromRun: a.ID, ToRun: b.ID, AckedAt: &at, CreatedAt: at},
+	} {
+		if err := h.svc.publishCoordAudit(ctx, publishedOutbox{}, pub); err != nil {
+			t.Fatalf("publish %s: %v", pub.EventType, err)
+		}
+	}
+	var got []events.Event
+	for range 2 {
+		select {
+		case ev := <-sub.Events():
+			got = append(got, ev)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("got %d coordination events, want 2", len(got))
+		}
+	}
+	if p, ok := got[0].Payload.(events.CoordMessagePayload); !ok || got[0].WorkspaceID != h.workspace || p.ToRunID != "" {
+		t.Fatalf("message event = %+v, want it in the sender's workspace without the recipient", got[0])
+	}
+	if p, ok := got[1].Payload.(events.CoordMessageAckedPayload); !ok || got[1].WorkspaceID != other.ID || got[1].RunID != b.ID || p.ToRunID != b.ID {
+		t.Fatalf("ack event = %+v, want it in the recipient's workspace", got[1])
+	}
+}
+
 // TestWitnessedClearSurvivesAnInterleavedRefresh covers the race between
 // the index publishing a clearing and the consumer processing it: a coord
 // call in that window re-reads the index first and expires the pair

@@ -184,9 +184,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	err = checkRunView(ctx, s.cfg.Store, member, domain.RunID(req.RunID))
+	var run *domain.Run
 	if err == nil {
-		err = checkIn(ctx, s.cfg.Store, member, permissions.View, run.WorkspaceID)
+		run, err = s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
 	}
 	if err != nil {
 		e := rpcError(err)
