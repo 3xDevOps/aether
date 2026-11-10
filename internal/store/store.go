@@ -102,6 +102,9 @@ type Store interface {
 	// ListMembers returns every member but those a merge absorbed.
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	UpdateMember(ctx context.Context, m *domain.Member) error
+	// DeleteMember refuses, in its own transaction, removing the last
+	// approved super admin (ErrLastSuperAdmin) or a member who owns
+	// workspaces (*OwnsWorkspacesError).
 	DeleteMember(ctx context.Context, id domain.MemberID) error
 
 	// ShareAccount and RevokeAccountShare report whether the grant changed:

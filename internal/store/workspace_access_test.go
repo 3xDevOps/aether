@@ -226,6 +226,59 @@ func TestSetMemberRoleGuards(t *testing.T) {
 	}
 }
 
+// Deleting a member re-checks, in its transaction, what a role change
+// may have changed since the caller looked: with two super admins, a
+// removal that counted the first must still refuse once the console
+// demoted it. A workspace owner is refused too.
+func TestDeleteMemberGuards(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, del := range []struct {
+		name string
+		fn   func(*DB, domain.MemberID) error
+	}{
+		{"DeleteMember", func(db *DB, id domain.MemberID) error { return db.DeleteMember(ctx, id) }},
+		{"DeleteMemberWithPreferences", func(db *DB, id domain.MemberID) error {
+			return db.DeleteMemberWithPreferences(ctx, id, func([]string) error { return nil })
+		}},
+	} {
+		t.Run(del.name, func(t *testing.T) {
+			db := openTestDB(t)
+			first := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#ffe119", Role: domain.RoleSuperAdmin}
+			second := &domain.Member{DisplayName: "Sue", PublicKey: testKey(t, "sue"), Color: "#3cb44b", Role: domain.RoleSuperAdmin}
+			owner := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+			for _, m := range []*domain.Member{first, second, owner} {
+				if err := db.CreateMember(ctx, m); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := db.SetMemberRole(ctx, first.ID, domain.RoleAdmin); err != nil {
+				t.Fatal(err)
+			}
+			if err := del.fn(db, second.ID); !errors.Is(err, ErrLastSuperAdmin) {
+				t.Fatalf("delete the last approved super admin = %v, want ErrLastSuperAdmin", err)
+			}
+			if _, err := db.GetMember(ctx, second.ID); err != nil {
+				t.Fatalf("last super admin after refused delete: %v", err)
+			}
+			w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
+			if err := db.CreateWorkspace(ctx, w); err != nil {
+				t.Fatal(err)
+			}
+			var owns *OwnsWorkspacesError
+			if err := del.fn(db, owner.ID); !errors.As(err, &owns) || len(owns.Workspaces) != 1 {
+				t.Fatalf("delete a workspace owner = %v, want OwnsWorkspacesError", err)
+			}
+			if err := del.fn(db, first.ID); err != nil {
+				t.Fatalf("delete an admin who owns nothing: %v", err)
+			}
+			if err := del.fn(db, "mem_missing"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("delete a missing member = %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
 // An invitation's role must be one its creator may grant when it is
 // accepted: an admin's admin invitation, from before super admins, adds
 // no admin.

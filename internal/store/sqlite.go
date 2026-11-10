@@ -776,6 +776,12 @@ func (d *DB) DeleteMember(ctx context.Context, id domain.MemberID) error {
 		return fmt.Errorf("store: begin delete member: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = refuseRemoval(ctx, tx, id); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("store: delete member: %w", err)
+	}
 	if err = removeConnectors(ctx, tx, `member_id = ?`, id); err != nil {
 		return err
 	}

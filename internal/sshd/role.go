@@ -98,7 +98,7 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	}
 	if len(activeRuns) == 0 || s.cfg.Control == nil {
 		if uerr := update(); uerr != nil {
-			return nil, roleError(uerr, m.ID)
+			return nil, memberGuardError(uerr, m.ID, "demote", "demoting")
 		}
 	} else {
 		updated := false
@@ -113,12 +113,12 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 				updated = true
 				return nil
 			}); uerr != nil {
-				return nil, roleError(uerr, m.ID)
+				return nil, memberGuardError(uerr, m.ID, "demote", "demoting")
 			}
 		}
 		if !updated {
 			if uerr := update(); uerr != nil {
-				return nil, roleError(uerr, m.ID)
+				return nil, memberGuardError(uerr, m.ID, "demote", "demoting")
 			}
 		}
 	}
@@ -134,13 +134,13 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	return protocol.MemberRoleResult{Member: protocol.MemberFromDomain(m)}, nil
 }
 
-func roleError(err error, id domain.MemberID) *protocol.Error {
+func memberGuardError(err error, id domain.MemberID, verb, gerund string) *protocol.Error {
 	var owns *store.OwnsWorkspacesError
 	switch {
 	case errors.Is(err, store.ErrLastSuperAdmin):
-		return &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to demote the last super admin"}
+		return &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to " + verb + " the last super admin"}
 	case errors.As(err, &owns):
-		return ownerRefusal("demoting", id, owns.Workspaces)
+		return ownerRefusal(gerund, id, owns.Workspaces)
 	}
 	return rpcError(err)
 }

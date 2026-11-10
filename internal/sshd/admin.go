@@ -169,9 +169,9 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	if p.MemberID == "" {
 		return nil, invalidParams("member_id is required")
 	}
-	// Same read-then-write hazard as member.role: without this lock a
-	// removal and a demotion racing each other can both see two super
-	// admins.
+	// The checks below refuse early, before the terminal stops; the
+	// delete repeats them in its own transaction, so `aether-server
+	// member role` cannot race it.
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
 	s.authorizationMu.Lock()
@@ -250,7 +250,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 				deleteMember = prefs.DeleteMember
 			}
 			if err := deleteMember(ctx, id); err != nil {
-				return err
+				return memberGuardError(err, id, "delete", "removing")
 			}
 			deleted = true
 			noteChange(ctx)

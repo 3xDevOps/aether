@@ -164,6 +164,28 @@ func TestRefuseDeletingLastSuperAdmin(t *testing.T) {
 	}
 }
 
+// A console demotion landing after member.remove counted the other super
+// admin must not let the removal take the last one.
+func TestMemberRemoveRechecksTheLastSuperAdminWhenDeleting(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
+	_, second := addMember(t, e, "Second", domain.RoleSuperAdmin, false)
+	e.runs.whileTerminalStopped = func() {
+		if _, err := e.db.SetMemberRole(context.Background(), e.member.ID, domain.RoleAdmin); err != nil {
+			t.Errorf("demote the caller from the console: %v", err)
+		}
+	}
+	c := controlClient(t, e)
+	var pe *protocol.Error
+	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(second.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied || pe.Message != "refusing to delete the last super admin" {
+		t.Fatalf("remove the super admin left after a console demotion = %v, want the last-super-admin denial", err)
+	}
+	if got, err := e.db.GetMember(context.Background(), second.ID); err != nil || got.Role != domain.RoleSuperAdmin {
+		t.Fatalf("last super admin after the refused removal = %+v, %v", got, err)
+	}
+}
+
 func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 	t.Parallel()
 	homeRoot := t.TempDir()
