@@ -301,6 +301,7 @@ func (s *Service) Capture(ctx context.Context, req Request) (protocol.EvidencePa
 // caller's checkout cleanup. cleanup is called only after Git retention,
 // transcript staging, and metadata persistence have all succeeded, or after
 // req.Uncaptured accepted a checkout Git refused; that returns no packet.
+// cleanup outlives ctx's cancellation and must bound its own work.
 func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup func(context.Context) error) (protocol.EvidencePacket, error) {
 	if err := validateRequest(req); err != nil {
 		return protocol.EvidencePacket{}, err
@@ -318,10 +319,7 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 		}
 	}
 	if cleanup != nil {
-		cleanupCtx, cancel := s.cleanupContext(ctx)
-		err := cleanup(cleanupCtx)
-		cancel()
-		if err != nil {
+		if err := cleanup(context.WithoutCancel(ctx)); err != nil {
 			return packet, fmt.Errorf("evidence: cleanup session %s: %w", req.RunID, err)
 		}
 	}

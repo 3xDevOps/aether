@@ -50,6 +50,7 @@ type GitEngine interface {
 	CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error)
 	PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error)
 	RemoveRunCheckout(ctx context.Context, run domain.RunID) error
+	SalvageRunCheckout(ctx context.Context, run domain.RunID) error
 	RemoveRunHistory(ctx context.Context, run domain.RunID) error
 	StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error
 	StopDiffWatch(run domain.RunID)

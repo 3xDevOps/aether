@@ -666,3 +666,49 @@ func TestSnapshotCheckoutCleanupWaitsForReadableHistoryLog(t *testing.T) {
 		t.Fatalf("retry lost captured history: %v", err)
 	}
 }
+
+func TestSalvagedCheckoutKeepsCataloguedHistoryWithoutTheLog(t *testing.T) {
+	e := newTestEngine(t, nil)
+	seedWorkspace(t, e, serveTransport(t, e), "ws1")
+	ctx := t.Context()
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "salvage", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trees []string
+	for _, body := range []string{"first\n", "second\n"} {
+		if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tree, treeErr := e.writeSnapshotTree(ctx, "run1", checkout)
+		if treeErr != nil {
+			t.Fatal(treeErr)
+		}
+		trees = append(trees, tree)
+	}
+	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.EventLog = log
+	if err := e.SalvageRunCheckout(ctx, "run1"); err != nil {
+		t.Fatalf("salvage with an unreadable log: %v", err)
+	}
+	if _, err := os.Stat(checkout); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("salvaged checkout survived: %v", err)
+	}
+	store, err := e.snapshotStorePath("run1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store, "objects", "info", "alternates")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("salvaged store still borrows the checkout's objects: %v", err)
+	}
+	patch, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[0], To: trees[1]})
+	if err != nil || !strings.Contains(patch.Text, "-first") || !strings.Contains(patch.Text, "+second") {
+		t.Fatalf("catalogued history after salvage: %+v, %v", patch, err)
+	}
+}

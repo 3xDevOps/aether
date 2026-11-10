@@ -37,6 +37,87 @@ func (s *Scheduler) captureBeforeCleanupEvidence(ctx context.Context, run domain
 	return s.captureEvidence(ctx, run, store.EvidenceFinish, "cleanup:"+string(run)+":"+identity, cleanup)
 }
 
+const (
+	// checkoutCleanupTimeout bounds one checkout removal, whose snapshot
+	// detach reads the run's recorded diffs from the event log.
+	checkoutCleanupTimeout = time.Minute
+	// cleanupAttempts is the attempt that settles a failing checkout cleanup.
+	cleanupAttempts  = 5
+	cleanupRetryBase = 15 * time.Minute
+	cleanupRetryMax  = 6 * time.Hour
+)
+
+// cleanupRetry counts the failed cleanups of the checkout a run left when it
+// finished at finished.
+type cleanupRetry struct {
+	finished time.Time
+	attempts int
+	next     time.Time
+}
+
+// cleanupDue reports whether run's checkout cleanup may be tried now, and
+// whether that attempt settles it.
+func (s *Scheduler) cleanupDue(run domain.RunID, finished time.Time) (due, settle bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	retry, ok := s.cleanupRetries[run]
+	if !ok || !retry.finished.Equal(finished) {
+		return true, false
+	}
+	return !s.cfg.Now().Before(retry.next), retry.attempts+1 >= cleanupAttempts
+}
+
+func (s *Scheduler) cleanupFailed(run domain.RunID, finished time.Time, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanupRetries == nil {
+		s.cleanupRetries = make(map[domain.RunID]cleanupRetry)
+	}
+	retry := s.cleanupRetries[run]
+	if !retry.finished.Equal(finished) {
+		retry = cleanupRetry{finished: finished}
+	}
+	retry.attempts++
+	retry.next = s.cfg.Now().Add(min(cleanupRetryBase<<min(retry.attempts-1, 5), cleanupRetryMax))
+	s.cleanupRetries[run] = retry
+	slog.Warn("scheduler: checkout gc: capture before cleanup", "run", run,
+		"attempt", retry.attempts, "retry_at", retry.next, "error", err)
+}
+
+func (s *Scheduler) cleanupDone(run domain.RunID) {
+	s.mu.Lock()
+	delete(s.cleanupRetries, run)
+	s.mu.Unlock()
+}
+
+// settleCheckoutCleanup removes the checkout of a run whose cleanup kept
+// failing, without capturing evidence. The checkout's work is published
+// first; a checkout whose work cannot be published is kept.
+func (s *Scheduler) settleCheckoutCleanup(ctx context.Context, r *domain.Run) error {
+	if _, err := s.commitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); err != nil && !errors.Is(err, gitengine.ErrCheckoutNotFound) {
+		return fmt.Errorf("scheduler: commit before settling cleanup: %w", err)
+	}
+	if _, err := s.cfg.Git.PublishRunBranch(ctx, r.ID); err != nil && !errors.Is(err, gitengine.ErrCheckoutNotFound) {
+		return fmt.Errorf("scheduler: publish before settling cleanup: %w", err)
+	}
+	removeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkoutCleanupTimeout)
+	defer cancel()
+	if err := s.deleteDevelopment(removeCtx, r.ID); err != nil {
+		return err
+	}
+	note := cleanupSettledReason
+	if err := s.cfg.Git.RemoveRunCheckout(removeCtx, r.ID); err != nil {
+		slog.Warn("scheduler: checkout gc: keep only catalogued diff history", "run", r.ID, "error", err)
+		salvageCtx, cancelSalvage := context.WithTimeout(context.WithoutCancel(ctx), checkoutCleanupTimeout)
+		defer cancelSalvage()
+		if err := s.cfg.Git.SalvageRunCheckout(salvageCtx, r.ID); err != nil {
+			return fmt.Errorf("scheduler: checkout gc: salvage session checkout: %w", err)
+		}
+		note = cleanupSalvagedReason
+	}
+	return s.noteCleanup(ctx, r.ID, note)
+}
+
 func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigger store.EvidenceTrigger, idempotency string, cleanup func(context.Context) error) error {
 	s.mu.Lock()
 	service := s.evidence
@@ -409,6 +490,13 @@ func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.Ru
 		}
 	}
 	slog.Warn("scheduler: release session without evidence", "run", run, "error", cause)
+	return s.noteCleanup(ctx, run, evidenceUnavailableReason)
+}
+
+// noteCleanup appends note to a terminal run's reason unless cleanup already
+// noted one there. Only a missing checkout is carried into the reason a run
+// not yet terminal ends with.
+func (s *Scheduler) noteCleanup(ctx context.Context, run domain.RunID, note string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, err := s.cfg.Store.GetRun(ctx, run)
@@ -416,20 +504,23 @@ func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.Ru
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+		return fmt.Errorf("scheduler: record cleanup note: %w", err)
 	}
 	if !r.Status.Terminal() {
+		if note != evidenceUnavailableReason {
+			return nil
+		}
 		if s.evidenceUnavailable == nil {
 			s.evidenceUnavailable = make(map[domain.RunID]struct{})
 		}
 		s.evidenceUnavailable[run] = struct{}{}
 		return nil
 	}
-	if _, noted := withoutEvidenceUnavailable(r.Reason); noted {
+	if _, noted := withoutCleanupNote(r.Reason); noted != "" {
 		return nil
 	}
-	if err := s.relabelLocked(ctx, run, r.WorkspaceID, r.Status, withEvidenceUnavailable(r.Reason), ""); err != nil {
-		return fmt.Errorf("scheduler: record unavailable evidence: %w", err)
+	if err := s.relabelLocked(ctx, run, r.WorkspaceID, r.Status, withCleanupNote(r.Reason, note), ""); err != nil {
+		return fmt.Errorf("scheduler: record cleanup note: %w", err)
 	}
 	return nil
 }

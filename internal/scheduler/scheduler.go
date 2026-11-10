@@ -240,8 +240,10 @@ type Scheduler struct {
 	// evidenceUnavailable holds active runs whose capture found the checkout
 	// gone, for the reason they are interrupted with. Guarded by mu.
 	evidenceUnavailable map[domain.RunID]struct{}
-	titleMu             sync.Mutex
-	titleUpdates        map[domain.RunID]*pendingRunTitle
+	// cleanupRetries backs off checkout cleanups that failed. Guarded by mu.
+	cleanupRetries map[domain.RunID]cleanupRetry
+	titleMu        sync.Mutex
+	titleUpdates   map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
 	// waits is nil when runs register no wait conditions.

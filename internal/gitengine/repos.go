@@ -136,8 +136,17 @@ func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (string
 }
 
 func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error {
-	return errors.Join(e.removeRunCheckout(ctx, run), e.eachExtra(run, false, func(key domain.RunID) error {
-		return e.removeRunCheckout(ctx, key)
+	return errors.Join(e.removeRunCheckout(ctx, run, true), e.eachExtra(run, false, func(key domain.RunID) error {
+		return e.removeRunCheckout(ctx, key, true)
+	}))
+}
+
+// SalvageRunCheckout is RemoveRunCheckout without reading the event log. The
+// snapshot store keeps every tree it catalogued; a tree an older store
+// recorded only in the event log becomes unavailable.
+func (e *Engine) SalvageRunCheckout(ctx context.Context, run domain.RunID) error {
+	return errors.Join(e.removeRunCheckout(ctx, run, false), e.eachExtra(run, false, func(key domain.RunID) error {
+		return e.removeRunCheckout(ctx, key, false)
 	}))
 }
 

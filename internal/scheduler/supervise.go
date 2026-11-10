@@ -728,6 +728,10 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 			if inUse[r.Worktree] {
 				continue
 			}
+			due, settle := s.cleanupDue(r.ID, *r.FinishedAt)
+			if !due {
+				continue
+			}
 
 			var lifecycle *supervised
 			s.mu.Lock()
@@ -787,6 +791,8 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 				identity = "none"
 			}
 			cleanup := func(cleanupCtx context.Context) error {
+				cleanupCtx, cancel := context.WithTimeout(cleanupCtx, checkoutCleanupTimeout)
+				defer cancel()
 				if err := s.deleteDevelopment(cleanupCtx, r.ID); err != nil {
 					return err
 				}
@@ -795,13 +801,20 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 				}
 				return nil
 			}
-			if err := s.captureBeforeCleanupEvidence(ctx, r.ID, identity, cleanup); err != nil {
+			var gcErr error
+			if settle {
+				gcErr = s.settleCheckoutCleanup(ctx, fresh)
+			} else {
+				gcErr = s.captureBeforeCleanupEvidence(ctx, r.ID, identity, cleanup)
+			}
+			if gcErr != nil {
 				if lifecycle != nil {
 					lifecycle.lifecycleMu.Unlock()
 				}
-				slog.Warn("scheduler: checkout gc: capture before cleanup", "run", r.ID, "error", err)
+				s.cleanupFailed(r.ID, *fresh.FinishedAt, gcErr)
 				continue
 			}
+			s.cleanupDone(r.ID)
 			var clearErr error
 			if clearer, ok := s.cfg.Store.(store.RunWorktreeStore); ok {
 				clearErr = clearer.ClearRunWorktree(ctx, fresh.ID, fresh.Worktree, fresh.Status)

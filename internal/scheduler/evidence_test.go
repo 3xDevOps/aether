@@ -600,9 +600,11 @@ func TestAutomaticCheckoutCleanupCapturesBeforeRemoval(t *testing.T) {
 }
 
 func TestCheckoutOverEvidenceLimitIsRemovedOnlyOncePublished(t *testing.T) {
+	clock, advance := movableClock()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = -time.Second
 		cfg.CheckoutTTL = time.Hour
+		cfg.Now = clock
 	})
 	capture := newSchedulerEvidenceCapture(e.ws.ID)
 	capture.refusal = fmt.Errorf("evidence: retain git state: %w", gitengine.ErrEvidenceStorageLimit)
@@ -640,12 +642,116 @@ func TestCheckoutOverEvidenceLimitIsRemovedOnlyOncePublished(t *testing.T) {
 	e.git.mu.Lock()
 	e.git.publishErr = nil
 	e.git.mu.Unlock()
+	advance(cleanupRetryBase)
 	e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) || worktree() != "" {
 		t.Fatalf("published checkout over the evidence limit was kept: %v", statErr)
 	}
 	if capture.packetCount() != 0 {
 		t.Fatalf("refused captures produced %d packets", capture.packetCount())
+	}
+}
+
+// movableClock is a Config.Now that only advance moves.
+func movableClock() (now func() time.Time, advance func(time.Duration)) {
+	var mu sync.Mutex
+	at := time.Now().UTC()
+	return func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return at
+		}, func(d time.Duration) {
+			mu.Lock()
+			at = at.Add(d)
+			mu.Unlock()
+		}
+}
+
+func TestFailingCheckoutCleanupBacksOffThenSettles(t *testing.T) {
+	clock, advance := movableClock()
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = -time.Second
+		cfg.CheckoutTTL = time.Hour
+		cfg.Now = clock
+	})
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.refusal = fmt.Errorf("evidence: retain git state: %w", gitengine.ErrEvidenceStorageLimit)
+	e.sched.UseEvidence(capture)
+	run, _ := e.launchFake(t, "oversized checkout")
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-2 * time.Hour)
+	row.FinishedAt = &old
+	if err = e.db.UpdateRun(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	sweep := func() {
+		e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
+	}
+	fresh := func() *domain.Run {
+		t.Helper()
+		r, getErr := e.db.GetRun(t.Context(), run.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		return r
+	}
+	kept := func(when string) {
+		t.Helper()
+		if _, statErr := os.Stat(row.Worktree); statErr != nil || fresh().Worktree == "" {
+			t.Fatalf("%s: checkout removed: %v", when, statErr)
+		}
+	}
+
+	e.git.mu.Lock()
+	e.git.removeErr = errors.New("events: read log: context deadline exceeded")
+	e.git.mu.Unlock()
+	closed := capture.requestCount()
+	for attempt := 1; attempt < cleanupAttempts; attempt++ {
+		sweep()
+		sweep()
+		if got := capture.requestCount() - closed; got != attempt {
+			t.Fatalf("captures after %d failed cleanups = %d; a failure must back off", attempt, got)
+		}
+		kept(fmt.Sprintf("attempt %d", attempt))
+		advance(cleanupRetryMax)
+	}
+
+	e.git.mu.Lock()
+	e.git.publishErr = errors.New("repository unavailable")
+	e.git.mu.Unlock()
+	sweep()
+	kept("settling with unpublished work")
+
+	e.git.mu.Lock()
+	e.git.publishErr = nil
+	e.git.mu.Unlock()
+	published := e.git.publishedCount(run.ID)
+	advance(cleanupRetryMax)
+	sweep()
+	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) {
+		t.Fatalf("settled checkout was kept: %v", statErr)
+	}
+	r := fresh()
+	if r.Worktree != "" || !strings.HasSuffix(r.Reason, "; "+cleanupSalvagedReason) {
+		t.Fatalf("settled run: worktree %q, reason %q", r.Worktree, r.Reason)
+	}
+	if e.git.publishedCount(run.ID) <= published {
+		t.Fatal("checkout was removed before its work was published")
+	}
+	e.git.mu.Lock()
+	salvaged := e.git.salvaged[run.ID]
+	e.git.mu.Unlock()
+	if salvaged != 1 {
+		t.Fatalf("salvaged = %d, want 1", salvaged)
+	}
+	if got := capture.requestCount() - closed; got != cleanupAttempts-1 {
+		t.Fatalf("captures = %d; settling must not capture again", got)
 	}
 }
 
