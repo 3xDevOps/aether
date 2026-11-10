@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -226,8 +227,10 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	q := store.AuditQuery{ConnectorID: p.ConnectorID, Before: p.Before, Limit: cmp.Or(p.Limit, protocol.AuditListDefaultLimit)}
+	limit := cmp.Or(p.Limit, protocol.AuditListDefaultLimit)
+	q := store.AuditQuery{ConnectorID: p.ConnectorID, Before: p.Before, Limit: limit}
 	actor := permissions.ActorOf(m)
+	shows := func(*store.AuditEntry) bool { return true }
 	if permissions.Check(permissions.ServerAdmin, actor, permissions.Target{}) != nil {
 		q.Member = member
 		for ws := range m.Access.Owned {
@@ -235,10 +238,28 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 				q.Workspaces = append(q.Workspaces, ws)
 			}
 		}
+		runs := newRunScopes(s.cfg.Store)
+		// Another member's entry about a session is shown only to a reader
+		// who reaches every workspace of it; a deleted one only to super admins.
+		shows = func(e *store.AuditEntry) bool {
+			return e.Member == member || !strings.HasPrefix(e.Target, "run-") || runs.reaches(ctx, actor, domain.RunID(e.Target))
+		}
 	}
-	entries, err := as.ListAudit(ctx, q)
-	if err != nil {
-		return nil, rpcError(err)
+	var entries []*store.AuditEntry
+	for len(entries) < limit {
+		page, err := as.ListAudit(ctx, q)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		for _, e := range page {
+			if len(entries) < limit && shows(e) {
+				entries = append(entries, e)
+			}
+		}
+		if len(page) < q.Limit {
+			break
+		}
+		q.Before = page[len(page)-1].Seq
 	}
 	out := protocol.AuditListResult{Entries: make([]protocol.AuditEntry, 0, len(entries))}
 	for _, e := range entries {
@@ -250,7 +271,7 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 		}
 		out.Entries = append(out.Entries, w)
 	}
-	if len(entries) == q.Limit {
+	if len(entries) == limit {
 		out.NextBefore = entries[len(entries)-1].Seq
 	}
 	return out, nil

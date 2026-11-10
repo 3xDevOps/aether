@@ -418,6 +418,56 @@ func TestAuditLeavesOutTheUnreachableWorkspaceOfARefusedCall(t *testing.T) {
 	}
 }
 
+// A workspace owner's audit view leaves out another member's entries about
+// a session they do not reach in every workspace, or that no longer
+// exists, and fills each page with the entries it shows.
+func TestAuditLeavesOutSessionsTheReaderDoesNotReach(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	gone := &domain.Run{WorkspaceID: w.wsA.ID, MemberID: w.u.ID, Task: "gone", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunCompleted}
+	if err := w.e.db.CreateRun(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	as := w.e.store.(store.AuditStore)
+	for _, target := range []domain.RunID{w.runUA.ID, w.runA.ID, gone.ID} {
+		if err := as.AddAudit(ctx, &store.AuditEntry{At: time.Now(), Member: w.e.member.ID, Via: ViaConnector, Method: protocol.MethodRunPause,
+			WorkspaceID: string(w.wsA.ID), Target: string(target)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.e.db.DeleteRun(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	audit := func(who string, p protocol.AuditListParams) protocol.AuditListResult {
+		t.Helper()
+		var res protocol.AuditListResult
+		if err := w.call(t, who, protocol.MethodAuditList, p, &res); err != nil {
+			t.Fatalf("%s audit.list: %v", who, err)
+		}
+		return res
+	}
+	targets := func(res protocol.AuditListResult) []string {
+		var out []string
+		for _, e := range res.Entries {
+			if e.Method == protocol.MethodRunPause {
+				out = append(out, e.Target)
+			}
+		}
+		return out
+	}
+	if got, want := targets(audit("S", protocol.AuditListParams{})), []string{string(gone.ID), string(w.runA.ID), string(w.runUA.ID)}; !slices.Equal(got, want) {
+		t.Fatalf("S audit targets = %v, want %v", got, want)
+	}
+	if got, want := targets(audit("A", protocol.AuditListParams{})), []string{string(w.runUA.ID)}; !slices.Equal(got, want) {
+		t.Fatalf("A audit targets = %v, want %v", got, want)
+	}
+	first := audit("A", protocol.AuditListParams{Limit: 1})
+	if got := targets(first); len(got) != 1 || got[0] != string(w.runUA.ID) || first.NextBefore != first.Entries[0].Seq {
+		t.Fatalf("A's first page of one = %+v, want the reachable entry and a cursor at it", first)
+	}
+}
+
 func TestWorkspaceScopeUnreachableReadsAsMissing(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
