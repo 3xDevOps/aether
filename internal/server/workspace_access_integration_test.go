@@ -120,11 +120,32 @@ func TestIntegrationWorkspaceAccessMatrix(t *testing.T) {
 			t.Run(name, func(t *testing.T) { w.assertLaunch(t, name) })
 		}
 	})
+	for _, check := range []struct {
+		name   string
+		assert func(*testing.T, string)
+	}{
+		{"writes", w.assertForeignWrites},
+		{"workspace roles", w.assertWorkspaceRoles},
+		{"memory", w.assertMemory},
+		{"counts", w.assertCounts},
+		{"connector", func(t *testing.T, name string) { w.assertTools(t, name, w.connectorSession(t, name)) }},
+		{"assistant", func(t *testing.T, name string) { w.assertTools(t, name, w.assistantSession(t, name)) }},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			for _, name := range wsaNames {
+				t.Run(name, func(t *testing.T) { check.assert(t, name) })
+			}
+		})
+	}
+	t.Run("account sharing", func(t *testing.T) { w.assertAccountSharing(t) })
 	t.Run("coordination", func(t *testing.T) { w.assertCoordination(ctx, t) })
 	t.Run("admin", func(t *testing.T) { w.assertAdminActions(t) })
 	t.Run("handoff", func(t *testing.T) { w.assertHandoff(t) })
+	t.Run("cli", func(t *testing.T) { w.assertCLI(t) })
 	t.Run("revoke in use", func(t *testing.T) { w.assertRevokeInUse(ctx, t) })
 	t.Run("roles", func(t *testing.T) { w.assertRoles(t) })
+	t.Run("self demotion", func(t *testing.T) { w.assertSelfDemotion(t) })
+	t.Run("children", func(t *testing.T) { w.assertChildren(ctx, t) })
 }
 
 func newWSAEnv(ctx context.Context, t *testing.T) *wsaEnv {
@@ -221,11 +242,13 @@ func newWSAEnv(ctx context.Context, t *testing.T) *wsaEnv {
 	w.wsB = addWorkspace("B", "access-b")
 
 	A, B := w.members["A"], w.members["B"]
+	// A sees no member who reaches none of A's workspaces, so the super
+	// admin grants U and V.
 	grantIDs := []string{w.members["U"].id, w.members["V"].id}
-	err := A.ctrl.Call(protocol.MethodWorkspaceAccessGrant, protocol.WorkspaceAccessGrantParams{WorkspaceID: w.wsA, MemberIDs: grantIDs}, nil)
+	err := S.ctrl.Call(protocol.MethodWorkspaceAccessGrant, protocol.WorkspaceAccessGrantParams{WorkspaceID: w.wsA, MemberIDs: grantIDs}, nil)
 	setupStep(t, "workspace.access.grant U V into wsA", err, func() error {
 		for _, id := range grantIDs {
-			if gerr := st.GrantWorkspace(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(id), domain.MemberID(A.id)); gerr != nil {
+			if gerr := st.GrantWorkspace(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(id), domain.MemberID(S.id)); gerr != nil {
 				return gerr
 			}
 		}
@@ -698,7 +721,13 @@ func (w *wsaEnv) assertAdminActions(t *testing.T) {
 		t.Errorf("A grants U into wsB = %+v, want not found", f)
 	}
 	assertLikeMissing(t, "A grants U into wsB", f, grant(missing, U.id), w.wsB, missing)
-	denied("A grants admin B into wsA", grant(w.wsA, B.id))
+	// B reaches none of A's workspaces, so to A B is a member that does
+	// not exist.
+	f = grant(w.wsA, B.id)
+	if !f.refused() {
+		t.Errorf("A granted admin B into wsA: %s", f.Result)
+	}
+	assertLikeMissing(t, "A grants admin B into wsA", f, grant(w.wsA, missingID(B.id)), B.id, missingID(B.id))
 	denied("U grants V into wsA", call(U.ctrl, protocol.MethodWorkspaceAccessGrant, protocol.WorkspaceAccessGrantParams{WorkspaceID: w.wsA, MemberIDs: []string{V.id}}))
 
 	owner := func(ws, to string) outcome {
