@@ -102,7 +102,7 @@ describe('workspace access', () => {
     const dialog = within(await screen.findByRole('dialog', { name: 'Change owner of main-repo' }))
     await userEvent.click(dialog.getByLabelText('Owner'))
     expect(screen.queryByRole('option', { name: /Bob/ })).toBeNull()
-    expect(screen.getByRole('option', { name: /^Alice \(current\)/ })).toBeTruthy()
+    expect(screen.getByRole('option', { name: /^Alice \((you, )?current owner\)/ })).toBeTruthy()
     await userEvent.keyboard('{Escape}')
     expect(dialog.queryByText(/keeps access/)).toBeNull()
     await pickOption(dialog.getByLabelText('Owner'), /^Root/)
@@ -120,7 +120,7 @@ describe('workspace access', () => {
     render(<WorkspacesRoute params={{}} client={api} />)
     fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    expect(await dialog.findByText('Everyone already has access')).toBeTruthy()
+    expect(await dialog.findByText('Everyone already has access.')).toBeTruthy()
     expect(dialog.queryByRole('button', { name: 'Add' })).toBeNull()
   })
 
