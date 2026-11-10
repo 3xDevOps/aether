@@ -408,7 +408,7 @@ func (s *Service) Pin(ctx context.Context, member domain.MemberID, p protocol.Me
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
-	if err := s.visible(ctx, member, workspace, p.ID, ""); err != nil {
+	if err = s.visible(ctx, member, workspace, p.ID, ""); err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
 	note, err := s.cfg.Store.PinMemory(ctx, workspace, p.ID, member, store.MemoryScope(p.Scope), mayPin(method, p.Scope, actor))
@@ -431,7 +431,7 @@ func (s *Service) Unpin(ctx context.Context, member domain.MemberID, p protocol.
 	if err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
-	if err := s.visible(ctx, member, workspace, p.ID, ""); err != nil {
+	if err = s.visible(ctx, member, workspace, p.ID, ""); err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
 	note, err := s.cfg.Store.UnpinMemory(ctx, workspace, p.ID, mayChange(method, "unpin", actor))
@@ -456,7 +456,7 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 	if err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
-	if err := s.visible(ctx, member, workspace, p.ID, domain.RunID(p.RunID)); err != nil {
+	if err = s.visible(ctx, member, workspace, p.ID, domain.RunID(p.RunID)); err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
 	ids, vet := []string{p.ID}, mayChange(method, "remove", actor)
