@@ -145,7 +145,9 @@ func identities(t *testing.T, e *testEnv) store.IdentityStore {
 // its link had been sent.
 func inviteAccount(t *testing.T, e *testEnv, inv domain.Invitation) *domain.Invitation {
 	t.Helper()
-	inv.CreatedBy = e.member.ID
+	if inv.CreatedBy == "" {
+		inv.CreatedBy = e.member.ID
+	}
 	if inv.ExpiresAt.IsZero() {
 		inv.ExpiresAt = time.Now().Add(edgeproto.InvitationTTL)
 	}
@@ -579,8 +581,8 @@ func TestEdgeFirstDevicePendingUntilApproved(t *testing.T) {
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	var pe *protocol.Error
 	err := approveByCode(controlAs(t, e, bob), code, nil)
-	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("other member approving = %v, want CodeDenied", err)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("other member approving = %v, want the invitation's device not found", err)
 	}
 	var approved protocol.MemberDeviceResult
 	if err = approveByCode(admin, strings.ToLower(code), &approved); err != nil {

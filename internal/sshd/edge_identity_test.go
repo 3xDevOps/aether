@@ -80,8 +80,8 @@ func TestRevokedInvitationDropsItsWaitingDevices(t *testing.T) {
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	var pe *protocol.Error
 	err := approveByCode(controlAs(t, e, bob), code, nil)
-	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("a member who is not an admin approving an invitation device = %v, want denied", err)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("a member who is not an admin approving an invitation device = %v, want not found", err)
 	}
 	if err := controlClient(t, e).Call(protocol.MethodMemberInvitationRevoke,
 		protocol.MemberInvitationRevokeParams{InvitationID: string(inv.ID)}, nil); err != nil {

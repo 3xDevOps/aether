@@ -219,12 +219,23 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 	if err != nil {
 		return fmt.Errorf("store: create workspace: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx,
+	// The owner is checked in the insert itself: a role change made by
+	// another process, such as aether-server member role, cannot land
+	// between a caller's check and the workspace it creates.
+	res, err := d.db.ExecContext(ctx,
 		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin, owner_member_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+		 WHERE ?8 = '' OR EXISTS (SELECT 1 FROM members
+		 	WHERE id = ?8 AND role IN ('admin', 'super_admin') AND pending = 0 AND merged_into = '')`,
 		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers, w.Origin, w.OwnerID,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("store: create workspace: %w", mapConstraint(err, ErrNotFound))
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: create workspace: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("store: create workspace: %w: %s is not an approved admin or super admin", ErrConflict, w.OwnerID)
 	}
 	w.ID, w.CreatedAt, w.Environment, w.BaseBranch = domain.WorkspaceID(id), ts, envDef, baseBranch
 	return nil

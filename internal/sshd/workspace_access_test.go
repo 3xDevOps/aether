@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -465,17 +466,23 @@ func TestEdgeInvitationScopes(t *testing.T) {
 	}
 }
 
-// An admin approves the device of a member below admin, not one that
-// would admit as a super admin.
+// An admin approves the device of a new member only on an invitation they
+// made: approving grants the invitation's workspaces. Another's waiting
+// device, a super admin's invitation included, is not found for them.
 func TestAdminApprovesDevicesOnlyBelowAdmin(t *testing.T) {
 	t.Parallel()
 	e := newAccessEnv(t, nil)
 	a := controlAs(t, e.testEnv, e.aKey)
+	dana := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "4004", Login: "dana", IdentityAt: time.Now()}
 	inviteAccount(t, e.testEnv, domain.Invitation{Provider: "github", Login: mallory().Login, Role: domain.RoleSuperAdmin})
 	_ = wantErrCode(t, approveByCode(a, e.refusedForApproval(t, mallory(), newSigner(t), "mallory-laptop"), nil),
-		protocol.CodeDenied, "A approves a device admitting as a super admin")
+		protocol.CodeNotFound, "A approves a device admitting as a super admin")
+	inviteAccount(t, e.testEnv, domain.Invitation{Provider: "github", Login: dana.Login, Role: domain.RoleCollaborator,
+		Workspaces: []domain.WorkspaceID{e.wsB.ID}, CreatedBy: e.b.ID})
+	_ = wantErrCode(t, approveByCode(a, e.refusedForApproval(t, dana, newSigner(t), "dana-laptop"), nil),
+		protocol.CodeNotFound, "A approves a device waiting on B's invitation into wsB")
 	inviteAccount(t, e.testEnv, domain.Invitation{Provider: "github", Login: octo.Login, Role: domain.RoleCollaborator,
-		Workspaces: []domain.WorkspaceID{e.wsA.ID}})
+		Workspaces: []domain.WorkspaceID{e.wsA.ID}, CreatedBy: e.a.ID})
 	if err := approveByCode(a, e.refusedForApproval(t, octo, newSigner(t), "octo-laptop"), nil); err != nil {
 		t.Fatalf("A approves a device admitting as a collaborator: %v", err)
 	}

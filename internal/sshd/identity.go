@@ -84,6 +84,19 @@ func (s *Server) actingOnDevice(ctx context.Context, ids store.IdentityStore, ca
 			return rpcError(err)
 		}
 		owner, role = inv.Member, inv.Role
+		// A device on an invitation that adds a member is its creator's to
+		// approve: approving it grants the creator's workspaces. Anyone
+		// else but a super admin is answered as the device list answers
+		// them, which leaves it out.
+		if inv.Member == "" && caller != inv.CreatedBy {
+			m, err := s.cfg.Store.GetMember(ctx, caller)
+			if err != nil {
+				return rpcError(err)
+			}
+			if m.Role != domain.RoleSuperAdmin {
+				return rpcError(store.ErrNotFound)
+			}
+		}
 	}
 	return s.actingAs(ctx, caller, owner, role, method)
 }

@@ -349,7 +349,7 @@ func (s *Server) loneApprover(ctx context.Context, ids store.IdentityStore, memb
 		return false, err
 	}
 	for _, m := range members {
-		if m.ID != member && m.Role == domain.RoleSuperAdmin {
+		if m.ID != member && m.Role == domain.RoleSuperAdmin && !m.Pending {
 			return false, nil
 		}
 	}
