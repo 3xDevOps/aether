@@ -397,11 +397,11 @@ func TestConnectorReadTools(t *testing.T) {
 	}
 
 	refused := testRun
-	refused.Mode, refused.ModelError = "acp", "the agent refused claude-fable-5-2, so the session runs on the agent's default model: "+injection
+	refused.Mode, refused.RefusedModel, refused.ModelError = "acp", "claude-fable-5-2", "The agent refused \"claude-fable-5-2\", so the session runs on the agent's default model: "+injection
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: refused})
 	_, out = run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1"})
-	if launch := out["launch"].(map[string]any); launch["model_refused"] != true || launch["model"] != nil ||
-		!strings.HasPrefix(out["untrusted"].(map[string]any)["model_error"].(string), "the agent refused claude-fable-5-2") || strings.Contains(trusted(t, out), injection) {
+	if launch := out["launch"].(map[string]any); launch["refused_model"] != "claude-fable-5-2" || launch["model"] != nil ||
+		!strings.HasPrefix(out["untrusted"].(map[string]any)["model_error"].(string), "The agent refused \"claude-fable-5-2\"") || strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_get_session of a refused model = %v", out)
 	}
 
@@ -674,6 +674,19 @@ func TestConnectorLaunch(t *testing.T) {
 		t.Fatalf("the same launch with an empty mode = %v, want the agent's default mode", out)
 	}
 	delete(args, "mode")
+	refused := recent
+	refused.RefusedModel = "claude-fable-5-2"
+	f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{refused}})
+	args["model"] = "claude-fable-5-2"
+	if _, out = run(t, cs, "aether_launch_session", args); out["duplicate"] != true {
+		t.Fatalf("the same launch after the agent refused its model = %v, want the first session", out)
+	}
+	args["model"] = "fable"
+	if _, out = run(t, cs, "aether_launch_session", args); out["run_id"] != "run-9" {
+		t.Fatalf("a retry with another model after a refusal = %v, want a new session", out)
+	}
+	delete(args, "model")
+	f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{recent}})
 	for _, stopped := range []string{"failed", "interrupted", "abandoned"} {
 		recent.Status = stopped
 		f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{recent}})

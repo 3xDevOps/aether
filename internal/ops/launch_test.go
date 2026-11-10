@@ -67,7 +67,7 @@ func TestConnectorLaunchReceipt(t *testing.T) {
 	withModel := launched
 	withModel.Model = "claude-fable-5-2"
 	f.answers[protocol.MethodRunLaunch] = returns(protocol.RunLaunchResult{Run: withModel})
-	if _, out = run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "model": "claude-fable-5-2", "idempotency_key": "k2"}); !strings.Contains(out["next"].(string), "launch.model_refused") {
+	if _, out = run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "model": "claude-fable-5-2", "idempotency_key": "k2"}); !strings.Contains(out["next"].(string), "launch.refused_model") {
 		t.Fatalf("next for an Enhanced model = %v", out["next"])
 	}
 

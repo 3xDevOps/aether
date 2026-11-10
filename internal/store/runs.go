@@ -147,7 +147,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt,
 		&r.Review, &reviewChangedAt, &r.ACP,
-		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.ModelError, &r.Effort, &r.Permission, &r.Via,
+		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.RefusedModel, &r.ModelError, &r.Effort, &r.Permission, &r.Via,
 		&r.Children, &r.ChildrenSetBy, &r.Limits.CPUs, &r.Limits.MemoryBytes, &r.Limits.Pids, &r.UnansweredQuestions,
 		&r.UnackedMessages, &oldestUnacked,
 		&r.ParentRunID, &r.RootRunID, &r.ChildPurpose, &r.Detached); err != nil {
@@ -176,7 +176,7 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 	runs.reason, runs.activity, runs.status_seq, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at,
-	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.model_error, runs.effort, runs.permission, runs.via,
+	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.refused_model, runs.model_error, runs.effort, runs.permission, runs.via,
 	runs.children, runs.children_set_by,
 	runs.cpu_limit, runs.memory_limit_bytes, runs.pids_limit`
 
@@ -665,7 +665,7 @@ func (d *DB) SetRunModel(ctx context.Context, id domain.RunID, model string) err
 		return fmt.Errorf("store: set session model: %w", err)
 	}
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE runs SET model = ?, model_error = '' WHERE id = ?`, model, id))
+		`UPDATE runs SET model = ?, refused_model = '', model_error = '' WHERE id = ?`, model, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: set session model: %w", err)
 	}
@@ -675,14 +675,18 @@ func (d *DB) SetRunModel(ctx context.Context, id domain.RunID, model string) err
 // maxModelError bounds the agent's error kept with a refused model.
 const maxModelError = 1024
 
-// RefuseRunModel records that the agent refused model, so the run runs on the
-// agent's default, and reports whether it did; a run whose model changed since
-// keeps it.
-func (d *DB) RefuseRunModel(ctx context.Context, id domain.RunID, model, reason string) (bool, error) {
+// RefuseRunModel records that the agent refused model and runs on running,
+// empty for its default, and reports whether it did; a run whose model changed
+// since keeps it.
+func (d *DB) RefuseRunModel(ctx context.Context, id domain.RunID, model, running, reason string) (bool, error) {
+	if err := domain.ValidModel(running); err != nil {
+		return false, fmt.Errorf("store: record the refused session model: %w", err)
+	}
 	if len(reason) > maxModelError {
 		reason = strings.ToValidUTF8(reason[:maxModelError], "")
 	}
-	res, err := d.db.ExecContext(ctx, `UPDATE runs SET model = '', model_error = ? WHERE id = ? AND model = ?`, reason, id, model)
+	res, err := d.db.ExecContext(ctx, `UPDATE runs SET model = ?, refused_model = ?, model_error = ? WHERE id = ? AND model = ?`,
+		running, model, reason, id, model)
 	if err != nil {
 		return false, fmt.Errorf("store: record the refused session model: %w", err)
 	}

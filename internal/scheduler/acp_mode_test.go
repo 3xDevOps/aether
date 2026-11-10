@@ -162,7 +162,24 @@ func TestEnhancedRunReportsAModelTheAgentRefused(t *testing.T) {
 	}
 	waitFor(t, "the refused model recorded", func() bool {
 		stored, err := e.cfg.Store.GetRun(t.Context(), run.ID)
-		return err == nil && stored.Model == "" && strings.HasPrefix(stored.ModelError, "The agent refused \"opus\", so the session runs on the agent's default model: ")
+		return err == nil && stored.Model == "" && stored.RefusedModel == "opus" && strings.HasPrefix(stored.ModelError, "The agent refused \"opus\", so the session runs on the agent's default model: ")
+	})
+}
+
+// A session the agent keeps on another model reports that model, not the
+// agent's default.
+func TestEnhancedRunReportsTheModelItKeepsAfterARefusal(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withMockClaude)
+	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy","models":{"currentModelId":"sonnet","availableModels":[{"modelId":"sonnet","name":"Sonnet"}]}}`)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP, domain.LaunchOptions{Model: "opus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the refused model recorded", func() bool {
+		stored, err := e.cfg.Store.GetRun(t.Context(), run.ID)
+		return err == nil && stored.Model == "sonnet" && stored.RefusedModel == "opus" &&
+			strings.HasPrefix(stored.ModelError, `The agent refused "opus", so the session runs on "sonnet": `)
 	})
 }
 

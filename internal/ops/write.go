@@ -272,7 +272,7 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self 
 				extras = append(extras, repo.WorkspaceID)
 			}
 		}
-		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model) &&
+		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model || r.RefusedModel == in.Model) &&
 			cmp.Or(in.AccountMemberID, self) == cmp.Or(r.RequestedAccountMemberID, r.AccountMemberID) &&
 			slices.Equal(in.FallbackAccountMemberIDs, r.FallbackAccountMemberIDs) && in.NoFallback == r.NoFallback && in.Children == r.Children &&
 			cmp.Or(in.Permission, string(domain.PermissionDefault)) == cmp.Or(r.Permission, string(domain.PermissionDefault)) &&

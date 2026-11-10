@@ -71,8 +71,9 @@ scheduler: harness "custom" has no command for mode "acp"
 
 `--model` is set after the session opens, so the launch itself still
 succeeds. If the agent rejects it, the session runs on the agent's default
-model and says so: the session's `model` is cleared, its `model_error` holds
-the reason, and the Session view shows a **Model not set** error notice, such
+model, or the one it already had, and says so: the session's `model` becomes
+that one, `refused_model` names the refused one, `model_error` holds the
+reason, and the Session view shows a **Model not set** error notice, such
 as `The agent refused "claude-fable-5-2", so the session runs on the agent's
 default model: ... Invalid value for config option model: claude-fable-5-2`
 from a Claude Code that predates the model. A Background session driven over
