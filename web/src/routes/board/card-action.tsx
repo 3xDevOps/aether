@@ -96,9 +96,12 @@ export function ReplyComposer({
   returnFocus: () => void
 }) {
   const runId = card.run.id
-  // A board card claims the reply as it opens; a composer opened anywhere else, such as Lanes or Map, claims it here.
+  // A board card claims the reply as it opens; a composer opened anywhere else, such as Lanes or Map, claims it here
+  // and lets it go on close, or the board card for that session would open its own.
   useLayoutEffect(() => {
-    if (useReply.getState().reply?.runId !== runId) setReplying(runId, true)
+    if (useReply.getState().reply?.runId === runId) return
+    setReplying(runId, true)
+    return () => setReplying(runId, false)
   }, [runId])
   const reply = useReply((s) => (s.reply?.runId === runId ? s.reply : null))
   const text = reply?.text ?? ''
