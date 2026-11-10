@@ -417,6 +417,45 @@ unit loads; subscription logins live in each member's home
 access is root-equivalent anyway. Its header comment explains how to run
 unprivileged; then every image needs a root user and self-update is off.
 
+### Keep the server reachable under load
+
+With Docker's systemd cgroup driver, the default on current Ubuntu and Debian,
+each session container is a `docker-<id>.scope` in `system.slice` with CPU and
+IO weight 100, the same as `aether-server`, `docker`, `containerd`, `ssh` and
+`tailscaled`. Twenty busy sessions then leave the server less than a twentieth
+of the CPU, and SSH, the dashboard and the connector time out. The unit sets
+`CPUWeight=1000` and `IOWeight=1000`, ten shares to each container's one, and
+`MemoryLow=1G`, so the kernel reclaims the server's first gigabyte only after
+unprotected memory. Weights only divide CPU and disk while they are contended;
+they cap nothing.
+
+An existing install keeps its old unit until you run the command the journal's
+unit warning prints ([What an update does not change](#what-an-update-does-not-change)).
+To apply the weights now, without a restart, to the server and to the
+services you need to reach the host:
+
+```sh
+sudo systemctl set-property aether-server CPUWeight=1000 IOWeight=1000 MemoryLow=1G
+for unit in docker containerd ssh tailscaled; do
+  sudo systemctl set-property "$unit" CPUWeight=1000 IOWeight=1000
+done
+```
+
+`set-property` changes the running unit and keeps the change in
+`/etc/systemd/system.control/<unit>.service.d/`. The SSH unit is `sshd` on
+Fedora and Arch; skip `tailscaled` without Tailscale. To keep the setting with
+your other overrides instead, put the same lines under `[Service]` in a
+drop-in, such as `sudo systemctl edit docker`, which reloads systemd when you
+save.
+
+`docker info --format '{{.CgroupDriver}}'` prints the driver. With `cgroupfs`,
+containers share a `/docker` group beside `system.slice`, and these weights
+order only the services inside `system.slice`. `IOWeight` takes effect only on
+a disk whose IO scheduler honors weights, such as `bfq`; NVMe disks often use
+`none` (`cat /sys/block/<disk>/queue/scheduler`). `MemoryLow` needs cgroup v2.
+systemd 232 and newer know all three directives; an older one logs
+`Unknown key name` and ignores them.
+
 ## Client files and variables
 
 The `aether` CLI keeps these files on your computer and reads these
