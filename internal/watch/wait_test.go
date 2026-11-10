@@ -1008,3 +1008,26 @@ func TestAHandedOffSessionReadsWithItsHomeLogin(t *testing.T) {
 		t.Fatalf("read with %s, want the home member %s", got, h.ada.ID)
 	}
 }
+
+// A wait on a run in another workspace is refused exactly as one on a run
+// that does not exist.
+func TestAWaitOnAnotherWorkspacesRunReadsAsMissing(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	other := &domain.Workspace{Name: "other", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(h.ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := &domain.Run{WorkspaceID: other.ID, MemberID: h.bob.ID, Task: "Elsewhere", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	if err := h.db.CreateRun(h.ctx, elsewhere); err != nil {
+		t.Fatal(err)
+	}
+	owner := h.run(h.ada, "Integrate")
+	const missing = "run-doesnotexist"
+	got := h.register(owner, "k-other", finished(elsewhere.ID))
+	want := h.register(owner, "k-missing", finished(missing))
+	if got == nil || want == nil || strings.ReplaceAll(got.Error(), string(elsewhere.ID), missing) != want.Error() {
+		t.Fatalf("wait on another workspace's run = %v, on a missing run = %v; want the same refusal", got, want)
+	}
+}

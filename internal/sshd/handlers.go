@@ -701,7 +701,7 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	// Handing a run to a member without Launch (a viewer or one awaiting
 	// approval) orphans it: only an admin could then steer or kill it.
 	to := domain.MemberID(p.ToMemberID)
-	recipient, err := s.cfg.Store.GetMember(ctx, to)
+	recipient, err := s.visibleMember(ctx, member, to)
 	if err != nil {
 		return nil, rpcError(err)
 	}

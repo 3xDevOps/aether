@@ -751,3 +751,35 @@ func TestMemberNotesYieldOnlyToTheWorkspacesAdmin(t *testing.T) {
 		t.Fatalf("member without a grant adds a note: %v, want not found", err)
 	}
 }
+
+// A run's socket lists memory by its owner's reach of the workspace: every
+// method for a member who may push, reading for a viewer, nothing for a
+// member who cannot reach it.
+func TestCapabilitiesFollowTheOwnersReach(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	scoped, err := New(Config{Store: f.db, Bus: f.bus, Log: f.log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, outsider := f.member("Vic", domain.RoleViewer), f.member("Cy", domain.RoleCollaborator)
+	for _, m := range []*domain.Member{f.dana, viewer} {
+		if gerr := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, ""); gerr != nil {
+			t.Fatal(gerr)
+		}
+	}
+	read := []string{protocol.MethodMemorySearch, protocol.MethodMemoryShow, protocol.MethodMemoryBrief}
+	for _, tc := range []struct {
+		owner *domain.Member
+		want  []string
+	}{
+		{f.dana, append([]string{protocol.MethodMemoryAdd}, read...)},
+		{viewer, read},
+		{outsider, nil},
+	} {
+		got, err := scoped.Capabilities(ctx, f.run(tc.owner, "claude", "task").ID)
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("%s's run capabilities = %v, %v; want %v", tc.owner.DisplayName, got, err, tc.want)
+		}
+	}
+}

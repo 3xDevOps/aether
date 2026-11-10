@@ -74,19 +74,19 @@ func ResolveLaunchAccount(ctx context.Context, st store.Store, actor domain.Memb
 	if account == "" || account == actor {
 		return actor, nil
 	}
-	owner, err := st.GetMember(ctx, account)
-	if err != nil {
-		return "", err
-	}
-	if owner.Pending {
-		return "", fmt.Errorf("%w: account owner is pending admin approval", permissions.ErrDenied)
-	}
 	shared, err := st.AccountSharedWith(ctx, account, actor)
 	if err != nil {
 		return "", err
 	}
 	if !shared {
 		return "", fmt.Errorf("%w: member %s has not shared their account with you", permissions.ErrDenied, account)
+	}
+	owner, err := st.GetMember(ctx, account)
+	if err != nil {
+		return "", err
+	}
+	if owner.Pending {
+		return "", fmt.Errorf("%w: account owner is pending admin approval", permissions.ErrDenied)
 	}
 	return account, nil
 }

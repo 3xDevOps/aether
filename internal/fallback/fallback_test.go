@@ -277,3 +277,35 @@ func TestMeasureNextTriesUnknownUsageLast(t *testing.T) {
 		})
 	}
 }
+
+// An account that was not shared with the launcher answers the same whether
+// its owner exists, is pending or does not exist.
+func TestResolveLaunchAccountWithoutAShareRevealsNoOwner(t *testing.T) {
+	ctx := context.Background()
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "fallback.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	member := func(name string, pending bool) domain.MemberID {
+		m := &domain.Member{DisplayName: name, TailnetLogin: strings.ToLower(name) + "@example.com", Color: "#3cb44b",
+			Role: domain.RoleCollaborator, Pending: pending}
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+		return m.ID
+	}
+	launcher, owner, pending := member("Lena", false), member("Ada", false), member("Pia", true)
+	for _, id := range []domain.MemberID{owner, pending, "mem-doesnotexist"} {
+		want := "permission denied: member " + string(id) + " has not shared their account with you"
+		if _, err := ResolveLaunchAccount(ctx, db, launcher, string(id)); err == nil || err.Error() != want {
+			t.Errorf("ResolveLaunchAccount(%s) = %v, want %q", id, err, want)
+		}
+	}
+	if _, err := db.ShareAccount(ctx, pending, launcher); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveLaunchAccount(ctx, db, launcher, string(pending)); err == nil || !strings.Contains(err.Error(), "pending admin approval") {
+		t.Errorf("ResolveLaunchAccount(shared pending) = %v, want the pending refusal", err)
+	}
+}

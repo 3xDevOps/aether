@@ -355,13 +355,17 @@ func (s *Service) Reply(ctx context.Context, from domain.RunID, p protocol.Coord
 	if err != nil {
 		return protocol.CoordReplyResult{}, internalError(method, err)
 	}
-	if _, serr := s.cfg.Store.GetRun(ctx, from); serr != nil {
-		if errors.Is(serr, store.ErrNotFound) {
-			return protocol.CoordReplyResult{}, &protocol.Error{
-				Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown session %s", method, from),
-			}
+	self, serr := s.cfg.Store.GetRun(ctx, from)
+	if errors.Is(serr, store.ErrNotFound) {
+		return protocol.CoordReplyResult{}, &protocol.Error{
+			Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown session %s", method, from),
 		}
+	}
+	if serr != nil {
 		return protocol.CoordReplyResult{}, internalError(method, serr)
+	}
+	if rpcErr := s.ownerReaches(ctx, method, self); rpcErr != nil {
+		return protocol.CoordReplyResult{}, rpcErr
 	}
 	if question.ToRun != from {
 		return protocol.CoordReplyResult{}, &protocol.Error{
@@ -403,7 +407,11 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 				method, inboxBurst, int(inboxRefill.Seconds())),
 		}
 	}
-	if _, rpcErr := s.resolveRun(ctx, method, run); rpcErr != nil {
+	self, rpcErr := s.resolveRun(ctx, method, run)
+	if rpcErr != nil {
+		return protocol.CoordInboxResult{}, rpcErr
+	}
+	if rpcErr := s.ownerReaches(ctx, method, self); rpcErr != nil {
 		return protocol.CoordInboxResult{}, rpcErr
 	}
 	var waiter chan struct{}
@@ -1169,9 +1177,18 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 				Message: fmt.Sprintf("%s: idempotency_key %q was used with different message inputs", method, idempotency),
 			}
 		}
+		sender, rpcErr := s.resolveRun(ctx, method, from)
+		if rpcErr != nil {
+			return nil, "", rpcErr
+		}
 		target, rpcErr := s.resolveRun(ctx, method, to)
 		if rpcErr != nil {
 			return nil, "", rpcErr
+		}
+		if !correlated {
+			if rpcErr := s.reachable(ctx, method, sender, target); rpcErr != nil {
+				return nil, "", rpcErr
+			}
 		}
 		return prior, target.Status, nil
 	} else if !errors.Is(err, store.ErrNotFound) {

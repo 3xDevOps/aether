@@ -341,6 +341,7 @@ instead of your login.
 - A launch checks every account it names, fallback included, when it is
   created, so a member cannot queue a session on an account nobody shared with them:
   `permission denied: member <member-id> has not shared their account with you`.
+  An id that names no member gets the same answer.
 - Sharing and revoking are recorded in the
   [audit history](connectors.md#audit-history), readable by the sharing member
   and admins.

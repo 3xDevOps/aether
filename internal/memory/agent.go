@@ -11,19 +11,23 @@ import (
 )
 
 // Capabilities lists the memory methods run's socket serves: reading
-// always, adding while the run's owner may push.
+// while the run's owner reaches its workspace, adding while they may push.
 func (s *Service) Capabilities(ctx context.Context, id domain.RunID) ([]string, error) {
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	capabilities := []string{protocol.MethodMemorySearch, protocol.MethodMemoryShow, protocol.MethodMemoryBrief}
-	if _, err := s.authorize(ctx, run.MemberID, run.WorkspaceID); err == nil {
-		capabilities = append([]string{protocol.MethodMemoryAdd}, capabilities...)
-	} else if !errors.Is(err, permissions.ErrDenied) {
-		return nil, err
+	_, err = s.authorize(ctx, run.MemberID, run.WorkspaceID)
+	switch {
+	case err == nil:
+		return append([]string{protocol.MethodMemoryAdd}, capabilities...), nil
+	case errors.Is(err, permissions.ErrNoAccess):
+		return nil, nil
+	case errors.Is(err, permissions.ErrDenied):
+		return capabilities, nil
 	}
-	return capabilities, nil
+	return nil, err
 }
 
 // HandleAgent answers a run's agent. The run is the socket's identity: the
