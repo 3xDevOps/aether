@@ -295,8 +295,24 @@ func TestSQLiteLogReadsOneRunThroughIndexes(t *testing.T) {
 		}
 	}
 
-	query, args := readQuery(f, 0, 7, 10, "DESC")
-	rows, err := log.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+	plan := queryPlan(t, log, f, "DESC")
+	for _, step := range []string{
+		"SEARCH events USING INDEX idx_events_run (run_id=? AND rowid>? AND rowid<?)",
+		"SEARCH events USING INDEX idx_events_coord_to_run (<expr>=? AND rowid>? AND rowid<?)",
+	} {
+		if !strings.Contains(plan, step) {
+			t.Errorf("plan %q lacks %q", plan, step)
+		}
+	}
+	if strings.Contains(plan, "TEMP B-TREE") {
+		t.Errorf("plan %q sorts its rows", plan)
+	}
+}
+
+func queryPlan(t *testing.T, log *SQLiteLog, f Filter, order string) string {
+	t.Helper()
+	query, args := readQuery(f, 0, 7, 10, order)
+	rows, err := log.db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,16 +328,77 @@ func TestSQLiteLogReadsOneRunThroughIndexes(t *testing.T) {
 	if err := rows.Close(); err != nil {
 		t.Fatal(err)
 	}
-	plan := strings.Join(steps, "; ")
-	for _, step := range []string{
-		"SEARCH events USING INDEX idx_events_run (run_id=? AND rowid>? AND rowid<?)",
-		"SEARCH events USING INDEX idx_events_coord_to_run (<expr>=? AND rowid>? AND rowid<?)",
+	return strings.Join(steps, "; ")
+}
+
+func TestSQLiteLogReadsTypesThroughIndexes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	db, err := storetest.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	log, err := OpenSQLiteLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	appendN(t, log,
+		logEvent(1, "w1", "r1", RunStatusPayload{To: domain.RunRunning}),
+		logEvent(2, "w1", "r1", RunDiffPayload{Files: []FileDiffStat{{Path: "a.go"}}}),
+		logEvent(3, "w2", "r2", RunDiffPayload{Files: []FileDiffStat{{Path: "b.go"}}}),
+		logEvent(4, "w1", "r1", TimelinePayload{Kind: TimelineKill}),
+		logEvent(5, "w2", "r2", RunStatusPayload{To: domain.RunFailed}),
+		logEvent(6, "w1", "r3", RunDiffPayload{Files: []FileDiffStat{{Path: "c.go"}}}),
+		logEvent(7, "w1", "r1", RunDiffPayload{Files: []FileDiffStat{{Path: "d.go"}}}),
+	)
+	ctx := context.Background()
+	seqs := func(got []Event, err error) []uint64 {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		out := make([]uint64, len(got))
+		for i, e := range got {
+			out[i] = e.Seq
+		}
+		return out
+	}
+	types := Filter{Types: []Type{TypeRunDiff, TypeRunStatus}}
+	workspace := Filter{Workspace: "w1", Types: []Type{TypeRunDiff, TypeTimeline}}
+	run := Filter{Workspace: "w1", Run: "r1", Types: []Type{TypeRunDiff}}
+	for name, tc := range map[string]struct {
+		got, want []uint64
+	}{
+		"types":                {seqs(log.Read(ctx, types, 0, 0, 10)), []uint64{1, 2, 3, 5, 6, 7}},
+		"types page":           {seqs(log.Read(ctx, types, 1, 6, 3)), []uint64{2, 3, 5}},
+		"types newest first":   {seqs(log.ReadBefore(ctx, types, 0, 7, 3)), []uint64{6, 5, 3}},
+		"workspace types":      {seqs(log.Read(ctx, workspace, 0, 0, 10)), []uint64{2, 4, 6, 7}},
+		"workspace types page": {seqs(log.ReadBefore(ctx, workspace, 2, 8, 2)), []uint64{7, 6}},
+		"run type":             {seqs(log.Read(ctx, run, 0, 0, 10)), []uint64{2, 7}},
+		"run type after":       {seqs(log.Read(ctx, run, 2, 0, 10)), []uint64{7}},
 	} {
-		if !strings.Contains(plan, step) {
-			t.Errorf("plan %q lacks %q", plan, step)
+		if !slices.Equal(tc.got, tc.want) {
+			t.Errorf("%s: seqs = %v, want %v", name, tc.got, tc.want)
 		}
 	}
-	if strings.Contains(plan, "TEMP B-TREE") {
-		t.Errorf("plan %q sorts its rows", plan)
+
+	for _, tc := range []struct {
+		f    Filter
+		step string
+	}{
+		{types, "SEARCH events USING COVERING INDEX idx_events_type (type=? AND rowid>? AND rowid<?)"},
+		{workspace, "SEARCH events USING COVERING INDEX idx_events_workspace_type (workspace_id=? AND type=? AND rowid>? AND rowid<?)"},
+		{run, "SEARCH events USING INDEX idx_events_run_type (run_id=? AND type=? AND rowid>? AND rowid<?)"},
+	} {
+		for _, order := range []string{"ASC", "DESC"} {
+			plan := queryPlan(t, log, tc.f, order)
+			if !strings.Contains(plan, tc.step) {
+				t.Errorf("%+v %s: plan %q lacks %q", tc.f, order, plan, tc.step)
+			}
+			if strings.Contains(plan, "TEMP B-TREE") || strings.Contains(plan, "SCAN events") {
+				t.Errorf("%+v %s: plan %q scans or sorts", tc.f, order, plan)
+			}
+		}
 	}
 }
