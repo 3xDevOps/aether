@@ -3,7 +3,6 @@ package sshd
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -85,12 +84,12 @@ func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw js
 		if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: domain.WorkspaceID(p.WorkspaceID)}); cerr != nil {
 			return nil, checkError(protocol.MethodMemoryBrief+": another member's brief", cerr)
 		}
-		m, err := s.cfg.Store.GetMember(ctx, domain.MemberID(p.MemberID))
+		m, err := s.visibleMember(ctx, caller, domain.MemberID(p.MemberID))
 		if err != nil {
 			return nil, rpcError(err)
 		}
 		if !permissions.ActorOf(m).Reaches(domain.WorkspaceID(p.WorkspaceID)) {
-			return nil, invalidParams(fmt.Sprintf("%s: member %s cannot reach workspace %s", protocol.MethodMemoryBrief, m.ID, p.WorkspaceID))
+			return nil, rpcError(permissions.ErrNoAccess)
 		}
 		member = m.ID
 	}

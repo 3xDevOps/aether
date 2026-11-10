@@ -1,10 +1,13 @@
 package sshd
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/memory"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -61,5 +64,54 @@ func TestProfilePushToAnUnreachableWorkspaceReadsAsMissing(t *testing.T) {
 		if err := w.call(t, who, protocol.MethodProfilePush, push(string(w.wsB.ID)), nil); err != nil {
 			t.Errorf("%s profile.push to wsB: %v", who, err)
 		}
+	}
+}
+
+// A handing a run off to B or N, whom A does not see, answers as a handoff
+// to a member who does not exist; A hands it to U.
+func TestHandoffToAnInvisibleMemberReadsAsMissing(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	run := &domain.Run{WorkspaceID: w.wsA.ID, MemberID: w.a.ID, Task: "hand me off", Harness: "claude", Mode: domain.LaunchTUI,
+		Status: domain.RunRunning}
+	if err := w.e.db.CreateRun(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	handoff := func(to string) protocol.RunHandoffParams {
+		return protocol.RunHandoffParams{RunID: string(run.ID), ToMemberID: to}
+	}
+	for _, to := range []*domain.Member{w.b, w.n} {
+		w.sameAsMissing(t, "A", protocol.MethodRunHandoff, handoff(string(to.ID)), handoff(noMember))
+	}
+	if err := w.call(t, "A", protocol.MethodRunHandoff, handoff(string(w.u.ID)), nil); err != nil {
+		t.Fatalf("A hands the run to U: %v", err)
+	}
+}
+
+// A asking for the wsA brief of B, whom A does not see, or of pending P,
+// whom A sees but who cannot reach wsA, answers as for a member who does
+// not exist; A reads U's.
+func TestMemoryBriefOfAMemberOutsideTheWorkspaceReadsAsMissing(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "memory.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	svc, err := memory.New(memory.Config{Store: w.e.db, Bus: w.bus, Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.e.srv.cfg.Services.Memory = svc
+	_, p := addMember(t, w.e, "P", domain.RoleCollaborator, true)
+	brief := func(member string) protocol.MemoryBriefParams {
+		return protocol.MemoryBriefParams{WorkspaceID: string(w.wsA.ID), MemberID: member}
+	}
+	for _, m := range []*domain.Member{w.b, p} {
+		w.sameAsMissing(t, "A", protocol.MethodMemoryBrief, brief(string(m.ID)), brief(noMember))
+	}
+	if err := w.call(t, "A", protocol.MethodMemoryBrief, brief(string(w.u.ID)), nil); err != nil {
+		t.Fatalf("A reads U's wsA brief: %v", err)
 	}
 }

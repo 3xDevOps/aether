@@ -116,3 +116,61 @@ func TestMessagesNeedEveryWorkspaceOfTheTarget(t *testing.T) {
 		t.Fatalf("send once the owner reaches both workspaces: %v", err)
 	}
 }
+
+// Losing a workspace closes coordination at once: a retried send answers
+// as for a missing session instead of reporting the target's status, and a
+// run whose owner lost its workspace reads no inbox and sends no reply.
+func TestLosingAWorkspaceClosesRetriesInboxAndReplies(t *testing.T) {
+	h := newHarness(t, 1, func(c *Config) { c.Store = c.Mail.(*store.DB) })
+	ctx := context.Background()
+	owner := h.runs[0].MemberID
+	foreign := &domain.Workspace{Name: "foreign", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+	stranger := h.member(domain.RoleCollaborator)
+	for _, grant := range []struct {
+		ws domain.WorkspaceID
+		m  domain.MemberID
+	}{{h.workspace, owner}, {foreign.ID, owner}, {foreign.ID, stranger.ID}} {
+		if err := h.db.GrantWorkspace(ctx, grant.ws, grant.m, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := &domain.Run{WorkspaceID: foreign.ID, MemberID: stranger.ID, Task: "foreign", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := h.db.CreateRun(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	mine := h.run(0)
+	send := sendParams(target.ID, "hello")
+	if _, err := h.svc.Send(ctx, mine, send); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	asked, err := h.svc.Ask(ctx, mine, protocol.CoordAskParams{ToRunID: string(target.ID), Body: "why?", IdempotencyKey: "ask-before-revoke"})
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	for _, m := range []domain.MemberID{owner, stranger.ID} {
+		if err := h.db.RevokeWorkspaceGrant(ctx, foreign.ID, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, missing := h.svc.Send(ctx, mine, sendParams("run-doesnotexist", "hello"))
+	_, retried := h.svc.Send(ctx, mine, send)
+	if retried == nil || missing == nil || retried.Code != missing.Code ||
+		retried.Message != "coord.send: unknown session "+string(target.ID) {
+		t.Errorf("retried send after the owner lost the workspace = %v, want the missing session's answer %v", retried, missing)
+	}
+	want := func(what string, err *protocol.Error, method string) {
+		t.Helper()
+		if err == nil || err.Code != protocol.CodeDenied ||
+			err.Message != method+": the session's owner "+string(stranger.ID)+" no longer has access to its workspace" {
+			t.Errorf("%s after the owner lost the workspace = %v, want refused", what, err)
+		}
+	}
+	_, inboxErr := h.svc.Inbox(ctx, target.ID, protocol.CoordInboxParams{})
+	want("inbox", inboxErr, protocol.MethodCoordInbox)
+	_, replyErr := h.svc.Reply(ctx, target.ID, protocol.CoordReplyParams{QuestionID: asked.QuestionID, Body: "because", IdempotencyKey: "reply-after-revoke"})
+	want("reply", replyErr, protocol.MethodCoordReply)
+}

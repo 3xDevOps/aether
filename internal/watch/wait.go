@@ -163,14 +163,11 @@ func (s *Service) waitTargetVisible(ctx context.Context, owner *domain.Run, targ
 		return invalid("until run:%s:finished: a run cannot wait for itself", target)
 	}
 	run, err := s.store.GetRun(ctx, target)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || err == nil && run.WorkspaceID != owner.WorkspaceID {
 		return invalid("until run:%s:finished: no such run", target)
 	}
 	if err != nil {
 		return err
-	}
-	if run.WorkspaceID != owner.WorkspaceID {
-		return invalid("until run:%s:finished: no such run in this workspace", target)
 	}
 	m, err := s.store.GetMember(ctx, owner.MemberID)
 	if err != nil {
