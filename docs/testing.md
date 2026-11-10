@@ -738,11 +738,21 @@ the server". Nothing Aether builds or installs is excluded.
 ## How CI runs the suites
 
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
-every merge queue entry and every push to `main`. A pull request, draft or
-ready, runs `changes`, `audit`, `lint`, `build-and-test` and `dashboard`. The
-merge queue and `main` run every job, so the full suite runs once per change,
-on the merge result, before `main` moves; a failure there removes the pull
-request from the queue. `CI gate` is the one required check: it passes when
+every merge queue entry, every push to `main` and nightly on `main` at 08:00
+UTC. A pull request, draft or ready, runs `changes`, `audit`, `lint`,
+`build-and-test` and `dashboard`. The merge queue runs every job, so the full
+suite runs once per change, on the merge result, before `main` moves; a
+failure there removes the pull request from the queue.
+
+The queue moves `main` to the commit it tested, so a push to `main` reuses
+that verdict: `scripts/ci-queue-verdict.sh` finds the merge queue run whose
+`CI gate` passed on the same commit, and the push runs only `changes` and
+`CI gate`, whose summary links that run. The push runs every job when no
+such run exists, when a lookup fails, or when it changes a file a cache key
+hashes (`ci-classify-areas.sh caches`). Caches save only from runs on `main`,
+because a merge queue run's caches are scoped to its own queue branch; the
+nightly run refreshes them and also tests `main` against the newest agent
+CLIs and the latest published release. `CI gate` is the one required check: it passes when
 every other job passed or was skipped by its own rule, and fails when any
 failed or was cancelled. A new job must be added to its `needs` list to gate
 `main`.
@@ -778,6 +788,7 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 | --- | --- | --- |
 | `go` | `lint`, `build-and-test` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
 | `web` | `dashboard` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
+| `caches` | The full suite on a push to `main` | `go.mod`, `go.sum`, `.golangci.yml`, `.github/`, `images/`, `web/public/fonts/`, the web and desktop package manifests and lockfiles, `web/.bun-version`, the Gradle files |
 
 The classifier runs from the pull request's base revision, so a pull request
 cannot change its own classification, and a renamed file counts by its old

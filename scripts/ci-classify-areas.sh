@@ -1,18 +1,20 @@
 #!/bin/sh
-# Whether a pull request's changed paths can affect the web or go jobs.
+# Whether a pull request's changed paths can affect the web or go jobs, or
+# whether a push to main changed what a CI cache key hashes.
 #
-# usage: ci-classify-areas.sh web|go
+# usage: ci-classify-areas.sh web|go|caches
 # stdin: newline-separated repo paths. Prints true or false.
 # web covers the dashboard checks: the dashboard source and everything that
 # builds or serves it. go covers the Go unit and lint jobs: everything
 # except the dashboard source (web/ other than web/embed.go) and docs-only
-# changes. false only when at least one path is present and every path is
+# changes. caches covers every file a cache key in .github/ hashes, and
+# .github/ itself, which names the keys. false only when at least one path is present and every path is
 # in the unrelated set for the mode. Empty input prints true. Blank lines
 # are ignored. A path in neither set prints true.
 set -eu
 
 if [ "$#" -ne 1 ]; then
-	echo "usage: ci-classify-areas.sh web|go" >&2
+	echo "usage: ci-classify-areas.sh web|go|caches" >&2
 	exit 2
 fi
 mode=$1
@@ -53,10 +55,22 @@ go() {
 	esac
 }
 
+caches() {
+	case $1 in
+	go.mod | go.sum | .golangci.yml | .github/* | images/* | web/public/fonts/* | \
+		web/package.json | web/bun.lock | web/.bun-version | \
+		desktop/package.json | desktop/package-lock.json | \
+		android/gradle/* | android/gradle.properties | android/*.gradle.kts)
+		return 0
+		;;
+	esac
+	return 1
+}
+
 case $mode in
-web | go) ;;
+web | go | caches) ;;
 *)
-	echo "usage: ci-classify-areas.sh web|go" >&2
+	echo "usage: ci-classify-areas.sh web|go|caches" >&2
 	exit 2
 	;;
 esac

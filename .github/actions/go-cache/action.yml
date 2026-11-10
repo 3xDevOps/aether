@@ -44,14 +44,14 @@ runs:
           go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-
     - name: Check for saved Go modules
       id: saved-modules
-      if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/restore@v4
       with:
         path: ${{ steps.paths.outputs.mod }}
         key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}
         lookup-only: true
     - name: Save Go modules
-      if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-modules.outputs.cache-hit != 'true'
+      if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.ref == 'refs/heads/main' && steps.saved-modules.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
         path: ${{ steps.paths.outputs.mod }}
@@ -62,7 +62,7 @@ runs:
     # refreshes an entry's mtime when a build uses it and the mtime is over an
     # hour old, so entries untouched for 90 minutes were not used by this job.
     - name: Trim the Go compiler cache to what this job used
-      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: inputs.mode == 'save' && github.ref == 'refs/heads/main'
       shell: bash
       run: |
         if [ -d "${{ steps.paths.outputs.build }}" ]; then
@@ -70,14 +70,14 @@ runs:
         fi
     - name: Check for saved Go compiler cache
       id: saved-build
-      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: inputs.mode == 'save' && github.ref == 'refs/heads/main'
       uses: actions/cache/restore@v4
       with:
         path: ${{ steps.paths.outputs.build }}
         key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-${{ github.sha }}
         lookup-only: true
     - name: Save Go compiler cache
-      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-build.outputs.cache-hit != 'true'
+      if: inputs.mode == 'save' && github.ref == 'refs/heads/main' && steps.saved-build.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
         path: ${{ steps.paths.outputs.build }}

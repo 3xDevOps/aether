@@ -71,7 +71,7 @@ jobs:
       # cache, before Defender is armed: archiving under its realtime scan
       # took eight minutes.
       - uses: ./.github/actions/go-cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell'
+        if: github.ref == 'refs/heads/main' && matrix.shell == 'powershell'
         with:
           mode: save
           variant: windows-install
@@ -209,7 +209,7 @@ jobs:
       # The only Windows arm64 Go job, so it writes that host's module and
       # compiler caches, before Defender is armed.
       - uses: ./.github/actions/go-cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.arch == 'arm64'
+        if: github.ref == 'refs/heads/main' && matrix.arch == 'arm64'
         with:
           mode: save
           variant: windows-install
