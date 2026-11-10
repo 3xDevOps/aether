@@ -919,3 +919,57 @@ func TestMemoryWritesLeaveHiddenSessionsNotesAlone(t *testing.T) {
 		t.Fatalf("the note after Dana's attempts: %v", err)
 	}
 }
+
+// memory.add never answers with a note the caller cannot see: a duplicate
+// of a hidden session's note is refused without naming it, and a hidden
+// note cannot be replaced.
+func TestMemoryAddKeepsHiddenDuplicatesHidden(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	scoped, err := New(Config{Store: f.db, Bus: f.bus, Log: f.log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib := &domain.Workspace{Name: "lib", BaseBranch: domain.DefaultBaseBranch}
+	if err = f.db.CreateWorkspace(ctx, lib); err != nil {
+		t.Fatal(err)
+	}
+	ola := f.member("Ola", domain.RoleCollaborator)
+	for _, g := range []struct {
+		ws domain.WorkspaceID
+		m  *domain.Member
+	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hidden := f.run(ola, "claude", "Two repositories")
+	if err = f.db.SetRunRepos(ctx, hidden.ID, []domain.RunRepo{{WorkspaceID: lib.ID, Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"}}); err != nil {
+		t.Fatal(err)
+	}
+	ws := string(f.ws.ID)
+	text := "Rotate the lib signing key before the release."
+	raw, err := json.Marshal(protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: text, Files: []string{"lib/private.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := scoped.HandleAgent(ctx, hidden.ID, protocol.MethodMemoryAdd, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := got.(protocol.MemoryAddResult).Item
+	_, err = scoped.Add(ctx, f.dana.ID, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindGotcha, Text: text})
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeConflict || strings.Contains(pe.Message, stored.ID) {
+		t.Fatalf("Dana adds the hidden note's text = %v; want a conflict that does not name %s", err, stored.ID)
+	}
+	_, err = scoped.Add(ctx, f.dana.ID, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindGotcha,
+		Text: "Keep the old key.", Supersedes: stored.ID})
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("Dana replaces the hidden note = %v; want not found", err)
+	}
+	again, err := scoped.Add(ctx, ola.ID, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindGotcha, Text: text})
+	if err != nil || !again.Duplicate || again.Item.ID != stored.ID {
+		t.Fatalf("Ola adds the same text = %+v, %v; want the duplicate %s", again, err, stored.ID)
+	}
+}
