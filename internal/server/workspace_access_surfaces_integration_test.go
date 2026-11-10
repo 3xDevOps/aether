@@ -460,19 +460,45 @@ func bridgeTransport(t *testing.T, sock string) mcp.Transport {
 // assertAccountSharing is threat case 11's shared account: a launch on
 // another member's account needs that member to reach the workspace too.
 func (w *wsaEnv) assertAccountSharing(t *testing.T) {
-	A, B, U, N := w.members["A"], w.members["B"], w.members["U"], w.members["N"]
-	share := func(owner, with *wsaMember) {
+	S, A, B, U, N := w.members["S"], w.members["A"], w.members["B"], w.members["U"], w.members["N"]
+	shareCall := func(owner *wsaMember, with string) outcome {
+		return call(owner.ctrl, protocol.MethodAccountShare, protocol.AccountMemberParams{MemberID: with})
+	}
+	f := shareCall(B, U.id)
+	if !f.refused() {
+		t.Errorf("B shared an account with U, whom B cannot see: %s", f.Result)
+	}
+	assertLikeMissing(t, "B account.share with U", f, shareCall(B, missingID(U.id)), U.id, missingID(U.id))
+	access := func(method, ws string, m *wsaMember) {
 		t.Helper()
-		if err := owner.ctrl.Call(protocol.MethodAccountShare, protocol.AccountMemberParams{MemberID: with.id}, nil); err != nil {
-			t.Fatalf("%s account.share with %s: %v", owner.name, with.name, err)
+		var err error
+		if method == protocol.MethodWorkspaceAccessGrant {
+			err = S.ctrl.Call(method, protocol.WorkspaceAccessGrantParams{WorkspaceID: ws, MemberIDs: []string{m.id}}, nil)
+		} else {
+			err = S.ctrl.Call(method, protocol.WorkspaceAccessRevokeParams{WorkspaceID: ws, MemberID: m.id}, nil)
+		}
+		if err != nil {
+			t.Fatalf("S %s %s %s: %v", method, ws, m.name, err)
+		}
+	}
+	// An owner shares with a member they see, who may later lose the
+	// workspace that made them visible; the share stays.
+	share := func(owner, with *wsaMember, via string) {
+		t.Helper()
+		if via != "" {
+			access(protocol.MethodWorkspaceAccessGrant, via, with)
+			defer access(protocol.MethodWorkspaceAccessRevoke, via, with)
+		}
+		if o := shareCall(owner, with.id); o.refused() {
+			t.Fatalf("%s account.share with %s: %+v", owner.name, with.name, o)
 		}
 		t.Cleanup(func() {
 			_ = owner.ctrl.Call(protocol.MethodAccountRevoke, protocol.AccountMemberParams{MemberID: with.id}, nil)
 		})
 	}
-	share(B, U)
-	share(A, U)
-	share(A, N)
+	share(B, U, w.wsB)
+	share(A, U, "")
+	share(A, N, w.wsA)
 	launch := func(m *wsaMember, ws, account string) outcome {
 		return call(m.ctrl, protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: ws, Task: "access-share", Harness: "fake",
 			Mode: string(domain.LaunchTUI), AccountMemberID: account})
@@ -485,7 +511,7 @@ func (w *wsaEnv) assertAccountSharing(t *testing.T) {
 	if o := launch(U, w.wsA, A.id); o.refused() {
 		t.Errorf("U launch in wsA on A's account, who owns wsA: %+v", o)
 	}
-	f := launch(N, w.wsA, A.id)
+	f = launch(N, w.wsA, A.id)
 	if !f.refused() {
 		t.Errorf("N launched in unreachable wsA on A's account: %s", f.Result)
 	}
@@ -553,8 +579,10 @@ func (w *wsaEnv) assertCLI(t *testing.T) {
 	if fc == 0 || fc != mc || normalize(foreign, w.wsB, missing) != normalize(absent, w.wsB, missing) {
 		t.Errorf("A aether workspace grant into wsB = %d %q, into a missing workspace = %d %q", fc, foreign, mc, absent)
 	}
-	if _, stderr, code := run("A", "workspace", "grant", w.wsA, B.id); code == 0 || !strings.Contains(stderr, fmt.Sprintf("rpc error %d", protocol.CodeDenied)) {
-		t.Errorf("A aether workspace grant of admin B into wsA = %d %q, want the server's denial", code, stderr)
+	_, foreign, fc = run("A", "workspace", "grant", w.wsA, B.id)
+	_, absent, mc = run("A", "workspace", "grant", w.wsA, missingID(B.id))
+	if fc == 0 || fc != mc || normalize(foreign, B.id, missingID(B.id)) != normalize(absent, B.id, missingID(B.id)) {
+		t.Errorf("A aether workspace grant of B, whom A cannot see, = %d %q; of a missing member = %d %q", fc, foreign, mc, absent)
 	}
 	if _, stderr, code := run("A", "member", "role", U.id, "admin"); code == 0 || !strings.Contains(stderr, fmt.Sprintf("rpc error %d", protocol.CodeDenied)) {
 		t.Errorf("A aether member role U admin = %d %q, want the server's denial", code, stderr)
