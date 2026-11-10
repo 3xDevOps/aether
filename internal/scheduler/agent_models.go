@@ -46,9 +46,12 @@ type agentModelsKey struct {
 	name    string
 }
 
+// agentModelsEntry.expired is when an agent update made it stale, so a
+// probe that started earlier stores its answer as stale too.
 type agentModelsEntry struct {
-	result protocol.AgentModelsResult
-	probed time.Time
+	result  protocol.AgentModelsResult
+	probed  time.Time
+	expired time.Time
 }
 
 func (e agentModelsEntry) ttl() time.Duration {
@@ -121,7 +124,11 @@ func (s *Scheduler) CachedAgentModels(account domain.MemberID, name string) (pro
 	s.agentModelsMu.Lock()
 	entry, ok := s.agentModels[agentModelsKey{account, name}]
 	s.agentModelsMu.Unlock()
-	if !ok || s.cfg.Now().Sub(entry.probed) >= entry.ttl() {
+	ttl := entry.ttl()
+	if entry.result.Source == protocol.ModelSourceAgent {
+		ttl = agentModelsTTL
+	}
+	if !ok || s.cfg.Now().Sub(entry.probed) >= ttl {
 		return protocol.AgentModelsResult{}, false
 	}
 	return entry.result, true
@@ -133,10 +140,12 @@ func (s *Scheduler) expireAgentModels(account domain.MemberID, name string) {
 	key := agentModelsKey{account, name}
 	s.agentModelsMu.Lock()
 	defer s.agentModelsMu.Unlock()
-	if entry, ok := s.agentModels[key]; ok {
-		entry.probed = time.Time{}
-		s.agentModels[key] = entry
+	if s.agentModels == nil {
+		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
 	}
+	entry := s.agentModels[key]
+	entry.probed, entry.expired = time.Time{}, s.cfg.Now().UTC()
+	s.agentModels[key] = entry
 }
 
 func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, executable string, passthrough []string, start bool) protocol.AgentModelsResult {
@@ -159,7 +168,11 @@ func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, ex
 	if s.agentModels == nil {
 		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
 	}
-	s.agentModels[key] = agentModelsEntry{result: result, probed: now}
+	probed := now
+	if expired := s.agentModels[key].expired; !expired.IsZero() && !expired.Before(now) {
+		probed = time.Time{}
+	}
+	s.agentModels[key] = agentModelsEntry{result: result, probed: probed}
 	s.agentModelsMu.Unlock()
 	return result
 }

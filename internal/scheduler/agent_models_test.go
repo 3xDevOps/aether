@@ -192,6 +192,10 @@ func TestAgentModelsCache(t *testing.T) {
 	if n := len(e.rt.execRuns()); n != 5 {
 		t.Fatalf("%d probes, want a failure to expire after %s", n, agentModelsFailTTL)
 	}
+	clock.advance(agentModelsFailTTL)
+	if cached, ok := e.sched.CachedAgentModels(e.member.ID, "claude"); !ok || len(cached.Models) != len(first.Models) {
+		t.Fatalf("CachedAgentModels after a failure = %+v, %v, want the last list until its hour is up", cached, ok)
+	}
 
 	fail.Store(false)
 	e.sched.expireAgentModels(e.member.ID, "claude")
@@ -359,5 +363,41 @@ func TestAgentModelsOverrideWithoutStandardArgv(t *testing.T) {
 	}
 	if runs := e.rt.execRuns(); len(runs) != 1 || !slices.Contains(runs[0].argv, "alt-codex") {
 		t.Fatalf("exec runs = %+v, want one probing alt-codex", runs)
+	}
+}
+
+// A probe that was running when the agent updated answers with what the old
+// CLI listed, so the next call asks the updated one.
+func TestAgentModelsUpdateDuringAProbe(t *testing.T) {
+	t.Parallel()
+	e, _ := newModelsEnv(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return 0, modelsFixture(t, "claude-initialize.jsonl"), nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false)
+		done <- err
+	}()
+	<-entered
+	e.sched.expireAgentModels(e.member.ID, "claude")
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil {
+		t.Fatal(err)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("%d probes, want the answer from before the update not cached", n)
+	}
+	if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil || calls.Load() != 2 {
+		t.Fatalf("a third call ran a probe (%d) or failed: %v", calls.Load(), err)
 	}
 }

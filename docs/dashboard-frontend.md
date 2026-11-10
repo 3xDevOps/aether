@@ -2681,8 +2681,9 @@ default**, sends no `model` and shows what that default resolves to when the
 agent reports it. The rest come from `agent.models` for the chosen agent and
 account, fetched when the field first shows and kept for the page session;
 the refresh button asks again with `refresh: true`. The list says when it is
-the agent's cache, and shows a failed discovery's error verbatim, above the
-last list that worked or none, without blocking a choice. Search matches id, name and description;
+the agent's cache, and shows a failed discovery's error verbatim without
+blocking a choice, after **List from <age>** when it keeps the last list that
+worked. Search matches id, name and description;
 text that matches no id is offered as **Use “<text>”**, so any id works,
 including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is

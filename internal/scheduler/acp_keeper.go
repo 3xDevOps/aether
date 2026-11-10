@@ -34,8 +34,8 @@ const keeperUser = "0"
 
 // startKeeper starts command, which serves the ACP server name, under a keeper
 // and returns the keeper's exec once it listens. The keeper starts command as
-// the container's user, as an exec without a user would run. The run records the exec and how to
-// reattach before the adapter can do anything.
+// the container's user, as an exec without a user would run. The run records
+// the exec and how to reattach before the adapter can do anything.
 func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, name string, command []string) (runtime.ManagedExec, error) {
 	info, err := d.s.cfg.Runtime.Inspect(ctx, cid)
 	if err != nil {

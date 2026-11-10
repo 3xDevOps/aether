@@ -209,13 +209,16 @@ installs that. Claude Code, Codex and pi need a separate npm adapter package:
 --enhanced` installs the agent and its adapter, pinned to the version Aether
 tests against. The dashboard's **Set up** does the same when you pick Enhanced.
 
-`claude-agent-acp` bundles its own copy of Claude Code, which moves only with
-the pin. An Enhanced Claude Code session runs the `claude` on the session's
-`PATH` instead, the one Standard sessions run and Aether updates before
-launch, by setting `CLAUDE_CODE_EXECUTABLE` to it. A new model therefore
+`claude-agent-acp` bundles its own copy of Claude Code (2.1.287 with the
+current pin), which moves only with the pin. An Enhanced Claude Code session
+runs the `claude` on the session's `PATH` instead, the one Standard sessions
+run, by setting `CLAUDE_CODE_EXECUTABLE` to it. A `claude` in `~/.local/bin` is
+the one Aether [updates before launch](#updates-before-launch), so a new model
 reaches Enhanced sessions with the next Claude Code update, without an Aether
-release. A `CLAUDE_CODE_EXECUTABLE` set as a workspace variable wins; with no
-`claude` on `PATH` the adapter runs its bundled copy.
+release. The adapter runs its bundled copy instead when `claude` is not on
+`PATH` or `claude --version` is older than the bundled one; update it with
+`claude update` in `aether terminal`. A `CLAUDE_CODE_EXECUTABLE` set as a
+workspace variable wins.
 
 ### Per-agent setup
 

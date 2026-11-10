@@ -350,7 +350,11 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 		}
 		models := make([]map[string]string, 0, min(len(res.Models), maxRows))
 		for _, m := range res.Models[:min(len(res.Models), maxRows)] {
-			models = append(models, map[string]string{"id": clip(m.ID, maxReport), "name": clip(m.Name, maxReport)})
+			model := map[string]string{"id": clip(m.ID, maxReport)}
+			if m.Name != "" {
+				model["name"] = clip(m.Name, maxReport)
+			}
+			models = append(models, model)
 		}
 		listed := map[string]any{"agent": in.Models, "source": res.Source, "default": res.DefaultLabel, "models": models, "fetched_at": res.FetchedAt}
 		if res.Error != "" {

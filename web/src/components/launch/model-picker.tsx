@@ -5,6 +5,7 @@ import { Check, RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverFieldTrigger } from '@/components/ui/popover'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { Spinner } from '@/components/ui/spinner'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -51,7 +52,8 @@ export function ModelPicker({ harness, accountMemberID, value, onChange, disable
   const selected = models.find((model) => model.id === value)
   const typed = search.trim()
   const failure = error ?? result?.error
-  const note = result ? sourceNotes[result.source] : undefined
+  const listedAt = result?.source === 'agent' && result.error && models.length > 0 ? result.fetched_at : undefined
+  const note = listedAt ? <>List from <RelativeTime at={listedAt} /></> : result && sourceNotes[result.source]
   const showUse = Boolean(typed) && typed !== value && !models.some((model) => model.id === typed)
   useEffect(() => {
     if (disabled) setOpen(false)

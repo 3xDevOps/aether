@@ -193,25 +193,26 @@ mkdir -p "$dir" && printf '{"version":"%s"}' "${last##*@}" > "$dir/package.json"
 }
 
 // An Enhanced Claude Code session runs the claude on PATH, which Aether
-// updates, rather than the CLI bundled with the pinned adapter.
+// updates, rather than the CLI bundled with the pinned adapter, unless that
+// claude is older than the bundled one.
 func TestACPCommandRunsTheCLIOnPath(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("adapters run in Linux containers")
 	}
 	claude, _ := Lookup("claude")
-	run := func(t *testing.T, withCLI bool, env ...string) string {
+	run := func(t *testing.T, version string, env ...string) string {
 		t.Helper()
 		bin := t.TempDir()
 		stubs := map[string]string{"claude-agent-acp": "#!/bin/sh\necho \"cli=${CLAUDE_CODE_EXECUTABLE-unset} args=$*\"\n"}
-		if withCLI {
-			stubs["claude"] = "#!/bin/sh\n"
+		if version != "-" {
+			stubs["my-claude"] = "#!/bin/sh\n[ \"$1\" = --version ] && [ -n \"" + version + "\" ] && echo \"" + version + " (Claude Code)\"\n"
 		}
 		for name, body := range stubs {
 			if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
 				t.Fatal(err)
 			}
 		}
-		argv := claude.ACPCommand([]string{"claude-agent-acp", "--flag"})
+		argv := claude.ACPCommand([]string{"claude-agent-acp", "--flag"}, "my-claude")
 		cmd := exec.CommandContext(t.Context(), argv[0], argv[1:]...)
 		cmd.Env = append([]string{"PATH=" + bin + ":/usr/bin:/bin"}, env...)
 		out, err := cmd.CombinedOutput()
@@ -220,29 +221,34 @@ func TestACPCommandRunsTheCLIOnPath(t *testing.T) {
 		}
 		return strings.ReplaceAll(strings.TrimSpace(string(out)), bin, "$BIN")
 	}
+	const onPath, bundled = "cli=$BIN/my-claude args=--flag", "cli=unset args=--flag"
 	for _, c := range []struct {
-		name    string
-		withCLI bool
-		env     []string
-		want    string
+		name, version string
+		env           []string
+		want          string
 	}{
-		{"cli on path", true, nil, "cli=$BIN/claude args=--flag"},
-		{"no cli", false, nil, "cli=unset args=--flag"},
-		{"already named", true, []string{"CLAUDE_CODE_EXECUTABLE=/opt/claude"}, "cli=/opt/claude args=--flag"},
+		{"newer", "2.1.322", nil, onPath},
+		{"same", claude.ACPInstall.CLIVersion, nil, onPath},
+		{"newer minor", "2.2.0", nil, onPath},
+		{"older", "2.1.250", nil, bundled},
+		{"older minor", "2.0.999", nil, bundled},
+		{"no version", "", nil, bundled},
+		{"not on path", "-", nil, bundled},
+		{"already named", "2.1.322", []string{"CLAUDE_CODE_EXECUTABLE=/opt/claude"}, "cli=/opt/claude args=--flag"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := run(t, c.withCLI, c.env...); got != c.want {
+			if got := run(t, c.version, c.env...); got != c.want {
 				t.Fatalf("adapter saw %q, want %q", got, c.want)
 			}
 		})
 	}
 
 	custom := []string{"my-acp"}
-	if got := claude.ACPCommand(custom); !slices.Equal(got, custom) {
+	if got := claude.ACPCommand(custom, "claude"); !slices.Equal(got, custom) {
 		t.Fatalf("an overridden ACP command = %q, want it unchanged", got)
 	}
 	codex, _ := Lookup("codex")
-	if got := codex.ACPCommand(codex.ACPArgs); !slices.Equal(got, codex.ACPArgs) {
+	if got := codex.ACPCommand(codex.ACPArgs, "codex"); !slices.Equal(got, codex.ACPArgs) {
 		t.Fatalf("codex ACPCommand = %q, want its adapter unchanged", got)
 	}
 }

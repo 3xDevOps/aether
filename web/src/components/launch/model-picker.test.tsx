@@ -123,10 +123,14 @@ describe('ModelPicker', () => {
     expect(onChange).toHaveBeenCalledWith('typed')
   })
 
-  it('shows a discovery error from the result verbatim next to the last list', async () => {
-    vi.mocked(api.agentModels).mockResolvedValue({ ...discovered, error: 'claude models: run in the environment terminal: context deadline exceeded' })
+  it('shows a discovery error from the result verbatim next to the last list and its age', async () => {
+    const fetched = new Date(Date.now() - 5 * 60_000).toISOString()
+    vi.mocked(api.agentModels).mockResolvedValue({ ...discovered, fetched_at: fetched, error: 'claude models: run in the environment terminal: context deadline exceeded' })
     const { trigger, onChange } = setup()
     await openPicker(trigger)
+
+    expect((await screen.findByText('5 minutes ago')).closest('time')?.getAttribute('datetime')).toBe(fetched)
+    expect(screen.getByText(/List from/)).toBeDefined()
 
     expect(await screen.findByText('claude models: run in the environment terminal: context deadline exceeded')).toBeDefined()
     await userEvent.click(await screen.findByRole('option', { name: /^Opus 4.1/ }))
