@@ -869,6 +869,20 @@ describe('lanes view', () => {
     expect(useReply.getState().reply).toBeNull()
   })
 
+  it("never shows or sends another session's draft in a lane's reply composer", async () => {
+    seed([stopped, working])
+    act(() => useReply.setState({ reply: { runId: working.id, text: 'draft for still going' } }))
+    const tree = await openLanes()
+    act(() => within(tree).getAllByRole('treeitem')[1].focus())
+    await userEvent.keyboard('r')
+    const composer = await screen.findByRole('dialog', { name: /^Reply to / })
+    const box = within(composer).getByRole('textbox', { name: 'Message to the agent' }) as HTMLTextAreaElement
+    expect(box.value).toBe('')
+    await userEvent.type(box, 'use the mock')
+    await userEvent.click(within(composer).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith(stopped.id, 'use the mock', expect.any(String)))
+  })
+
   it('groups a run with its child runs under one lane', async () => {
     seed([
       run({ id: 'run_parent', task: 'coordinate' }),
