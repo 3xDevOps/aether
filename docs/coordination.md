@@ -923,6 +923,10 @@ requests.
 Browser status also reports `state`: `not_started`, `creating`, `running`,
 `paused`, `session_lost`, or `unavailable`. An unreachable or failed Chromium
 session reports `available: false`, `running: false`, and its actual error.
+When the server starts and cannot release a companion's held input or pause
+it, the server still starts: that session's browser reports `unavailable`
+with the error, naming the session and companion container, until a
+`browser reset` replaces the companion.
 Failed initial creation may return an opaque
 `pending:` session ID. It is a recovery fence, not a usable page session.
 Acquire the browser surface with that exact incarnation, then explicitly

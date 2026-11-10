@@ -58,7 +58,10 @@ func (s *Scheduler) bindBrowserInput(id domain.RunID, status browser.Status, cli
 		if err != nil && manager.InputSessionGone(ctx, status) {
 			return nil
 		}
-		return err
+		if err != nil {
+			return fmt.Errorf("session %s browser companion %s: release held input: %w", id, status.ContainerID, err)
+		}
+		return nil
 	})
 }
 
