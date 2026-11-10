@@ -72,12 +72,23 @@ test('a click on an image larger than the window switches between fit and actual
   expect(width(dialog)).toBe('')
 })
 
+test('clicking the outer gutters closes the viewer while zoomed frame clicks do not', async () => {
+  const dialog = await open('Image 1 of 2')
+  load(dialog, [2400, 1400])
+  fireEvent.click(within(dialog).getByRole('img'))
+  fireEvent.click(frameOf(dialog))
+  expect(screen.getByRole('dialog')).toBe(dialog)
+  fireEvent.click(dialog)
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
 test('the viewer hides its title and closes from its close button or beside a fitted picture', async () => {
   const dialog = await open('Image 1 of 2')
   const close = within(dialog).getByRole('button', { name: 'Close' })
   const next = await within(dialog).findByRole('button', { name: 'Next image' })
   expect(dialog.querySelector('[data-slot="dialog-title"]')?.className).toContain('sr-only')
   expect(close.className).toContain('size-11')
+  expect(close.className).toContain('bg-raised')
   expect(next.className).toContain('coarse:opacity-100')
   expect(within(dialog).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Next image', 'Close'])
   fireEvent.click(close)
@@ -245,6 +256,17 @@ test('keyboard focus is shown around the image without outlining the viewer fram
   const image = within(dialog).getByRole('img')
   expect(frame.className).toContain('outline-none')
   expect(image.className).toContain('group-focus-visible:outline-2')
+})
+
+test('keyboard focus remains visible on the frame while the image is zoomed', async () => {
+  const dialog = await open('Image 1 of 2')
+  const frame = frameOf(dialog)
+  load(dialog, [2400, 1400])
+  frame.focus()
+  fireEvent.click(within(dialog).getByRole('img'))
+  expect(width(dialog)).toBe('2400px')
+  expect(frame.className).toContain('focus-visible:outline-2')
+  expect(frame.className).toContain('focus-visible:outline-solid')
 })
 
 test('Control with the zero key fits again on any layout, by its key code', async () => {

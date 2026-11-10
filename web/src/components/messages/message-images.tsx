@@ -208,7 +208,12 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
         tabIndex={0}
         role="group"
         aria-label={`${name}, ${scale === undefined ? 'fitted' : `zoomed to ${Math.round(scale * 100)}%`}`}
-        className={cn('group col-start-1 row-start-2 mx-auto mb-4 flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none', viewerBounds)}
+        data-image-viewer-frame
+        className={cn(
+          'group col-start-1 row-start-2 mx-auto mb-4 flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none',
+          viewerBounds,
+          scale !== undefined && 'focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus',
+        )}
         onClick={(event) => {
           // A fitted picture leaves only empty space around it; zoomed, a click there may be on the frame's scrollbar.
           if (event.target !== img.current) {
@@ -244,7 +249,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
           ].filter(Boolean).join(' ')}
         </DialogDescription>
         <DialogPrimitive.Close asChild>
-          <Button variant="ghost" size="icon" label="Close" className="size-11">
+          <Button variant="secondary" size="icon" label="Close" className="size-11">
             <X className="size-5" />
           </Button>
         </DialogPrimitive.Close>
@@ -388,6 +393,11 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
             if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
             event.preventDefault()
             step(event.key === 'ArrowRight' ? 1 : -1)
+          }}
+          onClick={(event) => {
+            const target = event.target
+            if (target instanceof Element && (target.closest('button') || target.closest('[data-image-viewer-frame]'))) return
+            setOpenID(undefined)
           }}
           onCloseAutoFocus={(event) => {
             // Return to the thumbnail of the image last shown, not the one first opened.

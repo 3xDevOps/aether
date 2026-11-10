@@ -3577,8 +3577,10 @@ Next image buttons appear on hover or keyboard focus; touch keeps them visible.
 They step through loaded images. `ArrowLeft` and `ArrowRight`, or a horizontal
 swipe, do the same while the image is fitted, stopping at either end;
 zoomed in, or with a modifier key held or the page pinch-zoomed, they do not
-switch. Losing an image's blob, as on reconnect, closes the dialog if it was
-showing that image. Each image opens fitted, and
+switch. With the image fitted, clicking beside it closes the dialog; while
+zoomed, the outer gutters close it and the frame remains scrollable. Losing an
+image's blob, as on reconnect, closes the dialog if it was showing that image.
+Each image opens fitted, and
 closing returns focus to the thumbnail of the image last shown. Attachments sit outside the
 text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
