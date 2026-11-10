@@ -3555,17 +3555,24 @@ ACP row whose `resource_link` URIs name attached files matches the room
 message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
 URLs when identity, session or row changes, and shows each other file as a chip
-named by its basename with the path as its title. Each image is named by its place
-in the row ("Image 2 of 3", or "Attached image" when it is alone), and its
-thumbnail is a button that opens the same blob in a `Dialog` filling the window
-(the whole screen on a phone), fitted to it. Zoom runs from fitted to 400% of
-the image's pixels, in a frame that scrolls and takes keyboard focus: a
-trackpad pinch (a ctrl wheel, or Safari's gesture events, both kept from
-zooming the page) or a two-finger touch pinch zooms about the fingers or
-pointer, and `Mod+=`/`Mod+-` step by 1.25 about the frame's centre while
-`Mod+0` fits again. When the image is larger than the frame, **Actual size**
-in the header, or a click on the image, switches between fitted and 100% about
-the clicked point; the header shows the zoom level while zoomed. One dialog serves the
+named by its basename with the path as its title. Thumbnails keep each image's
+aspect ratio within 320×192px; their composer radius shrinks on short images so
+the corners do not meet. Each image is named by its place in the row
+("Image 2 of 3", or "Attached image" when it is alone), and its thumbnail is a
+button that opens the same blob in a `Dialog` filling the window
+(the whole screen on a phone). The dialog shows only the image on a near-black
+backdrop, with the composer's thin border and corner radius, at up to 80% of
+the viewport width and height. A top-bar row keeps the image clear of macOS
+window controls and holds a 44px Close button; the image name stays for screen
+readers. Zoom runs
+from fitted to 400% of the image's pixels, in a frame that scrolls and takes
+keyboard focus; the focus outline follows the image. A trackpad pinch (a ctrl
+wheel, or Safari's gesture events, both kept from zooming the page) or a
+two-finger touch pinch zooms about the fingers or pointer. `Mod+=`/`Mod+-` step
+by 1.25 about the frame's centre while
+`Mod+0` fits again. When the image is larger than the frame, a click on it
+switches between fitted and 100% about the clicked point. A click beside a
+fitted image closes the dialog. One dialog serves the
 row: while the image is fitted, `ArrowLeft` and `ArrowRight`, or a horizontal
 swipe, step to the previous or next image that loaded, stopping at either end;
 zoomed in, or with a modifier key held or the page pinch-zoomed, they do not

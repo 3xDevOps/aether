@@ -1,8 +1,9 @@
 import type * as React from 'react'
+import { Dialog as DialogPrimitive } from 'radix-ui'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { File as FileIcon } from '@/components/icons'
+import { File as FileIcon, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { cn, focusRingInset } from '@/lib/utils'
@@ -12,7 +13,7 @@ import type { MessageImageRef } from '@/store/session-rows'
 const maxScale = 4
 const keyStep = 1.25
 
-function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
+function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClose }: {
   url: string
   name: string
   gallery: boolean
@@ -20,6 +21,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
   keys: React.RefObject<((event: React.KeyboardEvent) => void) | undefined>
   refocus: boolean
   onStep: (by: 1 | -1) => void
+  onClose: () => void
 }) {
   // Pixels drawn per natural pixel; undefined while the image is fitted to the frame.
   const [scale, setScale] = useState<number>()
@@ -48,17 +50,12 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
     const x = clientX ?? box.left + el.clientWidth / 2
     const y = clientY ?? box.top + el.clientHeight / 2
     // Where the point falls on the picture, 0 to 1 on each axis, measured on what is drawn since several wheel
-    // events can land before the next render. A fitted img letterboxes its picture.
+    // events can land before the next render.
     const drawn = picture.getBoundingClientRect()
-    const shown = picture.classList.contains('object-scale-down')
-      ? Math.min(1, drawn.width / picture.naturalWidth, drawn.height / picture.naturalHeight)
-      : drawn.width / picture.naturalWidth
-    const width = picture.naturalWidth * shown
-    const height = picture.naturalHeight * shown
     const clamp = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.5)
     anchor.current = {
-      x: clamp((x - drawn.left - (drawn.width - width) / 2) / width),
-      y: clamp((y - drawn.top - (drawn.height - height) / 2) / height),
+      x: clamp((x - drawn.left) / drawn.width),
+      y: clamp((y - drawn.top) / drawn.height),
       left: x - box.left,
       top: y - box.top,
     }
@@ -139,10 +136,15 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
       src={url}
       alt={name}
       className={cn(
-        scale === undefined ? 'size-full object-scale-down' : 'max-w-none shrink-0 cursor-zoom-out',
+        'rounded-composer border border-seam',
+        'group-focus-visible:outline-2 group-focus-visible:-outline-offset-2 group-focus-visible:outline-focus group-focus-visible:transition-none',
+        scale === undefined ? 'max-h-full max-w-full' : 'max-w-none shrink-0 cursor-zoom-out',
         scale === undefined && zoomable && 'cursor-zoom-in',
       )}
-      style={scale === undefined || !natural ? undefined : { width: natural.width * scale, height: natural.height * scale }}
+      style={natural ? {
+        ...(scale === undefined ? {} : { width: natural.width * scale, height: natural.height * scale }),
+        borderRadius: `min(var(--radius-composer), ${Math.min(natural.width, natural.height) * (scale ?? fitScale()) / 4}px)`,
+      } : undefined}
       onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
     />
   )
@@ -193,40 +195,37 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep }: {
         if (Math.abs(dx) > 48 && Math.abs(dx) > 2 * Math.abs(touch.clientY - begin.y)) onStep(dx < 0 ? 1 : -1)
       }}
     >
-      <DialogHeader className="min-h-6 flex-row items-center justify-between gap-3 coarse:min-h-11 coarse:pr-12">
-        <DialogTitle className="truncate">{name}</DialogTitle>
+      <div
+        ref={frame}
+        tabIndex={0}
+        role="group"
+        aria-label={`${name}, ${scale === undefined ? 'fitted' : `zoomed to ${Math.round(scale * 100)}%`}`}
+        className="group row-start-2 mx-auto mb-4 flex h-[min(80dvh,calc(100dvh_-_var(--top-bar-height)_-_var(--safe-top)_-_1rem))] w-[min(80vw,calc(100vw_-_2rem))] min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none"
+        onClick={(event) => {
+          // A fitted picture leaves only empty space around it; zoomed, a click there may be on the frame's scrollbar.
+          if (event.target !== img.current) {
+            if (scale === undefined) onClose()
+            return
+          }
+          if (scale !== undefined) zoomTo(undefined)
+          else if (zoomable) zoomTo(1, event.clientX, event.clientY)
+        }}
+      >
+        <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
+      </div>
+      <div className="row-start-1 flex min-h-[calc(var(--top-bar-height)_+_var(--safe-top))] items-center justify-end px-2 pt-[var(--safe-top)]">
+        <DialogTitle className="sr-only">{name}</DialogTitle>
         <DialogDescription className="sr-only">
           {[
             'Pinch, or press Command or Control with plus, minus or zero, to zoom.',
             gallery && 'Use the arrow keys or swipe to see the other images.',
           ].filter(Boolean).join(' ')}
         </DialogDescription>
-        <div className="flex items-center gap-2">
-          {scale !== undefined && <span className="text-ui-sm text-muted tabular-nums">{Math.round(scale * 100)}%</span>}
-          {zoomable && (
-            <Button variant="ghost" size="sm" aria-pressed={scale === 1} className="aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => zoomTo(scale === 1 ? undefined : 1)}>
-              Actual size
-            </Button>
-          )}
-        </div>
-      </DialogHeader>
-      <div
-        ref={frame}
-        tabIndex={0}
-        role="group"
-        aria-label={`${name}, ${scale === undefined ? 'fitted' : `zoomed to ${Math.round(scale * 100)}%`}`}
-        className={cn(
-          'flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control border border-seam bg-canvas outline-none',
-          'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus',
-        )}
-        onClick={(event) => {
-          // Only the picture: a click on the frame's own scrollbar must not reset the zoom.
-          if (event.target !== img.current) return
-          if (scale !== undefined) zoomTo(undefined)
-          else if (zoomable) zoomTo(1, event.clientX, event.clientY)
-        }}
-      >
-        <div className={scale === undefined ? 'size-full' : 'm-auto shrink-0'}>{image}</div>
+        <DialogPrimitive.Close asChild>
+          <Button variant="ghost" size="icon" label="Close" className="size-11">
+            <X className="size-5" />
+          </Button>
+        </DialogPrimitive.Close>
       </div>
     </div>
   )
@@ -240,7 +239,9 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
 }) {
   const [url, setURL] = useState<string>()
   const [loaded, setLoaded] = useState(false)
+  const [natural, setNatural] = useState<{ width: number; height: number }>()
   const [error, setError] = useState<string>()
+  const scale = natural ? Math.min(320 / natural.width, 192 / natural.height) : undefined
   const report = useRef(onURL)
   report.current = onURL
   useEffect(() => {
@@ -263,7 +264,15 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
   }, [runID, messageID, index])
 
   return (
-    <div className="relative flex h-48 w-full max-w-80 items-center justify-center overflow-hidden rounded-control border border-seam bg-canvas transition-colors has-[button:hover]:border-control">
+    <div
+      className="relative flex aspect-video w-full max-w-80 items-center justify-center overflow-hidden rounded-composer border border-seam bg-canvas transition-colors has-[button:hover]:border-control"
+      style={natural && scale !== undefined ? {
+        width: natural.width * scale,
+        maxWidth: '100%',
+        aspectRatio: `${natural.width} / ${natural.height}`,
+        borderRadius: `min(var(--radius-composer), ${Math.min(natural.width, natural.height) * scale / 4}px)`,
+      } : undefined}
+    >
       {error ? (
         <p role="alert" className="p-3 text-ui-sm break-words text-state-failed">{name} could not be loaded: {error}</p>
       ) : (
@@ -275,7 +284,10 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
                 src={url}
                 alt={name}
                 className="size-full object-contain"
-                onLoad={() => setLoaded(true)}
+                onLoad={(event) => {
+                  setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+                  setLoaded(true)
+                }}
                 onError={() => {
                   report.current(undefined)
                   setError('The downloaded image could not be decoded.')
@@ -342,7 +354,9 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
       ))}
       <Dialog open={url !== undefined} onOpenChange={(open) => !open && setOpenID(undefined)}>
         <DialogContent
-          className="inset-4 h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:rounded-none max-md:border-0 max-md:pt-[calc(1rem+var(--safe-top))] max-md:[&>button:last-child]:top-[calc(0.5rem+var(--safe-top))]"
+          showCloseButton={false}
+          overlayClassName="bg-scrim-strong"
+          className="inset-0 h-dvh max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[calc(var(--top-bar-height)_+_var(--safe-top))_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:w-auto max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:p-0"
           onKeyDown={(event) => {
             keys.current?.(event)
             if (event.defaultPrevented) return
@@ -362,7 +376,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
           }}
         >
           {url && openID && (
-            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} keys={keys} refocus={refocus.current} onStep={step} />
+            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} keys={keys} refocus={refocus.current} onStep={step} onClose={() => setOpenID(undefined)} />
           )}
         </DialogContent>
       </Dialog>
