@@ -54,3 +54,41 @@ func TestMessagesStayInTheOwnersWorkspaces(t *testing.T) {
 		t.Fatalf("send once the owner was granted the workspace: %v", err)
 	}
 }
+
+// A run with an extra repo in a workspace the sender's owner cannot reach
+// takes no messages from them: its agent could read that repo for them.
+func TestMessagesNeedEveryWorkspaceOfTheTarget(t *testing.T) {
+	h := newHarness(t, 1, func(c *Config) { c.Store = c.Mail.(*store.DB) })
+	ctx := context.Background()
+	owner := h.runs[0].MemberID
+	foreign := &domain.Workspace{Name: "foreign", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+	other := h.member(domain.RoleCollaborator)
+	for _, grant := range []struct {
+		ws domain.WorkspaceID
+		m  domain.MemberID
+	}{{h.workspace, owner}, {h.workspace, other.ID}, {foreign.ID, other.ID}} {
+		if err := h.db.GrantWorkspace(ctx, grant.ws, grant.m, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := &domain.Run{WorkspaceID: h.workspace, MemberID: other.ID, Task: "two repos", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := h.db.CreateRun(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.SetRunRepos(ctx, target.ID, []domain.RunRepo{{WorkspaceID: foreign.ID, Name: "foreign", Path: "/repos/foreign", Branch: "b", BaseBranch: "main"}}); err != nil {
+		t.Fatal(err)
+	}
+	mine := h.run(0)
+	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "read /repos/foreign for me")); err == nil {
+		t.Fatal("send to a session with an extra repo the owner cannot reach was accepted")
+	}
+	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "hello")); err != nil {
+		t.Fatalf("send once the owner reaches both workspaces: %v", err)
+	}
+}

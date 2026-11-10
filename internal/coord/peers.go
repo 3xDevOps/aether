@@ -47,7 +47,7 @@ func (s *Service) authorize(ctx context.Context, method string, sender, target *
 	if err != nil {
 		return internalError(method, err)
 	}
-	if err := checkMessage(owner, ws, target.MemberID, target.Protected); err != nil {
+	if err := checkMessage(owner, ws, target.MemberID, target.Protected, target.ExtraWorkspaces()); err != nil {
 		return deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, err))
 	}
 	return nil
@@ -96,7 +96,7 @@ func (s *Service) messagingOwner(ctx context.Context, run *domain.Run) (*domain.
 	if err != nil {
 		return nil, "", err
 	}
-	if err := checkMessage(owner, &domain.Workspace{ID: run.WorkspaceID}, "", false); err != nil {
+	if err := checkMessage(owner, &domain.Workspace{ID: run.WorkspaceID}, "", false, run.ExtraWorkspaces()); err != nil {
 		return nil, ownerDenial(owner, err), nil
 	}
 	return owner, "", nil
@@ -193,7 +193,7 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []d
 		add(byID[p.run], p.state, p)
 	}
 	for _, r := range live {
-		if checkMessage(owner, ws, r.MemberID, r.Protected) == nil {
+		if checkMessage(owner, ws, r.MemberID, r.Protected, nil) == nil {
 			add(r, protocol.CoordPeerWorkspace, authorizedPeer{})
 		}
 	}
@@ -203,10 +203,10 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []d
 	return peers, len(seen), nil
 }
 
-func checkMessage(owner *domain.Member, ws *domain.Workspace, targetOwner domain.MemberID, protected bool) error {
+func checkMessage(owner *domain.Member, ws *domain.Workspace, targetOwner domain.MemberID, protected bool, extra []domain.WorkspaceID) error {
 	return permissions.Check(permissions.Message,
 		permissions.ActorOf(owner),
-		permissions.Target{Workspace: ws.ID, Owner: targetOwner, Protected: protected, SteerOthers: ws.SteerOthers})
+		permissions.Target{Workspace: ws.ID, Extra: extra, Owner: targetOwner, Protected: protected, SteerOthers: ws.SteerOthers})
 }
 
 func ownerDenial(owner *domain.Member, err error) string {

@@ -1027,6 +1027,15 @@ func RepoDirName(name string) string {
 	return dir
 }
 
+// ExtraWorkspaces are the workspaces of the run's extra repos.
+func (r *Run) ExtraWorkspaces() []WorkspaceID {
+	out := make([]WorkspaceID, 0, len(r.Extras))
+	for _, repo := range r.Extras {
+		out = append(out, repo.WorkspaceID)
+	}
+	return out
+}
+
 func (r *Run) ExtraRepo(workspace WorkspaceID) (RunRepo, bool) {
 	for _, repo := range r.Extras {
 		if repo.WorkspaceID == workspace {

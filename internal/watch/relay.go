@@ -81,7 +81,7 @@ func (s *Service) mayRelay(ctx context.Context, member *domain.Member, ws domain
 		return err
 	}
 	actor := permissions.ActorOf(member)
-	target := permissions.Target{Workspace: ws, Owner: run.MemberID, Protected: run.Protected, SteerOthers: workspace.SteerOthers}
+	target := permissions.Target{Workspace: ws, Extra: run.ExtraWorkspaces(), Owner: run.MemberID, Protected: run.Protected, SteerOthers: workspace.SteerOthers}
 	if err := permissions.Check(permissions.Steer, actor, target); err != nil {
 		return relayRefused{fmt.Errorf("you may not write to session %s: %w", run.ID, err)}
 	}
