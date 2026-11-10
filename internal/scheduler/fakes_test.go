@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,6 +62,16 @@ type fakeRuntime struct {
 	execRunCalls []fakeExecCall
 	attaches     int
 	images       map[string]string
+	// imageLabels are the labels Commit set, by image tag.
+	imageLabels map[string]map[string]string
+	// exports are the tar streams ExportImage returns for an image committed
+	// from a container, by that container; any other image exports empty.
+	exports   map[runtime.ID][]byte
+	exportErr error
+	// exportHook runs at the start of every ExportImage.
+	exportHook func()
+	// imageStartErr fails Start of a container created from the image.
+	imageStartErr map[string]error
 }
 
 type fakeCommitCall struct {
@@ -200,6 +211,12 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 	c, err := r.get(id)
 	if err != nil {
 		return err
+	}
+	r.mu.Lock()
+	imageErr := r.imageStartErr[c.spec.Image]
+	r.mu.Unlock()
+	if imageErr != nil {
+		return imageErr
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -458,7 +475,7 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
 }
 
-func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error {
+func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string, labels map[string]string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.commitErr != nil {
@@ -469,7 +486,47 @@ func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error
 		r.images = make(map[string]string)
 	}
 	r.images[tag] = string(id)
+	if r.imageLabels == nil {
+		r.imageLabels = make(map[string]map[string]string)
+	}
+	r.imageLabels[tag] = maps.Clone(labels)
 	return nil
+}
+
+func (r *fakeRuntime) ImageLabels(_ context.Context, tag string) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.images[tag]; !ok {
+		return nil, fmt.Errorf("fake runtime: image %q: %w", tag, runtime.ErrNotFound)
+	}
+	return maps.Clone(r.imageLabels[tag]), nil
+}
+
+func (r *fakeRuntime) TagImage(_ context.Context, source, target string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.images[source]
+	if !ok {
+		return fmt.Errorf("fake runtime: no such image %q", source)
+	}
+	r.images[target] = id
+	r.imageLabels[target] = maps.Clone(r.imageLabels[source])
+	return nil
+}
+
+func (r *fakeRuntime) ExportImage(_ context.Context, tag string) (io.ReadCloser, error) {
+	if r.exportHook != nil {
+		r.exportHook()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.exportErr != nil {
+		return nil, r.exportErr
+	}
+	if _, ok := r.images[tag]; !ok {
+		return nil, fmt.Errorf("fake runtime: no such image %q", tag)
+	}
+	return io.NopCloser(bytes.NewReader(r.exports[runtime.ID(r.images[tag])])), nil
 }
 
 func (r *fakeRuntime) commitCalls() []fakeCommitCall {

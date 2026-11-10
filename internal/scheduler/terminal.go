@@ -200,13 +200,68 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	defer release()
 
 	s.removeScratch(terminalScratchName(member))
-	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, m, harness.Profile{}, EnvironmentPurposeTerminal)
+	st, err := s.startTerminalContainer(ctx, m, m, key, kept)
 	if err != nil {
-		return nil, fmt.Errorf("scheduler: build terminal environment: %w", err)
+		canRetry := func() bool { return st.cid == "" }
+		var plan *EnvironmentPlan
+		plan, err = s.startFromOlderImages(ctx, m, st.plan, err, canRetry, func(older *domain.Member) (*EnvironmentPlan, error) {
+			var startErr error
+			st, startErr = s.startTerminalContainer(ctx, m, older, key, "")
+			return st.plan, startErr
+		})
+		if err != nil {
+			return nil, err
+		}
+		slog.Warn("scheduler: environment terminal started from an older image", "member", member, "notice", plan.ImageNotice)
+	}
+	plan, terminalReservation, coordMounts, createdUser, cid, image := st.plan, st.reservation, st.coordMounts, st.createdUser, st.cid, st.image
+	if len(coordMounts) > 0 {
+		if updateErr := s.updateTerminalCoordination(member, cid); updateErr != nil {
+			destroyErr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid)
+			if destroyErr == nil || errors.Is(destroyErr, runtime.ErrNotFound) {
+				s.releaseTerminalCoordination(member)
+			} else {
+				s.retainTerminalAfterRuntimeError(m, nil, cid, createdUser)
+			}
+			s.releaseTerminalReservation(terminalReservation)
+			if destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
+				return nil, errors.Join(updateErr, fmt.Errorf("scheduler: destroy terminal after sidecar failure: %w", destroyErr))
+			}
+			return nil, updateErr
+		}
+	}
+	terminalReservation.containerID = cid
+	terminal := &domain.Terminal{Member: member, ContainerID: string(cid), Image: image, StartedAt: st.startedAt}
+	sup := s.registerTerminal(terminal, terminalReservation.userReservation, plan.Home)
+	sup.persistPending = true
+	if err := s.ensureTerminalReady(ctx, sup, terminal); err != nil {
+		return nil, err
+	}
+	return terminal, nil
+}
+
+type terminalStart struct {
+	plan        *EnvironmentPlan
+	reservation *terminalSupervision
+	coordMounts []runtime.Mount
+	createdUser string
+	startedAt   time.Time
+	cid         runtime.ID
+	image       string
+}
+
+// startTerminalContainer starts m's terminal container from planned's
+// image. On failure it releases what it reserved, except a container it
+// could not destroy, which it retains and returns.
+func (s *Scheduler) startTerminalContainer(ctx context.Context, m, planned *domain.Member, key string, kept runtime.ID) (terminalStart, error) {
+	member := m.ID
+	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, planned, harness.Profile{}, EnvironmentPurposeTerminal)
+	if err != nil {
+		return terminalStart{}, fmt.Errorf("scheduler: build terminal environment: %w", err)
 	}
 	coordMounts, coordErr := s.terminalCoordinationMount(member)
 	if coordErr != nil {
-		return nil, coordErr
+		return terminalStart{plan: plan}, coordErr
 	}
 	plan.Mounts = append(plan.Mounts, coordMounts...)
 	if len(coordMounts) > 0 {
@@ -215,18 +270,18 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	terminalReservation := &terminalSupervision{member: member}
 	if reserveErr := s.reserveTerminalUser(ctx, terminalReservation, plan.User); reserveErr != nil {
 		s.releaseTerminalCoordination(member)
-		return nil, fmt.Errorf("scheduler: reserve terminal user: %w", reserveErr)
+		return terminalStart{plan: plan}, fmt.Errorf("scheduler: reserve terminal user: %w", reserveErr)
 	}
 	if ownershipErr := s.applyRunOwnership(nil, &domain.Run{}, member, plan.Mounts, plan.User); ownershipErr != nil {
 		s.releaseTerminalCoordination(member)
 		s.releaseTerminalReservation(terminalReservation)
-		return nil, fmt.Errorf("scheduler: apply terminal ownership: %w", ownershipErr)
+		return terminalStart{plan: plan}, fmt.Errorf("scheduler: apply terminal ownership: %w", ownershipErr)
 	}
 	limits, err := s.runLimits(ctx, domain.RunLimits{})
 	if err != nil {
 		s.releaseTerminalCoordination(member)
 		s.releaseTerminalReservation(terminalReservation)
-		return nil, err
+		return terminalStart{plan: plan}, err
 	}
 	startedAt := time.Now().UTC()
 	spec := runtime.Spec{
@@ -254,6 +309,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		createdUser = terminalUnknownUser
 	}
 	cid, image, err := s.startOrCreateTerminal(ctx, kept, spec)
+	st := terminalStart{plan: plan, reservation: terminalReservation, coordMounts: coordMounts, createdUser: createdUser, startedAt: startedAt, cid: cid, image: image}
 	if err != nil {
 		if cid == "" {
 			s.releaseTerminalCoordination(member)
@@ -264,31 +320,9 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			s.retainTerminalAfterRuntimeError(m, nil, cid, createdUser)
 		}
 		s.releaseTerminalReservation(terminalReservation)
-		return nil, err
+		return st, err
 	}
-	if len(coordMounts) > 0 {
-		if updateErr := s.updateTerminalCoordination(member, cid); updateErr != nil {
-			destroyErr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid)
-			if destroyErr == nil || errors.Is(destroyErr, runtime.ErrNotFound) {
-				s.releaseTerminalCoordination(member)
-			} else {
-				s.retainTerminalAfterRuntimeError(m, nil, cid, createdUser)
-			}
-			s.releaseTerminalReservation(terminalReservation)
-			if destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
-				return nil, errors.Join(updateErr, fmt.Errorf("scheduler: destroy terminal after sidecar failure: %w", destroyErr))
-			}
-			return nil, updateErr
-		}
-	}
-	terminalReservation.containerID = cid
-	terminal := &domain.Terminal{Member: member, ContainerID: string(cid), Image: image, StartedAt: startedAt}
-	sup := s.registerTerminal(terminal, terminalReservation.userReservation, plan.Home)
-	sup.persistPending = true
-	if err := s.ensureTerminalReady(ctx, sup, terminal); err != nil {
-		return nil, err
-	}
-	return terminal, nil
+	return st, nil
 }
 
 // terminalFingerprint identifies the settings a terminal container was

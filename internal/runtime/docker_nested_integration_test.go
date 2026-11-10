@@ -155,7 +155,7 @@ YAML`)
 	t.Run("saved environment", func(t *testing.T) {
 		tag := "aether-nested-test:saved"
 		execOK(t, ctx, docker, id, "rm -f /tmp/main-docker-status /tmp/main-docker-version")
-		if err := docker.Commit(ctx, id, tag); err != nil {
+		if err := docker.Commit(ctx, id, tag, nil); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = docker.RemoveImage(context.Background(), tag) })

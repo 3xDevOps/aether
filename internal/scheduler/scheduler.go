@@ -240,6 +240,9 @@ type Scheduler struct {
 	assistantLoginLocks   map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
+	// unstartableImages maps a saved environment image that failed to start
+	// a session container to the cause. Guarded by mu.
+	unstartableImages map[string]string
 	// evidenceUnavailable holds active runs whose capture found the checkout
 	// gone, for the reason they are interrupted with. Guarded by mu.
 	evidenceUnavailable map[domain.RunID]struct{}
@@ -687,6 +690,7 @@ func New(cfg Config) (*Scheduler, error) {
 		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
 		terminals:            make(map[domain.MemberID]*terminalSupervision),
 		credentialUsers:      make(map[*credentialUserReservation]struct{}),
+		unstartableImages:    make(map[string]string),
 	}
 	s.acp = newACPDriver(s)
 	s.appServer = newAppServerDriver(s)
