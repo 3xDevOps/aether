@@ -81,7 +81,9 @@ type Insights struct {
 	PullRequests InsightsPullRequests
 	Success      InsightsSuccess
 	Members      []*InsightsMemberOutcomes
-	Recent       []*InsightsRun
+	// Recent leaves out a run with an extra repository outside Workspaces,
+	// which the figures still count.
+	Recent []*InsightsRun
 	// NeedsYou is the runs domain.Run.NeedsAttention selects, before the
 	// caller drops paused ones.
 	NeedsYou          []domain.RunID
@@ -199,6 +201,16 @@ func (q InsightsQuery) ownerScope() string {
 	}
 	if q.Workspaces != nil {
 		where += " AND r.workspace_id IN " + insightsReachable
+	}
+	return where
+}
+
+// runScope is ownerScope that also leaves out a run with an extra
+// repository in a workspace outside Workspaces.
+func (q InsightsQuery) runScope() string {
+	where := q.ownerScope()
+	if q.Workspaces != nil {
+		where += " AND NOT EXISTS (SELECT 1 FROM run_repos rr WHERE rr.run_id = r.id AND rr.workspace_id NOT IN " + insightsReachable + ")"
 	}
 	return where
 }
@@ -666,7 +678,7 @@ func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 		FROM runs r
 		LEFT JOIN run_pull_requests p ON p.rowid = (
 			SELECT p.rowid FROM run_pull_requests p WHERE p.run_id = r.id AND `+q.prScope()+` ORDER BY p.created_at DESC, p.rowid DESC LIMIT 1)
-		WHERE `+q.ownerScope()+` AND `+insightsFinishedIn+`
+		WHERE `+q.runScope()+` AND `+insightsFinishedIn+`
 		ORDER BY r.finished_at DESC, r.id DESC LIMIT 50`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: recent: %w", err)

@@ -1,7 +1,6 @@
 package sshd
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -93,7 +92,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	if run.Protected {
 		out = append(out, protectedWarning)
 	}
-	work, merged, err := s.workWarnings(ctx, actor, run, outcome)
+	work, merged, err := s.workWarnings(ctx, run, outcome)
 	if err != nil {
 		return nil, false, rpcError(err)
 	}
@@ -121,14 +120,14 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 				return nil, false, rpcError(err)
 			}
 		}
-		if child == nil || !actor.Reaches(child.WorkspaceID) {
+		if child == nil || !reachesRun(actor, child) {
 			continue
 		}
 		waiters, err := s.cfg.Store.RunWaiters(ctx, childID)
 		if err != nil {
 			return nil, false, rpcError(err)
 		}
-		childWork, _, err := s.workWarnings(ctx, actor, child, outcome)
+		childWork, _, err := s.workWarnings(ctx, child, outcome)
 		if err != nil {
 			return nil, false, rpcError(err)
 		}
@@ -154,9 +153,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 // workWarnings reads recorded pull request states as last observed; it
 // never asks GitHub, so a 50-run check stays fast. Recorded pull requests
 // carry no commit, so whether one holds the branch tip is judged by time.
-// A pull request of a repository in a workspace actor does not reach is
-// left out.
-func (s *Server) workWarnings(ctx context.Context, actor permissions.Actor, run *domain.Run, outcome domain.RunStatus) ([]protocol.CloseWarning, bool, error) {
+func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome domain.RunStatus) ([]protocol.CloseWarning, bool, error) {
 	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
 	if err != nil {
 		return nil, false, err
@@ -164,9 +161,6 @@ func (s *Server) workWarnings(ctx context.Context, actor permissions.Actor, run 
 	var out []protocol.CloseWarning
 	open, merged := false, false
 	for _, pr := range prs {
-		if !actor.Reaches(cmp.Or(pr.RepoWorkspace, run.WorkspaceID)) {
-			continue
-		}
 		primary := pr.RepoWorkspace == ""
 		switch pr.State {
 		case "merged":
@@ -220,7 +214,7 @@ func (s *Server) visibleRuns(ctx context.Context, actor permissions.Actor, known
 		switch {
 		case cached && r == nil:
 			label += " (queued)"
-		case r == nil || !actor.Reaches(r.WorkspaceID):
+		case r == nil || !reachesRun(actor, r):
 			continue
 		case r.Title != "":
 			label += " (" + r.Title + ")"

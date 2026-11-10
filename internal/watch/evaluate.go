@@ -180,7 +180,7 @@ func backoff(failures int) time.Duration {
 }
 
 // allowed checks that w's owner still exists, is approved and can view
-// its workspace.
+// its workspace and every workspace of its session.
 func (s *Service) allowed(ctx context.Context, w *store.Watch) error {
 	m, err := s.store.GetMember(ctx, w.MemberID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -200,8 +200,17 @@ func (s *Service) allowed(ctx context.Context, w *store.Watch) error {
 	} else if err != nil {
 		return err
 	}
-	actor := permissions.ActorOf(m)
-	if err := permissions.Check(permissions.View, actor, permissions.Target{Workspace: w.WorkspaceID}); err != nil {
+	target := permissions.Target{Workspace: w.WorkspaceID}
+	if w.RunID != "" {
+		run, err := s.store.GetRun(ctx, w.RunID)
+		switch {
+		case err == nil:
+			target.Extra = run.ExtraWorkspaces()
+		case !errors.Is(err, store.ErrNotFound):
+			return err
+		}
+	}
+	if err := permissions.Check(permissions.View, permissions.ActorOf(m), target); err != nil {
 		return fmt.Errorf("%w: %w", errRevoked, err)
 	}
 	return nil

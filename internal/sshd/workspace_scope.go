@@ -66,24 +66,28 @@ func workspaceWire(actor permissions.Actor, w *domain.Workspace) protocol.Worksp
 	return out
 }
 
-func scopeRepos(actor permissions.Actor, run *protocol.Run) {
-	if len(run.Repos) == 0 {
-		return
-	}
-	kept := run.Repos[:0]
-	for _, r := range run.Repos {
-		if r.Primary || actor.Reaches(domain.WorkspaceID(r.WorkspaceID)) {
-			kept = append(kept, r)
-		}
-	}
-	run.Repos = kept
-}
-
 // reachesRun reports whether actor reaches every workspace of run, its
-// extra repositories' included: a member who does not may list the run but
-// is shown none of its events.
+// extra repositories' included. A run a member does not reach does not
+// exist for them.
 func reachesRun(actor permissions.Actor, run *domain.Run) bool {
 	return reachesAll(actor, runWorkspaces(run))
+}
+
+// reachableRun is GetRun for member: a run they do not reach in every
+// workspace is permissions.ErrNoAccess, which reads as a missing run.
+func (s *Server) reachableRun(ctx context.Context, member domain.MemberID, id domain.RunID) (*domain.Run, error) {
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, err
+	}
+	run, err := s.cfg.Store.GetRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !reachesRun(actor, run) {
+		return nil, permissions.ErrNoAccess
+	}
+	return run, nil
 }
 
 func reachesAll(actor permissions.Actor, workspaces []domain.WorkspaceID) bool {
@@ -108,8 +112,8 @@ func newRunScopes(st store.Store) *runScopes {
 }
 
 // reaches reports whether actor reaches every workspace of run id. A run
-// that no longer exists leaves only the workspace of the event naming it
-// to check; one that cannot be read is reached by super admins alone.
+// that no longer exists, or cannot be read, is reached by super admins
+// alone: the extra repositories it had are no longer known.
 func (c *runScopes) reaches(ctx context.Context, actor permissions.Actor, id domain.RunID) bool {
 	if actor.Role == domain.RoleSuperAdmin {
 		return true
@@ -117,10 +121,7 @@ func (c *runScopes) reaches(ctx context.Context, actor permissions.Actor, id dom
 	workspaces, ok := c.runs[id]
 	if !ok {
 		run, err := c.st.GetRun(ctx, id)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-			return true
-		case err != nil:
+		if err != nil {
 			return false
 		}
 		workspaces = runWorkspaces(run)
@@ -158,19 +159,6 @@ func (s *Server) memberSight(ctx context.Context, actor permissions.Actor) func(
 		return func(domain.MemberID) bool { return false }
 	}
 	return sees
-}
-
-// memberRunSnapshot is runSnapshot as member may see it: repos in
-// workspaces they cannot reach are left out, and all extras are when their
-// access cannot be read.
-func (s *Server) memberRunSnapshot(ctx context.Context, member domain.MemberID, run *domain.Run) protocol.Run {
-	snap := s.runSnapshot(run)
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
-	if err != nil {
-		actor = permissions.Actor{}
-	}
-	scopeRepos(actor, &snap)
-	return snap
 }
 
 // visibleMembers reports which members actor sees. A super admin sees

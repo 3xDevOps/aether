@@ -173,7 +173,11 @@ func (s *Service) waitTargetVisible(ctx context.Context, owner *domain.Run, targ
 	if err != nil {
 		return err
 	}
-	if err := permissions.Check(permissions.View, permissions.ActorOf(m), permissions.Target{Workspace: run.WorkspaceID}); err != nil {
+	err = permissions.Check(permissions.View, permissions.ActorOf(m), permissions.Target{Workspace: run.WorkspaceID, Extra: run.ExtraWorkspaces()})
+	if errors.Is(err, permissions.ErrNoAccess) {
+		return invalid("until run:%s:finished: no such run", target)
+	}
+	if err != nil {
 		return invalid("until run:%s:finished: %v", target, err)
 	}
 	return nil

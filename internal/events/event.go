@@ -186,10 +186,16 @@ type RunInputPayload struct {
 
 func (RunInputPayload) EventType() Type { return TypeRunInput }
 
-// RunDeletedPayload signals that a run's durable record was removed.
-type RunDeletedPayload struct{}
+// RunDeletedPayload signals that a run's durable record was removed. With
+// no record left to read them from, it names the run's extra workspaces;
+// one logged before it did reads nil.
+type RunDeletedPayload struct {
+	ExtraWorkspaceIDs []domain.WorkspaceID `json:"extra_workspace_ids"`
+}
 
 func (RunDeletedPayload) EventType() Type { return TypeRunDeleted }
+
+func (p RunDeletedPayload) RunExtraWorkspaces() []domain.WorkspaceID { return p.ExtraWorkspaceIDs }
 
 // WorkspaceDeletedPayload invalidates the deleted workspace in connected clients.
 type WorkspaceDeletedPayload struct{}

@@ -163,7 +163,7 @@ func (w *scopeWorld) sameAsMissing(t *testing.T, who, method string, unreachable
 	}
 	g, m := wireErrOf(t, got), wireErrOf(t, want)
 	// An error may echo the id it was given.
-	echo := strings.NewReplacer(string(w.wsB.ID), "<id>", string(w.runB.ID), "<id>", noWorkspace, "<id>", noRun, "<id>")
+	echo := strings.NewReplacer(string(w.wsB.ID), "<id>", string(w.runB.ID), "<id>", string(w.runA.ID), "<id>", noWorkspace, "<id>", noRun, "<id>")
 	if g.Code != m.Code || echo.Replace(g.Message) != echo.Replace(m.Message) || string(g.Data) != string(m.Data) {
 		t.Fatalf("%s %s: unreachable = %d %q, missing = %d %q; want them identical", who, method, g.Code, g.Message, m.Code, m.Message)
 	}
@@ -208,11 +208,6 @@ func TestWorkspaceScopeLists(t *testing.T) {
 		var ids []string
 		for _, r := range res.Runs {
 			ids = append(ids, r.ID)
-			for _, repo := range r.Repos {
-				if !repo.Primary && who != "S" && repo.WorkspaceID == b {
-					t.Errorf("%s run.list shows %s's extra repository in wsB", who, r.ID)
-				}
-			}
 		}
 		slices.Sort(ids)
 		return ids
@@ -227,8 +222,8 @@ func TestWorkspaceScopeLists(t *testing.T) {
 	}
 	for who, want := range map[string][]string{
 		"S": sorted(e.run.ID, w.runA.ID, w.runB.ID, w.runUA.ID, w.runUB.ID),
-		"A": sorted(w.runA.ID, w.runUA.ID),
-		"U": sorted(w.runA.ID, w.runUA.ID),
+		"A": sorted(w.runUA.ID),
+		"U": sorted(w.runUA.ID),
 		"N": sorted(),
 	} {
 		for _, p := range []protocol.RunListParams{{}, {ActiveOnly: true}, {MemberID: string(w.u.ID)}} {
@@ -250,6 +245,9 @@ func TestWorkspaceScopeLists(t *testing.T) {
 	}
 	if got := runs("A", protocol.RunListParams{WorkspaceID: b}); len(got) != 0 {
 		t.Errorf("A run.list of wsB = %v, want none, as for a workspace that does not exist", got)
+	}
+	if got := runs("A", protocol.RunListParams{WorkspaceID: a}); !slices.Equal(got, sorted(w.runUA.ID)) {
+		t.Errorf("A run.list of wsA = %v, want only %s, not the run with a repository in wsB", got, w.runUA.ID)
 	}
 
 	attention := func(who string) []string {
@@ -448,17 +446,18 @@ func TestWorkspaceScopeUnreachableReadsAsMissing(t *testing.T) {
 			t.Fatalf("%s run.close_check: unreachable = %+v, missing = %+v; want them identical", who, got, missing)
 		}
 	}
-	// A run U reaches, with an extra repository in a workspace U does not.
-	read := func(repo string) protocol.FilesReadParams {
-		return protocol.FilesReadParams{WorkspaceID: string(w.wsA.ID), RunID: string(w.runA.ID), Repo: repo, Path: "README.md"}
+	// A run in a workspace U reaches, with an extra repository in one U
+	// does not, does not exist for U.
+	read := func(run, repo string) protocol.FilesReadParams {
+		return protocol.FilesReadParams{WorkspaceID: string(w.wsA.ID), RunID: run, Repo: repo, Path: "README.md"}
 	}
-	w.sameAsMissing(t, "U", protocol.MethodFilesRead, read(b), read(noWorkspace))
-	if err := w.call(t, "S", protocol.MethodFilesRead, read(b), nil); err != nil {
+	runA := string(w.runA.ID)
+	w.sameAsMissing(t, "U", protocol.MethodFilesRead, read(runA, b), read(noRun, b))
+	w.sameAsMissing(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: runA}, protocol.RunIDParams{RunID: noRun})
+	w.sameAsMissing(t, "U", protocol.MethodRunPull, protocol.RunPullParams{RunID: runA, Repo: b}, protocol.RunPullParams{RunID: noRun, Repo: b})
+	w.sameAsMissing(t, "U", protocol.MethodChangesList, protocol.ChangesListParams{RunID: runA}, protocol.ChangesListParams{RunID: noRun})
+	if err := w.call(t, "S", protocol.MethodFilesRead, read(runA, b), nil); err != nil {
 		t.Fatalf("S files.read of the extra repository: %v", err)
-	}
-	var pulled protocol.RunPullResult
-	if err := w.call(t, "U", protocol.MethodRunPull, protocol.RunPullParams{RunID: string(w.runA.ID), Repo: b}, &pulled); err == nil {
-		t.Fatalf("U run.pull of the extra repository in wsB = %+v, want refused", pulled)
 	}
 	for _, method := range []string{protocol.MethodWorkspaceTimeline, protocol.MethodCostReport, protocol.MethodTemplateList} {
 		if err := w.call(t, "B", method, protocol.WorkspaceGetParams{WorkspaceID: b}, nil); err != nil {
@@ -504,81 +503,179 @@ func TestScheduleReplaceAndDeleteNeedItsCreatorOrTheWorkspaceAdmin(t *testing.T)
 	}
 }
 
-// A session's result names only the repos the caller reaches: U closes
-// A's run, whose extra repo is in B's workspace, and is not told of it.
-func TestRunResultLeavesOutUnreachableRepos(t *testing.T) {
+// A session with an extra repository in a workspace the caller cannot
+// reach does not exist for them: it is not listed or read, and its events,
+// pull requests and status reason stay unseen. The figures insights
+// aggregates still count it.
+func TestASessionWithAnUnreachableRepoDoesNotExist(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
+	ctx := t.Context()
+	runA := w.runA
+	const url, reason = "https://github.com/acme/b/pull/7", "asked: which deploy key opens wsB?"
+	now := time.Now()
+	if _, err := w.e.db.UpdateRunStatus(ctx, runA.ID, domain.RunCompleted, reason, "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.e.db.RecordRunPullRequest(ctx, &store.RunPullRequest{RunID: runA.ID, RepoWorkspace: w.wsB.ID, Repository: "acme/b", Number: 7,
+		URL: url, State: "open", ObservedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []events.Payload{events.RunStatusPayload{To: domain.RunCompleted, Reason: reason}, events.RunDiffPayload{Repo: w.wsB.ID},
+		events.RunPRPayload{RunID: runA.ID, Repo: w.wsB.ID, Number: 7, URL: url}} {
+		if _, err := w.bus.Publish(ctx, events.Event{WorkspaceID: w.wsA.ID, RunID: runA.ID, Payload: p}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var got protocol.RunResult
-	if err := w.call(t, "S", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(w.runA.ID)}, &got); err != nil {
+	if err := w.call(t, "S", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(runA.ID)}, &got); err != nil {
 		t.Fatalf("S gets A's run: %v", err)
 	}
-	if len(got.Run.Repos) != 2 {
-		t.Fatalf("S sees repos %+v, want the primary and B's", got.Run.Repos)
-	}
-	var res protocol.RunResult
-	if err := w.call(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(w.runA.ID)}, &res); err != nil {
-		t.Fatalf("U gets A's run: %v", err)
-	}
-	if res.Run.ID != string(w.runA.ID) {
-		t.Fatalf("U's result = %+v, want A's run", res.Run)
-	}
-	for _, r := range res.Run.Repos {
-		if r.WorkspaceID == string(w.wsB.ID) {
-			t.Fatalf("U's result names B's repo: %+v", res.Run.Repos)
-		}
+	if len(got.Run.Repos) != 2 || len(got.PullRequests) != 1 {
+		t.Fatalf("S sees repos %+v and pull requests %+v, want the primary, B's, and B's pull request", got.Run.Repos, got.PullRequests)
 	}
 	closeParams := func(id string) protocol.RunCloseParams {
 		return protocol.RunCloseParams{RunID: id, Outcome: string(domain.RunAbandoned)}
 	}
-	w.sameAsMissing(t, "U", protocol.MethodRunClose, closeParams(string(w.runA.ID)), closeParams(noRun))
-}
-
-func TestExtraRepoWorkAndForeignSendersStayInTheirWorkspace(t *testing.T) {
-	t.Parallel()
-	w := newScopeWorld(t)
-	ctx := t.Context()
-	ua := w.runUA
-	const url = "https://github.com/acme/b/pull/7"
-	if err := w.e.db.RecordRunPullRequest(ctx, &store.RunPullRequest{RunID: ua.ID, RepoWorkspace: w.wsB.ID, Repository: "acme/b", Number: 7,
-		URL: url, State: "open", ObservedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.e.db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: w.wsB.ID, FromRun: w.runB.ID, ToRun: ua.ID, Body: "hi",
-		Kind: store.RunMessageKindMessage, CreatedAt: time.Now()}, 100); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range []events.Payload{events.RunDiffPayload{Repo: w.wsB.ID}, events.RunPRPayload{RunID: ua.ID, Repo: w.wsB.ID, Number: 7, URL: url}} {
-		if _, err := w.bus.Publish(ctx, events.Event{WorkspaceID: w.wsA.ID, RunID: ua.ID, Payload: p}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	from, to := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	from, to := now.Add(-time.Hour).UTC().Format(time.RFC3339), now.Add(time.Hour).UTC().Format(time.RFC3339)
 	calls := []struct {
 		method string
 		params any
 	}{
-		{protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(ua.ID)}}},
-		{protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{WorkspaceID: string(w.wsA.ID), Types: []string{string(events.TypeRunDiff), string(events.TypeRunPR)}}},
+		{protocol.MethodRunList, protocol.RunListParams{}},
+		{protocol.MethodRunList, protocol.RunListParams{WorkspaceID: string(w.wsA.ID)}},
+		{protocol.MethodRunList, protocol.RunListParams{MemberID: string(w.a.ID)}},
+		{protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{WorkspaceID: string(w.wsA.ID)}},
 		{protocol.MethodChangesList, protocol.ChangesListParams{WorkspaceID: string(w.wsA.ID)}},
 		{protocol.MethodInsightsGet, protocol.InsightsParams{Scope: protocol.InsightsScopeEveryone, From: from, To: to, TimeZone: "UTC"}},
 	}
 	for _, who := range []string{"S", "A", "U"} {
+		if who != "S" {
+			w.sameAsMissing(t, who, protocol.MethodRunGet, protocol.RunIDParams{RunID: string(runA.ID)}, protocol.RunIDParams{RunID: noRun})
+			w.sameAsMissing(t, who, protocol.MethodRunClose, closeParams(string(runA.ID)), closeParams(noRun))
+			var check protocol.RunCloseCheckResult
+			if err := w.call(t, who, protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(runA.ID), noRun}}, &check); err != nil {
+				t.Fatalf("%s run.close_check: %v", who, err)
+			}
+			if got, missing := check.Runs[0].Error, check.Runs[1].Error; got == nil || missing == nil || got.Code != missing.Code || got.Message != missing.Message {
+				t.Fatalf("%s run.close_check: unreachable = %+v, missing = %+v; want them identical", who, got, missing)
+			}
+		}
 		for _, c := range calls {
 			var res json.RawMessage
 			if err := w.call(t, who, c.method, c.params, &res); err != nil {
 				t.Fatalf("%s %s: %v", who, c.method, err)
 			}
-			leaked := strings.Contains(string(res), url) || strings.Contains(string(res), string(w.wsB.ID)) || strings.Contains(string(res), string(w.runB.ID))
+			leaked := false
+			for _, secret := range []string{url, reason, string(w.wsB.ID), string(runA.ID)} {
+				leaked = leaked || strings.Contains(string(res), secret)
+			}
 			if c.method == protocol.MethodInsightsGet {
 				var insights protocol.InsightsResult
 				if err := json.Unmarshal(res, &insights); err != nil {
 					t.Fatal(err)
 				}
 				leaked = leaked || insights.PullRequests.Opened != 0
+				if who == "A" && insights.Totals.Launched != 2 {
+					t.Errorf("A insights launched = %d, want wsA's 2 runs counted", insights.Totals.Launched)
+				}
 			}
 			if leaked != (who == "S") {
-				t.Errorf("%s %s leaks wsB = %v, want %v: %s", who, c.method, leaked, who == "S", res)
+				t.Errorf("%s %s %+v shows A's run = %v, want %v: %s", who, c.method, c.params, leaked, who == "S", res)
+			}
+		}
+	}
+}
+
+// A message from a session in a workspace the caller cannot reach is
+// counted in a close check but not named.
+func TestForeignSendersStayInTheirWorkspace(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ua := w.runUA
+	if err := w.e.db.AppendRunMessage(t.Context(), &store.RunMessage{WorkspaceID: w.wsB.ID, FromRun: w.runB.ID, ToRun: ua.ID, Body: "hi",
+		Kind: store.RunMessageKindMessage, CreatedAt: time.Now()}, 100); err != nil {
+		t.Fatal(err)
+	}
+	for _, who := range []string{"S", "A", "U"} {
+		var res json.RawMessage
+		if err := w.call(t, who, protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(ua.ID)}}, &res); err != nil {
+			t.Fatalf("%s run.close_check: %v", who, err)
+		}
+		if leaked := strings.Contains(string(res), string(w.runB.ID)); leaked != (who == "S") {
+			t.Errorf("%s run.close_check names wsB's sender = %v, want %v: %s", who, leaked, who == "S", res)
+		}
+		if !strings.Contains(string(res), `"count":1`) {
+			t.Errorf("%s run.close_check = %s, want the message counted", who, res)
+		}
+	}
+}
+
+// An event naming a session that no longer exists reaches only super
+// admins, unless it names every workspace of that session itself, as
+// run.deleted does.
+func TestADeletedSessionsEventsNeedEveryWorkspace(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	publish := func(r *domain.Run, p events.Payload) uint64 {
+		t.Helper()
+		ev, err := w.bus.Publish(ctx, events.Event{WorkspaceID: r.WorkspaceID, RunID: r.ID, Payload: p})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ev.Seq
+	}
+	plain := publish(w.runUA, events.RunStatusPayload{To: domain.RunCompleted, Reason: "plain"})
+	multi := publish(w.runA, events.RunStatusPayload{To: domain.RunCompleted, Reason: "two repos"})
+	for _, r := range []*domain.Run{w.runUA, w.runA} {
+		if err := w.e.db.DeleteRun(ctx, r.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy := publish(w.runUA, events.RunDeletedPayload{})
+	plainDeleted := publish(w.runUA, events.RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{}})
+	multiDeleted := publish(w.runA, events.RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{w.wsB.ID}})
+	all := []uint64{plain, multi, legacy, plainDeleted, multiDeleted}
+	seqs := func(who, method string, params any) []uint64 {
+		t.Helper()
+		var out []uint64
+		switch method {
+		case protocol.MethodChangesList:
+			var res protocol.ChangesListResult
+			if err := w.call(t, who, method, params, &res); err != nil {
+				t.Fatalf("%s %s: %v", who, method, err)
+			}
+			for _, c := range res.Changes {
+				out = append(out, c.Seq)
+			}
+		case protocol.MethodWorkspaceTimeline:
+			var res protocol.WorkspaceTimelineResult
+			if err := w.call(t, who, method, params, &res); err != nil {
+				t.Fatalf("%s %s: %v", who, method, err)
+			}
+			for _, ev := range res.Events {
+				out = append(out, ev.Seq)
+			}
+		}
+		slices.Sort(out)
+		return slices.DeleteFunc(out, func(seq uint64) bool { return !slices.Contains(all, seq) })
+	}
+	for who, want := range map[string][]uint64{
+		"S": all,
+		"A": {plainDeleted},
+		"U": {plainDeleted},
+	} {
+		for _, c := range []struct {
+			method string
+			params any
+		}{
+			{protocol.MethodChangesList, protocol.ChangesListParams{Cursor: "0", WorkspaceID: string(w.wsA.ID)}},
+			{protocol.MethodChangesList, protocol.ChangesListParams{Cursor: "0"}},
+			{protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{WorkspaceID: string(w.wsA.ID)}},
+		} {
+			if got := seqs(who, c.method, c.params); !slices.Equal(got, want) {
+				t.Errorf("%s %s %+v = %v, want %v", who, c.method, c.params, got, want)
 			}
 		}
 	}

@@ -258,7 +258,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		}
 		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; session %s was stopped, so launch again", childrenErr.Message, run.ID)}
 	}
-	return protocol.RunLaunchResult{Run: s.memberRunSnapshot(ctx, member, run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
+	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
 }
 
 func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback,
@@ -354,12 +354,10 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 		if p.ActiveOnly && r.Status.Terminal() {
 			continue
 		}
-		if !actor.Reaches(r.WorkspaceID) {
+		if !reachesRun(actor, r) {
 			continue
 		}
-		snap := s.runSnapshot(r)
-		scopeRepos(actor, &snap)
-		out = append(out, snap)
+		out = append(out, s.runSnapshot(r))
 		listed = append(listed, r)
 	}
 	if err := s.fillWaitConditions(ctx, member, listed, out); err != nil {
@@ -373,31 +371,20 @@ func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json
 	if perr != nil {
 		return nil, perr
 	}
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	run, err := s.reachableRun(ctx, member, p)
 	if err != nil {
 		return nil, rpcError(err)
-	}
-	run, err := s.cfg.Store.GetRun(ctx, p)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	if !actor.Reaches(run.WorkspaceID) {
-		return nil, rpcError(permissions.ErrNoAccess)
 	}
 	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	snap := []protocol.Run{s.runSnapshot(run)}
-	scopeRepos(actor, &snap[0])
 	if err := s.fillWaitConditions(ctx, member, []*domain.Run{run}, snap); err != nil {
 		return nil, rpcError(err)
 	}
 	out := protocol.RunResult{Run: snap[0]}
 	for _, pr := range prs {
-		if pr.RepoWorkspace != "" && !actor.Reaches(pr.RepoWorkspace) {
-			continue
-		}
 		out.PullRequests = append(out.PullRequests, protocol.RecordedPullRequest{Repo: string(pr.RepoWorkspace), Repository: pr.Repository,
 			Number: pr.Number, URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, CheckedAt: pr.ObservedAt})
 	}
@@ -485,7 +472,7 @@ func (s *Server) runArchive(ctx context.Context, member domain.MemberID, params 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 // runSeen records that the caller opened a run. The guard resolves the run
@@ -499,7 +486,7 @@ func (s *Server) runSeen(ctx context.Context, member domain.MemberID, params jso
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 func (s *Server) runPause(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -582,7 +569,7 @@ func (s *Server) runClose(ctx context.Context, member domain.MemberID, params js
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 func (s *Server) runReview(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -607,7 +594,7 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 // runRelaunch re-enters the addressed retained TUI run. The retained
@@ -669,7 +656,7 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, reopened)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(reopened)}, nil
 }
 
 func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -938,21 +925,14 @@ func (s *Server) runPull(ctx context.Context, member domain.MemberID, params jso
 	if p.RunID == "" {
 		return nil, invalidParams("run_id is required")
 	}
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	run, err := s.reachableRun(ctx, member, domain.RunID(p.RunID))
 	if err != nil {
 		return nil, rpcError(err)
-	}
-	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	if !actor.Reaches(run.WorkspaceID) {
-		return nil, rpcError(permissions.ErrNoAccess)
 	}
 	workspace, branch := run.WorkspaceID, run.Branch
 	if p.Repo != "" && domain.WorkspaceID(p.Repo) != run.WorkspaceID {
 		extra, ok := run.ExtraRepo(domain.WorkspaceID(p.Repo))
-		if !ok || !actor.Reaches(extra.WorkspaceID) {
+		if !ok {
 			return nil, invalidParams("repo " + p.Repo + " is not one of the session's repos")
 		}
 		workspace, branch = extra.WorkspaceID, extra.Branch

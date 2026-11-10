@@ -57,6 +57,12 @@ type repoScoped interface {
 	RepoWorkspace() domain.WorkspaceID
 }
 
+// runScoped is a payload that names every extra workspace of its run, nil
+// when it could not.
+type runScoped interface {
+	RunExtraWorkspaces() []domain.WorkspaceID
+}
+
 // memberNaming is a payload about members, which a reader sees only when
 // they see each of them and the event's actor. An empty id is a member
 // nobody but a super admin sees.
@@ -133,6 +139,7 @@ func seesNamed(ev Event, scope Scope) bool {
 // Reachable reports whether scope allows ev's workspace, for an event
 // about an extra repository of a run that repository's workspace, for an
 // event of a run every workspace of the run, and the members ev names.
+// The workspaces a runScoped payload names stand in for scope.Run.
 func Reachable(ev Event, scope Scope) bool {
 	if !scope.Workspace(ev.WorkspaceID) {
 		return false
@@ -140,8 +147,19 @@ func Reachable(ev Event, scope Scope) bool {
 	if r, ok := ev.Payload.(repoScoped); ok && r.RepoWorkspace() != "" && !scope.Workspace(r.RepoWorkspace()) {
 		return false
 	}
-	if ev.RunID != "" && scope.Run != nil && !scope.Run(ev.RunID) {
-		return false
+	if ev.RunID != "" {
+		var extras []domain.WorkspaceID
+		if r, ok := ev.Payload.(runScoped); ok {
+			extras = r.RunExtraWorkspaces()
+		}
+		if extras == nil && scope.Run != nil && !scope.Run(ev.RunID) {
+			return false
+		}
+		for _, ws := range extras {
+			if !scope.Workspace(ws) {
+				return false
+			}
+		}
 	}
 	return seesNamed(ev, scope)
 }

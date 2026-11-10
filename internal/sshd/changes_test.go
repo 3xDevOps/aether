@@ -312,7 +312,7 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 	if err := e.store.DeleteRun(ctx, doomed.ID); err != nil {
 		t.Fatalf("delete run: %v", err)
 	}
-	deleted := e.publish(t, e.ws.ID, doomed.ID, events.RunDeletedPayload{})
+	deleted := e.publish(t, e.ws.ID, doomed.ID, events.RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{}})
 
 	got, _ := pageAll(t, controlClient(t, e.testEnv), protocol.ChangesListParams{Cursor: "0", Limit: 1})
 	if want := []uint64{kept, alsoKept, deleted}; !slices.Equal(changeSeqs(got), want) {

@@ -146,15 +146,18 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 	return ws, title, fired, nil
 }
 
-// reachableRun reads run id for member, answering a run in a workspace
+// reachableRun reads run id for member, answering a run with a workspace
 // they cannot reach exactly as a missing one.
 func (s *Service) reachableRun(ctx context.Context, member *domain.Member, id domain.RunID) (*domain.Run, error) {
 	run, err := s.store.GetRun(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !permissions.ActorOf(member).Reaches(run.WorkspaceID) {
-		return nil, store.ErrNotFound
+	actor := permissions.ActorOf(member)
+	for _, ws := range append([]domain.WorkspaceID{run.WorkspaceID}, run.ExtraWorkspaces()...) {
+		if !actor.Reaches(ws) {
+			return nil, store.ErrNotFound
+		}
 	}
 	return run, nil
 }

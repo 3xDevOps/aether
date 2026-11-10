@@ -58,8 +58,8 @@ func changesTarget(s *Server, ctx context.Context, raw json.RawMessage) (permiss
 		return permissions.Target{}, perr
 	}
 	if p.RunID != "" {
-		if run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID)); err == nil {
-			return permissions.Target{Workspace: run.WorkspaceID}, nil
+		if target, err := resolveRunTarget(ctx, s.cfg.Store, domain.RunID(p.RunID)); err == nil {
+			return target, nil
 		}
 	}
 	ws, live, perr := s.changesScope(ctx, p)

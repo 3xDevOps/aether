@@ -176,7 +176,14 @@ Each is a single check that is easy to change.
   changes, and at every revalidation tick.
 - Budget notices go to the workspace's owner and the super admins.
 - `changes.list` reports a deleted workspace only to super admins.
-- A session result lists only the repositories the caller reaches.
+- A session exists for a caller only if they reach every one of its
+  workspaces, extras included; a super admin always does. Otherwise it is
+  absent from every list, attention, insights' recent sessions, watches and
+  coordination, and its id answers as a missing session. Insights and cost
+  totals still count it in its primary workspace.
+- An event of a deleted session reaches only super admins, except
+  `run.deleted`, which names the session's extra workspaces and reaches
+  whoever reaches all of them.
 - Edge ownership needs an admin or super admin; transfer and claim codes are
   super admin only.
 

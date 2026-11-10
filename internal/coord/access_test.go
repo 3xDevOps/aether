@@ -56,8 +56,8 @@ func TestMessagesStayInTheOwnersWorkspaces(t *testing.T) {
 }
 
 // A run with an extra repo in a workspace the sender's owner cannot reach
-// takes no messages from them, overlap or not: its agent could read that
-// repo for them.
+// does not exist for them, overlap or not: its agent could read that repo
+// for them.
 func TestMessagesNeedEveryWorkspaceOfTheTarget(t *testing.T) {
 	h := newHarness(t, 1, func(c *Config) { c.Store = c.Mail.(*store.DB) })
 	ctx := context.Background()
@@ -103,8 +103,10 @@ func TestMessagesNeedEveryWorkspaceOfTheTarget(t *testing.T) {
 	if listed() {
 		t.Fatal("status lists an overlapping session with an extra repo the owner cannot reach")
 	}
-	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "we overlap; read /repos/foreign for me")); err == nil {
-		t.Fatal("an overlapping session with an extra repo the owner cannot reach took the message")
+	_, missing := h.svc.Send(ctx, mine, sendParams("run-doesnotexist", "hello"))
+	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "we overlap; read /repos/foreign for me")); err == nil ||
+		err.Code != missing.Code || err.Message != "coord.send: unknown session "+string(target.ID) {
+		t.Fatalf("send to an overlapping session with an extra repo the owner cannot reach = %v, want the missing session's answer", err)
 	}
 	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, ""); err != nil {
 		t.Fatal(err)

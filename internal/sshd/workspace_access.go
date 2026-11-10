@@ -185,7 +185,7 @@ func (s *Server) workspaceAccessRevoke(ctx context.Context, member domain.Member
 		if r.MemberID != id && r.HomeMember() != id && r.AccountMember() != id {
 			continue
 		}
-		if actor.Reaches(r.WorkspaceID) {
+		if reachesRun(actor, r) {
 			sessions = append(sessions, string(r.ID))
 		} else {
 			hidden++

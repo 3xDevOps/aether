@@ -640,3 +640,63 @@ func (w *wsaEnv) assertSelfDemotion(t *testing.T) {
 		t.Errorf("B, an admin again, changes U's role = %+v, want denied", o)
 	}
 }
+
+// assertMultiRepo is the existence rule for a session with an extra
+// repository: it exists only for a member who reaches every one of its
+// workspaces, while it lives and after it is deleted.
+func (w *wsaEnv) assertMultiRepo(t *testing.T) {
+	S := w.members["S"]
+	var launched protocol.RunLaunchResult
+	if err := S.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: w.wsA, ExtraWorkspaceIDs: []string{w.wsB}, Task: "two-repos", Harness: "fake", Mode: string(domain.LaunchTUI),
+	}, &launched); err != nil {
+		t.Fatalf("S run.launch in wsA with wsB: %v", err)
+	}
+	id := launched.Run.ID
+	if len(launched.Run.Repos) != 2 {
+		t.Fatalf("S's launch result repos = %+v, want wsA's and wsB's", launched.Run.Repos)
+	}
+	for _, name := range wsaNames {
+		m := w.members[name]
+		var list protocol.RunListResult
+		if err := m.ctrl.Call(protocol.MethodRunList, protocol.RunListParams{}, &list); err != nil {
+			t.Fatalf("%s run.list: %v", name, err)
+		}
+		listed := slices.ContainsFunc(list.Runs, func(r protocol.Run) bool { return r.ID == id })
+		if listed != (name == "S") {
+			t.Errorf("%s run.list lists the two-repo session = %v, want %v", name, listed, name == "S")
+		}
+		if name == "S" {
+			continue
+		}
+		for method, params := range map[string]func(string) any{
+			protocol.MethodRunGet:      func(id string) any { return protocol.RunIDParams{RunID: id} },
+			protocol.MethodRunPull:     func(id string) any { return protocol.RunPullParams{RunID: id, Repo: w.wsB} },
+			protocol.MethodChangesList: func(id string) any { return protocol.ChangesListParams{RunID: id} },
+		} {
+			assertLikeMissing(t, name+" "+method+" of the two-repo session", call(m.ctrl, method, params(id)), call(m.ctrl, method, params(missingID(id))), id, missingID(id))
+		}
+	}
+	if err := S.ctrl.Call(protocol.MethodRunDelete, protocol.RunIDParams{RunID: id}, nil); err != nil {
+		t.Fatalf("S run.delete: %v", err)
+	}
+	for _, name := range []string{"S", "A", "U"} {
+		deleted := false
+		for cursor := "0"; ; {
+			var page protocol.ChangesListResult
+			if err := w.members[name].ctrl.Call(protocol.MethodChangesList, protocol.ChangesListParams{
+				Cursor: cursor, WorkspaceID: w.wsA, Kinds: []string{protocol.ChangeKindLifecycle},
+			}, &page); err != nil {
+				t.Fatalf("%s changes.list: %v", name, err)
+			}
+			deleted = deleted || slices.ContainsFunc(page.Changes, func(c protocol.Change) bool { return c.RunID == id })
+			if !page.More {
+				break
+			}
+			cursor = page.NextCursor
+		}
+		if deleted != (name == "S") {
+			t.Errorf("%s changes.list shows the two-repo session's deletion = %v, want %v", name, deleted, name == "S")
+		}
+	}
+}

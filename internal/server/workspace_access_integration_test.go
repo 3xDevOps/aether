@@ -146,6 +146,7 @@ func TestIntegrationWorkspaceAccessMatrix(t *testing.T) {
 	t.Run("roles", func(t *testing.T) { w.assertRoles(t) })
 	t.Run("self demotion", func(t *testing.T) { w.assertSelfDemotion(t) })
 	t.Run("children", func(t *testing.T) { w.assertChildren(ctx, t) })
+	t.Run("multi-repo session", func(t *testing.T) { w.assertMultiRepo(t) })
 }
 
 func newWSAEnv(ctx context.Context, t *testing.T) *wsaEnv {

@@ -27,14 +27,6 @@ func (s *Service) authorize(ctx context.Context, method string, sender, target *
 	if owner == nil {
 		return deniedPeer(method, sender.ID, target.ID, reason)
 	}
-	// The family and overlap exceptions waive protection and steer-others,
-	// never access: target's agent can read every repo it holds.
-	actor := permissions.ActorOf(owner)
-	for _, ws := range target.ExtraWorkspaces() {
-		if !actor.Reaches(ws) {
-			return deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, permissions.ErrNoAccess))
-		}
-	}
 	if s.cfg.Children != nil {
 		related, relErr := s.cfg.Children.Related(ctx, sender.ID, target.ID)
 		if relErr != nil {
@@ -61,9 +53,11 @@ func (s *Service) authorize(ctx context.Context, method string, sender, target *
 	return nil
 }
 
-// reachable answers a target in a workspace sender's owner cannot reach
-// exactly as a session that does not exist. An owner who is gone is left
-// to authorize, which names why.
+// reachable answers a target with a workspace sender's owner cannot reach
+// exactly as a session that does not exist, so the family and overlap
+// exceptions in authorize never waive access: target's agent can read
+// every repo it holds. An owner who is gone is left to authorize, which
+// names why.
 func (s *Service) reachable(ctx context.Context, method string, sender, target *domain.Run) *protocol.Error {
 	owner, err := s.cfg.Store.GetMember(ctx, sender.MemberID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -72,8 +66,11 @@ func (s *Service) reachable(ctx context.Context, method string, sender, target *
 	if err != nil {
 		return internalError(method, err)
 	}
-	if !permissions.ActorOf(owner).Reaches(target.WorkspaceID) {
-		return unknownRun(method, target.ID)
+	actor := permissions.ActorOf(owner)
+	for _, ws := range append([]domain.WorkspaceID{target.WorkspaceID}, target.ExtraWorkspaces()...) {
+		if !actor.Reaches(ws) {
+			return unknownRun(method, target.ID)
+		}
 	}
 	return nil
 }
