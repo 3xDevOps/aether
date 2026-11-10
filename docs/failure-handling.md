@@ -583,7 +583,9 @@ sudo systemctl restart aether-server
 
 The CPU, memory and process ceilings apply to containers created after the
 change. A host-wide out-of-memory kill takes agent processes before the server
-(`OOMScoreAdjust=-500` on the server, 500 in containers).
+(`OOMScoreAdjust=-500` on the server, 500 in containers). Under CPU and disk
+contention the server gets a hundred shares to each container's one
+([install.md](install.md#keep-the-server-reachable-under-load)).
 
 ### Picking a stall threshold
 
