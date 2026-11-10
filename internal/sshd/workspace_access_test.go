@@ -564,3 +564,53 @@ func TestRelaunchNeedsTheHomeMemberInEveryWorkspace(t *testing.T) {
 		t.Fatalf("relaunch once the launcher reaches the workspace again: %v", err)
 	}
 }
+
+// Deleting a workspace tells its owner and every grantee privately, since
+// their streams may drop workspace.deleted once they no longer reach it.
+func TestWorkspaceDeleteNotifiesEveryoneItLetIn(t *testing.T) {
+	t.Parallel()
+	e := newAccessEnv(t, func(c *Config) { c.revalidateInterval = time.Hour })
+	ctx := context.Background()
+	e.srv.cfg.DeleteWorkspace = func(ctx context.Context, id domain.WorkspaceID, actor domain.MemberID) error {
+		if err := e.db.DeleteWorkspace(ctx, id); err != nil {
+			return err
+		}
+		_, err := e.bus.Publish(ctx, events.Event{WorkspaceID: id, ActorID: actor, Payload: events.WorkspaceDeletedPayload{}})
+		return err
+	}
+	if err := e.db.GrantWorkspace(ctx, e.wsA.ID, e.u.ID, e.a.ID); err != nil {
+		t.Fatal(err)
+	}
+	feed := func(m domain.MemberID) <-chan protocol.Event {
+		stream, err := e.srv.Local(m).Events(ctx, protocol.SubscribeRequest{})
+		if err != nil {
+			t.Fatalf("events: %v", err)
+		}
+		t.Cleanup(func() { _ = stream.Close() })
+		return eventLines(t, stream)
+	}
+	feeds := map[domain.MemberID]<-chan protocol.Event{e.a.ID: feed(e.a.ID), e.u.ID: feed(e.u.ID), e.v.ID: feed(e.v.ID)}
+	if err := controlAs(t, e.testEnv, e.aKey).Call(protocol.MethodWorkspaceDelete, protocol.WorkspaceDeleteParams{WorkspaceID: string(e.wsA.ID)}, nil); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := e.bus.Publish(ctx, events.Event{WorkspaceID: events.ServerScope, ActorID: e.member.ID,
+		Payload: events.MemberDevicePayload{DeviceID: "marker", Status: "pending", MemberID: e.member.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	for m, lines := range feeds {
+		notified := false
+		for ev := nextEvent(t, lines); ev.Type != string(events.TypeMemberDevice); ev = nextEvent(t, lines) {
+			if ev.Type != string(events.TypeMemberAccess) {
+				continue
+			}
+			var p events.MemberAccessPayload
+			if err := json.Unmarshal(ev.Payload, &p); err != nil || p.WorkspaceID != e.wsA.ID || p.MemberID != m || p.Action != events.AccessRevoked {
+				t.Fatalf("%s's notice = %+v, payload %+v, %v", m, ev, p, err)
+			}
+			notified = true
+		}
+		if notified != (m != e.v.ID) {
+			t.Errorf("%s notified of the deletion = %v, want %v", m, notified, m != e.v.ID)
+		}
+	}
+}

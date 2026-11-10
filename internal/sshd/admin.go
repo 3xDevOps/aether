@@ -11,6 +11,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -120,9 +121,34 @@ func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, pa
 	if s.cfg.DeleteWorkspace == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace deletion is not configured"}
 	}
+	w, err := s.cfg.Store.GetWorkspace(ctx, ws)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	grants, err := s.cfg.Store.ListWorkspaceGrants(ctx, ws)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	if err := s.cfg.DeleteWorkspace(ctx, ws, member); err != nil {
 		return nil, rpcError(err)
 	}
+	// A stream that reloads its access after the deletion no longer
+	// reaches the workspace and drops workspace.deleted, so everyone the
+	// owner or a grant let in is told privately too.
+	reached := []domain.MemberID{w.OwnerID}
+	for _, g := range grants {
+		reached = append(reached, g.MemberID)
+	}
+	for _, m := range reached {
+		if m == "" {
+			continue
+		}
+		p := events.MemberAccessPayload{WorkspaceID: ws, MemberID: m, Action: events.AccessRevoked}
+		if _, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: events.ServerScope, ActorID: member, Payload: p}); err != nil {
+			slog.Warn("sshd: publish member.access", "workspace", ws, "member", m, "action", p.Action, "error", err)
+		}
+	}
+	s.accessChanged()
 	return protocol.WorkspaceDeleteResult{OK: true}, nil
 }
 
