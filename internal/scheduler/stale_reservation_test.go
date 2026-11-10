@@ -244,7 +244,7 @@ func TestCheckoutGCSettlesMissingCheckout(t *testing.T) {
 func TestEvidenceNoteKeepsTheReasonsCause(t *testing.T) {
 	t.Parallel()
 	cause := "exec: \"claude\": executable file not found"
-	got := publicRunStatusReason(withEvidenceUnavailable("provisioning: " + strings.Repeat("step ", 60) + cause))
+	got := publicRunStatusReason(withCleanupNote("provisioning: "+strings.Repeat("step ", 60)+cause, evidenceUnavailableReason))
 	if !strings.HasSuffix(got, "; "+evidenceUnavailableReason) || !strings.Contains(got, cause) ||
 		len([]rune(got)) > maxPublicRunStatusReason {
 		t.Fatalf("public reason = %q, want the cause and the note within %d runes", got, maxPublicRunStatusReason)

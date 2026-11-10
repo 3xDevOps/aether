@@ -604,6 +604,7 @@ type fakeGit struct {
 	branchLookupErr   error
 	createErr         error
 	publishErr        error
+	removeErr         error
 	createHook        func(run domain.RunID)
 	watchHook         func(run domain.RunID)                 // runs at the top of StartDiffWatch
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
@@ -743,6 +744,12 @@ func (g *fakeGit) PublishRunBranch(_ context.Context, run domain.RunID) (string,
 }
 
 func (g *fakeGit) RemoveRunCheckout(_ context.Context, run domain.RunID) error {
+	g.mu.Lock()
+	removeErr := g.removeErr
+	g.mu.Unlock()
+	if removeErr != nil {
+		return removeErr
+	}
 	return os.RemoveAll(g.checkoutPath(run))
 }
 

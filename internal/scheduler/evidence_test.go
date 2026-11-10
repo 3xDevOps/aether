@@ -600,9 +600,11 @@ func TestAutomaticCheckoutCleanupCapturesBeforeRemoval(t *testing.T) {
 }
 
 func TestCheckoutOverEvidenceLimitIsRemovedOnlyOncePublished(t *testing.T) {
+	clock, advance := movableClock()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = -time.Second
 		cfg.CheckoutTTL = time.Hour
+		cfg.Now = clock
 	})
 	capture := newSchedulerEvidenceCapture(e.ws.ID)
 	capture.refusal = fmt.Errorf("evidence: retain git state: %w", gitengine.ErrEvidenceStorageLimit)
@@ -640,12 +642,149 @@ func TestCheckoutOverEvidenceLimitIsRemovedOnlyOncePublished(t *testing.T) {
 	e.git.mu.Lock()
 	e.git.publishErr = nil
 	e.git.mu.Unlock()
+	advance(cleanupRetryBase)
 	e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) || worktree() != "" {
 		t.Fatalf("published checkout over the evidence limit was kept: %v", statErr)
 	}
 	if capture.packetCount() != 0 {
 		t.Fatalf("refused captures produced %d packets", capture.packetCount())
+	}
+}
+
+// movableClock is a Config.Now that only advance moves.
+func movableClock() (now func() time.Time, advance func(time.Duration)) {
+	var mu sync.Mutex
+	at := time.Now().UTC()
+	return func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return at
+		}, func(d time.Duration) {
+			mu.Lock()
+			at = at.Add(d)
+			mu.Unlock()
+		}
+}
+
+func TestFailingCheckoutCleanupBacksOffAndKeepsTheCheckout(t *testing.T) {
+	clock, advance := movableClock()
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = -time.Second
+		cfg.CheckoutTTL = time.Hour
+		cfg.Now = clock
+	})
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.refusal = fmt.Errorf("evidence: retain git state: %w", gitengine.ErrEvidenceStorageLimit)
+	e.sched.UseEvidence(capture)
+	run, _ := e.launchFake(t, "oversized checkout")
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-2 * time.Hour)
+	row.FinishedAt = &old
+	if err = e.db.UpdateRun(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	sweep := func() {
+		e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
+	}
+	fresh := func() *domain.Run {
+		t.Helper()
+		r, getErr := e.db.GetRun(t.Context(), run.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		return r
+	}
+	kept := func(when string) {
+		t.Helper()
+		if _, statErr := os.Stat(row.Worktree); statErr != nil || fresh().Worktree == "" {
+			t.Fatalf("%s: checkout removed: %v", when, statErr)
+		}
+	}
+
+	e.git.mu.Lock()
+	e.git.removeErr = errors.New("events: read log: context deadline exceeded")
+	e.git.mu.Unlock()
+	closed := capture.requestCount()
+	sweep()
+	kept("first failed cleanup")
+	if !strings.HasSuffix(fresh().Reason, "; "+evidenceOverLimitReason) {
+		t.Fatalf("reason %q does not say the session has no evidence", fresh().Reason)
+	}
+	for attempt, wait := range []time.Duration{15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 6 * time.Hour, 6 * time.Hour} {
+		advance(wait - time.Minute)
+		sweep()
+		sweep()
+		if got := capture.requestCount() - closed; got != attempt+1 {
+			t.Fatalf("captures %v after failure %d = %d, want %d", wait-time.Minute, attempt+1, got, attempt+1)
+		}
+		advance(time.Minute)
+		sweep()
+		if got := capture.requestCount() - closed; got != attempt+2 {
+			t.Fatalf("captures %v after failure %d = %d, want %d", wait, attempt+1, got, attempt+2)
+		}
+		kept(fmt.Sprintf("failure %d", attempt+2))
+	}
+
+	e.git.mu.Lock()
+	e.git.removeErr = nil
+	e.git.mu.Unlock()
+	advance(cleanupRetryMax)
+	sweep()
+	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) {
+		t.Fatalf("checkout kept once removal works: %v", statErr)
+	}
+	if r := fresh(); r.Worktree != "" || !strings.HasSuffix(r.Reason, "; "+evidenceOverLimitReason) {
+		t.Fatalf("removed run: worktree %q, reason %q", r.Worktree, r.Reason)
+	}
+}
+
+func TestCheckoutSweepWaiterLeavesOnCancel(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.sched.checkoutSweepGate <- struct{}{}
+	defer func() { <-e.sched.checkoutSweepGate }()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		e.sched.sweepCheckouts(ctx, time.Now().UTC())
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("waiter swept while another sweep held the slot")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled waiter still waits for the running sweep")
+	}
+	e.sched.trySweepCheckouts(t.Context(), time.Now().UTC())
+}
+
+func TestOnlyCheckoutNotFoundRejectsJoinedFailures(t *testing.T) {
+	failure := errors.New("extra repository a: commit failed")
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{gitengine.ErrCheckoutNotFound, true},
+		{fmt.Errorf("publish: %w", gitengine.ErrCheckoutNotFound), true},
+		{errors.Join(gitengine.ErrCheckoutNotFound, fmt.Errorf("extra b: %w", gitengine.ErrCheckoutNotFound)), true},
+		{errors.Join(failure, gitengine.ErrCheckoutNotFound), false},
+		{fmt.Errorf("extras: %w", errors.Join(gitengine.ErrCheckoutNotFound, failure)), false},
+		{failure, false},
+	} {
+		if got := onlyCheckoutNotFound(tc.err); got != tc.want {
+			t.Errorf("onlyCheckoutNotFound(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }
 

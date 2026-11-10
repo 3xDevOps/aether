@@ -34,6 +34,7 @@ shown beside the status says why it is there.
 | A session runs out of memory | Timeline note `Out of memory: the kernel killed a process in this session at its <n> GiB memory limit (peak <n> GiB)`. | Nothing automatic. The killed process may be a tool, the agent or the shell. | Check whether the agent is still running. Raise `--run-memory` if it keeps happening. |
 | The kernel's file-watch limits are spent | Server log `gitengine: cannot watch checkout for file changes; polling for diff snapshots instead`. | Launches the session anyway and checks its files every 60 seconds. | [Raise file-watch limits](#raise-file-watch-limits). |
 | Another process holds the database at startup | `store: begin migration <n>: database is locked (5) (SQLITE_BUSY)` | The server exits. | Find and stop the other writer, then start again. Never delete the database. |
+| The first start after an upgrade takes minutes | Clients cannot connect and the server logs nothing yet. `sudo aether-server update` prints `aether-server is migrating the database at schema <n> to <m>; waiting for it`. | Migrates the database before it serves. Migration 109 reads every stored event to build three indexes: on a 9 GB event log that took 1-2 minutes in testing, longer on a busy disk. | Wait. A restart starts the migration over, and an update rolls back a release that starts twice without finishing. Before the update, free the database's size again plus a tenth of it: the update copies the database into `server-update/`, and the migration adds indexes of about 4% of the event log's size (400 MB on 9 GB in testing), as much again in `aether.db-wal`, and sort files in `/var/tmp`. |
 | The server is down when a schedule is due | Nothing. | Skips the missed occurrence and waits for the next one. | Launch the session by hand if it matters. |
 
 A lost connection does not prove that a command failed. Before you retry
@@ -533,6 +534,22 @@ Aether captures evidence before it removes a container or checkout, and
 retries a failed capture every `--poll-interval`. If the checkout is already
 gone, no retry can capture it: cleanup finishes without an evidence packet and
 the reason gains `evidence unavailable: session checkout missing`.
+
+A checkout over the evidence storage limit cannot be captured, so the session
+gets no evidence packet. Aether commits the checkout's files as a `wip:`
+commit, publishes the session branch, adds `evidence unavailable: evidence
+storage limit exceeded` to the session's reason (shown by `aether sessions
+<session-id>` and the dashboard), and only then removes the checkout. If the
+commit, the publish or that reason write fails, the checkout stays.
+
+Removing a checkout first copies the session's diff history out of it into
+`checkouts/<run-id>.diffsnap/`, which stays; this reads the session's diff
+events from the event log. If any step fails, the checkout stays and the
+server logs `scheduler: checkout gc: capture before cleanup` with the session,
+the attempt, the next retry time and the error. Retries wait 15 minutes,
+doubling to at most 6 hours, and continue until cleanup succeeds; nothing is
+removed without its history. The wait restarts from 15 minutes when the
+server restarts.
 
 A member's containers share one uid:gid mapping, so a launch under another
 mapping is refused while one of them is live. A closed session whose cleanup
