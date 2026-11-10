@@ -229,6 +229,8 @@ func TestPagesFillWithWhatTheCallerSees(t *testing.T) {
 
 // A relay's wake names the watched session; in the history of the session
 // it relays to, it is shown only to members who reach the watched one.
+// Once the watch is gone, only super admins and the owner of the session
+// it woke read it.
 func TestARelayWakeOfAHiddenSessionStaysHidden(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
@@ -246,13 +248,59 @@ func TestARelayWakeOfAHiddenSessionStaysHidden(t *testing.T) {
 		Kind: store.RunMessageKindMessage, CorrelationID: watched.ID, CreatedAt: now}, 100); err != nil {
 		t.Fatal(err)
 	}
-	for who, want := range map[string]int{"S": 1, "U": 0} {
-		var list protocol.CoordMessagesListResult
-		if err := w.call(t, who, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), RunID: string(w.runUA.ID)}, &list); err != nil {
-			t.Fatalf("%s coord.messages.list: %v", who, err)
+	wakes := func(want map[string]int) {
+		t.Helper()
+		for who, n := range want {
+			var list protocol.CoordMessagesListResult
+			if err := w.call(t, who, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), RunID: string(w.runUA.ID)}, &list); err != nil {
+				t.Fatalf("%s coord.messages.list: %v", who, err)
+			}
+			if len(list.Messages) != n {
+				t.Errorf("%s sees %d relay wakes, want %d: %+v", who, len(list.Messages), n, list.Messages)
+			}
 		}
-		if len(list.Messages) != want {
-			t.Errorf("%s sees %d relay wakes, want %d: %+v", who, len(list.Messages), want, list.Messages)
+	}
+	wakes(map[string]int{"S": 1, "A": 0, "U": 0})
+	if err := db.DeleteWatch(ctx, watched.ID); err != nil {
+		t.Fatal(err)
+	}
+	wakes(map[string]int{"S": 1, "A": 0, "U": 1})
+}
+
+// A session keeps an extra workspace in its scope after that workspace is
+// deleted: no one but a super admin reaches it any more.
+func TestDeletingAnExtraWorkspaceKeepsTheSessionHidden(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	db := w.e.db
+	extra := &domain.Workspace{Name: "x", BaseBranch: "main", OwnerID: w.a.ID}
+	if err := db.CreateWorkspace(ctx, extra); err != nil {
+		t.Fatal(err)
+	}
+	run := &domain.Run{WorkspaceID: w.wsA.ID, MemberID: w.a.ID, Task: "two repos", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunCompleted}
+	if err := db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetRunRepos(ctx, run.ID, []domain.RunRepo{{WorkspaceID: extra.ID, Name: "x", Path: "/repos/x", Branch: "aether/x", BaseBranch: "main"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteWorkspace(ctx, extra.ID); err != nil {
+		t.Fatalf("delete the extra workspace: %v", err)
+	}
+	if err := w.call(t, "S", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(run.ID)}, nil); err != nil {
+		t.Fatalf("S run.get: %v", err)
+	}
+	for _, who := range []string{"A", "U"} {
+		w.sameAsMissing(t, who, protocol.MethodRunGet, protocol.RunIDParams{RunID: string(run.ID)}, protocol.RunIDParams{RunID: noRun})
+		var list protocol.RunListResult
+		if err := w.call(t, who, protocol.MethodRunList, protocol.RunListParams{WorkspaceID: string(w.wsA.ID)}, &list); err != nil {
+			t.Fatalf("%s run.list: %v", who, err)
+		}
+		for _, r := range list.Runs {
+			if r.ID == string(run.ID) {
+				t.Errorf("%s run.list shows the session whose extra workspace was deleted", who)
+			}
 		}
 	}
 }

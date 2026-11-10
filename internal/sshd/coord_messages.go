@@ -65,17 +65,40 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 				ok   bool
 			)
 			wait, _, ok, hideErr = s.storedWait(ctx, m.CorrelationID)
-			if hideErr == nil && !ok {
+			if watches, has := s.cfg.Store.(store.WatchStore); hideErr == nil && !ok && has {
 				// A relay's wake is correlated with its watch, not a wait.
-				wait, ok, hideErr = s.relayedWatch(ctx, m.CorrelationID)
+				var w *store.Watch
+				switch w, hideErr = watches.GetWatch(ctx, m.CorrelationID); {
+				case errors.Is(hideErr, store.ErrNotFound):
+					hideErr = nil
+				case hideErr == nil:
+					wait, ok = protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.RunID)}, true
+				}
 			}
-			if hideErr == nil && ok && wait.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(wait.RunID)) {
+			if hideErr != nil {
 				return false
 			}
-			if hideErr == nil && ok && visible == nil {
-				visible, hideErr = s.waitVisibility(ctx, actor, true)
+			if !ok {
+				// With its wait or watch gone, what the wake was about
+				// is unknown: only its session's owner reads it.
+				if actor.Role == domain.RoleSuperAdmin {
+					return true
+				}
+				run, runErr := s.cfg.Store.GetRun(ctx, m.ToRun)
+				if runErr != nil && !errors.Is(runErr, store.ErrNotFound) {
+					hideErr = runErr
+				}
+				return runErr == nil && run.MemberID == actor.ID
 			}
-			return hideErr == nil && (!ok || visible(wait))
+			if wait.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(wait.RunID)) {
+				return false
+			}
+			if visible == nil {
+				if visible, hideErr = s.waitVisibility(ctx, actor, true); hideErr != nil {
+					return false
+				}
+			}
+			return visible(wait)
 		},
 	})
 	if err == nil {
@@ -88,25 +111,6 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 		return nil, rpcError(err)
 	}
 	return protocol.CoordMessagesPageFromStore(page), nil
-}
-
-// relayedWatch is the target of the watch a relay's wake names, as a wait
-// condition, so its wake is judged as a wait on the same target would be.
-func (s *Server) relayedWatch(ctx context.Context, id string) (protocol.WaitCondition, bool, error) {
-	watches, has := s.cfg.Store.(interface {
-		GetWatch(context.Context, string) (*store.Watch, error)
-	})
-	if !has {
-		return protocol.WaitCondition{}, false, nil
-	}
-	w, err := watches.GetWatch(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
-		return protocol.WaitCondition{}, false, nil
-	}
-	if err != nil {
-		return protocol.WaitCondition{}, false, err
-	}
-	return protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.RunID)}, true, nil
 }
 
 // waitWake reports whether m is a wait's wake: a session's message to

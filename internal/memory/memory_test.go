@@ -286,7 +286,7 @@ func TestAddScansAndCapsCitedFiles(t *testing.T) {
 	_, err = f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "short note",
 		Files: []string{"web/package.json", strings.Repeat("x", protocol.MemoryMaxFileBytes+1)}})
 	wantError(t, err, protocol.CodeInvalidParams, "memory.add: file 2 is 513 bytes; a cited path holds at most 512")
-	found, err := f.svc.Search(context.Background(), protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)})
+	found, err := f.svc.Search(context.Background(), f.dana.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)})
 	if err != nil || len(found.Items) != 0 {
 		t.Fatalf("notes after refused adds = %+v, %v; want none", found.Items, err)
 	}
@@ -327,7 +327,7 @@ func TestAgentSupersedesOnlyUnpinnedAgentNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shown, err := f.svc.Show(context.Background(), protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: agentNote.Item.ID})
+	shown, err := f.svc.Show(context.Background(), f.dana.ID, protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: agentNote.Item.ID})
 	if err != nil || shown.Item.SupersededBy != replaced.Item.ID || len(shown.Chain) != 1 {
 		t.Fatalf("replaced note = %+v, %v", shown, err)
 	}
@@ -336,7 +336,7 @@ func TestAgentSupersedesOnlyUnpinnedAgentNotes(t *testing.T) {
 	if byMember.Item.Source != protocol.MemorySourceMember || byMember.Item.PinnedAt == nil || byMember.Item.PinnedBy != string(f.dana.ID) {
 		t.Fatalf("member replacement = %+v, want it to carry the pin", byMember.Item)
 	}
-	shown, err = f.svc.Show(context.Background(), protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: pinnedNote.Item.ID})
+	shown, err = f.svc.Show(context.Background(), f.dana.ID, protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: pinnedNote.Item.ID})
 	if err != nil || shown.Item.PinnedAt != nil || shown.Item.SupersededBy != byMember.Item.ID {
 		t.Fatalf("replaced pinned note = %+v, %v; want it unpinned and replaced", shown.Item, err)
 	}
@@ -367,7 +367,7 @@ func TestAgentSupersedeOntoDuplicateIsRefused(t *testing.T) {
 	wantError(t, err, protocol.CodeConflict, fmt.Sprintf(
 		"memory.add: store: conflict: memory note %s already holds this text; ask a member to replace %s with it (aether memory add --supersedes %s)",
 		kept.Item.ID, target.Item.ID, target.Item.ID))
-	shown, err := f.svc.Show(context.Background(), protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: target.Item.ID})
+	shown, err := f.svc.Show(context.Background(), f.dana.ID, protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: target.Item.ID})
 	if err != nil || shown.Item.InvalidAt != nil || shown.Item.SupersededBy != "" {
 		t.Fatalf("target after a refused replacement = %+v, %v; want it live", shown.Item, err)
 	}
@@ -450,7 +450,7 @@ func TestMembersPinUnpinAndRemove(t *testing.T) {
 		!slices.Equal(removed.IDs, []string{note.Item.ID}) {
 		t.Fatalf("rm = %+v, %v", removed, err)
 	}
-	_, err = f.svc.Show(ctx, protocol.MemoryShowParams{WorkspaceID: ws, ID: note.Item.ID})
+	_, err = f.svc.Show(ctx, f.dana.ID, protocol.MemoryShowParams{WorkspaceID: ws, ID: note.Item.ID})
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeNotFound {
 		t.Fatalf("show removed = %v", err)
 	}
@@ -469,7 +469,7 @@ func TestBriefShape(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	ada := f.member("Ada", domain.RoleCollaborator)
-	if text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ""); err != nil || text != "" {
+	if text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ada.ID, ""); err != nil || text != "" {
 		t.Fatalf("empty workspace brief = %q, %v", text, err)
 	}
 	self := f.run(ada, "claude", "my own task")
@@ -495,7 +495,7 @@ func TestBriefShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, self.ID)
+	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ada.ID, self.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +556,7 @@ func TestBriefFitsFullPinBudgets(t *testing.T) {
 		f.finish(r, time.Duration(i+1)*time.Hour)
 	}
 
-	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, self.ID)
+	text, err := f.svc.Brief(ctx, f.ws.ID, ada.ID, ada.ID, self.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +588,7 @@ func TestBriefStripsControlCharacters(t *testing.T) {
 	f := newFixture(t)
 	pinned := f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention,
 		Text: "\x1b]0;owned\x07\x1b[2J Use bun\x7f\u009b in web/\tnever npm", Pin: true})
-	text, err := f.svc.Brief(context.Background(), f.ws.ID, f.dana.ID, "")
+	text, err := f.svc.Brief(context.Background(), f.ws.ID, f.dana.ID, f.dana.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func TestAddRefusesNUL(t *testing.T) {
 	run := f.run(f.dana, "claude", "work")
 	_, err := f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "Run make db\x00"})
 	wantError(t, err, protocol.CodeInvalidParams, "memory.add: text contains a NUL byte; a note cannot hold one")
-	if found, err := f.svc.Search(context.Background(), protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)}); err != nil || len(found.Items) != 0 {
+	if found, err := f.svc.Search(context.Background(), f.dana.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)}); err != nil || len(found.Items) != 0 {
 		t.Fatalf("notes after a refused NUL = %+v, %v; want none", found.Items, err)
 	}
 }
@@ -642,7 +642,7 @@ func TestBriefDropsPinsOnlyPastBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, err := svc.Brief(ctx, f.ws.ID, f.dana.ID, "")
+	text, err := svc.Brief(ctx, f.ws.ID, f.dana.ID, f.dana.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,7 +679,7 @@ func TestSearchFiltersSourceAndReplaced(t *testing.T) {
 		{protocol.MemorySearchParams{WorkspaceID: ws, Source: protocol.MemorySourceAgent}, nil},
 		{protocol.MemorySearchParams{WorkspaceID: ws, Source: protocol.MemorySourceAgent, Replaced: true}, []string{agentNote.Item.ID}},
 	} {
-		found, searchErr := f.svc.Search(ctx, c.p)
+		found, searchErr := f.svc.Search(ctx, f.dana.ID, c.p)
 		var got []string
 		for _, item := range found.Items {
 			got = append(got, item.ID)
@@ -688,7 +688,7 @@ func TestSearchFiltersSourceAndReplaced(t *testing.T) {
 			t.Errorf("search %+v = %v, %v; want %v", c.p, got, searchErr, c.want)
 		}
 	}
-	_, err = f.svc.Search(ctx, protocol.MemorySearchParams{WorkspaceID: ws, Source: "lore"})
+	_, err = f.svc.Search(ctx, f.dana.ID, protocol.MemorySearchParams{WorkspaceID: ws, Source: "lore"})
 	wantError(t, err, protocol.CodeInvalidParams, `memory.search: source must be agent, member, report or answer; got "lore"`)
 }
 
@@ -781,5 +781,84 @@ func TestCapabilitiesFollowTheOwnersReach(t *testing.T) {
 		if err != nil || !slices.Equal(got, tc.want) {
 			t.Errorf("%s's run capabilities = %v, %v; want %v", tc.owner.DisplayName, got, err, tc.want)
 		}
+	}
+}
+
+// A session with a workspace the reader does not reach does not exist for
+// them in team memory: not in the brief's sessions or counts, and not as
+// the report note it wrote, for a member or for their session's agent.
+func TestMemoryLeavesOutSessionsWithAnUnreachableWorkspace(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	scoped, err := New(Config{Store: f.db, Bus: f.bus, Log: f.log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib := &domain.Workspace{Name: "lib", BaseBranch: domain.DefaultBaseBranch}
+	if err = f.db.CreateWorkspace(ctx, lib); err != nil {
+		t.Fatal(err)
+	}
+	ola, sam := f.member("Ola", domain.RoleCollaborator), f.member("Sam", domain.RoleSuperAdmin)
+	for _, g := range []struct {
+		ws domain.WorkspaceID
+		m  *domain.Member
+	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hidden, live := f.run(ola, "claude", "Two repositories"), f.run(ola, "claude", "Still two")
+	for _, r := range []*domain.Run{hidden, live} {
+		if err = f.db.SetRunRepos(ctx, r.ID, []domain.RunRepo{{WorkspaceID: lib.ID, Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = f.db.AppendCoordReport(ctx, &store.CoordReport{WorkspaceID: f.ws.ID, RunID: hidden.ID,
+		Outcome: store.CoordOutcomeSuccess, Summary: "Shipped the private change.", IdempotencyKey: "success-1"}); err != nil {
+		t.Fatal(err)
+	}
+	f.finish(hidden, time.Hour)
+	danas := f.run(f.dana, "claude", "task")
+
+	notes, err := scoped.Search(ctx, ola.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID), Source: protocol.MemorySourceReport})
+	if err != nil || len(notes.Items) != 1 || notes.Items[0].RunID != string(hidden.ID) {
+		t.Fatalf("Ola's report notes = %+v, %v; want the hidden session's", notes, err)
+	}
+	report := notes.Items[0].ID
+	for _, tc := range []struct {
+		who  *domain.Member
+		sees bool
+	}{{ola, true}, {sam, true}, {f.dana, false}} {
+		found, searchErr := scoped.Search(ctx, tc.who.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID), Words: "private"})
+		if searchErr != nil || (len(found.Items) == 1) != tc.sees {
+			t.Errorf("%s search = %+v, %v; want the report note %v", tc.who.DisplayName, found.Items, searchErr, tc.sees)
+		}
+		_, err = scoped.Show(ctx, tc.who.ID, protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: report})
+		if (err == nil) != tc.sees || (err != nil && !strings.Contains(err.Error(), "not found")) {
+			t.Errorf("%s show = %v; want shown %v, else not found", tc.who.DisplayName, err, tc.sees)
+		}
+		text, briefErr := scoped.Brief(ctx, f.ws.ID, tc.who.ID, tc.who.ID, "")
+		if briefErr != nil || strings.Contains(text, hidden.Branch) != tc.sees {
+			t.Errorf("%s brief = %q, %v; want the hidden session %v", tc.who.DisplayName, text, briefErr, tc.sees)
+		}
+		if !tc.sees && text != "" {
+			t.Errorf("%s brief = %q; want none, the hidden sessions and their note left out of the counts", tc.who.DisplayName, text)
+		}
+	}
+	text, err := scoped.Brief(ctx, f.ws.ID, ola.ID, f.dana.ID, "")
+	if err != nil || strings.Contains(text, hidden.Branch) {
+		t.Errorf("Ola's brief as Dana reads it = %q, %v; want the hidden session left out", text, err)
+	}
+	raw, err := json.Marshal(protocol.MemorySearchParams{Words: "private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := scoped.HandleAgent(ctx, danas.ID, protocol.MethodMemorySearch, raw)
+	if found, ok := got.(protocol.MemorySearchResult); err != nil || !ok || len(found.Items) != 0 {
+		t.Errorf("Dana's agent search = %+v, %v; want nothing", got, err)
+	}
+	got, err = scoped.HandleAgent(ctx, danas.ID, protocol.MethodMemoryBrief, nil)
+	if brief, ok := got.(protocol.MemoryBriefResult); err != nil || !ok || strings.Contains(brief.Text, hidden.Branch) {
+		t.Errorf("Dana's agent brief = %+v, %v; want the hidden session left out", got, err)
 	}
 }

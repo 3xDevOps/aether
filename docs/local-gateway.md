@@ -763,7 +763,8 @@ error names the blocker. In-flight control or Git operations return `-32003`
 instead of waiting behind them. Cleanup errors leave the workspace available
 for retry but do not restore already removed data. Success publishes
 `workspace.deleted` with the workspace ID in the event envelope and `{}` as
-the payload.
+the payload, and a `member.access` notice with action `revoked` to the owner
+and each granted member, whose streams may no longer carry `workspace.deleted`.
 
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished session from the board

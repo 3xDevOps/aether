@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -29,7 +30,7 @@ type Store interface {
 	InsertMemory(ctx context.Context, m *store.Memory) (bool, error)
 	SupersedeMemory(ctx context.Context, old string, m *store.Memory, agent bool, vet func(old *store.Memory) error) (duplicate, movedPin bool, err error)
 	SearchMemory(ctx context.Context, q store.MemoryQuery) ([]*store.Memory, error)
-	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*store.Memory, []*store.Memory, error)
+	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string, workspaces []domain.WorkspaceID) (*store.Memory, []*store.Memory, error)
 	PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope store.MemoryScope, vet func(*store.Memory) error) (*store.Memory, error)
 	UnpinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, vet func(*store.Memory) error) (*store.Memory, error)
 	DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id string, vet func(*store.Memory) error) error
@@ -162,7 +163,7 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		}
 		item = pinned.Item
 	}
-	similar, err := s.similar(ctx, workspace, item.ID, text)
+	similar, err := s.similar(ctx, member, workspace, item.ID, text)
 	if err != nil {
 		return protocol.MemoryAddResult{}, err
 	}
@@ -314,9 +315,14 @@ func (s *Service) head(ctx context.Context, run *domain.Run) (string, error) {
 
 const headDiffPage = 32
 
-// similar is the best live matches for text other than the note itself.
-func (s *Service) similar(ctx context.Context, workspace domain.WorkspaceID, self, text string) ([]protocol.MemoryItem, error) {
-	hits, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: workspace, Words: text, Limit: protocol.MemoryMaxSimilar + 1})
+// similar is the best live matches for text other than the note itself
+// that member reads.
+func (s *Service) similar(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, self, text string) ([]protocol.MemoryItem, error) {
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return nil, fail(protocol.MethodMemoryAdd, err)
+	}
+	hits, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: workspace, Workspaces: reach, Words: text, Limit: protocol.MemoryMaxSimilar + 1})
 	if err != nil {
 		return nil, fail(protocol.MethodMemoryAdd, err)
 	}
@@ -329,9 +335,9 @@ func (s *Service) similar(ctx context.Context, workspace domain.WorkspaceID, sel
 	return out, nil
 }
 
-// Search lists the workspace's notes matching p, best first. Every member
-// may read team memory, so it checks no permission.
-func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error) {
+// Search lists the workspace's notes matching p that member reads, best
+// first. Every member may read team memory, so it checks no permission.
+func (s *Service) Search(ctx context.Context, member domain.MemberID, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error) {
 	const method = protocol.MethodMemorySearch
 	if p.WorkspaceID == "" {
 		return protocol.MemorySearchResult{}, invalid(method, "workspace is required")
@@ -355,7 +361,11 @@ func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (pr
 		return protocol.MemorySearchResult{}, invalid(method,
 			fmt.Sprintf("limit must be between 1 and %d; got %d", protocol.MemorySearchMaxLimit, p.Limit))
 	}
-	notes, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: domain.WorkspaceID(p.WorkspaceID),
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return protocol.MemorySearchResult{}, fail(method, err)
+	}
+	notes, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: domain.WorkspaceID(p.WorkspaceID), Workspaces: reach,
 		Words: p.Words, Kind: store.MemoryKind(p.Kind), Source: store.MemorySource(p.Source), File: strings.TrimSpace(p.File),
 		All: p.All, Replaced: p.Replaced, Pinned: p.Pinned, Limit: p.Limit})
 	if err != nil {
@@ -364,13 +374,17 @@ func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (pr
 	return protocol.MemorySearchResult{Items: items(notes)}, nil
 }
 
-// Show returns one note and its supersede chain.
-func (s *Service) Show(ctx context.Context, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error) {
+// Show returns one note and its supersede chain as member reads them.
+func (s *Service) Show(ctx context.Context, member domain.MemberID, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error) {
 	const method = protocol.MethodMemoryShow
 	if p.WorkspaceID == "" || p.ID == "" {
 		return protocol.MemoryShowResult{}, invalid(method, "workspace and note ID are required")
 	}
-	note, chain, err := s.cfg.Store.GetMemory(ctx, domain.WorkspaceID(p.WorkspaceID), p.ID)
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return protocol.MemoryShowResult{}, fail(method, err)
+	}
+	note, chain, err := s.cfg.Store.GetMemory(ctx, domain.WorkspaceID(p.WorkspaceID), p.ID, reach)
 	if err != nil {
 		return protocol.MemoryShowResult{}, fail(method, err)
 	}
@@ -462,6 +476,35 @@ func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspa
 		return nil, err
 	}
 	return m, permissions.Check(permissions.Push, permissions.ActorOf(m), permissions.Target{Workspace: workspace})
+}
+
+// reach is the workspaces every one of members reaches, nil when they are
+// all super admins, who reach every workspace: a note of a session with a
+// workspace outside them, and the session itself, do not exist for them.
+func (s *Service) reach(ctx context.Context, members ...domain.MemberID) ([]domain.WorkspaceID, error) {
+	var actors []permissions.Actor
+	for _, id := range members {
+		m, err := s.cfg.Store.GetMember(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if actor := permissions.ActorOf(m); actor.Role != domain.RoleSuperAdmin {
+			actors = append(actors, actor)
+		}
+	}
+	if len(actors) == 0 {
+		return nil, nil
+	}
+	out := []domain.WorkspaceID{}
+	for _, set := range []map[domain.WorkspaceID]bool{actors[0].Access.Owned, actors[0].Access.Granted} {
+		for ws := range set {
+			if slices.ContainsFunc(actors, func(a permissions.Actor) bool { return !a.Reaches(ws) }) {
+				continue
+			}
+			out = append(out, ws)
+		}
+	}
+	return out, nil
 }
 
 // changed records each note's change for the activity feed. run is the

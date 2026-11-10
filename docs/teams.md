@@ -448,7 +448,9 @@ such as a rename, a device change or a merge, are left out the same way.
 The owner or a super admin runs `aether workspace delete myproject --yes`, which removes the workspace with its sessions,
 checkouts, transcripts, templates, budget and costs. Member accounts,
 local clones and the upstream repository stay. It never stops work: stop active
-sessions and remove schedules first. The error names what blocks it.
+sessions and remove schedules first. The error names what blocks it. A session
+in another workspace that mounted this one as an extra repository stays, and
+from then on only super admins see it.
 
 ## Work together
 
