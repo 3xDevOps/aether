@@ -13,8 +13,8 @@ import (
 // satisfies it. Writes re-check the member's push permission themselves.
 type MemoryService interface {
 	Add(ctx context.Context, member domain.MemberID, p protocol.MemoryAddParams) (protocol.MemoryAddResult, error)
-	Search(ctx context.Context, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error)
-	Show(ctx context.Context, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error)
+	Search(ctx context.Context, member domain.MemberID, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error)
+	Show(ctx context.Context, member domain.MemberID, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error)
 	Brief(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, self domain.RunID) (string, error)
 	Pin(ctx context.Context, member domain.MemberID, p protocol.MemoryPinParams) (protocol.MemoryPinResult, error)
 	Unpin(ctx context.Context, member domain.MemberID, p protocol.MemoryUnpinParams) (protocol.MemoryUnpinResult, error)
@@ -22,14 +22,8 @@ type MemoryService interface {
 }
 
 func init() {
-	registerMemory(protocol.MethodMemorySearch, permissions.View,
-		func(m MemoryService, ctx context.Context, _ domain.MemberID, p protocol.MemorySearchParams) (any, error) {
-			return m.Search(ctx, p)
-		})
-	registerMemory(protocol.MethodMemoryShow, permissions.View,
-		func(m MemoryService, ctx context.Context, _ domain.MemberID, p protocol.MemoryShowParams) (any, error) {
-			return m.Show(ctx, p)
-		})
+	registerMemory(protocol.MethodMemorySearch, permissions.View, MemoryService.Search)
+	registerMemory(protocol.MethodMemoryShow, permissions.View, MemoryService.Show)
 	registerMemory(protocol.MethodMemoryAdd, permissions.Push, MemoryService.Add)
 	registerMemory(protocol.MethodMemoryPin, permissions.Push, MemoryService.Pin)
 	registerMemory(protocol.MethodMemoryUnpin, permissions.Push, MemoryService.Unpin)

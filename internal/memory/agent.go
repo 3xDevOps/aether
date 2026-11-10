@@ -31,7 +31,8 @@ func (s *Service) Capabilities(ctx context.Context, id domain.RunID) ([]string, 
 }
 
 // HandleAgent answers a run's agent. The run is the socket's identity: the
-// workspace, author, harness and commit all come from it.
+// workspace, author, harness and commit all come from it, and it reads as
+// its owner.
 func (s *Service) HandleAgent(ctx context.Context, id domain.RunID, method string, params json.RawMessage) (any, error) {
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
@@ -52,14 +53,14 @@ func (s *Service) HandleAgent(ctx context.Context, id domain.RunID, method strin
 			return nil, err
 		}
 		p.WorkspaceID = workspace
-		return s.Search(ctx, p)
+		return s.Search(ctx, run.MemberID, p)
 	case protocol.MethodMemoryShow:
 		p, err := decode[protocol.MemoryShowParams](method, params)
 		if err != nil {
 			return nil, err
 		}
 		p.WorkspaceID = workspace
-		return s.Show(ctx, p)
+		return s.Show(ctx, run.MemberID, p)
 	case protocol.MethodMemoryBrief:
 		text, err := s.Brief(ctx, run.WorkspaceID, run.MemberID, run.ID)
 		if err != nil {

@@ -28,8 +28,12 @@ func (s *Service) Brief(ctx context.Context, workspace domain.WorkspaceID, membe
 	if err != nil {
 		return "", fail(method, err)
 	}
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return "", fail(method, err)
+	}
 	now := time.Now()
-	in, err := s.cfg.Store.ReadMemoryBrief(ctx, store.MemoryBriefQuery{Workspace: workspace, Member: member, Self: self,
+	in, err := s.cfg.Store.ReadMemoryBrief(ctx, store.MemoryBriefQuery{Workspace: workspace, Workspaces: reach, Member: member, Self: self,
 		Since: now.Add(-protocol.MemoryBriefWindow), Runs: protocol.MemoryBriefMaxRuns + 1})
 	if err != nil {
 		return "", fail(method, err)
