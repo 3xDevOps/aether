@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -367,6 +368,10 @@ func TestSQLiteLogReadsTypesThroughIndexes(t *testing.T) {
 	types := Filter{Types: []Type{TypeRunDiff, TypeRunStatus}}
 	workspace := Filter{Workspace: "w1", Types: []Type{TypeRunDiff, TypeTimeline}}
 	run := Filter{Workspace: "w1", Run: "r1", Types: []Type{TypeRunDiff}}
+	manyTypes := []Type{TypeTimeline, TypeRunStatus}
+	for i := range 600 {
+		manyTypes = append(manyTypes, Type(fmt.Sprintf("unknown.%d", i)))
+	}
 	for name, tc := range map[string]struct {
 		got, want []uint64
 	}{
@@ -377,6 +382,8 @@ func TestSQLiteLogReadsTypesThroughIndexes(t *testing.T) {
 		"workspace types page": {seqs(log.ReadBefore(ctx, workspace, 2, 8, 2)), []uint64{7, 6}},
 		"run type":             {seqs(log.Read(ctx, run, 0, 0, 10)), []uint64{2, 7}},
 		"run type after":       {seqs(log.Read(ctx, run, 2, 0, 10)), []uint64{7}},
+		"repeated types":       {seqs(log.Read(ctx, Filter{Types: slices.Repeat([]Type{TypeRunStatus}, 600)}, 0, 0, 10)), []uint64{1, 5}},
+		"many types":           {seqs(log.Read(ctx, Filter{Types: manyTypes}, 0, 0, 10)), []uint64{1, 4, 5}},
 	} {
 		if !slices.Equal(tc.got, tc.want) {
 			t.Errorf("%s: seqs = %v, want %v", name, tc.got, tc.want)

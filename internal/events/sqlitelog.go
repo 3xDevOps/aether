@@ -181,6 +181,8 @@ func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 	return out, nil
 }
 
+const maxTypeLookups = 32
+
 // readQuery reads a one-run Runs filter as two indexed lookups, the run's
 // own events and the agent messages other runs addressed to it, because
 // SQLite answers their OR by scanning the workspace's events. The message
@@ -193,7 +195,9 @@ func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 // and sorting every match after the cursor. Each lookup names its index
 // because, without ANALYZE statistics, SQLite reads a Run filter off a
 // less selective one. A Runs filter keeps its run lookups and checks the
-// type as +type, which keeps it off the type indexes.
+// type as +type, which keeps it off the type indexes. So does a filter
+// with more than maxTypeLookups distinct types, which keeps a client's
+// type list under SQLite's limit on compound terms.
 func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (string, []any) {
 	where := "seq > ?"
 	args := []any{afterSeq}
@@ -222,9 +226,10 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 		}
 	}
 	const cols = "seq, id, ts, workspace_id, run_id, actor_id, type, payload"
+	types := slices.Compact(slices.Sorted(slices.Values(f.Types)))
 	var index string
 	switch {
-	case len(f.Types) == 0 || len(f.Runs) > 0:
+	case len(types) == 0 || len(types) > maxTypeLookups || len(f.Runs) > 0:
 	case f.Run != "":
 		index = "idx_events_run_type"
 	case f.Workspace != "":
@@ -233,18 +238,18 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 		index = "idx_events_type"
 	}
 	if index != "" {
-		arms := make([]string, len(f.Types))
+		arms := make([]string, len(types))
 		var armArgs []any
-		for i, t := range f.Types {
+		for i, t := range types {
 			arms[i] = "SELECT seq FROM (SELECT seq FROM events INDEXED BY " + index + " WHERE " + where + " AND type = ? ORDER BY seq " + order + " LIMIT ?)"
 			armArgs = slices.Concat(armArgs, args, []any{string(t), limit})
 		}
 		query := "SELECT " + cols + " FROM events WHERE seq IN (" + strings.Join(arms, " UNION ALL ") + ") ORDER BY seq " + order + " LIMIT ?"
 		return query, append(armArgs, limit)
 	}
-	if len(f.Types) > 0 {
-		where += " AND +type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")"
-		for _, t := range f.Types {
+	if len(types) > 0 {
+		where += " AND +type IN (?" + strings.Repeat(", ?", len(types)-1) + ")"
+		for _, t := range types {
 			args = append(args, string(t))
 		}
 	}
