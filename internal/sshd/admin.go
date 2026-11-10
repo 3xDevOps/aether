@@ -63,6 +63,11 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	if perr != nil {
 		return nil, perr
 	}
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if err := s.requireIn(ctx, member, permissions.CreateWorkspace, "", protocol.MethodWorkspaceAdd); err != nil {
+		return nil, err
+	}
 	w, err := s.createWorkspace(ctx, p, "", member)
 	if err != nil {
 		return nil, err
