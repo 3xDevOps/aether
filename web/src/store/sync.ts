@@ -444,8 +444,9 @@ export async function applyEvent(
           store.getState().setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
         }
         // Who a member sees follows workspace access.
-        const members = await store.getState().readMembers(client.memberList()).catch(ignore)
-        if (members && !stale()) store.getState().setMemberList(members)
+        const members = await store.getState().readMembers(client.memberList())
+        if (stale()) return false
+        store.getState().setMemberList(members)
       } catch (err) {
         noteUnreachable(store, client, err, signal)
         return false

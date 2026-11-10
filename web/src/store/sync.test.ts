@@ -1980,6 +1980,19 @@ describe('applyEvent', () => {
     expect(memberList).toHaveBeenCalledTimes(1)
   })
 
+  it('records a failed members re-read on an access change instead of ignoring it', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const memberList = vi.fn(async () => Promise.reject(new ApiError(503, 'member.list: server unreachable: dial tcp 10.0.0.5:22: connect: connection refused')))
+    const applied = await applyEvent(store, statusEvent({
+      run_id: '', type: 'workspace.access',
+      payload: { workspace_id: workspace.id, member_id: bob.id, action: 'granted' },
+    }), fakeApi({ memberList }))
+
+    expect(applied).toBe(false)
+    expect(store.getState().unreachable).toBe('server')
+  })
+
   it('brings back the sessions of a workspace the viewer regains', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]), runList: vi.fn(async () => []) }))
