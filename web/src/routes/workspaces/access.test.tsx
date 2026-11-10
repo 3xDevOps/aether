@@ -120,7 +120,7 @@ describe('workspace access', () => {
     render(<WorkspacesRoute params={{}} client={api} />)
     fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    expect(await dialog.findByText('No more members you can add. A super admin grants other admins.')).toBeTruthy()
+    expect(await dialog.findByText("No more members you can add. A super admin can grant members you don't see here.")).toBeTruthy()
     expect(dialog.queryByRole('button', { name: 'Add' })).toBeNull()
   })
 

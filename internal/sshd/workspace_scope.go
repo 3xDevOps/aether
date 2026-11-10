@@ -7,6 +7,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func (s *Server) reachableWorkspaces(ctx context.Context, actor permissions.Actor) ([]*domain.Workspace, error) {
@@ -88,4 +89,73 @@ func (s *Server) memberRunSnapshot(ctx context.Context, member domain.MemberID, 
 	}
 	scopeRepos(actor, &snap)
 	return snap
+}
+
+// visibleMembers reports which members actor sees. A super admin sees
+// every member. Anyone else sees themselves, the super admins, every
+// member who owns, was granted or has a session in a workspace they
+// reach, and, as an admin, the pending members they approve. A merged-away
+// id is seen when the member it became is.
+func (s *Server) visibleMembers(ctx context.Context, actor permissions.Actor) (func(domain.MemberID) bool, error) {
+	if actor.Role == domain.RoleSuperAdmin {
+		return func(domain.MemberID) bool { return true }, nil
+	}
+	var reach []domain.WorkspaceID
+	for _, set := range []map[domain.WorkspaceID]bool{actor.Access.Owned, actor.Access.Granted} {
+		for ws := range set {
+			if actor.Reaches(ws) {
+				reach = append(reach, ws)
+			}
+		}
+	}
+	shared, err := s.cfg.Store.WorkspaceMembers(ctx, reach)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[domain.MemberID]bool{actor.ID: true}
+	for _, id := range shared {
+		seen[id] = true
+	}
+	members, err := s.cfg.Store.ListMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range members {
+		if m.Role == domain.RoleSuperAdmin || (m.Pending && actor.Role == domain.RoleAdmin) {
+			seen[m.ID] = true
+		}
+	}
+	mergedInto := map[domain.MemberID]domain.MemberID{}
+	if ms, ok := s.cfg.Store.(store.MergeStore); ok {
+		merges, err := ms.ListMerges(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range merges {
+			mergedInto[m.AbsorbedID] = m.SurvivorID
+		}
+	}
+	return func(id domain.MemberID) bool {
+		for hops := 0; !seen[id] && mergedInto[id] != "" && hops < 16; hops++ {
+			id = mergedInto[id]
+		}
+		return seen[id]
+	}, nil
+}
+
+// visibleMember is GetMember for caller: a member caller does not see
+// reads exactly as one that does not exist.
+func (s *Server) visibleMember(ctx context.Context, caller, id domain.MemberID) (*domain.Member, error) {
+	actor, err := resolveActor(ctx, s.cfg.Store, caller)
+	if err != nil {
+		return nil, err
+	}
+	sees, err := s.visibleMembers(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	if !sees(id) {
+		return nil, permissions.ErrNoAccess
+	}
+	return s.cfg.Store.GetMember(ctx, id)
 }

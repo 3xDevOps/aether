@@ -384,6 +384,16 @@ Invitations and invite codes carry `--workspace` grants
 shows each workspace's owner, and **Access…** lists the grants and adds or
 removes members.
 
+Members see each other through workspaces. A super admin sees every member.
+Anyone else sees themselves, the super admins, and every member who owns, was
+granted or has a session in a workspace they reach; an admin also sees members
+waiting for approval. A member you do not see is absent from `aether member
+list`, device lists and attention. Naming them in `aether workspace grant`,
+`aether account share`, `aether member identities` or `aether member unlink`
+fails as for an id that never existed. An admin therefore grants only members
+they see: to bring in someone new, invite them with `--workspace` or ask a super
+admin to grant them.
+
 #### What an unreachable workspace looks like
 
 A workspace you cannot reach does not exist for you. It is absent from your

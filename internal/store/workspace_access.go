@@ -17,6 +17,10 @@ type WorkspaceAccessStore interface {
 	// they were granted.
 	MemberWorkspaces(ctx context.Context, member domain.MemberID) (domain.WorkspaceAccess, error)
 	ListWorkspaceGrants(ctx context.Context, ws domain.WorkspaceID) ([]*domain.WorkspaceGrant, error)
+	// WorkspaceMembers returns the members who own, were granted, or have
+	// a session in any of workspaces, a session's extra repositories
+	// included.
+	WorkspaceMembers(ctx context.Context, workspaces []domain.WorkspaceID) ([]domain.MemberID, error)
 	// GrantWorkspace lets member into ws; granting an existing grant is a
 	// no-op. ErrNotFound when either does not exist.
 	GrantWorkspace(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID) error
@@ -88,6 +92,39 @@ func (d *DB) ListWorkspaceGrants(ctx context.Context, ws domain.WorkspaceID) ([]
 		g.CreatedAt = decodeTime(at)
 		return &g, nil
 	})
+}
+
+func (d *DB) WorkspaceMembers(ctx context.Context, workspaces []domain.WorkspaceID) ([]domain.MemberID, error) {
+	if len(workspaces) == 0 {
+		return nil, nil
+	}
+	ids, err := json.Marshal(workspaces)
+	if err != nil {
+		return nil, fmt.Errorf("store: workspace members: %w", err)
+	}
+	rows, err := d.db.QueryContext(ctx,
+		`WITH ws(id) AS (SELECT value FROM json_each(?))
+		 SELECT owner_member_id FROM workspaces WHERE id IN ws AND owner_member_id <> ''
+		 UNION SELECT member_id FROM workspace_grants WHERE workspace_id IN ws
+		 UNION SELECT member_id FROM runs WHERE workspace_id IN ws
+		 UNION SELECT r.member_id FROM run_repos rr JOIN runs r ON r.id = rr.run_id WHERE rr.workspace_id IN ws`,
+		string(ids))
+	if err != nil {
+		return nil, fmt.Errorf("store: workspace members: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var out []domain.MemberID
+	for rows.Next() {
+		var id domain.MemberID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: workspace members: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: workspace members: %w", err)
+	}
+	return out, nil
 }
 
 func (d *DB) GrantWorkspace(ctx context.Context, ws domain.WorkspaceID, member, by domain.MemberID) error {
