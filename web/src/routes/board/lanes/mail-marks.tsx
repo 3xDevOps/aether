@@ -65,13 +65,13 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
                 {count}
               </text>
             )}
-            {/* As wide as a bar is tall, and off the bar, so a press near a mark still reaches the bar. */}
+            {/* As wide as a bar is tall and inside its own lane, so facing marks on neighbouring lanes never cover each other. */}
             <rect
               {...mailControl}
               x={x - g.metrics.bar / 2}
-              y={y - 8 + dir * 4}
+              y={dir < 0 ? a.top : a.top + a.height - 12}
               width={g.metrics.bar}
-              height={16}
+              height={12}
               fill="transparent"
               pointerEvents="all"
               className="cursor-pointer"

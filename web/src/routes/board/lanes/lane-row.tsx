@@ -132,11 +132,11 @@ function RunBar({ lane, g, now }: { lane: RunLane; g: LaneGeometry; now: number 
   return (
     <>
       <Segments segments={lane.segments} outcome={lane.outcome} g={g} height={g.metrics.bar} className={working ? 'border-r-2 border-state-working' : undefined}>
-        {/* Clear of the Needs you tag when it shows; text that does not fit ends in an ellipsis, never mid-letter. */}
-        <span className={cn('relative flex h-full min-w-0 items-center gap-1.5 px-2 text-ui-sm font-medium whitespace-nowrap text-text', tagged && 'pr-24')}>
+        {/* Clear of the Needs you tag when it shows; text that does not fit ends in an ellipsis, and a bar too short for one shows only its colour. */}
+        {box && box.width >= 48 && <span className={cn('relative flex h-full min-w-0 items-center gap-1.5 px-2 text-ui-sm font-medium whitespace-nowrap text-text', tagged && 'pr-24')}>
           <StatusDot tone={stateTone[card.state]} />
           {working ? <Shimmer text={barText(lane)} className="min-w-0 overflow-hidden text-ellipsis" /> : <span className="min-w-0 overflow-hidden text-ellipsis">{barText(lane)}</span>}
-        </span>
+        </span>}
         {tagged && (
           <span aria-hidden className="absolute top-1/2 right-1 flex h-4.5 -translate-y-1/2 items-center gap-1 rounded-chip bg-raised px-1.5 text-ui-xs font-medium text-state-needs-you shadow-button">
             <StatusDot tone="needs-you" pulse />
@@ -338,7 +338,7 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
       className={cn(
         focusRingInset,
         'absolute inset-x-0 flex items-stretch outline-none',
-        lane.kind === 'note' ? 'cursor-default' : 'cursor-pointer',
+        lane.kind === 'note' && !lane.retry ? 'cursor-default' : 'cursor-pointer',
         lane.kind === 'section' && 'border-t border-seam first:border-t-0',
       )}
       style={{ top, height }}
@@ -354,7 +354,7 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
         {mail && !g.compact && lane.kind !== 'run' && <MailChip text={mail} />}
       </div>
       {!header && (
-        <div data-lane-track className="relative shrink-0" style={{ width: g.width }}>
+        <div data-lane-track className="relative shrink-0 select-none" style={{ width: g.width }}>
           {track}
         </div>
       )}

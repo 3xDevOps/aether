@@ -47,9 +47,17 @@ test('bar text ends in an ellipsis clear of the Needs you tag, and lanes and mar
   const quick = tree.getByRole('treeitem', { name: /^Tidy CODEOWNERS/ })
   await expect(quick).toBeVisible()
   expect(await quick.evaluate((el) => getComputedStyle(el).cursor)).toBe('pointer')
-  expect(await quick.locator('[data-lane-track] span.overflow-hidden').first().evaluate((el) => getComputedStyle(el).textOverflow)).toBe('ellipsis')
+  // Two minutes on a 6h window is a few pixels: too short for any word, so it shows only its colour.
+  await expect(quick.locator('[data-lane-track]').getByText('Completed')).toHaveCount(0)
 
-  const mark = page.locator('[data-lane-mail] rect[data-mail-control]').first()
-  const hit = (await mark.boundingBox())!
-  expect(hit.width).toBeGreaterThanOrEqual(24)
+  // Each mark's target is at least 24px wide and answers a press on its own dot, even facing a neighbour's mark.
+  const marks = page.locator('[data-lane-mail] g[data-mail]')
+  await expect(marks).toHaveCount(2)
+  for (const mark of await marks.all()) {
+    expect((await mark.locator('rect[data-mail-control]').boundingBox())!.width).toBeGreaterThanOrEqual(24)
+    expect(await mark.evaluate((g) => {
+      const dot = g.querySelector('circle')!.getBoundingClientRect()
+      return document.elementFromPoint(dot.x + dot.width / 2, dot.y + dot.height / 2)?.parentElement === g
+    })).toBe(true)
+  }
 })
