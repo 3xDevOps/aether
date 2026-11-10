@@ -458,7 +458,9 @@ done
 `set-property` changes the running unit and keeps the change in
 `/etc/systemd/system.control/<unit>.d/`. `sysbox-fs` serves `/proc` inside
 every Sysbox container, so the server's commands in sessions wait on it; skip
-both `sysbox-*` units without Sysbox. The SSH unit is `sshd` on Fedora and
+both `sysbox-*` units without Sysbox. Work docker, containerd and sysbox-fs
+do for a container, such as the `/proc` reads sysbox-fs serves, runs at their
+raised weight, not the container's. The SSH unit is `sshd` on Fedora and
 Arch; skip `tailscaled` without Tailscale. To keep the setting with your other
 overrides instead, put the same lines in a drop-in, such as
 `sudo systemctl edit docker`, which reloads systemd when you save: under
