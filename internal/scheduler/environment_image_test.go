@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -107,6 +108,44 @@ func TestSaveEnvironmentRejectsImageWithUnmappedOwners(t *testing.T) {
 	}
 	if tags, _ := e.rt.ListImageTags(t.Context(), memberImageRepo(e.member.ID)); !slices.Equal(tags, []string{good}) {
 		t.Fatalf("member images after a failed check = %v, want only %q", tags, good)
+	}
+	if pending, _ := e.rt.ListImageTags(t.Context(), pendingImageRepo(e.member.ID)); len(pending) != 0 {
+		t.Fatalf("pending images after rejected saves = %v, want none", pending)
+	}
+
+	// A rejected image whose removal failed never becomes the previous one.
+	left := pendingImageRepo(e.member.ID) + ":left"
+	if err = e.rt.Commit(t.Context(), runtime.ID(terminal.ContainerID), left); err != nil {
+		t.Fatal(err)
+	}
+	e.rt.holdImage(left, true)
+	e.rt.mu.Lock()
+	e.rt.exports, e.rt.exportErr = nil, nil
+	e.rt.mu.Unlock()
+	next, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("SaveEnvironment after rejections: %v", err)
+	}
+	if tags, _ := e.rt.ListImageTags(t.Context(), memberImageRepo(e.member.ID)); !slices.Equal(tags, []string{next, good}) {
+		t.Fatalf("member images = %v, want %q and the previous %q", tags, next, good)
+	}
+	e.rt.holdImage(left, false)
+	e.sched.sweepMemberImages(t.Context(), e.member.ID, "")
+	if pending, _ := e.rt.ListImageTags(t.Context(), pendingImageRepo(e.member.ID)); len(pending) != 0 {
+		t.Fatalf("pending images after maintenance = %v, want none", pending)
+	}
+}
+
+func TestCheckImageOwnersCountsAtMostThreeOwners(t *testing.T) {
+	t.Parallel()
+	var entries []tarEntry
+	for i := range 5 {
+		entries = append(entries, tarEntry{name: "f" + string(rune('a'+i)), uid: 70000 + i})
+	}
+	err := checkImageOwners(bytes.NewReader(imageTar(t, entries...)))
+	bad, ok := errors.AsType[*errImageOwners](err)
+	if !ok || bad.total != 5 || len(bad.owners) != 3 || !strings.Contains(err.Error(), "2 by other owners") {
+		t.Fatalf("checkImageOwners = %v, want 5 paths, 3 owners counted and 2 by other owners", err)
 	}
 }
 
@@ -228,5 +267,9 @@ func TestUnstartableImageCause(t *testing.T) {
 		if got := unstartableImageCause(errors.New(msg)); got != want {
 			t.Errorf("unstartableImageCause(%q) = %q, want %q", msg, got, want)
 		}
+	}
+	setup := fmt.Errorf("start container: %w", &runtime.SetupError{ExitCode: 125, Output: "docker: value too large for defined data type"})
+	if got := unstartableImageCause(setup); got != "" {
+		t.Errorf("unstartableImageCause(setup failure) = %q, want none", got)
 	}
 }

@@ -58,8 +58,8 @@ func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
 		t.Fatalf("member image = %q, want %q", member.Image, first)
 	}
 	calls := e.rt.commitCalls()
-	if len(calls) != 1 || calls[0].id != runtime.ID(terminal.ContainerID) || calls[0].tag != first {
-		t.Fatalf("commit calls = %+v, want terminal %q and %q", calls, terminal.ContainerID, first)
+	if len(calls) != 1 || calls[0].id != runtime.ID(terminal.ContainerID) || calls[0].tag != strings.Replace(first, memberImageRepo(e.member.ID), pendingImageRepo(e.member.ID), 1) {
+		t.Fatalf("commit calls = %+v, want terminal %q committed as the pending copy of %q", calls, terminal.ContainerID, first)
 	}
 
 	second, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)

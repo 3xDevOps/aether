@@ -22,6 +22,12 @@ func memberImageRepo(member domain.MemberID) string {
 	return "aether/member-" + string(member)
 }
 
+// pendingImageRepo holds a save until its check passes, so a rejected image
+// whose removal failed never sits among the member's images.
+func pendingImageRepo(member domain.MemberID) string {
+	return "aether/pending-member-" + string(member)
+}
+
 func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error) {
 	lock := s.terminalLock(member)
 	lock.Lock()
@@ -42,11 +48,12 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
-	tag := memberImageRepo(member) + ":" + strings.ToLower(rand.Text())
-	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, tag); err != nil {
+	name := strings.ToLower(rand.Text())
+	pending, tag := pendingImageRepo(member)+":"+name, memberImageRepo(member)+":"+name
+	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, pending); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
 	}
-	if checkErr := s.checkSavedImage(ctx, tag); checkErr != nil {
+	if checkErr := s.checkSavedImage(ctx, pending); checkErr != nil {
 		current := "the standard image"
 		if m.Image != "" {
 			current = "your saved image " + m.Image
@@ -56,10 +63,13 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 			problem = "would not start"
 		}
 		err := fmt.Errorf("scheduler: save environment: nothing was saved, because the committed image %s: %w. Your environment and its unsaved changes are kept, and new sessions still start from %s. Run aether env save again; if it fails the same way, see \"Saved image checks\" in docs/environments.md", problem, checkErr, current)
-		if removeErr := s.cfg.Runtime.RemoveImage(context.WithoutCancel(ctx), tag); removeErr != nil {
+		if removeErr := s.cfg.Runtime.RemoveImage(context.WithoutCancel(ctx), pending); removeErr != nil {
 			err = errors.Join(err, fmt.Errorf("scheduler: remove the unusable image: %w", removeErr))
 		}
 		return "", err
+	}
+	if err := s.cfg.Runtime.TagImage(ctx, pending, tag); err != nil {
+		return "", fmt.Errorf("scheduler: save environment: %w", err)
 	}
 	if err := s.cfg.Store.UpdateMemberImage(ctx, member, tag); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: persist image: %w", err)
@@ -172,9 +182,13 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	case !errors.Is(err, store.ErrNotFound):
 		return err
 	}
+	pending, err := s.cfg.Runtime.ListImageTags(ctx, pendingImageRepo(member))
+	if err != nil {
+		return err
+	}
 	var failures []error
-	for _, tag := range tags {
-		if refs[tag] || !strings.HasPrefix(tag, repo+":") {
+	for _, tag := range append(tags, pending...) {
+		if refs[tag] || !strings.HasPrefix(tag, repo+":") && !strings.HasPrefix(tag, pendingImageRepo(member)+":") {
 			continue
 		}
 		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil {

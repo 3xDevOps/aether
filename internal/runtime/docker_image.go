@@ -8,6 +8,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
@@ -79,13 +80,28 @@ func (d *Docker) ListImageTags(ctx context.Context, repo string) ([]string, erro
 	return tags, nil
 }
 
+func (d *Docker) TagImage(ctx context.Context, source, target string) error {
+	if _, err := d.cli.ImageTag(ctx, client.ImageTagOptions{Source: source, Target: target}); err != nil {
+		return fmt.Errorf("runtime: tag image %s as %s: %w", source, target, err)
+	}
+	return nil
+}
+
 // ExportImage streams the filesystem of a local image as a tar, read through
-// a container that is never started and is removed on Close.
+// a container that is never started and is removed on Close. The container
+// is named after the image's repository, so the next export of that
+// repository removes one a crash left behind.
 func (d *Docker) ExportImage(ctx context.Context, ref string) (io.ReadCloser, error) {
+	repo, _, _ := strings.Cut(ref, ":")
+	name := "aether-image-check-" + strings.ReplaceAll(repo, "/", "-")
+	if err := d.Destroy(ctx, ID(name)); err != nil {
+		return nil, err
+	}
 	// A saved image carries the labels of the container it was committed
 	// from; an empty creation key keeps FindByCreationKey from finding this
 	// container in place of that one.
 	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: name,
 		Config: &container.Config{
 			Image:  ref,
 			Cmd:    []string{"/bin/true"},
@@ -97,11 +113,16 @@ func (d *Docker) ExportImage(ctx context.Context, ref string) (io.ReadCloser, er
 		return nil, fmt.Errorf("runtime: create container to export image %s: %w", ref, err)
 	}
 	id := ID(created.ID)
+	destroy := func() error {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		return d.Destroy(cleanupCtx, id)
+	}
 	export, err := d.cli.ContainerExport(ctx, string(id), client.ContainerExportOptions{})
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("runtime: export image %s: %w", ref, err), d.Destroy(context.WithoutCancel(ctx), id))
+		return nil, errors.Join(fmt.Errorf("runtime: export image %s: %w", ref, err), destroy())
 	}
-	return &imageExport{ReadCloser: export, destroy: func() error { return d.Destroy(context.WithoutCancel(ctx), id) }}, nil
+	return &imageExport{ReadCloser: export, destroy: destroy}, nil
 }
 
 type imageExport struct {

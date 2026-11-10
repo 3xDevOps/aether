@@ -58,6 +58,8 @@ func TestExportImageReadsAContainerItRemovesOnClose(t *testing.T) {
 			_, _ = w.Write([]byte(`{"Id":"check"}`))
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/check/export"):
 			_, _ = w.Write([]byte("tar bytes"))
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/aether-image-check-aether-member-m"):
+			http.Error(w, `{"message":"No such container"}`, http.StatusNotFound)
 		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/check"):
 			removed = true
 			w.WriteHeader(http.StatusNoContent)

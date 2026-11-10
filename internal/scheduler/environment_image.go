@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 // maxContainerID is the highest uid or gid a container's user namespace
@@ -36,6 +37,7 @@ func (s *Scheduler) checkSavedImage(ctx context.Context, tag string) error {
 }
 
 // errImageOwners reports image entries whose owner a container cannot map.
+// It counts the first three owners it meets; the rest only add to total.
 type errImageOwners struct {
 	total    int
 	owners   map[string]int
@@ -46,12 +48,14 @@ func (e *errImageOwners) Error() string {
 	owners := slices.SortedFunc(maps.Keys(e.owners), func(a, b string) int {
 		return cmp.Or(cmp.Compare(e.owners[b], e.owners[a]), cmp.Compare(a, b))
 	})
-	parts := make([]string, 0, min(len(owners), 3))
-	for _, owner := range owners[:min(len(owners), 3)] {
+	parts := make([]string, 0, len(owners)+1)
+	counted := 0
+	for _, owner := range owners {
 		parts = append(parts, fmt.Sprintf("%d owned by %s", e.owners[owner], owner))
+		counted += e.owners[owner]
 	}
-	if len(owners) > 3 {
-		parts = append(parts, fmt.Sprintf("%d other owners", len(owners)-3))
+	if other := e.total - counted; other > 0 {
+		parts = append(parts, fmt.Sprintf("%d by other owners", other))
 	}
 	return fmt.Sprintf("%d paths are owned by a uid or gid above %d, which no container can map (%s; for example %s)",
 		e.total, maxContainerID, strings.Join(parts, ", "), strings.Join(e.examples, ", "))
@@ -72,7 +76,10 @@ func checkImageOwners(r io.Reader) error {
 			continue
 		}
 		bad.total++
-		bad.owners[fmt.Sprintf("%d:%d", h.Uid, h.Gid)]++
+		owner := fmt.Sprintf("%d:%d", h.Uid, h.Gid)
+		if _, ok := bad.owners[owner]; ok || len(bad.owners) < 3 {
+			bad.owners[owner]++
+		}
 		if len(bad.examples) < 3 {
 			bad.examples = append(bad.examples, "/"+strings.TrimSuffix(h.Name, "/"))
 		}
@@ -96,6 +103,9 @@ func previousImage(tags []string, current string) string {
 // unstartableImageCause matches the runtime errors of a root filesystem
 // that holds owners the container cannot map.
 func unstartableImageCause(err error) string {
+	if _, setup := errors.AsType[*runtime.SetupError](err); setup {
+		return ""
+	}
 	msg := err.Error()
 	if !strings.HasPrefix(msg, "create container: ") && !strings.HasPrefix(msg, "start container: ") {
 		return ""

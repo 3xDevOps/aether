@@ -407,6 +407,16 @@ func (r *e2eRuntime) ListImageTags(_ context.Context, repo string) ([]string, er
 	return tags, nil
 }
 
+func (r *e2eRuntime) TagImage(_ context.Context, source, target string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.images[source]; !ok {
+		return fmt.Errorf("e2e runtime: no such image %q", source)
+	}
+	r.images[target] = struct{}{}
+	return nil
+}
+
 func (r *e2eRuntime) ExportImage(_ context.Context, ref string) (io.ReadCloser, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -382,6 +382,8 @@ type Runtime interface {
 	// ListImageTags returns the local tags under one repository, newest
 	// image first.
 	ListImageTags(ctx context.Context, repo string) ([]string, error)
+	// TagImage adds target as another tag of the local image source.
+	TagImage(ctx context.Context, source, target string) error
 	// ExportImage streams the filesystem of a local image as a tar, with
 	// owners as stored in the image.
 	ExportImage(ctx context.Context, ref string) (io.ReadCloser, error)

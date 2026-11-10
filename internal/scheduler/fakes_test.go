@@ -492,6 +492,18 @@ func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error
 	return nil
 }
 
+func (r *fakeRuntime) TagImage(_ context.Context, source, target string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.images[source]
+	if !ok {
+		return fmt.Errorf("fake runtime: no such image %q", source)
+	}
+	r.images[target] = id
+	r.imageSeq[target] = len(r.imageSeq) + 1
+	return nil
+}
+
 func (r *fakeRuntime) ExportImage(_ context.Context, tag string) (io.ReadCloser, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
