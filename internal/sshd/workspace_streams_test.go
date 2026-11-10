@@ -317,10 +317,10 @@ func TestRetainedArtifactOfAForeignRunIsNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.srv.cfg.Services.Evidence = &retainedArtifactTestService{}
-	open := func(packetID string) *protocol.Error {
+	open := func(run domain.RunID, packetID string) *protocol.Error {
 		t.Helper()
 		_, _, _, err := w.srv.openDevelopmentArtifact(t.Context(), u.ID, protocol.DevArtifactDownloadRequest{
-			DevArtifactGetParams: protocol.DevArtifactGetParams{DevRunParams: protocol.DevRunParams{RunID: string(w.foreignRun.ID)}, ArtifactID: "capture"},
+			DevArtifactGetParams: protocol.DevArtifactGetParams{DevRunParams: protocol.DevRunParams{RunID: string(run)}, ArtifactID: "capture"},
 			EvidencePacketID:     packetID,
 		})
 		if err == nil {
@@ -328,9 +328,12 @@ func TestRetainedArtifactOfAForeignRunIsNotFound(t *testing.T) {
 		}
 		return rpcError(err)
 	}
-	missing, foreign := open("evp-doesnotexist"), open(packet.ID)
+	missing, foreign := open(w.foreignRun.ID, "evp-doesnotexist"), open(w.foreignRun.ID, packet.ID)
 	if missing.Code != protocol.CodeNotFound || !sameError(foreign, missing) {
 		t.Fatalf("foreign retained capture = %v, missing one = %v; want the same not found", foreign, missing)
+	}
+	if got := open(w.run.ID, packet.ID); !sameError(got, missing) {
+		t.Fatalf("foreign packet under a reachable run = %v, missing one = %v; want the same not found", got, missing)
 	}
 }
 
