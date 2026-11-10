@@ -63,6 +63,12 @@ type runScoped interface {
 	RunExtraWorkspaces() []domain.WorkspaceID
 }
 
+// runNaming is a payload that names runs besides its event's own, each of
+// which the reader must reach.
+type runNaming interface {
+	NamedRuns() []domain.RunID
+}
+
 // memberNaming is a payload about members, which a reader sees only when
 // they see each of them and the event's actor. An empty id is a member
 // nobody but a super admin sees.
@@ -138,7 +144,8 @@ func seesNamed(ev Event, scope Scope) bool {
 
 // Reachable reports whether scope allows ev's workspace, for an event
 // about an extra repository of a run that repository's workspace, for an
-// event of a run every workspace of the run, and the members ev names.
+// event of a run every workspace of the run and of every other run it
+// names, and the members ev names.
 // The workspaces a runScoped payload names stand in for scope.Run.
 func Reachable(ev Event, scope Scope) bool {
 	if !scope.Workspace(ev.WorkspaceID) {
@@ -157,6 +164,13 @@ func Reachable(ev Event, scope Scope) bool {
 		}
 		for _, ws := range extras {
 			if !scope.Workspace(ws) {
+				return false
+			}
+		}
+	}
+	if r, ok := ev.Payload.(runNaming); ok && scope.Run != nil {
+		for _, id := range r.NamedRuns() {
+			if !scope.Run(id) {
 				return false
 			}
 		}

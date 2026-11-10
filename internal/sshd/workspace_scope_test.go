@@ -617,6 +617,53 @@ func TestASessionBeforeItsCheckoutHasItsWholeScope(t *testing.T) {
 	}
 }
 
+// A coordination message between two sessions of one workspace names its
+// recipient, so it reaches only readers who reach the recipient's every
+// workspace too.
+func TestAMessageToASessionWithAnUnreachableRepoStaysUnseen(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	publish := func(to domain.RunID) uint64 {
+		t.Helper()
+		ev, err := w.bus.Publish(ctx, events.Event{WorkspaceID: w.wsA.ID, RunID: w.runUA.ID, Payload: events.CoordMessagePayload{
+			MessageID: "msg-" + string(to), WorkspaceID: w.wsA.ID, FromRunID: w.runUA.ID, ToRunID: to, Kind: "message",
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ev.Seq
+	}
+	plain := publish(w.runUA.ID)
+	hidden := publish(w.runA.ID)
+	for who, want := range map[string][]uint64{"S": {plain, hidden}, "A": {plain}, "U": {plain}} {
+		var timeline protocol.WorkspaceTimelineResult
+		if err := w.call(t, who, protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{WorkspaceID: string(w.wsA.ID)}, &timeline); err != nil {
+			t.Fatalf("%s timeline: %v", who, err)
+		}
+		var changes protocol.ChangesListResult
+		if err := w.call(t, who, protocol.MethodChangesList, protocol.ChangesListParams{Cursor: "0", WorkspaceID: string(w.wsA.ID)}, &changes); err != nil {
+			t.Fatalf("%s changes.list: %v", who, err)
+		}
+		var fromTimeline, fromChanges []uint64
+		for _, ev := range timeline.Events {
+			if ev.Seq == plain || ev.Seq == hidden {
+				fromTimeline = append(fromTimeline, ev.Seq)
+			}
+		}
+		for _, c := range changes.Changes {
+			if c.Seq == plain || c.Seq == hidden {
+				fromChanges = append(fromChanges, c.Seq)
+			}
+		}
+		slices.Sort(fromTimeline)
+		slices.Sort(fromChanges)
+		if !slices.Equal(fromTimeline, want) || !slices.Equal(fromChanges, want) {
+			t.Errorf("%s coord.message events: timeline %v, changes %v, want %v", who, fromTimeline, fromChanges, want)
+		}
+	}
+}
+
 // A message from a session in a workspace the caller cannot reach is
 // counted in a close check but not named.
 func TestForeignSendersStayInTheirWorkspace(t *testing.T) {
