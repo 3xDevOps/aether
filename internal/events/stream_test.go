@@ -29,7 +29,7 @@ func TestStreamWireSendsAWatchChangeToItsOwnerAlone(t *testing.T) {
 		}
 		var got []string
 		go func() { time.Sleep(100 * time.Millisecond); _ = sub.Close() }()
-		if err := StreamWire(sub, member, func(domain.WorkspaceID) bool { return true }, func(e protocol.Event) error {
+		if err := StreamWire(sub, member, Scope{Workspace: func(domain.WorkspaceID) bool { return true }}, func(e protocol.Event) error {
 			got = append(got, string(e.Payload))
 			return nil
 		}); err != nil {
@@ -60,7 +60,7 @@ func TestStreamWireSendsOnlyReachableWorkspaces(t *testing.T) {
 	go func() { time.Sleep(100 * time.Millisecond); _ = sub.Close() }()
 	var got []string
 	reaches := func(ws domain.WorkspaceID) bool { return ws == "ws-mine" }
-	if err := StreamWire(sub, "mem-ada", reaches, func(e protocol.Event) error {
+	if err := StreamWire(sub, "mem-ada", Scope{Workspace: reaches}, func(e protocol.Event) error {
 		got = append(got, e.WorkspaceID)
 		return nil
 	}); err != nil {
@@ -97,7 +97,7 @@ func TestStreamWireLeavesOutAnUnreachableExtraRepository(t *testing.T) {
 	go func() { time.Sleep(100 * time.Millisecond); _ = sub.Close() }()
 	var got []string
 	reaches := func(ws domain.WorkspaceID) bool { return ws == "ws-mine" }
-	if err := StreamWire(sub, "mem-ada", reaches, func(e protocol.Event) error {
+	if err := StreamWire(sub, "mem-ada", Scope{Workspace: reaches}, func(e protocol.Event) error {
 		got = append(got, e.Type)
 		return nil
 	}); err != nil {

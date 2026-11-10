@@ -45,7 +45,7 @@ func (s *Server) workspaceTimeline(ctx context.Context, member domain.MemberID, 
 		Run:       domain.RunID(p.RunID),
 		Member:    domain.MemberID(p.MemberID),
 		Types:     types,
-		Reaches:   actor.Reaches,
+		Scope:     s.eventScope(ctx, actor),
 	}
 	var page timeline.Page
 	if p.Newest {

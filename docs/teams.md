@@ -411,6 +411,13 @@ aether: rpc error -32000: store: not found
 The same holds for `git fetch` and `git push` to its remote. This is on purpose:
 the error never says whether the workspace is real.
 
+A session with an extra repository in a workspace you cannot reach still shows
+in `aether sessions`, without that repository. Its history does not: none of
+its events reaches your event feed, `aether timeline`, `aether changes`,
+attention or the overlap column, and attaching to it is refused. Events about a
+member you do not see, such as a rename, a device change or a merge, are left
+out the same way.
+
 ### Delete a workspace
 
 The owner or a super admin runs `aether workspace delete myproject --yes`, which removes the workspace with its sessions,

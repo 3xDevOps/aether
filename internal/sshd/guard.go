@@ -106,6 +106,7 @@ func registerGuarded(name string, cap permissions.Capability, resolve targetReso
 				return nil, perr
 			}
 		}
+		noteWorkspace(ctx, target.Workspace)
 		if cerr := permissions.Check(cap, actor, target); cerr != nil {
 			if errors.Is(cerr, permissions.ErrNoAccess) {
 				return nil, rpcError(cerr)

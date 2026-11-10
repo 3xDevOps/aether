@@ -68,21 +68,39 @@ var assistantReads = map[string]bool{
 	protocol.MethodTerminalStatus: true,
 }
 
-type auditChangeKey struct{}
+type auditNoteKey struct{}
+
+// auditNote is what the call behind a dispatch learns for its audit entry:
+// whether it changed something, and the first workspace the server
+// resolved for it.
+type auditNote struct {
+	changed   bool
+	workspace domain.WorkspaceID
+}
 
 // noteChange marks the call behind ctx as having changed a connector, an
 // account share, a member or a Slack link, so its audit entry is kept
 // among the security entries.
 func noteChange(ctx context.Context) {
-	if changed, ok := ctx.Value(auditChangeKey{}).(*bool); ok {
-		*changed = true
+	if note, ok := ctx.Value(auditNoteKey{}).(*auditNote); ok {
+		note.changed = true
+	}
+}
+
+// noteWorkspace records ws as the workspace the call behind ctx acts in,
+// unless one was resolved before it.
+func noteWorkspace(ctx context.Context, ws domain.WorkspaceID) {
+	if note, ok := ctx.Value(auditNoteKey{}).(*auditNote); ok && note.workspace == "" {
+		note.workspace = ws
 	}
 }
 
 // auditCall records every write call by a connector or the assistant, and
 // every call of auditedMethods; changed is whether the call noted a
 // change. The entry holds the ids the params and result name, never the
-// params themselves, and the workspace of the run it acted on.
+// params themselves, and the workspace the server resolved for the call:
+// the result's, the guard's or an in-handler check's target, or the named
+// run's, kept only when the caller reaches it.
 // Recording happens after the call took effect, so a store failure is
 // logged rather than turned into the call's error.
 func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method string, params, result json.RawMessage, perr *protocol.Error, changed bool) {
@@ -109,7 +127,6 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		MemberID    string `json:"member_id"`
 		DeviceID    string `json:"device_id"`
 		ProposalID  string `json:"proposal_id"`
-		WorkspaceID string `json:"workspace_id"`
 	}
 	_ = json.Unmarshal(params, &ids)
 	type made struct {
@@ -128,7 +145,10 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	}
 	_ = json.Unmarshal(result, &res)
 	target := cmp.Or(res.Run.ID, res.Item.ID, ids.RunID, ids.ID)
-	workspace := cmp.Or(res.Run.WorkspaceID, res.Item.WorkspaceID, ids.WorkspaceID)
+	workspace := cmp.Or(res.Run.WorkspaceID, res.Item.WorkspaceID)
+	if note, ok := ctx.Value(auditNoteKey{}).(*auditNote); ok && workspace == "" {
+		workspace = string(note.workspace)
+	}
 	switch method {
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID
@@ -147,7 +167,7 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 			workspace = string(r.WorkspaceID)
 		}
 	}
-	if workspace != "" && perr != nil {
+	if workspace != "" {
 		if actor, err := resolveActor(ctx, s.cfg.Store, member); err != nil || !actor.Reaches(domain.WorkspaceID(workspace)) {
 			workspace = ""
 		}

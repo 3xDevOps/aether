@@ -40,7 +40,7 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch sub
 		_ = writeJSONLine(ch, protocol.SubscribeResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	access := &streamAccess{s: s, member: member}
+	access := &streamAccess{s: s, member: member, runs: newRunScopes(s.cfg.Store)}
 	access.load(ctx)
 	if ws := domain.WorkspaceID(req.WorkspaceID); ws != "" && ws != events.ServerScope && !access.actor.Reaches(ws) {
 		e := rpcError(permissions.ErrNoAccess)
@@ -86,8 +86,12 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch sub
 
 	// A drop, a write failure, and a closed subscription all end the
 	// channel the same way: the client re-subscribes from its cursor.
-	_ = events.StreamWire(sub, member, func(ws domain.WorkspaceID) bool { return access.reaches(streamCtx, ws) },
-		func(ev protocol.Event) error { return writeJSONLine(ch, ev) })
+	scope := events.Scope{
+		Workspace: func(ws domain.WorkspaceID) bool { return access.current(streamCtx).Reaches(ws) },
+		Run:       func(id domain.RunID) bool { return access.runs.reaches(streamCtx, access.current(streamCtx), id) },
+		Sees:      func(id domain.MemberID) bool { return access.seesMember(streamCtx, id) },
+	}
+	_ = events.StreamWire(sub, member, scope, func(ev protocol.Event) error { return writeJSONLine(ch, ev) })
 }
 
 // accessChanged makes every live event stream reload its member's
@@ -96,20 +100,22 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch sub
 func (s *Server) accessChanged() { s.accessGen.Add(1) }
 
 // streamAccess is one event stream's view of its member's workspace
-// access. It reloads when accessChanged was called since the last load,
-// and at least every revalidateInterval for writes made outside this
-// process, such as aether-server member role. A failed load reaches
-// nothing.
+// access and of the members they see. It reloads when accessChanged was
+// called since the last load, and at least every revalidateInterval for
+// writes made outside this process, such as aether-server member role. A
+// failed load reaches nothing.
 type streamAccess struct {
 	s      *Server
 	member domain.MemberID
 	gen    uint64
 	at     time.Time
 	actor  permissions.Actor
+	runs   *runScopes
+	sees   func(domain.MemberID) bool
 }
 
 func (a *streamAccess) load(ctx context.Context) {
-	a.gen, a.at = a.s.accessGen.Load(), time.Now()
+	a.gen, a.at, a.sees = a.s.accessGen.Load(), time.Now(), nil
 	actor, err := resolveActor(ctx, a.s.cfg.Store, a.member)
 	if err != nil {
 		actor = permissions.Actor{}
@@ -117,9 +123,17 @@ func (a *streamAccess) load(ctx context.Context) {
 	a.actor = actor
 }
 
-func (a *streamAccess) reaches(ctx context.Context, ws domain.WorkspaceID) bool {
+func (a *streamAccess) current(ctx context.Context) permissions.Actor {
 	if a.s.accessGen.Load() != a.gen || time.Since(a.at) >= a.s.cfg.revalidateInterval {
 		a.load(ctx)
 	}
-	return a.actor.Reaches(ws)
+	return a.actor
+}
+
+func (a *streamAccess) seesMember(ctx context.Context, id domain.MemberID) bool {
+	actor := a.current(ctx)
+	if a.sees == nil {
+		a.sees = a.s.memberSight(ctx, actor)
+	}
+	return a.sees(id)
 }

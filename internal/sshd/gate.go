@@ -81,6 +81,7 @@ func resolveRunTarget(ctx context.Context, st store.Store, id domain.RunID) (per
 	if err != nil {
 		return permissions.Target{}, err
 	}
+	noteWorkspace(ctx, run.WorkspaceID)
 	ws, err := st.GetWorkspace(ctx, run.WorkspaceID)
 	if err != nil {
 		return permissions.Target{}, err
@@ -102,5 +103,6 @@ func checkIn(ctx context.Context, st store.Store, member domain.MemberID, cap pe
 	if err != nil {
 		return err
 	}
+	noteWorkspace(ctx, ws)
 	return permissions.Check(cap, actor, permissions.Target{Workspace: ws})
 }
