@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	cerrdefs "github.com/containerd/errdefs"
 
@@ -32,9 +33,10 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	unlockCaches := func() {}
 	if s.cfg.Homes != nil {
-		unlock := s.cfg.Homes.LockCaches(member)
-		defer unlock()
+		unlockCaches = sync.OnceFunc(s.cfg.Homes.LockCaches(member))
+		defer func() { unlockCaches() }()
 		if err := s.cfg.Homes.EnsureCacheMetadata(member, "terminal"); err != nil {
 			return "", fmt.Errorf("scheduler: preserve saved image cleanup owner: %w", err)
 		}
@@ -48,15 +50,28 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
-	name := strings.ToLower(rand.Text())
-	pending, tag := pendingImageRepo(member)+":"+name, memberImageRepo(member)+":"+name
-	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, pending); err != nil {
+	// The image sessions start from now is the new image's previous one.
+	previous, _, err := s.sessionImage(ctx, m)
+	if err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
 	}
-	if checkErr := s.checkSavedImage(ctx, pending); checkErr != nil {
+	name := strings.ToLower(rand.Text())
+	pending, tag := pendingImageRepo(member)+":"+name, memberImageRepo(member)+":"+name
+	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, pending, map[string]string{previousImageLabel: previous}); err != nil {
+		return "", fmt.Errorf("scheduler: save environment: %w", err)
+	}
+	// Launches by this member, or on their account, need the cache lock;
+	// the check can take minutes. The terminal lock keeps other saves,
+	// resets and sweeps of this member out.
+	unlockCaches()
+	checkErr := s.checkSavedImage(ctx, pending)
+	if s.cfg.Homes != nil {
+		unlockCaches = sync.OnceFunc(s.cfg.Homes.LockCaches(member))
+	}
+	if checkErr != nil {
 		current := "the standard image"
-		if m.Image != "" {
-			current = "your saved image " + m.Image
+		if previous != "" {
+			current = "your saved image " + previous
 		}
 		problem := "could not be checked"
 		if _, ok := errors.AsType[*errImageOwners](checkErr); ok {
@@ -178,8 +193,16 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	switch {
 	case err == nil:
-		refs[previousImage(tags, m.Image)] = true
+		previous, previousErr := s.previousImage(ctx, m.Image)
+		if previousErr != nil {
+			return previousErr
+		}
+		refs[previous] = true
 	case !errors.Is(err, store.ErrNotFound):
+		return err
+	}
+	// Sweeps hold the terminal lock, so no save is checking an image now.
+	if err = s.cfg.Runtime.Destroy(ctx, runtime.ExportContainer(pendingImageRepo(member))); err != nil {
 		return err
 	}
 	pending, err := s.cfg.Runtime.ListImageTags(ctx, pendingImageRepo(member))

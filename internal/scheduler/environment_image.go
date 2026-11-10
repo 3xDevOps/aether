@@ -90,80 +90,209 @@ func checkImageOwners(r io.Reader) error {
 	return nil
 }
 
-// previousImage is the member tag created just before current: the image a
-// save replaced. tags are newest first.
-func previousImage(tags []string, current string) string {
-	i := slices.Index(tags, current)
-	if i < 0 || i+1 >= len(tags) {
+// previousImageLabel names, on a saved image, the image sessions started
+// from when it was saved: the one to fall back to. Empty means the standard
+// image.
+const previousImageLabel = "aether.previous-image"
+
+func isMemberImage(member domain.MemberID, image string) bool {
+	return strings.HasPrefix(image, memberImageRepo(member)+":")
+}
+
+// previousImage is the fallback recorded on image, or "" when there is none
+// or image is gone.
+func (s *Scheduler) previousImage(ctx context.Context, image string) (string, error) {
+	if image == "" {
+		return "", nil
+	}
+	labels, err := s.cfg.Runtime.ImageLabels(ctx, image)
+	if errors.Is(err, runtime.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("scheduler: read the previous image of %s: %w", image, err)
+	}
+	return labels[previousImageLabel], nil
+}
+
+// imageChain lists the images a container of member may start from, in
+// order: the saved image and the previous one if it still exists. The
+// standard image follows them.
+func (s *Scheduler) imageChain(ctx context.Context, member *domain.Member) ([]string, error) {
+	if member.Image == "" {
+		return nil, nil
+	}
+	previous, err := s.previousImage(ctx, member.Image)
+	if err != nil || previous == "" {
+		return []string{member.Image}, err
+	}
+	exists, err := s.cfg.Runtime.ImageExists(ctx, previous)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: check previous image %s: %w", previous, err)
+	}
+	if !exists {
+		return []string{member.Image}, nil
+	}
+	return []string{member.Image, previous}, nil
+}
+
+type failedImage struct{ image, cause string }
+
+// sessionImage is the first image of member's chain no launch has found
+// unable to start a container, "" for the standard image, with the notice
+// that names the images it skipped.
+func (s *Scheduler) sessionImage(ctx context.Context, member *domain.Member) (string, string, error) {
+	if s.unstartableCause(member.Image) == "" {
+		return member.Image, "", nil
+	}
+	chain, err := s.imageChain(ctx, member)
+	if err != nil {
+		return "", "", err
+	}
+	var failed []failedImage
+	for _, image := range chain {
+		cause := s.unstartableCause(image)
+		if cause == "" {
+			return image, imageNotice(failed, image), nil
+		}
+		failed = append(failed, failedImage{image, cause})
+	}
+	return "", imageNotice(failed, ""), nil
+}
+
+func (s *Scheduler) unstartableCause(image string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unstartableImages[image]
+}
+
+// imageNotice tells the person which saved images a container skipped and
+// what it uses instead. It must fit a run status reason.
+func imageNotice(failed []failedImage, using string) string {
+	if len(failed) == 0 {
 		return ""
 	}
-	return tags[i+1]
+	var names, causes []string
+	for _, f := range failed {
+		_, name, _ := strings.Cut(f.image, ":")
+		names = append(names, name)
+		if !slices.Contains(causes, f.cause) {
+			causes = append(causes, f.cause)
+		}
+	}
+	instead := "the standard image"
+	if using != "" {
+		_, name, _ := strings.Cut(using, ":")
+		instead = "your previous saved image " + name
+	}
+	subject, it := "Saved image "+names[0], "it"
+	if len(names) > 1 {
+		subject, it = "Saved images "+strings.Join(names, " and "), "them"
+	}
+	return fmt.Sprintf("%s cannot start (%s); this session uses %s. Save your environment again to replace %s.",
+		subject, strings.Join(causes, "; "), instead, it)
 }
 
 // unstartableImageCause matches the runtime errors of a root filesystem
-// that holds owners the container cannot map.
-func unstartableImageCause(err error) string {
+// that holds owners the container cannot map. A mkdirall under one of
+// mounts is a mount's fault, not the image's.
+func unstartableImageCause(err error, mounts []string) string {
 	if _, setup := errors.AsType[*runtime.SetupError](err); setup {
 		return ""
 	}
 	msg := err.Error()
-	if !strings.HasPrefix(msg, "create container: ") && !strings.HasPrefix(msg, "start container: ") {
+	if !slices.ContainsFunc([]string{"create container: ", "start container: ", "scheduler: create terminal: ", "scheduler: start terminal: "}, func(prefix string) bool {
+		return strings.HasPrefix(msg, prefix)
+	}) {
 		return ""
 	}
 	if strings.Contains(msg, "value too large for defined data type") {
 		return "value too large for defined data type"
 	}
-	if strings.Contains(msg, "mkdirall") && strings.Contains(msg, "permission denied") {
-		return "root filesystem: permission denied"
+	_, target, ok := strings.Cut(msg, "mkdirall ")
+	if !ok || !strings.Contains(target, "permission denied") {
+		return ""
 	}
-	return ""
-}
-
-// markUnstartable records that member's saved image failed to start a
-// session container with err, and reports whether the launch should be
-// planned again, which then avoids it. Every image is marked once, so the
-// retries end at the standard image.
-func (s *Scheduler) markUnstartable(entry *supervised, member *domain.Member, image string, err error) bool {
-	cause := unstartableImageCause(err)
-	if cause == "" || !strings.HasPrefix(image, memberImageRepo(member.ID)+":") {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if entry.destroyPending || s.unstartableImages[image] != "" {
-		return false
-	}
-	s.unstartableImages[image] = cause
-	if entry.userReservation != nil {
-		delete(s.credentialUsers, entry.userReservation)
-		entry.userReservation = nil
-	}
-	entry.runUser = ""
-	slog.Warn("scheduler: saved environment image cannot start a session; retrying from an older image", "run", entry.runID, "image", image, "error", err)
-	return true
-}
-
-// sessionImage is the image a session of member starts from and, when it is
-// not the member's saved image, the notice that says why.
-func (s *Scheduler) sessionImage(ctx context.Context, member *domain.Member) (string, string, error) {
-	s.mu.Lock()
-	cause := s.unstartableImages[member.Image]
-	s.mu.Unlock()
-	if cause == "" {
-		return member.Image, "", nil
-	}
-	tags, err := s.cfg.Runtime.ListImageTags(ctx, memberImageRepo(member.ID))
-	if err != nil {
-		return "", "", fmt.Errorf("scheduler: list saved environment images: %w", err)
-	}
-	image, from := "", "the standard image"
-	if previous := previousImage(tags, member.Image); previous != "" {
-		s.mu.Lock()
-		usable := s.unstartableImages[previous] == ""
-		s.mu.Unlock()
-		if usable {
-			image, from = previous, "your previous saved image "+previous
+	target, _, _ = strings.Cut(target, ":")
+	for _, mount := range mounts {
+		if strings.Contains(target, strings.TrimSuffix(mount, "/")+"/") {
+			return ""
 		}
 	}
-	return image, fmt.Sprintf("Your saved environment image cannot start a container (%s), so this session uses %s. Run aether env reset to use the standard image.", cause, from), nil
+	return "rootfs permission denied"
+}
+
+func (s *Scheduler) planMounts(plan *EnvironmentPlan) []string {
+	mounts := []string{s.cfg.WorktreeMount}
+	for _, m := range slices.Concat(plan.Mounts, plan.Worktrees) {
+		mounts = append(mounts, m.ContainerPath)
+	}
+	return mounts
+}
+
+// startFromOlderImages calls start with the next image of member's chain
+// while the attempt before failed because its image cannot start a
+// container, and returns the plan that started. An image is marked
+// unstartable only once a later one starts. When the standard image fails
+// the same way the image was not the cause, so member's marks are dropped
+// and the error is returned as it is.
+func (s *Scheduler) startFromOlderImages(ctx context.Context, member *domain.Member, plan *EnvironmentPlan, err error, canRetry func() bool, start func(*domain.Member) (*EnvironmentPlan, error)) (*EnvironmentPlan, error) {
+	var failed []failedImage
+	substituted := plan != nil && plan.ImageNotice != ""
+	for plan != nil && isMemberImage(member.ID, plan.Image) && canRetry() {
+		cause := unstartableImageCause(err, s.planMounts(plan))
+		if cause == "" {
+			return nil, err
+		}
+		failed = append(failed, failedImage{plan.Image, cause})
+		next, nextErr := s.nextImage(ctx, member, plan.Image)
+		if nextErr != nil {
+			return nil, errors.Join(err, nextErr)
+		}
+		slog.Warn("scheduler: saved environment image cannot start a container; trying an older image", "member", member.ID, "image", plan.Image, "next", cmp.Or(next, "standard"), "error", err)
+		older := *member
+		older.Image = next
+		if plan, err = start(&older); err == nil {
+			s.mu.Lock()
+			for _, f := range failed {
+				s.unstartableImages[f.image] = f.cause
+			}
+			s.mu.Unlock()
+			_, notice, noticeErr := s.sessionImage(ctx, member)
+			if noticeErr != nil {
+				notice = imageNotice(failed, next)
+			}
+			plan.ImageNotice = notice
+			return plan, nil
+		}
+	}
+	if plan != nil && (len(failed) > 0 || substituted) && !isMemberImage(member.ID, plan.Image) && unstartableImageCause(err, s.planMounts(plan)) != "" {
+		s.mu.Lock()
+		for image := range s.unstartableImages {
+			if isMemberImage(member.ID, image) {
+				delete(s.unstartableImages, image)
+			}
+		}
+		s.mu.Unlock()
+	}
+	return nil, err
+}
+
+// nextImage is the image of member's chain after image that no launch has
+// marked unstartable, or "" for the standard image.
+func (s *Scheduler) nextImage(ctx context.Context, member *domain.Member, image string) (string, error) {
+	chain, err := s.imageChain(ctx, member)
+	if err != nil {
+		return "", err
+	}
+	i := slices.Index(chain, image)
+	if i < 0 {
+		return "", nil
+	}
+	for _, next := range chain[i+1:] {
+		if s.unstartableCause(next) == "" {
+			return next, nil
+		}
+	}
+	return "", nil
 }

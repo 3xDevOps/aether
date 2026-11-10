@@ -375,12 +375,15 @@ type Runtime interface {
 	// found and destroyed. Keys are assumed unique; with duplicates any
 	// match may be returned.
 	FindByCreationKey(ctx context.Context, key string) (ID, error)
-	// Commit snapshots a running container as a tagged image.
-	Commit(ctx context.Context, id ID, tag string) error
+	// Commit snapshots a running container as a tagged image with labels
+	// set on it.
+	Commit(ctx context.Context, id ID, tag string, labels map[string]string) error
+	// ImageLabels returns the labels of a local image; a missing image is
+	// ErrNotFound.
+	ImageLabels(ctx context.Context, ref string) (map[string]string, error)
 	// ImageExists reports whether an image reference exists locally.
 	ImageExists(ctx context.Context, ref string) (bool, error)
-	// ListImageTags returns the local tags under one repository, newest
-	// image first.
+	// ListImageTags returns the local tags under one repository.
 	ListImageTags(ctx context.Context, repo string) ([]string, error)
 	// TagImage adds target as another tag of the local image source.
 	TagImage(ctx context.Context, source, target string) error

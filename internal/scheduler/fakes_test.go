@@ -2,11 +2,11 @@ package scheduler
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -62,13 +62,14 @@ type fakeRuntime struct {
 	execRunCalls []fakeExecCall
 	attaches     int
 	images       map[string]string
-	// imageSeq orders committed images; ListImageTags lists them newest
-	// first, then the seeded ones by name.
-	imageSeq map[string]int
+	// imageLabels are the labels Commit set, by image tag.
+	imageLabels map[string]map[string]string
 	// exports are the tar streams ExportImage returns for an image committed
 	// from a container, by that container; any other image exports empty.
 	exports   map[runtime.ID][]byte
 	exportErr error
+	// exportHook runs at the start of every ExportImage.
+	exportHook func()
 	// imageStartErr fails Start of a container created from the image.
 	imageStartErr map[string]error
 }
@@ -474,7 +475,7 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
 }
 
-func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error {
+func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string, labels map[string]string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.commitErr != nil {
@@ -485,11 +486,20 @@ func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error
 		r.images = make(map[string]string)
 	}
 	r.images[tag] = string(id)
-	if r.imageSeq == nil {
-		r.imageSeq = make(map[string]int)
+	if r.imageLabels == nil {
+		r.imageLabels = make(map[string]map[string]string)
 	}
-	r.imageSeq[tag] = len(r.imageSeq) + 1
+	r.imageLabels[tag] = maps.Clone(labels)
 	return nil
+}
+
+func (r *fakeRuntime) ImageLabels(_ context.Context, tag string) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.images[tag]; !ok {
+		return nil, fmt.Errorf("fake runtime: image %q: %w", tag, runtime.ErrNotFound)
+	}
+	return maps.Clone(r.imageLabels[tag]), nil
 }
 
 func (r *fakeRuntime) TagImage(_ context.Context, source, target string) error {
@@ -500,11 +510,14 @@ func (r *fakeRuntime) TagImage(_ context.Context, source, target string) error {
 		return fmt.Errorf("fake runtime: no such image %q", source)
 	}
 	r.images[target] = id
-	r.imageSeq[target] = len(r.imageSeq) + 1
+	r.imageLabels[target] = maps.Clone(r.imageLabels[source])
 	return nil
 }
 
 func (r *fakeRuntime) ExportImage(_ context.Context, tag string) (io.ReadCloser, error) {
+	if r.exportHook != nil {
+		r.exportHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.exportErr != nil {
@@ -538,7 +551,6 @@ func (r *fakeRuntime) ListImageTags(_ context.Context, repo string) ([]string, e
 			tags = append(tags, tag)
 		}
 	}
-	slices.SortFunc(tags, func(a, b string) int { return cmp.Or(cmp.Compare(r.imageSeq[b], r.imageSeq[a]), cmp.Compare(a, b)) })
 	return tags, nil
 }
 

@@ -41,8 +41,8 @@ const (
 type EnvironmentPlan struct {
 	Purpose EnvironmentPurpose
 	Image   string
-	// ImageNotice says why a session does not start from the member's saved
-	// image; empty when it does.
+	// ImageNotice says why the container does not start from the member's
+	// saved image; empty when it does.
 	ImageNotice string
 	Env         map[string]string
 	SetupScript string
@@ -106,7 +106,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		}
 	}
 	var imageNotice string
-	if member.Image != "" && purpose == EnvironmentPurposeRun {
+	if member.Image != "" {
 		saved, notice, err := s.sessionImage(ctx, member)
 		if err != nil {
 			return nil, err

@@ -548,7 +548,7 @@ func TestConnectGitHubKeepsASavedEnvironmentOnOffer(t *testing.T) {
 	if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, "aether/member-test:1"); err != nil {
 		t.Fatalf("UpdateMemberImage: %v", err)
 	}
-	if err := e.rt.Commit(t.Context(), "c-saved", "aether/member-test:1"); err != nil {
+	if err := e.rt.Commit(t.Context(), "c-saved", "aether/member-test:1", nil); err != nil {
 		t.Fatalf("seed the saved image: %v", err)
 	}
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {

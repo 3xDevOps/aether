@@ -106,9 +106,10 @@ pushed to a registry.
 
 - New sessions, workspace shells and the next environment open use the saved image.
   Running containers keep theirs.
-- Each save replaces the previous one as your saved image. Aether keeps the
-  image it replaced on the server as your previous image, and removes older
-  ones. To fix a bad save, repair it and save again, or reset.
+- Each save replaces the previous one as your saved image. The new image
+  records the image new sessions started from until then as your previous
+  image; Aether keeps that one on the server and removes older ones. To fix a
+  bad save, repair it and save again, or reset.
 - Every save is checked before it becomes your saved image
   ([Saved image checks](#saved-image-checks)).
 - Saving needs a running terminal. If it is stopped, `aether env save` fails
@@ -156,26 +157,38 @@ docker rm "$c"
 ```
 
 The check reads the whole image, so a large environment takes longer to
-save. If the check itself fails, the save fails with `could not be checked`
-and the check's error, and nothing changes.
+save, up to 10 minutes before the check gives up. Your environment keeps
+running meanwhile, and sessions can launch. If the check itself fails, the
+save fails with `could not be checked` and the check's error, and nothing
+changes.
+
+On a host where every commit captures such owners, every save fails this
+way: the check stops a broken image from replacing your working one, but it
+does not fix the host.
 
 ### When a saved image cannot start
 
-An image saved before these checks may still hold such owners. A session
-container from it then fails to start with
-`value too large for defined data type` or a root filesystem
-`permission denied`. Aether starts that session from your previous image, or
-from the standard image when there is none or it fails the same way, and
-shows the reason on the session:
+An image saved before these checks may still hold such owners. A container
+from it then fails to start with `value too large for defined data type`, or
+with a `mkdirall` `permission denied` on one of the image's own directories.
+Aether then starts that session, or your environment terminal, from your
+previous image, or from the standard image when there is none or it fails
+the same way. The session's status names the images that failed:
 
 ```
-Your saved environment image cannot start a container (value too large for defined data type), so this session uses your previous saved image <tag>. Run aether env reset to use the standard image.
+Saved image <name> cannot start (value too large for defined data type); this session uses your previous saved image <name>. Save your environment again to replace it.
 ```
 
-Aether tries each image once, and remembers the failed images until the
-server restarts. Your environment terminal does not fall back: it fails with
-the runtime's error. Run `aether env reset`, then install your tools again
-and save.
+Open your environment, which now runs the same fallback image, and save it
+again. Aether skips a failed image only after another image started, and
+remembers it until the server restarts. When the standard image fails the
+same way, the image was not the cause: the launch fails with the runtime's
+own error and Aether forgets the failed images. A `permission denied` under
+a directory mounted into the container, such as your home, is never blamed
+on the image.
+
+The status shows from the session's start until the agent reports its own
+state.
 
 ## Reset to standard
 

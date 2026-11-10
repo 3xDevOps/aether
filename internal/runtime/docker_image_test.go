@@ -63,9 +63,6 @@ func TestExportImageReadsAContainerItRemovesOnClose(t *testing.T) {
 		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/check"):
 			removed = true
 			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/images/json"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"Created":10,"RepoTags":["aether/member-m:old"]},{"Created":30,"RepoTags":["aether/member-m:new"]},{"Created":20,"RepoTags":["aether/member-m:mid","other:latest"]}]`))
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected", http.StatusBadRequest)
@@ -78,10 +75,6 @@ func TestExportImageReadsAContainerItRemovesOnClose(t *testing.T) {
 	}
 	defer func() { _ = cli.Close() }()
 	d := &Docker{cli: cli}
-	tags, err := d.ListImageTags(t.Context(), "aether/member-m")
-	if want := []string{"aether/member-m:new", "aether/member-m:mid", "aether/member-m:old"}; err != nil || !reflect.DeepEqual(tags, want) {
-		t.Fatalf("ListImageTags = %v, %v, want %v", tags, err, want)
-	}
 	export, err := d.ExportImage(t.Context(), "aether/member-m:new")
 	if err != nil {
 		t.Fatal(err)
