@@ -190,7 +190,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last super admin"}
 		}
 	}
-	if perr := s.refuseOwner(ctx, target, "removing"); perr != nil {
+	if perr = s.refuseOwner(ctx, target, "removing"); perr != nil {
 		return nil, perr
 	}
 	ids, perr := s.rpcIdentityStore()

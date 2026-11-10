@@ -266,8 +266,8 @@ func (s *Server) workspaceOwnerSet(ctx context.Context, member domain.MemberID, 
 		return nil, rpcError(fmt.Errorf("%s: %s owns the workspace, but their grant on it is not removed: %w", method, owner.ID, err))
 	}
 	if previous, err := s.cfg.Store.GetMember(ctx, w.OwnerID); err == nil && previous.Role != domain.RoleSuperAdmin {
-		if err := s.cfg.Store.GrantWorkspace(ctx, ws, previous.ID, member); err != nil {
-			return nil, rpcError(fmt.Errorf("%s: %s owns the workspace, but the previous owner %s is not granted it: %w", method, owner.ID, previous.ID, err))
+		if gerr := s.cfg.Store.GrantWorkspace(ctx, ws, previous.ID, member); gerr != nil {
+			return nil, rpcError(fmt.Errorf("%s: %s owns the workspace, but the previous owner %s is not granted it: %w", method, owner.ID, previous.ID, gerr))
 		}
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, rpcError(err)

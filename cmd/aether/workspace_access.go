@@ -63,7 +63,7 @@ func printWorkspaceAccess(w io.Writer, res protocol.WorkspaceAccessResult, names
 
 func workspaceGrant(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: aether workspace grant <workspace> <member-id>...")
+		return fmt.Errorf("usage: aether workspace grant <workspace> <member-id> [<member-id>...]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		id, err := resolveWorkspace(c, args[0])

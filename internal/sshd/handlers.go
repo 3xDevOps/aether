@@ -632,7 +632,7 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	} else if cerr != nil {
 		return nil, rpcError(cerr)
 	}
-	if _, err := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, member, string(run.AccountMember()), workspaces); err != nil {
+	if _, err = fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, member, string(run.AccountMember()), workspaces); err != nil {
 		return nil, rpcError(err)
 	}
 	reopened, err := s.cfg.Runs.Relaunch(ctx, id, member)
