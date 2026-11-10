@@ -64,7 +64,9 @@ device waiting on an invitation only when they created the invitation.
 | Grant or revoke members in a workspace | any member, any workspace | collaborators and viewers, owned workspaces | no |
 | Change a workspace's owner | yes | no | no |
 | Invite | any role, any workspaces | collaborator or viewer, at least one owned workspace, only owned workspaces | no |
-| Approve a pending member, approve a device | anyone's | members below admin, and their own | own devices |
+| Approve a pending member, approve or deny a device, list a member's sign-ins | anyone's | members below admin, and their own | own |
+| Rename, recolor or set the git identity of a member, revoke an approved device, unlink a sign-in, revoke a connector | anyone's | own | own |
+| Revoke an invitation | anyone's | ones they created | no |
 | Change a role, remove a member | yes | no | no |
 | Server update, run limits, Sysbox, edge claim code and owner transfer, a mirror with a deploy key, reviewer link, everyone's audit, disk and system stats | yes | no | no |
 

@@ -352,16 +352,17 @@ func (s *Server) connectorRevoke(ctx context.Context, member domain.MemberID, pa
 	if perr != nil {
 		return nil, perr
 	}
+	unknown := &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf(
+		"%s: no connector %s; aether mcp lists yours", method, p.ConnectorID)}
 	c, err := cs.GetConnector(ctx, p.ConnectorID)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf(
-			"%s: no connector %s; aether mcp lists yours", method, p.ConnectorID)}
+		return nil, unknown
 	}
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if perr := s.actingOn(ctx, member, c.Member, method); perr != nil {
-		return nil, perr
+	if c.Member != member && !s.superAdmin(ctx, member) {
+		return nil, unknown
 	}
 	if err := cs.DeleteConnector(ctx, c.ID); err != nil {
 		return nil, rpcError(err)

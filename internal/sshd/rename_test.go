@@ -55,7 +55,11 @@ func TestMemberRename(t *testing.T) {
 	if err := bobC.Call(protocol.MethodMemberRename, protocol.MemberRenameParams{MemberID: string(e.member.ID), DisplayName: "Mallory"}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("non-admin rename of another member = %v, want CodeDenied", err)
 	}
+	if err := adminC.Call(protocol.MethodMemberRename, protocol.MemberRenameParams{MemberID: string(bob.ID), DisplayName: "Bobby"}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("admin rename of another member = %v, want CodeDenied", err)
+	}
+	setRole(t, e, domain.RoleSuperAdmin)
 	if err := adminC.Call(protocol.MethodMemberRename, protocol.MemberRenameParams{MemberID: string(bob.ID), DisplayName: "Bobby"}, &res); err != nil || res.Member.DisplayName != "Bobby" {
-		t.Fatalf("admin rename = %+v, %v; want Bobby", res.Member, err)
+		t.Fatalf("super admin rename = %+v, %v; want Bobby", res.Member, err)
 	}
 }

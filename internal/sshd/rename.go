@@ -33,7 +33,7 @@ func (s *Server) memberRename(ctx context.Context, member domain.MemberID, param
 	if p.MemberID != "" {
 		target = domain.MemberID(p.MemberID)
 	}
-	if aerr := s.actingOn(ctx, member, target, protocol.MethodMemberRename); aerr != nil {
+	if aerr := s.editing(ctx, member, target, protocol.MethodMemberRename); aerr != nil {
 		return nil, aerr
 	}
 	m, gerr := s.cfg.Store.GetMember(ctx, target)

@@ -157,10 +157,14 @@ func TestMemberIdentityListAndRemove(t *testing.T) {
 		}
 	}
 
+	removeParams := protocol.MemberIdentityRemoveParams{MemberID: string(m.ID), Provider: octo.Provider, Subject: octo.Subject}
+	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityRemove, removeParams, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("an admin removing another member's identity = %v, want denied", err)
+	}
+	setRole(t, e, domain.RoleSuperAdmin)
 	var removed protocol.MemberIdentityRemoveResult
-	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityRemove,
-		protocol.MemberIdentityRemoveParams{MemberID: string(m.ID), Provider: octo.Provider, Subject: octo.Subject}, &removed); err != nil {
-		t.Fatalf("admin removes the identity: %v", err)
+	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityRemove, removeParams, &removed); err != nil {
+		t.Fatalf("super admin removes the identity: %v", err)
 	}
 	if len(removed.Revoked) != 3 {
 		t.Fatalf("revoked %+v, want the identity's three devices", removed.Revoked)

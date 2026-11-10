@@ -1017,8 +1017,8 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 		t.Fatalf("directory = %+v, %v", entries, err)
 	}
 	if err := bob.Call(protocol.MethodMemberInvitationRevoke,
-		protocol.MemberInvitationRevokeParams{InvitationID: created.Invitation.ID}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("collaborator revoking an admin's invitation = %v, want CodeDenied", err)
+		protocol.MemberInvitationRevokeParams{InvitationID: created.Invitation.ID}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("collaborator revoking an admin's invitation = %v, want it answered as a missing one", err)
 	}
 	var list protocol.MemberInvitationListResult
 	if err := bob.Call(protocol.MethodMemberInvitationList, struct{}{}, &list); err != nil || len(list.Invitations) != 0 {
@@ -1129,6 +1129,12 @@ func TestEdgeDeviceKeyOnTheDirectPath(t *testing.T) {
 			if err != nil {
 				t.Fatalf("device: %v", err)
 			}
+			var pe *protocol.Error
+			if err := controlClient(t, e).Call(protocol.MethodMemberDeviceRevoke,
+				protocol.MemberDeviceRevokeParams{DeviceID: string(dev.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+				t.Fatalf("an admin revoking another member's approved device = %v, want CodeDenied", err)
+			}
+			setRole(t, e, domain.RoleSuperAdmin)
 			if err := controlClient(t, e).Call(protocol.MethodMemberDeviceRevoke,
 				protocol.MemberDeviceRevokeParams{DeviceID: string(dev.ID)}, nil); err != nil {
 				t.Fatalf("revoke: %v", err)

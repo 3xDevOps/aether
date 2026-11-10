@@ -760,7 +760,8 @@ aether mcp revoke con-7k2m9q4xbd
 
 The connector's next call fails, including one in a session the app already has
 open, and so does its refresh token; the app asks you to connect again with a
-new code. You can revoke your own connectors, and an admin can revoke anyone's.
+new code. You can revoke your own connectors, and a super admin can revoke
+anyone's; any other connector id fails as an unknown one.
 Removing the connector in ChatGPT or Claude does not revoke it on the server.
 Revoke it here too.
 

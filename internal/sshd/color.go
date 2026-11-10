@@ -29,7 +29,7 @@ func (s *Server) memberColor(ctx context.Context, member domain.MemberID, params
 	if p.MemberID != "" {
 		target = domain.MemberID(p.MemberID)
 	}
-	if aerr := s.actingOn(ctx, member, target, protocol.MethodMemberColor); aerr != nil {
+	if aerr := s.editing(ctx, member, target, protocol.MethodMemberColor); aerr != nil {
 		return nil, aerr
 	}
 	m, gerr := s.cfg.Store.GetMember(ctx, target)

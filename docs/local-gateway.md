@@ -781,7 +781,7 @@ Archiving does not schedule deletion; the obsolete `deletes_at` field is no
 longer emitted. Both calls publish `run.archived` with `archived_at` (null on
 restore) and a matching timeline note. Explicit Delete remains separate.
 
-`member.rename` accepts `{"display_name":"..."}` (and `member_id`, admin
+`member.rename` accepts `{"display_name":"..."}` (and `member_id`, super admin
 only, to rename someone else) and returns `{"member":Member}`. The name is
 trimmed and must be 1 to 64 characters with no control characters; a bad
 name is `-32602` with the reason. Each rename publishes `member.changed`

@@ -42,7 +42,14 @@ func TestMemberColor(t *testing.T) {
 		t.Fatalf("non-admin recolor other = %v, want CodeDenied", err)
 	}
 
-	// Admin recoloring another member: allowed.
+	// An admin may not recolor another member; a super admin may.
+	err = adminC.Call(protocol.MethodMemberColor, protocol.MemberColorParams{
+		MemberID: string(bob.ID), Color: "#911EB4",
+	}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("admin recolor other = %v, want CodeDenied", err)
+	}
+	setRole(t, e, domain.RoleSuperAdmin)
 	if aerr := adminC.Call(protocol.MethodMemberColor, protocol.MemberColorParams{
 		MemberID: string(bob.ID), Color: "#911EB4",
 	}, &res); aerr != nil {

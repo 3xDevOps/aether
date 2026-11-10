@@ -220,9 +220,14 @@ otherwise, so teammates can message and stop each other's agents in a shared
 workspace with no setup. Every such act is recorded in the workspace timeline
 with who did it.
 
-Only a super admin changes a role or removes a member. An admin may approve a
-pending member or device only when it admits a member below admin, or is their
-own.
+Only a super admin changes a role or removes a member. An admin may approve or
+deny a pending member or device only when it admits a member below admin, or is
+their own, and may list the sign-ins of a member below admin. Renaming,
+recoloring or setting the git identity of another member, revoking their
+approved device, unlinking their sign-in or revoking their connector is for
+that member and super admins only. An admin revokes only invitations they
+created. An approval code for a device you may not approve fails as an unknown
+code does, and another member's connector as an unknown connector id.
 
 ```sh
 aether member role <id> super_admin|admin|collaborator|viewer
@@ -259,6 +264,9 @@ new version:
   grants or delete. The super admin hands each workspace to its admin with
   `aether workspace owner <workspace> <member-id>`, and trims access with
   `aether workspace revoke`.
+- Invitations and invite codes created before the upgrade carry no
+  workspaces: whoever joins with one gets no grants until an owner or super
+  admin grants them.
 
 A server with no approved admin before the upgrade gets no super admin. Every
 member keeps their access, but nobody can administer the server until you

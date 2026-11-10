@@ -31,7 +31,7 @@ func (s *Server) memberGit(ctx context.Context, member domain.MemberID, params j
 	if p.MemberID != "" {
 		target = domain.MemberID(p.MemberID)
 	}
-	if aerr := s.actingOn(ctx, member, target, protocol.MethodMemberGit); aerr != nil {
+	if aerr := s.editing(ctx, member, target, protocol.MethodMemberGit); aerr != nil {
 		return nil, aerr
 	}
 	m, gerr := s.cfg.Store.GetMember(ctx, target)

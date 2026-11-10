@@ -40,9 +40,10 @@ func (s *Server) rpcIdentityStore() (store.IdentityStore, *protocol.Error) {
 	return ids, nil
 }
 
-// actingOn loads the caller and allows the call when it acts on the
-// caller's own member, the caller is a super admin, or the caller is an
-// admin and owner is below admin.
+// actingOn allows an approval on owner's member: approving it, a device or
+// a sign-in, or reading what it signs in with. Its own member and super
+// admins may, and an admin may for a member below admin. A member the
+// caller does not see reads as one that does not exist.
 func (s *Server) actingOn(ctx context.Context, caller, owner domain.MemberID, method string) *protocol.Error {
 	return s.actingAs(ctx, caller, owner, "", method)
 }
@@ -57,20 +58,31 @@ func (s *Server) actingAs(ctx context.Context, caller, owner domain.MemberID, ro
 	if caller == owner || m.Role == domain.RoleSuperAdmin {
 		return nil
 	}
-	if m.Role == domain.RoleAdmin {
-		if owner != "" {
-			target, err := s.visibleMember(ctx, caller, owner)
-			if err != nil {
-				return rpcError(err)
-			}
-			role = target.Role
+	if owner != "" {
+		target, err := s.visibleMember(ctx, caller, owner)
+		if err != nil {
+			return rpcError(err)
 		}
-		if !role.Admin() {
-			return nil
-		}
+		role = target.Role
+	}
+	if m.Role == domain.RoleAdmin && !role.Admin() {
+		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeDenied,
 		Message: method + ": only its own member, a super admin, or an admin for a member below admin may do this"}
+}
+
+// editing allows a change to owner's member, its devices, sign-ins or
+// connectors only to that member and super admins. A member the caller
+// does not see reads as one that does not exist.
+func (s *Server) editing(ctx context.Context, caller, owner domain.MemberID, method string) *protocol.Error {
+	if caller == owner || s.superAdmin(ctx, caller) {
+		return nil
+	}
+	if _, err := s.visibleMember(ctx, caller, owner); err != nil {
+		return rpcError(err)
+	}
+	return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": only the member themself or a super admin may do this"}
 }
 
 // actingOnDevice is actingOn for dev's member. A device waiting on an
@@ -236,7 +248,7 @@ func deviceByCode(ctx context.Context, ids store.IdentityStore, code string) (*d
 	dev, err := ids.GetDeviceByApprovalCode(ctx, code)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("no device is waiting for approval with code %q", code)}
+		return nil, noDeviceWithCode(code)
 	case errors.Is(err, store.ErrConflict):
 		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
 			"approval code %q names more than one waiting device, so it approves none; approve the right one on the server with `sudo aether-server device review`", code)}
@@ -244,6 +256,10 @@ func deviceByCode(ctx context.Context, ids store.IdentityStore, code string) (*d
 		return nil, rpcError(err)
 	}
 	return dev, nil
+}
+
+func noDeviceWithCode(code string) *protocol.Error {
+	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("no device is waiting for approval with code %q", code)}
 }
 
 func awaitingApproval(dev *domain.Device) *protocol.Error {
@@ -281,8 +297,12 @@ func (s *Server) memberDeviceLookup(ctx context.Context, member domain.MemberID,
 		return nil, perr
 	}
 	// The status is checked only once the caller may act on the device, so
-	// it is not revealed for another member's device.
+	// it is not revealed for another member's device, and a code is not
+	// told apart from an unknown one.
 	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceLookup); perr != nil {
+		if p.DeviceID == "" {
+			return nil, noDeviceWithCode(p.Code)
+		}
 		return nil, perr
 	}
 	if perr := awaitingApproval(dev); perr != nil {
@@ -336,6 +356,9 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		defer s.registerMu.Unlock()
 	}
 	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceApprove); perr != nil {
+		if p.Code != "" {
+			return nil, noDeviceWithCode(p.Code)
+		}
 		return nil, perr
 	}
 	if perr := awaitingApproval(dev); perr != nil {
@@ -415,8 +438,12 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceRevoke); perr != nil {
-		return nil, perr
+	allowed := s.editing(ctx, member, dev.Member, protocol.MethodMemberDeviceRevoke)
+	if dev.Status.AwaitsApproval() {
+		allowed = s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceRevoke)
+	}
+	if allowed != nil {
+		return nil, allowed
 	}
 	if err = ids.RevokeDevice(ctx, dev.ID); err != nil {
 		return nil, rpcError(err)
@@ -594,7 +621,7 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	if _, err := s.visibleMember(ctx, member, target); err != nil {
 		return nil, rpcError(err)
 	}
-	if perr := s.actingOn(ctx, member, target, method); perr != nil {
+	if perr := s.editing(ctx, member, target, method); perr != nil {
 		return nil, perr
 	}
 	if perr := s.requireApprovedCaller(ctx, method, false); perr != nil {
@@ -727,8 +754,8 @@ func (s *Server) memberInvitationRevoke(ctx context.Context, member domain.Membe
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if perr := s.actingOn(ctx, member, inv.CreatedBy, protocol.MethodMemberInvitationRevoke); perr != nil {
-		return nil, perr
+	if inv.CreatedBy != member && !s.superAdmin(ctx, member) {
+		return nil, rpcError(store.ErrNotFound)
 	}
 	devs, err := ids.ListDevices(ctx, "")
 	if err != nil {
