@@ -199,14 +199,14 @@ func TestMarkUnavailableKeepsThePausedCompanionsErrorReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, ContainerID: "companion", CreationKey: "creation", State: "running"}); err != nil {
+	if err = saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, ContainerID: "companion", CreationKey: "creation", State: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	reason := "startup recovery failed: " + strings.Repeat("x", 16384)
-	if err := manager.MarkUnavailable(run, reason); err != nil {
+	if err = manager.MarkUnavailable(run, reason); err != nil {
 		t.Fatal(err)
 	}
 	status, _, err := manager.Reconcile(t.Context(), run)
@@ -216,7 +216,7 @@ func TestMarkUnavailableKeepsThePausedCompanionsErrorReadable(t *testing.T) {
 	if status.State != "paused" || status.Reason != status.Unavailable {
 		t.Fatalf("status = %+v, want paused with the recorded error", status)
 	}
-	if err := manager.Remove(t.Context(), run.ID); err != nil || !runtime.destroyed {
+	if err = manager.Remove(t.Context(), run.ID); err != nil || !runtime.destroyed {
 		t.Fatalf("Remove = %v, destroyed %v: the marked journal must stay readable", err, runtime.destroyed)
 	}
 }
