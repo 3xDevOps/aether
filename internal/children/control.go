@@ -50,7 +50,7 @@ func (s *Service) Allow(ctx context.Context, actor *domain.Member, run domain.Ru
 			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the session's owner can allow its subsessions, since they spend the owner's accounts", permissions.ErrDenied)
 		}
 	case domain.ChildrenOff, "":
-		if actor.ID != r.MemberID && actor.Role != domain.RoleAdmin {
+		if actor.ID != r.MemberID && permissions.Check(permissions.WorkspaceAdmin, permissions.ActorOf(actor), permissions.Target{Workspace: r.WorkspaceID}) != nil {
 			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the session's owner or an admin can change its subsessions", permissions.ErrDenied)
 		}
 	default:

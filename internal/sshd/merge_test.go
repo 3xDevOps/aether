@@ -250,6 +250,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if err := tailnet.Call(protocol.MethodMemberMergeList, struct{}{}, &list); err != nil || len(list.Merges) != 1 || list.Merges[0].ID != res.Merge.ID {
 		t.Fatalf("member.merge.list = %+v, %v", list, err)
 	}
+	makeSuperAdmin(t, e)
 	var audit protocol.AuditListResult
 	if err := controlClient(t, e).Call(protocol.MethodAuditList, protocol.AuditListParams{}, &audit); err != nil {
 		t.Fatal(err)

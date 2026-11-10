@@ -77,7 +77,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 		return nil, false, rpcError(err)
 	}
 	if cerr := permissions.Check(permissions.View, actor, target); cerr != nil {
-		return nil, false, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunCloseCheck + ": " + cerr.Error()}
+		return nil, false, checkError(protocol.MethodRunCloseCheck, cerr)
 	}
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {

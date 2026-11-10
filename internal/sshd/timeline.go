@@ -8,12 +8,13 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
 func init() {
-	registerMethod(protocol.MethodWorkspaceTimeline, (*Server).workspaceTimeline)
+	registerGuarded(protocol.MethodWorkspaceTimeline, permissions.View, workspaceTarget, (*Server).workspaceTimeline)
 }
 
 func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -24,12 +25,6 @@ func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, param
 	p, perr := decodeParams[protocol.WorkspaceTimelineParams](params)
 	if perr != nil {
 		return nil, perr
-	}
-	if p.WorkspaceID == "" {
-		return nil, invalidParams("workspace_id is required")
-	}
-	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
-		return nil, rpcError(err)
 	}
 	types := make([]events.Type, 0, len(p.Types))
 	for _, t := range p.Types {

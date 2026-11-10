@@ -273,6 +273,7 @@ func TestAuditRecordsConnectorsRemovedWithTheirMember(t *testing.T) {
 	if _, perr := admin.Call(ctx, protocol.MethodMemberRemove, json.RawMessage(`{"member_id":"`+string(bo.ID)+`"}`)); perr != nil {
 		t.Fatalf("member.remove: %v", perr)
 	}
+	makeSuperAdmin(t, e)
 	var got []string
 	for _, params := range []string{`{"limit":2}`, `{"connector_id":"` + conn.ID + `"}`} {
 		raw, perr := admin.Call(ctx, protocol.MethodAuditList, json.RawMessage(params))

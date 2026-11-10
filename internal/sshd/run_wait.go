@@ -31,7 +31,7 @@ func (s *Server) runWaits() RunWaitService {
 
 // fillWaitConditions sets each of runs' latest wait conditions on out, the
 // snapshots of runs in the same order, in one read. Unless member owns the
-// run or is an admin, they are redacted.
+// run or administers its workspace, they are redacted.
 func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID, runs []*domain.Run, out []protocol.Run) error {
 	svc := s.runWaits()
 	if svc == nil || len(runs) == 0 {
@@ -45,13 +45,10 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 	if err != nil {
 		return fmt.Errorf("read the runs' wait conditions: %w", err)
 	}
-	admin := false
-	if m, err := s.cfg.Store.GetMember(ctx, member); err == nil {
-		admin = m.Role == domain.RoleAdmin
-	}
+	actor, actorErr := resolveActor(ctx, s.cfg.Store, member)
 	for i, r := range runs {
 		waits := byRun[r.ID]
-		if r.MemberID != member && !admin {
+		if r.MemberID != member && (actorErr != nil || !workspaceAdmin(actor, r.WorkspaceID)) {
 			for j := range waits {
 				redactWait(&waits[j])
 			}
@@ -77,13 +74,17 @@ func redactWait(w *protocol.WaitCondition) {
 }
 
 // seesWaitDetails reports whether member reads run's wait conditions in
-// full: its owner and admins do.
+// full: its owner and its workspace's admins do.
 func (s *Server) seesWaitDetails(ctx context.Context, member domain.MemberID, run *domain.Run) bool {
 	if member == run.MemberID {
 		return true
 	}
-	m, err := s.cfg.Store.GetMember(ctx, member)
-	return err == nil && m.Role == domain.RoleAdmin
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	return err == nil && workspaceAdmin(actor, run.WorkspaceID)
+}
+
+func workspaceAdmin(actor permissions.Actor, ws domain.WorkspaceID) bool {
+	return permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: ws}) == nil
 }
 
 func (s *Server) runWaitCancel(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

@@ -59,10 +59,20 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 	if span > insightsMaxDays {
 		return nil, invalidParams(fmt.Sprintf("range spans %d days; the limit is %d", span, insightsMaxDays))
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	if p.WorkspaceID != "" {
+		if !actor.Reaches(q.Workspace) {
+			return nil, rpcError(permissions.ErrNoAccess)
+		}
 		if _, err = s.cfg.Store.GetWorkspace(ctx, q.Workspace); err != nil {
 			return nil, rpcError(err)
 		}
+	}
+	if q.Workspaces, err = s.reachableIDs(ctx, actor); err != nil {
+		return nil, rpcError(err)
 	}
 
 	q.Previous = store.Interval{Start: q.From.Add(-q.To.Sub(q.From)), End: q.From}

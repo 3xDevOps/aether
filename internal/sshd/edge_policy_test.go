@@ -497,6 +497,7 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitClosed(t, live)
+	makeSuperAdmin(t, e)
 	for _, c := range []*store.Connector{conn, signedIn} {
 		var audit protocol.AuditListResult
 		if err = controlClient(t, e).Call(protocol.MethodAuditList, protocol.AuditListParams{ConnectorID: c.ID}, &audit); err != nil ||
@@ -504,6 +505,7 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 			t.Fatalf("audit for connector %s = %+v, %v; want its one removal", c.ID, audit.Entries, err)
 		}
 	}
+	setRole(t, e, domain.RoleAdmin)
 	after, err := e.store.GetMember(context.Background(), domain.MemberID(m.ID))
 	if err != nil || after.Role != domain.RoleAdmin {
 		t.Fatalf("member after the notice = %+v, %v; want kept as admin", after, err)

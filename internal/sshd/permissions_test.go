@@ -224,7 +224,7 @@ func TestWorkspaceSettingsRechecksAdminAfterDemotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checkErr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{}); checkErr != nil {
+	if checkErr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: e.ws.ID}); checkErr != nil {
 		t.Fatalf("pre-demotion workspace authorization = %v", checkErr)
 	}
 	member, err := e.store.GetMember(ctx, e.member.ID)

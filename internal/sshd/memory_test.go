@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memory"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // TestMemoryMembersCurateAndViewersRead drives team memory the way members
@@ -170,7 +171,7 @@ func newMemoryEnv(t *testing.T) (*testEnv, *memory.Service, *events.SQLiteLog) {
 		if !ok {
 			t.Fatalf("store is %T, want *store.DB", c.Store)
 		}
-		if svc, err = memory.New(memory.Config{Store: db, Bus: bus, Log: log}); err != nil {
+		if svc, err = memory.New(memory.Config{Store: storetest.Unscoped{DB: db}, Bus: bus, Log: log}); err != nil {
 			t.Fatalf("memory: %v", err)
 		}
 		c.Services.Memory = svc
@@ -208,7 +209,7 @@ func TestMemoryMemberNotesStayTheirOwners(t *testing.T) {
 	note := mine.Item.ID
 	line := "- " + note + " preference (yours): Prefer table output.\n"
 
-	const briefDenied = "memory.brief: another member's brief: permission denied: workspace administration requires the admin role"
+	const briefDenied = "memory.brief: another member's brief: permission denied: workspace administration requires the workspace's owner or a super admin"
 	others := protocol.MemoryBriefParams{WorkspaceID: ws, MemberID: string(alice.ID)}
 	denied("bob memory.brief --member alice", bobC.Call(protocol.MethodMemoryBrief, others, nil), briefDenied)
 	denied("viewer memory.brief --member alice", vicC.Call(protocol.MethodMemoryBrief, others, nil), briefDenied)

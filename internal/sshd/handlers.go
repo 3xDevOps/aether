@@ -61,19 +61,23 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 	}, nil
 }
 
-func (s *Server) workspaceList(ctx context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
-	list, err := s.cfg.Store.ListWorkspaces(ctx)
+func (s *Server) workspaceList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	list, err := s.reachableWorkspaces(ctx, actor)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Workspace, 0, len(list))
 	for _, w := range list {
-		out = append(out, protocol.WorkspaceFromDomain(w))
+		out = append(out, workspaceWire(actor, w))
 	}
 	return protocol.WorkspaceListResult{Workspaces: out}, nil
 }
 
-func (s *Server) workspaceGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) workspaceGet(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.WorkspaceGetParams](params)
 	if perr != nil {
 		return nil, perr
@@ -81,11 +85,18 @@ func (s *Server) workspaceGet(ctx context.Context, _ domain.MemberID, params jso
 	if p.WorkspaceID == "" {
 		return nil, invalidParams("workspace_id is required")
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if !actor.Reaches(domain.WorkspaceID(p.WorkspaceID)) {
+		return nil, rpcError(permissions.ErrNoAccess)
+	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.WorkspaceGetResult{Workspace: protocol.WorkspaceFromDomain(ws)}, nil
+	return protocol.WorkspaceGetResult{Workspace: workspaceWire(actor, ws)}, nil
 }
 
 func (s *Server) memberList(ctx context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
@@ -292,20 +303,23 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 	if perr != nil {
 		return nil, perr
 	}
-	var (
-		runs []*domain.Run
-		err  error
-	)
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	var runs []*domain.Run
 	switch {
 	case p.WorkspaceID != "":
-		runs, err = s.cfg.Store.ListRunsByWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
+		if actor.Reaches(domain.WorkspaceID(p.WorkspaceID)) {
+			runs, err = s.cfg.Store.ListRunsByWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
+		}
 	case p.MemberID != "":
 		runs, err = s.cfg.Store.ListRunsByMember(ctx, domain.MemberID(p.MemberID))
 	case p.ActiveOnly:
 		runs, err = s.cfg.Store.ListActiveRuns(ctx)
 	default:
 		var workspaces []*domain.Workspace
-		workspaces, err = s.cfg.Store.ListWorkspaces(ctx)
+		workspaces, err = s.reachableWorkspaces(ctx, actor)
 		for _, ws := range workspaces {
 			if err != nil {
 				break
@@ -327,7 +341,12 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 		if p.ActiveOnly && r.Status.Terminal() {
 			continue
 		}
-		out = append(out, s.runSnapshot(r))
+		if !actor.Reaches(r.WorkspaceID) {
+			continue
+		}
+		snap := s.runSnapshot(r)
+		scopeRepos(actor, &snap)
+		out = append(out, snap)
 		listed = append(listed, r)
 	}
 	if err := s.fillWaitConditions(ctx, member, listed, out); err != nil {
@@ -341,20 +360,31 @@ func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json
 	if perr != nil {
 		return nil, perr
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	run, err := s.cfg.Store.GetRun(ctx, p)
 	if err != nil {
 		return nil, rpcError(err)
+	}
+	if !actor.Reaches(run.WorkspaceID) {
+		return nil, rpcError(permissions.ErrNoAccess)
 	}
 	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	snap := []protocol.Run{s.runSnapshot(run)}
+	scopeRepos(actor, &snap[0])
 	if err := s.fillWaitConditions(ctx, member, []*domain.Run{run}, snap); err != nil {
 		return nil, rpcError(err)
 	}
 	out := protocol.RunResult{Run: snap[0]}
 	for _, pr := range prs {
+		if pr.RepoWorkspace != "" && !actor.Reaches(pr.RepoWorkspace) {
+			continue
+		}
 		out.PullRequests = append(out.PullRequests, protocol.RecordedPullRequest{Repo: string(pr.RepoWorkspace), Repository: pr.Repository,
 			Number: pr.Number, URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, CheckedAt: pr.ObservedAt})
 	}
@@ -861,7 +891,7 @@ func captureHandoffEvidence(ctx context.Context, h *store.HandoffOutbox, capture
 	return store.HandoffEvidenceAvailable, packet.ID, true
 }
 
-func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runPull(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.RunPullParams](params)
 	if perr != nil {
 		return nil, perr
@@ -869,14 +899,21 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	if p.RunID == "" {
 		return nil, invalidParams("run_id is required")
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	if !actor.Reaches(run.WorkspaceID) {
+		return nil, rpcError(permissions.ErrNoAccess)
+	}
 	workspace, branch := run.WorkspaceID, run.Branch
 	if p.Repo != "" && domain.WorkspaceID(p.Repo) != run.WorkspaceID {
 		extra, ok := run.ExtraRepo(domain.WorkspaceID(p.Repo))
-		if !ok {
+		if !ok || !actor.Reaches(extra.WorkspaceID) {
 			return nil, invalidParams("repo " + p.Repo + " is not one of the session's repos")
 		}
 		workspace, branch = extra.WorkspaceID, extra.Branch

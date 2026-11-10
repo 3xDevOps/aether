@@ -26,7 +26,7 @@ func (f *fakeSystem) Read(_ context.Context, since time.Time) (sysstats.Snapshot
 func TestSystemStatsFiltersContainersToTheCallerAndSumsTheRest(t *testing.T) {
 	t.Parallel()
 	reader := &fakeSystem{}
-	e := newTestEnv(t, func(c *Config) { c.Services.System = reader })
+	e := newScopedTestEnv(t, func(c *Config) { c.Services.System = reader })
 	_, member := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 	admin, grace := string(e.member.ID), string(member.ID)
 	cores := func(v float64) *sysstats.Rates { return &sysstats.Rates{CPUCores: v} }
