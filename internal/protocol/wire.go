@@ -23,8 +23,11 @@ type Run struct {
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
-	Effort          string `json:"effort,omitempty"`
-	Permission      string `json:"permission"`
+	// ModelError is why the agent refused the model the run asked for; Model
+	// is then empty, the agent's default.
+	ModelError string `json:"model_error,omitempty"`
+	Effort     string `json:"effort,omitempty"`
+	Permission string `json:"permission"`
 	// Via is the connector client, such as ChatGPT, the run was launched
 	// through.
 	Via    string `json:"via,omitempty"`
@@ -234,6 +237,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Harness:             r.Harness,
 		Mode:                string(r.Mode),
 		Model:               r.Model,
+		ModelError:          r.ModelError,
 		Effort:              r.Effort,
 		Permission:          string(r.Permission),
 		Via:                 r.Via,

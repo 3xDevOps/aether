@@ -795,8 +795,10 @@ type Run struct {
 	Harness string
 	Mode    LaunchMode
 	// Model is the agent's model for this run and Effort its effort or
-	// thinking level; empty keeps the agent's default.
+	// thinking level; empty keeps the agent's default. ModelError is why the
+	// agent refused the model the run asked for.
 	Model      string
+	ModelError string
 	Effort     string
 	Permission Permission
 	// ACP is true when the server drives the agent over the Agent Client

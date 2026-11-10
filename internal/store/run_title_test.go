@@ -90,6 +90,18 @@ func TestRunModelRoundTripsAndCanBeChanged(t *testing.T) {
 	if err := db.SetRunModel(ctx, run.ID, "x y"); err == nil {
 		t.Fatal("set model with whitespace succeeded")
 	}
+	if err := db.RefuseRunModel(ctx, run.ID, "the agent refused sonnet"); err != nil {
+		t.Fatalf("refuse model: %v", err)
+	}
+	if got, err := db.GetRun(ctx, run.ID); err != nil || got.Model != "" || got.ModelError != "the agent refused sonnet" {
+		t.Fatalf("refused run model = %+v, %v, want no model and the refusal", got, err)
+	}
+	if err := db.SetRunModel(ctx, run.ID, "opus"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	if got, err := db.GetRun(ctx, run.ID); err != nil || got.Model != "opus" || got.ModelError != "" {
+		t.Fatalf("run model after a refusal = %+v, %v, want opus and no refusal", got, err)
+	}
 }
 
 func TestRunEffortRoundTripsAndCanBeChanged(t *testing.T) {

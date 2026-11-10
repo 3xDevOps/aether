@@ -133,7 +133,7 @@ var controlOps = []Op{
 
 func launched(r protocol.Run, l links, book accountBook) map[string]any {
 	return map[string]any{"run_id": r.ID, "state": r.Status, "url": l.run(r.ID), "launch": runReceipt(r, l, book),
-		"next": "poll aether_get_session with run_id"}
+		"next": nextAfterLaunch(r)}
 }
 
 func recent(at string, now time.Time) bool {

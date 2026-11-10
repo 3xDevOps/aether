@@ -61,6 +61,15 @@ func TestConnectorLaunchReceipt(t *testing.T) {
 	if got := jsonOf(t, out["launch"]); got != jsonOf(t, normal) {
 		t.Fatalf("launch receipt =\n%s\nwant\n%s", got, want)
 	}
+	if out["next"] != "poll aether_get_session with run_id" {
+		t.Fatalf("next without a model = %v", out["next"])
+	}
+	withModel := launched
+	withModel.Model = "claude-fable-5-2"
+	f.answers[protocol.MethodRunLaunch] = returns(protocol.RunLaunchResult{Run: withModel})
+	if _, out = run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "model": "claude-fable-5-2", "idempotency_key": "k2"}); !strings.Contains(out["next"].(string), "launch.model_refused") {
+		t.Fatalf("next for an Enhanced model = %v", out["next"])
+	}
 
 	// The same receipt comes back from aether_get_session.
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: launched})

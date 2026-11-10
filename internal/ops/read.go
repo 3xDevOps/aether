@@ -407,6 +407,9 @@ func getRun(ctx context.Context, c calls, in getRunInput) (string, any, error) {
 	}
 	row := rowOf(r, l, nil)
 	untrusted := map[string]any{"run": row.Untrusted, "task": clip(r.Task, maxText)}
+	if r.ModelError != "" {
+		untrusted["model_error"] = clip(r.ModelError, maxReport)
+	}
 	row.Untrusted = nil
 	receipt := runReceipt(r, l, book)
 	out := map[string]any{"run": row, "launch": receipt, "branch": r.Branch,

@@ -396,6 +396,15 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("newest session first, cut to the limit = %q %v", text, out)
 	}
 
+	refused := testRun
+	refused.Mode, refused.ModelError = "acp", "the agent refused claude-fable-5-2, so the session runs on the agent's default model: "+injection
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: refused})
+	_, out = run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1"})
+	if launch := out["launch"].(map[string]any); launch["model_refused"] != true || launch["model"] != nil ||
+		!strings.HasPrefix(out["untrusted"].(map[string]any)["model_error"].(string), "the agent refused claude-fable-5-2") || strings.Contains(trusted(t, out), injection) {
+		t.Fatalf("aether_get_session of a refused model = %v", out)
+	}
+
 	waiter := testRun
 	waiter.WaitConditions = []protocol.WaitCondition{
 		{ID: "wait-1", Spec: "pr:o/r#7:checks", Kind: protocol.WaitKindPRChecks, Repo: "o/r", Number: 7, State: protocol.WaitPending,

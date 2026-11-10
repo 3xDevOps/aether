@@ -160,6 +160,10 @@ func TestEnhancedRunReportsAModelTheAgentRefused(t *testing.T) {
 	if !slices.Contains(rt.all()[0].agent.Methods(), "session/set_model") {
 		t.Fatal("the agent was never sent session/set_model")
 	}
+	waitFor(t, "the refused model recorded", func() bool {
+		stored, err := e.cfg.Store.GetRun(t.Context(), run.ID)
+		return err == nil && stored.Model == "" && strings.HasPrefix(stored.ModelError, "the agent refused opus, so the session runs on the agent's default model: ")
+	})
 }
 
 func TestComposerModelChoiceIsRecorded(t *testing.T) {

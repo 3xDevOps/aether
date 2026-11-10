@@ -2578,6 +2578,11 @@ ALTER TABLE room_messages ADD COLUMN resolved_at INTEGER;
 ALTER TABLE room_messages ADD COLUMN resolved_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE room_messages ADD COLUMN resolution TEXT NOT NULL DEFAULT '' CHECK (resolution IN ('', 'done', 'deleted'));
 `,
+	// v109: why the agent refused the model an Enhanced run asked for; the
+	// run's model is then empty, the agent's default.
+	`
+ALTER TABLE runs ADD COLUMN model_error TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
