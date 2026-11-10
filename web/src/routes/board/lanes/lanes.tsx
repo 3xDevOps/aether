@@ -468,7 +468,8 @@ export function LanesView(props: LanesViewProps) {
   const returnTo = (key: string | undefined) => () => {
     const target = jumped.current ?? key
     jumped.current = null
-    if (!popRef.current && target) focusLaneEl(target)
+    // A drag closes the card without pulling the view back to its lane.
+    if (!popRef.current && target && !drag.current?.moved) focusLaneEl(target)
   }
 
   // A live update can remove the selected lane; its popover closes and focus goes to the lane that draws its run now.
