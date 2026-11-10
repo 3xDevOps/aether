@@ -54,7 +54,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = bus.Close() })
-	svc, err := New(Config{Store: db, Bus: bus, Log: log})
+	svc, err := New(Config{Store: storetest.Unscoped{DB: db}, Bus: bus, Log: log})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestAddRefusesNUL(t *testing.T) {
 // bypassedPins adds pinned rows the budgets never measured, as a direct
 // insert would.
 type bypassedPins struct {
-	*store.DB
+	storetest.Unscoped
 	extra []*store.Memory
 }
 
@@ -638,7 +638,7 @@ func TestBriefDropsPinsOnlyPastBudgets(t *testing.T) {
 		extra = append(extra, &store.Memory{ID: fmt.Sprintf("note-bypass%05d", i), Kind: store.MemoryConvention,
 			Scope: store.MemoryScopeWorkspace, Title: strings.Repeat("z", store.MemoryMaxTitleBytes), PinnedByName: "Dana"})
 	}
-	svc, err := New(Config{Store: bypassedPins{DB: f.db, extra: extra}, Bus: f.bus, Log: f.log})
+	svc, err := New(Config{Store: bypassedPins{Unscoped: storetest.Unscoped{DB: f.db}, extra: extra}, Bus: f.bus, Log: f.log})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -708,5 +708,46 @@ func TestAgentAddFindsPrimaryHeadBehindManyExtraSnapshots(t *testing.T) {
 	added, err := f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindDecision, Text: "Keep the primary commit link."})
 	if err != nil || added.Item.Commit != "abc1234" {
 		t.Fatalf("agent note = %+v, %v; want commit abc1234", added.Item, err)
+	}
+}
+
+// Only an admin of the note's workspace may change another member's own
+// note: an admin who was granted the workspace acts there as a
+// collaborator.
+func TestMemberNotesYieldOnlyToTheWorkspacesAdmin(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	scoped, err := New(Config{Store: f.db, Bus: f.bus, Log: f.log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := f.member("Ada", domain.RoleAdmin)
+	guest := f.member("Bo", domain.RoleAdmin)
+	if err := f.db.SetWorkspaceOwner(ctx, f.ws.ID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []*domain.Member{guest, f.dana} {
+		if err := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, owner.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	note, err := scoped.Add(ctx, f.dana.ID, protocol.MemoryAddParams{WorkspaceID: string(f.ws.ID),
+		Kind: protocol.MemoryKindPreference, Scope: protocol.MemoryScopeMember, Text: "Dana prefers tabs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rm := protocol.MemoryRmParams{WorkspaceID: string(f.ws.ID), ID: note.Item.ID}
+	var denied *protocol.Error
+	if _, err := scoped.Remove(ctx, guest.ID, rm); !errors.As(err, &denied) || denied.Code != protocol.CodeDenied {
+		t.Fatalf("granted admin removes another member's note: %v, want denied", err)
+	}
+	if _, err := scoped.Remove(ctx, owner.ID, rm); err != nil {
+		t.Fatalf("owner removes a member's note: %v", err)
+	}
+	outsider := f.member("Cy", domain.RoleCollaborator)
+	var missing *protocol.Error
+	if _, err := scoped.Add(ctx, outsider.ID, protocol.MemoryAddParams{WorkspaceID: string(f.ws.ID),
+		Kind: protocol.MemoryKindPreference, Text: "hello"}); !errors.As(err, &missing) || missing.Code != protocol.CodeNotFound {
+		t.Fatalf("member without a grant adds a note: %v, want not found", err)
 	}
 }

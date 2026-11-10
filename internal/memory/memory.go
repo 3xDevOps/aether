@@ -230,10 +230,11 @@ func agentMayReplace(run *domain.Run) func(*store.Memory) error {
 }
 
 // mayChange lets actor change a member note only when it is theirs (see
-// store.Memory.Owner). Admins and workspace notes are unrestricted.
+// store.Memory.Owner). The workspace's admins and workspace notes are
+// unrestricted.
 func mayChange(method, verb string, actor *domain.Member) func(*store.Memory) error {
 	return func(n *store.Memory) error {
-		if n.Scope != store.MemoryScopeMember || actor.Role == domain.RoleAdmin || n.Owner() == actor.ID {
+		if n.Scope != store.MemoryScopeMember || adminIn(actor, n.WorkspaceID) || n.Owner() == actor.ID {
 			return nil
 		}
 		return denyOwner(method, verb, n)
@@ -252,13 +253,18 @@ func mayPin(method, scope string, actor *domain.Member) func(*store.Memory) erro
 		switch {
 		case n.Scope == store.MemoryScopeMember && n.Owner() != actor.ID:
 			return denyOwner(method, "pin", n)
-		case n.Scope == store.MemoryScopeWorkspace && n.AuthorNow != actor.ID && actor.Role != domain.RoleAdmin:
+		case n.Scope == store.MemoryScopeWorkspace && n.AuthorNow != actor.ID && !adminIn(actor, n.WorkspaceID):
 			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
 				"%s: permission denied: %s is a workspace note by %s; only they or an admin may pin it for themselves",
 				method, n.ID, name(n.AuthorName, string(n.AuthorID)))}
 		}
 		return nil
 	}
+}
+
+func adminIn(m *domain.Member, ws domain.WorkspaceID) bool {
+	role, _ := permissions.ActorOf(m).RoleIn(ws)
+	return role == domain.RoleAdmin
 }
 
 func denyOwner(method, verb string, n *store.Memory) error {
@@ -492,6 +498,8 @@ func fail(method string, err error) *protocol.Error {
 	var budget *store.MemoryPinBudgetError
 	code := protocol.CodeInternal
 	switch {
+	case errors.Is(err, permissions.ErrNoAccess):
+		code, err = protocol.CodeNotFound, store.ErrNotFound
 	case errors.Is(err, permissions.ErrDenied):
 		code = protocol.CodeDenied
 	case errors.Is(err, store.ErrNotFound):
