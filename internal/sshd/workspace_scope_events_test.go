@@ -135,7 +135,7 @@ func TestMultiRepoRunEventsNeedEveryWorkspace(t *testing.T) {
 	if got := attention(); slices.Contains(got, string(w.runA.ID)) {
 		t.Errorf("A attention.list = %v, want no runA while A does not reach its extra repository's workspace", got)
 	}
-	if err := w.e.db.GrantWorkspace(ctx, w.wsB.ID, w.a.ID, w.b.ID); err != nil {
+	if err := w.e.db.GrantWorkspace(ctx, w.wsB.ID, w.a.ID, w.b.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	w.e.srv.accessChanged()

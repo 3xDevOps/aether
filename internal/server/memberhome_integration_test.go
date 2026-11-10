@@ -93,7 +93,7 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 	if err = srv.Store().CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err = srv.Store().GrantWorkspace(ctx, ws.ID, memberB.ID, memberA.ID); err != nil {
+	if err = srv.Store().GrantWorkspace(ctx, ws.ID, memberB.ID, memberA.ID, true); err != nil {
 		t.Fatalf("grant workspace: %v", err)
 	}
 

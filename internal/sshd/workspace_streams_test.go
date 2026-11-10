@@ -49,7 +49,7 @@ func (w *scopedWorld) granted(t *testing.T, name string, role domain.Role, works
 	t.Helper()
 	signer, m := addMember(t, w.testEnv, name, role, false)
 	for _, ws := range workspaces {
-		if err := w.db.GrantWorkspace(context.Background(), ws, m.ID, w.member.ID); err != nil {
+		if err := w.db.GrantWorkspace(context.Background(), ws, m.ID, w.member.ID, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -135,14 +135,14 @@ func TestEventsCarryOnlyReachableWorkspaces(t *testing.T) {
 	publish(w.ws.ID, w.run.ID)
 	expect("before the grant", w.run.ID)
 
-	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	w.srv.accessChanged()
 	publish(w.foreign.ID, w.foreignRun.ID)
 	expect("after the grant", w.foreignRun.ID)
 
-	if err := w.db.RevokeWorkspaceGrant(ctx, w.foreign.ID, u.ID); err != nil {
+	if err := w.db.RevokeWorkspaceGrant(ctx, w.foreign.ID, u.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	w.srv.accessChanged()
@@ -175,7 +175,7 @@ func TestAttachAndACPOfAForeignRunAreNotFound(t *testing.T) {
 	if err != nil || !ack.OK {
 		t.Fatalf("read-only attach in a granted workspace: ack=%+v err=%v", ack, err)
 	}
-	if err := w.db.RevokeWorkspaceGrant(ctx, w.ws.ID, u.ID); err != nil {
+	if err := w.db.RevokeWorkspaceGrant(ctx, w.ws.ID, u.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -234,6 +234,59 @@ func TestGitTransportNeedsTheWorkspace(t *testing.T) {
 	}
 }
 
+// stalledGit advertises refs and then waits for its context, as a
+// receive-pack does while the client holds back its pack.
+type stalledGit struct {
+	fakeGit
+	started chan struct{}
+}
+
+func (g *stalledGit) ReceivePack(ctx context.Context, _ domain.WorkspaceID, _ io.Reader, stdout, _ io.Writer) (int, error) {
+	if _, err := io.WriteString(stdout, pktLine(testAdvertisedSHA+" refs/heads/main\x00report-status\n")+"0000"); err != nil {
+		return 128, err
+	}
+	close(g.started)
+	<-ctx.Done()
+	return 128, ctx.Err()
+}
+
+// A push left waiting ends when its member's grant is revoked, without
+// waiting for the periodic re-check.
+func TestGitPushEndsWhenAccessIsRevoked(t *testing.T) {
+	t.Parallel()
+	git := &stalledGit{started: make(chan struct{})}
+	w := newScopedWorld(t, func(c *Config) {
+		c.Git = git
+		c.revalidateInterval = time.Hour
+	})
+	signer, u := w.granted(t, "Una", domain.RoleCollaborator, w.foreign.ID)
+	pushed := make(chan string, 1)
+	go func() {
+		stderr, _ := runGit(t, w.testEnv, signer, "receive-pack", w.foreign.ID)
+		pushed <- stderr
+	}()
+	select {
+	case <-git.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("receive-pack did not start")
+	}
+	raw, err := json.Marshal(protocol.WorkspaceAccessRevokeParams{WorkspaceID: string(w.foreign.ID), MemberID: string(u.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := w.srv.workspaceAccessRevoke(t.Context(), w.member.ID, raw); perr != nil {
+		t.Fatalf("revoke: %+v", perr)
+	}
+	select {
+	case stderr := <-pushed:
+		if !strings.Contains(stderr, "access ended") || !strings.Contains(stderr, store.ErrNotFound.Error()) {
+			t.Fatalf("push stderr = %q, want access ended, not found", stderr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("receive-pack still runs after its member's grant was revoked")
+	}
+}
+
 // A launch needs every workspace it names, and a shared account's owner
 // must reach them too.
 func TestLaunchNeedsEveryWorkspace(t *testing.T) {
@@ -273,7 +326,7 @@ func TestLaunchNeedsEveryWorkspace(t *testing.T) {
 	if calls := w.runs.Calls(); len(calls) != 0 {
 		t.Fatalf("scheduler calls after refused launches = %v, want none", calls)
 	}
-	if err := w.db.GrantWorkspace(ctx, w.ws.ID, owner.ID, w.member.ID); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.ws.ID, owner.ID, w.member.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if perr := launch(protocol.RunLaunchParams{WorkspaceID: string(w.ws.ID), AccountMemberID: string(owner.ID)}); perr != nil {
@@ -297,7 +350,7 @@ func TestHandoffNeedsARecipientWithTheWorkspace(t *testing.T) {
 	if err := handoff(); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams || !strings.Contains(pe.Message, "no access") {
 		t.Fatalf("handoff to a member without the workspace = %v, want refused", err)
 	}
-	if err := w.db.GrantWorkspace(ctx, w.ws.ID, n.ID, w.member.ID); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.ws.ID, n.ID, w.member.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := handoff(); err != nil {
@@ -372,7 +425,7 @@ func TestRunWithAnUnreachableExtraRepoIsNotFound(t *testing.T) {
 		t.Fatalf("development authority = %v, want ErrNoAccess", err)
 	}
 
-	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID); err != nil {
+	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, ack, err := w.srv.Local(u.ID).Attach(ctx, protocol.AttachRequest{RunID: string(w.run.ID), ReadOnly: true, Cols: 80, Rows: 24}); err != nil || !ack.OK {

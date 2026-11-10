@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ func newScopeWorld(t *testing.T) *scopeWorld {
 		return ws
 	}
 	w.wsA, w.wsB = workspace("a", w.a.ID), workspace("b", w.b.ID)
-	if err := e.db.GrantWorkspace(ctx, w.wsA.ID, w.u.ID, w.a.ID); err != nil {
+	if err := e.db.GrantWorkspace(ctx, w.wsA.ID, w.u.ID, w.a.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	run := func(ws *domain.Workspace, owner domain.MemberID, status domain.RunStatus) *domain.Run {
@@ -520,7 +521,7 @@ func TestScheduleReplaceAndDeleteNeedItsCreatorOrTheWorkspaceAdmin(t *testing.T)
 	t.Parallel()
 	w := newScopeWorld(t)
 	a := string(w.wsA.ID)
-	if err := w.e.db.GrantWorkspace(t.Context(), w.wsA.ID, w.n.ID, w.a.ID); err != nil {
+	if err := w.e.db.GrantWorkspace(t.Context(), w.wsA.ID, w.n.ID, w.a.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.call(t, "A", protocol.MethodTemplateSave, protocol.TemplateSaveParams{
@@ -550,6 +551,73 @@ func TestScheduleReplaceAndDeleteNeedItsCreatorOrTheWorkspaceAdmin(t *testing.T)
 	}
 	if err := w.call(t, "U", protocol.MethodScheduleDelete, remove, nil); err != nil {
 		t.Fatalf("the creator's schedule.delete: %v", err)
+	}
+}
+
+type workspaceLookupGate struct {
+	*store.DB
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	blocked bool
+}
+
+func (g *workspaceLookupGate) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
+	g.mu.Lock()
+	first := !g.blocked
+	g.blocked = true
+	g.mu.Unlock()
+	if first {
+		close(g.started)
+		<-g.release
+	}
+	return g.DB.GetWorkspace(ctx, id)
+}
+
+// The guard reads the caller's access before it resolves the workspace,
+// so a schedule.save held at that lookup checked a grant that is gone by
+// the time it saves: the save must re-check, or the revocation that found
+// no schedule to refuse on leaves one behind.
+func TestScheduleSaveRacingRevokeLeavesNoSchedule(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	a := string(w.wsA.ID)
+	if err := w.call(t, "A", protocol.MethodTemplateSave, protocol.TemplateSaveParams{
+		WorkspaceID: a, Name: "nightly", Task: "upgrade deps", Harness: "claude", Mode: "headless",
+	}, nil); err != nil {
+		t.Fatalf("A template.save: %v", err)
+	}
+	gate := &workspaceLookupGate{DB: w.e.db, started: make(chan struct{}), release: make(chan struct{})}
+	w.e.srv.cfg.Store = gate
+	save, err := json.Marshal(protocol.ScheduleSaveParams{WorkspaceID: a, Template: "nightly", Cron: "0 3 * * *"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := w.e.srv.dispatch(ctx, w.u.ID, protocol.MethodScheduleSave, save)
+		saved <- perr
+	}()
+	select {
+	case <-gate.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("schedule.save did not pass its guard")
+	}
+	revoke, err := json.Marshal(protocol.WorkspaceAccessRevokeParams{WorkspaceID: a, MemberID: string(w.u.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := w.e.srv.workspaceAccessRevoke(ctx, w.a.ID, revoke); perr != nil {
+		t.Fatalf("revoke while schedule.save waited: %+v", perr)
+	}
+	close(gate.release)
+	if perr := <-saved; perr == nil || perr.Code != protocol.CodeNotFound {
+		t.Fatalf("schedule.save after revoke = %+v, want not found", perr)
+	}
+	schedules, err := w.e.db.ListSchedules(ctx, w.wsA.ID)
+	if err != nil || len(schedules) != 0 {
+		t.Fatalf("schedules after revoke = %+v, %v; want none", schedules, err)
 	}
 }
 

@@ -403,7 +403,9 @@ admin or super admin. Revoking is refused while the member has a live session or
 a schedule in the workspace, counting a session handed off from them that still
 runs on their home or agent account. A live session whose home member loses the
 workspace another way, such as a role change, is stopped; one on a shared account
-whose owner loses it moves off that account.
+whose owner loses it moves off that account. A `git fetch` or `git push` over
+SSH in progress stops when its member loses the workspace, with `aether: git
+receive-pack: stopped: access ended: ...` on stderr.
 
 Invitations and invite codes carry `--workspace` grants
 ([Join the server](#join-the-server)). The dashboard's **Manage workspaces**

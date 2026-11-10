@@ -27,8 +27,8 @@ type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
-	InsertMemory(ctx context.Context, m *store.Memory) (bool, error)
-	SupersedeMemory(ctx context.Context, old string, m *store.Memory, agent bool, vet func(old *store.Memory) error) (duplicate, movedPin bool, err error)
+	InsertMemory(ctx context.Context, m *store.Memory, workspaces []domain.WorkspaceID) (bool, error)
+	SupersedeMemory(ctx context.Context, old string, m *store.Memory, agent bool, vet func(old *store.Memory) error, workspaces []domain.WorkspaceID) (duplicate, movedPin bool, err error)
 	SearchMemory(ctx context.Context, q store.MemoryQuery) ([]*store.Memory, error)
 	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string, workspaces []domain.WorkspaceID) (*store.Memory, []*store.Memory, error)
 	PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope store.MemoryScope, vet func(*store.Memory) error) (*store.Memory, error)
@@ -121,15 +121,22 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		}
 		note.Source, note.RunID, note.Harness, note.Commit = store.MemoryFromAgent, run.ID, run.Harness, head
 	}
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return protocol.MemoryAddResult{}, fail(method, err)
+	}
 	var duplicate, movedPin bool
 	if p.Supersedes != "" {
+		if err = s.visible(ctx, member, workspace, p.Supersedes, ""); err != nil {
+			return protocol.MemoryAddResult{}, fail(method, err)
+		}
 		vet := mayChange(method, "replace", actor)
 		if run != nil {
 			vet = agentMayReplace(run)
 		}
-		duplicate, movedPin, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, run != nil, vet)
+		duplicate, movedPin, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, run != nil, vet, reach)
 	} else {
-		duplicate, err = s.cfg.Store.InsertMemory(ctx, note)
+		duplicate, err = s.cfg.Store.InsertMemory(ctx, note, reach)
 	}
 	if err != nil {
 		return protocol.MemoryAddResult{}, fail(method, err)

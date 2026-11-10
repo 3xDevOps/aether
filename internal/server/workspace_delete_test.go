@@ -153,7 +153,7 @@ func TestWorkspaceDeleteRefusesPermissionsAndScheduledWork(t *testing.T) {
 	t.Parallel()
 	s, _, member, ws := newWorkspaceDeletionServer(t)
 	ctx := context.Background()
-	if err := s.db.GrantWorkspace(ctx, ws.ID, member.ID, ""); err != nil {
+	if err := s.db.GrantWorkspace(ctx, ws.ID, member.ID, "", true); err != nil {
 		t.Fatal(err)
 	}
 	for _, role := range []domain.Role{domain.RoleViewer, domain.RoleCollaborator} {

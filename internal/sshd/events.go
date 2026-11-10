@@ -97,7 +97,25 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch sub
 // accessChanged makes every live event stream reload its member's
 // workspace access before its next event. Call it after any write that
 // changes who reaches a workspace: a grant, a revoke, an owner or a role.
-func (s *Server) accessChanged() { s.accessGen.Add(1) }
+func (s *Server) accessChanged() {
+	s.accessGen.Add(1)
+	s.accessWakeMu.Lock()
+	defer s.accessWakeMu.Unlock()
+	if s.accessWake != nil {
+		close(s.accessWake)
+		s.accessWake = nil
+	}
+}
+
+// accessChange returns a channel the next accessChanged closes.
+func (s *Server) accessChange() <-chan struct{} {
+	s.accessWakeMu.Lock()
+	defer s.accessWakeMu.Unlock()
+	if s.accessWake == nil {
+		s.accessWake = make(chan struct{})
+	}
+	return s.accessWake
+}
 
 // streamAccess is one event stream's view of its member's workspace
 // access and of the members they see. It reloads when accessChanged was

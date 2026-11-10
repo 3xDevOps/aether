@@ -16,7 +16,8 @@ exception: a session with an extra repository in a workspace you do not reach,
 and every note it wrote, is left out of your searches, `memory show` and briefs,
 and those of your sessions, whose agents read as you. A note of a deleted
 session, pinned ones included, reaches only super admins, since the workspaces
-that session had are no longer known. To keep something to
+that session had are no longer known. Adding the text of a note you cannot
+see is refused with a conflict that does not name the note; reword it. To keep something to
 yourself, ask the assistant to remember it as a
 [preference](assistant.md#preferences); preferences are private and live
 in **Settings → Memory**.

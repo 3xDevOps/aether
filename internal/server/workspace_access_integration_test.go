@@ -249,7 +249,7 @@ func newWSAEnv(ctx context.Context, t *testing.T) *wsaEnv {
 	err := S.ctrl.Call(protocol.MethodWorkspaceAccessGrant, protocol.WorkspaceAccessGrantParams{WorkspaceID: w.wsA, MemberIDs: grantIDs}, nil)
 	setupStep(t, "workspace.access.grant U V into wsA", err, func() error {
 		for _, id := range grantIDs {
-			if gerr := st.GrantWorkspace(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(id), domain.MemberID(S.id)); gerr != nil {
+			if gerr := st.GrantWorkspace(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(id), domain.MemberID(S.id), true); gerr != nil {
 				return gerr
 			}
 		}
@@ -790,7 +790,7 @@ func (w *wsaEnv) assertRevokeInUse(ctx context.Context, t *testing.T) {
 		t.Errorf("A revokes U from wsA with U's run live = %+v, want in use (%d)", o, protocol.CodeConflict)
 	}
 	if !o.refused() {
-		if err := w.srv.srv.Store().GrantWorkspace(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(U.id), domain.MemberID(A.id)); err != nil {
+		if err := w.srv.srv.Store().GrantWorkspace(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(U.id), domain.MemberID(A.id), true); err != nil {
 			t.Fatalf("restore U's grant: %v", err)
 		}
 	}

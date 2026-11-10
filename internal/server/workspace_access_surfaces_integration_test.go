@@ -527,11 +527,11 @@ func (w *wsaEnv) assertChildren(ctx context.Context, t *testing.T) {
 	}
 	st := w.srv.srv.Store()
 	U, A := w.members["U"], w.members["A"]
-	if err := st.RevokeWorkspaceGrant(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(U.id)); err != nil {
+	if err := st.RevokeWorkspaceGrant(ctx, domain.WorkspaceID(w.wsA), domain.MemberID(U.id), true); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = st.GrantWorkspace(context.Background(), domain.WorkspaceID(w.wsA), domain.MemberID(U.id), domain.MemberID(A.id))
+		_ = st.GrantWorkspace(context.Background(), domain.WorkspaceID(w.wsA), domain.MemberID(U.id), domain.MemberID(A.id), true)
 	})
 	for _, method := range []string{protocol.MethodChildOptions, protocol.MethodChildStart} {
 		params := any(protocol.ChildOptionsParams{})

@@ -193,7 +193,7 @@ func TestWorkspaceGrants(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	for range 2 {
-		if err := db.GrantWorkspace(ctx, w.ID, user.ID, owner.ID); err != nil {
+		if err := db.GrantWorkspace(ctx, w.ID, user.ID, owner.ID, true); err != nil {
 			t.Fatalf("GrantWorkspace: %v", err)
 		}
 	}
@@ -205,14 +205,59 @@ func TestWorkspaceGrants(t *testing.T) {
 	if err != nil || !got.Access.Granted[w.ID] || len(got.Access.Owned) != 0 {
 		t.Fatalf("user access = %+v, %v; want granted %s", got.Access, err, w.ID)
 	}
-	if err := db.GrantWorkspace(ctx, "ws_missing", user.ID, owner.ID); !errors.Is(err, ErrNotFound) {
+	if err := db.GrantWorkspace(ctx, "ws_missing", user.ID, owner.ID, true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("grant on a missing workspace = %v, want ErrNotFound", err)
 	}
-	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID); err != nil {
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, true); err != nil {
 		t.Fatalf("RevokeWorkspaceGrant: %v", err)
 	}
-	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID); !errors.Is(err, ErrNotFound) {
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second revoke = %v, want ErrNotFound", err)
+	}
+}
+
+// A grant change below super admin is decided against the grantee's role
+// at the write, so a promotion between the caller's check and the write
+// cannot let a workspace's owner change an admin's grant.
+func TestWorkspaceGrantsBelowSuperAdminRefuseAdmins(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	owner := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+	user := &domain.Member{DisplayName: "Cam", PublicKey: testKey(t, "cam"), Color: "#3cb44b", Role: domain.RoleCollaborator}
+	other := &domain.Member{DisplayName: "Dee", PublicKey: testKey(t, "dee"), Color: "#4363d8", Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{owner, user, other} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatalf("CreateMember: %v", err)
+		}
+	}
+	w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := db.GrantWorkspace(ctx, w.ID, user.ID, owner.ID, false); err != nil {
+		t.Fatalf("grant a collaborator: %v", err)
+	}
+	for _, id := range []domain.MemberID{user.ID, other.ID} {
+		if _, err := db.SetMemberRole(ctx, id, domain.RoleAdmin); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("revoke a promoted admin's grant = %v, want ErrConflict", err)
+	}
+	if err := db.GrantWorkspace(ctx, w.ID, other.ID, owner.ID, false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("grant a promoted admin = %v, want ErrConflict", err)
+	}
+	grants, err := db.ListWorkspaceGrants(ctx, w.ID)
+	if err != nil || len(grants) != 1 || grants[0].MemberID != user.ID {
+		t.Fatalf("grants = %+v, %v; want only %s's, untouched", grants, err, user.ID)
+	}
+	if err := db.RevokeWorkspaceGrant(ctx, w.ID, user.ID, true); err != nil {
+		t.Fatalf("super admin's revoke: %v", err)
+	}
+	if err := db.GrantWorkspace(ctx, w.ID, other.ID, owner.ID, true); err != nil {
+		t.Fatalf("super admin's grant: %v", err)
 	}
 }
 
@@ -275,7 +320,7 @@ func TestSetWorkspaceOwner(t *testing.T) {
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.GrantWorkspace(ctx, w.ID, next.ID, owner.ID); err != nil {
+	if err := db.GrantWorkspace(ctx, w.ID, next.ID, owner.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SetWorkspaceOwner(ctx, w.ID, user.ID, super.ID); !errors.Is(err, ErrConflict) {

@@ -105,11 +105,11 @@ func TestASessionWithAnUnreachableRepoIsAnsweredAsMissing(t *testing.T) {
 		t.Fatalf("watching a session with an unreachable repo: %v, want %v", got, want)
 	}
 
-	if err := h.db.GrantWorkspace(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+	if err := h.db.GrantWorkspace(h.ctx, other.ID, h.ada.ID, "", true); err != nil {
 		t.Fatal(err)
 	}
 	w := h.watch(h.ada, runTarget(run)).Watch
-	if err := h.db.RevokeWorkspaceGrant(h.ctx, other.ID, h.ada.ID); err != nil {
+	if err := h.db.RevokeWorkspaceGrant(h.ctx, other.ID, h.ada.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "secret question")

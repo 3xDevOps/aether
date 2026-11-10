@@ -211,13 +211,15 @@ func memoryTitle(text string) string {
 // InsertMemory stores m and reads it back into m. When a live agent or
 // member note already has the same text, or the question already has an
 // answer note, it stores nothing, reads that note into m and reports true.
-func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
+// A non-nil workspaces refuses, without naming it, a duplicate of a session
+// with a workspace outside it.
+func (d *DB) InsertMemory(ctx context.Context, m *Memory, workspaces []domain.WorkspaceID) (bool, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("store: insert memory: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	duplicate, err := insertMemory(ctx, tx, m)
+	duplicate, err := insertMemory(ctx, tx, m, workspaces)
 	if err != nil {
 		return false, err
 	}
@@ -238,8 +240,9 @@ func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
 // scope's budget without old. A pin is refused on a duplicate of the other
 // scope, and on one vet refuses. A member pin stays its member's; a
 // workspace pin is pinned by the author m arrived with. It reports
-// whether m duplicated a live note and whether old's pin moved.
-func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent bool, vet func(old *Memory) error) (duplicate, movedPin bool, err error) {
+// whether m duplicated a live note and whether old's pin moved. workspaces
+// limits the duplicate it may return as InsertMemory's does.
+func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent bool, vet func(old *Memory) error, workspaces []domain.WorkspaceID) (duplicate, movedPin bool, err error) {
 	if m == nil {
 		return false, false, errors.New("store: supersede memory: note is required")
 	}
@@ -272,7 +275,7 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent b
 	if prior.Scope == MemoryScopeMember && prior.PinnedAt != nil {
 		by = prior.PinnedBy
 	}
-	if duplicate, err = insertMemory(ctx, tx, m); err != nil {
+	if duplicate, err = insertMemory(ctx, tx, m, workspaces); err != nil {
 		return false, false, err
 	}
 	if duplicate && agent {
@@ -309,7 +312,7 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent b
 	return duplicate, prior.PinnedAt != nil, nil
 }
 
-func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
+func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory, workspaces []domain.WorkspaceID) (bool, error) {
 	if m == nil || m.WorkspaceID == "" || strings.TrimSpace(m.Body) == "" {
 		return false, errors.New("store: insert memory: workspace and body are required")
 	}
@@ -346,6 +349,20 @@ func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
 			`SELECT id FROM memory WHERE source IN ('agent', 'member') AND workspace_id = ? AND hash = ? AND invalid_at IS NULL`,
 			m.WorkspaceID, hash).Scan(&id); err != nil {
 			return false, fmt.Errorf("store: insert memory: read the note it duplicates: %w", err)
+		}
+		if workspaces != nil {
+			reach, reachErr := reachArgs(workspaces)
+			if reachErr != nil {
+				return false, fmt.Errorf("store: insert memory: %w", reachErr)
+			}
+			var reached bool
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM memory m WHERE m.id = ? AND `+memoryReached+`)`,
+				append([]any{id}, reach...)...).Scan(&reached); err != nil {
+				return false, fmt.Errorf("store: insert memory: check the note it duplicates: %w", err)
+			}
+			if !reached {
+				return false, fmt.Errorf("%w: a note of a session you cannot see already holds this text; reword it", ErrConflict)
+			}
 		}
 	}
 	stored, err := readMemory(ctx, tx, m.WorkspaceID, id)
