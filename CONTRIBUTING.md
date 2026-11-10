@@ -461,7 +461,13 @@ never put live credentials in a report.
 Maintainers release by pushing a tag: `vMAJOR.MINOR.PATCH` with an optional
 `-alpha.N`, `-beta.N` or `-rc.N`. The tag's exact commit needs a successful
 `CI` run from a push to `main`; a pull request run, a merge queue run or
-another commit's session does not count. From a `main` checkout with `gh` and
+another commit's session does not count on its own. That push session runs
+the full suite, except that it may run only `changes` and `CI gate`, linking
+the queue session, when the newest merge queue session of the same commit
+succeeded ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)).
+If you re-run that queue session after the push, re-run the whole push
+session too (`gh run rerun <session-id>`, not `--failed`): the check reads
+only the push session. From a `main` checkout with `gh` and
 `jq`:
 
 ```sh

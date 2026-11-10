@@ -45,6 +45,10 @@ Requires=docker.service
 [Service]
 Type=simple
 OOMScoreAdjust=-500
+# Priority over session containers; see docs/install.md.
+CPUWeight=10000
+IOWeight=10000
+MemoryLow=1G
 # Runs as root. Two reasons, both deliberate (docs/security.md):
 #   1. The unit needs the Docker socket, and Docker socket access is already
 #      root-equivalent on the host - a dedicated user in the docker group

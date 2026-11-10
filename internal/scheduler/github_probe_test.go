@@ -188,7 +188,7 @@ func TestProbeGitHubCLI(t *testing.T) {
 				if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, tc.saved); err != nil {
 					t.Fatalf("UpdateMemberImage: %v", err)
 				}
-				if err := e.rt.Commit(t.Context(), "c-saved", tc.saved); err != nil {
+				if err := e.rt.Commit(t.Context(), "c-saved", tc.saved, nil); err != nil {
 					t.Fatalf("seed the saved image: %v", err)
 				}
 			}
@@ -283,7 +283,7 @@ func TestProbeGitHubCLIKeepsASavedEnvironmentOnItsOwnRemedy(t *testing.T) {
 	if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, "aether/member-test:2"); err != nil {
 		t.Fatalf("UpdateMemberImage: %v", err)
 	}
-	if err := e.rt.Commit(t.Context(), "c-saved", "aether/member-test:2"); err != nil {
+	if err := e.rt.Commit(t.Context(), "c-saved", "aether/member-test:2", nil); err != nil {
 		t.Fatalf("seed the saved image: %v", err)
 	}
 	cli, err := e.sched.ProbeGitHubCLI(t.Context(), e.member.ID)

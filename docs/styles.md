@@ -310,7 +310,10 @@ fill and link. Every encoding differs by line style or marker as well as
 colour.
 
 Bars, `rounded-control`, 24px in a 36px lane (32px in 44px on a coarse
-pointer), with 1px between state spans. A filled span is its state's text
+pointer), with 1px between state spans. Bar text that does not fit ends in
+an ellipsis and keeps clear of the Needs you tag; a bar under 48px shows
+only its colour. Dragging a track selects no text. Every lane but a note
+takes `cursor-pointer`. A filled span is its state's text
 colour at `--lane-tint` (16% light, 26% dark), `bg-current/(--lane-tint)`,
 so every state reads as a tinted bar in both themes; bar text is `text-text`,
 which stays at 4.5:1 or more on every fill (`design-system.test.ts` checks
@@ -337,14 +340,17 @@ Mail marks and links use the categorical series by meaning:
 | Mark or link | Colour | Style | Ends |
 | --- | --- | --- | --- |
 | Agent message, at rest | `text-series-5` | sent: 5.5px filled dot with a 1px `--canvas` halo; received: 6px `--canvas` ring, 1.5px stroke; 2px outside the bar edge facing the other lane | a `text-ui-xs` tabular count on a `--canvas` halo when marks merge |
+| Agent message, at rest, between drawn lanes | `text-series-5/45` (`/30` below 768px); `text-seam` while a lane is focused | solid 1px hairline under the bars, no hit path, one layer apart from the links | its two marks |
 | Agent message, focused lane | `text-series-5` | solid 1.5px, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a count chip on bundles |
 | Agent message, live | `text-series-5` over a 4px `--canvas` halo; the recipient's track `bg-series-5/10` | dashed `4 3` 2px, round caps, an arc bowing left of the send time | dot at the sender, filled arrowhead along the arc at the recipient; a `×n` chip left of the arc |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
-Marks sit above the bars with 16px hit targets. Links and their chips draw
+Marks sit above the bars with hit targets as wide as a bar is tall (24px,
+32px on a coarse pointer), 12px deep and inside their own lane, ending
+halfway to a closer mark on the same edge; link hit paths are 16px wide. Links and their chips draw
 under the bars and labels, over the hover and selection fills; only their
-10px hit paths sit above. A focused lane's marks give way to its links and
+16px hit paths sit above. A focused lane's marks give way to its links and
 every other mark turns `text-icon-faint`. Label chips are 16px
 `rounded-chip`, `border-series-5` on `bg-raised` with the `MessageSquare`
 glyph, left of the age. A mark added after the view opens fades in once with

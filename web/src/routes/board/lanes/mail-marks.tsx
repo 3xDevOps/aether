@@ -19,7 +19,7 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
   /** Bundles drawn as links right now; their marks give way to them. */
   linked: (edge: LaneEdge) => boolean
   title: (edge: LaneEdge) => string
-  onPick: (edges: LaneEdge[], x: number, y: number) => void
+  onPick: (edges: LaneEdge[], x: number, y: number, lane?: string) => void
 }) {
   // Only a mark that arrives while the view is open fades in, and only the first time it shows.
   const seen = useRef<Set<string> | null>(null)
@@ -28,6 +28,22 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
   useEffect(() => {
     for (const key of drawn) seen.current!.add(key)
   })
+  // A target stops halfway to the next mark on the same lane edge, so each dot opens its own mail.
+  const reach = new Map<string, { left: number; right: number }>()
+  const edgesOf = new Map<string, number[]>()
+  for (const mark of marks) {
+    const x = Math.min(g.width - 6, Math.max(6, mark.x))
+    const list = edgesOf.get(`${mark.lane}:${mark.side}`) ?? []
+    list.push(x)
+    edgesOf.set(`${mark.lane}:${mark.side}`, list)
+  }
+  for (const mark of marks) {
+    const x = Math.min(g.width - 6, Math.max(6, mark.x))
+    const others = edgesOf.get(`${mark.lane}:${mark.side}`)!.filter((other) => other !== x)
+    const before = Math.max(-Infinity, ...others.filter((other) => other < x))
+    const after = Math.min(Infinity, ...others.filter((other) => other > x))
+    reach.set(mark.key, { left: Math.max(x - g.metrics.bar / 2, (before + x) / 2), right: Math.min(x + g.metrics.bar / 2, (x + after) / 2) })
+  }
   return (
     <svg aria-hidden data-lane-mail className="pointer-events-none absolute top-0 overflow-visible" style={{ left: g.labelWidth, width: g.width, height }}>
       {marks.map((mark) => {
@@ -65,18 +81,19 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
                 {count}
               </text>
             )}
+            {/* Inside its own lane, so facing marks on neighbouring lanes never cover each other. */}
             <rect
               {...mailControl}
-              x={x - 8}
-              y={y - 8}
-              width={16}
-              height={16}
+              x={reach.get(mark.key)!.left}
+              y={Math.min(a.top + a.height - 12, Math.max(a.top, y - 6))}
+              width={reach.get(mark.key)!.right - reach.get(mark.key)!.left}
+              height={12}
               fill="transparent"
               pointerEvents="all"
               className="cursor-pointer"
               onClick={(event) => {
                 event.stopPropagation()
-                onPick(edges, x, y)
+                onPick(edges, x, y, mark.lane)
               }}
             />
           </g>
@@ -112,6 +129,7 @@ export function OffscreenMail({ above, below, outside, g, top, bottom, nameOf, o
   const hint = (list: Conversation[], y: number, Icon: typeof ArrowUp) => (
     <Button
       {...mailControl}
+      data-mail-pinned
       variant="secondary"
       size="sm"
       tabIndex={-1}

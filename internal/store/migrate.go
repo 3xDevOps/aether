@@ -2587,7 +2587,13 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
 CREATE INDEX IF NOT EXISTS idx_events_run_type ON events (run_id, type);
 CREATE INDEX IF NOT EXISTS idx_events_workspace_type ON events (workspace_id, type);
 `,
-	// v110: workspace-scoped access. A workspace has an owner and members
+	// v110: the model an Enhanced run's agent refused and why; the run's
+	// model is then the one the session runs on, empty for the agent's default.
+	`
+ALTER TABLE runs ADD COLUMN refused_model TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN model_error TEXT NOT NULL DEFAULT '';
+`,
+	// v111: workspace-scoped access. A workspace has an owner and members
 	// reach it through a grant. The earliest live admin, the server's
 	// creator, becomes super admin and owns every existing workspace, and
 	// every approved member keeps the access they had, which was every

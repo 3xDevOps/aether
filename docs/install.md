@@ -417,6 +417,63 @@ unit loads; subscription logins live in each member's home
 access is root-equivalent anyway. Its header comment explains how to run
 unprivileged; then every image needs a root user and self-update is off.
 
+### Keep the server reachable under load
+
+With Docker's systemd cgroup driver, the default on current Ubuntu and Debian,
+each session container is a `docker-<id>.scope` in `system.slice` with CPU and
+IO weight 100, the same as `aether-server`, `docker`, `containerd`, `ssh` and
+`tailscaled`. With N busy sessions the server gets about 100/(100 + 100N) of
+contended CPU, a twenty-first at 20 sessions, and SSH, the dashboard and the
+connector time out.
+
+The unit sets `CPUWeight=10000` and `IOWeight=10000`, the systemd maximum,
+which raises that to 10000/(10000 + 100N): five sixths at 20 busy sessions, a
+third at 200, an eleventh at 1000. The server is idle most of the time, and a
+weight only counts while the unit has work, so the maximum costs sessions only
+the CPU and disk the server actually uses. The git commands the server runs on
+the host, such as diff snapshots and evidence, run in its unit and get the same
+weight. At many hundreds of busy sessions, weights on services stop being
+enough; that needs the session containers in their own low-weight slice,
+which Aether does not do yet. Weights only divide CPU and disk while they are
+contended; they cap nothing.
+
+`MemoryLow=1G` makes the kernel reclaim the server's first gigabyte only after
+unprotected memory. Memory protection passes down the cgroup tree, so it
+protects the server only once `system.slice` holds at least as much; the
+commands below set that, and the unit cannot.
+
+An existing install keeps its old unit until you run the command the journal's
+unit warning prints ([What an update does not change](#what-an-update-does-not-change)).
+To apply the settings now, without a restart, to the server and to the
+services it and you depend on:
+
+```sh
+sudo systemctl set-property system.slice MemoryLow=1G
+sudo systemctl set-property aether-server CPUWeight=10000 IOWeight=10000 MemoryLow=1G
+for unit in docker containerd sysbox-fs sysbox-mgr ssh tailscaled; do
+  sudo systemctl set-property "$unit" CPUWeight=10000 IOWeight=10000
+done
+```
+
+`set-property` changes the running unit and keeps the change in
+`/etc/systemd/system.control/<unit>.d/`. `sysbox-fs` serves `/proc` inside
+every Sysbox container, so the server's commands in sessions wait on it; skip
+both `sysbox-*` units without Sysbox. Work docker, containerd and sysbox-fs
+do for a container, such as the `/proc` reads sysbox-fs serves, runs at their
+raised weight, not the container's. The SSH unit is `sshd` on Fedora and
+Arch; skip `tailscaled` without Tailscale. To keep the setting with your other
+overrides instead, put the same lines in a drop-in, such as
+`sudo systemctl edit docker`, which reloads systemd when you save: under
+`[Service]` for a service, under `[Slice]` for `system.slice`.
+
+`docker info --format '{{.CgroupDriver}}'` prints the driver. With `cgroupfs`,
+containers share a `/docker` group beside `system.slice`, and these weights
+order only the services inside `system.slice`. `IOWeight` takes effect only on
+a disk whose IO scheduler honors weights, such as `bfq`; NVMe disks often use
+`none` (`cat /sys/block/<disk>/queue/scheduler`). `MemoryLow` needs cgroup v2.
+systemd 232 and newer know all three directives; an older one logs
+`Unknown key name` and ignores them.
+
 ## Client files and variables
 
 The `aether` CLI keeps these files on your computer and reads these

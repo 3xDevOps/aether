@@ -126,15 +126,28 @@ type launchReceipt struct {
 	DefaultsSkipped   []defaultSkip `json:"defaults_skipped,omitempty"`
 	DefaultsUnchecked []defaultSkip `json:"defaults_unchecked,omitempty"`
 	Via               string        `json:"via,omitempty"`
-	IdempotencyKey    string        `json:"idempotency_key,omitempty"`
-	URL               string        `json:"url,omitempty"`
+	// RefusedModel is the requested model the agent refused; model is then
+	// the one the session runs on, absent for the agent's default, and
+	// untrusted.model_error says why.
+	RefusedModel   string `json:"refused_model,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	URL            string `json:"url,omitempty"`
+}
+
+// nextAfterLaunch says to poll the session, and for an Enhanced model that
+// the agent takes or refuses only once the session opens, where that shows.
+func nextAfterLaunch(r protocol.Run) string {
+	if r.Mode == "acp" && r.Model != "" {
+		return "poll aether_get_session with run_id: an Enhanced session sets model after it opens; if the agent refuses it, launch.refused_model names it, model is the one the session runs on (absent for the agent's default) and untrusted.model_error says why"
+	}
+	return "poll aether_get_session with run_id"
 }
 
 func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {
 	run := choiceOf(r.Harness, r.Mode, r.Model, r.AccountMemberID, book)
 	out := &launchReceipt{Kind: "run", ID: r.ID, WorkspaceID: r.WorkspaceID, choice: &run,
 		RequestedAccount: book.ref(r.RequestedAccountMemberID), Fallback: policyOf(r.FallbackAccountMemberIDs, r.NoFallback), Children: r.Children,
-		Permission: r.Permission, Via: r.Via, URL: l.run(r.ID)}
+		Permission: r.Permission, Via: r.Via, RefusedModel: clip(r.RefusedModel, maxReport), URL: l.run(r.ID)}
 	for _, repo := range r.Repos {
 		out.Repos = append(out.Repos, repoRef{WorkspaceID: repo.WorkspaceID, Name: repo.Name, Primary: repo.Primary})
 	}
@@ -417,7 +430,7 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 	}
 	receipt := runReceipt(res.Run, l, book)
 	receipt.IdempotencyKey = params.IdempotencyKey
-	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": "poll aether_get_session with run_id"}
+	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": nextAfterLaunch(res.Run)}
 	switch {
 	case dup:
 		out["duplicate"] = true

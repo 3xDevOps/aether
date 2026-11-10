@@ -247,10 +247,24 @@ func (c *Conn) SessionID() string { return c.sessionID.Load().(string) }
 
 func (c *Conn) Info() AgentInfo { return c.info }
 
+// agentAnswer is an error the agent answered with. The ACP SDK reports a
+// lost connection or an ended context as a RequestError too, so only an
+// error that arrives while both are live counts.
+type agentAnswer struct{ error }
+
+func (e agentAnswer) Unwrap() error { return e.error }
+
 func call[T any](c *Conn, ctx context.Context, method string, params any) (T, error) {
 	res, err := acp.SendRequest[T](c.rpc, ctx, method, params)
 	c.touch()
 	if err != nil {
+		select {
+		case <-c.rpc.Done():
+		default:
+			if ctx.Err() == nil {
+				err = agentAnswer{err}
+			}
+		}
 		return res, fmt.Errorf("acphost: %s: %w", method, err)
 	}
 	return res, nil
@@ -379,6 +393,13 @@ func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, S
 		InputTokens:  int64(u.InputTokens + deref(u.CachedReadTokens) + deref(u.CachedWriteTokens)),
 		OutputTokens: int64(u.OutputTokens + deref(u.ThoughtTokens)),
 	}, err
+}
+
+// Refused reports an error the agent answered, or an option value it does
+// not offer, rather than a failure to reach it.
+func Refused(err error) bool {
+	var answer agentAnswer
+	return errors.As(err, &answer) || errors.Is(err, ErrUnknownOption)
 }
 
 // AuthRequired reports a request the agent refused with ACP's

@@ -89,13 +89,12 @@ files to itself.
 `INTEGRATION_NORACE` turns it off. CI runs the Docker suites in the merge
 queue and on `main` only, with `-race`.
 
-CI splits the suite into three jobs. To repeat one that failed:
+CI splits the suite into two jobs. To repeat one that failed:
 
 | CI job | Variables |
 | --- | --- |
 | `integration (server-rest, browser)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos\|Coordination\|EndToEnd\|MultiMember\|ServerUpdate)'` with the [browser image](#the-browser-companion) variables, after `make browser-smoke` |
-| `integration (server-flows, smoke)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Chaos\|Coordination)'`, then the same with `'^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'`, then the [smoke tests](#real-agent-smoke-tests) |
-| `integration (scheduler, rest, agents)` | `INTEGRATION_SKIP="./internal/harness ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'`, then [`make test-agents`](#real-agents-against-a-mock-model) |
+| `integration (server-flows, scheduler, rest, agents, smoke)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Chaos\|Coordination)'`, then the same with `'^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'`, then `INTEGRATION_SKIP="./internal/harness ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'`, then the [smoke tests](#real-agent-smoke-tests) and [`make test-agents`](#real-agents-against-a-mock-model) |
 
 The merge queue and `main` run the Docker suites on amd64 and also run the
 `arm64` job: the standard-image and browser-image builds, the smoke tests,
@@ -237,8 +236,8 @@ catches it.
 
 `TestSmokeHeadlessNoLogin` runs in CI. It launches each headless template
 with no credentials and passes when the session fails for want of a login, never
-for an unparseable command line. CI's `integration (server-flows, smoke)` job
-builds the standard image, adds the agent CLIs at their current versions with
+for an unparseable command line. CI's `integration (server-flows, scheduler, rest, agents, smoke)`
+job builds the standard image, adds the agent CLIs at their current versions with
 `images/smoke/Dockerfile`,
 and sessions:
 
@@ -360,7 +359,7 @@ approved API key and a trusted checkout. The Codex config also sets
 `model_auto_compact_token_limit`, so the `compaction` turn's claimed usage
 makes Codex compact.
 
-CI's `integration (scheduler, rest, agents)` job runs both as root. Run them the same way, with Docker and
+CI's `integration (server-flows, scheduler, rest, agents, smoke)` job runs both as root. Run them the same way, with Docker and
 git:
 
 ```sh
@@ -740,29 +739,34 @@ the server". Nothing Aether builds or installs is excluded.
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
 every merge queue entry, every push to `main` and nightly on `main` at 08:00
 UTC. A pull request, draft or ready, runs `changes`, `audit`, `lint`,
-`build-and-test` and `dashboard`. The merge queue runs every job, so the full
+`build-and-test` and `dashboard`. Every other job lives in
+`.github/workflows/ci-suite.yml`, which `ci.yml` calls as the `suite` job, so
+a run that skips them shows one skipped `suite` check; in a run that calls it
+each job shows as `suite / <job>`. The merge queue runs every job, so the full
 suite runs once per change, on the merge result, before `main` moves; a
 failure there removes the pull request from the queue.
 
 The queue moves `main` to the commit it tested, so a push to `main` reuses
-that verdict: `scripts/ci-queue-verdict.sh` finds the merge queue run whose
-`CI gate` passed on the same commit, and the push runs only `changes` and
-`CI gate`, whose summary links that run. The push runs every job when no
-such run exists, when a lookup fails, when the push touches 300 files or
-more (GitHub's compare limit), or when it changes a file a cache key hashes
-(`ci-classify-areas.sh caches`). Caches save only from runs on `main`,
-because a merge queue run's caches are scoped to its own queue branch; the
-nightly run refreshes them, so between nightly runs a session restores
-compiler caches up to a day old. It also tests `main` against the newest
-agent CLIs and the latest published release; its result gates nothing, so
-read a red nightly `CI gate` on the `main` tip yourself. A merge queue run
-re-run after its push reused it does not change that push's verdict:
-re-run the push session too.
+that verdict: `scripts/ci-queue-verdict.sh` finds the merge queue run on the
+same commit that completed with conclusion success and whose `CI gate`
+passed, and the push runs only `changes` and `CI gate`, whose summary links
+that run. The push runs every job when no such run exists, when a lookup
+fails, when the push touches 300 files or more (GitHub's compare limit), or
+when it changes a file a cache key hashes (`ci-classify-areas.sh caches`).
+Caches save only from runs on `main`, because a merge queue run's caches are
+scoped to its own queue branch; the nightly run refreshes them, so between
+nightly runs a session restores compiler caches up to a day old. It also
+tests `main` against the newest agent CLIs and the latest published release;
+its result gates nothing, so read a red nightly `CI gate` on the `main` tip
+yourself. A merge queue run re-run after its push reused it does not change
+that push's verdict: re-run the push session too.
 
 `CI gate` is the one required check: it passes when
 every other job passed or was skipped by its own rule, and fails when any
-failed or was cancelled. A new job must be added to its `needs` list to gate
-`main`.
+failed or was cancelled. In the merge queue no rule skips a job, so there it
+passes only when every job passed: a cancellation can leave a job skipped. A
+new job in `ci.yml` must be added to its `needs` list to gate `main`; a job
+in `ci-suite.yml` gates it through `suite`.
 
 `main` takes changes through a merge queue. `gh pr merge <n> --squash` adds a
 ready pull request whose `CI gate` passed; the queue batches up to five
@@ -778,13 +782,12 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
 | `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on every session that runs the full suite | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
 | `build-and-test` | Unit tests (`-race` on the merge queue and `main` only), then `make build` | `make test build` |
-| `integration (server-rest, browser)`, `integration (server-flows, smoke)`, `integration (scheduler, rest, agents)` | [Integration tests](#integration-tests), the [smoke tests](#real-agent-smoke-tests), [real agents against a mock model](#real-agents-against-a-mock-model) and [the browser companion](#the-browser-companion), on amd64 | See the table under Integration tests |
+| `integration (server-rest, browser)`, `integration (server-flows, scheduler, rest, agents, smoke)` | [Integration tests](#integration-tests), the [smoke tests](#real-agent-smoke-tests), [real agents against a mock model](#real-agents-against-a-mock-model) and [the browser companion](#the-browser-companion), on amd64 | See the table under Integration tests |
 | `arm64` | Standard and browser image builds, smoke tests and browser runtime tests on arm64 | Same commands on an arm64 host |
 | `dashboard` | `bun run typecheck` and `bun run test` | Same, from `web/` |
 | `dashboard-e2e` | [End-to-end suite](#the-dashboard-end-to-end-suite) in two shards | `make test-e2e E2E_ARGS='--shard=N/2'` |
-| `desktop`, `desktop-windows` | `aether gui build` on Linux; the Windows desktop zip on amd64 and arm64 | [Desktop shell](../CONTRIBUTING.md#desktop-shell) |
-| `windows`, `windows-install` | [Windows](#windows) | |
-| `release-build`, `android`, `windows-defender` | `make release-binaries`, `make android`, a Defender scan of the Windows binaries | `make release-binaries`, `make android` |
+| `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` install (zip) and update legs package and launch the Windows desktop zip on amd64 and arm64 | |
+| `release-build (binaries, desktop, android)` | `make release-binaries`, `aether gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
 | `edge-image` | [The edge image](#the-edge-image) and [qualification](#edge-upgrade-qualification) | |
 
 A pull request that changes only `docs/**` or root-level `*.md` files runs

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	cerrdefs "github.com/containerd/errdefs"
 
@@ -22,13 +23,20 @@ func memberImageRepo(member domain.MemberID) string {
 	return "aether/member-" + string(member)
 }
 
+// pendingImageRepo holds a save until its check passes, so a rejected image
+// whose removal failed never sits among the member's images.
+func pendingImageRepo(member domain.MemberID) string {
+	return "aether/pending-member-" + string(member)
+}
+
 func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error) {
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	unlockCaches := func() {}
 	if s.cfg.Homes != nil {
-		unlock := s.cfg.Homes.LockCaches(member)
-		defer unlock()
+		unlockCaches = sync.OnceFunc(s.cfg.Homes.LockCaches(member))
+		defer func() { unlockCaches() }()
 		if err := s.cfg.Homes.EnsureCacheMetadata(member, "terminal"); err != nil {
 			return "", fmt.Errorf("scheduler: preserve saved image cleanup owner: %w", err)
 		}
@@ -38,11 +46,55 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if sup == nil {
 		return "", fmt.Errorf("%w: open it with `aether terminal` (or the dashboard), check your changes are there, then save", ErrTerminalNotRunning)
 	}
-	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
-	tag := memberImageRepo(member) + ":" + strings.ToLower(rand.Text())
-	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, tag); err != nil {
+	starting, _, err := s.sessionImage(ctx, m)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: save environment: %w", err)
+	}
+	// A terminal created from one of the member's images, such as one that
+	// fell back, proves that image starts: it is the new image's previous
+	// one even after a restart forgot the fallback. A terminal on the
+	// standard image proves nothing about the member's images.
+	info, err := s.cfg.Runtime.Inspect(ctx, sup.containerID)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: save environment: inspect the terminal: %w", err)
+	}
+	previous := starting
+	if isMemberImage(member, info.Image) {
+		previous = info.Image
+	}
+	name := strings.ToLower(rand.Text())
+	pending, tag := pendingImageRepo(member)+":"+name, memberImageRepo(member)+":"+name
+	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, pending, map[string]string{previousImageLabel: previous}); err != nil {
+		return "", fmt.Errorf("scheduler: save environment: %w", err)
+	}
+	// Launches by this member, or on their account, need the cache lock;
+	// the check can take minutes. The terminal lock keeps other saves,
+	// resets and sweeps of this member out.
+	unlockCaches()
+	checkErr := s.checkSavedImage(ctx, pending)
+	if s.cfg.Homes != nil {
+		unlockCaches = sync.OnceFunc(s.cfg.Homes.LockCaches(member))
+	}
+	if checkErr != nil {
+		current := "the standard image"
+		if starting != "" {
+			current = "your saved image " + starting
+		}
+		problem := "could not be checked"
+		if _, ok := errors.AsType[*errImageOwners](checkErr); ok {
+			problem = "would not start"
+		}
+		err := fmt.Errorf("scheduler: save environment: nothing was saved, because the committed image %s: %w. Your environment and its unsaved changes are kept, and new sessions still start from %s. Run aether env save again; if it fails the same way, see \"Saved image checks\" in docs/environments.md", problem, checkErr, current)
+		if removeErr := s.cfg.Runtime.RemoveImage(context.WithoutCancel(ctx), pending); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("scheduler: remove the unusable image: %w", removeErr))
+		}
+		return "", err
+	}
+	if err := s.cfg.Runtime.TagImage(ctx, pending, tag); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
 	}
 	if err := s.cfg.Store.UpdateMemberImage(ctx, member, tag); err != nil {
@@ -149,9 +201,28 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	if err != nil {
 		return err
 	}
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	switch {
+	case err == nil:
+		previous, previousErr := s.previousImage(ctx, m.Image)
+		if previousErr != nil {
+			return previousErr
+		}
+		refs[previous] = true
+	case !errors.Is(err, store.ErrNotFound):
+		return err
+	}
+	// Sweeps hold the terminal lock, so no save is checking an image now.
+	if err = s.cfg.Runtime.Destroy(ctx, runtime.ExportContainer(pendingImageRepo(member))); err != nil {
+		return err
+	}
+	pending, err := s.cfg.Runtime.ListImageTags(ctx, pendingImageRepo(member))
+	if err != nil {
+		return err
+	}
 	var failures []error
-	for _, tag := range tags {
-		if refs[tag] || !strings.HasPrefix(tag, repo+":") {
+	for _, tag := range append(tags, pending...) {
+		if refs[tag] || !strings.HasPrefix(tag, repo+":") && !strings.HasPrefix(tag, pendingImageRepo(member)+":") {
 			continue
 		}
 		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil {

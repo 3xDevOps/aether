@@ -394,7 +394,7 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 		if err != nil {
 			return protocol.Child{}, err
 		}
-		out.State, out.Branch, out.AccountMemberID = childState(r), r.Branch, string(r.AccountMember())
+		out.State, out.Branch, out.AccountMemberID, out.Model = childState(r), r.Branch, string(r.AccountMember()), r.Model
 	}
 	if report, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil && report != nil {
 		out.Report = &protocol.ChildReport{Outcome: string(report.Outcome), Summary: report.Summary, At: report.CreatedAt.UTC().Format(time.RFC3339)}

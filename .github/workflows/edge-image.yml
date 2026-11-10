@@ -2,8 +2,8 @@ name: Edge image
 
 # Builds images/edge/Dockerfile on both architectures it ships for and runs
 # scripts/edge-image-smoke.sh on each, natively, and qualifies an upgrade
-# from the previous release with make test-edge-upgrade. ci.yml calls it in
-# every run of its full suite;
+# from the previous release with make test-edge-upgrade. ci-suite.yml calls it
+# in every full CI run;
 # `gh workflow run edge-image.yml --ref <branch>` runs it for any branch.
 # It pushes nothing and holds no credential beyond a read-only token.
 on:
@@ -19,23 +19,33 @@ permissions:
   contents: read
 
 jobs:
+  # The upgrade qualification rides on the amd64 leg, which has already
+  # pointed Docker at the mirror.
   build-and-smoke:
-    name: build-and-smoke (${{ matrix.arch }})
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
+            name: build, smoke and upgrade (amd64)
             runner: ubuntu-latest
+            upgrade: true
+            # The tags, to build the previous release.
+            fetch-depth: 0
           - arch: arm64
+            name: build and smoke (arm64)
             runner: ubuntu-24.04-arm
+            upgrade: false
+            fetch-depth: 1
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           ref: ${{ inputs.ref }}
+          fetch-depth: ${{ matrix.fetch-depth }}
       # The Makefile's COMMIT, so the binary reports the form a release
       # binary does.
       - name: Read the short commit
@@ -64,25 +74,10 @@ jobs:
             COMMIT=${{ steps.commit.outputs.short }}
       - name: Smoke-test the edge image
         run: sh scripts/edge-image-smoke.sh aether-edge:ci
-
-  upgrade:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.ref }}
-          # The tags, to build the previous release.
-          fetch-depth: 0
       - uses: actions/setup-go@v6
+        if: ${{ !cancelled() && matrix.upgrade }}
         with:
           go-version-file: go.mod
-      # Inline, not ./.github/actions/docker-mirror: ref may predate it.
-      - name: Point the Docker daemon at a Docker Hub mirror
-        run: |
-          current=$(sudo cat /etc/docker/daemon.json 2>/dev/null || printf '{}')
-          printf '%s' "$current" | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json >/dev/null
-          sudo systemctl restart docker
       - name: Qualify an edge upgrade
+        if: ${{ !cancelled() && matrix.upgrade }}
         run: sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade

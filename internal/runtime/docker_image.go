@@ -3,10 +3,16 @@ package runtime
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"maps"
+	"slices"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
 
@@ -32,8 +38,9 @@ func (d *Docker) ImageExists(ctx context.Context, ref string) (bool, error) {
 // interactive shell command. It keeps the user of the image the container
 // was created from, not the unprivileged one it ran as: the image's user
 // decides where the home is mounted, which must not move when an
-// environment is saved.
-func (d *Docker) Commit(ctx context.Context, id ID, tag string) error {
+// environment is saved. labels replace the labels of the same keys the
+// container inherited from its image.
+func (d *Docker) Commit(ctx context.Context, id ID, tag string, labels map[string]string) error {
 	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("runtime: inspect container %s: %w", id, err)
@@ -42,9 +49,13 @@ func (d *Docker) Commit(ctx context.Context, id ID, tag string) error {
 	if err != nil {
 		return err
 	}
+	changes := []string{"CMD []", "ENTRYPOINT []", "USER " + cmp.Or(user, "0:0")}
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
+		changes = append(changes, fmt.Sprintf("LABEL %s=%q", key, labels[key]))
+	}
 	_, err = d.cli.ContainerCommit(ctx, string(id), client.ContainerCommitOptions{
 		Reference: tag,
-		Changes:   []string{"CMD []", "ENTRYPOINT []", "USER " + cmp.Or(user, "0:0")},
+		Changes:   changes,
 	})
 	if err != nil {
 		return fmt.Errorf("runtime: commit container %s as %s: %w", id, tag, err)
@@ -69,6 +80,81 @@ func (d *Docker) ListImageTags(ctx context.Context, repo string) ([]string, erro
 		}
 	}
 	return tags, nil
+}
+
+func (d *Docker) TagImage(ctx context.Context, source, target string) error {
+	if _, err := d.cli.ImageTag(ctx, client.ImageTagOptions{Source: source, Target: target}); err != nil {
+		return fmt.Errorf("runtime: tag image %s as %s: %w", source, target, err)
+	}
+	return nil
+}
+
+// ImageLabels returns the labels of a local image; a missing image is
+// ErrNotFound.
+func (d *Docker) ImageLabels(ctx context.Context, ref string) (map[string]string, error) {
+	info, err := d.cli.ImageInspect(ctx, ref)
+	if cerrdefs.IsNotFound(err) {
+		return nil, fmt.Errorf("runtime: inspect image %s: %w", ref, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("runtime: inspect image %s: %w", ref, err)
+	}
+	if info.Config == nil {
+		return nil, nil
+	}
+	return info.Config.Labels, nil
+}
+
+// ExportContainer is the container ExportImage reads an image of repo
+// through. Exports of one repository must not overlap; the next export, or
+// a Destroy of this name, removes one a crash left behind.
+func ExportContainer(repo string) ID {
+	return ID("aether-image-check-" + strings.ReplaceAll(repo, "/", "-"))
+}
+
+// ExportImage streams the filesystem of a local image as a tar, read through
+// a container that is never started and is removed on Close.
+func (d *Docker) ExportImage(ctx context.Context, ref string) (io.ReadCloser, error) {
+	repo, _, _ := strings.Cut(ref, ":")
+	name := ExportContainer(repo)
+	if err := d.Destroy(ctx, name); err != nil {
+		return nil, err
+	}
+	// A saved image carries the labels of the container it was committed
+	// from; an empty creation key keeps FindByCreationKey from finding this
+	// container in place of that one.
+	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: string(name),
+		Config: &container.Config{
+			Image:  ref,
+			Cmd:    []string{"/bin/true"},
+			Labels: map[string]string{labelManaged: "true", labelCreationKey: "", labelFingerprint: ""},
+		},
+		HostConfig: &container.HostConfig{NetworkMode: "none"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("runtime: create container to export image %s: %w", ref, err)
+	}
+	id := ID(created.ID)
+	destroy := func() error {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		return d.Destroy(cleanupCtx, id)
+	}
+	export, err := d.cli.ContainerExport(ctx, string(id), client.ContainerExportOptions{})
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("runtime: export image %s: %w", ref, err), destroy())
+	}
+	return &imageExport{ReadCloser: export, destroy: destroy}, nil
+}
+
+type imageExport struct {
+	io.ReadCloser
+	destroy func() error
+}
+
+func (e *imageExport) Close() error {
+	return errors.Join(e.ReadCloser.Close(), e.destroy())
 }
 
 // RemoveImage untags a local image. Removing a missing tag is harmless.

@@ -513,7 +513,30 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Unlock()
 	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, unlockCaches)
 	if err != nil {
-		return err
+		canRetry := func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return !entry.destroyPending
+		}
+		plan, err = s.startFromOlderImages(ctx, actor, plan, err, canRetry, func(older *domain.Member) (*EnvironmentPlan, error) {
+			s.mu.Lock()
+			if entry.userReservation != nil {
+				delete(s.credentialUsers, entry.userReservation)
+				entry.userReservation = nil
+			}
+			entry.runUser = ""
+			s.mu.Unlock()
+			retry, planErr := s.runPlan(ctx, entry, run, ws, older, profile)
+			if planErr != nil {
+				return nil, planErr
+			}
+			var startErr error
+			driver, startErr = s.startRunContainer(ctx, entry, run, actor, argv, profile, retry, unlockCaches)
+			return retry, startErr
+		})
+		if err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	cid := entry.containerID
@@ -526,7 +549,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if entry.killRequested {
 		err = errKillRequested
 	} else {
-		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor.ID)
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, plan.ImageNotice, actor.ID)
 	}
 	s.mu.Unlock()
 	if err != nil {

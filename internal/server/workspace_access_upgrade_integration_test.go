@@ -27,8 +27,8 @@ import (
 )
 
 // preAccessSchemaVersion is the last schema without workspace-scoped
-// access; v110 adds owners and grants.
-const preAccessSchemaVersion = 109
+// access; v111 adds owners and grants.
+const preAccessSchemaVersion = 110
 
 // migrationsThrough reads the first n migrations out of
 // internal/store/migrate.go, which appends versions and never edits one
@@ -70,7 +70,7 @@ type preAccessMember struct {
 	key      ssh.Signer
 }
 
-// seedPreAccess writes a v109 database into dataDir holding members, in
+// seedPreAccess writes a v110 database into dataDir holding members, in
 // creation order, and each workspace with a completed session, a
 // template and a team memory note.
 func seedPreAccess(t *testing.T, dataDir string, members []*preAccessMember, workspaces []string) {

@@ -1905,10 +1905,11 @@ review-tone **Finished: review** chip instead of the Needs you chip. Finished
 bars add "took 18m" after their end when there is room.
 
 **Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
-pair within 24px) draws as marks, not links: a dot on the sender's bar and a
-ring on the recipient's, at the send time, on the bar edge facing the other
-lane. Marks within 8px on one edge merge and show their message count. Mail
-into a folded family or Finished marks its header. Mail with a session that
+pair within 24px) draws as marks joined by a hairline: a dot on the
+sender's bar and a ring on the recipient's, at the send time, on the bar
+edge facing the other lane, and a thin line between them under the bars.
+The hairlines are fainter below 768px. Marks within 8px on one edge merge
+and show their message count. Mail into a folded family or Finished marks its header. Mail with a session that
 has no lane in this view (another workspace, hidden by **Mine**) keeps its
 drawn end, marked on the top edge. A mark's or link's tooltip names sender,
 recipient, time and how many messages are not yet acknowledged; a session
@@ -1940,20 +1941,29 @@ messages: ...", listing at most three pairs).
 
 Hovering, focusing or selecting a lane draws its mail as solid links (a dot
 at the sender, an arrowhead at the recipient, hollow until every bundled
-message is acknowledged) and greys every other mark. Chips on the lanes'
+message is acknowledged) and greys every other mark and hairline. Chips on the lanes'
 labels count that mail from the focused lane's side: `↔ 3` on the focused
 lane (sessions it talks with), `→2 ←1` on each of them. Sessions past the
 scrolled rows get a pinned **↑**/**↓** button that moves to them, and mail with
 sessions outside the view gets a dashed note. File overlaps draw for the
 focused lane only, at the now line. Moving the pointer onto a link, mark or
-pinned button keeps the lane that drew it. Clicking a mark or link opens its
+pinned button keeps the lane that drew it. While the pointer heads for one of
+the lane's pinned buttons and keeps closing in, the lanes it crosses wait:
+one it rests on for 150ms, or crosses after a second and a half, takes the
+hover. An
+open popover keeps the lane it opened from in focus: lanes the pointer
+crosses, or that lie under the popover, show only the hover band until it
+closes. Clicking a mark or link opens its
 facts, every bundle a merged mark holds;
 a mail link reads the bodies through `coord.messages.list` (the thread, else
 each sender's newest page, since a mark on a folded lane can bundle several
 senders) and shows them with `MessageRow`. [Styles: Lanes](styles.md#lanes)
 has the colour coding.
 
-**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover:
+**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover
+(with one open, one click on another lane, mark or link moves it there,
+clicking its own lane again closes it, and dragging the track or a pinned
+button closes it):
 "agent · state · elapsed", the title, the reason, next step, branch and diff,
 unread mail, pending inputs, overlaps and the state span under the pointer,
 then the card's primary action (Reply opens the same composer as a card),
@@ -1991,7 +2001,11 @@ read. Lane geometry comes from the model
 measurement; above 60 lanes only those near the viewport render. Live bars
 move on a timer of window width per pixel, between 1s and 30s. Lanes move with
 a glide only when they change section, and lanes added after the first render
-fade in; reduced motion turns both off.
+fade in; reduced motion turns both off. A live update that moves lanes keeps
+the view steady: the lane at the top of the scrolled view stays where it was,
+an open popover follows its lane, a resting pointer hovers the lane now under
+it, and keyboard focus on a lane that leaves moves to the lane that now draws
+its session, else to its neighbour.
 
 `aether.ui` stores the window choice, the grouping and hidden link kinds.
 Below 768px the label column shrinks to the state dot and agent glyph, and
@@ -6718,6 +6732,12 @@ Categories:
   rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
+- **Agents**, where the server offers `agent.list`: each agent's install and
+  login state (`useAgentList`, read again each time the section opens,
+  rendered by the Agents page's `AgentList` without its actions) and **Open
+  Agents**, which leads to the Agents page; that page still owns install,
+  sign-in, update and removal. Search finds it by "sign in", "login", "Claude",
+  "install" or "agents".
 - **Launch**, where the server offers `launch.defaults.get`: **Saved
   defaults** says who saved them (you or the assistant) and when, or
   "Nothing saved yet". It lists each agent's saved mode and model with
@@ -7925,7 +7945,13 @@ device cards an admin and a member see.
 history, section order and folding, axis ticks and link
 bundling; the board test's `lanes view` cases cover the tree keyboard, the
 session popover and its links, a popover whose lane folds away, an empty
-window, bundled mail bodies and failed history reads.
+window, bundled mail bodies and failed history reads. `e2e/lanes.spec.ts`
+moves a real pointer over Lanes, with sessions and mail answered in the
+browser: from a lane to its popover and off it, one click from one lane's
+popover to another's, a drag and a pinned button closing it, and from a lane
+to its pinned button, on a held clock. Its live cases send `run.status`
+through the events socket: a session leaving above the view, one arriving
+above an open popover, and the focused lane folding into Finished.
 
 `src/a11y.test.tsx` exercises the session tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,

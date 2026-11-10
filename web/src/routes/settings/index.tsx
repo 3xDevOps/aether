@@ -11,6 +11,7 @@ import { prefersReducedMotion } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { surfaces } from '@/lib/surfaces'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { AgentsSection } from '@/routes/settings/agents'
 import { AssistantSection } from '@/routes/settings/assistant'
 import { ChildRunsSection } from '@/routes/settings/children'
 import { ConnectorsSection } from '@/routes/settings/connectors'
@@ -32,6 +33,7 @@ import { useCapability, useIsAdmin, useIsSuperAdmin } from '@/store/hooks'
 const bodies: Record<CategoryID, (client: Api) => ReactNode> = {
   general: () => <GeneralSections />,
   launch: (client) => <LaunchDefaultsSection client={client} />,
+  agents: (client) => <AgentsSection client={client} />,
   connections: (client) => <><ConnectorsSection client={client} /><GitHubSection client={client} /></>,
   notifications: (client) => <NotificationSections client={client} />,
   watches: (client) => <WatchesSection client={client} />,

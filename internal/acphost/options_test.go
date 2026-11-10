@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -442,5 +443,28 @@ func TestSetModelUsesTheNativeOptionElseSetModel(t *testing.T) {
 	}
 	if got := native.Model(); got != "y" {
 		t.Fatalf("native Model() after SetModel = %q", got)
+	}
+}
+
+// A model the agent answers with an error is refused; a request whose
+// context ends first, which the SDK also reports as a RequestError, is not.
+func TestRefusedCountsOnlyTheAgentsAnswer(t *testing.T) {
+	release := make(chan struct{})
+	s := startOptionSession(t, `{"sessionId":"options","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"default","options":[{"value":"default","name":"Default"}]}]}`,
+		func(_ *acp.Connection, _ string, params json.RawMessage) (any, *acp.RequestError) {
+			if strings.Contains(string(params), "slow") {
+				<-release
+			}
+			return nil, acp.NewInternalError(map[string]any{"details": "Invalid value for config option model"})
+		})
+	defer close(release)
+	err := s.SetModel(t.Context(), "claude-fable-5-2")
+	if err == nil || !Refused(err) {
+		t.Fatalf("answered refusal = %v, Refused %v, want an error that counts", err, Refused(err))
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	if err = s.SetModel(ctx, "slow"); err == nil || Refused(err) {
+		t.Fatalf("timed-out request = %v, Refused %v, want an error that does not count", err, Refused(err))
 	}
 }

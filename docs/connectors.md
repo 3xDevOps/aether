@@ -430,7 +430,11 @@ Each launch's result and `aether_get_session` has a
 (`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's own
 session), `requested_account` when usage fallback moved the session, `fallback`
 (`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, the session's
-own `children` setting, its `permission` tier, `via`, and `url`. A new launch's receipt adds
+own `children` setting, its `permission` tier, `via`, and `url`. An Enhanced
+session sets its model after it opens, so a launch's `model` is the one
+asked for; when the agent refuses it, `aether_get_session` names it in
+`refused_model`, `model` is the one the session runs on (absent for the
+agent's default), and `untrusted.model_error` says why. A new launch's receipt adds
 `defaults_applied`, the input fields your saved choices filled,
 `defaults_skipped`, each saved choice it did not use with `field` and `reason`,
 and `defaults_unchecked`, each saved agent, mode or model it used without

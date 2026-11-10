@@ -72,7 +72,7 @@ device waiting on an invitation only when they created the invitation.
 
 ## Storage
 
-Migration v110 runs in one transaction:
+Migration v111 runs in one transaction:
 
 ```sql
 ALTER TABLE workspaces ADD COLUMN owner_member_id TEXT NOT NULL DEFAULT '';

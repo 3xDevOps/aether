@@ -401,3 +401,63 @@ test('inspect describes the element under a point without touching the page or r
   ({ page } = await call('/command', { ...page, operation: 'navigate', url: `${origin}/next` }));
   await assert.rejects(call('/command', { ...old, operation: 'inspect', x: 45, y: 34 }), { code: 'stale_target' });
 });
+
+async function fakeCompanion(t, options) {
+  const dir = await mkdtemp(join(tmpdir(), 'aether-companion-'));
+  const socketPath = join(dir, 'browser.sock');
+  const session = {
+    context: {}, browser: { isConnected: () => true }, processID: 1, sessionID: 'fake',
+    initialize: async () => {}, close: async () => {}, releaseInput: async () => ({}),
+    execute: (body) => (body.operation === 'hang' ? new Promise(() => {}) : Promise.resolve({ ok: true })),
+  };
+  const companion = await startServer({ socketPath, creationKey: 'key', launch: () => session, ...options });
+  await companion.ready;
+  t.after(async () => { await companion.close(); await rm(dir, { recursive: true, force: true }); });
+  return (method, path, body, timeout = 3000) => {
+    const req = http.request({ socketPath, method, path, signal: AbortSignal.timeout(timeout) });
+    const done = new Promise((resolve, reject) => {
+      req.once('response', (res) => {
+        let text = '';
+        res.on('data', (chunk) => { text += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+      });
+      req.once('error', reject);
+    });
+    req.end(body && JSON.stringify(body));
+    return { req, done };
+  };
+}
+
+test('pure boundaries: an operation past its deadline wedges the companion as unavailable', async (t) => {
+  const wedged = [];
+  const send = await fakeCompanion(t, { operationDeadline: 200, onWedged: (message) => wedged.push(message) });
+  const hung = send('POST', '/command', { operation: 'hang' }).done;
+  await delay(50);
+  const queued = Array.from({ length: 3 }, () => send('POST', '/command', { operation: 'noop' }).done);
+  for (const reply of await Promise.all([hung, ...queued])) {
+    assert.equal(reply.status, 503);
+    assert.equal(reply.body.error.code, 'unavailable');
+  }
+  assert.equal(wedged.length, 1, 'the companion is told to exit once');
+  const health = await send('GET', '/health').done;
+  assert.deepEqual([health.status, health.body.error.code], [503, 'unavailable']);
+  for (const reply of await Promise.all(Array.from({ length: 20 }, () => send('POST', '/command', { operation: 'noop' }).done))) {
+    assert.deepEqual([reply.status, reply.body.error.code], [503, 'unavailable'], 'a wedged companion refuses with unavailable, never a full queue');
+  }
+});
+
+test('pure boundaries: callers that abandon a queued request free its slot', async (t) => {
+  const send = await fakeCompanion(t, { operationDeadline: 2000 });
+  send('POST', '/command', { operation: 'hang' }).done.catch(() => {});
+  await delay(50);
+  const abandoned = Array.from({ length: 20 }, () => send('POST', '/command', { operation: 'noop' }));
+  for (const { done } of abandoned) done.catch(() => {});
+  await delay(100);
+  for (const { req } of abandoned) req.destroy();
+  await delay(100);
+  const next = send('POST', '/command', { operation: 'noop' });
+  const reply = await Promise.race([next.done, delay(300)]);
+  next.done.catch(() => {});
+  next.req.destroy();
+  assert.notEqual(reply?.status, 429, `a new request is queued, not refused: ${JSON.stringify(reply?.body)}`);
+});

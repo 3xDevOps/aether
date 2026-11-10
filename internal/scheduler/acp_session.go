@@ -213,7 +213,7 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 	if err != nil {
 		return fmt.Errorf("scheduler: load session to record its model: %w", err)
 	}
-	if model == stored.Model {
+	if model == stored.Model && stored.ModelError == "" {
 		return nil
 	}
 	if err = domain.ValidModel(model); err != nil {
