@@ -242,11 +242,12 @@ type Scheduler struct {
 	evidenceUnavailable map[domain.RunID]struct{}
 	// cleanupRetries backs off checkout cleanups that failed. Guarded by mu.
 	cleanupRetries map[domain.RunID]cleanupRetry
-	// checkoutSweepMu lets one checkout sweep run at a time, so no checkout
-	// is retried before its backoff is recorded.
-	checkoutSweepMu sync.Mutex
-	titleMu         sync.Mutex
-	titleUpdates    map[domain.RunID]*pendingRunTitle
+	// checkoutSweepGate lets one checkout sweep run at a time, so no checkout
+	// is retried before its backoff is recorded. A waiter can leave on its
+	// context.
+	checkoutSweepGate chan struct{}
+	titleMu           sync.Mutex
+	titleUpdates      map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
 	// waits is nil when runs register no wait conditions.
@@ -672,6 +673,7 @@ func New(cfg Config) (*Scheduler, error) {
 		cfg:                  cfg,
 		harnesses:            harnesses,
 		capacityGate:         make(chan struct{}, 1),
+		checkoutSweepGate:    make(chan struct{}, 1),
 		superCtx:             ctx,
 		superCancel:          cancel,
 		recoveryReady:        make(chan struct{}),
@@ -749,9 +751,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 	sweep := time.NewTicker(interval)
 	defer sweep.Stop()
-	if s.cfg.CheckoutTTL > 0 && s.checkoutSweepMu.TryLock() {
-		s.sweepCheckoutsLocked(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
-		s.checkoutSweepMu.Unlock()
+	if s.cfg.CheckoutTTL > 0 {
+		s.trySweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 	}
 	s.sweepCaches(ctx, false)
 	gc := time.NewTicker(time.Hour)
@@ -777,9 +778,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 				s.reclaimMu.Unlock()
 			}
 		case <-gc.C:
-			if s.cfg.CheckoutTTL > 0 && s.checkoutSweepMu.TryLock() {
-				s.sweepCheckoutsLocked(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
-				s.checkoutSweepMu.Unlock()
+			if s.cfg.CheckoutTTL > 0 {
+				s.trySweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 			}
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepScratch(ctx)

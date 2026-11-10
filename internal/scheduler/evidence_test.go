@@ -745,6 +745,30 @@ func TestFailingCheckoutCleanupBacksOffAndKeepsTheCheckout(t *testing.T) {
 	}
 }
 
+func TestCheckoutSweepWaiterLeavesOnCancel(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.sched.checkoutSweepGate <- struct{}{}
+	defer func() { <-e.sched.checkoutSweepGate }()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		e.sched.sweepCheckouts(ctx, time.Now().UTC())
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("waiter swept while another sweep held the slot")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled waiter still waits for the running sweep")
+	}
+	e.sched.trySweepCheckouts(t.Context(), time.Now().UTC())
+}
+
 func TestOnlyCheckoutNotFoundRejectsJoinedFailures(t *testing.T) {
 	failure := errors.New("extra repository a: commit failed")
 	for _, tc := range []struct {

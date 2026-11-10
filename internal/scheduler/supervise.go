@@ -695,15 +695,30 @@ func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
 
 // sweepCheckouts never removes the branch or transcript. It removes checkouts
 // of runs that finished at or before cutoff. It waits for a running sweep, as
-// disk reclaim needs its own cutoff; the supervisor skips one instead.
+// disk reclaim needs its own cutoff, unless ctx ends first.
 func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
-	s.checkoutSweepMu.Lock()
-	defer s.checkoutSweepMu.Unlock()
-	s.sweepCheckoutsLocked(ctx, cutoff)
+	select {
+	case s.checkoutSweepGate <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
+	defer func() { <-s.checkoutSweepGate }()
+	s.sweepCheckoutsHeld(ctx, cutoff)
 }
 
-// sweepCheckoutsLocked requires checkoutSweepMu.
-func (s *Scheduler) sweepCheckoutsLocked(ctx context.Context, cutoff time.Time) {
+// trySweepCheckouts skips while a sweep runs, so the supervisor never waits.
+func (s *Scheduler) trySweepCheckouts(ctx context.Context, cutoff time.Time) {
+	select {
+	case s.checkoutSweepGate <- struct{}{}:
+	default:
+		return
+	}
+	defer func() { <-s.checkoutSweepGate }()
+	s.sweepCheckoutsHeld(ctx, cutoff)
+}
+
+// sweepCheckoutsHeld requires the checkoutSweepGate slot.
+func (s *Scheduler) sweepCheckoutsHeld(ctx context.Context, cutoff time.Time) {
 	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
 		slog.Warn("scheduler: checkout gc: list workspaces", "error", err)
