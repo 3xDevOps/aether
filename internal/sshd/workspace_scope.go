@@ -57,7 +57,6 @@ func checkError(method string, err error) *protocol.Error {
 	return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": " + err.Error()}
 }
 
-// workspaceWire is w as actor sees it, with the role they act with there.
 func workspaceWire(actor permissions.Actor, w *domain.Workspace) protocol.Workspace {
 	out := protocol.WorkspaceFromDomain(w)
 	role, _ := actor.RoleIn(w.ID)
