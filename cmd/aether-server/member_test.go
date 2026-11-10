@@ -11,8 +11,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
-// member role writes the role to the store, never demotes the last super
-// admin, and keeps a workspace owner an admin.
+// member role writes the role to the store, never demotes the last
+// approved super admin, a pending one not counting, and keeps a workspace
+// owner an admin.
 func TestMemberRoleCommand(t *testing.T) {
 	t.Parallel()
 	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
@@ -23,7 +24,8 @@ func TestMemberRoleCommand(t *testing.T) {
 	ctx := context.Background()
 	super := &domain.Member{DisplayName: "Sam", TailnetLogin: "sam@", Color: "#e6194b", Role: domain.RoleSuperAdmin}
 	owner := &domain.Member{DisplayName: "Ada", TailnetLogin: "ada@", Color: "#3cb44b", Role: domain.RoleAdmin}
-	for _, m := range []*domain.Member{super, owner} {
+	pending := &domain.Member{DisplayName: "Pat", TailnetLogin: "pat@", Color: "#ffe119", Role: domain.RoleSuperAdmin, Pending: true}
+	for _, m := range []*domain.Member{super, owner, pending} {
 		if err = db.CreateMember(ctx, m); err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +39,7 @@ func TestMemberRoleCommand(t *testing.T) {
 		rerr := memberRole(ctx, &out, db, id, r)
 		return out.String(), rerr
 	}
-	if _, err = role(super.ID, domain.RoleAdmin); err == nil || !strings.Contains(err.Error(), "refusing to demote the last super admin") {
+	if _, err = role(super.ID, domain.RoleAdmin); err == nil || !strings.Contains(err.Error(), "refusing to demote the last approved super admin") {
 		t.Fatalf("demote the last super admin = %v", err)
 	}
 	if _, err = role(owner.ID, domain.RoleViewer); err == nil || !strings.Contains(err.Error(), string(w.ID)) {

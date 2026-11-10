@@ -111,8 +111,8 @@ type MergeSnapshot struct {
 
 // MergePlan is what merging two members would do. Minted is the member
 // that minted the code, Proposer the one that entered it. Policy is the
-// server's edge access policy and SuperAdmins counts its super admins.
-// Digest is the SHA-256 of all of it.
+// server's edge access policy and SuperAdmins counts its approved super
+// admins. Digest is the SHA-256 of all of it.
 type MergePlan struct {
 	CodeHash    string        `json:"code_hash"`
 	Minted      MergeSnapshot `json:"minted"`
@@ -383,7 +383,7 @@ func planInTx(ctx context.Context, tx *sql.Tx, hash string, minted, proposer dom
 	if err := refuseLiveWork(ctx, tx, a.ID, b.ID); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM members WHERE role = 'super_admin' AND merged_into = ''`).Scan(&plan.SuperAdmins); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM members WHERE role = 'super_admin' AND pending = 0 AND merged_into = ''`).Scan(&plan.SuperAdmins); err != nil {
 		return nil, fmt.Errorf("store: plan merge: count super admins: %w", err)
 	}
 	body, err := json.Marshal(plan)

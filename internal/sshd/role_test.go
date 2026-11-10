@@ -140,6 +140,32 @@ func TestMemberRolePendingMember(t *testing.T) {
 	}
 }
 
+// A pending super admin cannot call the server, so they do not count
+// towards keeping one: the last approved super admin stays one.
+func TestMemberRoleCountsOnlyApprovedSuperAdmins(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
+	_, pending := addMember(t, e, "Pat", domain.RoleViewer, true)
+	adminC := controlClient(t, e)
+	if err := adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(pending.ID), Role: string(domain.RoleSuperAdmin),
+	}, nil); err != nil {
+		t.Fatalf("make the pending member super admin: %v", err)
+	}
+	wantDenied(t, adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(e.member.ID), Role: string(domain.RoleAdmin),
+	}, nil), "demoting the last approved super admin")
+	wantDenied(t, adminC.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{
+		MemberID: string(e.member.ID),
+	}, nil), "removing the last approved super admin")
+	if err := adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(pending.ID), Role: string(domain.RoleViewer),
+	}, nil); err != nil {
+		t.Fatalf("demote the pending super admin: %v", err)
+	}
+}
+
 // Bad input is rejected before anything is written.
 func TestMemberRoleRejectsBadInput(t *testing.T) {
 	t.Parallel()

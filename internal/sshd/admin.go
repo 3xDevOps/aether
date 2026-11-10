@@ -182,11 +182,11 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 		return nil, rpcError(err)
 	}
 	if target.Role == domain.RoleSuperAdmin {
-		supers, cerr := s.countSuperAdmins(ctx)
+		others, cerr := s.otherSuperAdmins(ctx, id)
 		if cerr != nil {
 			return nil, cerr
 		}
-		if supers <= 1 {
+		if others == 0 {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last super admin"}
 		}
 	}
@@ -307,25 +307,26 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	return struct{}{}, nil
 }
 
-// countSuperAdmins reports how many members are super admins. It backs
-// the last-super-admin invariant: the server must never lose its ability
-// to administer itself, whether through removal or demotion.
-func (s *Server) countSuperAdmins(ctx context.Context) (int, *protocol.Error) {
+// otherSuperAdmins reports how many approved members other than except
+// are super admins. It backs the last-super-admin invariant: the server
+// must never lose its ability to administer itself, and a pending member
+// cannot call it.
+func (s *Server) otherSuperAdmins(ctx context.Context, except domain.MemberID) (int, *protocol.Error) {
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return 0, rpcError(err)
 	}
 	supers := 0
 	for _, m := range members {
-		if m.Role == domain.RoleSuperAdmin {
+		if m.Role == domain.RoleSuperAdmin && !m.Pending && m.ID != except {
 			supers++
 		}
 	}
 	return supers, nil
 }
 
-// refuseOwner refuses removing or demoting m below admin while m owns
-// workspaces: a workspace's owner is always an admin.
+// refuseOwner refuses removing m while m owns workspaces: a workspace's
+// owner is always an admin.
 func (s *Server) refuseOwner(ctx context.Context, m *domain.Member, action string) *protocol.Error {
 	all, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
@@ -340,9 +341,13 @@ func (s *Server) refuseOwner(ctx context.Context, m *domain.Member, action strin
 	if len(owned) == 0 {
 		return nil
 	}
+	return ownerRefusal(action, m.ID, owned)
+}
+
+func ownerRefusal(action string, id domain.MemberID, owned []string) *protocol.Error {
 	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
 		"%s %s is refused while they own workspaces %s; give each a new owner first: aether workspace owner <workspace> <member-id>",
-		action, m.ID, strings.Join(owned, ", "))}
+		action, id, strings.Join(owned, ", "))}
 }
 
 // inviteWorkspaces checks the workspaces an invitation from member grants:

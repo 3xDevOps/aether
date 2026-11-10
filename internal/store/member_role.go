@@ -1,0 +1,102 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/3xDevOps/Aether/internal/domain"
+)
+
+// ErrLastSuperAdmin refuses a role change that would leave no approved
+// super admin to administer the server.
+var ErrLastSuperAdmin = errors.New("store: refusing to demote the last approved super admin")
+
+// OwnsWorkspacesError refuses demoting Member below admin while they own
+// Workspaces, each "name (id)": a workspace's owner is always an admin.
+type OwnsWorkspacesError struct {
+	Member     domain.MemberID
+	Workspaces []string
+}
+
+func (e *OwnsWorkspacesError) Error() string {
+	return fmt.Sprintf("store: member %s owns workspaces %s", e.Member, strings.Join(e.Workspaces, ", "))
+}
+
+func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.Role) (domain.Role, error) {
+	if !role.Valid() {
+		return "", fmt.Errorf("store: set member role: invalid role %q", role)
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("store: begin set member role: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var was domain.Role
+	err = tx.QueryRowContext(ctx, `SELECT role FROM members WHERE id = ? AND merged_into = ''`, id).Scan(&was)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: set member role: %w", err)
+	}
+	if was == role {
+		return was, nil
+	}
+	if was == domain.RoleSuperAdmin {
+		var others int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM members WHERE role = 'super_admin' AND pending = 0 AND merged_into = '' AND id <> ?`,
+			id).Scan(&others); err != nil {
+			return "", fmt.Errorf("store: set member role: count super admins: %w", err)
+		}
+		if others == 0 {
+			return "", ErrLastSuperAdmin
+		}
+	}
+	if !role.Admin() {
+		owned, err := ownedWorkspaces(ctx, tx, id)
+		if err != nil {
+			return "", fmt.Errorf("store: set member role: %w", err)
+		}
+		if len(owned) > 0 {
+			return "", &OwnsWorkspacesError{Member: id, Workspaces: owned}
+		}
+	}
+	if was == domain.RoleSuperAdmin || (was == domain.RoleAdmin && !role.Admin()) {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM identity_invitations WHERE created_by = ? AND consumed_at IS NULL`, id); err != nil {
+			return "", fmt.Errorf("store: set member role: revoke invitations: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE members SET role = ? WHERE id = ?`, role, id); err != nil {
+		return "", fmt.Errorf("store: set member role: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("store: commit set member role: %w", err)
+	}
+	return was, nil
+}
+
+func ownedWorkspaces(ctx context.Context, tx *sql.Tx, id domain.MemberID) ([]string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT name || ' (' || id || ')' FROM workspaces WHERE owner_member_id = ? ORDER BY created_at, id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("owned workspaces: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var owned []string
+	for rows.Next() {
+		var w string
+		if err := rows.Scan(&w); err != nil {
+			return nil, fmt.Errorf("owned workspaces: %w", err)
+		}
+		owned = append(owned, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("owned workspaces: %w", err)
+	}
+	return owned, nil
+}

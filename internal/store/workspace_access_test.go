@@ -172,6 +172,60 @@ func TestSetWorkspaceOwner(t *testing.T) {
 	}
 }
 
+// SetMemberRole refuses, in its transaction, demoting the last approved
+// super admin, a pending one not counting, and demoting a workspace owner
+// below admin; a demotion revokes the demoted admin's invitations.
+func TestSetMemberRoleGuards(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	super := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#ffe119", Role: domain.RoleSuperAdmin}
+	pending := &domain.Member{DisplayName: "Pat", PublicKey: testKey(t, "pat"), Color: "#3cb44b", Role: domain.RoleSuperAdmin, Pending: true}
+	owner := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+	for _, m := range []*domain.Member{super, pending, owner} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.SetMemberRole(ctx, super.ID, domain.RoleAdmin); !errors.Is(err, ErrLastSuperAdmin) {
+		t.Fatalf("demote the last approved super admin = %v, want ErrLastSuperAdmin", err)
+	}
+	if was, err := db.SetMemberRole(ctx, pending.ID, domain.RoleViewer); err != nil || was != domain.RoleSuperAdmin {
+		t.Fatalf("demote the pending super admin = %s, %v", was, err)
+	}
+	w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	inv := &domain.Invitation{Provider: "github", Login: "dana", Role: domain.RoleCollaborator, Workspaces: []domain.WorkspaceID{w.ID},
+		CreatedBy: owner.ID, ExpiresAt: time.Now().Add(time.Hour)}
+	if err := db.CreateInvitation(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	var owns *OwnsWorkspacesError
+	if _, err := db.SetMemberRole(ctx, owner.ID, domain.RoleCollaborator); !errors.As(err, &owns) || len(owns.Workspaces) != 1 {
+		t.Fatalf("demote a workspace owner = %v, want OwnsWorkspacesError naming %s", err, w.ID)
+	}
+	if got, err := db.GetMember(ctx, owner.ID); err != nil || got.Role != domain.RoleAdmin {
+		t.Fatalf("owner after refused demotion = %+v, %v", got, err)
+	}
+	if _, err := db.GetInvitation(ctx, inv.ID); err != nil {
+		t.Fatalf("invitation after refused demotion: %v", err)
+	}
+	if _, err := db.SetWorkspaceOwner(ctx, w.ID, super.ID, super.ID); err != nil {
+		t.Fatal(err)
+	}
+	if was, err := db.SetMemberRole(ctx, owner.ID, domain.RoleCollaborator); err != nil || was != domain.RoleAdmin {
+		t.Fatalf("demote a former owner = %s, %v", was, err)
+	}
+	if _, err := db.GetInvitation(ctx, inv.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("demoted admin's invitation = %v, want ErrNotFound", err)
+	}
+	if _, err := db.SetMemberRole(ctx, "mem_missing", domain.RoleViewer); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("role of a missing member = %v, want ErrNotFound", err)
+	}
+}
+
 // Accepting an invitation, or joining with a code, creates the member with
 // a grant on each named workspace that still exists and its issuer still
 // administers: any for a super admin, the owned ones for an admin.

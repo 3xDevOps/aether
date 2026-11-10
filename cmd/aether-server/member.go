@@ -35,10 +35,9 @@ func memberCmd(args []string) error {
 	return memberRole(context.Background(), os.Stdout, db, id, role)
 }
 
-// memberRole sets a member's role in the store, as member.role does over
-// RPC: the last super admin is never demoted, and a member who owns
-// workspaces stays an admin. A demoted admin's open invitations go with
-// the role. The server reads roles on every call, so it applies at once.
+// memberRole sets a member's role with the store's SetMemberRole, as
+// member.role does over RPC. The server reads roles on every call, so it
+// applies at once.
 func memberRole(ctx context.Context, w io.Writer, db *store.DB, id domain.MemberID, role domain.Role) error {
 	if !role.Valid() {
 		return fmt.Errorf("unknown role %q; want viewer, collaborator, admin, or super_admin", role)
@@ -50,49 +49,17 @@ func memberRole(ctx context.Context, w io.Writer, db *store.DB, id domain.Member
 	if err != nil {
 		return err
 	}
-	was := m.Role
-	if was != role {
-		if was == domain.RoleSuperAdmin {
-			members, err := db.ListMembers(ctx)
-			if err != nil {
-				return err
-			}
-			supers := 0
-			for _, o := range members {
-				if o.Role == domain.RoleSuperAdmin {
-					supers++
-				}
-			}
-			if supers <= 1 {
-				return fmt.Errorf("refusing to demote the last super admin %s (%s); make another member super admin first", m.DisplayName, m.ID)
-			}
-		}
-		if !role.Admin() {
-			workspaces, err := db.ListWorkspaces(ctx)
-			if err != nil {
-				return err
-			}
-			var owned []string
-			for _, ws := range workspaces {
-				if ws.OwnerID == m.ID {
-					owned = append(owned, fmt.Sprintf("%s (%s)", ws.Name, ws.ID))
-				}
-			}
-			if len(owned) > 0 {
-				return fmt.Errorf("refusing to demote %s (%s) to %s while they own workspaces %s; give each a new owner first: aether workspace owner <workspace> <member-id>",
-					m.DisplayName, m.ID, role, strings.Join(owned, ", "))
-			}
-		}
-		if was == domain.RoleSuperAdmin || (was == domain.RoleAdmin && !role.Admin()) {
-			if err := db.DeleteInvitationsBy(ctx, m.ID); err != nil {
-				return err
-			}
-		}
-		m.Role = role
-		if err := db.UpdateMember(ctx, m); err != nil {
-			return err
-		}
+	was, err := db.SetMemberRole(ctx, id, role)
+	var owns *store.OwnsWorkspacesError
+	switch {
+	case errors.Is(err, store.ErrLastSuperAdmin):
+		return fmt.Errorf("refusing to demote the last approved super admin %s (%s); make another member super admin first", m.DisplayName, m.ID)
+	case errors.As(err, &owns):
+		return fmt.Errorf("refusing to demote %s (%s) to %s while they own workspaces %s; give each a new owner first: aether workspace owner <workspace> <member-id>",
+			m.DisplayName, m.ID, role, strings.Join(owns.Workspaces, ", "))
+	case err != nil:
+		return err
 	}
-	_, _ = fmt.Fprintf(w, "%s (%s) is %s, was %s\n", m.DisplayName, m.ID, m.Role, was)
+	_, _ = fmt.Fprintf(w, "%s (%s) is %s, was %s\n", m.DisplayName, m.ID, role, was)
 	return nil
 }
