@@ -1,6 +1,3 @@
-// Settings > Agents: the sign-in state of each agent on the real agent.list,
-// and the hand-off to the Agents page that owns installing and signing in.
-
 import { expect, test } from './fixtures'
 
 test('Settings lists each agent and a search for sign in leads to it', async ({ page, aether }) => {
