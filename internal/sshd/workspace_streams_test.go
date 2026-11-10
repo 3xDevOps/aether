@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -330,5 +331,51 @@ func TestRetainedArtifactOfAForeignRunIsNotFound(t *testing.T) {
 	missing, foreign := open("evp-doesnotexist"), open(packet.ID)
 	if missing.Code != protocol.CodeNotFound || !sameError(foreign, missing) {
 		t.Fatalf("foreign retained capture = %v, missing one = %v; want the same not found", foreign, missing)
+	}
+}
+
+func TestRunWithAnUnreachableExtraRepoIsNotFound(t *testing.T) {
+	t.Parallel()
+	w := newScopedWorld(t, nil)
+	ctx := context.Background()
+	signer, u := w.granted(t, "Una", domain.RoleCollaborator, w.ws.ID)
+	extra := []domain.RunRepo{{WorkspaceID: w.foreign.ID, Name: "foreign", Path: "/repos/foreign", Branch: "aether/foreign", BaseBranch: "main"}}
+	if err := w.db.SetRunRepos(ctx, w.run.ID, extra); err != nil {
+		t.Fatal(err)
+	}
+
+	missing, got := attachAs(t, w.testEnv, signer, "run-doesnotexist", false), attachAs(t, w.testEnv, signer, w.run.ID, false)
+	if missing.Code != protocol.CodeNotFound || got.OK || got.Code != missing.Code || got.Error != missing.Error {
+		t.Fatalf("attach to a run with an unreachable extra repo = %+v, to a missing run = %+v; want the same not found", got, missing)
+	}
+	_, missingACP, _ := w.srv.Local(u.ID).ACP(ctx, protocol.ACPStreamRequest{RunID: "run-doesnotexist"})
+	_, gotACP, _ := w.srv.Local(u.ID).ACP(ctx, protocol.ACPStreamRequest{RunID: string(w.run.ID)})
+	if gotACP.Code != missingACP.Code || gotACP.Error != missingACP.Error {
+		t.Fatalf("ACP = %+v, missing = %+v; want the same not found", gotACP, missingACP)
+	}
+	missingSync, gotSync := syncAck(t, w.testEnv, signer, "run-doesnotexist", true), syncAck(t, w.testEnv, signer, w.run.ID, true)
+	if missingSync.Code != protocol.CodeNotFound || gotSync.OK || gotSync.Code != missingSync.Code || gotSync.Error != missingSync.Error {
+		t.Fatalf("sync = %+v, missing = %+v; want the same not found", gotSync, missingSync)
+	}
+	client := controlAs(t, w.testEnv, signer)
+	for _, method := range []string{protocol.MethodRunInject, protocol.MethodRunACPHistory, protocol.MethodRunKill} {
+		gotErr := client.Call(method, protocol.RunIDParams{RunID: string(w.run.ID)}, nil)
+		missingErr := client.Call(method, protocol.RunIDParams{RunID: "run-doesnotexist"}, nil)
+		if gotErr == nil || missingErr == nil || !sameError(wireErrOf(t, gotErr), wireErrOf(t, missingErr)) {
+			t.Fatalf("%s = %v, missing = %v; want the same not found", method, gotErr, missingErr)
+		}
+	}
+	if _, _, _, err := w.srv.developmentAuthority(ctx, u.ID, string(w.run.ID)); !errors.Is(err, permissions.ErrNoAccess) {
+		t.Fatalf("development authority = %v, want ErrNoAccess", err)
+	}
+
+	if err := w.db.GrantWorkspace(ctx, w.foreign.ID, u.ID, w.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ack, err := w.srv.Local(u.ID).Attach(ctx, protocol.AttachRequest{RunID: string(w.run.ID), ReadOnly: true, Cols: 80, Rows: 24}); err != nil || !ack.OK {
+		t.Fatalf("read-only attach once every repo is reachable: ack=%+v err=%v", ack, err)
+	}
+	if err := checkSteer(ctx, w.store, u.ID, w.run.ID); err != nil {
+		t.Fatalf("steer once every repo is reachable: %v", err)
 	}
 }

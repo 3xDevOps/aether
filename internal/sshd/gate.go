@@ -40,14 +40,18 @@ func checkSteer(ctx context.Context, st store.Store, member domain.MemberID, run
 	return permissions.Check(permissions.Steer, actor, target)
 }
 
-// checkRunView is View in the run's workspace: whether the member may
-// still see the run at all.
+// checkRunView is View on the run: whether the member may still see its
+// terminal, transcript and files.
 func checkRunView(ctx context.Context, st store.Store, member domain.MemberID, run domain.RunID) error {
-	r, err := st.GetRun(ctx, run)
+	actor, err := resolveActor(ctx, st, member)
 	if err != nil {
 		return err
 	}
-	return checkIn(ctx, st, member, permissions.View, r.WorkspaceID)
+	target, err := resolveRunTarget(ctx, st, run)
+	if err != nil {
+		return err
+	}
+	return permissions.Check(permissions.View, actor, target)
 }
 
 // checkPush authorizes git receive-pack in workspace ws: pushing writes to
@@ -69,7 +73,9 @@ func resolveActor(ctx context.Context, st store.Store, id domain.MemberID) (perm
 }
 
 // resolveRunTarget loads the run's ownership and protection plus its
-// workspace's steer-others policy for a permission check.
+// workspace's steer-others policy for a permission check. The run's extra
+// workspaces are in the target: its container mounts every repository, so
+// whoever acts on the run must reach all of them.
 func resolveRunTarget(ctx context.Context, st store.Store, id domain.RunID) (permissions.Target, error) {
 	run, err := st.GetRun(ctx, id)
 	if err != nil {
@@ -81,6 +87,7 @@ func resolveRunTarget(ctx context.Context, st store.Store, id domain.RunID) (per
 	}
 	return permissions.Target{
 		Workspace:   run.WorkspaceID,
+		Extra:       runWorkspaces(run)[1:],
 		Owner:       run.MemberID,
 		Protected:   run.Protected,
 		SteerOthers: ws.SteerOthers,

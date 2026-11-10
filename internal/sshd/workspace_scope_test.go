@@ -487,9 +487,8 @@ func TestRunResultLeavesOutUnreachableRepos(t *testing.T) {
 		t.Fatalf("S sees repos %+v, want the primary and B's", got.Run.Repos)
 	}
 	var res protocol.RunResult
-	params := protocol.RunCloseParams{RunID: string(w.runA.ID), Outcome: string(domain.RunAbandoned)}
-	if err := w.call(t, "U", protocol.MethodRunClose, params, &res); err != nil {
-		t.Fatalf("U closes A's run: %v", err)
+	if err := w.call(t, "U", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(w.runA.ID)}, &res); err != nil {
+		t.Fatalf("U gets A's run: %v", err)
 	}
 	if res.Run.ID != string(w.runA.ID) {
 		t.Fatalf("U's result = %+v, want A's run", res.Run)
@@ -499,4 +498,8 @@ func TestRunResultLeavesOutUnreachableRepos(t *testing.T) {
 			t.Fatalf("U's result names B's repo: %+v", res.Run.Repos)
 		}
 	}
+	closeParams := func(id string) protocol.RunCloseParams {
+		return protocol.RunCloseParams{RunID: id, Outcome: string(domain.RunAbandoned)}
+	}
+	w.sameAsMissing(t, "U", protocol.MethodRunClose, closeParams(string(w.runA.ID)), closeParams(noRun))
 }
