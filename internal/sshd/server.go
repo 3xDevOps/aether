@@ -199,6 +199,8 @@ type Server struct {
 	// paths never acquire registerMu or mu, so the lock order cannot cycle.
 	authorizationMu *sync.Mutex
 	handoffSeq      atomic.Uint64
+	// accessGen counts workspace access changes; see accessChanged.
+	accessGen atomic.Uint64
 
 	// Workspace gates fence repository access and live overlays against
 	// deletion. Keep each gate stable even after deletion so queued readers

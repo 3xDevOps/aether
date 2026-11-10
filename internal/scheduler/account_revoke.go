@@ -126,14 +126,24 @@ func (s *Scheduler) accountRevoked(ctx context.Context, run *domain.Run) (bool, 
 }
 
 // resolveRunAccount refuses the run's account as a launch by its launcher
-// would be refused now.
+// would be refused now, including when the account's owner no longer
+// reaches one of the run's workspaces.
 func (s *Scheduler) resolveRunAccount(ctx context.Context, run *domain.Run) error {
 	launcher := run.HomeMemberID
 	if launcher == "" {
 		launcher = run.MemberID
 	}
-	_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, launcher, string(run.AccountMember()))
+	_, err := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, launcher, string(run.AccountMember()), runWorkspaces(run))
 	return err
+}
+
+// runWorkspaces is the run's primary workspace followed by its extra ones.
+func runWorkspaces(run *domain.Run) []domain.WorkspaceID {
+	out := []domain.WorkspaceID{run.WorkspaceID}
+	for _, repo := range run.Extras {
+		out = append(out, repo.WorkspaceID)
+	}
+	return out
 }
 
 // leaveRevokedAccount claims a run on a revoked account and moves it to

@@ -247,7 +247,8 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	s.authorizationMu.Lock()
 	unlockAuthorization := sync.OnceFunc(s.authorizationMu.Unlock)
 	defer unlockAuthorization()
-	admission, err := AuthorizeLaunch(ctx, s.cfg.Store, member, p.AccountMemberID)
+	workspaces := append([]domain.WorkspaceID{domain.WorkspaceID(p.WorkspaceID)}, workspaceIDs(p.ExtraWorkspaceIDs)...)
+	admission, err := AuthorizeLaunch(ctx, s.cfg.Store, member, p.AccountMemberID, workspaces)
 	if err != nil {
 		if errors.Is(err, permissions.ErrDenied) {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunLaunch + ": " + err.Error()}
@@ -260,7 +261,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 			return nil, rpcError(err)
 		}
 	}
-	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, member, requested, workspaces, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
 		return s.cfg.Runs.FallbackLaunchable(ctx, member, requested, account, p.Harness, mode)
 	})
 	if excluded != nil {
@@ -596,8 +597,14 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if _, perr := s.launchAccount(ctx, member, string(run.AccountMember())); perr != nil {
-		return nil, perr
+	workspaces := runWorkspaces(run)
+	if cerr := checkLaunchIn(actor, workspaces[1:]); errors.Is(cerr, permissions.ErrDenied) {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunRelaunch + ": " + cerr.Error()}
+	} else if cerr != nil {
+		return nil, rpcError(cerr)
+	}
+	if _, err := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, member, string(run.AccountMember()), workspaces); err != nil {
+		return nil, rpcError(err)
 	}
 	reopened, err := s.cfg.Runs.Relaunch(ctx, id, member)
 	if err != nil {
@@ -645,6 +652,9 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	recipientActor := permissions.ActorOf(recipient)
 	if derr := permissions.Check(permissions.Launch, recipientActor, permissions.Target{}); derr != nil {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own sessions", recipient.DisplayName))
+	}
+	if derr := checkLaunchIn(recipientActor, runWorkspaces(run)); derr != nil {
+		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: they have no access to every workspace of this session", recipient.DisplayName))
 	}
 	from := run.MemberID
 	outbox, ok := s.cfg.Store.(store.HandoffOutboxStore)

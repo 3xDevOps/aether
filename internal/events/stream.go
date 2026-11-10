@@ -50,11 +50,20 @@ type private interface {
 	Recipient() domain.MemberID
 }
 
-// StreamWire pumps a subscription onto write in wire form, leaving out
-// what is private to a member other than member, until the subscription
-// ends (nil), the buffer dropped (ErrDropped), or a write or encode fails.
+// repoScoped is a payload about one repository of a run, published under
+// the run's workspace. For an extra repository of a multi-repo run it names
+// that repository's workspace, which the member must reach too.
+type repoScoped interface {
+	RepoWorkspace() domain.WorkspaceID
+}
+
+// StreamWire pumps a subscription onto write in wire form, until the
+// subscription ends (nil), the buffer dropped (ErrDropped), or a write or
+// encode fails. A private event goes to its recipient alone, a ServerScope
+// event to everyone, and any other event only when reaches allows its
+// workspace and, for a repository's event, the repository's workspace.
 // Framing belongs to the caller; ordering belongs here.
-func StreamWire(sub Subscription, member domain.MemberID, write func(protocol.Event) error) error {
+func StreamWire(sub Subscription, member domain.MemberID, reaches func(domain.WorkspaceID) bool, write func(protocol.Event) error) error {
 	for ev := range sub.Events() {
 		// Check for drops before writing: an event already dequeued was
 		// dequeued before any drop, so ending the stream pre-write leaves
@@ -64,7 +73,7 @@ func StreamWire(sub Subscription, member domain.MemberID, write func(protocol.Ev
 		if sub.Dropped() > 0 {
 			return ErrDropped
 		}
-		if p, ok := ev.Payload.(private); ok && p.Recipient() != member {
+		if !deliverable(ev, member, reaches) {
 			continue
 		}
 		we, err := wireEvent(ev)
@@ -76,6 +85,22 @@ func StreamWire(sub Subscription, member domain.MemberID, write func(protocol.Ev
 		}
 	}
 	return nil
+}
+
+func deliverable(ev Event, member domain.MemberID, reaches func(domain.WorkspaceID) bool) bool {
+	if p, ok := ev.Payload.(private); ok {
+		return p.Recipient() == member
+	}
+	if ev.WorkspaceID == ServerScope {
+		return true
+	}
+	if !reaches(ev.WorkspaceID) {
+		return false
+	}
+	if r, ok := ev.Payload.(repoScoped); ok && r.RepoWorkspace() != "" {
+		return reaches(r.RepoWorkspace())
+	}
+	return true
 }
 
 // wireEvent renders one event in its wire form.

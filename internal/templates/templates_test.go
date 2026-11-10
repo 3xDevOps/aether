@@ -113,7 +113,7 @@ func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 	clock := &fakeClock{t: now}
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
-		Store: db, Bus: bus, Runs: runs,
+		Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: runs,
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
@@ -179,7 +179,7 @@ func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 	clock := &fakeClock{t: now}
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
-		Store: db, Bus: bus, Runs: runs,
+		Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: runs,
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
@@ -241,7 +241,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	clock := &fakeClock{t: now}
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
-		Store: db, Bus: bus, Runs: runs,
+		Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: runs,
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})

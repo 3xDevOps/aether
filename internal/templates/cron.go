@@ -171,7 +171,7 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 		slog.Warn("templates: schedule template unavailable", "schedule", sc.ID, "error", err)
 		return
 	}
-	if err = s.allowed(ctx, sc.MemberID); err != nil {
+	if err = s.allowed(ctx, sc.MemberID, t.WorkspaceID); err != nil {
 		slog.Warn("templates: schedule skipped", "schedule", sc.ID, "template", t.Name, "error", err)
 		s.publish(ctx, t.WorkspaceID, "", sc.MemberID,
 			fmt.Sprintf("schedule for template %q skipped: %s", t.Name, err))
@@ -196,8 +196,8 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 }
 
 // allowed re-reads the schedule's member and checks the launch capability
-// against their current role.
-func (s *Service) allowed(ctx context.Context, member domain.MemberID) error {
+// against their current role and access in workspace.
+func (s *Service) allowed(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) error {
 	m, err := s.store.GetMember(ctx, member)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -208,7 +208,7 @@ func (s *Service) allowed(ctx context.Context, member domain.MemberID) error {
 	if m.Pending {
 		return fmt.Errorf("member %s is awaiting admin approval", member)
 	}
-	if err := permissions.Check(permissions.Launch, permissions.ActorOf(m), permissions.Target{}); err != nil {
+	if err := permissions.Check(permissions.Launch, permissions.ActorOf(m), permissions.Target{Workspace: workspace}); err != nil {
 		return fmt.Errorf("member %s may no longer launch sessions: %w", member, err)
 	}
 	return nil

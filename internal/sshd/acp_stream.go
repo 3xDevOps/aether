@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 )
@@ -76,6 +77,9 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 		return
 	}
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	if err == nil {
+		err = checkIn(ctx, s.cfg.Store, member, permissions.View, run.WorkspaceID)
+	}
 	if err != nil {
 		e := rpcError(err)
 		refuse(e.Code, e.Message)

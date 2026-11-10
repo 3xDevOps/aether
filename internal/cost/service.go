@@ -380,7 +380,7 @@ func (s *Service) SetBudget(ctx context.Context, workspace domain.WorkspaceID, c
 // workspace's budget. A run already running is never affected: budgets
 // gate admission only.
 func (s *Service) Admit(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID) error {
-	if err := s.checkLaunch(ctx, member); err != nil {
+	if err := s.checkLaunch(ctx, member, workspace); err != nil {
 		return err
 	}
 	st, err := s.status(ctx, workspace)
@@ -402,10 +402,11 @@ func (s *Service) Admit(ctx context.Context, workspace domain.WorkspaceID, membe
 		permissions.ErrDenied, ErrBudgetExceeded, workspace, st.Spend.CostUSD, st.Budget.LimitUSD, advisory)
 }
 
-// checkLaunch re-resolves the member and checks the launch capability, so
-// a member demoted or removed since the request started cannot keep
-// starting runs through this path.
-func (s *Service) checkLaunch(ctx context.Context, member domain.MemberID) error {
+// checkLaunch re-resolves the member and checks the launch capability in
+// workspace, so a member demoted, removed or no longer granted the
+// workspace since the request started cannot keep starting runs through
+// this path.
+func (s *Service) checkLaunch(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) error {
 	m, err := s.store.GetMember(ctx, member)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -416,10 +417,7 @@ func (s *Service) checkLaunch(ctx context.Context, member domain.MemberID) error
 	if m.Pending {
 		return fmt.Errorf("%w: membership pending admin approval", permissions.ErrDenied)
 	}
-	if err := permissions.Check(permissions.Launch, permissions.ActorOf(m), permissions.Target{}); err != nil {
-		return err
-	}
-	return nil
+	return permissions.Check(permissions.Launch, permissions.ActorOf(m), permissions.Target{Workspace: workspace})
 }
 
 // status reads a workspace's budget and current spend.
