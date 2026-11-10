@@ -256,3 +256,41 @@ func TestARelayWakeOfAHiddenSessionStaysHidden(t *testing.T) {
 		}
 	}
 }
+
+// A session keeps an extra workspace in its scope after that workspace is
+// deleted: no one but a super admin reaches it any more.
+func TestDeletingAnExtraWorkspaceKeepsTheSessionHidden(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	db := w.e.db
+	extra := &domain.Workspace{Name: "x", BaseBranch: "main", OwnerID: w.a.ID}
+	if err := db.CreateWorkspace(ctx, extra); err != nil {
+		t.Fatal(err)
+	}
+	run := &domain.Run{WorkspaceID: w.wsA.ID, MemberID: w.a.ID, Task: "two repos", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunCompleted}
+	if err := db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetRunRepos(ctx, run.ID, []domain.RunRepo{{WorkspaceID: extra.ID, Name: "x", Path: "/repos/x", Branch: "aether/x", BaseBranch: "main"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteWorkspace(ctx, extra.ID); err != nil {
+		t.Fatalf("delete the extra workspace: %v", err)
+	}
+	if err := w.call(t, "S", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(run.ID)}, nil); err != nil {
+		t.Fatalf("S run.get: %v", err)
+	}
+	for _, who := range []string{"A", "U"} {
+		w.sameAsMissing(t, who, protocol.MethodRunGet, protocol.RunIDParams{RunID: string(run.ID)}, protocol.RunIDParams{RunID: noRun})
+		var list protocol.RunListResult
+		if err := w.call(t, who, protocol.MethodRunList, protocol.RunListParams{WorkspaceID: string(w.wsA.ID)}, &list); err != nil {
+			t.Fatalf("%s run.list: %v", who, err)
+		}
+		for _, r := range list.Runs {
+			if r.ID == string(run.ID) {
+				t.Errorf("%s run.list shows the session whose extra workspace was deleted", who)
+			}
+		}
+	}
+}

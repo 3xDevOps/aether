@@ -45,7 +45,6 @@ func (d *DB) DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error {
 		`DELETE FROM templates WHERE workspace_id = ?`,
 		`DELETE FROM coord_audit_publications WHERE workspace_id = ?`,
 		`DELETE FROM events WHERE workspace_id = ?`,
-		`DELETE FROM run_repos WHERE workspace_id = ?`,
 	} {
 		if _, err = tx.ExecContext(ctx, query, id); err != nil {
 			return fmt.Errorf("store: delete workspace data: %w", mapConstraint(err, ErrInUse))
