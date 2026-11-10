@@ -35,7 +35,7 @@ type Pop =
 /** How long the pointer may rest, or move without closing in, while heading for a pinned button before the lane under it takes the hover. */
 const aimMs = 150
 /** The longest the lanes crossed on the way to a pinned button wait. */
-const aimMaxMs = 1000
+const aimMaxMs = 1500
 
 function side(a: { x: number; y: number }, b: { x: number; y: number }, p: { x: number; y: number }): number {
   return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
@@ -331,8 +331,8 @@ export function LanesView(props: LanesViewProps) {
     pointer.current = at
     const next = laneAt(at.y - event.currentTarget.getBoundingClientRect().top)
     // On its way to the hovered lane's pinned button the pointer crosses other lanes. They wait while it keeps closing in, for at most aimMaxMs.
-    const buttons = content.current?.querySelectorAll('[data-mail-pinned]') ?? []
-    if (!popRef.current && hovered && next !== hovered && left.current && headingFor(left.current, at, buttons)) {
+    const buttons = !popRef.current && hovered && next !== hovered && left.current ? content.current?.querySelectorAll('[data-mail-pinned]') ?? [] : []
+    if (left.current && headingFor(left.current, at, buttons)) {
       const gap = distanceTo(at, buttons)
       aim.current ??= { since: Date.now(), gap: Infinity }
       if (Date.now() - aim.current.since < aimMaxMs) {
@@ -456,11 +456,12 @@ export function LanesView(props: LanesViewProps) {
 
   const onPick = useCallback((lane: Lane, x: number | undefined, chevron: boolean) => {
     if (drag.current?.moved) return
+    const again = popRef.current?.kind === 'lane' && popRef.current.key === lane.key && !chevron
     setPop(null)
-    latestActivate.current(lane, x, chevron)
+    if (!again) latestActivate.current(lane, x, chevron)
   }, [])
-  // A lane, mark or link replaces the open popover on click; Radix dismissing it after that click would close the new one.
-  const keep = useCallback((target: Element) => Boolean(content.current?.contains(target) && target.closest('[role=treeitem], [data-mail-control]')), [])
+  // A click on a lane, mark or link replaces the open popover itself; Radix dismissing it after that click would close the new one.
+  const keep = useCallback((target: Element) => !drag.current?.moved && Boolean(content.current?.contains(target) && target.closest('[role=treeitem], svg [data-mail-control]')), [])
   const latestActivate = useRef(activate)
   latestActivate.current = activate
   const onRetry = useCallback((runID: string) => latest.current.onRetryAgents(runID), [])
@@ -547,6 +548,8 @@ export function LanesView(props: LanesViewProps) {
   const focusBelow = focusTalks.filter((c) => offscreen(c, false))
   const focusOutside = focusTalks.filter((c) => !c.lane)
   const jump = (key: string) => {
+    jumped.current = key
+    setPop(null)
     setHovered(null)
     setActiveKey(key)
     focusLaneEl(key)

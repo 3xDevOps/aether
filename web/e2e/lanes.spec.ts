@@ -124,8 +124,15 @@ test('one click on another lane moves its card there', async ({ page, aether }) 
   await expect(page.getByRole('dialog')).toHaveCount(1)
 })
 
+// The hover waits on a timer while the pointer heads for a pinned button,
+// so these cases hold the page's clock: nothing hands over between steps.
+async function holdClock(page: Page) {
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
+}
+
 test("a lane's pinned button stays while the pointer crosses other lanes to reach it", async ({ page, aether }) => {
   await page.setViewportSize({ width: 1280, height: 600 })
+  await page.clock.install()
   const tree = await setUp(page, aether, 16)
   const lead = tree.getByRole('treeitem', { name: /^Lead the checkout rewrite/ })
   await expect(lead).toBeVisible()
@@ -135,16 +142,19 @@ test("a lane's pinned button stays while the pointer crosses other lanes to reac
   await expect(pinned).toHaveText(/Test the checkout rewrite/)
 
   // A straight path from Lead down to the button, over a dozen lanes with no mail.
+  await holdClock(page)
   const button = (await pinned.boundingBox())!
-  await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2, { steps: 8 })
+  await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2, { steps: 20 })
   await expect(pinned).toHaveText(/Test the checkout rewrite/)
   await page.mouse.down()
   await page.mouse.up()
+  await page.clock.resume()
   await expect(tree.getByRole('treeitem', { name: /^Test the checkout rewrite/ })).toBeFocused()
 })
 
 test('a lane the pointer rests on takes the hover even on the way to a pinned button', async ({ page, aether }) => {
   await page.setViewportSize({ width: 1280, height: 600 })
+  await page.clock.install()
   const tree = await setUp(page, aether, 16)
   const lead = tree.getByRole('treeitem', { name: /^Lead the checkout rewrite/ })
   await expect(lead).toBeVisible()
@@ -155,10 +165,41 @@ test('a lane the pointer rests on takes the hover even on the way to a pinned bu
   const button = (await pinned.boundingBox())!
   const helper = (await tree.getByRole('treeitem', { name: /^Helper 3,/ }).boundingBox())!
   const x = box.x + 300 + ((button.x - box.x - 300) * (helper.y - box.y)) / (button.y - box.y)
+  await holdClock(page)
   await page.mouse.move(x, helper.y + helper.height / 2, { steps: 10 })
-  expect(await pinned.isVisible()).toBe(true)
-  expect(await page.locator('[data-lane-highlight="hover"]').count()).toBe(1)
-  expect(await page.locator('[data-lane-highlight="hover"]').boundingBox()).toEqual(expect.objectContaining({ y: box.y }))
+  const band = page.locator('[data-lane-highlight="hover"]')
+  await expect(pinned).toBeVisible()
+  expect((await band.boundingBox())?.y).toBe(box.y)
+  await page.clock.runFor(200)
   await expect(pinned).toBeHidden()
-  await expect(page.locator('[data-lane-highlight="hover"]')).toHaveCount(1)
+  expect((await band.boundingBox())?.y).toBe(helper.y)
+})
+
+test('a pinned button moves to its lane and closes the open card', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 600 })
+  const tree = await setUp(page, aether, 16)
+  const lead = tree.getByRole('treeitem', { name: /^Lead the checkout rewrite/ })
+  await expect(lead).toBeVisible()
+  const box = (await lead.boundingBox())!
+  await page.mouse.click(box.x + 300, box.y + box.height / 2)
+  await expect(page.getByRole('dialog', { name: /^Lead the checkout rewrite/ })).toBeVisible()
+  await page.locator('[data-mail-pinned]').click()
+  await expect(tree.getByRole('treeitem', { name: /^Test the checkout rewrite/ })).toBeFocused()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('dragging the track pans and closes the open card', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const tree = await setUp(page, aether)
+  const lead = tree.getByRole('treeitem', { name: /^Lead the checkout rewrite/ })
+  await expect(lead).toBeVisible()
+  const box = (await lead.boundingBox())!
+  await page.mouse.click(box.x + 600, box.y + box.height / 2)
+  await expect(page.getByRole('dialog')).toHaveCount(1)
+  await page.mouse.move(box.x + 600, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 800, box.y + box.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect(page.getByRole('button', { name: 'Now', exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
