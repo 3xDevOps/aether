@@ -234,7 +234,8 @@ dropping it would end every stream it carries. On Linux and Android a link
 to an address or tailnet name, not the edge, also sets `TCP_USER_TIMEOUT` to
 90 seconds: the kernel keeps acknowledging for a starved server, so only a dead
 network, such as a NAT timeout or a Wi-Fi switch, trips it, and that
-connection goes within about two minutes. Elsewhere, and through the edge, a
+connection goes within about two minutes. A server that reads nothing for 90
+seconds while an upload fills its receive buffer trips it too. Elsewhere, and through the edge, a
 dead network takes up to six minutes, and the events stream shows nothing
 new meanwhile. Through the edge the longer window does not help either: the
 edge marks a server offline after 60 seconds without control traffic.
