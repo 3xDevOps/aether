@@ -225,8 +225,8 @@ on its own, the Chat view shows it as an autonomous turn. The session reason rea
 `working in background: <n> tasks`, or `waiting-agents` or `waiting-tools`
 between turns.
 
-- Claude Code runs every `Agent` call in the background: the call returns at once
-  and its subagent's card follows the task until it reports. A reload keeps the
+- Claude Code runs the main agent's `Agent` calls in the background: the call
+  returns at once and its subagent's card follows the task until it reports. A reload keeps the
   card of a subagent that still runs, however much the session logged since its
   launch.
 - A shell such as a dev server does not hold the session, because it may never end.

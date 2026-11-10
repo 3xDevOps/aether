@@ -324,14 +324,15 @@ export function agentState(agent: Subagent): AgentState {
 }
 
 /** Whether a live subagent or workflow task was launched before the loaded
- * history: no held call started it and no held launch still waits for its
- * task, so its card shows only once older history is read. */
-export function launchUnloaded(index: AgentIndex, tasks: BackgroundTask[] | undefined): boolean {
-  const live = (tasks ?? []).filter((task) => /agent|workflow|teammate/.test(task.type ?? ''))
+ * history: no call held from oldestSeq on started it and no launch of an
+ * open turn still waits for its task, so its card shows only once older
+ * history is read. */
+export function launchUnloaded(index: AgentIndex, tasks: BackgroundTask[] | undefined, oldestSeq: number): boolean {
+  const live = (tasks ?? []).filter((task) => /agent|workflow/.test(task.type ?? ''))
   if (live.length === 0) return false
   const agents = Object.values(index.agents)
-  if (agents.some((agent) => agent.call && !agent.call.task && !callSettled(agent.call))) return false
-  const held = new Set(agents.map((agent) => agent.call?.task?.id))
+  if (agents.some((agent) => !agent.parentID && agent.turnEndedSeq === undefined && agent.call && !agent.call.task && !callSettled(agent.call))) return false
+  const held = new Set(agents.filter((agent) => Math.max(agent.launchSeq ?? -1, agent.callSeq ?? -1) >= oldestSeq).map((agent) => agent.call?.task?.id))
   return live.some((task) => !held.has(task.id))
 }
 

@@ -372,13 +372,16 @@ describe('live launches', () => {
   const running = { id: 't1', type: 'local_agent', status: 'running' as const }
 
   it('finds a live subagent task no held call started', () => {
-    expect(launchUnloaded(index([read(1, 'a1', 'r1')]).index, [task])).toBe(true)
-    expect(launchUnloaded(index([launch(1, 'a1', 'completed', { task: running })]).index, [task])).toBe(false)
+    expect(launchUnloaded(index([read(1, 'a1', 'r1')]).index, [task], 0)).toBe(true)
+    const held = index([launch(1, 'a1', 'completed', { task: running })]).index
+    expect(launchUnloaded(held, [task], 0)).toBe(false)
+    expect(launchUnloaded(held, [task], held.agents.a1!.callSeq! + 1)).toBe(true)
   })
 
-  it('waits for a launch whose task is not linked yet and skips shells', () => {
-    expect(launchUnloaded(index([launch(1, 'a1', 'pending')]).index, [task])).toBe(false)
-    expect(launchUnloaded(noAgents, [{ id: 'b1', type: 'local_bash' }])).toBe(false)
-    expect(launchUnloaded(noAgents, undefined)).toBe(false)
+  it('waits only for an open turn\'s launch whose task is not linked yet, and skips shells', () => {
+    expect(launchUnloaded(index([launch(1, 'a1', 'pending')]).index, [task], 0)).toBe(false)
+    expect(launchUnloaded(index([launch(1, 'a1', 'pending'), item('turn_end', 1)]).index, [task], 0)).toBe(true)
+    expect(launchUnloaded(noAgents, [{ id: 'b1', type: 'local_bash' }], 0)).toBe(false)
+    expect(launchUnloaded(noAgents, undefined, 0)).toBe(false)
   })
 })
