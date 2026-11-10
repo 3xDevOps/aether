@@ -53,7 +53,7 @@ export const alice: Member = {
   id: 'mem_alice',
   display_name: 'Alice',
   color: '#e6194b',
-  role: 'admin',
+  role: 'super_admin',
 }
 
 export const bob: Member = {
@@ -732,6 +732,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceDelete: vi.fn(async () => ({ ok: true as const })),
+    workspaceAccessList: vi.fn(async (workspaceID: string) => ({ workspace_id: workspaceID, owner_member_id: alice.id, grants: [] })),
+    workspaceAccessGrant: vi.fn(async () => ({})),
+    workspaceAccessRevoke: vi.fn(async () => ({})),
+    workspaceOwnerSet: vi.fn(async () => ({})),
     workspaceSettings: vi.fn(async () => workspace),
     workspaceEnvironment: vi.fn(async () => ({ workspace_id: workspace.id, setup_script: '', variables: [], egress: false, egress_hosts: [] })),
     workspaceEnvironmentSet: vi.fn(async () => needsOverride('workspaceEnvironmentSet')),

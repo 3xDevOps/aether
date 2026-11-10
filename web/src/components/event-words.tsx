@@ -250,6 +250,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     : "The agent's questions were answered",
   'run.deleted': () => 'Session deleted',
   'workspace.deleted': () => 'Workspace deleted',
+  'workspace.access': () => 'Workspace access changed',
   'run.children': (p, e) => {
     if (p.detached) return 'Detached from its parent session'
     if (p.children === 'on') return <><Who id={e.actor_id} /> allowed subsessions for this session</>

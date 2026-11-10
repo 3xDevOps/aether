@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
 import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you'
+import { isAdminRole } from '@/lib/permissions'
 import { isSudo } from '@/lib/run-requests'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
 import type { GatewayCapabilities, Member, Run, RunStatusCause, RunWait } from '@/lib/types'
@@ -213,9 +214,27 @@ export function useIdentityKnown(): boolean {
   return useStore((s) => s.identityKey !== null || s.hydrated)
 }
 
-/** Whether the caller holds the admin role. False until hydrated. */
+/** Whether the caller is an admin or a super admin: may create workspaces and invite. False until hydrated. */
 export function useIsAdmin(): boolean {
-  return useStore((s) => s.info?.member.role === 'admin')
+  return useStore((s) => isAdminRole(s.info?.member.role))
+}
+
+/** Whether the caller holds the server-wide super admin role. False until hydrated. */
+export function useIsSuperAdmin(): boolean {
+  return useStore((s) => s.info?.member.role === 'super_admin')
+}
+
+/**
+ * The caller's role in one workspace, as workspace.list reports it. A server
+ * that does not report one leaves the server role, which is the old rule.
+ */
+export function useWorkspaceRole(workspaceID: string | null | undefined): Member['role'] | null {
+  return useStore((s) => (workspaceID ? s.workspaces[workspaceID]?.role : undefined) ?? s.info?.member.role ?? null)
+}
+
+/** Whether the caller administers this workspace: its owner, or a super admin. */
+export function useIsWorkspaceAdmin(workspaceID: string | null | undefined): boolean {
+  return isAdminRole(useWorkspaceRole(workspaceID))
 }
 
 /** While `shown`, the phone top bar shrinks New run to an icon, so the page's own action stays the one filled button. */

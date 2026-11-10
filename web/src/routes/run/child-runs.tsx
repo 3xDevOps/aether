@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -180,7 +181,7 @@ export function useChildRunsItems(run: RunRecord, client: Api = api): ExtraItem[
   })
   const items: ExtraItem[] = []
   if (owner && run.children !== 'on') items.push(item('on'))
-  if ((owner || self.role === 'admin') && run.children !== 'off') items.push(item('off'))
+  if ((owner || isAdminRole(self.role)) && run.children !== 'off') items.push(item('off'))
   return items
 }
 

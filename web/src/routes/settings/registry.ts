@@ -4,7 +4,7 @@ import type { Capability } from '@/store/hooks'
 
 export type CategoryID = 'general' | 'launch' | 'connections' | 'notifications' | 'watches' | 'memory' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
 
-export type Gates = { cap: Capability; admin: boolean; assistant: boolean; onboarding: boolean; member: boolean; workspace: boolean }
+export type Gates = { cap: Capability; admin: boolean; superAdmin: boolean; assistant: boolean; onboarding: boolean; member: boolean; workspace: boolean }
 
 export type Category = {
   id: CategoryID
@@ -69,8 +69,8 @@ export const entries: SettingEntry[] = [
   { id: 'danger-zone', category: 'this-computer', label: 'Clear local state', help: 'Forget every server, edge sign-in and device key on this computer.', keywords: 'reset logout disconnect clear forget danger', visible: (g) => g.cap.hasLocal('link.reset') },
   { id: 'version', category: 'server', label: 'Version', help: 'Server version and updates.', keywords: 'update upgrade release tailnet' },
   { id: 'disk', category: 'server', label: 'Disk and performance', help: 'CPU, memory, disk and Docker storage.', keywords: 'disk storage cpu memory insights system' },
-  { id: 'run-limits', category: 'server', label: 'Session limits', help: 'Memory, CPU and process ceiling for every session.', keywords: 'memory cpu pids processes limit ceiling resources oom', visible: (g) => g.admin && g.cap.hasMethod('server.run_limits') },
-  { id: 'docker', category: 'server', label: 'Docker inside sessions', help: 'Lets agents build and run containers inside their sessions.', keywords: 'sysbox docker compose buildx container', visible: (g) => g.admin && g.cap.hasMethod('server.sysbox.status') },
+  { id: 'run-limits', category: 'server', label: 'Session limits', help: 'Memory, CPU and process ceiling for every session.', keywords: 'memory cpu pids processes limit ceiling resources oom', visible: (g) => g.superAdmin && g.cap.hasMethod('server.run_limits') },
+  { id: 'docker', category: 'server', label: 'Docker inside sessions', help: 'Lets agents build and run containers inside their sessions.', keywords: 'sysbox docker compose buildx container', visible: (g) => g.superAdmin && g.cap.hasMethod('server.sysbox.status') },
   { id: 'retained-containers', category: 'server', label: 'Retained containers', help: 'Remove containers that finished sessions keep.', keywords: 'cleanup free disk release', visible: (g) => g.admin && g.cap.hasMethod('run.release') },
   { id: 'workspace-settings', category: 'server', label: 'Workspace settings and budget', help: "The active workspace's settings, on its page.", keywords: 'budget limit workspace repository', link: { name: 'workspace', params: (active) => ({ workspaceId: active }) }, visible: (g) => g.workspace && g.cap.hasMethod('workspace.settings') },
   { id: 'members', category: 'server', label: 'Members and devices', help: 'Invite members and approve devices, on the Members page.', keywords: 'invite member device approve', link: { name: 'members' }, visible: (g) => g.admin && g.cap.hasMethod('member.list') },

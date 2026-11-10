@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { useEffect, useRef, useState } from 'react'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -60,7 +61,7 @@ export function usePublish(run: ScopedRun, client: Api, open: boolean) {
   const mounted = useRef(true)
   const operation = useRef(false)
   const requested = useRef(false)
-  const canWrite = self.role === 'admin' || self.role === 'collaborator'
+  const canWrite = isAdminRole(self.role) || self.role === 'collaborator'
   const expected = statusReady && status && !status.error ? { branch: status.branch, head: status.head } : null
   const pushTarget = { ...(status ? defaultPushTarget(status, workspace?.origin) : noPush), ...pushEdit }
   const target = unsettled ?? { ...defaultPRTarget(pushTarget, run.base_branch || workspace?.base_branch || '', source), ...targetEdit }

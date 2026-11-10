@@ -427,7 +427,8 @@ export async function applyEvent(
   }
 
   switch (ev.type) {
-    case 'workspace.deleted': {
+    case 'workspace.deleted':
+    case 'workspace.access': {
       try {
         store.getState().setWorkspaces(await client.workspaceListFull())
       } catch (err) {

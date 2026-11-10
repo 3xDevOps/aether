@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { shellQuote } from '@/lib/shell'
@@ -153,7 +154,7 @@ export function RepoStep({
   // to seed - not always `main`.
   const branch = workspace?.base_branch ?? 'main'
   const pushCmd = `git push -u aether ${shellQuote(branch)}`
-  const canWrite = role === 'admin' || role === 'collaborator'
+  const canWrite = isAdminRole(role) || role === 'collaborator'
   const canPush = caps.hasLocal('repo.push') && canWrite && !mirrored && !sourcePending
   const pushAllowed = useRef(canPush)
   pushAllowed.current = canPush
