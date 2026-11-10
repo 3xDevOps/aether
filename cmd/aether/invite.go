@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -14,13 +15,14 @@ func init() {
 	register(command{
 		name:  "invite",
 		short: "invite a GitHub account through the edge, or mint a one-time invite code",
-		usage: "aether invite [--ttl <seconds>]\n" +
-			"aether invite --github <login> [--role <viewer|collaborator|admin>]\n" +
-			"aether invite --email <address> [--role <viewer|collaborator|admin>]\n" +
+		usage: "aether invite [--ttl <seconds>] [--workspace <workspace>]...\n" +
+			"aether invite --github <login> [--role <admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
+			"aether invite --email <address> [--role <admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
 			"aether invite list\n" +
 			"aether invite revoke <invitation-id>",
 		example: "aether invite\n" +
-			"aether invite --github alice --role collaborator\n" +
+			"aether invite --workspace web\n" +
+			"aether invite --github alice --role collaborator --workspace web --workspace api\n" +
 			"aether invite list",
 		flags: true,
 		run:   runInvite,
@@ -49,14 +51,19 @@ func runInvite(args []string) error {
 			})
 		}
 	}
-	params, ttl, err := parseInviteArgs(args)
+	params, ttl, workspaces, err := parseInviteArgs(args)
 	if err != nil {
 		return err
 	}
-	if params == nil {
-		return inviteCode(ttl)
-	}
 	return withControl(func(c *protocol.Client) error {
+		ids, err := resolveWorkspaces(c, workspaces)
+		if err != nil {
+			return err
+		}
+		if params == nil {
+			return inviteCode(c, ttl, ids)
+		}
+		params.WorkspaceIDs = ids
 		var res protocol.MemberInvitationResult
 		if err := c.Call(protocol.MethodMemberInvitationCreate, params, &res); err != nil {
 			return err
@@ -71,47 +78,70 @@ func runInvite(args []string) error {
 }
 
 const inviteUsage = "usage: aether invite [--ttl <seconds>]\n" +
-	"       aether invite --github <login> | --email <address> [--role viewer|collaborator|admin]\n" +
+	"       aether invite --github <login> | --email <address> [--role admin|collaborator|viewer]\n" +
+	"       aether invite ... [--workspace <workspace>]...\n" +
 	"       aether invite list | revoke <invitation-id>"
 
 // parseInviteArgs reads an invite command line: the invitation of an edge
 // account, or nil and the lifetime of a one-time invite code. A flag of
-// the other kind is refused rather than ignored.
-func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int, error) {
+// the other kind is refused rather than ignored. The workspaces are the
+// names or ids typed, in order, for the caller to resolve.
+func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int, []string, error) {
 	fs := newFlagSet("invite")
 	ttl := fs.Int("ttl", 86400, "lifetime of a one-time invite code in seconds")
 	github := fs.String("github", "", "invite this GitHub login; prints the link they join with")
 	email := fs.String("email", "", "invite the GitHub account whose verified primary email this is")
-	role := fs.String("role", "collaborator", "role of an invited account: viewer, collaborator, or admin")
+	role := fs.String("role", "collaborator", "role of an invited account: admin, collaborator, or viewer")
+	var workspaces stringList
+	fs.Var(&workspaces, "workspace", "workspace the invited member is granted, by name or id (repeatable)")
 	if err := fs.Parse(args); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	switch {
 	case fs.NArg() != 0:
-		return nil, 0, errors.New(inviteUsage)
+		return nil, 0, nil, errors.New(inviteUsage)
 	case *github == "" && *email == "":
 		if set["role"] {
-			return nil, 0, errors.New("invite: --role applies to --github and --email; a one-time invite code always joins as a collaborator\n" + inviteUsage)
+			return nil, 0, nil, errors.New("invite: --role applies to --github and --email; a one-time invite code always joins as a collaborator\n" + inviteUsage)
 		}
-		return nil, *ttl, nil
+		return nil, *ttl, workspaces, nil
 	case set["ttl"]:
-		return nil, 0, errors.New("invite: --ttl applies to a one-time invite code; an account invitation expires after 7 days\n" + inviteUsage)
+		return nil, 0, nil, errors.New("invite: --ttl applies to a one-time invite code; an account invitation expires after 7 days\n" + inviteUsage)
 	}
-	return &protocol.MemberInvitationCreateParams{Login: *github, Email: *email, Role: *role}, 0, nil
+	return &protocol.MemberInvitationCreateParams{Login: *github, Email: *email, Role: *role}, 0, workspaces, nil
 }
 
-func inviteCode(ttl int) error {
-	return withControl(func(c *protocol.Client) error {
-		var res protocol.MemberInviteResult
-		if err := c.Call(protocol.MethodMemberInvite, protocol.MemberInviteParams{TTLSeconds: ttl}, &res); err != nil {
-			return err
+func inviteCode(c *protocol.Client, ttl int, workspaceIDs []string) error {
+	var res protocol.MemberInviteResult
+	if err := c.Call(protocol.MethodMemberInvite, protocol.MemberInviteParams{TTLSeconds: ttl, WorkspaceIDs: workspaceIDs}, &res); err != nil {
+		return err
+	}
+	fmt.Println(res.Code)
+	fmt.Fprintf(os.Stderr, "expires %s\n", res.ExpiresAt)
+	return nil
+}
+
+// resolveWorkspaces maps the workspace names or ids of --workspace flags to
+// ids.
+func resolveWorkspaces(c *protocol.Client, idsOrNames []string) ([]string, error) {
+	if len(idsOrNames) == 0 {
+		return nil, nil
+	}
+	var wl protocol.WorkspaceListResult
+	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(idsOrNames))
+	for i, n := range idsOrNames {
+		id, err := workspaceIDIn(wl.Workspaces, n)
+		if err != nil {
+			return nil, err
 		}
-		fmt.Println(res.Code)
-		fmt.Fprintf(os.Stderr, "expires %s\n", res.ExpiresAt)
-		return nil
-	})
+		ids[i] = id
+	}
+	return ids, nil
 }
 
 func inviteList() error {
@@ -121,9 +151,9 @@ func inviteList() error {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tACCOUNT\tROLE\tLINKS MEMBER\tEXPIRES")
+		_, _ = fmt.Fprintln(tw, "ID\tACCOUNT\tROLE\tWORKSPACES\tLINKS MEMBER\tEXPIRES")
 		for _, inv := range res.Invitations {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", inv.ID, inviteeOf(inv), inv.Role, inv.MemberID, inv.ExpiresAt)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", inv.ID, inviteeOf(inv), inv.Role, strings.Join(inv.WorkspaceIDs, ","), inv.MemberID, inv.ExpiresAt)
 		}
 		return tw.Flush()
 	})
