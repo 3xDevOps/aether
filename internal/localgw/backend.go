@@ -59,13 +59,15 @@ const dialTimeout = 90 * time.Second
 // intervals pass without a byte from the server; a keepalive is sent only
 // after an interval without one, so an idle phone's radio can sleep.
 // keepaliveTimeout bounds the probe of a connection a stream failed to
-// open on. Variables so a test can shorten them.
+// open on. Both leave a server stalled by memory pressure on a saturated
+// host time to answer: tearing down a live connection ends every stream.
+// Variables so a test can shorten them.
 var (
 	keepaliveInterval = 30 * time.Second
-	keepaliveTimeout  = 10 * time.Second
+	keepaliveTimeout  = 60 * time.Second
 )
 
-const keepaliveCount = 3
+const keepaliveCount = 10
 
 var (
 	errClosed   = errors.New("the gateway is closing")

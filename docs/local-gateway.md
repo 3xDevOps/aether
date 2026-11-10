@@ -218,17 +218,21 @@ handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
 in particular, busy retention admission requires an explicit retry, not
 automatic replay. Streams have a separate guard: a channel that fails to open
-triggers a redial only when a keepalive shows the connection is actually gone,
-because tearing down a healthy connection would kill its other live streams.
+triggers a redial only when a keepalive, given 60 seconds to answer, shows the
+connection is actually gone, because tearing down a healthy connection would
+kill its other live streams.
 
 A network that goes away without a reset, as when a phone sleeps or moves
 between Wi-Fi and mobile data, leaves the connection open and silent. Any
 byte from the server, a keepalive reply or a stream's data, proves the
 connection alive, so a large download on a slow link is never mistaken for
 a dead one. After 30 seconds without one the gateway sends an SSH keepalive,
-and after 90 seconds without one it drops the connection, so an idle phone's
-radio can sleep and a dead connection goes within two minutes. Every call
-and stream waiting on a dropped connection then fails or redials. A call
+and after 5 minutes without one it drops the connection, so an idle phone's
+radio can sleep and a dead connection goes within six minutes. The window is
+that long because a server on a saturated host can stall for a minute or more
+under memory pressure and still be alive; dropping it would end every stream
+it carries. Every call and stream waiting on a dropped connection then fails
+or redials. A call
 already sent on it is replayed under the rule above; one that is not fails
 with `-32004` and `the server stopped answering keepalives`. Requests that
 arrive while a dial is in progress wait for that one dial, each only as long
@@ -2499,10 +2503,11 @@ its PTY are not reopened by either event.
 
 Every live socket - `events`, `attach`, `acp`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
-**10**. A client that changed networks or went to sleep leaves a half-open
-connection that reads as live on both ends; the ping is what releases the PTY
-client it was holding, whose geometry may be clamping every other viewer. The SPA
-reconnects on its normal path.
+**60**, long enough for a server starved on a saturated host. A client that
+changed networks or went to sleep leaves a half-open connection that reads as
+live on both ends; the ping is what releases the PTY client it was holding,
+whose geometry may be clamping every other viewer. The SPA reconnects on its
+normal path.
 
 ### `GET /ws/events`
 

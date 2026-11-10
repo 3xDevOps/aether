@@ -27,10 +27,11 @@ const (
 // to sleep leaves a half-open TCP connection that reads as live on both
 // ends; the ping turns that into a close within the sum of the two,
 // which is what releases its PTY client and stops it clamping the
-// geometry. Variables so a test can shorten them.
+// geometry. The pong gets a minute because the server's own gateway pings
+// too, and a server starved on a saturated host reads the pong late.
 const (
 	defaultPingInterval = 30 * time.Second
-	defaultPingTimeout  = 10 * time.Second
+	defaultPingTimeout  = 60 * time.Second
 )
 
 // Socket is one accepted WebSocket. Ctx is canceled when the peer goes

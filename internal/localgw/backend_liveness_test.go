@@ -86,6 +86,33 @@ func TestSSHBackendKeepsASlowBusyConnection(t *testing.T) {
 	}
 }
 
+// A server starved on a saturated host stops answering keepalives for a
+// while and then catches up. Its connection must survive, since dropping it
+// ends every stream it carries.
+func TestSSHBackendKeepsAStalledServer(t *testing.T) {
+	shortenKeepalive(t, 150*time.Millisecond, 300*time.Millisecond)
+	home := testhome.Isolate(t)
+	server := listen(t)
+	connections := serveControl(t, server, nil)
+	path := newSilencer(t, server.Addr().String(), 0)
+	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")})
+	t.Cleanup(func() { _ = b.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, perr := b.Call(ctx, protocol.MethodServerInfo, nil); perr != nil {
+		t.Fatal(perr)
+	}
+	path.stall(keepaliveCount / 2 * keepaliveInterval)
+	time.Sleep(keepaliveCount / 2 * keepaliveInterval)
+	if _, perr := b.Call(ctx, protocol.MethodServerInfo, nil); perr != nil {
+		t.Fatalf("call after a stall = %v, want it answered", perr)
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("server accepted %d connections, want the stalled one kept", got)
+	}
+}
+
 // A call whose connection went silent after the request left may have
 // reached the server. One unsafe to repeat fails without a replay, since a
 // replayed run.launch starts a second run; a read is answered over a new
@@ -388,11 +415,13 @@ func serveControl(t *testing.T, ln net.Listener, answer func(method string) json
 // silencer relays TCP to target, pausing pace after each 4 KiB toward the
 // client when pace is set, as a weak mobile link does. silence stops every
 // connection open so far from carrying anything, without closing it, as a
-// network that went away does; connections opened later work.
+// network that went away does; connections opened later work. stall holds
+// every byte for a while and then delivers it, as a starved server does.
 type silencer struct {
 	ln     net.Listener
 	mu     sync.Mutex
 	silent chan struct{}
+	hold   sync.RWMutex
 }
 
 func newSilencer(t *testing.T, target string, pace time.Duration) *silencer {
@@ -413,8 +442,8 @@ func newSilencer(t *testing.T, target string, pace time.Duration) *silencer {
 			s.mu.Lock()
 			silent := s.silent
 			s.mu.Unlock()
-			go relay(server, client, silent, 0)
-			go relay(client, server, silent, pace)
+			go relay(server, client, silent, 0, &s.hold)
+			go relay(client, server, silent, pace, &s.hold)
 		}
 	}()
 	return s
@@ -429,7 +458,12 @@ func (s *silencer) silence() {
 	s.silent = make(chan struct{})
 }
 
-func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Duration) {
+func (s *silencer) stall(d time.Duration) {
+	s.hold.Lock()
+	time.AfterFunc(d, s.hold.Unlock)
+}
+
+func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Duration, hold *sync.RWMutex) {
 	buf := make([]byte, 32<<10)
 	if pace > 0 {
 		buf = buf[:4<<10]
@@ -443,7 +477,10 @@ func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Durat
 		default:
 		}
 		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
+			hold.RLock()
+			_, werr := dst.Write(buf[:n])
+			hold.RUnlock()
+			if werr != nil {
 				return
 			}
 		}
