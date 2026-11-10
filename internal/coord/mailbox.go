@@ -467,15 +467,16 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunID) (*domain.Run, *protocol.Error) {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, &protocol.Error{
-			Code:    protocol.CodeNotFound,
-			Message: fmt.Sprintf("%s: unknown session %s", method, run),
-		}
+		return nil, unknownRun(method, run)
 	}
 	if err != nil {
 		return nil, internalError(method, err)
 	}
 	return r, nil
+}
+
+func unknownRun(method string, run domain.RunID) *protocol.Error {
+	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown session %s", method, run)}
 }
 
 // CoordReport reserves an outcome before evidence capture. Live interactive
@@ -1165,6 +1166,11 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	target, rpcErr := s.resolveRun(ctx, method, to)
 	if rpcErr != nil {
 		return nil, "", rpcErr
+	}
+	if !correlated {
+		if rpcErr := s.reachable(ctx, method, sender, target); rpcErr != nil {
+			return nil, "", rpcErr
+		}
 	}
 	if target.Status.Terminal() {
 		return nil, "", &protocol.Error{

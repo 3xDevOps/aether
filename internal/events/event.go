@@ -356,6 +356,8 @@ type RunDiffPayload struct {
 
 func (RunDiffPayload) EventType() Type { return TypeRunDiff }
 
+func (p RunDiffPayload) RepoWorkspace() domain.WorkspaceID { return p.Repo }
+
 // RunCostPayload reports token usage for a run. Metered is false for
 // PTY-only runs where counts are best-effort estimates or unavailable.
 // Increment marks usage spent since the run's previous report, which adds
@@ -459,6 +461,8 @@ type GitBranchPayload struct {
 }
 
 func (GitBranchPayload) EventType() Type { return TypeGitBranch }
+
+func (p GitBranchPayload) RepoWorkspace() domain.WorkspaceID { return p.WorkspaceID }
 
 // AgentEventKind classifies an agent activity event.
 type AgentEventKind string

@@ -229,7 +229,7 @@ func (s *Service) receipt(ctx context.Context, c *domain.ChildReservation, err e
 // as every launch does.
 func (s *Service) admit(ctx context.Context, p *policy, account domain.MemberID) error {
 	s.cfg.AuthorizationMu.Lock()
-	_, err := s.cfg.Authorize(ctx, s.cfg.Store, p.owner, string(account))
+	_, err := s.cfg.Authorize(ctx, s.cfg.Store, p.owner, string(account), p.workspaces())
 	s.cfg.AuthorizationMu.Unlock()
 	if err != nil {
 		return err

@@ -37,6 +37,13 @@ func (s *Service) handleChild(ctx context.Context, run domain.RunID, method stri
 		return nil, runClosing(method)
 	}
 	defer s.leaveRun(run)
+	self, rpcErr := s.resolveRun(ctx, method, run)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if rpcErr := s.ownerReaches(ctx, method, self); rpcErr != nil {
+		return nil, rpcErr
+	}
 	if method == protocol.MethodChildStart {
 		lock := s.reportLock(run)
 		lock.Lock()

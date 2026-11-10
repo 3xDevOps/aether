@@ -206,8 +206,8 @@ func newHarness(t *testing.T) *harness {
 	h.svc, err = New(Config{
 		Store: db, Runs: h.runs, Git: &fakeGit{head: strings.Repeat("a", 40)},
 		Agents: func() Agents { return h.agents },
-		Authorize: func(ctx context.Context, st store.Store, actor domain.MemberID, account string) (domain.MemberID, error) {
-			return fallback.ResolveLaunchAccount(ctx, st, actor, account)
+		Authorize: func(ctx context.Context, st store.Store, actor domain.MemberID, account string, workspaces []domain.WorkspaceID) (domain.MemberID, error) {
+			return fallback.ResolveLaunchAccountIn(ctx, st, actor, account, workspaces)
 		},
 		AuthorizationMu: &mu,
 		Now:             func() time.Time { return h.now },

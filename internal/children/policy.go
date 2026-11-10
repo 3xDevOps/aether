@@ -62,6 +62,16 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 	return p, nil
 }
 
+// workspaces is the parent's primary workspace followed by its extra ones,
+// which a child launches into too.
+func (p *policy) workspaces() []domain.WorkspaceID {
+	out := []domain.WorkspaceID{p.parent.WorkspaceID}
+	for _, repo := range p.parent.Extras {
+		out = append(out, repo.WorkspaceID)
+	}
+	return out
+}
+
 // memberAllows applies the run's own setting, which counts only while the
 // run's current owner made it, else the owner's.
 func memberAllows(run *domain.Run, settings store.ChildSettings) bool {

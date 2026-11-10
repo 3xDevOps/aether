@@ -91,6 +91,28 @@ func ResolveLaunchAccount(ctx context.Context, st store.Store, actor domain.Memb
 	return account, nil
 }
 
+// ResolveLaunchAccountIn is ResolveLaunchAccount for a launch into
+// workspaces. A run works with its account owner's login, so another
+// member's account is usable only when that owner reaches every one of the
+// workspaces too.
+func ResolveLaunchAccountIn(ctx context.Context, st store.Store, actor domain.MemberID, requested string, workspaces []domain.WorkspaceID) (domain.MemberID, error) {
+	account, err := ResolveLaunchAccount(ctx, st, actor, requested)
+	if err != nil || account == actor {
+		return account, err
+	}
+	owner, err := st.GetMember(ctx, account)
+	if err != nil {
+		return "", err
+	}
+	reach := permissions.ActorOf(owner)
+	for _, ws := range workspaces {
+		if !reach.Reaches(ws) {
+			return "", fmt.Errorf("%w: the owner of account %s has no access to workspace %s", permissions.ErrDenied, account, ws)
+		}
+	}
+	return account, nil
+}
+
 // Measured is the highest used share of each account's quota windows, for
 // the accounts whose usage could be read, and Unknown for a candidate
 // MeasureNext could not read.
@@ -199,7 +221,7 @@ func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, l
 type Launchable func(ctx context.Context, account domain.MemberID) (bool, error)
 
 // Select returns the account launcher's run launches on, from the usage
-// Measure read. The caller has admitted launcher's launch on requested and
+// Measure read, for a run in workspaces. The caller has admitted launcher's launch on requested and
 // holds the shared authorization mutex until the scheduler's durable launch
 // boundary, so each candidate needs only its account authorization checked
 // here; an account Measure could not read, or launchable refuses, is never
@@ -208,7 +230,7 @@ type Launchable func(ctx context.Context, account domain.MemberID) (bool, error)
 // launch stays on the requested account. A candidate whose check fails is
 // left out like a refused one, so it never fails a launch that can stay on
 // the requested account; excluded joins those failures.
-func Select(ctx context.Context, st store.Store, measured Measured, launcher, requested domain.MemberID, policy domain.AccountFallback, launchable Launchable) (account domain.MemberID, excluded error) {
+func Select(ctx context.Context, st store.Store, measured Measured, launcher, requested domain.MemberID, workspaces []domain.WorkspaceID, policy domain.AccountFallback, launchable Launchable) (account domain.MemberID, excluded error) {
 	if policy.Disabled {
 		return requested, nil
 	}
@@ -232,7 +254,7 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		if candidate == requested {
 			continue
 		}
-		if _, authErr := ResolveLaunchAccount(ctx, st, launcher, string(candidate)); authErr != nil {
+		if _, authErr := ResolveLaunchAccountIn(ctx, st, launcher, string(candidate), workspaces); authErr != nil {
 			if !errors.Is(authErr, permissions.ErrDenied) && !errors.Is(authErr, store.ErrNotFound) {
 				failures = append(failures, &Skip{Account: candidate, Reason: ReasonAccess, Err: authErr})
 			}

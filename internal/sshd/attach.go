@@ -185,6 +185,9 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		return
 	}
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	if err == nil {
+		err = checkIn(ctx, s.cfg.Store, member, permissions.View, run.WorkspaceID)
+	}
 	if err != nil {
 		e := rpcError(err)
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
@@ -1107,6 +1110,9 @@ func (s *Server) revokeOnControlChange(ctx context.Context, revoke context.Cance
 // counts as a loss.
 func (s *Server) attachRevocation(ctx context.Context, member domain.MemberID, run domain.RunID, readOnly bool) error {
 	if s.checkMember(ctx, member) != nil {
+		return errAttachMembershipRevoked
+	}
+	if run != "" && checkRunView(ctx, s.cfg.Store, member, run) != nil {
 		return errAttachMembershipRevoked
 	}
 	if readOnly {

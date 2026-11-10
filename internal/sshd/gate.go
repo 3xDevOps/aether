@@ -40,15 +40,22 @@ func checkSteer(ctx context.Context, st store.Store, member domain.MemberID, run
 	return permissions.Check(permissions.Steer, actor, target)
 }
 
-// checkPush authorizes git receive-pack: pushing writes to the workspace
-// repository, so it needs Push. The role is read at exec time, so a
-// demoted member cannot push on an already-open connection.
-func (s *Server) checkPush(ctx context.Context, member domain.MemberID) error {
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
+// checkRunView is View in the run's workspace: whether the member may
+// still see the run at all.
+func checkRunView(ctx context.Context, st store.Store, member domain.MemberID, run domain.RunID) error {
+	r, err := st.GetRun(ctx, run)
 	if err != nil {
 		return err
 	}
-	return permissions.Check(permissions.Push, actor, permissions.Target{})
+	return checkIn(ctx, st, member, permissions.View, r.WorkspaceID)
+}
+
+// checkPush authorizes git receive-pack in workspace ws: pushing writes to
+// the workspace repository, so it needs Push there. Access is read at exec
+// time, so a demoted or revoked member cannot push on an already-open
+// connection.
+func (s *Server) checkPush(ctx context.Context, member domain.MemberID, ws domain.WorkspaceID) error {
+	return checkIn(ctx, s.cfg.Store, member, permissions.Push, ws)
 }
 
 // resolveActor loads the member's current role and workspace access for a

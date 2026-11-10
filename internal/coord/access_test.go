@@ -1,0 +1,56 @@
+package coord
+
+import (
+	"context"
+	"testing"
+
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
+)
+
+// TestMessagesStayInTheOwnersWorkspaces covers coordination under
+// workspace-scoped access: a run whose owner cannot reach the target's
+// workspace gets the same answer for that run as for one that never
+// existed, on send and on ask; a grant opens the route.
+func TestMessagesStayInTheOwnersWorkspaces(t *testing.T) {
+	h := newHarness(t, 1, func(c *Config) { c.Store = c.Mail.(*store.DB) })
+	ctx := context.Background()
+	owner := h.runs[0].MemberID
+	if err := h.db.GrantWorkspace(ctx, h.workspace, owner, ""); err != nil {
+		t.Fatal(err)
+	}
+	foreign := &domain.Workspace{Name: "foreign", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+	stranger := h.member(domain.RoleCollaborator)
+	if err := h.db.GrantWorkspace(ctx, foreign.ID, stranger.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	target := &domain.Run{WorkspaceID: foreign.ID, MemberID: stranger.ID, Task: "foreign", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := h.db.CreateRun(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	mine := h.run(0)
+
+	_, missing := h.svc.Send(ctx, mine, sendParams("run-doesnotexist", "hello"))
+	if missing == nil || missing.Code != protocol.CodeNotFound {
+		t.Fatalf("send to a missing session = %v, want not found", missing)
+	}
+	_, err := h.svc.Send(ctx, mine, sendParams(target.ID, "hello"))
+	if err == nil || err.Code != missing.Code || err.Message != "coord.send: unknown session "+string(target.ID) {
+		t.Fatalf("send to a session in a foreign workspace = %v, want the missing session's answer", err)
+	}
+	_, err = h.svc.Ask(ctx, mine, protocol.CoordAskParams{ToRunID: string(target.ID), Body: "why?", IdempotencyKey: "ask-foreign"})
+	if err == nil || err.Code != protocol.CodeNotFound {
+		t.Fatalf("ask of a session in a foreign workspace = %v, want not found", err)
+	}
+
+	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "hello")); err != nil {
+		t.Fatalf("send once the owner was granted the workspace: %v", err)
+	}
+}

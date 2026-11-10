@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type sessionState struct {
@@ -172,6 +175,22 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 		sendExitStatus(ch, 128)
 		return
 	}
+	var aerr error
+	if op == "upload-pack" {
+		aerr = checkIn(ctx, s.cfg.Store, member, permissions.View, domain.WorkspaceID(wsID))
+	} else {
+		aerr = s.checkPush(ctx, member, domain.WorkspaceID(wsID))
+	}
+	if errors.Is(aerr, permissions.ErrNoAccess) {
+		_, _ = fmt.Fprintf(ch.Stderr(), "aether: workspace %q: %v\n", wsID, store.ErrNotFound)
+		sendExitStatus(ch, 128)
+		return
+	}
+	if aerr != nil {
+		_, _ = fmt.Fprintf(ch.Stderr(), "aether: %v\n", aerr)
+		sendExitStatus(ch, 128)
+		return
+	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(wsID))
 	if err == nil {
 		lock := s.workspaceLock(ws.ID)
@@ -186,17 +205,10 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 		sendExitStatus(ch, 128)
 		return
 	}
-	// receive-pack writes to the workspace repository, so it is the Push
-	// capability; upload-pack is a read and stays open to every member.
 	var code int
 	if op == "upload-pack" {
 		code, err = s.cfg.Git.UploadPack(ctx, ws.ID, ch, ch, ch.Stderr())
 	} else {
-		if perr := s.checkPush(ctx, member); perr != nil {
-			_, _ = fmt.Fprintf(ch.Stderr(), "aether: %v\n", perr)
-			sendExitStatus(ch, 128)
-			return
-		}
 		code, err = s.cfg.Git.ReceivePack(ctx, ws.ID, ch, ch, ch.Stderr())
 	}
 	if err != nil {
