@@ -712,7 +712,7 @@ func TestDevelopmentSessionReportsOnlyAnsweredOutput(t *testing.T) {
 	}
 	input := att.captureStdin()
 	waitAnswered(8)
-	if input.String() != "\x1b[1;3R" {
-		t.Fatalf("reply %q", input.String())
-	}
+	// The sink is filled by a goroutine copying the pipe, after the write to
+	// the pipe that the host's report follows has returned.
+	waitFor(t, "the cursor reply in the terminal's input", func() bool { return input.String() == "\x1b[1;3R" })
 }
