@@ -360,6 +360,14 @@ export function agentReport(agent: Subagent): string | undefined {
   return report || undefined
 }
 
+/** The text of a subagent's last message, which reports what a background
+ * subagent did: its launching call returned once it started. */
+export function agentLastMessage(agent: Subagent): string | undefined {
+  const id = agent.items.filter((item) => item.kind === 'message' && item.message?.role === 'assistant').at(-1)?.message?.message_id
+  if (!id) return undefined
+  return agent.items.filter((item) => item.kind === 'message' && item.message?.message_id === id).map((item) => item.message!.text).join('').trim() || undefined
+}
+
 export function agentPrompt(agent: Subagent): string | undefined {
   const raw = rawInput(agent)
   return typeof raw.prompt === 'string' ? raw.prompt : agent.workflow ? text(raw.script) : undefined

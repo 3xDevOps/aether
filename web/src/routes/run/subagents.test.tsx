@@ -397,6 +397,26 @@ describe('subagents in the session view', () => {
     expect(api.runACPHistory).toHaveBeenCalledTimes(1)
   })
 
+  it('reports a background subagent by its last message once its task ends', async () => {
+    const task = (status: string) => ({ task: { id: `t-${status}`, type: 'local_agent', status }, content: [{ type: 'text', text: 'Async agent launched successfully.' }] })
+    open()
+    acpSocket().open({}, [
+      item('turn_start', 1),
+      launch(1, 'a1', 'Coverage', 'completed', task('running')),
+      launch(1, 'a2', 'Broken', 'completed', task('running')),
+      item('message', 1, { message: { role: 'assistant', message_id: 'r1', parent_id: 'a1', text: '## Coverage is ' } }),
+      item('message', 1, { message: { role: 'assistant', message_id: 'r1', parent_id: 'a1', text: '91%\n\nDetails follow.', complete: true } }),
+      item('message', 1, { message: { role: 'assistant', message_id: 'r2', parent_id: 'a2', text: 'API Error: 400', complete: true } }),
+      launch(1, 'a1', 'Coverage', 'completed', task('completed')),
+      launch(1, 'a2', 'Broken', 'completed', task('failed')),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const log = await screen.findByRole('log', { name: 'Chat' })
+    await openSteps(log, /^Delegated 2 tasks/)
+    expect(within(await within(log).findByRole('button', { name: 'Coverage, Explore, Done' })).getByText('Coverage is 91%')).toBeDefined()
+    expect(within(within(log).getByRole('button', { name: 'Broken, Explore, Failed' })).getByText('API Error: 400')).toBeDefined()
+  })
+
   it('summarises a report by its first line without markdown marks', async () => {
     const report = (text: string) => [{ type: 'text', text }]
     open()

@@ -3343,7 +3343,8 @@ Workflow call, or an Agent call with `run_in_background`, completes as soon
 as its work starts. When the call carries `tool_call.task`
 ([`internal/acphost/items.go`](../internal/acphost/items.go)), the card follows
 the task: running, then done, failed or stopped, with elapsed time to the
-snapshot that settled it. Without it, the card reads "Launched in the
+snapshot that settled it, and a settled card's report is the first line of
+the subagent's last message. Without it, the card reads "Launched in the
 background", and running once a child item is logged after the call
 completed. The launch acknowledgement is never shown as a report. A workflow card lists the subagents whose items name it as parent.
 A subagent whose launch call is not loaded, or was trimmed, shows its card at

@@ -10,6 +10,7 @@ import { loadOlderItems } from '@/store/session-stream'
 import {
   activityLabel,
   agentLabel,
+  agentLastMessage,
   agentReport,
   agentState,
   agentType,
@@ -81,7 +82,7 @@ function firstLine(text: string | undefined): string | undefined {
 
 function Progress({ runID, agent, state }: { runID: string; agent: Subagent; state: AgentState }) {
   const more = useStore((s) => s.acpSessions[runID]?.more ?? false)
-  const report = firstLine(agentReport(agent))
+  const report = firstLine(agentReport(agent) ?? (agent.call?.task ? agentLastMessage(agent) : undefined))
   const activity = agent.latest ? activityLabel(agent.latest) : undefined
   switch (state) {
     case 'running':
