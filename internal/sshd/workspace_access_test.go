@@ -513,3 +513,47 @@ func TestMergeKeepsTheLastSuperAdminBesideAPendingOne(t *testing.T) {
 		t.Fatalf("super admin after the refused merge = %+v, %v", m, err)
 	}
 }
+
+// A retained run mounts its launcher's home. Handed to another member, it
+// does not relaunch once that launcher lost a workspace of the run, even
+// when the caller and the account's owner still reach it.
+func TestRelaunchNeedsTheHomeMemberInEveryWorkspace(t *testing.T) {
+	t.Parallel()
+	e := newAccessEnv(t, nil)
+	ctx := context.Background()
+	_, launcher := addMember(t, e.testEnv, "L", domain.RoleCollaborator, false)
+	_, account := addMember(t, e.testEnv, "O", domain.RoleCollaborator, false)
+	for _, m := range []domain.MemberID{launcher.ID, account.ID, e.u.ID} {
+		if err := e.db.GrantWorkspace(ctx, e.wsA.ID, m, e.member.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.db.ShareAccount(ctx, account.ID, e.u.ID); err != nil {
+		t.Fatal(err)
+	}
+	run := &domain.Run{WorkspaceID: e.wsA.ID, MemberID: e.u.ID, HomeMemberID: launcher.ID, AccountMemberID: account.ID,
+		Task: "t", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning, Branch: "aether/run-home"}
+	if err := e.db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.RevokeWorkspaceGrant(ctx, e.wsA.ID, launcher.ID); err != nil {
+		t.Fatal(err)
+	}
+	u := controlAs(t, e.testEnv, e.uKey)
+	pe := wantErrCode(t, u.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: string(run.ID)}, nil), protocol.CodeDenied, "relaunch on a revoked launcher's home")
+	if !strings.Contains(pe.Message, "whose home the session uses") {
+		t.Fatalf("relaunch refusal %q does not name the home", pe.Message)
+	}
+	if calls := e.runs.Calls(); len(calls) != 0 {
+		t.Fatalf("scheduler calls after the refused relaunch = %v, want none", calls)
+	}
+	if err := e.db.GrantWorkspace(ctx, e.wsA.ID, launcher.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: string(run.ID)}, nil); err != nil {
+		t.Fatalf("relaunch once the launcher reaches the workspace again: %v", err)
+	}
+}
