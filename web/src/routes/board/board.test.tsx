@@ -5,6 +5,7 @@ import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api, ApiError } from '@/lib/api'
 import type { Event, GatewayCapabilities, Run, TimelinePage } from '@/lib/types'
 import { Board } from '@/routes/board'
+import { useReply } from '@/routes/board/card-action'
 import { virtualizeAbove } from '@/routes/board/card-list'
 import { EdgePopover } from '@/routes/board/lanes/lane-popover'
 import { liveMailMs } from '@/routes/board/lanes/live-mail'
@@ -862,7 +863,28 @@ describe('lanes view', () => {
     const composer = await screen.findByRole('dialog', { name: /^Reply to / })
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
     expect(composer.isConnected).toBe(true)
-    expect(document.activeElement).toBe(within(composer).getByRole('textbox', { name: 'Message to the agent' }))
+    const box = within(composer).getByRole('textbox', { name: 'Message to the agent' })
+    expect(document.activeElement).toBe(box)
+    await userEvent.type(box, 'use the staging IdP')
+    expect((box as HTMLTextAreaElement).value).toBe('use the staging IdP')
+    expect(within(composer).getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
+    await userEvent.click(within(composer).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Reply to / })).toBeNull())
+    expect(useReply.getState().reply).toBeNull()
+  })
+
+  it("never shows or sends another session's draft in a lane's reply composer", async () => {
+    seed([stopped, working])
+    act(() => useReply.setState({ reply: { runId: working.id, text: 'draft for still going' } }))
+    const tree = await openLanes()
+    act(() => within(tree).getAllByRole('treeitem')[1].focus())
+    await userEvent.keyboard('r')
+    const composer = await screen.findByRole('dialog', { name: /^Reply to / })
+    const box = within(composer).getByRole('textbox', { name: 'Message to the agent' }) as HTMLTextAreaElement
+    expect(box.value).toBe('')
+    await userEvent.type(box, 'use the mock')
+    await userEvent.click(within(composer).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith(stopped.id, 'use the mock', expect.any(String)))
   })
 
   it('groups a run with its child runs under one lane', async () => {
