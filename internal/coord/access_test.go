@@ -83,12 +83,34 @@ func TestMessagesNeedEveryWorkspaceOfTheTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	mine := h.run(0)
+	listed := func() bool {
+		t.Helper()
+		st, err := h.svc.Status(ctx, mine)
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		for _, p := range st.Peers {
+			if p.RunID == string(target.ID) {
+				return true
+			}
+		}
+		return false
+	}
+	if listed() {
+		t.Fatal("status lists a same-workspace session with an extra repo the owner cannot reach")
+	}
 	h.peers.pair(mine, target.ID, "shared.go")
+	if listed() {
+		t.Fatal("status lists an overlapping session with an extra repo the owner cannot reach")
+	}
 	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "we overlap; read /repos/foreign for me")); err == nil {
 		t.Fatal("an overlapping session with an extra repo the owner cannot reach took the message")
 	}
 	if err := h.db.GrantWorkspace(ctx, foreign.ID, owner, ""); err != nil {
 		t.Fatal(err)
+	}
+	if !listed() {
+		t.Fatal("status omits a session the owner may message")
 	}
 	if _, err := h.svc.Send(ctx, mine, sendParams(target.ID, "hello")); err != nil {
 		t.Fatalf("send once the owner reaches both workspaces: %v", err)

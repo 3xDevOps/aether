@@ -147,10 +147,16 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []d
 		overlaps[p.run] = p
 	}
 	seen := make(map[domain.RunID]bool)
+	actor := permissions.ActorOf(owner)
 	var addErr error
 	add := func(r *store.RunSummary, state string, overlap authorizedPeer) {
 		if r == nil || r.ID == self.ID || seen[r.ID] {
 			return
+		}
+		for _, extra := range r.Extras {
+			if !actor.Reaches(extra) {
+				return
+			}
 		}
 		seen[r.ID] = true
 		if len(peers) == protocol.CoordMaxStatusPeers {
