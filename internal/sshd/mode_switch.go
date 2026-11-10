@@ -37,7 +37,7 @@ func (s *Server) runModeSwitch(ctx context.Context, member domain.MemberID, raw 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(fresh)}, nil
+	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, fresh)}, nil
 }
 
 // admitControl runs act with Steer rechecked under the run's admission lock:

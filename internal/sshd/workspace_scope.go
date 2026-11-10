@@ -81,3 +81,16 @@ func scopeRepos(actor permissions.Actor, run *protocol.Run) {
 	}
 	run.Repos = kept
 }
+
+// memberRunSnapshot is runSnapshot as member may see it: repos in
+// workspaces they cannot reach are left out, and all extras are when their
+// access cannot be read.
+func (s *Server) memberRunSnapshot(ctx context.Context, member domain.MemberID, run *domain.Run) protocol.Run {
+	snap := s.runSnapshot(run)
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		actor = permissions.Actor{}
+	}
+	scopeRepos(actor, &snap)
+	return snap
+}

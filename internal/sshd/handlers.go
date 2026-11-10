@@ -245,7 +245,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		}
 		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; session %s was stopped, so launch again", childrenErr.Message, run.ID)}
 	}
-	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
+	return protocol.RunLaunchResult{Run: s.memberRunSnapshot(ctx, member, run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
 }
 
 func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback,
@@ -472,7 +472,7 @@ func (s *Server) runArchive(ctx context.Context, member domain.MemberID, params 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
 }
 
 // runSeen records that the caller opened a run. The guard resolves the run
@@ -486,7 +486,7 @@ func (s *Server) runSeen(ctx context.Context, member domain.MemberID, params jso
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
 }
 
 func (s *Server) runPause(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -569,7 +569,7 @@ func (s *Server) runClose(ctx context.Context, member domain.MemberID, params js
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
 }
 
 func (s *Server) runReview(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -594,7 +594,7 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
 }
 
 // runRelaunch re-enters the addressed retained TUI run. The retained
@@ -639,7 +639,7 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(reopened)}, nil
+	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, reopened)}, nil
 }
 
 func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

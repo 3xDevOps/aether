@@ -473,3 +473,30 @@ func TestScheduleDeleteNeedsItsCreatorOrTheWorkspaceAdmin(t *testing.T) {
 		t.Fatalf("the creator's schedule.delete: %v", err)
 	}
 }
+
+// A session's result names only the repos the caller reaches: U closes
+// A's run, whose extra repo is in B's workspace, and is not told of it.
+func TestRunResultLeavesOutUnreachableRepos(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	var got protocol.RunResult
+	if err := w.call(t, "S", protocol.MethodRunGet, protocol.RunIDParams{RunID: string(w.runA.ID)}, &got); err != nil {
+		t.Fatalf("S gets A's run: %v", err)
+	}
+	if len(got.Run.Repos) != 2 {
+		t.Fatalf("S sees repos %+v, want the primary and B's", got.Run.Repos)
+	}
+	var res protocol.RunResult
+	params := protocol.RunCloseParams{RunID: string(w.runA.ID), Outcome: string(domain.RunAbandoned)}
+	if err := w.call(t, "U", protocol.MethodRunClose, params, &res); err != nil {
+		t.Fatalf("U closes A's run: %v", err)
+	}
+	if res.Run.ID != string(w.runA.ID) {
+		t.Fatalf("U's result = %+v, want A's run", res.Run)
+	}
+	for _, r := range res.Run.Repos {
+		if r.WorkspaceID == string(w.wsB.ID) {
+			t.Fatalf("U's result names B's repo: %+v", res.Run.Repos)
+		}
+	}
+}

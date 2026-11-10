@@ -1231,3 +1231,18 @@ func (h *harness) approveForDirect(ctl *protocol.Client, c *client, s *serverNod
 	}
 	approve(t, ctl, s.pendingCode(t, c.user.Login+"'s registered device directly", r))
 }
+
+// grantEveryone grants ws to every member, as the upgrade to
+// workspace-scoped access does for a workspace made before it.
+func grantEveryone(t *testing.T, db *store.DB, ws domain.WorkspaceID) {
+	t.Helper()
+	members, err := db.ListMembers(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range members {
+		if err := db.GrantWorkspace(t.Context(), ws, m.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

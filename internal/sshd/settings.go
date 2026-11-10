@@ -239,5 +239,5 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 	if len(publicationErrs) != 0 {
 		return nil, rpcError(errors.Join(publicationErrs...))
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	return protocol.RunResult{Run: s.memberRunSnapshot(ctx, member, run)}, nil
 }
