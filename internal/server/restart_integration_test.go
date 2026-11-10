@@ -159,7 +159,7 @@ func newSoakEnv(ctx context.Context, t *testing.T) *soakEnv {
 	}
 	member := &domain.Member{
 		DisplayName: "Soak Tester", PublicKey: string(ssh.MarshalAuthorizedKey(e.signer.PublicKey())),
-		Color: "#e6194b", Role: domain.RoleAdmin,
+		Color: "#e6194b", Role: domain.RoleSuperAdmin,
 	}
 	if err = db.CreateMember(ctx, member); err != nil {
 		t.Fatal(err)

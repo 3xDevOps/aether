@@ -126,14 +126,26 @@ func (s *Scheduler) accountRevoked(ctx context.Context, run *domain.Run) (bool, 
 }
 
 // resolveRunAccount refuses the run's account as a launch by its launcher
-// would be refused now, including when the account's owner no longer
-// reaches one of the run's workspaces.
+// would be refused now, including when the member whose home it mounts or
+// the account's owner no longer reaches one of the run's workspaces. A
+// handoff keeps the home, so the current owner's access does not stand in.
 func (s *Scheduler) resolveRunAccount(ctx context.Context, run *domain.Run) error {
 	launcher := run.HomeMemberID
 	if launcher == "" {
 		launcher = run.MemberID
 	}
-	_, err := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, launcher, string(run.AccountMember()), runWorkspaces(run))
+	workspaces := runWorkspaces(run)
+	home, err := s.cfg.Store.GetMember(ctx, run.HomeMember())
+	if err != nil {
+		return err
+	}
+	reach := permissions.ActorOf(home)
+	for _, ws := range workspaces {
+		if !reach.Reaches(ws) {
+			return fmt.Errorf("%w: %s, whose home the session uses, has no access to workspace %s", permissions.ErrDenied, home.ID, ws)
+		}
+	}
+	_, err = fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, launcher, string(run.AccountMember()), workspaces)
 	return err
 }
 

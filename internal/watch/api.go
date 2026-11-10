@@ -116,7 +116,7 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		if t.RunID == "" {
 			return "", "", nil, invalid("target.run_id is required")
 		}
-		run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
+		run, err := s.reachableRun(ctx, member, domain.RunID(t.RunID))
 		if err != nil {
 			return "", "", nil, fmt.Errorf("session %s: %w", t.RunID, err)
 		}
@@ -133,7 +133,7 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 			return "", "", nil, invalid("target.repo and target.number are required")
 		}
 		if t.RunID != "" {
-			run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
+			run, err := s.reachableRun(ctx, member, domain.RunID(t.RunID))
 			if err != nil {
 				return "", "", nil, fmt.Errorf("session %s: %w", t.RunID, err)
 			}
@@ -143,13 +143,20 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 	default:
 		return "", "", nil, invalid("target kind %q is not one of run, pr", t.Kind)
 	}
-	if ws != "" {
-		actor := permissions.ActorOf(member)
-		if err := permissions.Check(permissions.View, actor, permissions.Target{Workspace: ws}); err != nil {
-			return "", "", nil, fmt.Errorf("%w: %w", ErrDenied, err)
-		}
-	}
 	return ws, title, fired, nil
+}
+
+// reachableRun reads run id for member, answering a run in a workspace
+// they cannot reach exactly as a missing one.
+func (s *Service) reachableRun(ctx context.Context, member *domain.Member, id domain.RunID) (*domain.Run, error) {
+	run, err := s.store.GetRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !permissions.ActorOf(member).Reaches(run.WorkspaceID) {
+		return nil, store.ErrNotFound
+	}
+	return run, nil
 }
 
 // ErrDenied marks a target the caller may not see.

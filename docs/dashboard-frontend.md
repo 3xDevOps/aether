@@ -6210,7 +6210,9 @@ in `workspace.list` is `admin`, the row menu offers **Settings…**, **Access…
 and **Delete…**; **Access…** lists the owner and granted members, adds members
 (an admin sees only collaborators and viewers) and removes them, showing the
 server's error verbatim. Super admins also get **Change owner…**. A grant,
-revoke or `workspace.access` event reloads the workspace list. Server-wide
+revoke, `workspace.access` event or `member.access` event reloads the workspace
+list. `member.access` (workspace id `server`) goes only to the member whose
+access changed, so a member who just lost a workspace still gets it. Server-wide
 controls (server update, session limits, Docker inside sessions, remote access)
 show to super admins; the dashboard hides what the caller cannot use and the
 server refuses it regardless.

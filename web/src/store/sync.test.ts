@@ -1918,6 +1918,20 @@ describe('applyEvent', () => {
     })
   })
 
+  it('re-reads the workspaces when the viewer loses one', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const workspaceListFull = vi.fn(async () => [otherWorkspace])
+    const applied = await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.access',
+      payload: { workspace_id: workspace.id, member_id: alice.id, action: 'revoked' },
+    }), fakeApi({ workspaceListFull }))
+
+    expect(applied).toBe(true)
+    expect(workspaceListFull).toHaveBeenCalledTimes(1)
+    expect(store.getState().workspaces[workspace.id]).toBeUndefined()
+  })
+
   it('re-reads the devices on a device event', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

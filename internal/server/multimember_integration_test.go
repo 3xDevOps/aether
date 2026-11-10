@@ -112,7 +112,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	var seen []events.Event
 
 	// Ada: the first tailnet identity to contact a fresh server bootstraps
-	// as the admin, with no key exchange at all.
+	// as the super admin, with no key exchange at all.
 	adaClient, err := dialNoAuth(addr, "ada", nil)
 	if err != nil {
 		t.Fatalf("ada tailnet dial: %v", err)
@@ -120,8 +120,8 @@ func TestIntegrationMultiMember(t *testing.T) {
 	t.Cleanup(func() { _ = adaClient.Close() })
 	adaCtrl := openControl(t, adaClient)
 	ada := memberInfo(t, adaCtrl)
-	if ada.Role != string(domain.RoleAdmin) || ada.Pending {
-		t.Fatalf("bootstrap member = %+v, want approved admin", ada)
+	if ada.Role != string(domain.RoleSuperAdmin) || ada.Pending {
+		t.Fatalf("bootstrap member = %+v, want approved super admin", ada)
 	}
 
 	// Bo: the second tailnet identity lands pending and is denied
@@ -196,6 +196,11 @@ func TestIntegrationMultiMember(t *testing.T) {
 		t.Fatalf("workspace.add: %v", err)
 	}
 	wsID := addedWS.Workspace.ID
+	if err := adaCtrl.Call(protocol.MethodWorkspaceAccessGrant, protocol.WorkspaceAccessGrantParams{
+		WorkspaceID: wsID, MemberIDs: []string{bo.ID, cam.ID},
+	}, nil); err != nil {
+		t.Fatalf("workspace.access.grant: %v", err)
+	}
 
 	// Cam seeds the base branch over the SSH git transport with their key.
 	seedDir := t.TempDir()

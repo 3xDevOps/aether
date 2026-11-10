@@ -6,6 +6,11 @@ import "github.com/3xDevOps/Aether/internal/domain"
 // workspace, or became its owner. It is published in that workspace.
 const TypeWorkspaceAccess Type = "workspace.access"
 
+// TypeMemberAccess tells the member a workspace.access event is about. It
+// is published under ServerScope and streamed to them alone, so it reaches
+// a member who just lost the workspace and with it that event.
+const TypeMemberAccess Type = "member.access"
+
 // Workspace access actions.
 const (
 	AccessGranted = "granted"
@@ -21,4 +26,13 @@ type WorkspaceAccessPayload struct {
 
 func (WorkspaceAccessPayload) EventType() Type { return TypeWorkspaceAccess }
 
-func init() { registerPayload[WorkspaceAccessPayload](TypeWorkspaceAccess) }
+type MemberAccessPayload WorkspaceAccessPayload
+
+func (MemberAccessPayload) EventType() Type { return TypeMemberAccess }
+
+func (p MemberAccessPayload) Recipient() domain.MemberID { return p.MemberID }
+
+func init() {
+	registerPayload[WorkspaceAccessPayload](TypeWorkspaceAccess)
+	registerPayload[MemberAccessPayload](TypeMemberAccess)
+}

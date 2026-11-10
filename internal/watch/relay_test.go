@@ -53,6 +53,38 @@ func TestARelayWakesTheTargetOnceAcrossARestart(t *testing.T) {
 	}
 }
 
+func TestASessionInAnUnreachableWorkspaceIsAnsweredAsMissing(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	hidden := &domain.Workspace{Name: "hidden", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(h.ctx, hidden); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	ended := &domain.Run{WorkspaceID: hidden.ID, MemberID: h.bob.ID, Task: "Secret", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	live := &domain.Run{WorkspaceID: hidden.ID, MemberID: h.bob.ID, Task: "Secret live", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	for _, r := range []*domain.Run{ended, live} {
+		if err := h.db.CreateRun(h.ctx, r); err != nil {
+			t.Fatalf("create run: %v", err)
+		}
+	}
+	h.status(ended, domain.RunFailed, "", "secret failure")
+
+	_, want := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-missing"}})
+	_, got := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(ended)})
+	if !errors.Is(got, store.ErrNotFound) || strings.ReplaceAll(got.Error(), string(ended.ID), "run-missing") != want.Error() {
+		t.Fatalf("watching an unreachable ended session: %v, want %v", got, want)
+	}
+
+	build := h.run(h.ada, "Build")
+	_, want = h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(build), RelayTo: []string{"run-missing"}})
+	_, got = h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(build), RelayTo: []string{string(live.ID)}})
+	if !errors.Is(got, store.ErrNotFound) || strings.ReplaceAll(got.Error(), string(live.ID), "run-missing") != want.Error() {
+		t.Fatalf("relaying to an unreachable session: %v, want %v", got, want)
+	}
+}
+
 func TestARelayToASessionTheMemberMayNotWriteToIsRefused(t *testing.T) {
 	t.Parallel()
 	h := newWaitHarness(t)

@@ -210,15 +210,16 @@ func TestIntegrationAssistantWatchesRun(t *testing.T) {
 }
 
 // seedAssistantWorkspace creates a workspace with one commit on main, pushed
-// by a second admin.
+// by a second admin who owns it.
 func seedAssistantWorkspace(t *testing.T, ctx context.Context, env *assistantEnv, name string) *domain.Workspace {
 	t.Helper()
 	store := env.srv.Store()
 	pusherPath, pusher := writeClientKey(t)
-	if err := store.CreateMember(ctx, &domain.Member{DisplayName: "Pusher", PublicKey: string(ssh.MarshalAuthorizedKey(pusher.PublicKey())), Color: "#3cb44b", Role: domain.RoleAdmin}); err != nil {
+	owner := &domain.Member{DisplayName: "Pusher", PublicKey: string(ssh.MarshalAuthorizedKey(pusher.PublicKey())), Color: "#3cb44b", Role: domain.RoleAdmin}
+	if err := store.CreateMember(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	ws := &domain.Workspace{Name: name, BaseBranch: domain.DefaultBaseBranch}
+	ws := &domain.Workspace{Name: name, BaseBranch: domain.DefaultBaseBranch, OwnerID: owner.ID}
 	if err := store.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatal(err)
 	}

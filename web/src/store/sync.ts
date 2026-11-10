@@ -414,7 +414,7 @@ export async function applyEvent(
   // No workspace.created event exists; without this a new workspace's runs
   // would be stored but rendered nowhere. Device events carry the server
   // scope, which names no workspace.
-  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.type !== 'member.merged' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.type !== 'member.merged' && ev.type !== 'member.access' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
       .then(store.getState().setWorkspaces)
@@ -428,7 +428,8 @@ export async function applyEvent(
 
   switch (ev.type) {
     case 'workspace.deleted':
-    case 'workspace.access': {
+    case 'workspace.access':
+    case 'member.access': {
       try {
         store.getState().setWorkspaces(await client.workspaceListFull())
       } catch (err) {
