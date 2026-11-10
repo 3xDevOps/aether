@@ -7,7 +7,7 @@ import { CenterView } from '@/components/shell/center-view'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import { useStore } from '@/store'
-import { item, resetItems, ScriptedSession, say, tool } from '@/test/acp-stream'
+import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
 import { alice, run, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
@@ -377,6 +377,24 @@ describe('subagents in the session view', () => {
     const card = await within(log).findByRole('button', { name: 'Watch CI, Explore, Launched' })
     expect(within(card).getByText('Launched in the background')).toBeDefined()
     expect(within(log).queryByText('Async agent launched successfully.')).toBeNull()
+  })
+
+  it('reads older history for a running background subagent the replay left out', async () => {
+    const raw_input = { description: 'Find usages', prompt: 'Search the repo for round()' }
+    const earlier = [
+      item('turn_start', 1),
+      say(1, 'user', 'Map the billing code'),
+      launch(1, 'a1', 'Find usages', 'pending', { raw_input }),
+      launch(1, 'a1', 'Find usages', 'completed', { raw_input, task: { id: 't1', type: 'local_agent', status: 'running' }, content: [{ type: 'text', text: 'Async agent launched successfully.' }] }),
+    ]
+    const replayed = Array.from({ length: 12 }, (_, i) => say(1, 'assistant', `Still working ${i}`))
+    vi.mocked(api.runACPHistory).mockClear().mockResolvedValue({ frames: earlier.map((it) => ({ seq: it.seq, item: it })), oldest_seq: earlier[0]!.seq })
+    SizedObserver.viewport = 100
+    open()
+    acpSocket().open({ oldest_seq: replayed[0]!.seq, state: state({ turn_in_flight: true, tasks: [{ id: 't1', type: 'local_agent', holds: true }] }) }, replayed)
+    const log = await screen.findByRole('log', { name: 'Chat' })
+    expect(await within(log).findByRole('button', { name: 'Find usages, Explore, Running' })).toBeDefined()
+    expect(api.runACPHistory).toHaveBeenCalledTimes(1)
   })
 
   it('summarises a report by its first line without markdown marks', async () => {

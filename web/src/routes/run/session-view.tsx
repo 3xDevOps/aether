@@ -28,6 +28,7 @@ import { requestAnnouncement } from '@/routes/run/session-requests'
 import { EnteringRow, rowGap, sessionColumn, TimelineRow, useArrivals, useFlatRows, useRowContext, type FlatRow, type OpenPolicy } from '@/routes/run/session-rows'
 import { NotesRail, NotesStrip } from '@/routes/run/session-notes'
 import type { RunShells } from '@/routes/run/shells'
+import { useLiveLaunches } from '@/routes/run/subagent-cards'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { messageScopeKey, useMessageList } from '@/store/messages'
@@ -260,6 +261,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     return Boolean(page?.initialized && !page.exhausted && s.roomNextBefore[run.id] !== undefined)
   })
   const older = olderRoom || (enhanced && Boolean(session?.more))
+  useLiveLaunches(run.id, enhanced)
   useEffect(() => {
     if (missingRoomImages && olderRoom && !roomLoading && !roomError) void room.loadOlder()
   }, [missingRoomImages, olderRoom, roomLoading, roomError, room.loadOlder])

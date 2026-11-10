@@ -1,7 +1,7 @@
 import type { SessionItem, SessionToolCall } from '@/lib/session-types'
 import {
   activityLabel, agentLabel, agentLoaded, agentPrompt, agentReport, agentRows, agentState, agentTurn, agentType, ancestry,
-  indexItems, localItem, noAgents, replaceAgentItem, siblings, trimAgents, turnExtras, withAgentRows,
+  indexItems, launchUnloaded, localItem, noAgents, replaceAgentItem, siblings, trimAgents, turnExtras, withAgentRows,
 } from '@/store/subagents'
 import { rowsOfTurn } from '@/store/session-rows'
 import { item, resetItems, say, tool } from '@/test/acp-stream'
@@ -364,5 +364,21 @@ describe('indexing subagents', () => {
     const later = launch(2, 'a1', 'completed')
     expect(localItem(idx, later).tool_call?.id).toBe(key)
     expect(localItem(idx, first).tool_call?.id).toBe('a1')
+  })
+})
+
+describe('live launches', () => {
+  const task = { id: 't1', type: 'local_agent', holds: true }
+  const running = { id: 't1', type: 'local_agent', status: 'running' as const }
+
+  it('finds a live subagent task no held call started', () => {
+    expect(launchUnloaded(index([read(1, 'a1', 'r1')]).index, [task])).toBe(true)
+    expect(launchUnloaded(index([launch(1, 'a1', 'completed', { task: running })]).index, [task])).toBe(false)
+  })
+
+  it('waits for a launch whose task is not linked yet and skips shells', () => {
+    expect(launchUnloaded(index([launch(1, 'a1', 'pending')]).index, [task])).toBe(false)
+    expect(launchUnloaded(noAgents, [{ id: 'b1', type: 'local_bash' }])).toBe(false)
+    expect(launchUnloaded(noAgents, undefined)).toBe(false)
   })
 })

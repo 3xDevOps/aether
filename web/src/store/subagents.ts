@@ -1,4 +1,4 @@
-import type { SessionItem, SessionToolCall } from '@/lib/session-types'
+import type { BackgroundTask, SessionItem, SessionToolCall } from '@/lib/session-types'
 import { isLaunch, toolLabel, toolStatus, type Rehome, type SessionRow, type Turn } from '@/store/session-rows'
 
 /** A background task's own status wins; otherwise done and failed come from
@@ -321,6 +321,18 @@ export function agentState(agent: Subagent): AgentState {
     return (agent.activeSeq ?? -1) > (agent.settledSeq ?? Infinity) ? 'running' : 'launched'
   }
   return agent.turnEndedSeq !== undefined && (agent.activeSeq ?? -1) < agent.turnEndedSeq ? 'stopped' : 'running'
+}
+
+/** Whether a live subagent or workflow task was launched before the loaded
+ * history: no held call started it and no held launch still waits for its
+ * task, so its card shows only once older history is read. */
+export function launchUnloaded(index: AgentIndex, tasks: BackgroundTask[] | undefined): boolean {
+  const live = (tasks ?? []).filter((task) => /agent|workflow|teammate/.test(task.type ?? ''))
+  if (live.length === 0) return false
+  const agents = Object.values(index.agents)
+  if (agents.some((agent) => agent.call && !agent.call.task && !callSettled(agent.call))) return false
+  const held = new Set(agents.map((agent) => agent.call?.task?.id))
+  return live.some((task) => !held.has(task.id))
 }
 
 function rawInput(agent: Subagent): Record<string, unknown> {

@@ -3348,7 +3348,10 @@ background", and running once a child item is logged after the call
 completed. The launch acknowledgement is never shown as a report. A workflow card lists the subagents whose items name it as parent.
 A subagent whose launch call is not loaded, or was trimmed, shows its card at
 its first held item until a history page brings the launch; without the
-call its state is unknown. A launch id seen again after
+call its state is unknown. When the session state lists a live subagent or
+workflow task that no held call started, the Chat and Trace views page
+`run.acp.history` until one does or history ends: a reload replays only the
+newest 200 items, which can leave out a launch that still runs. A launch id seen again after
 its call settled names a new subagent, keyed `<id>@<seq>`. While the main
 agent only waits on its subagents, the live steps header reads "Waiting on 2
 subagents". A fallback launch shows a card with no nested items;

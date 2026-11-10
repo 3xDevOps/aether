@@ -1,16 +1,19 @@
-import { memo, useId } from 'react'
+import { memo, useEffect, useId } from 'react'
 import { AgentCard, AgentEntry, duration, WorkGroup } from '@/components/ui/timeline'
 import { Shimmer } from '@/components/ui/shimmer'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
+import { api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { redirectRoute } from '@/lib/url-state'
 import { useStore } from '@/store'
+import { loadOlderItems } from '@/store/session-stream'
 import {
   activityLabel,
   agentLabel,
   agentReport,
   agentState,
   agentType,
+  launchUnloaded,
   type AgentState,
   type Subagent,
 } from '@/store/subagents'
@@ -26,6 +29,18 @@ const tones: Record<AgentState, { tone: Tone; pulse?: boolean; word: string }> =
 
 export const agentStateWord = (state: AgentState) => tones[state].word
 export const agentTone = (state: AgentState) => tones[state].tone
+
+/** Reads older history until every live subagent's launch is held: a reload
+ * replays only the newest items, which can leave out a launch that still runs. */
+export function useLiveLaunches(runID: string, enabled: boolean) {
+  const missing = useStore((s) => {
+    const session = s.acpSessions[runID]
+    return enabled && session !== undefined && session.more && !session.olderLoading && !session.olderError && launchUnloaded(session.agents, session.state?.tasks)
+  })
+  useEffect(() => {
+    if (missing) void loadOlderItems(useStore, api, runID)
+  }, [missing, runID])
+}
 
 /** replace swaps the open subagent without a history entry. */
 export function openAgent(runID: string, id: string, replace = false) {
