@@ -2,8 +2,8 @@ name: Edge image
 
 # Builds images/edge/Dockerfile on both architectures it ships for and runs
 # scripts/edge-image-smoke.sh on each, natively, and qualifies an upgrade
-# from the previous release with make test-edge-upgrade. ci.yml calls it in
-# every run of its full suite;
+# from the previous release with make test-edge-upgrade. ci-suite.yml calls it
+# in every full CI run;
 # `gh workflow run edge-image.yml --ref <branch>` runs it for any branch.
 # It pushes nothing and holds no credential beyond a read-only token.
 on:

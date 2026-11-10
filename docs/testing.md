@@ -739,7 +739,10 @@ the server". Nothing Aether builds or installs is excluded.
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
 every merge queue entry, every push to `main` and nightly on `main` at 08:00
 UTC. A pull request, draft or ready, runs `changes`, `audit`, `lint`,
-`build-and-test` and `dashboard`. The merge queue runs every job, so the full
+`build-and-test` and `dashboard`. Every other job lives in
+`.github/workflows/ci-suite.yml`, which `ci.yml` calls as the `suite` job, so
+a run that skips them shows one skipped `suite` check; in a run that calls it
+each job shows as `suite / <job>`. The merge queue runs every job, so the full
 suite runs once per change, on the merge result, before `main` moves; a
 failure there removes the pull request from the queue.
 
@@ -760,8 +763,8 @@ re-run the push session too.
 
 `CI gate` is the one required check: it passes when
 every other job passed or was skipped by its own rule, and fails when any
-failed or was cancelled. A new job must be added to its `needs` list to gate
-`main`.
+failed or was cancelled. A new job in `ci.yml` must be added to its `needs`
+list to gate `main`; a job in `ci-suite.yml` gates it through `suite`.
 
 `main` takes changes through a merge queue. `gh pr merge <n> --squash` adds a
 ready pull request whose `CI gate` passed; the queue batches up to five
