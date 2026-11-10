@@ -749,8 +749,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 	sweep := time.NewTicker(interval)
 	defer sweep.Stop()
-	if s.cfg.CheckoutTTL > 0 {
-		s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+	if s.cfg.CheckoutTTL > 0 && s.checkoutSweepMu.TryLock() {
+		s.sweepCheckoutsLocked(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+		s.checkoutSweepMu.Unlock()
 	}
 	s.sweepCaches(ctx, false)
 	gc := time.NewTicker(time.Hour)
@@ -776,8 +777,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 				s.reclaimMu.Unlock()
 			}
 		case <-gc.C:
-			if s.cfg.CheckoutTTL > 0 {
-				s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+			if s.cfg.CheckoutTTL > 0 && s.checkoutSweepMu.TryLock() {
+				s.sweepCheckoutsLocked(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+				s.checkoutSweepMu.Unlock()
 			}
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepScratch(ctx)
