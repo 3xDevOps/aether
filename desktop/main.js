@@ -157,6 +157,7 @@ function main() {
 
     child = spawn(bin, ['gui', '--json', '--port', '0'], {
       stdio: ['ignore', 'pipe', 'inherit'],
+      windowsHide: true,
       // Tells the gateway this shell quits on exit 76 (localgw.ShellQuitsEnv).
       env: { ...process.env, AETHER_SHELL_QUITS_ON_76: '1' },
     })
