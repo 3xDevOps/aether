@@ -2069,7 +2069,11 @@ as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`
 under the workspace id `server`, which names no workspace, so a server without
 workspaces still reports it. The shapes are in
 `internal/protocol/identity.go` and `internal/protocol/edge.go`, and
-[edge.md](edge.md) describes what each does.
+[edge.md](edge.md) describes what each does. A workspace grant, revoke or
+owner change is also published under `server` as `member.access`,
+`{"workspace_id":"...","member_id":"...","action":"granted|revoked|owner"}`,
+to the member it changed alone, so a member who just lost the workspace still
+receives it.
 
 `workspace.selection` stores only the last selected workspace ID in
 `workspace-selection/<hash>.json` beside the CLI's `config.json`. The hash

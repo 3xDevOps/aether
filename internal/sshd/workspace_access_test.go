@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -204,6 +205,55 @@ func TestWorkspaceAccessRevokeRefusedWhileInUse(t *testing.T) {
 		t.Fatalf("U's workspaces after revoke = %+v, %v", access, err)
 	}
 	_ = wantErrCode(t, a.Call(protocol.MethodWorkspaceAccessRevoke, revoke, nil), protocol.CodeNotFound, "revoke a grant that is gone")
+}
+
+// A revoked member's own feed carries a member.access notice about the
+// workspace they lost, which no one else's feed does.
+func TestWorkspaceAccessRevokeNotifiesTheRevokedMember(t *testing.T) {
+	t.Parallel()
+	e := newAccessEnv(t, func(c *Config) { c.revalidateInterval = time.Hour })
+	ctx := context.Background()
+	a := controlAs(t, e.testEnv, e.aKey)
+	if err := grant(a, e.wsA.ID, e.u.ID); err != nil {
+		t.Fatal(err)
+	}
+	feed := func(m domain.MemberID) <-chan protocol.Event {
+		stream, err := e.srv.Local(m).Events(ctx, protocol.SubscribeRequest{})
+		if err != nil {
+			t.Fatalf("events: %v", err)
+		}
+		t.Cleanup(func() { _ = stream.Close() })
+		return eventLines(t, stream)
+	}
+	uFeed, aFeed := feed(e.u.ID), feed(e.a.ID)
+	if err := a.Call(protocol.MethodWorkspaceAccessRevoke, protocol.WorkspaceAccessRevokeParams{WorkspaceID: string(e.wsA.ID), MemberID: string(e.u.ID)}, nil); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	for {
+		ev := nextEvent(t, uFeed)
+		if ev.Type != string(events.TypeMemberAccess) {
+			continue
+		}
+		var p events.MemberAccessPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil || ev.WorkspaceID != string(events.ServerScope) ||
+			p.WorkspaceID != e.wsA.ID || p.MemberID != e.u.ID || p.Action != events.AccessRevoked {
+			t.Fatalf("revoked member's notice = %+v, payload %+v, %v", ev, p, err)
+		}
+		break
+	}
+	if _, err := e.bus.Publish(ctx, events.Event{WorkspaceID: events.ServerScope, ActorID: e.member.ID,
+		Payload: events.MemberDevicePayload{DeviceID: "marker", Status: "pending"}}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		ev := nextEvent(t, aFeed)
+		if ev.Type == string(events.TypeMemberAccess) {
+			t.Fatalf("the owner's feed carries the revoked member's notice: %+v", ev)
+		}
+		if ev.Type == string(events.TypeMemberDevice) {
+			break
+		}
+	}
 }
 
 // Only a super admin changes a workspace's owner, and only to an admin or
