@@ -166,8 +166,8 @@ a link.
 to the member. Delete those first. It is also refused while the member owns
 workspaces, with an error that names them and the command to reassign them
 (`aether workspace owner`, [below](#workspace-access)). Only super admins remove
-members. `aether member transfer <member id>` makes another super admin the
-server's owner at its edge.
+members. Only a super admin runs `aether member transfer <member id>`; it makes
+another admin or super admin the server's owner at its edge.
 
 ### Single sign-on
 

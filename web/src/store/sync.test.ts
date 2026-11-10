@@ -1947,6 +1947,27 @@ describe('applyEvent', () => {
     expect(memberList).toHaveBeenCalled()
   })
 
+  it('writes nothing from member.access reads that finish after the identity changed or the connection aborted', async () => {
+    for (const stop of ['identity', 'abort']) {
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+      const before = store.getState().info
+      const controller = new AbortController()
+      let release: (v: unknown) => void = () => {}
+      const runList = vi.fn(() => new Promise<never[]>((resolve) => { release = resolve as (v: unknown) => void }))
+      const applied = applyEvent(store, statusEvent({
+        run_id: '', workspace_id: 'server', type: 'member.access',
+        payload: { workspace_id: '', member_id: serverInfoFixture.member.id, action: 'granted' },
+      }), fakeApi({ runList, serverInfo: vi.fn(async () => ({ ...serverInfoFixture, tailnet_hostname: 'late' })) }), controller.signal)
+      await vi.waitFor(() => expect(runList).toHaveBeenCalled())
+      if (stop === 'identity') store.setState({ identityKey: 'someone-else' })
+      else controller.abort()
+      release([])
+      expect(await applied).toBe(false)
+      expect(store.getState().info).toBe(before)
+    }
+  })
+
   it('brings back the sessions of a workspace the viewer regains', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]), runList: vi.fn(async () => []) }))

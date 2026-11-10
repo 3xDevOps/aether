@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -34,6 +34,14 @@ function useMembers(client: Api): Member[] {
     }
   }, [client])
   return Object.values(members).filter((m) => !m.pending)
+}
+
+function useCloseOnIdentityChange(onClose: () => void) {
+  const identity = useStore((s) => s.identityKey)
+  const opened = useRef(identity)
+  useEffect(() => {
+    if (identity !== opened.current) onClose()
+  }, [identity, onClose])
 }
 
 function useSelfID(): string | undefined {
@@ -76,12 +84,15 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
   const [pick, setPick] = useState('')
   const selfID = useSelfID()
   const returnFocus = useReturnFocus()
+  useCloseOnIdentityChange(onClose)
 
   const load = useCallback(async () => {
+    const same = sameIdentity()
     try {
-      setAccess(await client.workspaceAccessList(workspaceID))
+      const list = await client.workspaceAccessList(workspaceID)
+      if (same()) setAccess(list)
     } catch (err) {
-      setError(message(err))
+      if (same()) setError(message(err))
     }
   }, [client, workspaceID])
 
@@ -150,7 +161,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
           )}
           {access?.grants.length === 0 && <p className="text-ui-sm text-muted">No one else has access yet.</p>}
           {addable.length === 0 ? (
-            <p className="text-ui-sm text-muted">{superAdmin ? 'Everyone already has access.' : "No more members you can add. A super admin can grant members you don't see here."}</p>
+            <p className="text-ui-sm text-muted">{superAdmin ? 'Everyone already has access.' : "Invite someone new from Members, or ask a super admin to add an existing member."}</p>
           ) : (
           <div className="flex min-w-0 items-end gap-2">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -192,13 +203,16 @@ export function WorkspaceOwnerDialog({ workspaceID, client, onClose }: { workspa
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const returnFocus = useReturnFocus()
+  useCloseOnIdentityChange(onClose)
 
   const save = async () => {
     setBusy(true)
     setError(null)
     try {
+      const same = sameIdentity()
       await client.workspaceOwnerSet(workspaceID, owner)
       await refreshWorkspaces(client)
+      if (!same()) return
       toast.success(`${workspace?.name ?? 'The workspace'} has a new owner`)
       onClose()
     } catch (err) {

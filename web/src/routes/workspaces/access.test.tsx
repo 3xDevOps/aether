@@ -120,7 +120,7 @@ describe('workspace access', () => {
     render(<WorkspacesRoute params={{}} client={api} />)
     fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    expect(await dialog.findByText("No more members you can add. A super admin can grant members you don't see here.")).toBeTruthy()
+    expect(await dialog.findByText("Invite someone new from Members, or ask a super admin to add an existing member.")).toBeTruthy()
     expect(dialog.queryByRole('button', { name: 'Add' })).toBeNull()
   })
 
@@ -155,5 +155,31 @@ describe('workspace access', () => {
     await waitFor(() => expect(api.workspaceAccessRevoke).toHaveBeenCalled())
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(useStore.getState().workspaces.ws_stale).toBeUndefined()
+  })
+
+  it('closes the access dialog and drops a late grant list when the signed-in member changes', async () => {
+    seed(admin, { owned: true })
+    useStore.setState({ identityKey: 'alice' })
+    let release: (v: unknown) => void = () => {}
+    const api = client({
+      workspaceAccessList: vi.fn(() => new Promise((resolve) => { release = resolve })),
+    })
+    render(<WorkspacesRoute params={{}} client={api} />)
+    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
+    await screen.findByRole('dialog', { name: 'Access to main-repo' })
+    useStore.setState({ identityKey: 'bob' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    release({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [] })
+    expect(screen.queryByText('No one else has access yet.')).toBeNull()
+  })
+
+  it('closes the owner dialog when the signed-in member changes', async () => {
+    seed(root, { other: true })
+    useStore.setState({ identityKey: 'root' })
+    render(<WorkspacesRoute params={{}} client={client()} />)
+    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Change owner…' }))
+    await screen.findByRole('dialog', { name: 'Change owner of main-repo' })
+    useStore.setState({ identityKey: 'alice' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 })

@@ -129,6 +129,7 @@ export function Roster({ client }: { client: Api }) {
       )}
       <section aria-label="Roster" className="flex min-w-0 flex-col gap-2">
         <SectionLabel as="h2">{roster.length === 1 ? '1 member' : `${roster.length} members`}</SectionLabel>
+        {!superAdmin && <p className="text-ui-sm text-muted">You see super admins and the members of workspaces you can use.</p>}
         <div className="overflow-hidden rounded-panel border border-seam">
           <table className="w-full table-fixed text-ui">
             <thead className="border-b border-seam bg-chrome text-left text-ui-sm text-muted">

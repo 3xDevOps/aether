@@ -65,6 +65,18 @@ describe('members page', () => {
     expect(within(row('Alice')).getByText('Offline')).toBeDefined()
   })
 
+  it('tells everyone but a super admin which members the roster leaves out', async () => {
+    const note = 'You see super admins and the members of workspaces you can use.'
+    seed({ info: { ...serverInfo, member: { ...alice, role: 'admin' } } })
+    const view = render(<MembersRoute params={{}} client={fakeApi()} />)
+    expect(await screen.findByText(note)).toBeDefined()
+    view.unmount()
+    seed({ info: { ...serverInfo, member: { ...alice, role: 'super_admin' } } })
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+    await screen.findByRole('region', { name: 'Roster' })
+    expect(screen.queryByText(note)).toBeNull()
+  })
+
   it('shows a pending member approved before the server answers, with no second Approve', async () => {
     let answer: (member: Member) => void = () => {}
     const client = fakeApi({
