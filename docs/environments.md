@@ -173,7 +173,8 @@ from it then fails to start with `value too large for defined data type`, or
 with a `mkdirall` `permission denied` on one of the image's own directories.
 Aether then starts that session, or your environment terminal, from your
 previous image, or from the standard image when there is none or it fails
-the same way. The session's status names the images that failed:
+the same way. A session's status names the images that failed; the
+terminal shows nothing, and only the server log records its fallback:
 
 ```
 Saved image <name> cannot start (value too large for defined data type); this session uses your previous saved image <name>. Save your environment again to replace it.
