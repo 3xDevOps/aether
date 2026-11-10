@@ -30,10 +30,12 @@ const onlyOverlaps = new Set(['message'] as const)
 
 type Pop =
   | { kind: 'lane'; key: string; run?: string; x: number; y: number; h: number; at?: number; reply?: boolean }
-  | { kind: 'edge'; edges: LaneEdge[]; x: number; y: number }
+  | { kind: 'edge'; edges: LaneEdge[]; x: number; y: number; focus?: string }
 
-/** How long the pointer may rest while heading for a pinned button before the lane under it takes the hover. */
-const aimMs = 250
+/** How long the pointer may rest, or move without closing in, while heading for a pinned button before the lane under it takes the hover. */
+const aimMs = 150
+/** The longest the lanes crossed on the way to a pinned button wait. */
+const aimMaxMs = 1000
 
 function side(a: { x: number; y: number }, b: { x: number; y: number }, p: { x: number; y: number }): number {
   return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
@@ -58,6 +60,15 @@ function headingFor(from: { x: number; y: number }, to: { x: number; y: number }
     if (inTriangle(to, from, tl, br) || inTriangle(to, from, tr, bl)) return true
   }
   return false
+}
+
+function distanceTo(p: { x: number; y: number }, targets: Iterable<Element>): number {
+  let best = Infinity
+  for (const el of targets) {
+    const r = el.getBoundingClientRect()
+    best = Math.min(best, Math.hypot(Math.max(r.left - p.x, 0, p.x - r.right), Math.max(r.top - p.y, 0, p.y - r.bottom)))
+  }
+  return best
 }
 
 /** An estimate of one axis character at text-ui-xs; tabular digits keep it close. */
@@ -168,7 +179,10 @@ export function LanesView(props: LanesViewProps) {
   }, [model.lanes, layout, g.metrics])
 
   const popLane = pop?.kind === 'lane' ? byKey.get(pop.key) : undefined
-  const focusKey = popLane?.key ?? hovered ?? (treeFocused ? active : undefined)
+  // An open popover keeps the lane it opened from in focus, wherever the pointer goes on its way to it.
+  const focusKey = popLane?.key ?? (pop?.kind === 'edge' ? pop.focus : undefined) ?? hovered ?? (treeFocused ? active : undefined)
+  const focusRef = useRef(focusKey)
+  focusRef.current = focusKey
   const focusLane = focusKey ? byKey.get(focusKey) : undefined
   const focusRun = focusLane?.kind === 'run' ? focusLane.card.run.id : undefined
   const overlaps = useMemo(
@@ -286,7 +300,6 @@ export function LanesView(props: LanesViewProps) {
     drag.current = { x: event.clientX, id: event.pointerId, moved: false }
   }
   // Hover comes from the pointer's y, not row events: link hit paths above the rows would otherwise end a row's hover.
-  // An open popover holds the hover it opened with, so the lanes the pointer crosses on its way there change nothing.
   const laneAt = (y: number): string | null => {
     if (y < 0 || y >= layout.height || model.lanes.length === 0) return null
     let lo = 0
@@ -298,35 +311,50 @@ export function LanesView(props: LanesViewProps) {
     }
     return model.lanes[lo].key
   }
+  const latestLaneAt = useRef(laneAt)
+  latestLaneAt.current = laneAt
   const pointer = useRef<{ x: number; y: number } | null>(null)
   /** Where the pointer last was on the hovered lane. */
   const left = useRef<{ x: number; y: number } | null>(null)
+  /** Travel towards a pinned button: when it began and the closest the pointer has come. */
+  const aim = useRef<{ since: number; gap: number } | null>(null)
   const settle = useRef<number | undefined>(undefined)
   useEffect(() => () => clearTimeout(settle.current), [])
+  const hover = (key: string | null) => {
+    clearTimeout(settle.current)
+    aim.current = null
+    left.current = pointer.current
+    setHovered(key)
+  }
   const hoverAt = (event: React.PointerEvent<HTMLDivElement>) => {
     const at = { x: event.clientX, y: event.clientY }
     pointer.current = at
-    clearTimeout(settle.current)
-    if (popRef.current) return
     const next = laneAt(at.y - event.currentTarget.getBoundingClientRect().top)
-    // On its way to the hovered lane's pinned button the pointer crosses other lanes; they take the hover only once it stops heading there.
-    if (hovered && next !== hovered && left.current && content.current && headingFor(left.current, at, content.current.querySelectorAll('[data-mail-pinned]'))) {
-      settle.current = window.setTimeout(() => {
-        const el = content.current
-        if (!el || !pointer.current || popRef.current) return
-        left.current = pointer.current
-        setHovered(laneAt(pointer.current.y - el.getBoundingClientRect().top))
-      }, aimMs)
-      return
+    // On its way to the hovered lane's pinned button the pointer crosses other lanes. They wait while it keeps closing in, for at most aimMaxMs.
+    const buttons = content.current?.querySelectorAll('[data-mail-pinned]') ?? []
+    if (!popRef.current && hovered && next !== hovered && left.current && headingFor(left.current, at, buttons)) {
+      const gap = distanceTo(at, buttons)
+      aim.current ??= { since: Date.now(), gap: Infinity }
+      if (Date.now() - aim.current.since < aimMaxMs) {
+        if (gap < aim.current.gap) {
+          aim.current.gap = gap
+          clearTimeout(settle.current)
+          settle.current = window.setTimeout(() => {
+            const el = content.current
+            if (el && pointer.current) hover(latestLaneAt.current(pointer.current.y - el.getBoundingClientRect().top))
+          }, aimMs)
+        }
+        return
+      }
     }
-    left.current = at
-    setHovered(next)
+    hover(next)
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    // React bubbles the portalled popover's events here; the lane under the popover is not hovered.
     const target = event.target as Element
     if (target.closest('[data-mail-control]')) clearTimeout(settle.current)
-    else if (event.currentTarget.contains(target)) hoverAt(event)
+    // React bubbles the portalled popover's events here: the pointer is on the popover, not on the lane under it.
+    else if (!event.currentTarget.contains(target)) hover(null)
+    else hoverAt(event)
     const d = drag.current
     if (!d || d.id !== event.pointerId) return
     const dx = event.clientX - d.x
@@ -394,7 +422,7 @@ export function LanesView(props: LanesViewProps) {
     // Mail with a session outside the view has one drawn end; its facts open there.
     const a = anchors.get(edge.from.lane) ?? anchors.get(edge.to.lane)!
     const { mid } = edgeShape(edge, a, anchors.get(edge.to.lane) ?? a, g)
-    setPop({ kind: 'edge', edges: [edge], x: mid.x, y: mid.y })
+    setPop({ kind: 'edge', edges: [edge], x: mid.x, y: mid.y, focus: focusRef.current })
   }
 
   const toggle = (lane: Lane, open: boolean) => {
@@ -428,14 +456,17 @@ export function LanesView(props: LanesViewProps) {
 
   const onPick = useCallback((lane: Lane, x: number | undefined, chevron: boolean) => {
     if (drag.current?.moved) return
+    setPop(null)
     latestActivate.current(lane, x, chevron)
   }, [])
+  // A lane, mark or link replaces the open popover on click; Radix dismissing it after that click would close the new one.
+  const keep = useCallback((target: Element) => Boolean(content.current?.contains(target) && target.closest('[role=treeitem], [data-mail-control]')), [])
   const latestActivate = useRef(activate)
   latestActivate.current = activate
   const onRetry = useCallback((runID: string) => latest.current.onRetryAgents(runID), [])
   const onWiden = useCallback(() => latest.current.onWiden(), [])
   const pickEdges = useCallback((edges: LaneEdge[], x: number, y: number) => {
-    if (!drag.current?.moved) setPop({ kind: 'edge', edges, x, y })
+    if (!drag.current?.moved) setPop({ kind: 'edge', edges, x, y, focus: focusRef.current })
   }, [])
   // Swapping the lane popover for the reply composer unmounts its content too; only a real close returns focus.
   // Moving to a lane from a popover's message list closes the popover there, not on the lane it opened from.
@@ -569,10 +600,8 @@ export function LanesView(props: LanesViewProps) {
         onPointerDownCapture={pointerDown}
         onPointerMove={pointerMove}
         onPointerLeave={() => {
-          clearTimeout(settle.current)
           pointer.current = null
-          left.current = null
-          if (!popRef.current) setHovered(null)
+          hover(null)
         }}
         onPointerUp={pointerUp}
         onPointerCancel={pointerUp}
@@ -655,7 +684,7 @@ export function LanesView(props: LanesViewProps) {
           {pop?.kind === 'lane' && popRun && pop.reply ? (
             <ReplyComposer card={popRun.card} title={popRun.title} onDone={() => setPop(null)} returnFocus={returnTo(popRun.key)} />
           ) : pop?.kind === 'lane' && popLane ? (
-            <LanePopoverContent label={treeLabel(popLane, now)} returnFocus={returnTo(popLane.key)}>
+            <LanePopoverContent label={treeLabel(popLane, now)} returnFocus={returnTo(popLane.key)} keep={keep}>
               {popLane.kind === 'run' && (
                 <RunPopover
                   lane={popLane}
@@ -682,7 +711,7 @@ export function LanesView(props: LanesViewProps) {
               <LaneLinks edges={overlaps.filter((edge) => edge.from.lane === popLane.key || edge.to.lane === popLane.key)} now={now} onPick={openEdge} />
             </LanePopoverContent>
           ) : pop?.kind === 'edge' ? (
-            <LanePopoverContent label="Link" returnFocus={returnTo(active)}>
+            <LanePopoverContent label="Link" returnFocus={returnTo(active)} keep={keep}>
               {pop.edges.map((edge, i) => (
                 <div key={edge.key} className={cn(i > 0 && 'mt-3 border-t border-seam pt-2')}>
                   <EdgePopover edge={edge} now={now} />

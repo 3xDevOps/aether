@@ -69,10 +69,11 @@ test('a lane popover keeps its lane while the pointer travels to it and rests on
   const card = page.getByRole('dialog', { name: /^Lead the checkout rewrite/ })
   await expect(card).toBeVisible()
 
-  // The card opens below Lead, over Reviewer, which has no mail: hovering
-  // Reviewer would take Lead's link away.
+  // The card opens below Lead, over Reviewer, which has no mail: Reviewer
+  // taking the focus would take Lead's link away.
   const target = (await card.boundingBox())!
-  const reviewer = (await tree.getByRole('treeitem', { name: /^Review the checkout rewrite/ }).boundingBox())!
+  const reviewerLane = tree.getByRole('treeitem', { name: /^Review the checkout rewrite/ })
+  const reviewer = (await reviewerLane.boundingBox())!
   expect(target.y).toBeLessThan(reviewer.y + reviewer.height)
   await page.mouse.move(target.x + 40, reviewer.y + reviewer.height / 2, { steps: 12 })
   await expect(links).toHaveCount(1)
@@ -80,14 +81,47 @@ test('a lane popover keeps its lane while the pointer travels to it and rests on
   await expect(card).toBeVisible()
   await expect(lead).toHaveAttribute('aria-selected', 'true')
   await expect(links).toHaveCount(1)
-  await expect(page.locator('[data-lane-highlight="hover"]')).toHaveCount(0)
+  const band = page.locator('[data-lane-highlight="hover"]')
+  await expect(band).toHaveCount(0)
 
-  // Closed, the pointer hovers lanes again.
+  // Off the card, the lane under the pointer shows its hover band; the card keeps Lead's link.
+  await page.mouse.move(reviewer.x + 100, reviewer.y + reviewer.height / 2, { steps: 4 })
+  await expect(band).toHaveCount(1)
+  await expect(links).toHaveCount(1)
+
+  // Closed by Escape with the pointer outside the lanes, focus is back on
+  // Lead and nothing else holds the hover: the keyboard moves the focus.
+  await page.mouse.move(5, 795, { steps: 4 })
   await page.keyboard.press('Escape')
   await expect(card).toBeHidden()
-  await page.mouse.move(start.x, reviewer.y + reviewer.height / 2, { steps: 4 })
-  await expect(page.locator('[data-lane-highlight="hover"]')).toHaveCount(1)
+  await expect(lead).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(reviewerLane).toBeFocused()
+  await expect(band).toHaveCount(1)
   await expect(links).toHaveCount(0)
+
+  // Closed with the pointer on Reviewer, Reviewer takes the hover at once.
+  await page.mouse.click(start.x, start.y)
+  await expect(card).toBeVisible()
+  await page.mouse.move(reviewer.x + 100, reviewer.y + reviewer.height / 2, { steps: 4 })
+  await page.keyboard.press('Escape')
+  await expect(card).toBeHidden()
+  await expect(band).toHaveCount(1)
+  await expect(links).toHaveCount(0)
+})
+
+test('one click on another lane moves its card there', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const tree = await setUp(page, aether)
+  const lead = tree.getByRole('treeitem', { name: /^Lead the checkout rewrite/ })
+  await expect(lead).toBeVisible()
+  const box = (await lead.boundingBox())!
+  await page.mouse.click(box.x + 120, box.y + box.height / 2)
+  await expect(page.getByRole('dialog', { name: /^Lead the checkout rewrite/ })).toBeVisible()
+  const reviewer = (await tree.getByRole('treeitem', { name: /^Review the checkout rewrite/ }).boundingBox())!
+  await page.mouse.click(reviewer.x + 120, reviewer.y + reviewer.height / 2)
+  await expect(page.getByRole('dialog', { name: /^Review the checkout rewrite/ })).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(1)
 })
 
 test("a lane's pinned button stays while the pointer crosses other lanes to reach it", async ({ page, aether }) => {
@@ -100,9 +134,9 @@ test("a lane's pinned button stays while the pointer crosses other lanes to reac
   const pinned = page.locator('[data-mail-pinned]')
   await expect(pinned).toHaveText(/Test the checkout rewrite/)
 
-  // A straight, unhurried path from Lead down to the button, over a dozen lanes with no mail.
+  // A straight path from Lead down to the button, over a dozen lanes with no mail.
   const button = (await pinned.boundingBox())!
-  await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2, { steps: 40 })
+  await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2, { steps: 8 })
   await expect(pinned).toHaveText(/Test the checkout rewrite/)
   await page.mouse.down()
   await page.mouse.up()
@@ -122,6 +156,9 @@ test('a lane the pointer rests on takes the hover even on the way to a pinned bu
   const helper = (await tree.getByRole('treeitem', { name: /^Helper 3,/ }).boundingBox())!
   const x = box.x + 300 + ((button.x - box.x - 300) * (helper.y - box.y)) / (button.y - box.y)
   await page.mouse.move(x, helper.y + helper.height / 2, { steps: 10 })
+  expect(await pinned.isVisible()).toBe(true)
+  expect(await page.locator('[data-lane-highlight="hover"]').count()).toBe(1)
+  expect(await page.locator('[data-lane-highlight="hover"]').boundingBox()).toEqual(expect.objectContaining({ y: box.y }))
   await expect(pinned).toBeHidden()
   await expect(page.locator('[data-lane-highlight="hover"]')).toHaveCount(1)
 })
