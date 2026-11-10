@@ -723,12 +723,12 @@ func TestMemberNotesYieldOnlyToTheWorkspacesAdmin(t *testing.T) {
 	}
 	owner := f.member("Ada", domain.RoleAdmin)
 	guest := f.member("Bo", domain.RoleAdmin)
-	if err := f.db.SetWorkspaceOwner(ctx, f.ws.ID, owner.ID); err != nil {
-		t.Fatal(err)
+	if serr := f.db.SetWorkspaceOwner(ctx, f.ws.ID, owner.ID); serr != nil {
+		t.Fatal(serr)
 	}
 	for _, m := range []*domain.Member{guest, f.dana} {
-		if err := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, owner.ID); err != nil {
-			t.Fatal(err)
+		if gerr := f.db.GrantWorkspace(ctx, f.ws.ID, m.ID, owner.ID); gerr != nil {
+			t.Fatal(gerr)
 		}
 	}
 	note, err := scoped.Add(ctx, f.dana.ID, protocol.MemoryAddParams{WorkspaceID: string(f.ws.ID),

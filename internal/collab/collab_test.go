@@ -339,6 +339,19 @@ func (s *collabStore) GetMember(_ context.Context, id domain.MemberID) (*domain.
 		return nil, store.ErrNotFound
 	}
 	copy := *m
+	if copy.Access.Owned == nil && copy.Access.Granted == nil {
+		// Members of this fake reach every workspace, as before
+		// workspace-scoped access.
+		reach := map[domain.WorkspaceID]bool{}
+		for ws := range s.workspaces {
+			reach[ws] = true
+		}
+		if copy.Role == domain.RoleAdmin {
+			copy.Access.Owned = reach
+		} else {
+			copy.Access.Granted = reach
+		}
+	}
 	return &copy, nil
 }
 func (s *collabStore) GetWorkspace(_ context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {

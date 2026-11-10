@@ -47,9 +47,9 @@ func TestWorkspaceAccessMigrationKeepsTodaysAccess(t *testing.T) {
 		"user": domain.RoleCollaborator, "watcher": domain.RoleViewer, "waiting": domain.RoleCollaborator,
 	}
 	for id, want := range roles {
-		m, err := db.GetMember(ctx, id)
-		if err != nil {
-			t.Fatalf("GetMember %s: %v", id, err)
+		m, gerr := db.GetMember(ctx, id)
+		if gerr != nil {
+			t.Fatalf("GetMember %s: %v", id, gerr)
 		}
 		if m.Role != want {
 			t.Fatalf("%s role = %s, want %s", id, m.Role, want)
@@ -63,9 +63,9 @@ func TestWorkspaceAccessMigrationKeepsTodaysAccess(t *testing.T) {
 		}
 	}
 	for _, id := range []domain.WorkspaceID{"w1", "w2"} {
-		w, err := db.GetWorkspace(ctx, id)
-		if err != nil {
-			t.Fatalf("GetWorkspace %s: %v", id, err)
+		w, gerr := db.GetWorkspace(ctx, id)
+		if gerr != nil {
+			t.Fatalf("GetWorkspace %s: %v", id, gerr)
 		}
 		if w.OwnerID != "creator" {
 			t.Fatalf("%s owner = %q, want creator", id, w.OwnerID)
