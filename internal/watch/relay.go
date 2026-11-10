@@ -41,7 +41,7 @@ func (s *Service) relayTargets(ctx context.Context, member *domain.Member, ws do
 	// Sorted, so the same sessions in another order find the same watch.
 	slices.Sort(out)
 	for _, id := range out {
-		run, err := s.store.GetRun(ctx, id)
+		run, err := s.reachableRun(ctx, member, id)
 		if err != nil {
 			return nil, fmt.Errorf("relay_to session %s: %w", id, err)
 		}
