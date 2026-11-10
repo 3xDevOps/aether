@@ -776,7 +776,7 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | Job | Sessions | Locally |
 | --- | --- | --- |
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
-| `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on merge queue and nightly sessions only | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
+| `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on every session that runs the full suite | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
 | `build-and-test` | Unit tests (`-race` on the merge queue and `main` only), then `make build` | `make test build` |
 | `integration (server-rest, browser)`, `integration (server-flows, smoke)`, `integration (scheduler, rest, agents)` | [Integration tests](#integration-tests), the [smoke tests](#real-agent-smoke-tests), [real agents against a mock model](#real-agents-against-a-mock-model) and [the browser companion](#the-browser-companion), on amd64 | See the table under Integration tests |
 | `arm64` | Standard and browser image builds, smoke tests and browser runtime tests on arm64 | Same commands on an arm64 host |
