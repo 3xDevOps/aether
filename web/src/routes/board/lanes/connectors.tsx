@@ -164,7 +164,7 @@ export const EdgeHits = memo(function EdgeHits({ shapes, g, height, title, onPic
           d={shape.d}
           fill="none"
           stroke="transparent"
-          strokeWidth={10}
+          strokeWidth={16}
           pointerEvents="stroke"
           className="cursor-pointer"
           onClick={(event) => {
