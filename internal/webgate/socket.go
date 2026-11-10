@@ -27,8 +27,8 @@ const (
 // to sleep leaves a half-open TCP connection that reads as live on both
 // ends; the ping turns that into a close within the sum of the two,
 // which is what releases its PTY client and stops it clamping the
-// geometry. The pong gets a minute because the server's own gateway pings
-// too, and a server starved on a saturated host reads the pong late.
+// geometry. The pong gets a minute for the server's own HTTPS dashboard,
+// which pings from inside a server a saturated host may starve.
 const (
 	defaultPingInterval = 30 * time.Second
 	defaultPingTimeout  = 60 * time.Second

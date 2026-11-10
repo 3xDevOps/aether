@@ -3,6 +3,7 @@ package localgw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"path/filepath"
@@ -111,6 +112,42 @@ func TestSSHBackendKeepsAStalledServer(t *testing.T) {
 	}
 	if got := connections.Load(); got != 1 {
 		t.Fatalf("server accepted %d connections, want the stalled one kept", got)
+	}
+}
+
+// A stream open that failed because its request was cancelled returns at
+// once and keeps the shared connection, instead of waiting out a keepalive
+// probe on a server that may be slow to answer.
+func TestStreamReturnsACancelledOpenWithoutProbing(t *testing.T) {
+	shortenKeepalive(t, time.Minute, time.Minute)
+	home := testhome.Isolate(t)
+	server := listen(t)
+	serveControl(t, server, nil)
+	path := newSilencer(t, server.Addr().String(), 0)
+	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")}).(*sshBackend)
+	t.Cleanup(func() { _ = b.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn, _, err := b.live(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path.silence()
+	within(t, "a cancelled stream open", 5*time.Second, func() {
+		_, err := stream(ctx, b, func(*cli.Conn) (struct{}, error) {
+			cancel()
+			return struct{}{}, ctx.Err()
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("cancelled stream open = %v, want context.Canceled", err)
+		}
+	})
+	b.mu.Lock()
+	cached := b.conn
+	b.mu.Unlock()
+	if cached != conn {
+		t.Fatal("a cancelled stream open dropped the shared connection")
 	}
 }
 
