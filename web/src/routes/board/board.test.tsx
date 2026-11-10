@@ -782,14 +782,15 @@ describe('lanes view', () => {
     const tree = await openLanes()
     await waitFor(() => expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(2))
     expect(document.querySelector('[data-lane-mail] [data-mail="sent"] title')?.textContent).toMatch(/^Message from still going to waiting on you · .* · 1 not acknowledged$/)
-    expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"][data-quiet]')).toHaveLength(1)
-    expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]:not([data-quiet])')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-lane-hairlines] [data-hairline]')).toHaveLength(1)
+    expect(document.querySelector('[data-lane-hairlines]')?.getAttribute('class')).toContain('text-series-5/45')
+    expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(0)
     expect(document.querySelectorAll('path[data-mail-control]')).toHaveLength(0)
     const lane = within(tree).getByRole('treeitem', { name: /^still going/ })
     expect(lane.getAttribute('aria-label')).toMatch(/messages: sent 1 to waiting on you, 1 not acknowledged$/)
     act(() => lane.focus())
-    await waitFor(() => expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]:not([data-quiet])')).toHaveLength(1))
-    expect(document.querySelectorAll('[data-lane-edges] [data-quiet]')).toHaveLength(0)
+    await waitFor(() => expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(1))
+    expect(document.querySelector('[data-lane-hairlines]')?.getAttribute('class')).toContain('text-seam')
     expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(0)
     const link = document.querySelector('path[data-mail-control]')!
     expect(link.querySelector('title')?.textContent).toMatch(/^Message from still going to waiting on you/)
@@ -873,18 +874,6 @@ describe('lanes view', () => {
     expect(within(tree).getByRole('treeitem', { name: /^Session coordinate, 1 subsession/ }).getAttribute('aria-expanded')).toBe('true')
     const child = within(tree).getByRole('treeitem', { name: /^implement checkout, / })
     expect([child.getAttribute('aria-level'), child.getAttribute('aria-posinset'), child.getAttribute('aria-setsize')]).toEqual(['3', '2', '2'])
-  })
-
-  it("joins a subsession's bar to its parent's at the moment it started", async () => {
-    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
-    seed([
-      run({ id: 'run_parent', task: 'coordinate', created_at: ago(40) }),
-      run({ id: 'child', task: 'implement checkout', parent_run_id: 'run_parent', created_at: ago(20) }),
-    ])
-    await openLanes()
-    const spawns = document.querySelectorAll('[data-lane-spawns] [data-spawn]')
-    expect(spawns).toHaveLength(1)
-    expect(spawns[0].getAttribute('data-spawn')).toMatch(/child$/)
   })
 
   it('closes a popover whose lane folds away and focuses the lane that draws its run', async () => {

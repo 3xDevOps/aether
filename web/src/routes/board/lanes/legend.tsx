@@ -17,10 +17,10 @@ const bars: { label: string; className: string }[] = [
   { label: 'History not loaded', className: barFill('unloaded') },
 ]
 
-function Line({ className, dash, head, tail, thin }: { className: string; dash?: string; head?: 'filled' | 'hollow'; tail?: 'dot'; thin?: boolean }) {
+function Line({ className, dash, head, tail }: { className: string; dash?: string; head?: 'filled' | 'hollow'; tail?: 'dot' }) {
   return (
     <svg aria-hidden viewBox="0 0 40 10" className={cn('h-2.5 w-10 shrink-0', className)}>
-      <path d={head ? 'M4 5H32' : 'M4 5H36'} fill="none" stroke="currentColor" strokeWidth={thin ? 1 : 1.5} strokeDasharray={dash} />
+      <path d="M4 5H32" fill="none" stroke="currentColor" strokeWidth={1.5} strokeDasharray={dash} />
       {tail && <circle cx={4} cy={5} r={2} fill="currentColor" stroke="currentColor" strokeWidth={1.25} />}
       {head && <polygon points="38,5 32,1.5 32,8.5" fill={head === 'hollow' ? 'var(--raised)' : 'currentColor'} stroke="currentColor" strokeWidth={1} strokeLinejoin="round" />}
     </svg>
@@ -37,15 +37,25 @@ function Mark({ sent }: { sent: boolean }) {
   )
 }
 
+/** A sent mark and a received mark joined by the at-rest hairline. */
+function Hairline() {
+  return (
+    <svg aria-hidden viewBox="0 0 40 10" className={cn('h-2.5 w-10 shrink-0', edgeTone.message)}>
+      <path d="M7 5H33" fill="none" stroke="currentColor" strokeWidth={1} className="text-series-5/45" />
+      <circle cx={5} cy={5} r={2.75} fill="currentColor" />
+      <circle cx={35} cy={5} r={3} fill="var(--raised)" stroke="currentColor" strokeWidth={1.5} />
+    </svg>
+  )
+}
+
 const lines = [
   { label: 'Agent message sent, on the edge facing the recipient', line: <Mark sent /> },
   { label: 'Agent message received, on the edge facing the sender', line: <Mark sent={false} /> },
-  { label: 'Messages between two sessions, at rest', line: <Line className="text-series-5/45" thin tail="dot" /> },
+  { label: 'Messages between two sessions, at rest', line: <Hairline /> },
   { label: 'Message that just arrived; fades in a few seconds', line: <Line className={edgeTone.message} dash="4 3" tail="dot" head="filled" /> },
   { label: 'Focused session\'s message, acknowledged', line: <Line className={edgeTone.message} tail="dot" head="filled" /> },
   { label: 'Focused session\'s message, not acknowledged', line: <Line className={edgeTone.message} tail="dot" head="hollow" /> },
   { label: 'Edits the same files (selected session)', line: <Line className={edgeTone.overlap} dash="4 2" /> },
-  { label: 'Subsession started, from its parent', line: <Line className="text-icon-faint" thin tail="dot" /> },
 ]
 
 const strips: { label: string; tone: Tone }[] = [

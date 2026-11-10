@@ -61,23 +61,16 @@ interface DrawnEdge {
   shape: Shape
   tone: string
   near: boolean
-  /** Mail at rest: a hairline between its marks, with no ends of its own and nothing to click. */
-  quiet: boolean
 }
 
-/**
- * `focus` is a hovered or selected lane: its edges keep their colour and every other edge recedes, drawn first so the focused ones sit on top.
- * An edge that is not `linked` draws quiet.
- */
-export function drawEdges(edges: LaneEdge[], anchors: Map<string, EdgeAnchor>, g: LaneGeometry, focus: string | undefined, linked: (edge: LaneEdge) => boolean): DrawnEdge[] {
+/** `focus` is a hovered or selected lane: its edges keep their colour and every other edge recedes, drawn first so the focused ones sit on top. */
+export function drawEdges(edges: LaneEdge[], anchors: Map<string, EdgeAnchor>, g: LaneGeometry, focus?: string): DrawnEdge[] {
   const out = edges.flatMap((edge) => {
     const a = anchors.get(edge.from.lane)
     const b = anchors.get(edge.to.lane)
     if (!a || !b) return []
-    const quiet = !linked(edge)
     const near = !focus || edge.from.lane === focus || edge.to.lane === focus
-    const tone = quiet ? (focus ? 'text-seam' : 'text-series-5/45') : near ? edgeTone[edge.kind] : 'text-icon-faint'
-    return [{ edge, shape: edgeShape(edge, a, b, g), tone, near: near && !quiet, quiet }]
+    return [{ edge, shape: edgeShape(edge, a, b, g), tone: near ? edgeTone[edge.kind] : 'text-icon-faint', near }]
   })
   return out.sort((x, y) => Number(x.near) - Number(y.near))
 }
@@ -87,9 +80,7 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
   return (
     <>
       <svg aria-hidden data-lane-edges className="pointer-events-none absolute top-0 overflow-visible" style={{ left: g.labelWidth, width: g.width, height }}>
-        {shapes.map(({ edge, shape, tone, quiet }) => quiet ? (
-          <path key={edge.key} data-edge={edge.kind} data-quiet d={shape.d} fill="none" stroke="currentColor" strokeWidth={1} className={tone} vectorEffect="non-scaling-stroke" />
-        ) : (
+        {shapes.map(({ edge, shape, tone }) => (
           <g key={edge.key} data-edge={edge.kind} className={tone}>
             <path
               d={shape.d}
@@ -105,8 +96,7 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
           </g>
         ))}
       </svg>
-      {shapes.map(({ edge, shape, tone, quiet }) => {
-        if (quiet) return null
+      {shapes.map(({ edge, shape, tone }) => {
         const count = edge.messages && edge.messages.ids.length > 1 ? edge.messages.ids.length : undefined
         const files = edge.kind === 'overlap' ? edge.files?.length : undefined
         if (!count && !files) return null
@@ -126,30 +116,35 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
   )
 })
 
-export interface Spawn {
-  key: string
-  /** The parent's lane and the subsession's, and when the subsession started. */
-  from: string
-  to: string
-  t: number
-}
-
-/** A subsession's start on its parent's bar, joined to its own bar; drawn under the lanes, like links. */
-export const SpawnLinks = memo(function SpawnLinks({ spawns, anchors, g, height }: { spawns: Spawn[]; anchors: Map<string, EdgeAnchor>; g: LaneGeometry; height: number }) {
+/**
+ * Every message between two drawn lanes at rest: a hairline between its two marks, under the bars, with no
+ * ends or hit path of its own. Apart from the links, so a hover recolours one group rather than every line.
+ */
+export const Hairlines = memo(function Hairlines({ edges, anchors, g, height, receded }: {
+  edges: LaneEdge[]
+  anchors: Map<string, EdgeAnchor>
+  g: LaneGeometry
+  height: number
+  /** Another lane is focused: the hairlines sit back with the gridlines. */
+  receded: boolean
+}) {
   return (
-    <svg aria-hidden data-lane-spawns className="pointer-events-none absolute top-0 overflow-visible text-icon-faint" style={{ left: g.labelWidth, width: g.width, height }}>
-      {spawns.map((spawn) => {
-        const a = anchors.get(spawn.from)
-        const b = anchors.get(spawn.to)
-        const x = xOf(spawn.t, g.window, g.width)
-        if (!a || !b || x < 0 || x > g.width) return null
-        const y = a.top + a.height / 2 + a.half
-        return (
-          <g key={spawn.key} data-spawn={spawn.to}>
-            <path d={`M${x} ${y}V${b.top + b.height / 2 - b.half}`} fill="none" stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-            <circle cx={x} cy={y} r={1.5} fill="currentColor" />
-          </g>
-        )
+    <svg
+      aria-hidden
+      data-lane-hairlines
+      className={cn('pointer-events-none absolute top-0 overflow-visible', receded ? 'text-seam' : g.compact ? 'text-series-5/30' : 'text-series-5/45')}
+      style={{ left: g.labelWidth, width: g.width, height }}
+    >
+      {edges.map((edge) => {
+        const a = anchors.get(edge.from.lane)
+        const b = anchors.get(edge.to.lane)
+        if (edge.kind !== 'message' || !a || !b) return null
+        // At the marks' x, which keep inside the bars' rounded ends.
+        const x = Math.min(g.width - 6, Math.max(6, xOf(edge.from.t, g.window, g.width)))
+        const ya = a.top + a.height / 2
+        const yb = b.top + b.height / 2
+        const dir = Math.sign(yb - ya) || 1
+        return <path key={edge.key} data-hairline d={`M${x} ${ya + dir * a.half}V${yb - dir * b.half}`} fill="none" stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
       })}
     </svg>
   )
@@ -165,7 +160,7 @@ export const EdgeHits = memo(function EdgeHits({ shapes, g, height, title, onPic
 }) {
   return (
     <svg aria-hidden className="pointer-events-none absolute top-0 overflow-visible" style={{ left: g.labelWidth, width: g.width, height }}>
-      {shapes.filter((shape) => !shape.quiet).map(({ edge, shape }) => (
+      {shapes.map(({ edge, shape }) => (
         <path
           {...mailControl}
           key={edge.key}

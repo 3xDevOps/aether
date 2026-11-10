@@ -1905,9 +1905,10 @@ review-tone **Finished: review** chip instead of the Needs you chip. Finished
 bars add "took 18m" after their end when there is room.
 
 **Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
-pair within 24px) draws as marks joined by a hairline: a dot on the sender's
-bar and a ring on the recipient's, at the send time, on the bar edge facing
-the other lane, and a thin line between them under the bars. Marks within 8px on one edge merge and show their message count. Mail
+pair within 24px) draws as marks joined by a hairline: a dot on the
+sender's bar and a ring on the recipient's, at the send time, on the bar
+edge facing the other lane, and a thin line between them under the bars.
+The hairlines are fainter below 768px. Marks within 8px on one edge merge and show their message count. Mail
 into a folded family or Finished marks its header. Mail with a session that
 has no lane in this view (another workspace, hidden by **Mine**) keeps its
 drawn end, marked on the top edge. A mark's or link's tooltip names sender,
@@ -1915,9 +1916,8 @@ recipient, time and how many messages are not yet acknowledged; a session
 folded into a family or Finished keeps its own name and counts.
 Each lane's accessible name ends with its mail, such as "messages: sent 2 to
 Reviewer and received 1 from Reviewer, 2 not acknowledged".
-Mail is not parentage: subsessions show as a family, and a faint line
-joins each subsession's bar to its parent's at the moment it started.
-Nothing draws dependencies.
+Mail is not parentage: subsessions show as a family, and nothing draws
+dependencies.
 
 Mail that arrives while the view is open (`appendLaneEvent` records it in
 `laneArrivals`; history pages never do) also draws a dashed arc from
