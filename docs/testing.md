@@ -748,11 +748,14 @@ The queue moves `main` to the commit it tested, so a push to `main` reuses
 that verdict: `scripts/ci-queue-verdict.sh` finds the merge queue run whose
 `CI gate` passed on the same commit, and the push runs only `changes` and
 `CI gate`, whose summary links that run. The push runs every job when no
-such run exists, when a lookup fails, or when it changes a file a cache key
-hashes (`ci-classify-areas.sh caches`). Caches save only from runs on `main`,
+such run exists, when a lookup fails, when the push touches 300 files or
+more (GitHub's compare limit), or when it changes a file a cache key hashes
+(`ci-classify-areas.sh caches`). Caches save only from runs on `main`,
 because a merge queue run's caches are scoped to its own queue branch; the
 nightly run refreshes them and also tests `main` against the newest agent
-CLIs and the latest published release. `CI gate` is the one required check: it passes when
+CLIs and the latest published release.
+
+`CI gate` is the one required check: it passes when
 every other job passed or was skipped by its own rule, and fails when any
 failed or was cancelled. A new job must be added to its `needs` list to gate
 `main`.

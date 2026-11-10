@@ -94,12 +94,8 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            verdict=$(sh scripts/ci-queue-verdict.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA") || verdict=
-            caches=true
-            if [ -n "$verdict" ] && files=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BEFORE}...${GITHUB_SHA}" --jq '.files[] | .filename, (.previous_filename // empty)'); then
-              caches=$(printf '%s\n' "$files" | sh scripts/ci-classify-areas.sh caches) || caches=true
-            fi
-            if [ -n "$verdict" ] && [ "$caches" = false ]; then
+            verdict=$(sh scripts/ci-queue-verdict.sh "$GITHUB_REPOSITORY" "$BEFORE" "$GITHUB_SHA") || verdict=
+            if [ -n "$verdict" ]; then
               echo "The merge queue passed this commit in $verdict; this push runs no other job." >> "$GITHUB_STEP_SUMMARY"
               printf '%s\n' go=false web=false suite=false >> "$GITHUB_OUTPUT"
               exit 0

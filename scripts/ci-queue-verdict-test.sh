@@ -1,7 +1,8 @@
 #!/bin/sh
 # ci-queue-verdict.sh: prints the newest merge queue run of the commit only
-# when its CI gate passed, and nothing on any other answer or a failed
-# lookup. Only the gh boundary is replaced.
+# when its CI gate passed and the push changed no cache key input, and
+# nothing on any other answer, a failed lookup or a truncated file list.
+# Only the gh boundary is replaced.
 set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 tmp=$(mktemp -d)
@@ -23,10 +24,11 @@ shift
 case "$url" in
 "repos/o/r/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$SHA&per_page=100") file=runs ;;
 repos/o/r/actions/runs/*/jobs?per_page=100) file=jobs-$(echo "$url" | cut -d/ -f6) ;;
+"repos/o/r/compare/before...$SHA") file=compare ;;
 *) echo "unexpected request: $url" >&2; exit 92 ;;
 esac
 [ "${FAIL:-}" != "$file" ] || exit 1
-jq -r "$2" "$FIXTURES/$file.json"
+jq -r "$2" "$FIXTURES/$file.json" || exit 1
 STUB
 chmod 0755 "$tmp/bin/gh"
 
@@ -49,14 +51,35 @@ gate() {
 
 expect() {
 	want=$1
-	got=$(FAIL=${2:-} sh "$script_dir/ci-queue-verdict.sh" o/r "$sha" 2>"$tmp/err") || fail "exit $? with FAIL=${2:-}"
+	got=$(FAIL=${2:-} sh "$script_dir/ci-queue-verdict.sh" o/r before "$sha" 2>"$tmp/err") || fail "exit $? with FAIL=${2:-}"
 	[ "$got" = "$want" ] || fail "printed [$got], want [$want] with FAIL=${2:-}: $(cat "$tmp/err")"
+}
+
+changed() {
+	printf '%s\n' "$@" | jq -R '{filename: .}' | jq -s '{files: .}' >"$tmp/compare.json"
 }
 
 { run_json 1 10; run_json 2 11; } | jq -s '{workflow_runs: .}' >"$tmp/runs.json"
 gate 1 success
 gate 2 success
+changed internal/store/store.go web/src/app.tsx
 expect https://github.com/o/r/actions/runs/2
+
+changed internal/store/store.go go.sum
+expect ''
+grep -q 'changes a cache key input' "$tmp/err" || fail "a cache key change was not named"
+
+jq -n '{files: [{filename: "internal/a.go", previous_filename: "images/browser/smoke.mjs"}]}' >"$tmp/compare.json"
+expect ''
+
+jq -n '{files: [range(300) | {filename: "internal/f\(.).go"}]}' >"$tmp/compare.json"
+expect ''
+grep -q 'cannot list the files' "$tmp/err" || fail "a truncated file list was not named"
+
+printf '%s\n' '{"files": []}' >"$tmp/compare.json"
+expect ''
+
+changed internal/store/store.go
 
 gate 2 failure
 expect ''
@@ -69,7 +92,7 @@ jq -n '{jobs: [{name: "lint", conclusion: "success"}]}' >"$tmp/jobs-2.json"
 expect ''
 
 gate 2 success
-for what in runs jobs-2; do
+for what in runs jobs-2 compare; do
 	expect '' "$what"
 done
 
@@ -81,5 +104,5 @@ printf '%s\n' '{"workflow_runs": []}' >"$tmp/runs.json"
 expect ''
 grep -q 'no merge queue run tested' "$tmp/err" || fail "a missing run was not named"
 
-sh "$script_dir/ci-queue-verdict.sh" o/r ABC >/dev/null 2>&1 && fail "accepted a short SHA"
+sh "$script_dir/ci-queue-verdict.sh" o/r before ABC >/dev/null 2>&1 && fail "accepted a short SHA"
 exit 0
