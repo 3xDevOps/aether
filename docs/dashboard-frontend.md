@@ -6299,7 +6299,9 @@ from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
 **Approve** sends `member.device.approve` with the device id and the code.
-It revokes a device too, and shows every server refusal verbatim. The
+**Revoke** shows on the member's own devices, on a device still waiting,
+and, for a super admin, on every device; it shows every server refusal
+verbatim. The
 list is an `InsetList`; until it arrives, three row skeletons stand in after
 ~200ms ("Loading devices").
 
