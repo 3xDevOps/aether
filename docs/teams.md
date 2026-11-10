@@ -373,8 +373,11 @@ aether workspace owner <workspace> <member-id>    # super admin only
 admin reaches every workspace without a grant, so none is listed. An admin grants
 and revokes collaborators and viewers in workspaces they own. A super admin
 grants any member into any workspace and changes its owner, which must be an
-admin or super admin. Revoking is refused while the member has a live session in
-the workspace.
+admin or super admin. Revoking is refused while the member has a live session or
+a schedule in the workspace, counting a session handed off from them that still
+runs on their home or agent account. A live session whose home member loses the
+workspace another way, such as a role change, is stopped; one on a shared account
+whose owner loses it moves off that account.
 
 Invitations and invite codes carry `--workspace` grants
 ([Join the server](#join-the-server)). The dashboard's **Manage workspaces**

@@ -163,7 +163,7 @@ func (s *Server) workspaceAccessRevoke(ctx context.Context, member domain.Member
 			continue
 		}
 		inWorkspace = append(inWorkspace, r)
-		if r.MemberID == id {
+		if r.MemberID == id || r.HomeMember() == id || r.AccountMember() == id {
 			sessions = append(sessions, string(r.ID))
 		}
 	}

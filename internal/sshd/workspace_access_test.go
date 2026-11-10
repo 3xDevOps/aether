@@ -158,7 +158,8 @@ func TestWorkspaceAccessGrantRules(t *testing.T) {
 }
 
 // Revoking a grant is refused, naming what uses it, while the member has
-// a live session in the workspace; once it ends, the member no longer
+// a live session in the workspace, or one handed off from them still runs
+// on their home and account; once they end, the member no longer
 // reaches the workspace.
 func TestWorkspaceAccessRevokeRefusedWhileInUse(t *testing.T) {
 	t.Parallel()
@@ -182,6 +183,18 @@ func TestWorkspaceAccessRevokeRefusedWhileInUse(t *testing.T) {
 		protocol.WorkspaceAccessRevokeParams{WorkspaceID: string(e.wsB.ID), MemberID: string(e.u.ID)}, nil), "A revokes in B's workspace")
 
 	if _, err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	handed := &domain.Run{WorkspaceID: e.wsA.ID, MemberID: e.member.ID, HomeMemberID: e.u.ID, AccountMemberID: e.u.ID,
+		Task: "t", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning, Branch: "aether/run-handed"}
+	if err := e.db.CreateRun(ctx, handed); err != nil {
+		t.Fatal(err)
+	}
+	pe = wantErrCode(t, a.Call(protocol.MethodWorkspaceAccessRevoke, revoke, nil), protocol.CodeConflict, "revoke while a handed-off session uses U's home")
+	if !strings.Contains(pe.Message, string(handed.ID)) {
+		t.Fatalf("revoke refusal %q does not name the handed-off session on U's home", pe.Message)
+	}
+	if _, err := e.db.UpdateRunStatus(ctx, handed.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Call(protocol.MethodWorkspaceAccessRevoke, revoke, nil); err != nil {
