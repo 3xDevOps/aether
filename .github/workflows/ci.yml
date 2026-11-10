@@ -289,12 +289,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # No job's rule skips it in the merge queue, so a skip there means a
+      # cancellation kept it from starting.
       - name: Require every job to pass or be skipped by its rule
         env:
           NEEDS: ${{ toJSON(needs) }}
+          SKIP_PASSES: ${{ github.event_name != 'merge_group' }}
         run: |
           printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"'
-          bad=$(printf '%s' "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(" ")')
+          bad=$(printf '%s' "$NEEDS" | jq -r --argjson skip "$SKIP_PASSES" '[to_entries[] | select(.value.result != "success" and (.value.result != "skipped" or ($skip | not))) | .key] | join(" ")')
           if [ -n "$bad" ]; then
             echo "::error::Not passed: $bad"
             exit 1

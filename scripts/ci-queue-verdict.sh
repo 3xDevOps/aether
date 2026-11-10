@@ -6,7 +6,9 @@
 #
 # usage: ci-queue-verdict.sh <owner/repository> <commit before the push> <full-commit-sha>
 # Only the newest merge_group run of ci.yml for the commit counts, and only
-# its latest attempt. A push that changes a file a cache key hashes
+# its latest attempt, which must have completed with conclusion success and
+# a passed `CI gate`: a job that a cancellation kept from starting reports
+# skipped, so the gate alone does not prove the suite ran. A push that changes a file a cache key hashes
 # (ci-classify-areas.sh caches) never reuses one: only a run on main can save
 # the caches the queue restores. A failed lookup, or a compare at GitHub's
 # 300-file limit, prints nothing and exits 0.
@@ -29,9 +31,13 @@ run=$(gh api "$endpoint/workflows/ci.yml/runs?event=merge_group&head_sha=$sha&pe
 	[.workflow_runs[] | select(.path == ".github/workflows/ci.yml" and .event == "merge_group" and .head_sha == "'"$sha"'" and
 		(.repository.full_name | ascii_downcase) == ("'"$repository"'" | ascii_downcase) and
 		(.head_repository.full_name | ascii_downcase) == ("'"$repository"'" | ascii_downcase))] |
-	max_by(.run_number) // empty | "\(.id) \(.html_url)"') || none "cannot list merge queue runs of $sha"
+	max_by(.run_number) // empty | "\(.id) \(.status)/\(.conclusion) \(.html_url)"') || none "cannot list merge queue runs of $sha"
 [ -n "$run" ] || none "no merge queue run tested $sha"
 id=${run%% *}
+run=${run#* }
+state=${run%% *}
+run=${run#* }
+[ "$state" = completed/success ] || none "merge queue run $id is $state"
 gate=$(gh api --paginate "$endpoint/runs/$id/jobs?per_page=100" --jq '.jobs[] | select(.name == "CI gate") | .conclusion') ||
 	none "cannot read the jobs of merge queue run $id"
 [ "$gate" = success ] || none "CI gate of merge queue run $id is '${gate:-missing}'"
@@ -42,4 +48,4 @@ files=$(gh api "repos/$repository/compare/$before...$sha" --jq '
 	none "cannot list the files of $before...$sha completely"
 caches=$(printf '%s\n' "$files" | sh "$script_dir/ci-classify-areas.sh" caches) || none "cannot classify the files of $before...$sha"
 [ "$caches" = false ] || none "$before...$sha changes a cache key input"
-printf '%s\n' "${run#* }"
+printf '%s\n' "$run"
