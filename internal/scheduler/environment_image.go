@@ -11,9 +11,9 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -22,12 +22,10 @@ import (
 // Sysbox refuses to set up a root filesystem that holds one.
 const maxContainerID = 65535
 
-const savedImageCheckTimeout = 10 * time.Minute
-
 // checkSavedImage reads every entry of the committed image, so a save that
 // captured host-shifted owners never becomes the member's image.
 func (s *Scheduler) checkSavedImage(ctx context.Context, tag string) error {
-	ctx, cancel := context.WithTimeout(ctx, savedImageCheckTimeout)
+	ctx, cancel := context.WithTimeout(ctx, protocol.EnvSaveCheckTimeout)
 	defer cancel()
 	export, err := s.cfg.Runtime.ExportImage(ctx, tag)
 	if err != nil {
