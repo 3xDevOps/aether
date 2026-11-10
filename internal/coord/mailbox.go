@@ -1069,9 +1069,10 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	// Coordination is a run-originated protocol event, not a human action:
 	// the actor stays empty rather than naming the run's mutable owner.
 	ev := events.Event{ID: pub.EventID, Time: pub.CreatedAt, WorkspaceID: pub.WorkspaceID}
-	// The message is filed under the sender's workspace. A recipient in
-	// another workspace is left out of it, and the ack is filed under the
-	// recipient's, so neither names a run to members who cannot reach it.
+	// The message and its ack are filed under the sender's workspace, which
+	// follows the sender's view of the conversation. A recipient in another
+	// workspace is left out of both, so neither names a run to members who
+	// cannot reach it.
 	toWorkspace, err := s.runWorkspace(ctx, pub.ToRun)
 	if err != nil {
 		return err
@@ -1090,8 +1091,8 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	case pub.EventType == store.CoordAuditAcked && pub.EventID == store.CoordAuditAckedEventID(pub.MessageID) &&
 		pub.AckedAt != nil:
 		acked := events.CoordMessageAckedPayload{MessageID: pub.MessageID, AckedAt: pub.AckedAt.UTC().Format(time.RFC3339Nano)}
-		if toWorkspace != "" {
-			ev.WorkspaceID, ev.RunID, acked.ToRunID = toWorkspace, pub.ToRun, pub.ToRun
+		if toWorkspace == pub.WorkspaceID {
+			ev.RunID, acked.ToRunID = pub.ToRun, pub.ToRun
 		}
 		ev.Payload = acked
 	default:

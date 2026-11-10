@@ -527,8 +527,8 @@ func TestMessageEventsKeepARecipientInAnotherWorkspaceOutOfTheSenders(t *testing
 	if p, ok := got[0].Payload.(events.CoordMessagePayload); !ok || got[0].WorkspaceID != h.workspace || p.ToRunID != "" {
 		t.Fatalf("message event = %+v, want it in the sender's workspace without the recipient", got[0])
 	}
-	if p, ok := got[1].Payload.(events.CoordMessageAckedPayload); !ok || got[1].WorkspaceID != other.ID || got[1].RunID != b.ID || p.ToRunID != b.ID {
-		t.Fatalf("ack event = %+v, want it in the recipient's workspace", got[1])
+	if p, ok := got[1].Payload.(events.CoordMessageAckedPayload); !ok || got[1].WorkspaceID != h.workspace || got[1].RunID != "" || p.ToRunID != "" || p.MessageID != "msg-1" {
+		t.Fatalf("ack event = %+v, want it in the sender's workspace without the recipient", got[1])
 	}
 }
 

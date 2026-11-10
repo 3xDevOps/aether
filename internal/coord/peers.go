@@ -27,6 +27,14 @@ func (s *Service) authorize(ctx context.Context, method string, sender, target *
 	if owner == nil {
 		return deniedPeer(method, sender.ID, target.ID, reason)
 	}
+	// The family and overlap exceptions waive protection and steer-others,
+	// never access: target's agent can read every repo it holds.
+	actor := permissions.ActorOf(owner)
+	for _, ws := range target.ExtraWorkspaces() {
+		if !actor.Reaches(ws) {
+			return deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, permissions.ErrNoAccess))
+		}
+	}
 	if s.cfg.Children != nil {
 		related, relErr := s.cfg.Children.Related(ctx, sender.ID, target.ID)
 		if relErr != nil {
