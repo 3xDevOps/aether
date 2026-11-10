@@ -222,7 +222,16 @@ func (s *Service) read(ctx context.Context, w *store.Watch, prev protocol.WatchO
 	}
 	switch w.TargetKind {
 	case protocol.WatchTargetRun:
-		return s.readRun(ctx, w, prev)
+		r, err := s.readRun(ctx, w, prev)
+		if err != nil {
+			return r, err
+		}
+		// Access may have ended while the session was read; what was read
+		// then is not the member's to keep.
+		if err := s.allowed(ctx, w); err != nil {
+			return reading{}, err
+		}
+		return r, nil
 	case protocol.WatchTargetPR:
 		if s.pr == nil {
 			return reading{}, errors.New("pull request watches are not supported yet")
