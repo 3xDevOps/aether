@@ -679,7 +679,7 @@ export function LanesView(props: LanesViewProps) {
             if (!key) return
             setActiveKey(key)
             const lane = byKey.get(key)
-            focused.current = { key, index: model.lanes.findIndex((item) => item.key === key), run: lane?.kind === 'run' ? lane.card.run.id : lane?.kind === 'family' ? lane.parentID : undefined }
+            focused.current = { key, index: model.lanes.findIndex((item) => item.key === key), run: lane?.kind === 'run' ? lane.card.run.id : lane?.kind === 'family' ? lane.parentID : lane?.kind === 'agent' || lane?.kind === 'note' ? lane.runID : undefined }
           }}
           onBlur={(event) => {
             if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
