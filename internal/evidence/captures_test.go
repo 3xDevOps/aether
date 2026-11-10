@@ -401,7 +401,7 @@ func waitCaptureAdmission(t *testing.T, ready <-chan struct{}) {
 
 func assertDeniedCaptureRemoved(t *testing.T, f *durableCaptureFixture, s *Service, req Request) {
 	t.Helper()
-	packets, err := s.List(t.Context(), f.run.WorkspaceID, req.RunID, "", MaxPageSize)
+	packets, err := s.List(t.Context(), f.run.WorkspaceID, req.RunID, "", MaxPageSize, nil)
 	if err != nil || len(packets.Packets) != 0 {
 		t.Fatalf("denied capture has View-accessible metadata: %v, %v", packets, err)
 	}

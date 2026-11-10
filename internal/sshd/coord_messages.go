@@ -3,7 +3,6 @@ package sshd
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -38,24 +37,24 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 	if perr := validateCollaborationPage(p.Before, p.Limit); perr != nil {
 		return nil, perr
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	runs := newRunScopes(s.cfg.Store)
 	page, err := s.cfg.Store.ListRunMessages(ctx, store.RunMessageFilter{
 		WorkspaceID:   domain.WorkspaceID(p.WorkspaceID),
 		RunID:         domain.RunID(p.RunID),
 		CorrelationID: p.CorrelationID,
 		Before:        p.Before,
 		Limit:         p.Limit,
+		Shows: func(m *store.ListedRunMessage) bool {
+			return runs.reaches(ctx, actor, m.FromRun) && runs.reaches(ctx, actor, m.ToRun)
+		},
 	})
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	runs := newRunScopes(s.cfg.Store)
-	page.Items = slices.DeleteFunc(page.Items, func(m *store.ListedRunMessage) bool {
-		return !runs.reaches(ctx, actor, m.FromRun) || !runs.reaches(ctx, actor, m.ToRun)
-	})
 	if err := s.redactWaitWakes(ctx, member, page.Items); err != nil {
 		return nil, rpcError(err)
 	}

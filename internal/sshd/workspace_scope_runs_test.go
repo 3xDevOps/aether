@@ -8,6 +8,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -92,5 +93,66 @@ func TestWorkspaceListsLeaveOutSessionsWithAnUnreachableRepo(t *testing.T) {
 				t.Errorf("%s %s %+v names A's two-repo session or wsB's repository = %v, want %v: %s", who, c.method, c.params, leaked, who == "S", res)
 			}
 		}
+	}
+}
+
+// Pages of coordination messages and evidence are filled with what the
+// caller sees, and their cursors point at it, so a page never ends on a
+// hidden row.
+func TestPagesFillWithWhatTheCallerSees(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	db := w.e.db
+	ua := w.runUA
+	now := time.Now()
+	for _, m := range []*store.RunMessage{
+		{WorkspaceID: w.wsA.ID, FromRun: ua.ID, ToRun: ua.ID, Body: "note to self", Kind: store.RunMessageKindMessage, CreatedAt: now},
+		{WorkspaceID: w.wsA.ID, FromRun: w.runA.ID, ToRun: ua.ID, Body: "from two repos", Kind: store.RunMessageKindMessage, CreatedAt: now.Add(time.Second)},
+		{WorkspaceID: w.wsA.ID, FromRun: ua.ID, ToRun: w.runA.ID, Body: "to two repos", Kind: store.RunMessageKindMessage, CreatedAt: now.Add(2 * time.Second)},
+	} {
+		if err := db.AppendRunMessage(ctx, m, 100); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var packetIDs []string
+	for i, r := range []*domain.Run{ua, w.runA} {
+		p := handlerPacket("p-"+string(r.ID), w.wsA.ID, r.ID, r.MemberID)
+		p.CapturedAt = now.Add(time.Duration(i) * time.Second)
+		if err := db.CreateEvidencePacket(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		packetIDs = append(packetIDs, p.ID)
+	}
+	ev, err := evidence.New(evidence.Config{Store: db, Runs: db, Git: struct{ evidence.GitEvidence }{}, EvidenceDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.e.srv.cfg.Services.Evidence = ev
+
+	var messages protocol.CoordMessagesListResult
+	if err := w.call(t, "U", protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), Limit: 1}, &messages); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages.Messages) != 1 || messages.Messages[0].Body != "note to self" || messages.NextBefore != "" {
+		t.Errorf("U's first page of one message = %+v, want the note and no cursor", messages)
+	}
+	var packets protocol.EvidencePacketListResult
+	if err := w.call(t, "U", protocol.MethodRunEvidenceList, protocol.RunEvidenceListParams{WorkspaceID: string(w.wsA.ID), Limit: 1}, &packets); err != nil {
+		t.Fatal(err)
+	}
+	visible, err := db.GetEvidencePacket(ctx, packetIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packets.Packets) != 1 || packets.Packets[0].ID != visible.ID || packets.NextBefore != store.EncodeEvidenceCursor(visible.CapturedAt, visible.ID) {
+		t.Errorf("U's first page of one packet = %+v, want %s and a cursor at it", packets, visible.ID)
+	}
+	var all protocol.CoordMessagesListResult
+	if err := w.call(t, "S", protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: string(w.wsA.ID), Limit: 2}, &all); err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Messages) != 2 || all.Messages[1].Body != "from two repos" || all.NextBefore == "" {
+		t.Errorf("S's first page of two messages = %+v, want the two newest and a cursor", all)
 	}
 }
