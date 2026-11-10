@@ -2001,7 +2001,11 @@ read. Lane geometry comes from the model
 measurement; above 60 lanes only those near the viewport render. Live bars
 move on a timer of window width per pixel, between 1s and 30s. Lanes move with
 a glide only when they change section, and lanes added after the first render
-fade in; reduced motion turns both off.
+fade in; reduced motion turns both off. A live update that moves lanes keeps
+the view steady: the lane at the top of the scrolled view stays where it was,
+an open popover follows its lane, a resting pointer hovers the lane now under
+it, and keyboard focus on a lane that leaves moves to the lane that now draws
+its session, else to its neighbour.
 
 `aether.ui` stores the window choice, the grouping and hidden link kinds.
 Below 768px the label column shrinks to the state dot and agent glyph, and
@@ -7918,7 +7922,9 @@ window, bundled mail bodies and failed history reads. `e2e/lanes.spec.ts`
 moves a real pointer over Lanes, with sessions and mail answered in the
 browser: from a lane to its popover and off it, one click from one lane's
 popover to another's, a drag and a pinned button closing it, and from a lane
-to its pinned button, on a held clock.
+to its pinned button, on a held clock. Its live cases send `run.status`
+through the events socket: a session leaving above the view, one arriving
+above an open popover, and the focused lane folding into Finished.
 
 `src/a11y.test.tsx` exercises the session tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,

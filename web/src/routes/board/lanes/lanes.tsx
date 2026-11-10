@@ -364,7 +364,20 @@ export function LanesView(props: LanesViewProps) {
   const before = useRef<{ top: Map<string, number>; section: Map<string, string> } | null>(null)
   useLayoutEffect(() => {
     const previous = before.current
+    const el = scroller.current
+    // Lanes are placed absolutely, so the browser cannot anchor the scroll: the lane at the top of the view stays put when lanes above it come or go.
+    if (previous && el && viewport.top > 0) {
+      let top: [string, number] | undefined
+      for (const [key, y] of previous.top) if (y <= viewport.top && (!top || y > top[1])) top = [key, y]
+      const moved = top && layout.top.get(top[0])
+      if (top && moved !== undefined && moved !== top[1]) el.scrollTop = viewport.top + moved - top[1]
+    }
     before.current = { top: layout.top, section: new Map([...tree].map(([key, t]) => [key, t.section])) }
+    // A pointer at rest hovers whatever lane is under it now.
+    if (pointer.current && content.current && !popRef.current && !aim.current) {
+      const key = latestLaneAt.current(pointer.current.y - content.current.getBoundingClientRect().top)
+      if (key !== hovered) hover(key)
+    }
     if (!previous || windowed || prefersReducedMotion() || !content.current) return
     let entering = 0
     for (const el of content.current.querySelectorAll<HTMLElement>('[data-glide-key]')) {
@@ -470,6 +483,18 @@ export function LanesView(props: LanesViewProps) {
     if (!popRef.current && target && !drag.current?.moved) focusLaneEl(target)
   }
 
+  // The focused lane, kept so focus survives a live update that removes it: the browser drops it on the page.
+  const focused = useRef<{ key: string; index: number; run?: string } | null>(null)
+  const lost = focused.current && !byKey.has(focused.current.key) ? focused.current : null
+  useEffect(() => {
+    if (!lost || popRef.current || (document.activeElement && document.activeElement !== document.body)) return
+    focused.current = null
+    const key = (lost.run && model.drawn.get(lost.run)) || model.lanes[Math.min(lost.index, model.lanes.length - 1)]?.key
+    if (!key) return
+    setActiveKey(key)
+    focusLaneEl(key)
+  }, [lost])
+
   // A live update can remove the selected lane; its popover closes and focus goes to the lane that draws its run now.
   const gone = pop?.kind === 'lane' && !popLane ? pop : undefined
   useEffect(() => {
@@ -553,6 +578,10 @@ export function LanesView(props: LanesViewProps) {
     popLane && { key: popLane.key, kind: 'selection' },
     !hoveredLane && !popLane && treeFocused && activeLane && activeLane.kind !== 'section' && { key: activeLane.key, kind: 'hover' },
   ].filter((item): item is { key: string; kind: 'hover' | 'selection' } => Boolean(item))
+  // A lane's popover follows its lane and the moment it was opened at, as live updates move them.
+  const anchor = pop?.kind === 'lane' && popLane
+    ? { x: pop.at === undefined ? pop.x : Math.min(g.width, Math.max(0, xOf(pop.at, g.window, g.width))), y: layout.top.get(popLane.key)! + (laneHeight(popLane, g.metrics) - pop.h) / 2 }
+    : { x: pop?.x ?? 0, y: pop?.y ?? 0 }
   const tickMarks = spaced(ticks(g.window, now), g)
   const popRun = popLane?.kind === 'run' ? popLane : undefined
   const totalWidth = g.labelWidth + g.width + trackGutter
@@ -621,10 +650,15 @@ export function LanesView(props: LanesViewProps) {
           onFocus={(event) => {
             setTreeFocused(true)
             const key = (event.target as HTMLElement).dataset.key
-            if (key) setActiveKey(key)
+            if (!key) return
+            setActiveKey(key)
+            const lane = byKey.get(key)
+            focused.current = { key, index: model.lanes.findIndex((item) => item.key === key), run: lane?.kind === 'run' ? lane.card.run.id : undefined }
           }}
           onBlur={(event) => {
-            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setTreeFocused(false)
+            if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+            setTreeFocused(false)
+            if ((event.target as Node).isConnected) focused.current = null
           }}
         >
           {shown.map((lane) => (
@@ -676,7 +710,7 @@ export function LanesView(props: LanesViewProps) {
         <Popover open={pop !== null} onOpenChange={(open) => { if (!open) setPop(null) }}>
           {pop && (
             <PopoverAnchor asChild>
-              <span aria-hidden className="pointer-events-none absolute w-px" style={{ left: g.labelWidth + pop.x, top: pop.y, height: pop.kind === 'lane' ? pop.h : 0 }} />
+              <span aria-hidden className="pointer-events-none absolute w-px" style={{ left: g.labelWidth + anchor.x, top: anchor.y, height: pop.kind === 'lane' ? pop.h : 0 }} />
             </PopoverAnchor>
           )}
           {pop?.kind === 'lane' && popRun && pop.reply ? (
