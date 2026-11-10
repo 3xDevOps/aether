@@ -252,7 +252,10 @@ has the thresholds and what to do.
 Reporting success or failure leaves an interactive session open for follow-up, and
 quiet sessions do not expire. **Close** keeps the session's container for seven days
 (`--run-container-ttl`) so you can **Relaunch** it, unless disk runs low first. The seven days pause
-while the session is relaunched and start over at its next close.
+while the session is relaunched and start over at its next close. Close
+removes the session's browser companion, the Chromium container behind its
+Browser tab; a relaunched session creates a new companion when its Browser
+tab is next used.
 [What stays after a session ends](failure-handling.md#what-stays-after-a-session-ends)
 covers Close, Kill, **Free container…** and Delete.
 

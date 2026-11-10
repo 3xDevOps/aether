@@ -51,7 +51,7 @@ func TestDockerBrowserCompanion(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := browser.Run{ID: "integration-run", ContainerID: app}
-	t.Cleanup(func() { _ = manager.Remove(context.Background(), run) })
+	t.Cleanup(func() { _ = manager.Remove(context.Background(), run.ID) })
 	status, control, err := manager.Ensure(ctx, run)
 	if err != nil {
 		t.Fatalf("sandboxed companion startup (private UID 1000 bind requires server/root authority): %v", err)

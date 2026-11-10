@@ -751,6 +751,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 	}
 	s.sweepCaches(ctx, false)
+	s.sweepBrowsers(ctx)
 	gc := time.NewTicker(time.Hour)
 	defer gc.Stop()
 	for {
@@ -779,6 +780,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			}
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepScratch(ctx)
+			s.sweepBrowsers(ctx)
 			s.sweepCaches(ctx, false)
 		}
 	}
