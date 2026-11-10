@@ -351,14 +351,34 @@ func (d *DB) ListDevices(ctx context.Context, member domain.MemberID) ([]*domain
 	return collect(rows, scanDevice)
 }
 
+// ApproveDevice approves a waiting device of a member. The approver's right
+// is checked in the same write: the machine's administrator (empty
+// approver), the device's own member, a super admin, or an admin for a
+// member below admin, so a promotion landing first is refused, not admitted.
 func (d *DB) ApproveDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE member_devices SET status = 'approved', approval_code = '', approved_by = ?
-		 WHERE id = ? AND member_id IS NOT NULL AND status IN ('registered', 'pending')`, approver, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: approve device: %w", err)
+	res, err := d.db.ExecContext(ctx,
+		`UPDATE member_devices SET status = 'approved', approval_code = '', approved_by = ?1
+		 WHERE id = ?2 AND member_id IS NOT NULL AND status IN ('registered', 'pending') AND (
+		 	?1 = '' OR member_id = ?1 OR EXISTS (SELECT 1 FROM members a WHERE a.id = ?1 AND a.pending = 0 AND a.merged_into = '' AND (
+		 		a.role = 'super_admin' OR (a.role = 'admin' AND (SELECT m.role FROM members m WHERE m.id = member_devices.member_id) NOT IN ('admin', 'super_admin')))))`,
+		approver, id)
+	if err != nil {
+		return fmt.Errorf("store: approve device: %w", err)
 	}
-	return err
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: approve device: %w", err)
+	} else if n > 0 {
+		return nil
+	}
+	var waiting bool
+	if err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM member_devices
+		WHERE id = ? AND member_id IS NOT NULL AND status IN ('registered', 'pending'))`, id).Scan(&waiting); err != nil {
+		return fmt.Errorf("store: approve device: %w", err)
+	}
+	if !waiting {
+		return ErrNotFound
+	}
+	return fmt.Errorf("%w: only a super admin approves a device of an admin or super admin", ErrConflict)
 }
 
 func (d *DB) RevokeDevice(ctx context.Context, id domain.DeviceID) error {

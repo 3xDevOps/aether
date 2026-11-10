@@ -645,3 +645,44 @@ func TestUnlinkIdentityRevokesItsDevices(t *testing.T) {
 		t.Fatalf("member after unlink: %v", err)
 	}
 }
+
+// A device approval is decided with the approver's right in the same write:
+// an admin cannot approve the device of a member promoted to super admin
+// since, while a super admin and the machine's administrator still can.
+func TestApproveDeviceChecksTheApproverInTheWrite(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t)
+	m := edgeMemberWithIdentity(t, db, "42")
+	admin := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+	super := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#3cb44b", Role: domain.RoleSuperAdmin}
+	for _, a := range []*domain.Member{admin, super} {
+		if err := db.CreateMember(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waiting := func() *domain.Device {
+		t.Helper()
+		dev := newDevice(t, m, "42", domain.DeviceRegistered)
+		if err := db.RegisterDevice(ctx, dev); err != nil {
+			t.Fatal(err)
+		}
+		return dev
+	}
+	first := waiting()
+	if _, err := db.SetMemberRole(ctx, m.ID, domain.RoleSuperAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ApproveDevice(ctx, first.ID, admin.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("an admin approving a super admin's device = %v, want ErrConflict", err)
+	}
+	if err := db.ApproveDevice(ctx, first.ID, super.ID); err != nil {
+		t.Fatalf("a super admin's approval: %v", err)
+	}
+	if err := db.ApproveDevice(ctx, waiting().ID, ""); err != nil {
+		t.Fatalf("the machine's administrator's approval: %v", err)
+	}
+	if err := db.ApproveDevice(ctx, "dev-missing", admin.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("approving a missing device = %v, want ErrNotFound", err)
+	}
+}
