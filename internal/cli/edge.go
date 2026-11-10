@@ -93,7 +93,7 @@ func DialLinked(ctx context.Context, cfg Config, user string) (*ssh.Client, erro
 }
 
 func dialDirect(ctx context.Context, cfg Config, user string, signer ssh.Signer) (*ssh.Client, error) {
-	nc, err := (&net.Dialer{Timeout: directTimeout}).DialContext(ctx, "tcp", cfg.Addr)
+	nc, err := (&net.Dialer{Timeout: directTimeout, Control: dialControl}).DialContext(ctx, "tcp", cfg.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", cfg.Addr, err)
 	}

@@ -3,6 +3,7 @@ package localgw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"path/filepath"
@@ -83,6 +84,70 @@ func TestSSHBackendKeepsASlowBusyConnection(t *testing.T) {
 	}
 	if got := connections.Load(); got != 1 {
 		t.Fatalf("server accepted %d connections, want the first kept", got)
+	}
+}
+
+// A server starved on a saturated host stops answering keepalives for a
+// while and then catches up. Its connection must survive, since dropping it
+// ends every stream it carries.
+func TestSSHBackendKeepsAStalledServer(t *testing.T) {
+	shortenKeepalive(t, 150*time.Millisecond, 300*time.Millisecond)
+	home := testhome.Isolate(t)
+	server := listen(t)
+	connections := serveControl(t, server, nil)
+	path := newSilencer(t, server.Addr().String(), 0)
+	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")})
+	t.Cleanup(func() { _ = b.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, perr := b.Call(ctx, protocol.MethodServerInfo, nil); perr != nil {
+		t.Fatal(perr)
+	}
+	path.hold.Lock()
+	time.AfterFunc(5*keepaliveInterval, path.hold.Unlock)
+	time.Sleep(5 * keepaliveInterval)
+	if _, perr := b.Call(ctx, protocol.MethodServerInfo, nil); perr != nil {
+		t.Fatalf("call after a stall = %v, want it answered", perr)
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("server accepted %d connections, want the stalled one kept", got)
+	}
+}
+
+// A stream open that failed because its request was cancelled returns at
+// once and keeps the shared connection, instead of waiting out a keepalive
+// probe on a server that may be slow to answer.
+func TestStreamReturnsACancelledOpenWithoutProbing(t *testing.T) {
+	shortenKeepalive(t, time.Minute, time.Minute)
+	home := testhome.Isolate(t)
+	server := listen(t)
+	serveControl(t, server, nil)
+	path := newSilencer(t, server.Addr().String(), 0)
+	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")}).(*sshBackend)
+	t.Cleanup(func() { _ = b.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn, _, err := b.live(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path.silence()
+	within(t, "a cancelled stream open", 5*time.Second, func() {
+		_, err := stream(ctx, b, func(*cli.Conn) (struct{}, error) {
+			cancel()
+			return struct{}{}, ctx.Err()
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("cancelled stream open = %v, want context.Canceled", err)
+		}
+	})
+	b.mu.Lock()
+	cached := b.conn
+	b.mu.Unlock()
+	if cached != conn {
+		t.Fatal("a cancelled stream open dropped the shared connection")
 	}
 }
 
@@ -388,11 +453,13 @@ func serveControl(t *testing.T, ln net.Listener, answer func(method string) json
 // silencer relays TCP to target, pausing pace after each 4 KiB toward the
 // client when pace is set, as a weak mobile link does. silence stops every
 // connection open so far from carrying anything, without closing it, as a
-// network that went away does; connections opened later work.
+// network that went away does; connections opened later work. Holding hold
+// keeps every byte back until it is released, as a starved server does.
 type silencer struct {
 	ln     net.Listener
 	mu     sync.Mutex
 	silent chan struct{}
+	hold   sync.RWMutex
 }
 
 func newSilencer(t *testing.T, target string, pace time.Duration) *silencer {
@@ -413,8 +480,8 @@ func newSilencer(t *testing.T, target string, pace time.Duration) *silencer {
 			s.mu.Lock()
 			silent := s.silent
 			s.mu.Unlock()
-			go relay(server, client, silent, 0)
-			go relay(client, server, silent, pace)
+			go relay(server, client, silent, 0, &s.hold)
+			go relay(client, server, silent, pace, &s.hold)
 		}
 	}()
 	return s
@@ -429,7 +496,7 @@ func (s *silencer) silence() {
 	s.silent = make(chan struct{})
 }
 
-func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Duration) {
+func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Duration, hold *sync.RWMutex) {
 	buf := make([]byte, 32<<10)
 	if pace > 0 {
 		buf = buf[:4<<10]
@@ -443,7 +510,10 @@ func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Durat
 		default:
 		}
 		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
+			hold.RLock()
+			_, werr := dst.Write(buf[:n])
+			hold.RUnlock()
+			if werr != nil {
 				return
 			}
 		}
