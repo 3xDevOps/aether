@@ -672,16 +672,16 @@ jobs:
           mode: save
           save-modules: 'true'
       - name: Arm Defender before downloading binaries
-        if: ${{ !cancelled() && needs.release-build.result == 'success' }}
+        if: ${{ !cancelled() && needs.release-build.outputs.windows-binaries == 'success' }}
         shell: powershell
         run: ./scripts/windows-defender.ps1 -Mode Prepare
       - uses: actions/download-artifact@v4
-        if: ${{ !cancelled() && needs.release-build.result == 'success' }}
+        if: ${{ !cancelled() && needs.release-build.outputs.windows-binaries == 'success' }}
         with:
           name: binaries-go-windows
           path: dist
       - name: Scan both Windows clients
-        if: ${{ !cancelled() && needs.release-build.result == 'success' }}
+        if: ${{ !cancelled() && needs.release-build.outputs.windows-binaries == 'success' }}
         shell: powershell
         run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe
 
@@ -703,6 +703,10 @@ jobs:
     runs-on: ubuntu-latest
     # A wedged Gradle daemon must not hold the runner for the six-hour default.
     timeout-minutes: 60
+    # Set when the job fails later too, so windows still scans the binaries
+    # after a desktop or Android failure.
+    outputs:
+      windows-binaries: ${{ steps.windows-binaries.outcome }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -733,7 +737,8 @@ jobs:
         with:
           mode: save
           variant: release
-      - uses: actions/upload-artifact@v4
+      - id: windows-binaries
+        uses: actions/upload-artifact@v4
         with:
           name: binaries-go-windows
           path: dist/aether-windows-*.exe

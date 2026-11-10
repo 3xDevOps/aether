@@ -196,7 +196,10 @@ jobs:
           mode: save
           variant: windows-install
           save-modules: 'true'
+      # Needs only the checkout, so it packages and launches after an earlier
+      # failure too: this leg is the only arm64 caller.
       - id: desktop
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/desktop-windows-zip
         with:
           version: ${{ env.OLD_VERSION }}

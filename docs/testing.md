@@ -781,7 +781,7 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | `arm64` | Standard and browser image builds, smoke tests and browser runtime tests on arm64 | Same commands on an arm64 host |
 | `dashboard` | `bun run typecheck` and `bun run test` | Same, from `web/` |
 | `dashboard-e2e` | [End-to-end suite](#the-dashboard-end-to-end-suite) in two shards | `make test-e2e E2E_ARGS='--shard=N/2'` |
-| `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` legs package and launch the Windows desktop zip on amd64 and arm64 | |
+| `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` install (zip) and update legs package and launch the Windows desktop zip on amd64 and arm64 | |
 | `release-build (binaries, desktop, android)` | `make release-binaries`, `aether gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
 | `edge-image` | [The edge image](#the-edge-image) and [qualification](#edge-upgrade-qualification) | |
 
