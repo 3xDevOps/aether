@@ -16,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func TestRoomImageReadFailureAllowsFreshKeyRetry(t *testing.T) {
@@ -43,7 +44,7 @@ func TestRoomImageReadFailureAllowsFreshKeyRetry(t *testing.T) {
 			ctl := control.New(control.Config{})
 			admissions := 0
 			room, err := collab.New(collab.Config{
-				Store: e.db, Runs: e.db, Workspaces: e.db, Bus: e.bus, Control: ctl,
+				Store: e.db, Runs: storetest.Unscoped{DB: e.db}, Workspaces: e.db, Bus: e.bus, Control: ctl,
 				Inject: e.sched.Inject, Now: func() time.Time { return now },
 				Attachments: func(ctx context.Context, _ domain.WorkspaceID, id domain.RunID, ref string) error {
 					if validationErr := e.sched.ValidateAttachment(ctx, id, ref); validationErr != nil {

@@ -17,7 +17,7 @@ func TestWatchesBelongToTheirCreator(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) {
 		svc, err := watch.New(watch.Config{
-			Store: testDB(c.Store), Bus: c.Bus, Runs: c.Runs,
+			Store: c.Store.(watch.Store), Bus: c.Bus, Runs: c.Runs,
 		})
 		if err != nil {
 			t.Fatalf("watch.New: %v", err)

@@ -9,6 +9,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 	"github.com/3xDevOps/Aether/internal/watch"
 )
 
@@ -37,7 +38,7 @@ func TestWatchAnnouncesAReportedSuccessOnceThroughItsReview(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 
 	svc, err := watch.New(watch.Config{
-		Store: e.db, Bus: bus, Runs: e.sched, Head: log.LastSeq, Debounce: 20 * time.Millisecond, Tick: 50 * time.Millisecond,
+		Store: storetest.Unscoped{DB: e.db}, Bus: bus, Runs: e.sched, Head: log.LastSeq, Debounce: 20 * time.Millisecond, Tick: 50 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
