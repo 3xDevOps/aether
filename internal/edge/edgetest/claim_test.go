@@ -80,7 +80,7 @@ func TestClaim(t *testing.T) {
 				t.Fatalf("claiming device is %q, want approved", got)
 			}
 			servers, err := al.edge.Servers(context.Background())
-			if err != nil || len(servers) != 1 || servers[0].ID != a.id || servers[0].Role != "admin" || !servers[0].Online ||
+			if err != nil || len(servers) != 1 || servers[0].ID != a.id || servers[0].Role != "super_admin" || !servers[0].Online ||
 				servers[0].AccessPolicy != policy {
 				t.Fatalf("alice's servers = %+v %v", servers, err)
 			}
@@ -124,8 +124,8 @@ func TestFailedClaimRecordRecovers(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	members, err := a.db.ListMembers(ctx)
-	if err != nil || len(members) != 1 || members[0].Role != domain.RoleAdmin {
-		t.Fatalf("members after the claim = %+v, %v; want alice as admin", members, err)
+	if err != nil || len(members) != 1 || members[0].Role != domain.RoleSuperAdmin {
+		t.Fatalf("members after the claim = %+v, %v; want alice as super admin", members, err)
 	}
 	admin := members[0].ID
 
@@ -159,7 +159,7 @@ func TestFailedClaimRecordRecovers(t *testing.T) {
 		t.Fatalf("alice claims again: %+v, %v", res.Info.Member, cerr)
 	}
 	members, err = a.db.ListMembers(ctx)
-	if err != nil || len(members) != 1 || members[0].ID != admin || members[0].Role != domain.RoleAdmin {
+	if err != nil || len(members) != 1 || members[0].ID != admin || members[0].Role != domain.RoleSuperAdmin {
 		t.Fatalf("members after the second claim = %+v, %v; want alice unchanged", members, err)
 	}
 	eventually(t, "the edge records alice", func() error {
@@ -185,7 +185,7 @@ func TestClaimKeepsTheDirectoryPushedWithIt(t *testing.T) {
 	cs := h.login(alice, bob)
 	al, bo := cs[0], cs[1]
 	ctx := context.Background()
-	admin := &domain.Member{DisplayName: "Admin", Color: "#3cb44b", Role: domain.RoleAdmin,
+	admin := &domain.Member{DisplayName: "Admin", Color: "#3cb44b", Role: domain.RoleSuperAdmin,
 		PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey()))}
 	if err := a.db.CreateMember(ctx, admin); err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestTransferTakesOnlyItsOwnAnswer(t *testing.T) {
 	cs := h.login(alice, bob)
 	al, bo := cs[0], cs[1]
 	h.claimServer(al, a)
-	h.join(h.control(al, a), bo, a, "admin")
+	h.join(h.control(al, a), bo, a, "super_admin")
 	aliceID, bobID := a.memberOf(t, alice).ID, a.memberOf(t, bob).ID
 	transfer := func(actor, to domain.MemberID) error {
 		return a.local(t, actor, protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: string(to)}, nil)

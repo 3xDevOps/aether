@@ -36,6 +36,7 @@ func TestPushSubscriptionsBelongToTheCaller(t *testing.T) {
 		}
 		c.Services.Push = svc
 	})
+	asSuperAdmin(t, e)
 	bobSigner, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	ada, bobControl := controlClient(t, e), controlAs(t, e, bobSigner)
 

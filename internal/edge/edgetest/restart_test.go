@@ -102,7 +102,7 @@ func TestEdgeRestartAndDirectFallback(t *testing.T) {
 	}
 	_ = sc.Close()
 	servers, err := al.edge.Servers(context.Background())
-	if err != nil || len(servers) != 1 || servers[0].ID != a.id || servers[0].Role != "admin" {
+	if err != nil || len(servers) != 1 || servers[0].ID != a.id || servers[0].Role != "super_admin" {
 		t.Fatalf("servers after the restart = %+v %v", servers, err)
 	}
 }

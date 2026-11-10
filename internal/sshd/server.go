@@ -412,7 +412,7 @@ func (s *Server) storeIsFresh(ctx context.Context) (bool, error) {
 }
 
 // bootstrapKeyMember registers the first key to contact a fresh server as
-// the admin member, only after the SSH handshake verified its signature.
+// the super admin member, only after the SSH handshake verified its signature.
 // Freshness is re-checked under registerMu: if another identity won the
 // race the connection is rejected, exactly as an unknown key would be.
 func (s *Server) bootstrapKeyMember(ctx context.Context, user, keyLine string) (*domain.Member, error) {
@@ -429,12 +429,12 @@ func (s *Server) bootstrapKeyMember(ctx context.Context, user, keyLine string) (
 		DisplayName: "admin",
 		PublicKey:   keyLine,
 		Color:       attribution.NextColor(nil),
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	if err := s.cfg.Store.CreateMember(ctx, m); err != nil {
 		return nil, fmt.Errorf("sshd: bootstrap: %w", err)
 	}
-	slog.Info("sshd: bootstrap: first member registered as admin",
+	slog.Info("sshd: bootstrap: first member registered as super admin",
 		"member", m.ID, "key", fingerprintOf(keyLine), "user", user, "method", "publickey")
 	return m, nil
 }

@@ -263,7 +263,7 @@ func edgeClaimCode(w io.Writer, dataDir, edgeURL string, admin domain.MemberID) 
 }
 
 // recoveryAdmin is the member claim-code --admin names, which must exist
-// and be an admin.
+// and be an admin or a super admin.
 func recoveryAdmin(dataDir string, id domain.MemberID) (*domain.Member, error) {
 	db, err := store.Open(server.StorePath(dataDir))
 	if err != nil {
@@ -282,7 +282,7 @@ func recoveryAdmin(dataDir string, id domain.MemberID) (*domain.Member, error) {
 	if err != nil {
 		return nil, err
 	}
-	if m.Role != domain.RoleAdmin {
+	if !m.Role.Admin() {
 		return nil, fmt.Errorf("--admin: member %s (%s) is %s; console recovery restores an admin and never raises a role", m.DisplayName, id, m.Role)
 	}
 	return m, nil
@@ -313,7 +313,7 @@ func refuseClaimWithMembers(dataDir string) error {
 func adminsOf(members []*domain.Member) string {
 	var admins []string
 	for _, a := range members {
-		if a.Role == domain.RoleAdmin {
+		if a.Role.Admin() {
 			admins = append(admins, fmt.Sprintf("%s (%s)", a.ID, a.DisplayName))
 		}
 	}

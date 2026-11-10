@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -23,6 +24,9 @@ type WorkspaceAccessStore interface {
 	// there is none.
 	RevokeWorkspaceGrant(ctx context.Context, ws domain.WorkspaceID, member domain.MemberID) error
 	SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner domain.MemberID) error
+	// JoinMember creates m, which has a public key, with a grant on each
+	// of workspaces that still exists and issuer administers.
+	JoinMember(ctx context.Context, m *domain.Member, workspaces []domain.WorkspaceID, issuer domain.MemberID) error
 }
 
 func (d *DB) MemberWorkspaces(ctx context.Context, member domain.MemberID) (domain.WorkspaceAccess, error) {
@@ -110,4 +114,51 @@ func (d *DB) SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner
 		return fmt.Errorf("store: set workspace owner: %w", err)
 	}
 	return err
+}
+
+func (d *DB) JoinMember(ctx context.Context, m *domain.Member, workspaces []domain.WorkspaceID, issuer domain.MemberID) error {
+	if m.PublicKey == "" {
+		return errors.New("store: join member: a public key is required")
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin join member: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertMember(ctx, tx, m); err != nil {
+		return err
+	}
+	if err := grantAdministered(ctx, tx, m.ID, issuer, workspaces, time.Now()); err != nil {
+		return fmt.Errorf("store: join member: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit join member: %w", err)
+	}
+	return nil
+}
+
+// grantAdministered grants member each of workspaces that still exists and
+// that issuer administers now: any for a super admin, the ones they own
+// for an admin, none for anyone else.
+func grantAdministered(ctx context.Context, tx *sql.Tx, member, issuer domain.MemberID, workspaces []domain.WorkspaceID, now time.Time) error {
+	if len(workspaces) == 0 {
+		return nil
+	}
+	ids, err := json.Marshal(workspaces)
+	if err != nil {
+		return fmt.Errorf("grant workspaces: %w", err)
+	}
+	at, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("grant workspaces: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO workspace_grants (workspace_id, member_id, granted_by, created_at)
+		 SELECT w.id, ?1, i.id, ?2 FROM workspaces w JOIN members i ON i.id = ?3
+		 WHERE w.id IN (SELECT value FROM json_each(?4)) AND i.merged_into = '' AND i.pending = 0
+		   AND (i.role = 'super_admin' OR (i.role = 'admin' AND w.owner_member_id = i.id))`,
+		member, at, issuer, string(ids)); err != nil {
+		return fmt.Errorf("grant workspaces: %w", err)
+	}
+	return nil
 }

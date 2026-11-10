@@ -19,6 +19,7 @@ import (
 func TestApproveDeviceByID(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	approveAsAdmin(t, e, e.refusedForApproval(t, octo, newSigner(t), "phone"))

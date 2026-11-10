@@ -40,32 +40,51 @@ func (s *Server) rpcIdentityStore() (store.IdentityStore, *protocol.Error) {
 }
 
 // actingOn loads the caller and allows the call when it acts on the
-// caller's own member or the caller is an admin.
+// caller's own member, the caller is a super admin, or the caller is an
+// admin and owner is below admin.
 func (s *Server) actingOn(ctx context.Context, caller, owner domain.MemberID, method string) *protocol.Error {
+	return s.actingAs(ctx, caller, owner, "", method)
+}
+
+// actingAs is actingOn for owner, or, when owner is empty, for the new
+// member with role an invitation adds.
+func (s *Server) actingAs(ctx context.Context, caller, owner domain.MemberID, role domain.Role, method string) *protocol.Error {
 	m, err := s.cfg.Store.GetMember(ctx, caller)
 	if err != nil {
 		return rpcError(err)
 	}
-	if caller != owner && m.Role != domain.RoleAdmin {
-		return &protocol.Error{Code: protocol.CodeDenied,
-			Message: method + ": only its own member or an admin may do this"}
+	if caller == owner || m.Role == domain.RoleSuperAdmin {
+		return nil
 	}
-	return nil
+	if m.Role == domain.RoleAdmin {
+		if owner != "" {
+			target, err := s.cfg.Store.GetMember(ctx, owner)
+			if err != nil {
+				return rpcError(err)
+			}
+			role = target.Role
+		}
+		if !role.Admin() {
+			return nil
+		}
+	}
+	return &protocol.Error{Code: protocol.CodeDenied,
+		Message: method + ": only its own member, a super admin, or an admin for a member below admin may do this"}
 }
 
 // actingOnDevice is actingOn for dev's member. A device waiting on an
 // invitation acts for the member a link invitation names, and otherwise
-// for nobody but an admin.
+// for the new member the invitation adds.
 func (s *Server) actingOnDevice(ctx context.Context, ids store.IdentityStore, caller domain.MemberID, dev *domain.Device, method string) *protocol.Error {
-	owner := dev.Member
+	owner, role := dev.Member, domain.Role("")
 	if dev.Invitation != "" {
 		inv, err := ids.GetInvitation(ctx, dev.Invitation)
 		if err != nil {
 			return rpcError(err)
 		}
-		owner = inv.Member
+		owner, role = inv.Member, inv.Role
 	}
-	return s.actingOn(ctx, caller, owner, method)
+	return s.actingAs(ctx, caller, owner, role, method)
 }
 
 func deviceToWire(d *domain.Device) protocol.Device {
@@ -82,12 +101,16 @@ func deviceToWire(d *domain.Device) protocol.Device {
 }
 
 func invitationToWire(inv *domain.Invitation) protocol.Invitation {
-	return protocol.Invitation{
+	out := protocol.Invitation{
 		ID: string(inv.ID), Provider: inv.Provider, Login: inv.Login, Email: inv.Email,
 		Role: string(inv.Role), MemberID: string(inv.Member), CreatedBy: string(inv.CreatedBy),
 		CreatedAt: inv.CreatedAt.UTC().Format(time.RFC3339),
 		ExpiresAt: inv.ExpiresAt.UTC().Format(time.RFC3339),
 	}
+	for _, w := range inv.Workspaces {
+		out.WorkspaceIDs = append(out.WorkspaceIDs, string(w))
+	}
+	return out
 }
 
 func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
@@ -105,17 +128,17 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 	}
 	out := make([]protocol.Device, 0, len(devs))
 	for _, d := range devs {
-		if caller.Role != domain.RoleAdmin && d.Member != member {
-			linked, err := linksTo(ctx, ids, d, member)
-			if err != nil {
+		mine := caller.Role == domain.RoleSuperAdmin || d.Member == member
+		if !mine {
+			if mine, err = linksTo(ctx, ids, d, member); err != nil {
 				return nil, rpcError(err)
 			}
-			if !linked {
-				continue
-			}
+		}
+		if !mine && caller.Role != domain.RoleAdmin {
+			continue
 		}
 		w := deviceToWire(d)
-		if d.Status.AwaitsApproval() {
+		if d.Status.AwaitsApproval() || !mine {
 			_, name, role, err := s.admitsAs(ctx, ids, d)
 			if errors.Is(err, store.ErrNotFound) {
 				continue
@@ -123,7 +146,12 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 			if err != nil {
 				return nil, rpcError(err)
 			}
-			w.DisplayName, w.Role = name, string(role)
+			if !mine && role.Admin() {
+				continue
+			}
+			if d.Status.AwaitsApproval() {
+				w.DisplayName, w.Role = name, string(role)
+			}
 		}
 		out = append(out, w)
 	}
@@ -406,13 +434,36 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	}
 	role := domain.Role(p.Role)
 	if !role.Valid() {
-		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, or admin", p.Role))
+		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, admin, or super_admin", p.Role))
 	}
 	inv, perr := newInvitation(p.Login, p.Email, role, member)
 	if perr != nil {
 		return nil, perr
 	}
+	for _, w := range p.WorkspaceIDs {
+		inv.Workspaces = append(inv.Workspaces, domain.WorkspaceID(w))
+	}
 	return s.createInvitation(ctx, ids, inv, protocol.MethodMemberInvitationCreate)
+}
+
+// checkInvitation refuses inv, which adds a member, unless its creator
+// may invite with its role into its workspaces: a super admin any role
+// into any workspaces, an admin a collaborator or viewer into at least
+// one workspace they own and no other.
+func (s *Server) checkInvitation(ctx context.Context, inv *domain.Invitation, method string) *protocol.Error {
+	creator, err := s.cfg.Store.GetMember(ctx, inv.CreatedBy)
+	if err != nil {
+		return rpcError(err)
+	}
+	switch {
+	case creator.Role == domain.RoleSuperAdmin:
+	case creator.Role != domain.RoleAdmin:
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + " requires the admin role"}
+	case inv.Role.Admin():
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+			"%s: an admin invites collaborators and viewers, not %s; a super admin invites admins", method, inv.Role)}
+	}
+	return s.inviteWorkspaces(ctx, inv.CreatedBy, inv.Workspaces, method)
 }
 
 // memberIdentityLink names an edge account to bind to the caller's own
@@ -534,7 +585,8 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	return out, nil
 }
 
-// createInvitation stores inv while its creator is an admin, or for a link,
+// createInvitation stores inv while its creator may invite with its role
+// into its workspaces (checkInvitation), or for a link,
 // while its creator is the approved member it links to; a link replaces
 // that member's open one. member.role revokes a demoted admin's
 // invitations under registerMu, so checking under it too keeps any
@@ -554,7 +606,7 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 	defer s.registerMu.Unlock()
 	var replaced []*domain.Device
 	if inv.Member == "" {
-		if perr := s.requireAdmin(ctx, inv.CreatedBy, method); perr != nil {
+		if perr := s.checkInvitation(ctx, inv, method); perr != nil {
 			return nil, perr
 		}
 	} else {
@@ -616,7 +668,7 @@ func (s *Server) memberInvitationList(ctx context.Context, member domain.MemberI
 	}
 	out := make([]protocol.Invitation, 0, len(invs))
 	for _, inv := range invs {
-		if caller.Role == domain.RoleAdmin || inv.CreatedBy == member {
+		if caller.Role == domain.RoleSuperAdmin || inv.CreatedBy == member {
 			out = append(out, invitationToWire(inv))
 		}
 	}

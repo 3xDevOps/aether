@@ -34,13 +34,13 @@ func (s *Server) serverEdge(context.Context, domain.MemberID, json.RawMessage) (
 	return out, nil
 }
 
-// serverEdgeClaimCode issues the calling admin a claim code bound to their
-// own member, so an admin who joined over an SSH key or a tailnet can
+// serverEdgeClaimCode issues the calling super admin a claim code bound to
+// their own member, so one who joined over an SSH key or a tailnet can
 // connect their GitHub account and give the server an owner. The claim
 // creates no member and raises no role.
 func (s *Server) serverEdgeClaimCode(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
 	const method = protocol.MethodServerEdgeClaimCode
-	if perr := s.requireAdmin(ctx, member, method); perr != nil {
+	if perr := s.requireSuperAdmin(ctx, member, method); perr != nil {
 		return nil, perr
 	}
 	if perr := s.requireApprovedCaller(ctx, method, true); perr != nil {
@@ -62,7 +62,7 @@ func (s *Server) serverEdgeClaimCode(ctx context.Context, member domain.MemberID
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": " + err.Error()}
 	}
-	slog.Info("sshd: an admin issued a claim code for themself", "member", member)
+	slog.Info("sshd: a super admin issued a claim code for themself", "member", member)
 	return protocol.ServerEdgeClaimCodeResult{Code: code, ExpiresAt: expires.UTC().Format(time.RFC3339)}, nil
 }
 

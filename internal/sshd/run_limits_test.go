@@ -10,6 +10,7 @@ import (
 func TestServerRunLimits(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.RunLimits = domain.RunLimits{CPUs: 4, MemoryBytes: 8 << 30, Pids: 4096} })
+	asSuperAdmin(t, e)
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	cpus, mem := 2.0, int64(1<<30)
 

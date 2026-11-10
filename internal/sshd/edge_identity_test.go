@@ -25,6 +25,7 @@ import (
 func TestInvitationWaitsUntilOneDeviceIsApproved(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	inv := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	forged := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "6666", Login: "octo", IdentityAt: time.Now()}
@@ -241,6 +242,7 @@ func TestClaimCodeForAnAdminRecoversThatAdmin(t *testing.T) {
 func TestGoogleIdentityFromAnEarlierVersion(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	ids := identities(t, e)
 	admin := controlClient(t, e)

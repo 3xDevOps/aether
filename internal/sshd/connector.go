@@ -301,9 +301,9 @@ func (s *Server) checkReviewer(account edgeproto.Account, m *domain.Member) erro
 	case !s.cfg.EdgeReviewer:
 		return fmt.Errorf("%s does not take the edge's reviewer account: edge-reviewer is off. An admin turns it on on the server's host with "+
 			"sudo aether-server config set edge-reviewer true, then sudo systemctl restart aether-server", cmp.Or(s.cfg.Name, "this server"))
-	case m.Role == domain.RoleAdmin:
+	case m.Role.Admin():
 		return fmt.Errorf("%s is bound to member %s, an admin, and a reviewer may act only as a viewer or collaborator; "+
-			"an admin changes the member's role with aether member role", accountName(account), m.ID)
+			"a super admin changes the member's role with aether member role", accountName(account), m.ID)
 	}
 	return nil
 }

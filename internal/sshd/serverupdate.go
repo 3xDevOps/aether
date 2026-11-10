@@ -59,7 +59,7 @@ func (s *Server) serverUpdateStatus(ctx context.Context, _ domain.MemberID, para
 // role is re-read from the store on every call, like member.role, so a
 // demotion lands on connections that are already open.
 func (s *Server) serverUpdate(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if err := s.requireAdmin(ctx, member, protocol.MethodServerUpdate); err != nil {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodServerUpdate); err != nil {
 		return nil, err
 	}
 	svc, perr := s.updates()

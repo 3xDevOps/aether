@@ -40,6 +40,9 @@ func (s *Server) sysboxStatus(ctx context.Context, member domain.MemberID, _ jso
 }
 
 func (s *Server) sysboxInstall(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	if perr := s.requireSuperAdmin(ctx, member, protocol.MethodServerSysboxInstall); perr != nil {
+		return nil, perr
+	}
 	svc, perr := s.sysbox(ctx, member, protocol.MethodServerSysboxInstall)
 	if perr != nil {
 		return nil, perr

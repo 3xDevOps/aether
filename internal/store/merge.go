@@ -94,29 +94,32 @@ type MergeSettings struct {
 // MergeSnapshot is one member as a merge plan read it. Devices carry no
 // approval code and no last-seen time. SharedWithMe lists the members
 // sharing their agent account with it, OpenInvitations the open
-// invitations it created or that link to it.
+// invitations it created or that link to it. The workspaces it owns and
+// was granted go to the survivor.
 type MergeSnapshot struct {
-	Member          domain.Member         `json:"member"`
-	Identities      []*domain.Identity    `json:"identities"`
-	Devices         []*domain.Device      `json:"devices"`
-	Runs            int                   `json:"runs"`
-	Schedules       int                   `json:"schedules"`
-	Settings        MergeSettings         `json:"settings"`
-	SharedWithMe    []domain.MemberID     `json:"shared_with_me"`
-	OpenInvitations []domain.InvitationID `json:"open_invitations"`
+	Member            domain.Member         `json:"member"`
+	Identities        []*domain.Identity    `json:"identities"`
+	Devices           []*domain.Device      `json:"devices"`
+	Runs              int                   `json:"runs"`
+	Schedules         int                   `json:"schedules"`
+	Settings          MergeSettings         `json:"settings"`
+	SharedWithMe      []domain.MemberID     `json:"shared_with_me"`
+	OpenInvitations   []domain.InvitationID `json:"open_invitations"`
+	OwnedWorkspaces   []domain.WorkspaceID  `json:"owned_workspaces"`
+	GrantedWorkspaces []domain.WorkspaceID  `json:"granted_workspaces"`
 }
 
 // MergePlan is what merging two members would do. Minted is the member
 // that minted the code, Proposer the one that entered it. Policy is the
-// server's edge access policy and Admins counts its admins. Digest is the
-// SHA-256 of all of it.
+// server's edge access policy and SuperAdmins counts its super admins.
+// Digest is the SHA-256 of all of it.
 type MergePlan struct {
-	CodeHash string        `json:"code_hash"`
-	Minted   MergeSnapshot `json:"minted"`
-	Proposer MergeSnapshot `json:"proposer"`
-	Policy   string        `json:"policy"`
-	Admins   int           `json:"admins"`
-	Digest   string        `json:"-"`
+	CodeHash    string        `json:"code_hash"`
+	Minted      MergeSnapshot `json:"minted"`
+	Proposer    MergeSnapshot `json:"proposer"`
+	Policy      string        `json:"policy"`
+	SuperAdmins int           `json:"super_admins"`
+	Digest      string        `json:"-"`
 }
 
 // Side returns the plan's snapshot of member, nil when it is neither.
@@ -138,43 +141,43 @@ func (p *MergePlan) Other(member domain.MemberID) *MergeSnapshot {
 	return &p.Minted
 }
 
-// Role is the merged member's role: the lower of the two, or admin when
-// an admin side asked to keep it, the minter on accepting or the proposer
-// on proposing. Neither side's flag lifts the other's role.
+// Role is the merged member's role: the lower of the two, or the role of
+// an admin or super admin side that asked to keep it, the minter on
+// accepting or the proposer on proposing. Neither side's flag lifts the
+// other's role.
 func (p *MergePlan) Role(mintedKeepAdmin, proposerKeepAdmin bool) domain.Role {
-	keep := (mintedKeepAdmin && p.Minted.Member.Role == domain.RoleAdmin) ||
-		(proposerKeepAdmin && p.Proposer.Member.Role == domain.RoleAdmin)
-	return MergedRole(p.Minted.Member.Role, p.Proposer.Member.Role, keep)
+	a, b := p.Minted.Member.Role, p.Proposer.Member.Role
+	role := a
+	if roleRank[b] < roleRank[a] {
+		role = b
+	}
+	for _, kept := range []struct {
+		keep bool
+		role domain.Role
+	}{{mintedKeepAdmin, a}, {proposerKeepAdmin, b}} {
+		if kept.keep && kept.role.Admin() && roleRank[kept.role] > roleRank[role] {
+			role = kept.role
+		}
+	}
+	return role
 }
 
-// LeavesNoAdmin reports whether a merge with role as its result leaves
-// the server without an admin.
-func (p *MergePlan) LeavesNoAdmin(role domain.Role) bool {
-	after := p.Admins
+// LeavesNoSuperAdmin reports whether a merge with role as its result
+// takes the server's last super admin.
+func (p *MergePlan) LeavesNoSuperAdmin(role domain.Role) bool {
+	after := p.SuperAdmins
 	for _, m := range []domain.Member{p.Minted.Member, p.Proposer.Member} {
-		if m.Role == domain.RoleAdmin {
+		if m.Role == domain.RoleSuperAdmin {
 			after--
 		}
 	}
-	if role == domain.RoleAdmin {
+	if role == domain.RoleSuperAdmin {
 		after++
 	}
-	return after < 1
+	return after < 1 && after < p.SuperAdmins
 }
 
-var roleRank = map[domain.Role]int{domain.RoleViewer: 0, domain.RoleCollaborator: 1, domain.RoleAdmin: 2}
-
-// MergedRole is the role of two members merged: the lower of a and b,
-// or admin when one of them is admin and keepAdmin is set.
-func MergedRole(a, b domain.Role, keepAdmin bool) domain.Role {
-	if keepAdmin && (a == domain.RoleAdmin || b == domain.RoleAdmin) {
-		return domain.RoleAdmin
-	}
-	if roleRank[a] < roleRank[b] {
-		return a
-	}
-	return b
-}
+var roleRank = map[domain.Role]int{domain.RoleViewer: 0, domain.RoleCollaborator: 1, domain.RoleAdmin: 2, domain.RoleSuperAdmin: 3}
 
 // MergeProposal is the proposer's half of a merge: whose settings prevail
 // and, from an admin proposer only, keeping the merged member admin. The
@@ -380,8 +383,8 @@ func planInTx(ctx context.Context, tx *sql.Tx, hash string, minted, proposer dom
 	if err := refuseLiveWork(ctx, tx, a.ID, b.ID); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM members WHERE role = 'admin' AND merged_into = ''`).Scan(&plan.Admins); err != nil {
-		return nil, fmt.Errorf("store: plan merge: count admins: %w", err)
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM members WHERE role = 'super_admin' AND merged_into = ''`).Scan(&plan.SuperAdmins); err != nil {
+		return nil, fmt.Errorf("store: plan merge: count super admins: %w", err)
 	}
 	body, err := json.Marshal(plan)
 	if err != nil {
@@ -542,6 +545,9 @@ func mergeSnapshot(ctx context.Context, tx *sql.Tx, id domain.MemberID) (*MergeS
 		{`SELECT workspace_id FROM workspace_mirrors WHERE github_member_id = ? ORDER BY 1`, func(v []string) { s.MirrorWorkspaces = idsOf[domain.WorkspaceID](v) }},
 		{`SELECT id FROM identity_invitations WHERE consumed_at IS NULL AND (created_by = ?1 OR member_id = ?1) ORDER BY 1`,
 			func(v []string) { snap.OpenInvitations = idsOf[domain.InvitationID](v) }},
+		{`SELECT id FROM workspaces WHERE owner_member_id = ? ORDER BY 1`, func(v []string) { snap.OwnedWorkspaces = idsOf[domain.WorkspaceID](v) }},
+		{`SELECT workspace_id FROM workspace_grants WHERE member_id = ? ORDER BY 1`,
+			func(v []string) { snap.GrantedWorkspaces = idsOf[domain.WorkspaceID](v) }},
 	}
 	for _, l := range lists {
 		v, err := queryStrings(ctx, tx, l.query, id)
@@ -586,7 +592,7 @@ func (d *DB) ProposeMerge(ctx context.Context, p MergeProposal) (*PendingMerge, 
 		return nil, refuseMerge("the members changed since the preview; preview again")
 	case plan.Side(p.Keep) == nil:
 		return nil, refuseMerge("keep_settings_of must be %s or %s, the two members this code merges", code.member, p.Proposer)
-	case p.KeepAdmin && plan.Proposer.Member.Role != domain.RoleAdmin:
+	case p.KeepAdmin && !plan.Proposer.Member.Role.Admin():
 		return nil, refuseMerge("keep_admin is the admin's to ask for, and you are %s; the admin asks for it when accepting", plan.Proposer.Member.Role)
 	}
 	id, err := newID("mrp")
@@ -690,14 +696,22 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (_ *MemberMerge, er
 	switch {
 	case plan.Digest != code.digest:
 		return nil, refuseMerge("the members changed since the proposal; cancel it with aether member merge cancel and propose again")
-	case a.KeepAdmin && plan.Minted.Member.Role != domain.RoleAdmin:
+	case a.KeepAdmin && !plan.Minted.Member.Role.Admin():
 		return nil, refuseMerge("keep_admin is the admin's to ask for, and you are %s", plan.Minted.Member.Role)
 	}
 	role := plan.Role(a.KeepAdmin, code.proposerKeepAdmin)
-	if plan.LeavesNoAdmin(role) {
-		return nil, refuseMerge("refusing to demote the server's last admin: the merged member would be %s; the admin side asks to keep it admin with --keep-admin", role)
+	if plan.LeavesNoSuperAdmin(role) {
+		return nil, refuseMerge("refusing to demote the server's last super admin: the merged member would be %s; the super admin side asks to keep its role with --keep-admin", role)
 	}
-	if role != domain.RoleAdmin && a.OwnerSubject != "" {
+	if !role.Admin() {
+		for _, side := range []MergeSnapshot{plan.Minted, plan.Proposer} {
+			if len(side.OwnedWorkspaces) > 0 {
+				return nil, refuseMerge("member %s owns workspaces %s, and the merged member would be %s, which cannot own one; give each a new owner first with aether workspace owner <workspace> <member-id>, or keep it admin with --keep-admin",
+					side.Member.ID, joinIDs(side.OwnedWorkspaces), role)
+			}
+		}
+	}
+	if !role.Admin() && a.OwnerSubject != "" {
 		for _, side := range []MergeSnapshot{plan.Minted, plan.Proposer} {
 			for _, id := range side.Identities {
 				if id.Provider == a.OwnerProvider && id.Subject == a.OwnerSubject {
@@ -718,7 +732,10 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (_ *MemberMerge, er
 		return nil, err
 	}
 	committed := false
-	demoted := role != domain.RoleAdmin && (survivor.Member.Role == domain.RoleAdmin || absorbed.Member.Role == domain.RoleAdmin)
+	demoted := false
+	for _, before := range []domain.Role{survivor.Member.Role, absorbed.Member.Role} {
+		demoted = demoted || (before.Admin() && roleRank[role] < roleRank[before])
+	}
 	if err = mergeRows(ctx, tx, survivor.Member, absorbed.Member, role, demoted); err != nil {
 		return nil, err
 	}
@@ -766,6 +783,14 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (_ *MemberMerge, er
 	}
 	committed = true
 	return merge, nil
+}
+
+func joinIDs[T ~string](ids []T) string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = string(id)
+	}
+	return strings.Join(out, ", ")
 }
 
 func identityName(id *domain.Identity) string {
