@@ -162,7 +162,7 @@ func TestEnhancedRunReportsAModelTheAgentRefused(t *testing.T) {
 	}
 	waitFor(t, "the refused model recorded", func() bool {
 		stored, err := e.cfg.Store.GetRun(t.Context(), run.ID)
-		return err == nil && stored.Model == "" && strings.HasPrefix(stored.ModelError, "the agent refused opus, so the session runs on the agent's default model: ")
+		return err == nil && stored.Model == "" && strings.HasPrefix(stored.ModelError, "The agent refused \"opus\", so the session runs on the agent's default model: ")
 	})
 }
 

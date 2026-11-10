@@ -154,7 +154,7 @@ type Store interface {
 	SetRunAccount(ctx context.Context, id domain.RunID, account domain.MemberID, reason string, at time.Time) (int, error)
 	ListRunAccountSegments(ctx context.Context, id domain.RunID) ([]*RunAccountSegment, error)
 	SetRunModel(ctx context.Context, id domain.RunID, model string) error
-	RefuseRunModel(ctx context.Context, id domain.RunID, reason string) error
+	RefuseRunModel(ctx context.Context, id domain.RunID, model, reason string) error
 	SetRunEffort(ctx context.Context, id domain.RunID, effort string) error
 	// TransferRun reassigns only the run's owning member (handoff),
 	// leaving every other field untouched.

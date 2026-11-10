@@ -637,14 +637,22 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	var modelErr error
 	if run.Model != "" && adopt == nil {
 		if modelErr = sess.SetModel(ctx, run.Model); modelErr != nil {
-			reason := fmt.Sprintf("the agent refused %s, so the session runs on the agent's default model: %v", run.Model, modelErr)
+			reason := modelErr.Error()
+			// A one-shot run ends on the error below; a refusal of a
+			// live session leaves it on the agent's default model.
+			refused := !oneShot && acphost.Refused(modelErr)
+			if refused {
+				reason = fmt.Sprintf("The agent refused %q, so the session runs on the agent's default model: %v", run.Model, modelErr)
+			}
 			if err := sess.Notice("error", "Model not set", reason); err != nil {
 				slog.Warn("scheduler: record the model notice", "run", runID, "error", err)
 			}
-			if err := d.s.cfg.Store.RefuseRunModel(ctx, runID, reason); err != nil {
-				slog.Warn("scheduler: record the refused model", "run", runID, "error", err)
-			} else {
-				d.s.publish(ctx, events.Event{WorkspaceID: run.WorkspaceID, RunID: runID, Payload: events.RunModelPayload{}})
+			if refused {
+				if err := d.s.cfg.Store.RefuseRunModel(ctx, runID, run.Model, reason); err != nil {
+					slog.Warn("scheduler: record the refused model", "run", runID, "error", err)
+				} else {
+					d.s.publish(ctx, events.Event{WorkspaceID: run.WorkspaceID, RunID: runID, Payload: events.RunModelPayload{}})
+				}
 			}
 		}
 	}

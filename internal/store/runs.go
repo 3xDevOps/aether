@@ -672,15 +672,20 @@ func (d *DB) SetRunModel(ctx context.Context, id domain.RunID, model string) err
 	return err
 }
 
-// RefuseRunModel records that the agent refused the run's model, so the run
-// runs on the agent's default.
-func (d *DB) RefuseRunModel(ctx context.Context, id domain.RunID, reason string) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE runs SET model = '', model_error = ? WHERE id = ?`, reason, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: record the refused session model: %w", err)
+// maxModelError bounds the agent's error kept with a refused model.
+const maxModelError = 1024
+
+// RefuseRunModel records that the agent refused model, so the run runs on the
+// agent's default; a run whose model changed since keeps it.
+func (d *DB) RefuseRunModel(ctx context.Context, id domain.RunID, model, reason string) error {
+	if len(reason) > maxModelError {
+		reason = strings.ToValidUTF8(reason[:maxModelError], "")
 	}
-	return err
+	_, err := d.db.ExecContext(ctx, `UPDATE runs SET model = '', model_error = ? WHERE id = ? AND model = ?`, reason, id, model)
+	if err != nil {
+		return fmt.Errorf("store: record the refused session model: %w", err)
+	}
+	return nil
 }
 
 // SetRunEffort updates only the run's effort level.

@@ -381,6 +381,13 @@ func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, S
 	}, err
 }
 
+// Refused reports an error the agent answered, or an option value it does
+// not offer, rather than a failure to reach it.
+func Refused(err error) bool {
+	var re *acp.RequestError
+	return errors.As(err, &re) || errors.Is(err, ErrUnknownOption)
+}
+
 // AuthRequired reports a request the agent refused with ACP's
 // auth_required error: it found no usable sign-in.
 func AuthRequired(err error) bool {
