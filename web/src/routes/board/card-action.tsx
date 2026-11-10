@@ -158,7 +158,9 @@ export function ReplyComposer({
           placeholder="Message to the agent"
           value={text}
           onChange={(event) => {
-            if (useReply.getState().reply?.runId === runId) saveReply({ text: event.target.value })
+            // An identity change clears the store under an open composer; typing claims it again.
+            if (useReply.getState().reply?.runId !== runId) setReplying(runId, true)
+            saveReply({ text: event.target.value })
           }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
