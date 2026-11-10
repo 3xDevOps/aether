@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -122,6 +123,10 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	sees, err := s.visibleMembers(ctx, permissions.ActorOf(caller))
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	devs, err := ids.ListDevices(ctx, "")
 	if err != nil {
 		return nil, rpcError(err)
@@ -136,6 +141,21 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 		}
 		if !mine && caller.Role != domain.RoleAdmin {
 			continue
+		}
+		if !mine && d.Invitation == "" && !sees(d.Member) {
+			continue
+		}
+		if !mine && d.Invitation != "" {
+			inv, err := ids.GetInvitation(ctx, d.Invitation)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, rpcError(err)
+			}
+			if inv.CreatedBy != member {
+				continue
+			}
 		}
 		w := deviceToWire(d)
 		if d.Status.AwaitsApproval() || !mine {
@@ -507,12 +527,12 @@ func (s *Server) memberIdentityList(ctx context.Context, member domain.MemberID,
 	if target == "" {
 		return nil, invalidParams("member_id is required")
 	}
-	if perr := s.actingOn(ctx, member, target, protocol.MethodMemberIdentityList); perr != nil {
-		return nil, perr
-	}
-	m, err := s.cfg.Store.GetMember(ctx, target)
+	m, err := s.visibleMember(ctx, member, target)
 	if err != nil {
 		return nil, rpcError(err)
+	}
+	if perr := s.actingOn(ctx, member, target, protocol.MethodMemberIdentityList); perr != nil {
+		return nil, perr
 	}
 	all, err := ids.ListIdentities(ctx)
 	if err != nil {
@@ -557,6 +577,9 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	target := domain.MemberID(p.MemberID)
 	if target == "" || p.Provider == "" || p.Subject == "" {
 		return nil, invalidParams("member_id, provider and subject are required")
+	}
+	if _, err := s.visibleMember(ctx, member, target); err != nil {
+		return nil, rpcError(err)
 	}
 	if perr := s.actingOn(ctx, member, target, method); perr != nil {
 		return nil, perr

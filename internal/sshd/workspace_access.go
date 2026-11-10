@@ -99,8 +99,19 @@ func (s *Server) workspaceAccessGrant(ctx context.Context, member domain.MemberI
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	sees, err := s.visibleMembers(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	var grant []domain.MemberID
 	for _, id := range p.MemberIDs {
+		if !sees(domain.MemberID(id)) {
+			return nil, rpcError(permissions.ErrNoAccess)
+		}
 		m, perr := s.grantee(ctx, member, domain.MemberID(id), method)
 		if perr != nil {
 			return nil, perr

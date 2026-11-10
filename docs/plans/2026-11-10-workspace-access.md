@@ -43,6 +43,17 @@ Capabilities with no workspace (`Target{}`):
 - `CreateWorkspace` (new) is for admins and super admins.
 - `ServerAdmin` (new) is for super admins only.
 
+### Who sees whom
+
+A super admin sees every member. Anyone else sees themselves, every super
+admin, every member who owns or was granted a workspace they reach, every
+member with a session in one (primary or extra repository), and, as an
+admin, every pending member. A session author whose grant was revoked stays
+visible there, since the workspace's history names them. A member the
+caller does not see is absent from member and device lists and reads as
+`not found` wherever an ID names them. An admin's device list shows a
+device waiting on an invitation only when they created the invitation.
+
 ### Who may do what
 
 | Action | super_admin | admin | collaborator / viewer |
@@ -116,7 +127,8 @@ in, or filters a list by `Actor.Reaches`.
 | account sharing | sharer and borrower | also: both reach every workspace of the launch; the revoke sweep stops a live run when either loses access |
 | assistant, MCP connector, Slack actions, dashboard | through `dispatch` | inherit every RPC change; no separate path |
 | audit, `system.stats`, `server.disk` | admin sees all | super admin sees all; others as before |
-| member list | all members | unchanged (*Assumption*); carries no workspace data |
+| `member.list`, `member.device.list`, attention names | all members | the members the caller sees ([Who sees whom](#who-sees-whom)) |
+| `member.identity.*`, `workspace.access.grant`, `account.share` naming a member | any member | a member the caller does not see is `not found` |
 
 ## Changed commands and screens
 

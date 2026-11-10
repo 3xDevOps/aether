@@ -88,3 +88,16 @@ func (u Unscoped) GetMember(ctx context.Context, id domain.MemberID) (*domain.Me
 	}
 	return m, nil
 }
+
+// WorkspaceMembers is every member: every member shares every workspace.
+func (u Unscoped) WorkspaceMembers(ctx context.Context, _ []domain.WorkspaceID) ([]domain.MemberID, error) {
+	all, err := u.ListMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]domain.MemberID, 0, len(all))
+	for _, m := range all {
+		ids = append(ids, m.ID)
+	}
+	return ids, nil
+}
