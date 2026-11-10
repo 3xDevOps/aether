@@ -447,9 +447,9 @@ done
 `set-property` changes the running unit and keeps the change in
 `/etc/systemd/system.control/<unit>.d/`. The SSH unit is `sshd` on
 Fedora and Arch; skip `tailscaled` without Tailscale. To keep the setting with
-your other overrides instead, put the same lines under `[Service]` in a
-drop-in, such as `sudo systemctl edit docker`, which reloads systemd when you
-save.
+your other overrides instead, put the same lines in a drop-in, such as
+`sudo systemctl edit docker`, which reloads systemd when you save: under
+`[Service]` for a service, under `[Slice]` for `system.slice`.
 
 `docker info --format '{{.CgroupDriver}}'` prints the driver. With `cgroupfs`,
 containers share a `/docker` group beside `system.slice`, and these weights
