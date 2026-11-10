@@ -800,14 +800,19 @@ func withholdSecret(text string, files []string) (string, []string) {
 	return fmt.Sprintf("(withheld: gitleaks rule %s at %s)", hits[0].Kind, hits[0].Location), nil
 }
 
+// latestRunDiffQuery names its index because, without ANALYZE statistics,
+// SQLite reads it off idx_events_workspace_type and walks every run.diff
+// in the workspace.
+const latestRunDiffQuery = `SELECT payload FROM events INDEXED BY idx_events_run_type
+	WHERE workspace_id = ? AND run_id = ? AND type = 'run.diff' AND json_extract(payload, '$.repo') IS NULL
+	ORDER BY seq DESC LIMIT 1`
+
 // latestRunDiff reads the files and HEAD of the run's newest run.diff
 // event. It decodes the payload itself because the events package imports
 // this one.
 func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) ([]string, string, error) {
 	var payload string
-	err := d.db.QueryRowContext(ctx,
-		`SELECT payload FROM events WHERE workspace_id = ? AND run_id = ? AND type = 'run.diff' AND json_extract(payload, '$.repo') IS NULL ORDER BY seq DESC LIMIT 1`,
-		workspace, run).Scan(&payload)
+	err := d.db.QueryRowContext(ctx, latestRunDiffQuery, workspace, run).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", nil
 	}

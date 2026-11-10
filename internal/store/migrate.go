@@ -2578,6 +2578,15 @@ ALTER TABLE room_messages ADD COLUMN resolved_at INTEGER;
 ALTER TABLE room_messages ADD COLUMN resolved_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE room_messages ADD COLUMN resolution TEXT NOT NULL DEFAULT '' CHECK (resolution IN ('', 'done', 'deleted'));
 `,
+	// v109: type-filtered event reads, such as a replaying subscriber, a
+	// run's diff snapshots or a workspace's timeline, scanned every event
+	// in their range for their types. internal/events.readQuery names these
+	// indexes.
+	`
+CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
+CREATE INDEX IF NOT EXISTS idx_events_run_type ON events (run_id, type);
+CREATE INDEX IF NOT EXISTS idx_events_workspace_type ON events (workspace_id, type);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

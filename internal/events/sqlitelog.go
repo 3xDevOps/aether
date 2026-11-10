@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS events (
 	payload      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_workspace_seq ON events (workspace_id, seq);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
+CREATE INDEX IF NOT EXISTS idx_events_run_type ON events (run_id, type);
+CREATE INDEX IF NOT EXISTS idx_events_workspace_type ON events (workspace_id, type);
 `
 
 // SQLiteLog is the EventLog backed by a SQLite events table
@@ -190,12 +193,23 @@ func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 	return out, nil
 }
 
+const maxTypeLookups = 32
+
 // readQuery reads a one-run Runs filter as two indexed lookups, the run's
 // own events and the agent messages other runs addressed to it, because
 // SQLite answers their OR by scanning the workspace's events. The message
 // type is a literal so the partial idx_events_coord_to_run can serve the
 // second lookup. Several runs keep the OR: SQLite would read both lookups off the
 // workspace index and scan it twice.
+//
+// Types are read with one limited lookup per type on the type index that
+// fits the filter: SQLite answers type IN (...) on an index by collecting
+// and sorting every match after the cursor. Each lookup names its index
+// because, without ANALYZE statistics, SQLite reads a Run filter off a
+// less selective one. A Runs filter keeps its run lookups and checks the
+// type as +type, which keeps it off the type indexes. So does a filter
+// with more than maxTypeLookups distinct types, which keeps a client's
+// type list under SQLite's limit on compound terms.
 func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (string, []any) {
 	where := "seq > ?"
 	args := []any{afterSeq}
@@ -223,13 +237,34 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 			args = append(args, string(r))
 		}
 	}
-	if len(f.Types) > 0 {
-		where += " AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")"
-		for _, t := range f.Types {
+	const cols = "seq, id, ts, workspace_id, run_id, actor_id, type, payload"
+	types := slices.Compact(slices.Sorted(slices.Values(f.Types)))
+	var index string
+	switch {
+	case len(types) == 0 || len(types) > maxTypeLookups || len(f.Runs) > 0:
+	case f.Run != "":
+		index = "idx_events_run_type"
+	case f.Workspace != "":
+		index = "idx_events_workspace_type"
+	default:
+		index = "idx_events_type"
+	}
+	if index != "" {
+		arms := make([]string, len(types))
+		var armArgs []any
+		for i, t := range types {
+			arms[i] = "SELECT seq FROM (SELECT seq FROM events INDEXED BY " + index + " WHERE " + where + " AND type = ? ORDER BY seq " + order + " LIMIT ?)"
+			armArgs = slices.Concat(armArgs, args, []any{string(t), limit})
+		}
+		query := "SELECT " + cols + " FROM events WHERE seq IN (" + strings.Join(arms, " UNION ALL ") + ") ORDER BY seq " + order + " LIMIT ?"
+		return query, append(armArgs, limit)
+	}
+	if len(types) > 0 {
+		where += " AND +type IN (?" + strings.Repeat(", ?", len(types)-1) + ")"
+		for _, t := range types {
 			args = append(args, string(t))
 		}
 	}
-	const cols = "seq, id, ts, workspace_id, run_id, actor_id, type, payload"
 	query := "SELECT " + cols + " FROM events WHERE " + where
 	if union {
 		run := string(f.Runs[0])
