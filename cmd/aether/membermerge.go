@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -109,7 +110,7 @@ func mergeProposal(plan protocol.MemberMergePlan, code, keep string, keepAdmin, 
 	if err := printMergeChoice(out, plan, keep); err != nil {
 		return params, err
 	}
-	if plan.RoleWithKeepAdmin != "" && plan.Proposer.Role == "admin" && !keepAdmin && !yes {
+	if plan.RoleWithKeepAdmin != "" && domain.Role(plan.Proposer.Role).Admin() && !keepAdmin && !yes {
 		params.KeepAdmin = askKeepAdmin(out, in, plan)
 	}
 	if !yes {
@@ -193,11 +194,11 @@ func acceptDecision(p protocol.MemberMergeProposal, keepAdmin, yes, interactive 
 	if !interactive && !yes {
 		return params, fmt.Errorf("aether member merge accept: no terminal to ask on; pass --yes to accept the plan above: aether member merge accept %s --yes", p.ID)
 	}
-	if plan.RoleWithKeepAdmin != "" && plan.Minted.Role == "admin" && !keepAdmin && !yes && !p.ProposerKeepAdmin {
+	if plan.RoleWithKeepAdmin != "" && domain.Role(plan.Minted.Role).Admin() && !keepAdmin && !yes && !p.ProposerKeepAdmin {
 		params.KeepAdmin = askKeepAdmin(out, in, plan)
 	}
 	role := plan.Role
-	if plan.RoleWithKeepAdmin != "" && (params.KeepAdmin || (p.ProposerKeepAdmin && plan.Proposer.Role == "admin")) {
+	if plan.RoleWithKeepAdmin != "" && (params.KeepAdmin || (p.ProposerKeepAdmin && domain.Role(plan.Proposer.Role).Admin())) {
 		role = plan.RoleWithKeepAdmin
 	}
 	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s\n", role)
