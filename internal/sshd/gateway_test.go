@@ -198,7 +198,7 @@ func TestServerDiskContainersAreOwnOrAdmin(t *testing.T) {
 	t.Parallel()
 	measured := time.Date(2026, 10, 10, 6, 0, 0, 0, time.UTC)
 	reader := &fakeDisk{}
-	e := newTestEnv(t, func(c *Config) { c.Services.Disk = reader })
+	e := newScopedTestEnv(t, func(c *Config) { c.Services.Disk = reader })
 	_, member := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 	reader.usage = disk.Usage{
 		ContainersAt: &measured,
@@ -221,7 +221,7 @@ func TestServerDiskContainersAreOwnOrAdmin(t *testing.T) {
 		return result
 	}
 	if all := read(e.member.ID); len(all.Containers) != 3 || all.Containers[0].OwnerID != "run-big" || all.ContainersMeasuredAt != "2026-10-10T06:00:00Z" {
-		t.Fatalf("admin containers = %+v", all)
+		t.Fatalf("super admin containers = %+v", all)
 	}
 	own := read(member.ID)
 	want := []protocol.ServerDiskContainer{

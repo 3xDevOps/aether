@@ -1108,7 +1108,7 @@ func TestProtectedRunRejectsOwnerAndAdminSteering(t *testing.T) {
 // whose workspace allows steering others.
 func TestResolvePermissionsKindAndIdempotency(t *testing.T) {
 	st, clock, ws, owner, other, run := setupCollab(t)
-	admin := &domain.Member{ID: "admin", DisplayName: "Admin", Role: domain.RoleAdmin}
+	admin := &domain.Member{ID: "admin", DisplayName: "Admin", Role: domain.RoleAdmin, Access: domain.WorkspaceAccess{Owned: map[domain.WorkspaceID]bool{ws.ID: true}}}
 	third := &domain.Member{ID: "third", DisplayName: "Third", Role: domain.RoleCollaborator}
 	st.members[admin.ID], st.members[third.ID] = admin, third
 	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Now: clock.Now})

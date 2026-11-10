@@ -59,6 +59,9 @@ type Filter struct {
 	// NoRereads leaves out run.status rereads even when Types asks for
 	// run.status.
 	NoRereads bool
+	// Reaches, when set, keeps only events of the workspaces it reports
+	// true for.
+	Reaches func(domain.WorkspaceID) bool
 }
 
 // Page is one slice of history, oldest first. NextSeq is the cursor to
@@ -211,6 +214,9 @@ func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, 
 
 func (f Filter) keeps(e events.Event) bool {
 	if f.Member != "" && e.ActorID != f.Member {
+		return false
+	}
+	if f.Reaches != nil && !f.Reaches(e.WorkspaceID) {
 		return false
 	}
 	if p, ok := e.Payload.(events.TimelinePayload); ok && len(f.TimelineKinds) > 0 && !slices.Contains(f.TimelineKinds, p.Kind) {

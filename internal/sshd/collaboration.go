@@ -97,7 +97,7 @@ func roomTarget(s *Server, ctx context.Context, raw json.RawMessage) (permission
 		return permissions.Target{}, rpcError(err)
 	}
 	if target.Workspace != domain.WorkspaceID(p.WorkspaceID) {
-		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "session is not in workspace"}
+		return permissions.Target{}, rpcError(store.ErrNotFound)
 	}
 	return target, nil
 }
@@ -135,7 +135,7 @@ func evidencePacketTarget(s *Server, ctx context.Context, raw json.RawMessage) (
 		return permissions.Target{}, rpcError(err)
 	}
 	if packet.WorkspaceID != domain.WorkspaceID(p.WorkspaceID) {
-		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "evidence packet not found"}
+		return permissions.Target{}, rpcError(store.ErrNotFound)
 	}
 	target, err := resolveRunTarget(ctx, s.cfg.Store, packet.RunID)
 	if err != nil {
@@ -257,11 +257,15 @@ func (s *Server) runRoomPost(ctx context.Context, member domain.MemberID, raw js
 	if perr != nil {
 		return nil, perr
 	}
-	if p.Kind == protocol.RoomMessageSteerRequest {
+	role, reached := actor.RoleIn(target.Workspace)
+	switch {
+	case !reached:
+		return nil, rpcError(permissions.ErrNoAccess)
+	case p.Kind == protocol.RoomMessageSteerRequest:
 		if checkErr := permissions.Check(permissions.Steer, actor, target); checkErr != nil {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunRoomPost + ": " + checkErr.Error()}
+			return nil, checkError(protocol.MethodRunRoomPost, checkErr)
 		}
-	} else if actor.Role != domain.RoleAdmin && actor.Role != domain.RoleCollaborator {
+	case role != domain.RoleAdmin && role != domain.RoleCollaborator:
 		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunRoomPost + ": posting requires the collaborator role"}
 	}
 	input := collab.MessageInput{

@@ -47,27 +47,31 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 	if perr != nil {
 		return nil, perr
 	}
-	caller, err := s.cfg.Store.GetMember(ctx, member)
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	var workspaces []*domain.Workspace
 	if p.WorkspaceID != "" {
+		if !actor.Reaches(domain.WorkspaceID(p.WorkspaceID)) {
+			return nil, rpcError(permissions.ErrNoAccess)
+		}
 		ws, getErr := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
 		if getErr != nil {
 			return nil, rpcError(getErr)
 		}
 		workspaces = []*domain.Workspace{ws}
-	} else if workspaces, err = s.cfg.Store.ListWorkspaces(ctx); err != nil {
+	} else if workspaces, err = s.reachableWorkspaces(ctx, actor); err != nil {
 		return nil, rpcError(err)
 	}
 	names, err := s.memberNames(ctx)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	viewer := attentionViewer{id: member, admin: caller.Role == domain.RoleAdmin, name: names}
 	items := []protocol.AttentionItem{}
 	for _, ws := range workspaces {
+		role, _ := actor.RoleIn(ws.ID)
+		viewer := attentionViewer{id: member, admin: role == domain.RoleAdmin, name: names}
 		runs, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
 		if err != nil {
 			return nil, rpcError(err)

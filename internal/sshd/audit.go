@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -197,8 +198,14 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 		return nil, rpcError(err)
 	}
 	q := store.AuditQuery{ConnectorID: p.ConnectorID, Before: p.Before, Limit: cmp.Or(p.Limit, protocol.AuditListDefaultLimit)}
-	if m.Role != domain.RoleAdmin {
+	actor := permissions.ActorOf(m)
+	if permissions.Check(permissions.ServerAdmin, actor, permissions.Target{}) != nil {
 		q.Member = member
+		for ws := range m.Access.Owned {
+			if workspaceAdmin(actor, ws) {
+				q.Workspaces = append(q.Workspaces, ws)
+			}
+		}
 	}
 	entries, err := as.ListAudit(ctx, q)
 	if err != nil {

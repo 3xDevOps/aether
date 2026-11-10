@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -64,8 +65,8 @@ func (s *Server) memory(method string) (MemoryService, *protocol.Error) {
 }
 
 // memoryBrief builds the brief a new run of the member would get: the
-// caller's, or for an admin member_id's, since it holds that member's own
-// pins.
+// caller's, or for the workspace's admin member_id's, since it holds that
+// member's own pins. member_id must reach the workspace.
 func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.memory(protocol.MethodMemoryBrief)
 	if perr != nil {
@@ -82,12 +83,14 @@ func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw js
 			return nil, rpcError(err)
 		}
 		if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: domain.WorkspaceID(p.WorkspaceID)}); cerr != nil {
-			return nil, &protocol.Error{Code: protocol.CodeDenied,
-				Message: protocol.MethodMemoryBrief + ": another member's brief: " + cerr.Error()}
+			return nil, checkError(protocol.MethodMemoryBrief+": another member's brief", cerr)
 		}
 		m, err := s.cfg.Store.GetMember(ctx, domain.MemberID(p.MemberID))
 		if err != nil {
 			return nil, rpcError(err)
+		}
+		if !permissions.ActorOf(m).Reaches(domain.WorkspaceID(p.WorkspaceID)) {
+			return nil, invalidParams(fmt.Sprintf("%s: member %s cannot reach workspace %s", protocol.MethodMemoryBrief, m.ID, p.WorkspaceID))
 		}
 		member = m.ID
 	}

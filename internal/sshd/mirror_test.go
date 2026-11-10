@@ -180,10 +180,16 @@ func TestWorkspaceMirrorLifecycleAndSanitizedTimeline(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sub.Close() })
 	client := controlClient(t, e)
-	var configured protocol.WorkspaceMirrorResult
-	if err := client.Call(protocol.MethodWorkspaceMirrorConfigure, protocol.WorkspaceMirrorConfigureParams{
+	configure := protocol.WorkspaceMirrorConfigureParams{
 		WorkspaceID: string(e.ws.ID), SourceURL: fake.result.Mirror.SourceURL, Branch: "main", Auth: "deploy-key", KnownHosts: "known",
-	}, &configured); err != nil {
+	}
+	// Deploy keys are server administration, beyond the workspace's admin.
+	if err := client.Call(protocol.MethodWorkspaceMirrorConfigure, configure, nil); err == nil || wireErrOf(t, err).Code != protocol.CodeDenied {
+		t.Fatalf("configure by the workspace's admin = %v, want denied", err)
+	}
+	makeSuperAdmin(t, e)
+	var configured protocol.WorkspaceMirrorResult
+	if err := client.Call(protocol.MethodWorkspaceMirrorConfigure, configure, &configured); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
 	if !configured.Enabled || configured.PublicKey == "" || configured.SourceURL != fake.result.Mirror.SourceURL || configured.Generation != 7 {
@@ -234,6 +240,7 @@ func TestWorkspaceMirrorInputValidation(t *testing.T) {
 	t.Parallel()
 	fake := &mirrorRPCFake{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Mirrors = fake })
+	makeSuperAdmin(t, e)
 	client := controlClient(t, e)
 	cases := []struct {
 		name   string

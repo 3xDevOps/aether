@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
@@ -342,6 +343,13 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 		t.Fatalf("delete workspace: %v", err)
 	}
 	notice := e.publish(t, gone.ID, "", events.WorkspaceDeletedPayload{})
+	// No owner or grant survives the deletion, so only a super admin
+	// still reaches it.
+	err = c.Call(protocol.MethodChangesList, protocol.ChangesListParams{Cursor: strconv.FormatUint(deleted, 10), WorkspaceID: string(gone.ID)}, nil)
+	if !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound || perr.Message != store.ErrNotFound.Error() {
+		t.Fatalf("an admin's changes of a deleted workspace: err = %v, want not found", err)
+	}
+	makeSuperAdmin(t, e.testEnv)
 	for _, p := range []protocol.ChangesListParams{
 		{WorkspaceID: string(gone.ID)},
 		{WorkspaceID: string(gone.ID), RunID: "run-in-gone"},

@@ -13,9 +13,9 @@ import (
 )
 
 func init() {
-	registerMethod(protocol.MethodCostReport, (*Server).costReport)
-	registerMethod(protocol.MethodBudgetGet, (*Server).budgetGet)
-	registerGuarded(protocol.MethodBudgetSet, permissions.WorkspaceAdmin, nil, (*Server).budgetSet)
+	registerGuarded(protocol.MethodCostReport, permissions.View, workspaceTarget, (*Server).costReport)
+	registerGuarded(protocol.MethodBudgetGet, permissions.View, workspaceTarget, (*Server).budgetGet)
+	registerGuarded(protocol.MethodBudgetSet, permissions.WorkspaceAdmin, workspaceTarget, (*Server).budgetSet)
 }
 
 // GuardRuns wraps a run controller so launches and retained-run reopens are

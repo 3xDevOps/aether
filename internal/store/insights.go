@@ -52,17 +52,19 @@ type Interval struct {
 
 // InsightsQuery selects what Insights aggregates: the range [From, To) and
 // the Previous period it is compared with. An empty Member or Workspace
-// selects every member or workspace. Buckets are the series intervals and
-// Days the heatmap days, all computed by the caller in the member's time
-// zone.
+// selects every member or workspace. A non-nil Workspaces limits every
+// figure, and the members listed, to those workspaces; empty selects none.
+// Buckets are the series intervals and Days the heatmap days, all computed
+// by the caller in the member's time zone.
 type InsightsQuery struct {
-	Member    domain.MemberID
-	Workspace domain.WorkspaceID
-	From, To  time.Time
-	Previous  Interval
-	Now       time.Time
-	Buckets   []Interval
-	Days      []Interval
+	Member     domain.MemberID
+	Workspace  domain.WorkspaceID
+	Workspaces []domain.WorkspaceID
+	From, To   time.Time
+	Previous   Interval
+	Now        time.Time
+	Buckets    []Interval
+	Days       []Interval
 }
 
 // Insights is the aggregate of one InsightsQuery. Series has one entry per
@@ -184,6 +186,7 @@ const (
 		COUNT(*) FILTER (WHERE ` + insightsFinished + ` AND r.status IN ('completed', 'merged')),
 		COUNT(*) FILTER (WHERE ` + insightsFinished + ` AND r.status = 'failed')`
 	insightsFinishedIn = insightsFinished + ` AND r.status IN ` + insightsTerminal
+	insightsReachable  = `(SELECT value FROM json_each(:workspaces))`
 )
 
 func (q InsightsQuery) ownerScope() string {
@@ -193,6 +196,9 @@ func (q InsightsQuery) ownerScope() string {
 	}
 	if q.Workspace != "" {
 		where += " AND r.workspace_id = :workspace"
+	}
+	if q.Workspaces != nil {
+		where += " AND r.workspace_id IN " + insightsReachable
 	}
 	return where
 }
@@ -338,8 +344,12 @@ func (q InsightsQuery) args(intervals []Interval) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	reachable, err := json.Marshal(q.Workspaces)
+	if err != nil {
+		return nil, err
+	}
 	return []any{
-		sql.Named("member", q.Member), sql.Named("workspace", q.Workspace),
+		sql.Named("member", q.Member), sql.Named("workspace", q.Workspace), sql.Named("workspaces", string(reachable)),
 		sql.Named("from", from), sql.Named("to", to), sql.Named("now", now),
 		sql.Named("buckets", buckets), sql.Named("lo", lo), sql.Named("hi", hi),
 		sql.Named("days", days), sql.Named("day_lo", dayLo), sql.Named("day_hi", dayHi),
@@ -710,6 +720,11 @@ func insightsMemberOutcomes(ctx context.Context, tx *sql.Tx, q InsightsQuery, ar
 	members := "SELECT id, display_name, color FROM members WHERE merged_into = ''"
 	if q.Member != "" {
 		members += " AND id = :member"
+	}
+	if q.Workspaces != nil {
+		members += ` AND (id IN (SELECT owner_member_id FROM workspaces WHERE id IN ` + insightsReachable + `)
+			OR id IN (SELECT member_id FROM workspace_grants WHERE workspace_id IN ` + insightsReachable + `)
+			OR id IN (SELECT r.member_id FROM runs r WHERE r.workspace_id IN ` + insightsReachable + `))`
 	}
 	rows, err := tx.QueryContext(ctx, members+" ORDER BY created_at, id", args...)
 	if err != nil {

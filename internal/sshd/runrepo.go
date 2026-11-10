@@ -118,6 +118,14 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 			if capabilityErr := permissions.Check(capability, actor, target); capabilityErr != nil {
 				return capabilityErr
 			}
+			if repo.WorkspaceID != run.WorkspaceID {
+				if !actor.Reaches(repo.WorkspaceID) {
+					return invalidParams("repo " + repoID + " is not one of the session's repos")
+				}
+				if repoErr := permissions.Check(capability, actor, permissions.Target{Workspace: repo.WorkspaceID}); repoErr != nil {
+					return repoErr
+				}
+			}
 			// Editing a protected/other member's checkout is also steering it.
 			if mutate {
 				if steeringErr := permissions.Check(permissions.Steer, actor, target); steeringErr != nil {

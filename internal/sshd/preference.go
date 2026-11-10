@@ -22,22 +22,28 @@ type PreferenceService interface {
 }
 
 func init() {
-	registerGuarded(protocol.MethodPreferenceList, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceListParams) (any, error) {
+	registerGuarded(protocol.MethodPreferenceList, permissions.View, nil, preferenceMethod(func(_ *Server, svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceListParams) (any, error) {
 		return svc.List(ctx, m, p)
 	}))
-	registerGuarded(protocol.MethodPreferenceAdd, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceAddParams) (any, error) {
+	registerGuarded(protocol.MethodPreferenceAdd, permissions.View, nil, preferenceMethod(func(s *Server, svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceAddParams) (any, error) {
 		if err := sameMember(m, p.ExpectedMemberID); err != nil {
+			return nil, err
+		}
+		if err := s.preferenceWorkspace(ctx, m, p.WorkspaceID); err != nil {
 			return nil, err
 		}
 		return svc.Add(ctx, m, p.Text, p.WorkspaceID, protocol.PreferenceSourceSettings, "")
 	}))
-	registerGuarded(protocol.MethodPreferenceUpdate, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceUpdateParams) (any, error) {
+	registerGuarded(protocol.MethodPreferenceUpdate, permissions.View, nil, preferenceMethod(func(s *Server, svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceUpdateParams) (any, error) {
 		if err := sameMember(m, p.ExpectedMemberID); err != nil {
+			return nil, err
+		}
+		if err := s.preferenceWorkspace(ctx, m, p.WorkspaceID); err != nil {
 			return nil, err
 		}
 		return svc.Update(ctx, m, p, protocol.PreferenceSourceSettings, "")
 	}))
-	registerGuarded(protocol.MethodPreferenceDelete, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceDeleteParams) (any, error) {
+	registerGuarded(protocol.MethodPreferenceDelete, permissions.View, nil, preferenceMethod(func(_ *Server, svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceDeleteParams) (any, error) {
 		if err := sameMember(m, p.ExpectedMemberID); err != nil {
 			return nil, err
 		}
@@ -54,10 +60,26 @@ func sameMember(m domain.MemberID, expected string) error {
 	return nil
 }
 
+// preferenceWorkspace refuses a workspace member cannot reach exactly as
+// the preference service refuses one that does not exist.
+func (s *Server) preferenceWorkspace(ctx context.Context, member domain.MemberID, id string) error {
+	if id == "" {
+		return nil
+	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return err
+	}
+	if !actor.Reaches(domain.WorkspaceID(id)) {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: "workspace " + id + " not found"}
+	}
+	return nil
+}
+
 // preferenceMethod serves a preference method to the member in person: a
 // connector, which acts for an app holding the member's grant, is refused
 // whatever its scopes.
-func preferenceMethod[P any](call func(PreferenceService, context.Context, domain.MemberID, P) (any, error)) methodHandler {
+func preferenceMethod[P any](call func(*Server, PreferenceService, context.Context, domain.MemberID, P) (any, error)) methodHandler {
 	return func(s *Server, ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 		if id, ok := ctx.Value(connIdentityKey{}).(connIdentity); (ok && id.connector != "") || domain.ViaFrom(ctx) != "" {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "preferences are private: only you can read or change them, in the Aether app"}
@@ -70,7 +92,7 @@ func preferenceMethod[P any](call func(PreferenceService, context.Context, domai
 		if perr != nil {
 			return nil, perr
 		}
-		out, err := call(svc, ctx, member, p)
+		out, err := call(s, svc, ctx, member, p)
 		if err != nil {
 			return nil, rpcError(err)
 		}
