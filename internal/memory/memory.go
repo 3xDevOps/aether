@@ -487,9 +487,6 @@ func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspa
 	return m, permissions.Check(permissions.Push, permissions.ActorOf(m), permissions.Target{Workspace: workspace})
 }
 
-// reach is the workspaces every one of members reaches, nil when they are
-// all super admins, who reach every workspace: a note of a session with a
-// workspace outside them, and the session itself, do not exist for them.
 // visible answers a note, or the notes of a session, that member cannot see
 // exactly as one that does not exist, before anything is changed: a note
 // of a session with a workspace they do not reach is not theirs to touch.
@@ -503,9 +500,6 @@ func (s *Service) visible(ctx context.Context, member domain.MemberID, workspace
 		return err
 	}
 	r, err := s.cfg.Store.GetRun(ctx, run)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}
@@ -517,6 +511,9 @@ func (s *Service) visible(ctx context.Context, member domain.MemberID, workspace
 	return nil
 }
 
+// reach is the workspaces every one of members reaches, nil when they are
+// all super admins, who reach every workspace: a note of a session with a
+// workspace outside them, and the session itself, do not exist for them.
 func (s *Service) reach(ctx context.Context, members ...domain.MemberID) ([]domain.WorkspaceID, error) {
 	var actors []permissions.Actor
 	for _, id := range members {

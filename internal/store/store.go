@@ -82,9 +82,7 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error)
 	GetMemberByTailnetLogin(ctx context.Context, login string) (*domain.Member, error)
-	// ApproveMember clears only the member's pending flag, leaving every
-	// other field untouched.
-	// ApproveMember clears the member's pending flag. Unless anyRole, it
+	// ApproveMember clears only the member's pending flag. Unless anyRole, it
 	// does so only for a member below admin, decided in the same write as
 	// the approval so a role change cannot land between check and approval.
 	ApproveMember(ctx context.Context, id domain.MemberID, anyRole bool) error
