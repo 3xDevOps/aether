@@ -132,7 +132,6 @@ function RunBar({ lane, g, now }: { lane: RunLane; g: LaneGeometry; now: number 
   return (
     <>
       <Segments segments={lane.segments} outcome={lane.outcome} g={g} height={g.metrics.bar} className={working ? 'border-r-2 border-state-working' : undefined}>
-        {/* Clear of the Needs you tag when it shows; text that does not fit ends in an ellipsis, and a bar too short for one shows only its colour. */}
         {box && box.width >= 48 && <span className={cn('relative flex h-full min-w-0 items-center gap-1.5 px-2 text-ui-sm font-medium whitespace-nowrap text-text', tagged && 'pr-24')}>
           <StatusDot tone={stateTone[card.state]} />
           {working ? <Shimmer text={barText(lane)} className="min-w-0 overflow-hidden text-ellipsis" /> : <span className="min-w-0 overflow-hidden text-ellipsis">{barText(lane)}</span>}

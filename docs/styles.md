@@ -346,8 +346,8 @@ Mail marks and links use the categorical series by meaning:
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
 Marks sit above the bars with hit targets as wide as a bar is tall (24px,
-32px on a coarse pointer) and 12px deep, inside their own lane; link hit
-paths are 16px wide. Links and their chips draw
+32px on a coarse pointer), 12px deep and inside their own lane, ending
+halfway to a closer mark on the same edge; link hit paths are 16px wide. Links and their chips draw
 under the bars and labels, over the hover and selection fills; only their
 16px hit paths sit above. A focused lane's marks give way to its links and
 every other mark turns `text-icon-faint`. Label chips are 16px
