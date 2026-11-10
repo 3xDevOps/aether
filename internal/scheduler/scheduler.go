@@ -242,8 +242,8 @@ type Scheduler struct {
 	evidenceUnavailable map[domain.RunID]struct{}
 	// cleanupRetries backs off checkout cleanups that failed. Guarded by mu.
 	cleanupRetries map[domain.RunID]cleanupRetry
-	// checkoutSweepMu keeps the hourly and disk-pressure sweeps from both
-	// trying one checkout before either records its backoff.
+	// checkoutSweepMu lets one checkout sweep run at a time, so no checkout
+	// is retried before its backoff is recorded.
 	checkoutSweepMu sync.Mutex
 	titleMu         sync.Mutex
 	titleUpdates    map[domain.RunID]*pendingRunTitle

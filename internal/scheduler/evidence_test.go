@@ -667,7 +667,7 @@ func movableClock() (now func() time.Time, advance func(time.Duration)) {
 		}
 }
 
-func TestFailingCheckoutCleanupBacksOffThenSettles(t *testing.T) {
+func TestFailingCheckoutCleanupBacksOffAndKeepsTheCheckout(t *testing.T) {
 	clock, advance := movableClock()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = -time.Second
@@ -712,51 +712,55 @@ func TestFailingCheckoutCleanupBacksOffThenSettles(t *testing.T) {
 	e.git.removeErr = errors.New("events: read log: context deadline exceeded")
 	e.git.mu.Unlock()
 	closed := capture.requestCount()
-	for attempt := 1; attempt < cleanupAttempts; attempt++ {
+	sweep()
+	kept("first failed cleanup")
+	if !strings.HasSuffix(fresh().Reason, "; "+evidenceOverLimitReason) {
+		t.Fatalf("reason %q does not say the session has no evidence", fresh().Reason)
+	}
+	for attempt, wait := range []time.Duration{15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 6 * time.Hour, 6 * time.Hour} {
+		advance(wait - time.Minute)
 		sweep()
 		sweep()
-		if got := capture.requestCount() - closed; got != attempt {
-			t.Fatalf("captures after %d failed cleanups = %d; a failure must back off", attempt, got)
+		if got := capture.requestCount() - closed; got != attempt+1 {
+			t.Fatalf("captures %v after failure %d = %d, want %d", wait-time.Minute, attempt+1, got, attempt+1)
 		}
-		kept(fmt.Sprintf("attempt %d", attempt))
-		advance(cleanupRetryMax)
+		advance(time.Minute)
+		sweep()
+		if got := capture.requestCount() - closed; got != attempt+2 {
+			t.Fatalf("captures %v after failure %d = %d, want %d", wait, attempt+1, got, attempt+2)
+		}
+		kept(fmt.Sprintf("failure %d", attempt+2))
 	}
 
 	e.git.mu.Lock()
-	e.git.publishErr = errors.New("repository unavailable")
+	e.git.removeErr = nil
 	e.git.mu.Unlock()
-	sweep()
-	kept("settling with unpublished work")
-
-	e.git.mu.Lock()
-	e.git.publishErr = nil
-	e.git.mu.Unlock()
-	published := e.git.publishedCount(run.ID)
-	advance(cleanupRetryMax - time.Minute)
-	sweep()
-	if e.git.publishedCount(run.ID) != published {
-		t.Fatal("a failed settling attempt retried before cleanupRetryMax")
-	}
-	advance(time.Minute)
+	advance(cleanupRetryMax)
 	sweep()
 	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) {
-		t.Fatalf("settled checkout was kept: %v", statErr)
+		t.Fatalf("checkout kept once removal works: %v", statErr)
 	}
-	r := fresh()
-	if r.Worktree != "" || !strings.HasSuffix(r.Reason, "; "+cleanupSalvagedReason) {
-		t.Fatalf("settled run: worktree %q, reason %q", r.Worktree, r.Reason)
+	if r := fresh(); r.Worktree != "" || !strings.HasSuffix(r.Reason, "; "+evidenceOverLimitReason) {
+		t.Fatalf("removed run: worktree %q, reason %q", r.Worktree, r.Reason)
 	}
-	if e.git.publishedCount(run.ID) <= published {
-		t.Fatal("checkout was removed before its work was published")
-	}
-	e.git.mu.Lock()
-	salvaged := e.git.salvaged[run.ID]
-	e.git.mu.Unlock()
-	if salvaged != 1 {
-		t.Fatalf("salvaged = %d, want 1", salvaged)
-	}
-	if got := capture.requestCount() - closed; got != cleanupAttempts-1 {
-		t.Fatalf("captures = %d; settling must not capture again", got)
+}
+
+func TestOnlyCheckoutNotFoundRejectsJoinedFailures(t *testing.T) {
+	failure := errors.New("extra repository a: commit failed")
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{gitengine.ErrCheckoutNotFound, true},
+		{fmt.Errorf("publish: %w", gitengine.ErrCheckoutNotFound), true},
+		{errors.Join(gitengine.ErrCheckoutNotFound, fmt.Errorf("extra b: %w", gitengine.ErrCheckoutNotFound)), true},
+		{errors.Join(failure, gitengine.ErrCheckoutNotFound), false},
+		{fmt.Errorf("extras: %w", errors.Join(gitengine.ErrCheckoutNotFound, failure)), false},
+		{failure, false},
+	} {
+		if got := onlyCheckoutNotFound(tc.err); got != tc.want {
+			t.Errorf("onlyCheckoutNotFound(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }
 

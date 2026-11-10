@@ -694,9 +694,12 @@ func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
 }
 
 // sweepCheckouts never removes the branch or transcript. It removes checkouts
-// of runs that finished at or before cutoff.
+// of runs that finished at or before cutoff. It returns at once while another
+// sweep runs, so neither a launch reclaiming disk nor the supervisor waits on it.
 func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
-	s.checkoutSweepMu.Lock()
+	if !s.checkoutSweepMu.TryLock() {
+		return
+	}
 	defer s.checkoutSweepMu.Unlock()
 	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
@@ -739,6 +742,11 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 			continue
 		}
 		for _, r := range runs {
+			// Each cleanup outlives cancellation by up to its own budget.
+			if ctx.Err() != nil {
+				listed = false
+				return
+			}
 			if r.Worktree != "" {
 				withCheckout[r.ID] = true
 			}
@@ -748,8 +756,7 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 			if inUse[r.Worktree] {
 				continue
 			}
-			due, settle := s.cleanupDue(r.ID, *r.FinishedAt)
-			if !due {
+			if !s.cleanupDue(r.ID, *r.FinishedAt) {
 				continue
 			}
 
@@ -821,13 +828,7 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 				}
 				return nil
 			}
-			var gcErr error
-			if settle {
-				gcErr = s.settleCheckoutCleanup(ctx, fresh)
-			} else {
-				gcErr = s.captureBeforeCleanupEvidence(ctx, r.ID, identity, cleanup)
-			}
-			if gcErr != nil {
+			if gcErr := s.captureBeforeCleanupEvidence(ctx, r.ID, identity, cleanup); gcErr != nil {
 				if lifecycle != nil {
 					lifecycle.lifecycleMu.Unlock()
 				}

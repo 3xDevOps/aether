@@ -32,12 +32,11 @@ const (
 	exitedCompletedReason         = "agent exited; results committed"
 	exitedFailedReasonPrefix      = "agent exited "
 	evidenceUnavailableReason     = "evidence unavailable: session checkout missing"
-	cleanupSettledReason          = "checkout removed after repeated cleanup failures"
-	cleanupSalvagedReason         = cleanupSettledReason + "; older diff history may be missing"
+	evidenceOverLimitReason       = "evidence unavailable: evidence storage limit exceeded"
 )
 
 // cleanupNotes are the notes checkout cleanup appends to a terminal reason.
-var cleanupNotes = []string{evidenceUnavailableReason, cleanupSalvagedReason, cleanupSettledReason}
+var cleanupNotes = []string{evidenceUnavailableReason, evidenceOverLimitReason}
 
 // withoutCleanupNote strips the note checkout cleanup appended, returning it,
 // so the retention reasons below still match exactly.

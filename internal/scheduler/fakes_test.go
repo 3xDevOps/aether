@@ -605,7 +605,6 @@ type fakeGit struct {
 	createErr         error
 	publishErr        error
 	removeErr         error
-	salvaged          map[domain.RunID]int
 	createHook        func(run domain.RunID)
 	watchHook         func(run domain.RunID)                 // runs at the top of StartDiffWatch
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
@@ -618,7 +617,6 @@ func newFakeGit(root string) *fakeGit {
 		root:              root,
 		commits:           make(map[domain.RunID][]string),
 		published:         make(map[domain.RunID]int),
-		salvaged:          make(map[domain.RunID]int),
 		watching:          make(map[domain.RunID]domain.WorkspaceID),
 		lastFile:          make(map[domain.RunID]time.Time),
 		baseCommits:       make(map[domain.RunID]string),
@@ -752,13 +750,6 @@ func (g *fakeGit) RemoveRunCheckout(_ context.Context, run domain.RunID) error {
 	if removeErr != nil {
 		return removeErr
 	}
-	return os.RemoveAll(g.checkoutPath(run))
-}
-
-func (g *fakeGit) SalvageRunCheckout(_ context.Context, run domain.RunID) error {
-	g.mu.Lock()
-	g.salvaged[run]++
-	g.mu.Unlock()
 	return os.RemoveAll(g.checkoutPath(run))
 }
 

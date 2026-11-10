@@ -132,7 +132,7 @@ func (e *Engine) retainSnapshot(ctx context.Context, store, tree string) error {
 // never the ancestry behind scratch branch-publication refs. Existing local
 // objects are left intact. The caller stops the watcher and holds
 // repoMaintenanceMu before snapshotLock, matching evidence capture's lock order.
-func (e *Engine) detachSnapshotStore(ctx context.Context, run domain.RunID, checkout string, fromLog bool) error {
+func (e *Engine) detachSnapshotStore(ctx context.Context, run domain.RunID, checkout string) error {
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return err
@@ -150,14 +150,12 @@ func (e *Engine) detachSnapshotStore(ctx context.Context, run domain.RunID, chec
 	if initErr := e.initSnapshotStore(ctx, run, checkout, store); initErr != nil {
 		return initErr
 	}
-	if fromLog {
-		meta, metaErr := e.readRunMeta(run)
-		if metaErr != nil {
-			return metaErr
-		}
-		if retainErr := e.retainRecordedSnapshotTrees(ctx, meta.Workspace, run, store); retainErr != nil {
-			return retainErr
-		}
+	meta, err := e.readRunMeta(run)
+	if err != nil {
+		return err
+	}
+	if retainErr := e.retainRecordedSnapshotTrees(ctx, meta.Workspace, run, store); retainErr != nil {
+		return retainErr
 	}
 	roots, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/")
 	if err != nil {

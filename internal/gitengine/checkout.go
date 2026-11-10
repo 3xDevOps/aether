@@ -427,9 +427,8 @@ func (e *Engine) publishRunBranch(ctx context.Context, run domain.RunID) (commit
 
 // removeRunCheckout deletes the checkout and identity, not recorded diff
 // history or source branches. Snapshot objects are detached from the checkout's
-// alternate object database before removal; fromLog also keeps the trees an
-// older store recorded only in the event log. Idempotent on missing paths.
-func (e *Engine) removeRunCheckout(ctx context.Context, run domain.RunID, fromLog bool) error {
+// alternate object database before removal. Idempotent on missing paths.
+func (e *Engine) removeRunCheckout(ctx context.Context, run domain.RunID) error {
 	checkout, err := e.checkoutPath(run)
 	if err != nil {
 		return err
@@ -446,7 +445,7 @@ func (e *Engine) removeRunCheckout(ctx context.Context, run domain.RunID, fromLo
 	lock := e.snapshotLock(run)
 	lock.Lock()
 	defer lock.Unlock()
-	if detachErr := e.detachSnapshotStore(ctx, run, checkout, fromLog); detachErr != nil {
+	if detachErr := e.detachSnapshotStore(ctx, run, checkout); detachErr != nil {
 		return detachErr
 	}
 	if checkoutErr := e.cfg.RemoveCheckout(ctx, checkout); checkoutErr != nil {
