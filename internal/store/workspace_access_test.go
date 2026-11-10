@@ -167,16 +167,16 @@ func TestJoiningGrantsWhatTheIssuerAdministers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if access, err := db.MemberWorkspaces(ctx, dana.ID); err != nil || len(access.Granted) != 1 || !access.Granted[owned.ID] {
-		t.Fatalf("accepted member's workspaces = %+v, %v; want only the issuer's surviving one", access, err)
+	if access, aerr := db.MemberWorkspaces(ctx, dana.ID); aerr != nil || len(access.Granted) != 1 || !access.Granted[owned.ID] {
+		t.Fatalf("accepted member's workspaces = %+v, %v; want only the issuer's surviving one", access, aerr)
 	}
 
 	joined := &domain.Member{DisplayName: "Jo", PublicKey: testKey(t, "jo"), Color: "#f58231", Role: domain.RoleCollaborator}
-	if err := db.JoinMember(ctx, joined, []domain.WorkspaceID{owned.ID, others.ID}, super.ID); err != nil {
+	if err = db.JoinMember(ctx, joined, []domain.WorkspaceID{owned.ID, others.ID}, super.ID); err != nil {
 		t.Fatal(err)
 	}
-	if access, err := db.MemberWorkspaces(ctx, joined.ID); err != nil || len(access.Granted) != 2 {
-		t.Fatalf("member a super admin's code admitted has %+v, %v; want both workspaces", access, err)
+	if access, aerr := db.MemberWorkspaces(ctx, joined.ID); aerr != nil || len(access.Granted) != 2 {
+		t.Fatalf("member a super admin's code admitted has %+v, %v; want both workspaces", access, aerr)
 	}
 	grants, err := db.ListWorkspaceGrants(ctx, others.ID)
 	if err != nil || len(grants) != 1 || grants[0].GrantedBy != super.ID {

@@ -54,7 +54,7 @@ func TestScheduleFireNeedsTheCreatorsAccessToTheWorkspace(t *testing.T) {
 	fireAt := func(at time.Time) {
 		t.Helper()
 		clock.set(at)
-		if err := svc.scan(ctx, true); err != nil {
+		if err = svc.scan(ctx, true); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
 	}

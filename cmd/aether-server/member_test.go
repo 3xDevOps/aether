@@ -24,26 +24,26 @@ func TestMemberRoleCommand(t *testing.T) {
 	super := &domain.Member{DisplayName: "Sam", TailnetLogin: "sam@", Color: "#e6194b", Role: domain.RoleSuperAdmin}
 	owner := &domain.Member{DisplayName: "Ada", TailnetLogin: "ada@", Color: "#3cb44b", Role: domain.RoleAdmin}
 	for _, m := range []*domain.Member{super, owner} {
-		if err := db.CreateMember(ctx, m); err != nil {
+		if err = db.CreateMember(ctx, m); err != nil {
 			t.Fatal(err)
 		}
 	}
 	w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
-	if err := db.CreateWorkspace(ctx, w); err != nil {
+	if err = db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	role := func(id domain.MemberID, r domain.Role) (string, error) {
 		var out bytes.Buffer
-		err := memberRole(ctx, &out, db, id, r)
-		return out.String(), err
+		rerr := memberRole(ctx, &out, db, id, r)
+		return out.String(), rerr
 	}
-	if _, err := role(super.ID, domain.RoleAdmin); err == nil || !strings.Contains(err.Error(), "refusing to demote the last super admin") {
+	if _, err = role(super.ID, domain.RoleAdmin); err == nil || !strings.Contains(err.Error(), "refusing to demote the last super admin") {
 		t.Fatalf("demote the last super admin = %v", err)
 	}
-	if _, err := role(owner.ID, domain.RoleViewer); err == nil || !strings.Contains(err.Error(), string(w.ID)) {
+	if _, err = role(owner.ID, domain.RoleViewer); err == nil || !strings.Contains(err.Error(), string(w.ID)) {
 		t.Fatalf("demote a workspace owner = %v, want refused naming %s", err, w.ID)
 	}
-	if _, err := role(owner.ID, "owner"); err == nil || !strings.Contains(err.Error(), "unknown role") {
+	if _, err = role(owner.ID, "owner"); err == nil || !strings.Contains(err.Error(), "unknown role") {
 		t.Fatalf("unknown role = %v", err)
 	}
 	out, err := role(owner.ID, domain.RoleSuperAdmin)

@@ -47,7 +47,7 @@ func TestParseInviteArgs(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || !reflect.DeepEqual(got, tc.want) || ttl != tc.ttl || !reflect.DeepEqual([]string(ws), tc.ws) {
+		if err != nil || !reflect.DeepEqual(got, tc.want) || ttl != tc.ttl || !reflect.DeepEqual(ws, tc.ws) {
 			t.Errorf("%q = %+v, %d, %v, %v; want %+v, %d, %v", tc.args, got, ttl, ws, err, tc.want, tc.ttl, tc.ws)
 		}
 	}

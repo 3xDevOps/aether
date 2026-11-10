@@ -117,7 +117,7 @@ func TestWorkspaceAccessGrantRules(t *testing.T) {
 	defer sub.Close() //nolint:errcheck
 	a, s, u := controlAs(t, e.testEnv, e.aKey), controlClient(t, e.testEnv), controlAs(t, e.testEnv, e.uKey)
 
-	if err := grant(a, e.wsA.ID, e.u.ID, e.v.ID); err != nil {
+	if err = grant(a, e.wsA.ID, e.u.ID, e.v.ID); err != nil {
 		t.Fatalf("owner grants a collaborator and a viewer: %v", err)
 	}
 	if got, want := grantees(e.access(t, a, e.wsA.ID)), sortedIDs(e.u.ID, e.v.ID); !slices.Equal(got, want) {
@@ -137,15 +137,15 @@ func TestWorkspaceAccessGrantRules(t *testing.T) {
 
 	wantMissing(t, grant(a, e.wsB.ID, e.u.ID), "A grants into B's workspace")
 	wantMissing(t, grant(a, "ws-never-existed", e.u.ID), "A grants into a missing workspace")
-	wantErrCode(t, grant(a, e.wsA.ID, e.b.ID), protocol.CodeDenied, "A grants an admin")
+	_ = wantErrCode(t, grant(a, e.wsA.ID, e.b.ID), protocol.CodeDenied, "A grants an admin")
 	_, pending := addMember(t, e.testEnv, "P", domain.RoleCollaborator, true)
-	wantErrCode(t, grant(a, e.wsA.ID, pending.ID), protocol.CodeInvalidState, "A grants a pending member")
-	wantErrCode(t, u.Call(protocol.MethodWorkspaceAccessList, protocol.WorkspaceAccessParams{WorkspaceID: string(e.wsA.ID)}, nil),
+	_ = wantErrCode(t, grant(a, e.wsA.ID, pending.ID), protocol.CodeInvalidState, "A grants a pending member")
+	_ = wantErrCode(t, u.Call(protocol.MethodWorkspaceAccessList, protocol.WorkspaceAccessParams{WorkspaceID: string(e.wsA.ID)}, nil),
 		protocol.CodeDenied, "a granted collaborator lists access")
 	wantMissing(t, u.Call(protocol.MethodWorkspaceAccessList, protocol.WorkspaceAccessParams{WorkspaceID: string(e.wsB.ID)}, nil),
 		"an ungranted collaborator lists access")
 
-	if err := grant(s, e.wsA.ID, e.b.ID, e.a.ID, e.member.ID); err != nil {
+	if err = grant(s, e.wsA.ID, e.b.ID, e.a.ID, e.member.ID); err != nil {
 		t.Fatalf("super admin grants an admin, the owner and itself: %v", err)
 	}
 	if got, want := grantees(e.access(t, s, e.wsA.ID)), sortedIDs(e.b.ID, e.u.ID, e.v.ID); !slices.Equal(got, want) {
@@ -190,7 +190,7 @@ func TestWorkspaceAccessRevokeRefusedWhileInUse(t *testing.T) {
 	if access, err := e.db.MemberWorkspaces(ctx, e.u.ID); err != nil || access.Granted[e.wsA.ID] {
 		t.Fatalf("U's workspaces after revoke = %+v, %v", access, err)
 	}
-	wantErrCode(t, a.Call(protocol.MethodWorkspaceAccessRevoke, revoke, nil), protocol.CodeNotFound, "revoke a grant that is gone")
+	_ = wantErrCode(t, a.Call(protocol.MethodWorkspaceAccessRevoke, revoke, nil), protocol.CodeNotFound, "revoke a grant that is gone")
 }
 
 // Only a super admin changes a workspace's owner, and only to an admin or
@@ -203,9 +203,9 @@ func TestWorkspaceOwnerSet(t *testing.T) {
 	set := func(c *protocol.Client, ws domain.WorkspaceID, owner domain.MemberID) error {
 		return c.Call(protocol.MethodWorkspaceOwnerSet, protocol.WorkspaceOwnerSetParams{WorkspaceID: string(ws), MemberID: string(owner)}, nil)
 	}
-	wantErrCode(t, set(a, e.wsA.ID, e.b.ID), protocol.CodeDenied, "the owner sets their workspace's owner")
-	wantErrCode(t, set(a, e.wsB.ID, e.a.ID), protocol.CodeDenied, "A sets B's workspace's owner")
-	wantErrCode(t, set(s, e.wsA.ID, e.u.ID), protocol.CodeInvalidState, "owner set to a collaborator")
+	_ = wantErrCode(t, set(a, e.wsA.ID, e.b.ID), protocol.CodeDenied, "the owner sets their workspace's owner")
+	_ = wantErrCode(t, set(a, e.wsB.ID, e.a.ID), protocol.CodeDenied, "A sets B's workspace's owner")
+	_ = wantErrCode(t, set(s, e.wsA.ID, e.u.ID), protocol.CodeInvalidState, "owner set to a collaborator")
 	if err := grant(s, e.wsA.ID, e.b.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -239,14 +239,14 @@ func TestWorkspaceAddOwnsAndDeleteIsTheOwners(t *testing.T) {
 	if added.Workspace.OwnerMemberID != string(e.a.ID) {
 		t.Fatalf("added workspace = %+v, want it owned by its creator", added.Workspace)
 	}
-	wantErrCode(t, u.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "x", Environment: protocol.WorkspaceEnvironment{}}, nil),
+	_ = wantErrCode(t, u.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "x", Environment: protocol.WorkspaceEnvironment{}}, nil),
 		protocol.CodeDenied, "collaborator workspace.add")
 	del := func(ws domain.WorkspaceID) error {
 		return a.Call(protocol.MethodWorkspaceDelete, protocol.WorkspaceDeleteParams{WorkspaceID: string(ws)}, nil)
 	}
 	wantMissing(t, del(e.wsB.ID), "A deletes B's workspace")
 	wantMissing(t, del("ws-never-existed"), "A deletes a missing workspace")
-	wantErrCode(t, del(e.wsA.ID), protocol.CodeUnavailable, "A deletes their own workspace on a server without deletion")
+	_ = wantErrCode(t, del(e.wsA.ID), protocol.CodeUnavailable, "A deletes their own workspace on a server without deletion")
 }
 
 // member.role and member.remove are a super admin's: an admin promotes
@@ -259,9 +259,9 @@ func TestRolesAndRemovalAreSuperAdmins(t *testing.T) {
 	role := func(c *protocol.Client, m domain.MemberID, r domain.Role) error {
 		return c.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(m), Role: string(r)}, nil)
 	}
-	wantErrCode(t, role(a, e.u.ID, domain.RoleAdmin), protocol.CodeDenied, "A promotes U to admin")
-	wantErrCode(t, role(a, e.member.ID, domain.RoleViewer), protocol.CodeDenied, "A demotes S")
-	wantErrCode(t, a.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(e.u.ID)}, nil),
+	_ = wantErrCode(t, role(a, e.u.ID, domain.RoleAdmin), protocol.CodeDenied, "A promotes U to admin")
+	_ = wantErrCode(t, role(a, e.member.ID, domain.RoleViewer), protocol.CodeDenied, "A demotes S")
+	_ = wantErrCode(t, a.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(e.u.ID)}, nil),
 		protocol.CodeDenied, "A removes U")
 
 	pe := wantErrCode(t, role(s, e.a.ID, domain.RoleCollaborator), protocol.CodeInvalidState, "demote an owner")
@@ -279,7 +279,7 @@ func TestRolesAndRemovalAreSuperAdmins(t *testing.T) {
 	if err := role(s, e.member.ID, domain.RoleAdmin); err != nil {
 		t.Fatalf("demote a super admin beside another: %v", err)
 	}
-	wantErrCode(t, role(controlAs(t, e.testEnv, e.aKey), e.a.ID, domain.RoleAdmin), protocol.CodeDenied, "demote the last super admin")
+	_ = wantErrCode(t, role(controlAs(t, e.testEnv, e.aKey), e.a.ID, domain.RoleAdmin), protocol.CodeDenied, "demote the last super admin")
 }
 
 // An admin's invite code names at least one workspace, only ones they
@@ -300,19 +300,19 @@ func TestInviteCodeGrantsTheIssuersWorkspaces(t *testing.T) {
 		return out, c.Call(protocol.MethodMemberInvite, p, &out)
 	}
 	_, err := invite(a)
-	wantErrCode(t, err, protocol.CodeInvalidParams, "admin invite code with no workspace")
+	_ = wantErrCode(t, err, protocol.CodeInvalidParams, "admin invite code with no workspace")
 	_, err = invite(a, e.wsA.ID, e.wsB.ID)
 	wantMissing(t, err, "admin invite code into B's workspace")
 	join := func(code string) *domain.Member {
 		t.Helper()
-		client, err := e.dialAs("invite:"+code+":Jo", nil, ssh.PublicKeys(newSigner(t)))
-		if err != nil {
-			t.Fatalf("invite dial: %v", err)
+		client, derr := e.dialAs("invite:"+code+":Jo", nil, ssh.PublicKeys(newSigner(t)))
+		if derr != nil {
+			t.Fatalf("invite dial: %v", derr)
 		}
 		t.Cleanup(func() { _ = client.Close() })
-		m, err := e.db.GetMember(ctx, domain.MemberID(serverInfoMember(t, controlClientOn(t, client)).ID))
-		if err != nil {
-			t.Fatal(err)
+		m, merr := e.db.GetMember(ctx, domain.MemberID(serverInfoMember(t, controlClientOn(t, client)).ID))
+		if merr != nil {
+			t.Fatal(merr)
 		}
 		return m
 	}
@@ -354,9 +354,9 @@ func TestEdgeInvitationScopes(t *testing.T) {
 		}
 		return c.Call(protocol.MethodMemberInvitationCreate, p, nil)
 	}
-	wantErrCode(t, create(a, "dana", domain.RoleAdmin, e.wsA.ID), protocol.CodeDenied, "A invites an admin")
+	_ = wantErrCode(t, create(a, "dana", domain.RoleAdmin, e.wsA.ID), protocol.CodeDenied, "A invites an admin")
 	wantMissing(t, create(a, "dana", domain.RoleCollaborator, e.wsB.ID), "A invites into B's workspace")
-	wantErrCode(t, create(a, "dana", domain.RoleCollaborator), protocol.CodeInvalidParams, "A invites into no workspace")
+	_ = wantErrCode(t, create(a, "dana", domain.RoleCollaborator), protocol.CodeInvalidParams, "A invites into no workspace")
 	created := e.invite(t, a, protocol.MethodMemberInvitationCreate,
 		protocol.MemberInvitationCreateParams{Login: "dana", Role: string(domain.RoleViewer), WorkspaceIDs: []string{string(e.wsA.ID)}})
 	if !slices.Equal(created.Invitation.WorkspaceIDs, []string{string(e.wsA.ID)}) {
@@ -393,7 +393,7 @@ func TestAdminApprovesDevicesOnlyBelowAdmin(t *testing.T) {
 	e := newAccessEnv(t, nil)
 	a := controlAs(t, e.testEnv, e.aKey)
 	inviteAccount(t, e.testEnv, domain.Invitation{Provider: "github", Login: mallory().Login, Role: domain.RoleSuperAdmin})
-	wantErrCode(t, approveByCode(a, e.refusedForApproval(t, mallory(), newSigner(t), "mallory-laptop"), nil),
+	_ = wantErrCode(t, approveByCode(a, e.refusedForApproval(t, mallory(), newSigner(t), "mallory-laptop"), nil),
 		protocol.CodeDenied, "A approves a device admitting as a super admin")
 	inviteAccount(t, e.testEnv, domain.Invitation{Provider: "github", Login: octo.Login, Role: domain.RoleCollaborator,
 		Workspaces: []domain.WorkspaceID{e.wsA.ID}})
