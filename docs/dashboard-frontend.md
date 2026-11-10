@@ -1905,9 +1905,9 @@ review-tone **Finished: review** chip instead of the Needs you chip. Finished
 bars add "took 18m" after their end when there is room.
 
 **Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
-pair within 24px) draws as marks, not links: a dot on the sender's bar and a
-ring on the recipient's, at the send time, on the bar edge facing the other
-lane. Marks within 8px on one edge merge and show their message count. Mail
+pair within 24px) draws as marks joined by a hairline: a dot on the sender's
+bar and a ring on the recipient's, at the send time, on the bar edge facing
+the other lane, and a thin line between them under the bars. Marks within 8px on one edge merge and show their message count. Mail
 into a folded family or Finished marks its header. Mail with a session that
 has no lane in this view (another workspace, hidden by **Mine**) keeps its
 drawn end, marked on the top edge. A mark's or link's tooltip names sender,
@@ -1915,8 +1915,9 @@ recipient, time and how many messages are not yet acknowledged; a session
 folded into a family or Finished keeps its own name and counts.
 Each lane's accessible name ends with its mail, such as "messages: sent 2 to
 Reviewer and received 1 from Reviewer, 2 not acknowledged".
-Mail is not parentage: subsessions show as a family, and nothing draws
-dependencies.
+Mail is not parentage: subsessions show as a family, and a faint line
+joins each subsession's bar to its parent's at the moment it started.
+Nothing draws dependencies.
 
 Mail that arrives while the view is open (`appendLaneEvent` records it in
 `laneArrivals`; history pages never do) also draws a dashed arc from
@@ -1940,7 +1941,7 @@ messages: ...", listing at most three pairs).
 
 Hovering, focusing or selecting a lane draws its mail as solid links (a dot
 at the sender, an arrowhead at the recipient, hollow until every bundled
-message is acknowledged) and greys every other mark. Chips on the lanes'
+message is acknowledged) and greys every other mark and hairline. Chips on the lanes'
 labels count that mail from the focused lane's side: `↔ 3` on the focused
 lane (sessions it talks with), `→2 ←1` on each of them. Sessions past the
 scrolled rows get a pinned **↑**/**↓** button that moves to them, and mail with

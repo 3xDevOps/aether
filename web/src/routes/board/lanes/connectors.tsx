@@ -61,16 +61,23 @@ interface DrawnEdge {
   shape: Shape
   tone: string
   near: boolean
+  /** Mail at rest: a hairline between its marks, with no ends of its own and nothing to click. */
+  quiet: boolean
 }
 
-/** `focus` is a hovered or selected lane: its edges keep their colour and every other edge recedes, drawn first so the focused ones sit on top. */
-export function drawEdges(edges: LaneEdge[], anchors: Map<string, EdgeAnchor>, g: LaneGeometry, focus?: string): DrawnEdge[] {
+/**
+ * `focus` is a hovered or selected lane: its edges keep their colour and every other edge recedes, drawn first so the focused ones sit on top.
+ * An edge that is not `linked` draws quiet.
+ */
+export function drawEdges(edges: LaneEdge[], anchors: Map<string, EdgeAnchor>, g: LaneGeometry, focus: string | undefined, linked: (edge: LaneEdge) => boolean): DrawnEdge[] {
   const out = edges.flatMap((edge) => {
     const a = anchors.get(edge.from.lane)
     const b = anchors.get(edge.to.lane)
     if (!a || !b) return []
+    const quiet = !linked(edge)
     const near = !focus || edge.from.lane === focus || edge.to.lane === focus
-    return [{ edge, shape: edgeShape(edge, a, b, g), tone: near ? edgeTone[edge.kind] : 'text-icon-faint', near }]
+    const tone = quiet ? (focus ? 'text-seam' : 'text-series-5/45') : near ? edgeTone[edge.kind] : 'text-icon-faint'
+    return [{ edge, shape: edgeShape(edge, a, b, g), tone, near: near && !quiet, quiet }]
   })
   return out.sort((x, y) => Number(x.near) - Number(y.near))
 }
@@ -80,7 +87,9 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
   return (
     <>
       <svg aria-hidden data-lane-edges className="pointer-events-none absolute top-0 overflow-visible" style={{ left: g.labelWidth, width: g.width, height }}>
-        {shapes.map(({ edge, shape, tone }) => (
+        {shapes.map(({ edge, shape, tone, quiet }) => quiet ? (
+          <path key={edge.key} data-edge={edge.kind} data-quiet d={shape.d} fill="none" stroke="currentColor" strokeWidth={1} className={tone} vectorEffect="non-scaling-stroke" />
+        ) : (
           <g key={edge.key} data-edge={edge.kind} className={tone}>
             <path
               d={shape.d}
@@ -96,7 +105,8 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
           </g>
         ))}
       </svg>
-      {shapes.map(({ edge, shape, tone }) => {
+      {shapes.map(({ edge, shape, tone, quiet }) => {
+        if (quiet) return null
         const count = edge.messages && edge.messages.ids.length > 1 ? edge.messages.ids.length : undefined
         const files = edge.kind === 'overlap' ? edge.files?.length : undefined
         if (!count && !files) return null
@@ -116,6 +126,35 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
   )
 })
 
+export interface Spawn {
+  key: string
+  /** The parent's lane and the subsession's, and when the subsession started. */
+  from: string
+  to: string
+  t: number
+}
+
+/** A subsession's start on its parent's bar, joined to its own bar; drawn under the lanes, like links. */
+export const SpawnLinks = memo(function SpawnLinks({ spawns, anchors, g, height }: { spawns: Spawn[]; anchors: Map<string, EdgeAnchor>; g: LaneGeometry; height: number }) {
+  return (
+    <svg aria-hidden data-lane-spawns className="pointer-events-none absolute top-0 overflow-visible text-icon-faint" style={{ left: g.labelWidth, width: g.width, height }}>
+      {spawns.map((spawn) => {
+        const a = anchors.get(spawn.from)
+        const b = anchors.get(spawn.to)
+        const x = xOf(spawn.t, g.window, g.width)
+        if (!a || !b || x < 0 || x > g.width) return null
+        const y = a.top + a.height / 2 + a.half
+        return (
+          <g key={spawn.key} data-spawn={spawn.to}>
+            <path d={`M${x} ${y}V${b.top + b.height / 2 - b.half}`} fill="none" stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <circle cx={x} cy={y} r={1.5} fill="currentColor" />
+          </g>
+        )
+      })}
+    </svg>
+  )
+})
+
 /** Transparent hit paths above the lanes, so a link stays clickable where it crosses a bar. */
 export const EdgeHits = memo(function EdgeHits({ shapes, g, height, title, onPick }: {
   shapes: DrawnEdge[]
@@ -126,7 +165,7 @@ export const EdgeHits = memo(function EdgeHits({ shapes, g, height, title, onPic
 }) {
   return (
     <svg aria-hidden className="pointer-events-none absolute top-0 overflow-visible" style={{ left: g.labelWidth, width: g.width, height }}>
-      {shapes.map(({ edge, shape }) => (
+      {shapes.filter((shape) => !shape.quiet).map(({ edge, shape }) => (
         <path
           {...mailControl}
           key={edge.key}
