@@ -150,7 +150,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
           )}
           {access?.grants.length === 0 && <p className="text-ui-sm text-muted">No one else has access yet.</p>}
           {addable.length === 0 ? (
-            <p className="text-ui-sm text-muted">Everyone already has access.</p>
+            <p className="text-ui-sm text-muted">{superAdmin ? 'Everyone already has access.' : 'No more members you can add. A super admin grants other admins.'}</p>
           ) : (
           <div className="flex min-w-0 items-end gap-2">
             <div className="flex min-w-0 flex-1 flex-col gap-1">

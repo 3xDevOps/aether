@@ -111,7 +111,7 @@ describe('workspace access', () => {
     await waitFor(() => expect(api.workspaceOwnerSet).toHaveBeenCalledWith(workspace.id, root.id))
   })
 
-  it('never offers a super admin to add, and says so when everyone has access', async () => {
+  it('never offers a super admin to add, and tells an owner who else only a super admin can add', async () => {
     seed(admin, { owned: true })
     const api = client({
       memberList: vi.fn(async () => ({ members: [admin, bob, root] })),
@@ -120,7 +120,7 @@ describe('workspace access', () => {
     render(<WorkspacesRoute params={{}} client={api} />)
     fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    expect(await dialog.findByText('Everyone already has access.')).toBeTruthy()
+    expect(await dialog.findByText('No more members you can add. A super admin grants other admins.')).toBeTruthy()
     expect(dialog.queryByRole('button', { name: 'Add' })).toBeNull()
   })
 

@@ -432,6 +432,11 @@ export async function applyEvent(
     case 'member.access': {
       try {
         store.getState().setWorkspaces(await client.workspaceListFull())
+        // Losing a workspace drops its runs; regaining one must bring them back.
+        if (ev.type === 'member.access') {
+          const runs = await client.runList()
+          store.getState().setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
+        }
       } catch (err) {
         noteUnreachable(store, client, err, signal)
         return false

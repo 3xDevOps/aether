@@ -1932,6 +1932,20 @@ describe('applyEvent', () => {
     expect(store.getState().workspaces[workspace.id]).toBeUndefined()
   })
 
+  it('brings back the sessions of a workspace the viewer regains', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]), runList: vi.fn(async () => []) }))
+    const regained = run({ id: 'run_back', workspace_id: workspace.id })
+    const runList = vi.fn(async () => [regained])
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.access',
+      payload: { workspace_id: workspace.id, member_id: alice.id, action: 'granted' },
+    }), fakeApi({ workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]), runList }))
+
+    expect(runList).toHaveBeenCalledTimes(1)
+    expect(store.getState().runs[regained.id]).toBeTruthy()
+  })
+
   it('re-reads the devices on a device event', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
