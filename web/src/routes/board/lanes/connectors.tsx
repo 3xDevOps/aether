@@ -116,10 +116,7 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
   )
 })
 
-/**
- * Every message between two drawn lanes at rest: a hairline between its two marks, under the bars, with no
- * ends or hit path of its own. Apart from the links, so a hover recolours one group rather than every line.
- */
+/** Apart from the links, so a hover recolours one group rather than rebuilding every line. */
 export const Hairlines = memo(function Hairlines({ edges, anchors, g, height, receded }: {
   edges: LaneEdge[]
   anchors: Map<string, EdgeAnchor>

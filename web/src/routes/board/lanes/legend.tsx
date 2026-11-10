@@ -37,7 +37,6 @@ function Mark({ sent }: { sent: boolean }) {
   )
 }
 
-/** A sent mark and a received mark joined by the at-rest hairline. */
 function Hairline() {
   return (
     <svg aria-hidden viewBox="0 0 40 10" className={cn('h-2.5 w-10 shrink-0', edgeTone.message)}>
