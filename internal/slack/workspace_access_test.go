@@ -52,10 +52,10 @@ func TestSlackActionsOnAnUnreachableSessionReadAsMissing(t *testing.T) {
 	for name, role := range map[string]domain.Role{"S": domain.RoleSuperAdmin, "A": domain.RoleAdmin, "B": domain.RoleAdmin,
 		"U": domain.RoleCollaborator, "N": domain.RoleCollaborator} {
 		m := &domain.Member{DisplayName: name, TailnetLogin: strings.ToLower(name) + "@example.com", Color: "#e6194b", Role: role}
-		if err := h.db.CreateMember(ctx, m); err != nil {
+		if err = h.db.CreateMember(ctx, m); err != nil {
 			t.Fatalf("CreateMember %s: %v", name, err)
 		}
-		if err := h.db.PutSlackLink(ctx, &store.SlackLink{Member: m.ID, TeamID: "T1", UserID: "U-" + name, Channel: "D-" + name,
+		if err = h.db.PutSlackLink(ctx, &store.SlackLink{Member: m.ID, TeamID: "T1", UserID: "U-" + name, Channel: "D-" + name,
 			CreatedAt: time.Now()}); err != nil {
 			t.Fatalf("PutSlackLink %s: %v", name, err)
 		}
@@ -63,16 +63,16 @@ func TestSlackActionsOnAnUnreachableSessionReadAsMissing(t *testing.T) {
 	}
 	wsA, wsB := &domain.Workspace{Name: "a", OwnerID: cast["A"].ID}, &domain.Workspace{Name: "b", OwnerID: cast["B"].ID}
 	for _, ws := range []*domain.Workspace{wsA, wsB} {
-		if err := h.db.CreateWorkspace(ctx, ws); err != nil {
+		if err = h.db.CreateWorkspace(ctx, ws); err != nil {
 			t.Fatalf("CreateWorkspace: %v", err)
 		}
 	}
-	if err := h.db.GrantWorkspace(ctx, wsA.ID, cast["U"].ID, cast["A"].ID); err != nil {
+	if err = h.db.GrantWorkspace(ctx, wsA.ID, cast["U"].ID, cast["A"].ID); err != nil {
 		t.Fatalf("GrantWorkspace: %v", err)
 	}
 	runB := &domain.Run{Title: "Tidy b", WorkspaceID: wsB.ID, MemberID: cast["B"].ID, Harness: "claude",
 		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
-	if err := h.db.CreateRun(ctx, runB); err != nil {
+	if err = h.db.CreateRun(ctx, runB); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	runs.set(runB.ID, acphost.Request{ID: "req1", Kind: "permission", Title: "Delete b?", Options: []acphost.Option{

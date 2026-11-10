@@ -99,7 +99,7 @@ func refuseRemoval(ctx context.Context, tx *sql.Tx, id domain.MemberID) error {
 		return fmt.Errorf("read role: %w", err)
 	}
 	if role == domain.RoleSuperAdmin {
-		if err := refuseLastSuperAdmin(ctx, tx, id); err != nil {
+		if err = refuseLastSuperAdmin(ctx, tx, id); err != nil {
 			return err
 		}
 	}

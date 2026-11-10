@@ -1336,7 +1336,7 @@ func TestSteeringNeedsEveryWorkspaceOfTheRun(t *testing.T) {
 	st.mu.Lock()
 	st.members[other.ID].Access = domain.WorkspaceAccess{Granted: map[domain.WorkspaceID]bool{ws.ID: true}}
 	st.mu.Unlock()
-	if _, err := service.Post(context.Background(), MessageInput{
+	if _, err = service.Post(context.Background(), MessageInput{
 		WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
 		Kind: store.RoomMessageSteerRequest, Body: "no extra", IdempotencyKey: "no-extra",
 	}); !errors.Is(err, permissions.ErrNoAccess) {
@@ -1357,7 +1357,7 @@ func TestSteeringNeedsEveryWorkspaceOfTheRun(t *testing.T) {
 	delete(st.members[other.ID].Access.Granted, "extra")
 	st.mu.Unlock()
 	clock.Add(SteeringDelay)
-	if _, err := service.DeliverDue(context.Background(), 10); err != nil {
+	if _, err = service.DeliverDue(context.Background(), 10); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.GetRoomMessage(context.Background(), result.Message.ID)
