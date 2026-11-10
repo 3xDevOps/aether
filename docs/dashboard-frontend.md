@@ -1946,7 +1946,11 @@ lane (sessions it talks with), `→2 ←1` on each of them. Sessions past the
 scrolled rows get a pinned **↑**/**↓** button that moves to them, and mail with
 sessions outside the view gets a dashed note. File overlaps draw for the
 focused lane only, at the now line. Moving the pointer onto a link, mark or
-pinned button keeps the lane that drew it. Clicking a mark or link opens its
+pinned button keeps the lane that drew it. While the pointer heads for one of
+the lane's pinned buttons, the lanes it crosses do not take the hover; one it
+rests on for 250ms does. An open popover keeps its lane focused: lanes the
+pointer crosses on the way, or that lie under the popover, change nothing
+until it closes. Clicking a mark or link opens its
 facts, every bundle a merged mark holds;
 a mail link reads the bodies through `coord.messages.list` (the thread, else
 each sender's newest page, since a mark on a folded lane can bundle several
@@ -7898,7 +7902,9 @@ device cards an admin and a member see.
 history, section order and folding, axis ticks and link
 bundling; the board test's `lanes view` cases cover the tree keyboard, the
 session popover and its links, a popover whose lane folds away, an empty
-window, bundled mail bodies and failed history reads.
+window, bundled mail bodies and failed history reads. `e2e/lanes.spec.ts`
+moves a real pointer over Lanes, with sessions and mail answered in the
+browser: from a lane to its popover, and from a lane to its pinned button.
 
 `src/a11y.test.tsx` exercises the session tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,
