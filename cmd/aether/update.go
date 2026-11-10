@@ -270,7 +270,7 @@ func probeLinkedServer(ctx context.Context) linkedServer {
 	if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
 		return linkedServer{}
 	}
-	out := linkedServer{reachable: true, version: info.ServerVersion, admin: info.Member.Role == string(domain.RoleAdmin)}
+	out := linkedServer{reachable: true, version: info.ServerVersion, admin: info.Member.Role == string(domain.RoleSuperAdmin)}
 	var status protocol.ServerUpdateStatusResult
 	if err := c.Call(protocol.MethodServerUpdateStatus, struct{}{}, &status); err == nil {
 		out.capable, out.manual = status.Capable, status.ManualCommands
@@ -306,7 +306,7 @@ func serverFirst(w io.Writer, target string, server linkedServer) error {
 	case server.admin:
 		_, _ = fmt.Fprintf(w, "the server runs %s; update it first on the server host: %s\n", running, printable(strings.Join(server.manual, ", then ")))
 	default:
-		_, _ = fmt.Fprintf(w, "the server runs %s; ask a server admin to run: aether server update\n", running)
+		_, _ = fmt.Fprintf(w, "the server runs %s; ask a super admin to run: aether server update\n", running)
 	}
 	return nil
 }

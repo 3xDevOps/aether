@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -11,12 +12,16 @@ import (
 func init() {
 	register(command{
 		name:  "workspace",
-		short: "manage workspaces: init, add, import, delete, list, settings, origin, env, mirror",
+		short: "manage workspaces: init, add, import, delete, list, access, grant, revoke, owner, settings, origin, env, mirror",
 		usage: "aether workspace init <name> [--base <branch>]\n" +
 			"aether workspace add <name> [--base <branch>]\n" +
 			"aether workspace import <path|url> [--name <name>]\n" +
 			"aether workspace delete <name> --yes\n" +
 			"aether workspace list\n" +
+			"aether workspace access <workspace>\n" +
+			"aether workspace grant <workspace> <member-id>...\n" +
+			"aether workspace revoke <workspace> <member-id>\n" +
+			"aether workspace owner <workspace> <member-id>\n" +
 			"aether workspace settings [--workspace <name>] [--message-others everyone|admins-only] [--child-max-live <n>]\n" +
 			"aether workspace origin [--workspace <name>] [<url>|--clear]\n" +
 			"aether workspace env list [--workspace <name>]\n" +
@@ -34,6 +39,7 @@ func init() {
 		example: "aether workspace list\n" +
 			"aether workspace import ~/src/app\n" +
 			"aether workspace import https://github.com/acme/app\n" +
+			"aether workspace grant app mem-rbekp4h6fx\n" +
 			"aether workspace env set --workspace app API_URL=https://api.example.com\n" +
 			"aether workspace env set --workspace app --secret DATABASE_PASSWORD < secret.txt\n" +
 			"aether workspace mirror status --workspace app",
@@ -43,7 +49,7 @@ func init() {
 
 func runWorkspace(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether workspace <init|add|import|delete|list|settings|origin|env|mirror>")
+		return fmt.Errorf("usage: aether workspace <init|add|import|delete|list|access|grant|revoke|owner|settings|origin|env|mirror>")
 	}
 	switch args[0] {
 	case "init":
@@ -56,6 +62,14 @@ func runWorkspace(args []string) error {
 		return workspaceDelete(args[1:])
 	case "list":
 		return workspaceList(args[1:])
+	case "access":
+		return workspaceAccess(args[1:])
+	case "grant":
+		return workspaceGrant(args[1:])
+	case "revoke":
+		return workspaceRevoke(args[1:])
+	case "owner":
+		return workspaceOwner(args[1:])
 	case "settings":
 		return workspaceSettings(args[1:])
 	case "origin":
@@ -78,23 +92,27 @@ func workspaceList(args []string) error {
 		if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
 			return err
 		}
-		return printWorkspaces(os.Stdout, list.Workspaces)
+		return printWorkspaces(os.Stdout, list.Workspaces, memberNames(c))
 	})
 }
 
-// printWorkspaces emits one "workspace <id> <name>" line per workspace, the
-// same shape init and add print, so IDs are easy to copy into git remotes.
-func printWorkspaces(w io.Writer, workspaces []protocol.Workspace) error {
+// printWorkspaces prints one row per workspace: its ID, which git remote
+// URLs need, its owner, and the caller's role there.
+func printWorkspaces(w io.Writer, workspaces []protocol.Workspace, names map[string]string) error {
 	if len(workspaces) == 0 {
 		_, err := fmt.Fprintln(w, "no workspaces")
 		return err
 	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "ID\tNAME\tOWNER\tROLE")
 	for _, ws := range workspaces {
-		if _, err := fmt.Fprintf(w, "workspace %s %s\n", ws.ID, ws.Name); err != nil {
-			return err
+		owner := ""
+		if ws.OwnerMemberID != "" {
+			owner = nameOrID(names, ws.OwnerMemberID)
 		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", ws.ID, ws.Name, owner, ws.Role)
 	}
-	return nil
+	return tw.Flush()
 }
 
 type workspaceCreateOptions struct {
