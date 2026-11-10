@@ -316,7 +316,8 @@ export function LanesView(props: LanesViewProps) {
       const r = el.getBoundingClientRect()
       const [tl, tr, bl, br] = [{ x: r.left, y: r.top }, { x: r.right, y: r.top }, { x: r.left, y: r.bottom }, { x: r.right, y: r.bottom }]
       // The two triangles from where the pointer left the lane to the button's diagonals cover the cone towards it.
-      heading ||= inTriangle(at, from!, tl, br) || inTriangle(at, from!, tr, bl)
+      if (!inTriangle(at, from!, tl, br) && !inTriangle(at, from!, tr, bl)) continue
+      heading = true
       gap = Math.min(gap, Math.hypot(Math.max(r.left - at.x, 0, at.x - r.right), Math.max(r.top - at.y, 0, at.y - r.bottom)))
     }
     if (heading) {
@@ -348,7 +349,10 @@ export function LanesView(props: LanesViewProps) {
     if (!d || d.id !== event.pointerId) return
     const dx = event.clientX - d.x
     if (!d.moved && Math.abs(dx) < 6) return
-    if (!d.moved) event.currentTarget.setPointerCapture(event.pointerId)
+    if (!d.moved) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setPop(null)
+    }
     d.moved = true
     d.x = event.clientX
     props.onPan((-dx * (g.window.end - g.window.start)) / g.width)
