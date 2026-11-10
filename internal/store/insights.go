@@ -205,16 +205,6 @@ func (q InsightsQuery) ownerScope() string {
 	return where
 }
 
-// runScope is ownerScope that also leaves out a run with an extra
-// repository in a workspace outside Workspaces.
-func (q InsightsQuery) runScope() string {
-	where := q.ownerScope()
-	if q.Workspaces != nil {
-		where += " AND NOT EXISTS (SELECT 1 FROM run_repos rr WHERE rr.run_id = r.id AND rr.workspace_id NOT IN " + insightsReachable + ")"
-	}
-	return where
-}
-
 // prScope keeps the pull requests of p whose repository is in scope: a
 // run's extra repository can be in a workspace the caller does not reach.
 func (q InsightsQuery) prScope() string {
@@ -672,13 +662,19 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 }
 
 func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
+	where := q.ownerScope()
+	if q.Workspaces != nil {
+		// A run with an extra repository outside Workspaces does not exist
+		// for the caller.
+		where += " AND NOT EXISTS (SELECT 1 FROM run_repos rr WHERE rr.run_id = r.id AND rr.workspace_id NOT IN " + insightsReachable + ")"
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.title, r.task, r.workspace_id, r.status, r.reason, r.harness, r.model,
 			r.created_at, r.started_at, r.finished_at, COALESCE(p.url, ''), COALESCE(p.state, '')
 		FROM runs r
 		LEFT JOIN run_pull_requests p ON p.rowid = (
 			SELECT p.rowid FROM run_pull_requests p WHERE p.run_id = r.id AND `+q.prScope()+` ORDER BY p.created_at DESC, p.rowid DESC LIMIT 1)
-		WHERE `+q.runScope()+` AND `+insightsFinishedIn+`
+		WHERE `+where+` AND `+insightsFinishedIn+`
 		ORDER BY r.finished_at DESC, r.id DESC LIMIT 50`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: recent: %w", err)
