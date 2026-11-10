@@ -300,9 +300,9 @@ address, path, status and user agent.
 Rate limits count requests per IP address, or per /64 for IPv6, in memory
 only; nothing is written. While you are connected, the edge also sees your
 IP address, which server you reach, when, and how many bytes flow. Your
-server logs the IP address of each connection the edge relays to it
-(`edge: relayed connection ... client=<address>`), as it does for direct
-connections.
+server logs the IP address of each connection the edge relays to it and
+then refuses (`edge: refused relayed connection ... client=<address>`); it
+logs accepted connections only at debug level, which the server never enables.
 
 Revoking your devices removes them from the edge; the account record stays.
 To delete it yourself, open the edge's Account page,
