@@ -449,8 +449,8 @@ export function LanesView(props: LanesViewProps) {
     setPop(null)
     if (!again) latestActivate.current(lane, x, chevron)
   }, [])
-  // A click on a lane, mark or link replaces the open popover itself; Radix dismissing it after that click would close the new one.
-  const keep = useCallback((target: Element) => !drag.current?.moved && Boolean(content.current?.contains(target) && target.closest('[role=treeitem], svg [data-mail-control]')), [])
+  // A click on a lane, mark, link or pinned button replaces or closes the open popover itself; Radix dismissing it after that click would close a new one.
+  const keep = useCallback((target: Element) => !drag.current?.moved && Boolean(content.current?.contains(target) && target.closest('[role=treeitem], [data-mail-control]')), [])
   const latestActivate = useRef(activate)
   latestActivate.current = activate
   const onRetry = useCallback((runID: string) => latest.current.onRetryAgents(runID), [])
