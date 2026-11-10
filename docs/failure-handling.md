@@ -534,6 +534,22 @@ retries a failed capture every `--poll-interval`. If the checkout is already
 gone, no retry can capture it: cleanup finishes without an evidence packet and
 the reason gains `evidence unavailable: session checkout missing`.
 
+A checkout over the evidence storage limit cannot be captured, so the session
+gets no evidence packet. Aether commits the checkout's files as a `wip:`
+commit, publishes the session branch, adds `evidence unavailable: evidence
+storage limit exceeded` to the session's reason (shown by `aether sessions
+<session-id>` and the dashboard), and only then removes the checkout. If the
+commit, the publish or that reason write fails, the checkout stays.
+
+Removing a checkout first copies the session's diff history out of it into
+`checkouts/<run-id>.diffsnap/`, which stays; this reads the session's diff
+events from the event log. If any step fails, the checkout stays and the
+server logs `scheduler: checkout gc: capture before cleanup` with the session,
+the attempt, the next retry time and the error. Retries wait 15 minutes,
+doubling to at most 6 hours, and continue until cleanup succeeds; nothing is
+removed without its history. The wait restarts from 15 minutes when the
+server restarts.
+
 A member's containers share one uid:gid mapping, so a launch under another
 mapping is refused while one of them is live. A closed session whose cleanup
 is still retrying counts only while its container exists: Aether asks Docker

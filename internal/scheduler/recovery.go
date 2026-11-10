@@ -1234,7 +1234,7 @@ func (s *Scheduler) interruptedReasonLocked(run domain.RunID, reason string) str
 	if _, ok := s.evidenceUnavailable[run]; !ok {
 		return reason
 	}
-	return withEvidenceUnavailable(reason)
+	return withCleanupNote(reason, evidenceUnavailableReason)
 }
 
 func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {

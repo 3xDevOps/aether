@@ -243,8 +243,14 @@ type Scheduler struct {
 	// evidenceUnavailable holds active runs whose capture found the checkout
 	// gone, for the reason they are interrupted with. Guarded by mu.
 	evidenceUnavailable map[domain.RunID]struct{}
-	titleMu             sync.Mutex
-	titleUpdates        map[domain.RunID]*pendingRunTitle
+	// cleanupRetries backs off checkout cleanups that failed. Guarded by mu.
+	cleanupRetries map[domain.RunID]cleanupRetry
+	// checkoutSweepGate lets one checkout sweep run at a time, so no checkout
+	// is retried before its backoff is recorded. A waiter can leave on its
+	// context.
+	checkoutSweepGate chan struct{}
+	titleMu           sync.Mutex
+	titleUpdates      map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
 	// waits is nil when runs register no wait conditions.
@@ -670,6 +676,7 @@ func New(cfg Config) (*Scheduler, error) {
 		cfg:                  cfg,
 		harnesses:            harnesses,
 		capacityGate:         make(chan struct{}, 1),
+		checkoutSweepGate:    make(chan struct{}, 1),
 		superCtx:             ctx,
 		superCancel:          cancel,
 		recoveryReady:        make(chan struct{}),
@@ -748,7 +755,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	sweep := time.NewTicker(interval)
 	defer sweep.Stop()
 	if s.cfg.CheckoutTTL > 0 {
-		s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+		s.trySweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 	}
 	s.sweepCaches(ctx, false)
 	s.sweepBrowsers(ctx)
@@ -776,7 +783,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			}
 		case <-gc.C:
 			if s.cfg.CheckoutTTL > 0 {
-				s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+				s.trySweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 			}
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepScratch(ctx)
