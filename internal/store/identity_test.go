@@ -189,6 +189,17 @@ func TestClaimMemberOnlyOnEmptyServer(t *testing.T) {
 	}
 }
 
+// mustCreateSuperAdmin creates a member who may invite with any role.
+func mustCreateSuperAdmin(t *testing.T, db *DB) *domain.Member {
+	t.Helper()
+	m := mustCreateMember(t, db)
+	if _, err := db.SetMemberRole(context.Background(), m.ID, domain.RoleSuperAdmin); err != nil {
+		t.Fatalf("SetMemberRole: %v", err)
+	}
+	m.Role = domain.RoleSuperAdmin
+	return m
+}
+
 func mustInvite(t *testing.T, db *DB, by domain.MemberID, inv domain.Invitation) *domain.Invitation {
 	t.Helper()
 	inv.CreatedBy = by
@@ -205,7 +216,7 @@ func TestAcceptInvitationCreatesOneMemberUnderConcurrency(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
 
 	const racers = 8
@@ -255,7 +266,7 @@ func TestAcceptInvitationRefusesExpired(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Email: "a@example.com", Role: domain.RoleCollaborator,
 		ExpiresAt: time.Now().Add(time.Minute)})
 	_, err := db.AcceptInvitation(ctx, inv.ID,
@@ -272,7 +283,7 @@ func TestAcceptLinkInvitationBindsExistingMember(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "ada", Member: admin.ID})
 	m, err := db.AcceptInvitation(ctx, inv.ID,
 		&domain.Identity{Provider: "github", Subject: "7", Login: "ada"}, edgeMember("ignored"), time.Now())
@@ -287,7 +298,7 @@ func TestAcceptLinkInvitationBindsExistingMember(t *testing.T) {
 // edgeMemberWithIdentity creates a member bound to (github, subject).
 func edgeMemberWithIdentity(t *testing.T, db *DB, subject string) *domain.Member {
 	t.Helper()
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	m, err := db.AcceptInvitation(context.Background(),
 		mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "u" + subject, Role: domain.RoleCollaborator}).ID,
 		&domain.Identity{Provider: "github", Subject: subject, Login: "u" + subject}, edgeMember("u"+subject), time.Now())
@@ -442,7 +453,7 @@ func TestDeleteMemberRemovesIdentitiesDevicesAndInvitations(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	m, err := db.AcceptInvitation(ctx,
 		mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin}).ID,
 		&domain.Identity{Provider: "github", Subject: "42", Login: "octo"}, edgeMember("octo"), time.Now())
@@ -486,7 +497,7 @@ func TestInvitationDevices(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	now := time.Now()
 	invitee, forged := invitationDevice(t, inv, "42"), invitationDevice(t, inv, "666")
@@ -556,7 +567,7 @@ func TestApprovalAfterTheDeviceMovedIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	shown := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
 	joined := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	now := time.Now()

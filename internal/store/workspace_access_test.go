@@ -226,6 +226,40 @@ func TestSetMemberRoleGuards(t *testing.T) {
 	}
 }
 
+// An invitation's role must be one its creator may grant when it is
+// accepted: an admin's admin invitation, from before super admins, adds
+// no admin.
+func TestAcceptingNeedsACreatorWhoGrantsTheRoleNow(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	admin := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+	if err := db.CreateMember(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	invite := func(login string, role domain.Role) *domain.Invitation {
+		inv := &domain.Invitation{Provider: "github", Login: login, Role: role, CreatedBy: admin.ID, ExpiresAt: now.Add(time.Hour)}
+		if err := db.CreateInvitation(ctx, inv); err != nil {
+			t.Fatal(err)
+		}
+		return inv
+	}
+	stale, fine := invite("dana", domain.RoleAdmin), invite("eve", domain.RoleCollaborator)
+	if _, err := db.AcceptInvitation(ctx, stale.ID, &domain.Identity{Provider: "github", Subject: "4004", Login: "dana"},
+		&domain.Member{DisplayName: "Dana", Color: "#4363d8"}, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("accept an admin's admin invitation = %v, want ErrNotFound", err)
+	}
+	if _, err := db.GetMemberByIdentity(ctx, "github", "4004"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("member after a refused acceptance = %v, want none", err)
+	}
+	m, err := db.AcceptInvitation(ctx, fine.ID, &domain.Identity{Provider: "github", Subject: "5005", Login: "eve"},
+		&domain.Member{DisplayName: "Eve", Color: "#911eb4"}, now)
+	if err != nil || m.Role != domain.RoleCollaborator {
+		t.Fatalf("accept an admin's collaborator invitation = %+v, %v", m, err)
+	}
+}
+
 // Accepting an invitation, or joining with a code, creates the member with
 // a grant on each named workspace that still exists and its issuer still
 // administers: any for a super admin, the owned ones for an admin.

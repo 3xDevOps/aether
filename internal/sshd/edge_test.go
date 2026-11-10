@@ -498,6 +498,7 @@ func TestEdgeExpiredInvitationRefused(t *testing.T) {
 func TestEdgeStaleIdentityMatchesNoInvitation(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	stale := octo
 	stale.IdentityAt = time.Now().Add(-edgeproto.IdentityMaxAge - time.Minute)

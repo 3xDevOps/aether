@@ -168,6 +168,7 @@ func TestConnectorIsJudgedByItsDevice(t *testing.T) {
 		c.EdgeAccess = edgeproto.PolicyAccount
 		c.InvitesDir = dir
 	})
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	laptop := newSigner(t)
 	e.mustDialEdge(t, octo, laptop, "laptop")

@@ -499,6 +499,18 @@ func acceptInTx(ctx context.Context, tx *sql.Tx, id domain.InvitationID, identit
 			return nil, fmt.Errorf("store: accept invitation: linked member: %w", err)
 		}
 	} else {
+		// An invitation may predate its creator's demotion, or the
+		// super admin role: its role must be one the creator grants now.
+		var grants bool
+		if err = tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM members WHERE id = ? AND pending = 0 AND merged_into = ''
+			 AND (role = 'super_admin' OR (role = 'admin' AND ? NOT IN ('admin', 'super_admin'))))`,
+			inv.CreatedBy, inv.Role).Scan(&grants); err != nil {
+			return nil, fmt.Errorf("store: accept invitation: creator: %w", err)
+		}
+		if !grants {
+			return nil, fmt.Errorf("%w: invitation %s grants %s, which its creator %s may no longer grant", ErrNotFound, id, inv.Role, inv.CreatedBy)
+		}
 		m.Role, m.Pending = inv.Role, false
 		if err = insertMember(ctx, tx, m); err != nil {
 			return nil, err
