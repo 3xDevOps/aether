@@ -39,6 +39,18 @@ func newAccessEnv(t *testing.T, mod func(*Config)) *accessEnv {
 	return e
 }
 
+// introduce lets admin see members, who are granted another workspace
+// admin owns. An admin grants only members they see.
+func (e *accessEnv) introduce(t *testing.T, admin domain.MemberID, members ...domain.MemberID) {
+	t.Helper()
+	ws := ownedWorkspace(t, e.testEnv, "shared-"+string(admin), admin)
+	for _, m := range members {
+		if err := e.db.GrantWorkspace(context.Background(), ws.ID, m, e.member.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func ownedWorkspace(t *testing.T, e *testEnv, name string, owner domain.MemberID) *domain.Workspace {
 	t.Helper()
 	w := &domain.Workspace{Name: name, BaseBranch: "main", OwnerID: owner}
@@ -118,6 +130,8 @@ func TestWorkspaceAccessGrantRules(t *testing.T) {
 	defer sub.Close() //nolint:errcheck
 	a, s, u := controlAs(t, e.testEnv, e.aKey), controlClient(t, e.testEnv), controlAs(t, e.testEnv, e.uKey)
 
+	wantMissing(t, grant(a, e.wsA.ID, e.u.ID), "owner grants a member they do not see")
+	e.introduce(t, e.a.ID, e.u.ID, e.v.ID, e.b.ID)
 	if err = grant(a, e.wsA.ID, e.u.ID, e.v.ID); err != nil {
 		t.Fatalf("owner grants a collaborator and a viewer: %v", err)
 	}
@@ -167,6 +181,7 @@ func TestWorkspaceAccessRevokeRefusedWhileInUse(t *testing.T) {
 	e := newAccessEnv(t, nil)
 	ctx := context.Background()
 	a := controlAs(t, e.testEnv, e.aKey)
+	e.introduce(t, e.a.ID, e.u.ID)
 	if err := grant(a, e.wsA.ID, e.u.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -214,6 +229,7 @@ func TestWorkspaceAccessRevokeNotifiesTheRevokedMember(t *testing.T) {
 	e := newAccessEnv(t, func(c *Config) { c.revalidateInterval = time.Hour })
 	ctx := context.Background()
 	a := controlAs(t, e.testEnv, e.aKey)
+	e.introduce(t, e.a.ID, e.u.ID)
 	if err := grant(a, e.wsA.ID, e.u.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -64,7 +64,7 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 	} else if workspaces, err = s.reachableWorkspaces(ctx, actor); err != nil {
 		return nil, rpcError(err)
 	}
-	names, err := s.memberNames(ctx)
+	names, err := s.memberNames(ctx, actor)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -142,15 +142,22 @@ func (s *Server) attentionRun(ctx context.Context, run *domain.Run) (*attentionR
 }
 
 // memberNames is memberName in web/src/lib/member-name.ts: a merged-away
-// id names the member it became, marked merged; an unknown id names itself.
-func (s *Server) memberNames(ctx context.Context) (func(domain.MemberID) string, error) {
+// id names the member it became, marked merged; an unknown id, and one
+// actor does not see, names itself.
+func (s *Server) memberNames(ctx context.Context, actor permissions.Actor) (func(domain.MemberID) string, error) {
+	sees, err := s.visibleMembers(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return nil, err
 	}
 	display := make(map[domain.MemberID]string, len(members))
 	for _, m := range members {
-		display[m.ID] = m.DisplayName
+		if sees(m.ID) {
+			display[m.ID] = m.DisplayName
+		}
 	}
 	mergedInto := map[domain.MemberID]domain.MemberID{}
 	if ms, ok := s.cfg.Store.(store.MergeStore); ok {

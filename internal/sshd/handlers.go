@@ -99,14 +99,24 @@ func (s *Server) workspaceGet(ctx context.Context, member domain.MemberID, param
 	return protocol.WorkspaceGetResult{Workspace: workspaceWire(actor, ws)}, nil
 }
 
-func (s *Server) memberList(ctx context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+func (s *Server) memberList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	sees, err := s.visibleMembers(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	list, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := protocol.MemberListResult{Members: make([]protocol.Member, 0, len(list))}
 	for _, m := range list {
-		out.Members = append(out.Members, protocol.MemberFromDomain(m))
+		if sees(m.ID) {
+			out.Members = append(out.Members, protocol.MemberFromDomain(m))
+		}
 	}
 	if ms, ok := s.cfg.Store.(store.MergeStore); ok {
 		merges, err := ms.ListMerges(ctx, "")
@@ -114,6 +124,9 @@ func (s *Server) memberList(ctx context.Context, _ domain.MemberID, _ json.RawMe
 			return nil, rpcError(err)
 		}
 		for _, m := range merges {
+			if !sees(m.AbsorbedID) && !sees(m.SurvivorID) {
+				continue
+			}
 			if out.MergedInto == nil {
 				out.MergedInto = map[string]string{}
 			}
