@@ -72,6 +72,10 @@ func (s *Server) presenceRoster(ctx context.Context, member domain.MemberID, par
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	runs := newRunScopes(s.cfg.Store)
+	if p.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(p.RunID)) {
+		return protocol.PresenceRosterResult{Members: []protocol.PresenceEntry{}}, nil
+	}
 	present := svc.Roster(domain.WorkspaceID(p.WorkspaceID), domain.RunID(p.RunID))
 	out := protocol.PresenceRosterResult{Members: make([]protocol.PresenceEntry, 0, len(present))}
 	for _, m := range present {
@@ -84,7 +88,9 @@ func (s *Server) presenceRoster(ctx context.Context, member domain.MemberID, par
 			LastSeen: m.LastSeen.UTC().Format(time.RFC3339),
 		}
 		for _, run := range m.Watching {
-			e.Watching = append(e.Watching, string(run))
+			if runs.reaches(ctx, actor, run) {
+				e.Watching = append(e.Watching, string(run))
+			}
 		}
 		out.Members = append(out.Members, e)
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -351,7 +352,7 @@ func roomMutationResult(result collab.Result) protocol.RunRoomPostResult {
 	return out
 }
 
-func (s *Server) runEvidenceList(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runEvidenceList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	ev, perr := s.evidence()
 	if perr != nil {
 		return nil, perr
@@ -370,6 +371,14 @@ func (s *Server) runEvidenceList(ctx context.Context, _ domain.MemberID, raw jso
 	if err != nil {
 		return nil, collaborationRPCError(err)
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	runs := newRunScopes(s.cfg.Store)
+	result.Packets = slices.DeleteFunc(result.Packets, func(packet protocol.EvidencePacket) bool {
+		return !runs.reaches(ctx, actor, domain.RunID(packet.RunID))
+	})
 	return result, nil
 }
 

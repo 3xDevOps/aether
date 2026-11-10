@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -30,8 +31,9 @@ func (s *Server) runWaits() RunWaitService {
 }
 
 // fillWaitConditions sets each of runs' latest wait conditions on out, the
-// snapshots of runs in the same order, in one read. Unless member owns the
-// run or administers its workspace, they are redacted.
+// snapshots of runs in the same order, in one read. A condition naming a
+// session or a repository member does not reach is left out. Unless member
+// owns the run or administers its workspace, the rest are redacted.
 func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID, runs []*domain.Run, out []protocol.Run) error {
 	svc := s.runWaits()
 	if svc == nil || len(runs) == 0 {
@@ -46,8 +48,12 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 		return fmt.Errorf("read the runs' wait conditions: %w", err)
 	}
 	actor, actorErr := resolveActor(ctx, s.cfg.Store, member)
+	visible, err := s.waitVisibility(ctx, actor, byRun)
+	if err != nil {
+		return err
+	}
 	for i, r := range runs {
-		waits := byRun[r.ID]
+		waits := slices.DeleteFunc(byRun[r.ID], func(w protocol.WaitCondition) bool { return !visible(w) })
 		if r.MemberID != member && (actorErr != nil || !workspaceAdmin(actor, r.WorkspaceID)) {
 			for j := range waits {
 				redactWait(&waits[j])
@@ -56,6 +62,50 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 		out[i].WaitConditions = waits
 	}
 	return nil
+}
+
+// waitVisibility reports which of byRun's conditions actor may read: a
+// run_finished condition whose session they reach in every workspace, and
+// a pull request condition unless its repository is the origin or mirror
+// source only of workspaces actor does not reach.
+func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, byRun map[domain.RunID][]protocol.WaitCondition) (func(protocol.WaitCondition) bool, error) {
+	if actor.Role == domain.RoleSuperAdmin {
+		return func(protocol.WaitCondition) bool { return true }, nil
+	}
+	prs := false
+	for _, waits := range byRun {
+		prs = prs || slices.ContainsFunc(waits, func(w protocol.WaitCondition) bool { return w.Repo != "" })
+	}
+	repos := map[string][]domain.WorkspaceID{}
+	if prs {
+		workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read the workspaces of the runs' wait conditions: %w", err)
+		}
+		mirrors, err := s.cfg.Store.ListWorkspaceMirrors(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read the mirrors of the runs' wait conditions: %w", err)
+		}
+		add := func(url string, ws domain.WorkspaceID) {
+			if repo := strings.ToLower(protocol.GitHubRemoteRepository(url)); repo != "" {
+				repos[repo] = append(repos[repo], ws)
+			}
+		}
+		for _, w := range workspaces {
+			add(w.Origin, w.ID)
+		}
+		for _, m := range mirrors {
+			add(m.SourceURL, m.WorkspaceID)
+		}
+	}
+	runs := newRunScopes(s.cfg.Store)
+	return func(w protocol.WaitCondition) bool {
+		if w.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(w.RunID)) {
+			return false
+		}
+		owners := repos[w.Repo]
+		return len(owners) == 0 || slices.ContainsFunc(owners, actor.Reaches)
+	}, nil
 }
 
 // redactWait leaves out of w what only the run's owner and admins read:
