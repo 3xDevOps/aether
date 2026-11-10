@@ -16,9 +16,9 @@ import (
 // authorize lets sender open a conversation with target: its owner may
 // message, and unless the runs are parent and child or overlap
 // on a file, the target's protection and its workspace's steer-others
-// setting allow it. Any
-// live run on the server qualifies, in any workspace and tree. Callers have
-// checked that target is live.
+// setting allow it. Any live run in a workspace sender's owner reaches
+// qualifies, in any tree. Callers have checked that target is live and
+// reachable.
 func (s *Service) authorize(ctx context.Context, method string, sender, target *domain.Run) *protocol.Error {
 	owner, reason, err := s.messagingOwner(ctx, sender)
 	if err != nil {
@@ -49,6 +49,38 @@ func (s *Service) authorize(ctx context.Context, method string, sender, target *
 	}
 	if err := checkMessage(owner, ws, target.MemberID, target.Protected); err != nil {
 		return deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, err))
+	}
+	return nil
+}
+
+// reachable answers a target in a workspace sender's owner cannot reach
+// exactly as a session that does not exist. An owner who is gone is left
+// to authorize, which names why.
+func (s *Service) reachable(ctx context.Context, method string, sender, target *domain.Run) *protocol.Error {
+	owner, err := s.cfg.Store.GetMember(ctx, sender.MemberID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return internalError(method, err)
+	}
+	if !permissions.ActorOf(owner).Reaches(target.WorkspaceID) {
+		return unknownRun(method, target.ID)
+	}
+	return nil
+}
+
+// ownerReaches refuses a run socket call from a run whose owner no longer
+// reaches the run's workspace.
+func (s *Service) ownerReaches(ctx context.Context, method string, run *domain.Run) *protocol.Error {
+	owner, err := s.cfg.Store.GetMember(ctx, run.MemberID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: the session's owner %s is no longer a member", method, run.MemberID)}
+	case err != nil:
+		return internalError(method, err)
+	case !permissions.ActorOf(owner).Reaches(run.WorkspaceID):
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: the session's owner %s no longer has access to its workspace", method, run.MemberID)}
 	}
 	return nil
 }

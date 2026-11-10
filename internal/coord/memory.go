@@ -52,6 +52,9 @@ func (s *Service) handleMemory(ctx context.Context, run domain.RunID, method str
 	if self.Status.Terminal() {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": session has finished"}
 	}
+	if rpcErr := s.ownerReaches(ctx, method, self); rpcErr != nil {
+		return nil, rpcErr
+	}
 	// encoding/json matches field names case-insensitively, so every
 	// spelling of an identity field is refused before the service decodes.
 	var fields map[string]json.RawMessage
