@@ -72,7 +72,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 		DisplayName: "E2E Tester",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
 		Color:       "#e6194b",
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	ws := &domain.Workspace{
 		Name:        "e2e",

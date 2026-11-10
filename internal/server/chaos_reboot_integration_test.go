@@ -434,7 +434,7 @@ func (e *chaosEnv) seedStore(t *testing.T) {
 		DisplayName: "Chaos Tester",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(e.signer.PublicKey())),
 		Color:       "#e6194b",
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	if err := db.CreateMember(e.ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)

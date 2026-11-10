@@ -90,8 +90,8 @@ func TestIntegrationServerGateway(t *testing.T) {
 	if status := postJSON(t, web.URL+"/api/v1/server.info", "", &info); status != http.StatusOK {
 		t.Fatalf("server.info status = %d", status)
 	}
-	if info.Member.Role != string(domain.RoleAdmin) || info.Member.Pending || !info.TailnetIdentityAuth {
-		t.Fatalf("server.info = %+v, want the first tailnet contact as an approved admin", info)
+	if info.Member.Role != string(domain.RoleSuperAdmin) || info.Member.Pending || !info.TailnetIdentityAuth {
+		t.Fatalf("server.info = %+v, want the first tailnet contact as an approved super admin", info)
 	}
 
 	// Seed the workspace over the SSH git transport; the "none" auth
@@ -464,7 +464,7 @@ func TestIntegrationServerGatewayHTTPSConfigImport(t *testing.T) {
 	if status := postJSONClient(t, client, base+"/api/v1/server.info", "", &adaInfo); status != http.StatusOK {
 		t.Fatalf("Ada server.info status = %d", status)
 	}
-	if adaInfo.Member.ID == "" || adaInfo.Member.Role != string(domain.RoleAdmin) {
+	if adaInfo.Member.ID == "" || adaInfo.Member.Role != string(domain.RoleSuperAdmin) {
 		t.Fatalf("Ada server.info member = %+v", adaInfo.Member)
 	}
 

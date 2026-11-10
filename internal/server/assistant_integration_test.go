@@ -208,7 +208,7 @@ func startAssistantServer(t *testing.T, ctx context.Context, prior *assistantEnv
 	}
 	env.srv = srv
 	if prior == nil {
-		env.member = seedAssistantMember(t, ctx, srv, env.data, domain.RoleAdmin)
+		env.member = seedAssistantMember(t, ctx, srv, env.data, domain.RoleSuperAdmin)
 	}
 	var runCtx context.Context
 	runCtx, env.cancel = context.WithCancel(ctx)
