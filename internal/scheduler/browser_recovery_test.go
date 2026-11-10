@@ -157,4 +157,13 @@ func TestStartupRecoversEverySessionWhenACompanionCannotReleaseInput(t *testing.
 	if _, _, err = next.browserClient(t.Context(), LiveRun{Run: *healthy, ContainerID: healthyContainer.id}, false); err != nil {
 		t.Errorf("healthy session's browser after recovery: %v", err)
 	}
+	exited := runtime.ID("companion-" + string(healthy.ID))
+	rt.mu.Lock()
+	info := rt.browsers[exited]
+	info.State = "exited"
+	rt.browsers[exited] = info
+	rt.mu.Unlock()
+	if err = next.resumeDevelopmentBrowser(t.Context(), healthy.ID, healthyContainer.id); err != nil {
+		t.Errorf("resume a session whose companion exited: %v", err)
+	}
 }

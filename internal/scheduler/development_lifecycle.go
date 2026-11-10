@@ -142,10 +142,10 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 	if reconcileErr == nil {
 		return s.clearRecoveredBrowserInput(id, status, client)
 	}
-	// A companion recorded unavailable must not hold its session paused:
-	// it can be reset only once the session runs.
+	// A companion recorded unavailable or ended must not hold its session
+	// paused: it can be reset only once the session runs.
 	if status.State != "paused" {
-		if status.Unavailable != "" {
+		if status.Unavailable != "" || status.State == "exited" || status.State == "dead" || status.State == "removed" {
 			return nil
 		}
 		return reconcileErr

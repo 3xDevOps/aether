@@ -31,7 +31,7 @@ function image(response, capture) {
   response.end(capture.bytes);
 }
 
-export async function startServer({ socketPath = '/aether-control/browser.sock', creationKey = process.env.AETHER_BROWSER_CREATION_KEY || '', launch = () => BrowserSession.launch() } = {}) {
+export async function startServer({ socketPath = '/aether-control/browser.sock', creationKey = process.env.AETHER_BROWSER_CREATION_KEY || '', launch = () => BrowserSession.launch(), operationDeadline = 60000, onWedged = () => {} } = {}) {
   requireValue(creationKey.length > 0, 'Companion creation identity is required');
   await mkdir(process.env.HOME || '/tmp/aether-browser-home', { recursive: true, mode: 0o700 });
   let startupError;
@@ -39,11 +39,31 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
   const startup = Promise.resolve().then(launch).then(async (value) => { session = value; await value.initialize(); return value; }).catch((error) => { startupError = error; console.error(`Browser sandbox startup failed: ${error.message}`); });
   let queue = Promise.resolve();
   let pending = 0;
+  // An operation past its deadline may still be driving Chromium, so later
+  // operations cannot safely run beside it: the companion refuses them and
+  // exits, and the host reports it unavailable until a reset replaces it.
+  let wedged = '';
   const serialize = (operation, signal) => {
+    if (wedged) throw new BrowserError('unavailable', wedged);
     requireValue(pending < 16, 'Companion operation queue is full', 'resource_limit');
     pending++;
-    const next = queue.then(() => { signal.throwIfAborted(); return operation(); });
-    queue = next.catch(() => {}).finally(() => { pending--; });
+    let counted = true;
+    const release = () => { if (counted) { counted = false; pending--; } };
+    signal.addEventListener('abort', release, { once: true });
+    const next = queue.then(async () => {
+      signal.throwIfAborted();
+      if (wedged) throw new BrowserError('unavailable', wedged);
+      let timer;
+      const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          wedged = `A companion operation did not finish within ${operationDeadline / 1000}s; reset the session's browser`;
+          reject(new BrowserError('unavailable', wedged));
+          onWedged(wedged);
+        }, operationDeadline).unref();
+      });
+      try { return await Promise.race([operation(), deadline]); } finally { clearTimeout(timer); }
+    });
+    queue = next.catch(() => {}).finally(() => { signal.removeEventListener('abort', release); release(); });
     return next;
   };
   const server = http.createServer({ maxHeaderSize: 8192, requestTimeout: 15000, headersTimeout: 10000 }, async (request, response) => {
@@ -54,6 +74,7 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
       requireValue(!request.headers.origin, 'Browser-origin requests are not accepted');
       if (request.method === 'GET' && request.url === '/health') {
         if (startupError) return json(response, 503, { error: { code: 'unavailable', message: startupError.message.slice(0, 8192) }, creation_key: creationKey });
+        if (wedged) return json(response, 503, { error: { code: 'unavailable', message: wedged }, creation_key: creationKey });
         if (!session?.context || !session.browser.isConnected()) return json(response, 503, { error: { code: 'unavailable', message: 'Chromium is not connected' }, creation_key: creationKey });
         return json(response, 200, { creation_key: creationKey, process_id: session.processID, session_id: session.sessionID, protocol_version: 1 });
       }
@@ -112,7 +133,7 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const companion = await startServer();
+  const companion = await startServer({ onWedged: (message) => { console.error(message); setImmediate(() => process.exit(1)); } });
   let closing = false;
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
     if (closing) return;
