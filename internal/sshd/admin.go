@@ -86,6 +86,7 @@ func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddPar
 	if err := s.cfg.Store.CreateWorkspace(ctx, w); err != nil {
 		return nil, rpcError(err)
 	}
+	s.accessChanged()
 	return w, nil
 }
 

@@ -25,10 +25,6 @@ func init() {
 	registerMethod(protocol.MethodWorkspaceOwnerSet, (*Server).workspaceOwnerSet)
 }
 
-// accessChanged is called after a grant, a revocation or an owner change,
-// once the store holds it.
-func (s *Server) accessChanged() {}
-
 func (s *Server) workspaceAccessList(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.WorkspaceAccessParams](params)
 	if perr != nil {
