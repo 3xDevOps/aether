@@ -370,15 +370,14 @@ export function LanesView(props: LanesViewProps) {
     // Lanes are placed absolutely, so the browser cannot anchor the scroll: the lane at the top of the view stays put when lanes above it come or go.
     const scroll = el?.scrollTop ?? 0
     if (previous && el && scroll > 0) {
-      // The first lane that still exists and started in view, else the nearest above it.
+      // The lane at the top of the view, as a browser would anchor; if it left, the first lane that started in view.
+      let top: [string, number] | undefined
       let below: [string, number] | undefined
-      let above: [string, number] | undefined
       for (const [key, y] of previous.top) {
-        if (!layout.top.has(key)) continue
-        if (y >= scroll) { if (!below || y < below[1]) below = [key, y] }
-        else if (!above || y > above[1]) above = [key, y]
+        if (y <= scroll && (!top || y > top[1])) top = [key, y]
+        if (y > scroll && layout.top.has(key) && (!below || y < below[1])) below = [key, y]
       }
-      const anchor = below ?? above
+      const anchor = top && layout.top.has(top[0]) ? top : below
       const moved = anchor && layout.top.get(anchor[0])! - anchor[1]
       if (moved) el.scrollTop = scroll + moved
     }
