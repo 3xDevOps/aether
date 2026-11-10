@@ -929,7 +929,8 @@ error, naming the session and companion container, until a `browser reset`
 replaces the companion. A paused session resumes with its browser still
 unavailable. A companion operation still running after 60 s fails, with the
 operations queued behind it, and ends the companion: its browser reports
-`unavailable` until a `browser reset`.
+`available: false` and state `exited` until a `browser reset`, and a paused
+session still resumes.
 Failed initial creation may return an opaque
 `pending:` session ID. It is a recovery fence, not a usable page session.
 Acquire the browser surface with that exact incarnation, then explicitly

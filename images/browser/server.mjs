@@ -49,7 +49,6 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
     pending++;
     let counted = true;
     const release = () => { if (counted) { counted = false; pending--; } };
-    // A caller that gave up no longer holds a slot, even before its turn.
     signal.addEventListener('abort', release, { once: true });
     const next = queue.then(async () => {
       signal.throwIfAborted();
@@ -60,7 +59,7 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
           wedged = `A companion operation did not finish within ${operationDeadline / 1000}s; reset the session's browser`;
           reject(new BrowserError('unavailable', wedged));
           onWedged(wedged);
-        }, operationDeadline);
+        }, operationDeadline).unref();
       });
       try { return await Promise.race([operation(), deadline]); } finally { clearTimeout(timer); }
     });
