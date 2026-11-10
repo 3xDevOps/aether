@@ -241,3 +241,45 @@ func TestTerminalGuidanceErrorKeepsTheCause(t *testing.T) {
 		t.Fatalf("err = %v, want the cause and the guidance", err)
 	}
 }
+
+func TestAgentModelsPrintsTheListAndTheError(t *testing.T) {
+	result := protocol.AgentModelsResult{
+		Models: []protocol.AgentModel{
+			{ID: "fable", Name: "Fable 5.2", Description: "For your toughest challenges"},
+			{ID: "claude-fable-5-1", Name: "Fable 5.1"},
+		},
+		DefaultLabel: "Fable 5.2", Source: protocol.ModelSourceAgent, FetchedAt: "2026-11-10T07:06:00Z",
+		Error: "claude models: run in the environment terminal: context deadline exceeded",
+	}
+	var out, errOut strings.Builder
+	if err := printModels(&out, &errOut, "claude", result); err != nil {
+		t.Fatal(err)
+	}
+	want := "claude models (agent, listed 2026-11-10T07:06:00Z)\n" +
+		"without --model: Fable 5.2\n" +
+		"MODEL             NAME       DESCRIPTION\n" +
+		"fable             Fable 5.2  For your toughest challenges\n" +
+		"claude-fable-5-1  Fable 5.1  \n"
+	if out.String() != want {
+		t.Fatalf("output =\n%q\nwant\n%q", out.String(), want)
+	}
+	if errOut.String() != "could not list claude's models: claude models: run in the environment terminal: context deadline exceeded\n" {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+
+	out.Reset()
+	if err := printModels(&out, io.Discard, "claude", protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Error: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "claude listed no models; --model passes any id to it as is\n" {
+		t.Fatalf("no models = %q", out.String())
+	}
+}
+
+func TestAgentModelsUsage(t *testing.T) {
+	for _, args := range [][]string{nil, {"--refresh"}, {"claude", "extra"}} {
+		if err := agentModels(args); err == nil || !strings.Contains(err.Error(), "usage: aether agent models") {
+			t.Fatalf("agentModels(%q) = %v, want the usage", args, err)
+		}
+	}
+}

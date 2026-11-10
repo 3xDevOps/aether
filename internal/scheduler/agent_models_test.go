@@ -127,7 +127,7 @@ func TestAgentModelsCodexFallsBackToItsCache(t *testing.T) {
 	}
 }
 
-func TestAgentModelsClaudeFailureFallsBack(t *testing.T) {
+func TestAgentModelsClaudeFailureListsNone(t *testing.T) {
 	t.Parallel()
 	e, _ := newModelsEnv(t)
 	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) { return 127, "", nil }
@@ -136,8 +136,7 @@ func TestAgentModelsClaudeFailureFallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Source != protocol.ModelSourceFallback || !slices.Equal(modelIDs(got), []string{"opus", "sonnet", "haiku"}) ||
-		got.Error != "claude exited 127: sh: 1: claude: not found" {
+	if got.Source != protocol.ModelSourceNone || len(got.Models) != 0 || got.Error != "claude exited 127: sh: 1: claude: not found" {
 		t.Fatalf("result = %+v", got)
 	}
 }
@@ -179,12 +178,32 @@ func TestAgentModelsCache(t *testing.T) {
 		got.FetchedAt != clock.now().Format(time.RFC3339) {
 		t.Fatalf("failed refresh = %+v, want the previous list with the error", got)
 	}
-	clock.advance(time.Minute)
+	clock.advance(30 * time.Second)
 	if got = models(false); got.FetchedAt != time.Date(2026, 10, 13, 13, 0, 1, 0, time.UTC).Format(time.RFC3339) || got.Error == "" {
 		t.Fatalf("a cached failure = %+v, want the old FetchedAt and the error", got)
 	}
 	if n := len(e.rt.execRuns()); n != 4 {
 		t.Fatalf("%d probes, want the failed one served from cache", n)
+	}
+	clock.advance(agentModelsFailTTL)
+	if got = models(false); len(got.Models) != len(first.Models) || got.Error == "" {
+		t.Fatalf("a second failure = %+v, want the previous list with the error", got)
+	}
+	if n := len(e.rt.execRuns()); n != 5 {
+		t.Fatalf("%d probes, want a failure to expire after %s", n, agentModelsFailTTL)
+	}
+	clock.advance(agentModelsFailTTL)
+	if cached, ok := e.sched.CachedAgentModels(e.member.ID, "claude"); !ok || len(cached.Models) != len(first.Models) {
+		t.Fatalf("CachedAgentModels after a failure = %+v, %v, want the last list until its hour is up", cached, ok)
+	}
+
+	fail.Store(false)
+	e.sched.expireAgentModels(e.member.ID, "claude")
+	if got = models(false); got.Error != "" || got.FetchedAt != clock.now().Format(time.RFC3339) {
+		t.Fatalf("after an update = %+v, want a fresh list", got)
+	}
+	if n := len(e.rt.execRuns()); n != 6 {
+		t.Fatalf("%d probes, want an update to expire the list", n)
 	}
 }
 
@@ -227,8 +246,8 @@ func TestAgentModelsSharedAccount(t *testing.T) {
 
 	writeHomeFiles(t, e.ownerHome, claudeLogin)
 	got, err := e.sched.AgentModels(t.Context(), e.member.ID, e.owner.ID, "claude", false)
-	if err != nil || got.Source != protocol.ModelSourceFallback || !strings.Contains(got.Error, "the account owner's environment is not running") {
-		t.Fatalf("with the owner's terminal stopped: %+v, %v, want the fallback and why", got, err)
+	if err != nil || got.Source != protocol.ModelSourceNone || !strings.Contains(got.Error, "the account owner's environment is not running") {
+		t.Fatalf("with the owner's terminal stopped: %+v, %v, want no list and why", got, err)
 	}
 	if n := len(e.rt.execRuns()); n != 0 || e.rt.byName(terminalContainerName(e.owner.ID)) != nil {
 		t.Fatalf("%d probes ran or the owner's terminal was started", n)
@@ -344,5 +363,41 @@ func TestAgentModelsOverrideWithoutStandardArgv(t *testing.T) {
 	}
 	if runs := e.rt.execRuns(); len(runs) != 1 || !slices.Contains(runs[0].argv, "alt-codex") {
 		t.Fatalf("exec runs = %+v, want one probing alt-codex", runs)
+	}
+}
+
+// A probe that was running when the agent updated answers with what the old
+// CLI listed, so the next call asks the updated one.
+func TestAgentModelsUpdateDuringAProbe(t *testing.T) {
+	t.Parallel()
+	e, _ := newModelsEnv(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return 0, modelsFixture(t, "claude-initialize.jsonl"), nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false)
+		done <- err
+	}()
+	<-entered
+	e.sched.expireAgentModels(e.member.ID, "claude")
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil {
+		t.Fatal(err)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("%d probes, want the answer from before the update not cached", n)
+	}
+	if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil || calls.Load() != 2 {
+		t.Fatalf("a third call ran a probe (%d) or failed: %v", calls.Load(), err)
 	}
 }

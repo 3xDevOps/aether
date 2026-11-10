@@ -497,5 +497,18 @@ func TestIntegrationAssistantIssuerMatchesTheBundledCLIs(t *testing.T) {
 				t.Errorf("%s's bundled CLI %s does not contain %q; update the issuer next to the pins", agent, matches[0], s)
 			}
 		}
+		if profile.ACPInstall.CLIVersion == "" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(AssistantInstallDir(e.sched.cfg.AssistantDir, e.member.ID, agent), "node_modules/@anthropic-ai/claude-agent-sdk/package.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sdk struct {
+			ClaudeCodeVersion string `json:"claudeCodeVersion"`
+		}
+		if err := json.Unmarshal(raw, &sdk); err != nil || sdk.ClaudeCodeVersion != profile.ACPInstall.CLIVersion {
+			t.Errorf("%s's adapter bundles Claude Code %q (%v); set CLIVersion %q next to the pin to it", agent, sdk.ClaudeCodeVersion, err, profile.ACPInstall.CLIVersion)
+		}
 	}
 }

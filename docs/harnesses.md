@@ -209,6 +209,19 @@ installs that. Claude Code, Codex and pi need a separate npm adapter package:
 --enhanced` installs the agent and its adapter, pinned to the version Aether
 tests against. The dashboard's **Set up** does the same when you pick Enhanced.
 
+`claude-agent-acp` bundles its own copy of Claude Code (2.1.287 with the
+current pin), which moves only with the pin. An Enhanced Claude Code session
+runs the `claude` on the session's `PATH` instead, the one Standard sessions
+run, by setting `CLAUDE_CODE_EXECUTABLE` to it. A `claude` in `~/.local/bin` is
+the one Aether [updates before launch](#updates-before-launch), so a new model
+reaches Enhanced sessions with the next Claude Code update, without an Aether
+release. The adapter runs its bundled copy instead when `claude` is not on
+`PATH`, or `claude --version` is older than the bundled one or prints no
+version Aether can read within 10 seconds. Update a `claude` in your home with
+`claude update` in `aether terminal`, and one installed in the image by
+rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` set as a
+workspace variable wins.
+
 ### Per-agent setup
 
 Run each login in your environment's shell, which `aether terminal` opens from
@@ -561,14 +574,24 @@ A model that is not a single argument is refused before launch:
 model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes
 ```
 
-The dashboard offers a model list for Claude Code and Codex, read from the
-installed CLI on your login. Falling back, Claude Code lists `opus`, `sonnet`
-and `haiku`; Codex lists models from `~/.codex/models_cache.json`. For other
-agents, type the model name. The list is cached for an hour. On a shared
-account, discovery runs in the account owner's environment and never starts it.
-If the owner's terminal is not running, the result is the fallback with an error
-saying so. A failed discovery shows the CLI's error, for example
-`codex exited 127: sh: 3: codex: not found`.
+The dashboard, `aether agent models <name>` and the connector's
+`aether_launch_options` list the models of Claude Code and Codex, read from the
+installed CLI on your login: what `claude` or `codex app-server` reports, with
+each model's id and name. Claude Code's aliases resolve to its newest models,
+so check the name: `fable` is `Fable 5.2` once Claude Code knows Fable 5.2. For
+other agents, type the model name. Any id is accepted; Claude Code also takes a
+full model id such as `claude-fable-5-2` that its list shows only as an alias.
+
+The list is cached for an hour and discovered again after Aether updates the
+agent; `aether agent models <name> --refresh` or the dashboard's refresh button
+discovers it now. A failed discovery shows the CLI's real error, for example
+`codex exited 127: sh: 3: codex: not found` or
+`claude models: run in the environment terminal: context deadline exceeded`,
+next to the last list that worked, and is retried after a minute. With no
+earlier list since the server started, Claude Code lists nothing and Codex
+lists `~/.codex/models_cache.json`; type the id. On a shared account,
+discovery runs in the account owner's environment and never starts it; if the
+owner's terminal is not running, the error says so.
 
 ### Choose an effort
 

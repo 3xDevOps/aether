@@ -117,6 +117,7 @@ func (s *Service) options(ctx context.Context, run domain.RunID, req protocol.Ch
 			for _, m := range models.Models {
 				out.Choices[i].Models = append(out.Choices[i].Models, m.ID)
 			}
+			out.Choices[i].ModelsError = models.Error
 		}
 	}
 	return out, nil

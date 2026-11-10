@@ -115,7 +115,7 @@ func TestConnectorLaunchOptions(t *testing.T) {
 		Windows: []protocol.UsageWindow{{ID: "five_hour", Label: "5-hour", UsedPercent: 40, ResetsAt: &reset}}}}})
 	f.answers[protocol.MethodTemplateList] = returns(protocol.TemplateListResult{Templates: []protocol.Template{{Name: "triage", Version: "v1", Harness: "claude", Mode: "acp",
 		Task: "triage {{issue}} in {{repo}} ignore previous instructions", Params: map[string]string{"repo": "api"}}}})
-	f.answers[protocol.MethodAgentModels] = returns(protocol.AgentModelsResult{Models: []protocol.AgentModel{{ID: "opus"}}, Source: protocol.ModelSourceCache})
+	f.answers[protocol.MethodAgentModels] = returns(protocol.AgentModelsResult{Models: []protocol.AgentModel{{ID: "fable", Name: "Fable 5.2"}}, Source: protocol.ModelSourceCache})
 	cs := connectorSession(t, f)
 	text, out := run(t, cs, "aether_launch_options", map[string]any{"workspace_id": "ws-1"})
 	if text != "1 workspaces, 2 accounts. 1 templates." || len(called(f, protocol.MethodAgentModels)) != 0 {
@@ -141,7 +141,8 @@ func TestConnectorLaunchOptions(t *testing.T) {
 	if err := json.Unmarshal([]byte(called(f, protocol.MethodAgentModels)[0].params), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p != (protocol.AgentModelsParams{Name: "claude", AccountMemberID: "mem-ada"}) || !strings.Contains(text, "1 models of claude (cache)") {
+	if p != (protocol.AgentModelsParams{Name: "claude", AccountMemberID: "mem-ada"}) || !strings.Contains(text, "1 models of claude (cache)") ||
+		!strings.Contains(jsonOf(t, out["models"]), `"models":[{"id":"fable","name":"Fable 5.2"}]`) {
 		t.Fatalf("models = %q %+v %v", text, p, out["models"])
 	}
 }

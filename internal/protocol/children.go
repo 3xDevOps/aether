@@ -61,6 +61,9 @@ type ChildChoice struct {
 	// means any model the agent accepts.
 	Model  string   `json:"model,omitempty"`
 	Models []string `json:"models,omitempty"`
+	// ModelsError is the last failed discovery's error; Models then holds
+	// the last list that worked, or none.
+	ModelsError string `json:"models_error,omitempty"`
 	// Status is "ready", "exhausted" (usage at the fallback threshold),
 	// "not-installed" or "not-signed-in"; Detail is the exact sentence.
 	Status string `json:"status"`
