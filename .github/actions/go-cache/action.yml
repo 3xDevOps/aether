@@ -1,7 +1,7 @@
 name: Go build cache
 description: >
   Restore separate Go module and compiler caches after actions/setup-go
-  with its own cache disabled. Only main pushes save; one job per host
+  with its own cache disabled. Only runs on main save; one job per host
   saves modules, and one job per variant saves its compiler cache.
   Host, runner environment and resolved toolchain isolate all archives.
 inputs:

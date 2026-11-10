@@ -7,10 +7,12 @@
 # web covers the dashboard checks: the dashboard source and everything that
 # builds or serves it. go covers the Go unit and lint jobs: everything
 # except the dashboard source (web/ other than web/embed.go) and docs-only
-# changes. caches covers every file a cache key in .github/ hashes, and
-# .github/ itself, which names the keys. false only when at least one path is present and every path is
-# in the unrelated set for the mode. Empty input prints true. Blank lines
-# are ignored. A path in neither set prints true.
+# changes. caches covers every file a cache key in .github/ hashes, every
+# file the cached browser and standard image builds copy in, and .github/
+# itself, which names the keys; any other path is outside it. false only
+# when at least one path is present and every path is in the unrelated set
+# for the mode. Empty input prints true. Blank lines are ignored. For web
+# and go, a path in neither set prints true.
 set -eu
 
 if [ "$#" -ne 1 ]; then

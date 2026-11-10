@@ -752,8 +752,12 @@ such run exists, when a lookup fails, when the push touches 300 files or
 more (GitHub's compare limit), or when it changes a file a cache key hashes
 (`ci-classify-areas.sh caches`). Caches save only from runs on `main`,
 because a merge queue run's caches are scoped to its own queue branch; the
-nightly run refreshes them and also tests `main` against the newest agent
-CLIs and the latest published release.
+nightly run refreshes them, so between nightly runs a session restores
+compiler caches up to a day old. It also tests `main` against the newest
+agent CLIs and the latest published release; its result gates nothing, so
+read a red nightly `CI gate` on the `main` tip yourself. A merge queue run
+re-run after its push reused it does not change that push's verdict:
+re-run the push session too.
 
 `CI gate` is the one required check: it passes when
 every other job passed or was skipped by its own rule, and fails when any
@@ -772,7 +776,7 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | Job | Sessions | Locally |
 | --- | --- | --- |
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
-| `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on `main` pushes and merge queue sessions only | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
+| `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on merge queue and nightly sessions only | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
 | `build-and-test` | Unit tests (`-race` on the merge queue and `main` only), then `make build` | `make test build` |
 | `integration (server-rest, browser)`, `integration (server-flows, smoke)`, `integration (scheduler, rest, agents)` | [Integration tests](#integration-tests), the [smoke tests](#real-agent-smoke-tests), [real agents against a mock model](#real-agents-against-a-mock-model) and [the browser companion](#the-browser-companion), on amd64 | See the table under Integration tests |
 | `arm64` | Standard and browser image builds, smoke tests and browser runtime tests on arm64 | Same commands on an arm64 host |
@@ -791,7 +795,7 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 | --- | --- | --- |
 | `go` | `lint`, `build-and-test` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
 | `web` | `dashboard` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
-| `caches` | The full suite on a push to `main` | `go.mod`, `go.sum`, `.golangci.yml`, `.github/`, `images/`, `web/public/fonts/`, the web and desktop package manifests and lockfiles, `web/.bun-version`, the Gradle files |
+| `caches` | The full suite on a push to `main` | `go.mod`, `go.sum`, `.golangci.yml`, `.github/`, `images/`, the fonts the browser image copies from `web/public/fonts/`, the web and desktop package manifests and lockfiles, `web/.bun-version`, the Gradle files |
 
 The classifier runs from the pull request's base revision, so a pull request
 cannot change its own classification, and a renamed file counts by its old
