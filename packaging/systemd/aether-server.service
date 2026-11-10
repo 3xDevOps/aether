@@ -8,11 +8,9 @@ Requires=docker.service
 [Service]
 Type=simple
 OOMScoreAdjust=-500
-# Session containers run beside this unit in system.slice at weight 100; the
-# higher weights keep the server answering while they saturate CPU and disk.
-CPUWeight=1000
-IOWeight=1000
-# MemoryLow protects only once system.slice has MemoryLow too (docs/install.md).
+# Priority over session containers; see docs/install.md.
+CPUWeight=10000
+IOWeight=10000
 MemoryLow=1G
 # Runs as root. Two reasons, both deliberate (docs/security.md):
 #   1. The unit needs the Docker socket, and Docker socket access is already

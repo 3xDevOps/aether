@@ -202,8 +202,8 @@ func TestDefaultUnitKeepsOperationalDirectives(t *testing.T) {
 	unit := DefaultUnit()
 	for _, want := range []string{
 		"Requires=docker.service",
-		"CPUWeight=1000",
-		"IOWeight=1000",
+		"CPUWeight=10000",
+		"IOWeight=10000",
 		"MemoryLow=1G",
 		"ExecStart=/usr/local/bin/aether-server serve --config " + DefaultConfigPath,
 		"EnvironmentFile=-/etc/aether/aether-server.env",
