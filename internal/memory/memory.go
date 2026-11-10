@@ -408,6 +408,9 @@ func (s *Service) Pin(ctx context.Context, member domain.MemberID, p protocol.Me
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
+	if err := s.visible(ctx, member, workspace, p.ID, ""); err != nil {
+		return protocol.MemoryPinResult{}, fail(method, err)
+	}
 	note, err := s.cfg.Store.PinMemory(ctx, workspace, p.ID, member, store.MemoryScope(p.Scope), mayPin(method, p.Scope, actor))
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
@@ -426,6 +429,9 @@ func (s *Service) Unpin(ctx context.Context, member domain.MemberID, p protocol.
 	workspace := domain.WorkspaceID(p.WorkspaceID)
 	actor, err := s.authorize(ctx, member, workspace)
 	if err != nil {
+		return protocol.MemoryUnpinResult{}, fail(method, err)
+	}
+	if err := s.visible(ctx, member, workspace, p.ID, ""); err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
 	note, err := s.cfg.Store.UnpinMemory(ctx, workspace, p.ID, mayChange(method, "unpin", actor))
@@ -448,6 +454,9 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 	workspace := domain.WorkspaceID(p.WorkspaceID)
 	actor, err := s.authorize(ctx, member, workspace)
 	if err != nil {
+		return protocol.MemoryRmResult{}, fail(method, err)
+	}
+	if err := s.visible(ctx, member, workspace, p.ID, domain.RunID(p.RunID)); err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
 	ids, vet := []string{p.ID}, mayChange(method, "remove", actor)
@@ -481,6 +490,33 @@ func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspa
 // reach is the workspaces every one of members reaches, nil when they are
 // all super admins, who reach every workspace: a note of a session with a
 // workspace outside them, and the session itself, do not exist for them.
+// visible answers a note, or the notes of a session, that member cannot see
+// exactly as one that does not exist, before anything is changed: a note
+// of a session with a workspace they do not reach is not theirs to touch.
+func (s *Service) visible(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, note string, run domain.RunID) error {
+	reach, err := s.reach(ctx, member)
+	if err != nil || reach == nil {
+		return err
+	}
+	if note != "" {
+		_, _, err = s.cfg.Store.GetMemory(ctx, workspace, note, reach)
+		return err
+	}
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, ws := range append([]domain.WorkspaceID{r.WorkspaceID}, r.ExtraWorkspaces()...) {
+		if !slices.Contains(reach, ws) {
+			return store.ErrNotFound
+		}
+	}
+	return nil
+}
+
 func (s *Service) reach(ctx context.Context, members ...domain.MemberID) ([]domain.WorkspaceID, error) {
 	var actors []permissions.Actor
 	for _, id := range members {

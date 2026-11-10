@@ -84,7 +84,10 @@ type Store interface {
 	GetMemberByTailnetLogin(ctx context.Context, login string) (*domain.Member, error)
 	// ApproveMember clears only the member's pending flag, leaving every
 	// other field untouched.
-	ApproveMember(ctx context.Context, id domain.MemberID) error
+	// ApproveMember clears the member's pending flag. Unless anyRole, it
+	// does so only for a member below admin, decided in the same write as
+	// the approval so a role change cannot land between check and approval.
+	ApproveMember(ctx context.Context, id domain.MemberID, anyRole bool) error
 	// UpdateMemberImage sets only the member's saved environment image.
 	UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error
 	// UpdateMemberGitIdentity sets only the member's git author name and

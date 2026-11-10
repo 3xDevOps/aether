@@ -862,3 +862,60 @@ func TestMemoryLeavesOutSessionsWithAnUnreachableWorkspace(t *testing.T) {
 		t.Errorf("Dana's agent brief = %+v, %v; want the hidden session left out", got, err)
 	}
 }
+
+// A note of a session with a workspace the member does not reach cannot be
+// pinned, unpinned or removed by them, by its id or by the session's: each
+// answers as for a note that does not exist, and the note is left alone.
+func TestMemoryWritesLeaveHiddenSessionsNotesAlone(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	scoped, err := New(Config{Store: f.db, Bus: f.bus, Log: f.log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib := &domain.Workspace{Name: "lib", BaseBranch: domain.DefaultBaseBranch}
+	if err = f.db.CreateWorkspace(ctx, lib); err != nil {
+		t.Fatal(err)
+	}
+	ola := f.member("Ola", domain.RoleCollaborator)
+	for _, g := range []struct {
+		ws domain.WorkspaceID
+		m  *domain.Member
+	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hidden := f.run(ola, "claude", "Two repositories")
+	if err = f.db.SetRunRepos(ctx, hidden.ID, []domain.RunRepo{{WorkspaceID: lib.ID, Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.db.AppendCoordReport(ctx, &store.CoordReport{WorkspaceID: f.ws.ID, RunID: hidden.ID,
+		Outcome: store.CoordOutcomeSuccess, Summary: "Shipped the private change.", IdempotencyKey: "success-1"}); err != nil {
+		t.Fatal(err)
+	}
+	f.finish(hidden, time.Hour)
+	notes, err := scoped.Search(ctx, ola.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID), Source: protocol.MemorySourceReport})
+	if err != nil || len(notes.Items) != 1 {
+		t.Fatalf("Ola's report notes = %+v, %v", notes, err)
+	}
+	note, ws := notes.Items[0].ID, string(f.ws.ID)
+	notFound := func(what string, err error) {
+		t.Helper()
+		var pe *protocol.Error
+		if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+			t.Errorf("Dana %s = %v, want not found", what, err)
+		}
+	}
+	_, err = scoped.Pin(ctx, f.dana.ID, protocol.MemoryPinParams{WorkspaceID: ws, ID: note})
+	notFound("pins the hidden note", err)
+	_, err = scoped.Unpin(ctx, f.dana.ID, protocol.MemoryUnpinParams{WorkspaceID: ws, ID: note})
+	notFound("unpins the hidden note", err)
+	_, err = scoped.Remove(ctx, f.dana.ID, protocol.MemoryRmParams{WorkspaceID: ws, ID: note})
+	notFound("removes the hidden note", err)
+	_, err = scoped.Remove(ctx, f.dana.ID, protocol.MemoryRmParams{WorkspaceID: ws, RunID: string(hidden.ID)})
+	notFound("removes the hidden session's notes", err)
+	if _, err = scoped.Show(ctx, ola.ID, protocol.MemoryShowParams{WorkspaceID: ws, ID: note}); err != nil {
+		t.Fatalf("the note after Dana's attempts: %v", err)
+	}
+}

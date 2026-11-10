@@ -120,7 +120,7 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 			if !f.keeps(e) {
 				continue
 			}
-			out = append(out, e)
+			out = append(out, events.Scoped(e, f.Scope))
 			if len(out) == limit {
 				break
 			}
@@ -171,7 +171,7 @@ func (r *Reader) Before(ctx context.Context, f Filter, beforeSeq uint64, limit i
 			if !f.keeps(e) {
 				continue
 			}
-			out = append(out, e)
+			out = append(out, events.Scoped(e, f.Scope))
 			if len(out) == limit {
 				break
 			}

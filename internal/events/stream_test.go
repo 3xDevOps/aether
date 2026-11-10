@@ -108,25 +108,26 @@ func TestStreamWireLeavesOutAnUnreachableExtraRepository(t *testing.T) {
 	}
 }
 
-// An overlap set names its peers, so a reader who cannot fully reach one
-// peer gets none of it.
-func TestReachableJudgesEveryOverlapPeer(t *testing.T) {
+// An overlap set is delivered with the peers a reader cannot fully reach
+// left out, an emptied set included, so its other changes still arrive.
+func TestScopedLeavesOutUnreachableOverlapPeers(t *testing.T) {
 	hidden := domain.RunID("run-hidden")
 	scope := Scope{
 		Workspace: func(domain.WorkspaceID) bool { return true },
 		Run:       func(id domain.RunID) bool { return id != hidden },
 	}
-	ev := func(peers ...domain.RunID) Event {
-		var p OverlapPayload
-		for _, id := range peers {
-			p.With = append(p.With, OverlapPeer{RunID: id, Files: []string{"a.go"}})
-		}
-		return Event{WorkspaceID: "ws-a", RunID: "run-mine", Payload: p}
+	ev := Event{WorkspaceID: "ws-a", RunID: "run-mine", Payload: OverlapPayload{With: []OverlapPeer{
+		{RunID: "run-seen", Files: []string{"a.go"}}, {RunID: hidden, Files: []string{"a.go"}},
+	}}}
+	if !Reachable(ev, scope) {
+		t.Fatal("an overlap set naming a hidden peer was withheld")
 	}
-	if !Reachable(ev("run-seen"), scope) {
-		t.Fatal("an overlap with a reachable peer was hidden")
+	got := Scoped(ev, scope).Payload.(OverlapPayload)
+	if len(got.With) != 1 || got.With[0].RunID != "run-seen" {
+		t.Fatalf("scoped overlap = %+v, want only the reachable peer", got.With)
 	}
-	if Reachable(ev("run-seen", hidden), scope) {
-		t.Fatal("an overlap naming a peer the reader cannot reach was delivered")
+	ev.Payload = OverlapPayload{With: []OverlapPeer{{RunID: hidden}}}
+	if got := Scoped(ev, scope).Payload.(OverlapPayload); len(got.With) != 0 {
+		t.Fatalf("scoped overlap of a hidden peer = %+v, want an empty set", got.With)
 	}
 }

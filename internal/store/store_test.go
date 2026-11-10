@@ -538,7 +538,7 @@ func TestMemberTailnetIdentity(t *testing.T) {
 		t.Fatal("CreateMember accepted a member with no identity at all")
 	}
 
-	if approveErr := db.ApproveMember(ctx, m.ID); approveErr != nil {
+	if approveErr := db.ApproveMember(ctx, m.ID, true); approveErr != nil {
 		t.Fatalf("ApproveMember: %v", approveErr)
 	}
 	got, err = db.GetMember(ctx, m.ID)
@@ -551,7 +551,7 @@ func TestMemberTailnetIdentity(t *testing.T) {
 	if got.TailnetLogin != m.TailnetLogin || got.DisplayName != m.DisplayName {
 		t.Errorf("ApproveMember touched other fields: %+v", got)
 	}
-	if err := db.ApproveMember(ctx, "m_missing"); !errors.Is(err, ErrNotFound) {
+	if err := db.ApproveMember(ctx, "m_missing", true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ApproveMember unknown id: %v, want ErrNotFound", err)
 	}
 }

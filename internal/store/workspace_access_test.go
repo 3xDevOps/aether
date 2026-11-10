@@ -580,3 +580,27 @@ func TestMergeKeepsSuperAdmin(t *testing.T) {
 		t.Error("LeavesNoSuperAdmin does not guard the last super admin")
 	}
 }
+
+// An approval that may admit only members below admin is decided in the
+// same write, so a promotion landing first is refused, not admitted.
+func TestApproveMemberBelowAdminIsGuardedInTheWrite(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	pending := &domain.Member{DisplayName: "Pat", PublicKey: testKey(t, "pat"), Color: "#e6194b", Role: domain.RoleCollaborator, Pending: true}
+	if err := db.CreateMember(ctx, pending); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetMemberRole(ctx, pending.ID, domain.RoleSuperAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ApproveMember(ctx, pending.ID, false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("approving a promoted member below admin only = %v, want ErrConflict", err)
+	}
+	if m, err := db.GetMember(ctx, pending.ID); err != nil || !m.Pending {
+		t.Fatalf("member after the refused approval = %+v, %v; want still pending", m, err)
+	}
+	if err := db.ApproveMember(ctx, pending.ID, true); err != nil {
+		t.Fatalf("a super admin's approval: %v", err)
+	}
+}

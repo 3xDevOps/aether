@@ -105,7 +105,7 @@ func StreamWire(sub Subscription, member domain.MemberID, scope Scope, write fun
 		if !deliverable(ev, member, scope) {
 			continue
 		}
-		we, err := wireEvent(ev)
+		we, err := wireEvent(Scoped(ev, scope))
 		if err != nil {
 			return err
 		}
@@ -114,6 +114,20 @@ func StreamWire(sub Subscription, member domain.MemberID, scope Scope, write fun
 		}
 	}
 	return nil
+}
+
+// peerScoped is a payload that names other runs and drops, for a reader,
+// those the reader cannot fully reach.
+type peerScoped interface {
+	ScopedTo(reaches func(domain.RunID) bool) Payload
+}
+
+// Scoped is ev as a reader with scope may see it.
+func Scoped(ev Event, scope Scope) Event {
+	if p, ok := ev.Payload.(peerScoped); ok && scope.Run != nil {
+		ev.Payload = p.ScopedTo(scope.Run)
+	}
+	return ev
 }
 
 func deliverable(ev Event, member domain.MemberID, scope Scope) bool {

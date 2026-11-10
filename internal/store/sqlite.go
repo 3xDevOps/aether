@@ -700,13 +700,21 @@ func (d *DB) GetMemberByTailnetLogin(ctx context.Context, login string) (*domain
 	return m, nil
 }
 
-func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE members SET pending = 0 WHERE id = ?`, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: approve member: %w", err)
+func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID, anyRole bool) error {
+	res, err := d.db.ExecContext(ctx,
+		`UPDATE members SET pending = 0 WHERE id = ?1 AND (?2 OR role NOT IN ('admin', 'super_admin'))`, id, anyRole)
+	if err != nil {
+		return fmt.Errorf("store: approve member: %w", err)
 	}
-	return err
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: approve member: %w", err)
+	} else if n > 0 {
+		return nil
+	}
+	if _, err := d.GetMember(ctx, id); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: member %s is an admin or super admin now; only a super admin approves them", ErrConflict, id)
 }
 
 // UpdateMemberGitIdentity sets only the member's git author name and
