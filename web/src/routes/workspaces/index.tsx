@@ -20,13 +20,14 @@ import { WorkspaceAccessDialog, WorkspaceOwnerDialog } from '@/routes/workspaces
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { isAdminRole } from '@/lib/permissions'
 import { sameIdentity, useStore } from '@/store'
-import { useCapability, useIsAdmin, useIsSuperAdmin, useSelfRole } from '@/store/hooks'
+import { useCapability, useIsAdmin, useIsSuperAdmin, useSelfRole, useWorkspaceAccessServer } from '@/store/hooks'
 
 export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const selfRole = useSelfRole()
   const superAdmin = useIsSuperAdmin()
+  const scoped = useWorkspaceAccessServer()
   const members = useStore((s) => s.members)
   const canAdd = isAdmin && (caps.hasMethod('workspace.add') || caps.hasMethod('workspace.import'))
   const navigate = useStore((s) => s.navigate)
@@ -152,8 +153,8 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                               <MenuItem onSelect={() => navigate('workspace', { workspaceId: workspace.id, section: 'environment' })}>Environment</MenuItem>
                             )}
                             {administers(workspace) && caps.hasMethod('workspace.settings') && <MenuItem onSelect={() => setSettings(workspace)}>Settings…</MenuItem>}
-                            {administers(workspace) && caps.hasMethod('workspace.access.list') && <MenuItem onSelect={() => setAccessing(workspace)}>Access…</MenuItem>}
-                            {superAdmin && caps.hasMethod('workspace.owner.set') && <MenuItem onSelect={() => setChowning(workspace)}>Change owner…</MenuItem>}
+                            {scoped && administers(workspace) && caps.hasMethod('workspace.access.list') && <MenuItem onSelect={() => setAccessing(workspace)}>Access…</MenuItem>}
+                            {scoped && superAdmin && caps.hasMethod('workspace.owner.set') && <MenuItem onSelect={() => setChowning(workspace)}>Change owner…</MenuItem>}
                             {administers(workspace) && caps.hasMethod('workspace.delete') && (
                               <>
                                 <MenuSeparator />

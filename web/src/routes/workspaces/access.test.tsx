@@ -193,3 +193,14 @@ describe('workspace access', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 })
+
+describe('a server without workspace access', () => {
+  it('offers no Access or Change owner actions', async () => {
+    seed(root, { owned: true })
+    useStore.setState({ info: { ...serverInfo, member: { ...root, role: 'admin' }, features: [] } })
+    render(<WorkspacesRoute params={{}} client={client()} />)
+    const menu = await menuOf('main-repo')
+    expect(menu.queryByRole('menuitem', { name: 'Access…' })).toBeNull()
+    expect(menu.queryByRole('menuitem', { name: 'Change owner…' })).toBeNull()
+  })
+})

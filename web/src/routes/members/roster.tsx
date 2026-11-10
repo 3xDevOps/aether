@@ -15,7 +15,7 @@ import type { AccountAccess, Member } from '@/lib/types'
 import { useFailure } from '@/components/failure'
 import { useStore } from '@/store'
 import { nextMemberOrder, type MemberPatch } from '@/store/members'
-import { useCapability, useIsAdmin, useIsSuperAdmin } from '@/store/hooks'
+import { useCapability, useIsAdmin, useIsSuperAdmin, useWorkspaceAccessServer } from '@/store/hooks'
 import { optimistic } from '@/store/optimistic'
 import { onlineMembers } from '@/store/presence'
 
@@ -53,6 +53,7 @@ export function Roster({ client }: { client: Api }) {
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const superAdmin = useIsSuperAdmin()
+  const scoped = useWorkspaceAccessServer()
   const [access, setAccess] = useState<AccountAccess | null>(null)
   const [removing, setRemoving] = useState<Member | null>(null)
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
@@ -172,7 +173,7 @@ export function Roster({ client }: { client: Api }) {
                           <MenuContent align="end">
                             <MenuLabel>Role</MenuLabel>
                             <MenuRadioGroup value={member.role} onValueChange={(role) => changeRole(member, role as Member['role'])}>
-                              {roles.map((role) => <MenuRadioItem key={role} value={role} description={roleDescription[role]}>{roleLabel[role]}</MenuRadioItem>)}
+                              {roles.filter((role) => scoped || role !== 'super_admin').map((role) => <MenuRadioItem key={role} value={role} description={roleDescription[role]}>{roleLabel[role]}</MenuRadioItem>)}
                             </MenuRadioGroup>
                             {canRemove && !you && (
                               <>
