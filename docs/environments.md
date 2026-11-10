@@ -107,9 +107,10 @@ pushed to a registry.
 - New sessions, workspace shells and the next environment open use the saved image.
   Running containers keep theirs.
 - Each save replaces the previous one as your saved image. The new image
-  records the image new sessions started from until then as your previous
-  image; Aether keeps that one on the server and removes older ones. To fix a
-  bad save, repair it and save again, or reset.
+  records a previous image: the saved image your environment was created
+  from, or, when it runs the standard image, the image new sessions started
+  from until then. Aether keeps that one on the server and removes older
+  ones. To fix a bad save, repair it and save again, or reset.
 - Every save is checked before it becomes your saved image
   ([Saved image checks](#saved-image-checks)).
 - Saving needs a running terminal. If it is stopped, `aether env save` fails

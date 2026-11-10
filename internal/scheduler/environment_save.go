@@ -50,10 +50,21 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
-	// The image sessions start from now is the new image's previous one.
-	previous, _, err := s.sessionImage(ctx, m)
+	starting, _, err := s.sessionImage(ctx, m)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
+	}
+	// A terminal created from one of the member's images, such as one that
+	// fell back, proves that image starts: it is the new image's previous
+	// one even after a restart forgot the fallback. A terminal on the
+	// standard image proves nothing about the member's images.
+	info, err := s.cfg.Runtime.Inspect(ctx, sup.containerID)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: save environment: inspect the terminal: %w", err)
+	}
+	previous := starting
+	if isMemberImage(member, info.Image) {
+		previous = info.Image
 	}
 	name := strings.ToLower(rand.Text())
 	pending, tag := pendingImageRepo(member)+":"+name, memberImageRepo(member)+":"+name
@@ -70,8 +81,8 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	}
 	if checkErr != nil {
 		current := "the standard image"
-		if previous != "" {
-			current = "your saved image " + previous
+		if starting != "" {
+			current = "your saved image " + starting
 		}
 		problem := "could not be checked"
 		if _, ok := errors.AsType[*errImageOwners](checkErr); ok {

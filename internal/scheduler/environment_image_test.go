@@ -437,3 +437,51 @@ func TestUnstartableImageCause(t *testing.T) {
 		t.Errorf("unstartableImageCause(setup failure) = %q, want none", got)
 	}
 }
+
+func TestSaveAfterRestartRecordsTheTerminalsFallbackImage(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	saved := e.saveTimes(t, 2)
+	working, broken := saved[0], saved[1]
+	if err := e.sched.StopTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("StopTerminal: %v", err)
+	}
+	if destroyed, err := e.sched.DestroyStoppedTerminal(t.Context(), e.member.ID); err != nil || !destroyed {
+		t.Fatalf("DestroyStoppedTerminal = %v, %v", destroyed, err)
+	}
+	e.failImageStarts(map[string]string{broken: eoverflowErr})
+	if terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil || terminal.Image != working {
+		t.Fatalf("EnsureTerminal = %+v, %v, want it on %q", terminal, err, working)
+	}
+
+	// The restart forgets the marks; the adopted terminal still runs the
+	// working image while the member's image is the broken one.
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	startScheduler(t, recovered)
+	waitFor(t, "terminal recovery", func() bool { return recovered.lookupTerminal(e.member.ID) != nil })
+	if _, err := recovered.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal after restart: %v", err)
+	}
+	recovered.mu.Lock()
+	marks := len(recovered.unstartableImages)
+	recovered.mu.Unlock()
+	if member, err := e.db.GetMember(t.Context(), e.member.ID); err != nil || member.Image != broken || marks != 0 {
+		t.Fatalf("member image = %q, %d marks, %v; want %q and no marks", member.Image, marks, err, broken)
+	}
+	tag, err := recovered.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("SaveEnvironment: %v", err)
+	}
+	if previous, err := recovered.previousImage(t.Context(), tag); err != nil || previous != working {
+		t.Fatalf("previous of the save = %q, %v, want the terminal's %q", previous, err, working)
+	}
+	if tags := e.memberImages(t); !slices.Equal(tags, slices.Sorted(slices.Values([]string{tag, working}))) {
+		t.Fatalf("images after the save = %v, want %q and %q, without the broken %q", tags, tag, working, broken)
+	}
+}
