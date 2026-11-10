@@ -615,7 +615,10 @@ whitespace or control characters, a leading `-`, or more than 128 bytes is
 `-32602` with
 `model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes`.
 Session snapshots and templates carry the `model` they launch with, omitted when
-empty.
+empty. When the agent of an Enhanced session refuses its model, the snapshot's
+`refused_model` names it, `model` becomes the one the session reports running,
+empty for the agent's default, `model_error` says why, and a `run.model` event
+with that `model` follows; choosing a model later clears both.
 
 They take an optional `effort` in the same places: one of the agent's
 `effort_levels` from `agent.list`, empty for the agent's default

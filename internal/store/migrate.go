@@ -2587,6 +2587,12 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
 CREATE INDEX IF NOT EXISTS idx_events_run_type ON events (run_id, type);
 CREATE INDEX IF NOT EXISTS idx_events_workspace_type ON events (workspace_id, type);
 `,
+	// v110: the model an Enhanced run's agent refused and why; the run's
+	// model is then the one the session runs on, empty for the agent's default.
+	`
+ALTER TABLE runs ADD COLUMN refused_model TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN model_error TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

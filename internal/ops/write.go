@@ -133,7 +133,7 @@ var controlOps = []Op{
 
 func launched(r protocol.Run, l links, book accountBook) map[string]any {
 	return map[string]any{"run_id": r.ID, "state": r.Status, "url": l.run(r.ID), "launch": runReceipt(r, l, book),
-		"next": "poll aether_get_session with run_id"}
+		"next": nextAfterLaunch(r)}
 }
 
 func recent(at string, now time.Time) bool {
@@ -272,7 +272,7 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self 
 				extras = append(extras, repo.WorkspaceID)
 			}
 		}
-		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model) &&
+		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model || r.RefusedModel == in.Model) &&
 			cmp.Or(in.AccountMemberID, self) == cmp.Or(r.RequestedAccountMemberID, r.AccountMemberID) &&
 			slices.Equal(in.FallbackAccountMemberIDs, r.FallbackAccountMemberIDs) && in.NoFallback == r.NoFallback && in.Children == r.Children &&
 			cmp.Or(in.Permission, string(domain.PermissionDefault)) == cmp.Or(r.Permission, string(domain.PermissionDefault)) &&

@@ -795,10 +795,13 @@ type Run struct {
 	Harness string
 	Mode    LaunchMode
 	// Model is the agent's model for this run and Effort its effort or
-	// thinking level; empty keeps the agent's default.
-	Model      string
-	Effort     string
-	Permission Permission
+	// thinking level; empty keeps the agent's default. RefusedModel is the
+	// model the run asked for and the agent refused, and ModelError why.
+	Model        string
+	RefusedModel string
+	ModelError   string
+	Effort       string
+	Permission   Permission
 	// ACP is true when the server drives the agent over the Agent Client
 	// Protocol: every LaunchACP run, and a LaunchHeadless run whose agent
 	// serves ACP. Such a run has a session item log.
