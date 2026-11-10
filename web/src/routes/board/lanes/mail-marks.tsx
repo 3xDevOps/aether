@@ -65,11 +65,11 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
                 {count}
               </text>
             )}
-            {/* As wide as a bar is tall and inside its own lane, so facing marks on neighbouring lanes never cover each other. */}
+            {/* As wide as a bar is tall, on its dot but inside its own lane, so facing marks on neighbouring lanes never cover each other. */}
             <rect
               {...mailControl}
               x={x - g.metrics.bar / 2}
-              y={dir < 0 ? a.top : a.top + a.height - 12}
+              y={Math.min(a.top + a.height - 12, Math.max(a.top, y - 6))}
               width={g.metrics.bar}
               height={12}
               fill="transparent"
