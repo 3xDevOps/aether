@@ -1,8 +1,9 @@
 #!/bin/sh
 # Reuse full main CI only for the exact commit being released. No green fallback.
 # The push run on main is that verdict: it runs the full suite, or it skips the
-# suite only when scripts/ci-queue-verdict.sh found the merge queue run whose
-# CI gate passed on this same commit (and so the same tree and ci.yml).
+# suite only when scripts/ci-queue-verdict.sh found that the newest merge
+# queue run of this same commit (and so the same tree and ci.yml) succeeded
+# on its latest attempt.
 set -eu
 
 fail() {
