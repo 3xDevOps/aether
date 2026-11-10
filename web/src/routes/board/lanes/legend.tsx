@@ -37,9 +37,20 @@ function Mark({ sent }: { sent: boolean }) {
   )
 }
 
+function Hairline() {
+  return (
+    <svg aria-hidden viewBox="0 0 40 10" className={cn('h-2.5 w-10 shrink-0', edgeTone.message)}>
+      <path d="M7 5H33" fill="none" stroke="currentColor" strokeWidth={1} className="text-series-5/45" />
+      <circle cx={5} cy={5} r={2.75} fill="currentColor" />
+      <circle cx={35} cy={5} r={3} fill="var(--raised)" stroke="currentColor" strokeWidth={1.5} />
+    </svg>
+  )
+}
+
 const lines = [
   { label: 'Agent message sent, on the edge facing the recipient', line: <Mark sent /> },
   { label: 'Agent message received, on the edge facing the sender', line: <Mark sent={false} /> },
+  { label: 'Messages between two sessions, at rest', line: <Hairline /> },
   { label: 'Message that just arrived; fades in a few seconds', line: <Line className={edgeTone.message} dash="4 3" tail="dot" head="filled" /> },
   { label: 'Focused session\'s message, acknowledged', line: <Line className={edgeTone.message} tail="dot" head="filled" /> },
   { label: 'Focused session\'s message, not acknowledged', line: <Line className={edgeTone.message} tail="dot" head="hollow" /> },
@@ -83,7 +94,7 @@ export function Legend() {
           ))}
         </ul>
         <h3 className="mt-3 text-ui-sm font-medium">Messages and overlaps</h3>
-        <p className="mt-1.5 text-ui-sm text-muted">Hover, focus or select a session to draw its messages as links; its popover lists them by session.</p>
+        <p className="mt-1.5 text-ui-sm text-muted">Hover, focus or select a session to draw its messages as links and quiet the rest; its popover lists them by session.</p>
         <ul className="mt-1.5 grid gap-1 text-ui-sm">
           {lines.map((item) => (
             <li key={item.label} className="flex items-center gap-2">

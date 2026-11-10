@@ -337,6 +337,7 @@ Mail marks and links use the categorical series by meaning:
 | Mark or link | Colour | Style | Ends |
 | --- | --- | --- | --- |
 | Agent message, at rest | `text-series-5` | sent: 5.5px filled dot with a 1px `--canvas` halo; received: 6px `--canvas` ring, 1.5px stroke; 2px outside the bar edge facing the other lane | a `text-ui-xs` tabular count on a `--canvas` halo when marks merge |
+| Agent message, at rest, between drawn lanes | `text-series-5/45` (`/30` below 768px); `text-seam` while a lane is focused | solid 1px hairline under the bars, no hit path, one layer apart from the links | its two marks |
 | Agent message, focused lane | `text-series-5` | solid 1.5px, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a count chip on bundles |
 | Agent message, live | `text-series-5` over a 4px `--canvas` halo; the recipient's track `bg-series-5/10` | dashed `4 3` 2px, round caps, an arc bowing left of the send time | dot at the sender, filled arrowhead along the arc at the recipient; a `×n` chip left of the arc |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |

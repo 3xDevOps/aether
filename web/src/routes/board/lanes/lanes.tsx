@@ -9,7 +9,7 @@ import { runLabel, stateWords } from '@/lib/status'
 import { cn, focusRingInset } from '@/lib/utils'
 import { ReplyComposer, cardAction } from '@/routes/board/card-action'
 import { type Tick, ticks, xOf } from '@/routes/board/lanes/axis'
-import { EdgeHits, EdgeStrokes, drawEdges, edgeShape, type EdgeAnchor } from '@/routes/board/lanes/connectors'
+import { EdgeHits, EdgeStrokes, Hairlines, drawEdges, edgeShape, type EdgeAnchor } from '@/routes/board/lanes/connectors'
 import { laneEdges, type EdgesInput, type LaneEdge } from '@/routes/board/lanes/edges'
 import { EdgePopover, FamilyPopover, LaneConversations, LaneLinks, LanePopoverContent, RunPopover } from '@/routes/board/lanes/lane-popover'
 import { LaneRow, trackGutter, type LaneGeometry } from '@/routes/board/lanes/lane-row'
@@ -170,16 +170,14 @@ export function LanesView(props: LanesViewProps) {
     (edge: LaneEdge) => edge.kind !== 'message' || (Boolean(edge.from.lane && edge.to.lane) && (picked.has(edge.key) || (focusKey !== undefined && (edge.from.lane === focusKey || edge.to.lane === focusKey)))),
     [picked, focusKey],
   )
-  const shapes = useMemo(() => {
-    const shownEdges = edgeView
-      ? edges.filter((edge) => {
-          const a = anchors.get(edge.from.lane)?.top ?? 0
-          const b = anchors.get(edge.to.lane)?.top ?? 0
-          return Math.max(a, b) >= edgeView.top - overscan && Math.min(a, b) <= edgeView.top + edgeView.height + overscan
-        })
-      : edges
-    return drawEdges(shownEdges.filter(linked), anchors, g, focusKey)
-  }, [edgeView, edges, anchors, g, focusKey, linked])
+  const inView = useCallback((edge: LaneEdge) => {
+    if (!edgeView) return true
+    const a = anchors.get(edge.from.lane)?.top ?? 0
+    const b = anchors.get(edge.to.lane)?.top ?? 0
+    return Math.max(a, b) >= edgeView.top - overscan && Math.min(a, b) <= edgeView.top + edgeView.height + overscan
+  }, [edgeView, anchors])
+  const shapes = useMemo(() => drawEdges(edges.filter((edge) => inView(edge) && linked(edge)), anchors, g, focusKey), [edges, inView, anchors, g, focusKey, linked])
+  const hairlines = useMemo(() => props.edges.filter(inView), [props.edges, inView])
   const order = useMemo(() => new Map(model.lanes.map((lane, i) => [lane.key, i])), [model.lanes])
   const shownKeys = windowed ? shown.map((lane) => lane.key).join('\n') : ''
   const marks = useMemo(() => {
@@ -526,6 +524,7 @@ export function LanesView(props: LanesViewProps) {
           ))}
           {nowShown && <span className="absolute inset-y-0 w-px bg-icon-faint" style={{ left: nowX }} />}
         </div>
+        <Hairlines edges={hairlines} anchors={anchors} g={g} height={layout.height} receded={focusKey !== undefined} />
         <EdgeStrokes shapes={shapes} g={g} height={layout.height} />
         <div
           role="tree"

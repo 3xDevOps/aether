@@ -772,7 +772,7 @@ describe('lanes view', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
   })
 
-  it('marks agent mail on both lanes and draws its link only for the focused lane, with words for screen readers', async () => {
+  it('marks agent mail on both lanes, joins its marks with a quiet line, and draws its link for the focused lane, with words for screen readers', async () => {
     seed([stopped, working])
     const sent: Event = {
       id: 'evt_mail', seq: 1, time: new Date(Date.now() - 10 * 60_000).toISOString(), workspace_id: workspace.id, run_id: working.id, actor_id: '',
@@ -782,11 +782,15 @@ describe('lanes view', () => {
     const tree = await openLanes()
     await waitFor(() => expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(2))
     expect(document.querySelector('[data-lane-mail] [data-mail="sent"] title')?.textContent).toMatch(/^Message from still going to waiting on you · .* · 1 not acknowledged$/)
+    expect(document.querySelectorAll('[data-lane-hairlines] [data-hairline]')).toHaveLength(1)
+    expect(document.querySelector('[data-lane-hairlines]')?.getAttribute('class')).toContain('text-series-5/45')
     expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(0)
+    expect(document.querySelectorAll('path[data-mail-control]')).toHaveLength(0)
     const lane = within(tree).getByRole('treeitem', { name: /^still going/ })
     expect(lane.getAttribute('aria-label')).toMatch(/messages: sent 1 to waiting on you, 1 not acknowledged$/)
     act(() => lane.focus())
     await waitFor(() => expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(1))
+    expect(document.querySelector('[data-lane-hairlines]')?.getAttribute('class')).toContain('text-seam')
     expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(0)
     const link = document.querySelector('path[data-mail-control]')!
     expect(link.querySelector('title')?.textContent).toMatch(/^Message from still going to waiting on you/)
