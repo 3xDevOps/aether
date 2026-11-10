@@ -31,10 +31,15 @@ CREATE INDEX IF NOT EXISTS idx_events_workspace_seq ON events (workspace_id, seq
 
 // SQLiteLog is the EventLog backed by a SQLite events table
 // (modernc.org/sqlite, pure Go). Rows are append-only; seq is the bus
-// cursor and primary key.
+// cursor and primary key. Appends go through one writer connection;
+// reads take one of readConns read-only connections, which WAL lets run
+// beside the writer and each other.
 type SQLiteLog struct {
-	db *sql.DB
+	db    *sql.DB
+	reads *sql.DB
 }
+
+const readConns = 4
 
 // sqliteURIPath percent-encodes the characters that would otherwise be
 // misparsed in the path component of a SQLite file: URI - '?' starts the
@@ -45,19 +50,26 @@ var sqliteURIPath = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 // OpenSQLiteLog opens (creating if needed) the event log database at path
 // and ensures the events table exists.
 func OpenSQLiteLog(path string) (*SQLiteLog, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)", sqliteURIPath.Replace(path))
-	db, err := sql.Open("sqlite", dsn)
+	file := "file:" + sqliteURIPath.Replace(path)
+	db, err := sql.Open("sqlite", file+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, fmt.Errorf("events: open sqlite log: %w", err)
 	}
 	// SQLite allows one writer; a single connection avoids lock contention
 	// between pooled connections under the race detector and in production.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(eventsSchema); err != nil {
+	if _, err = db.Exec(eventsSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("events: init sqlite log schema: %w", err)
 	}
-	return &SQLiteLog{db: db}, nil
+	reads, err := sql.Open("sqlite", file+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("events: open sqlite log reader: %w", err)
+	}
+	reads.SetMaxOpenConns(readConns)
+	reads.SetMaxIdleConns(readConns)
+	return &SQLiteLog{db: db, reads: reads}, nil
 }
 
 // Append implements EventLog. Repeating an identical event ID is safe and
@@ -103,7 +115,7 @@ func (l *SQLiteLog) Get(ctx context.Context, id string) (Event, error) {
 		typ     string
 		payload []byte
 	)
-	err := l.db.QueryRowContext(ctx,
+	err := l.reads.QueryRowContext(ctx,
 		`SELECT seq, id, ts, workspace_id, run_id, actor_id, type, payload
 		 FROM events WHERE id = ?`, id,
 	).Scan(&e.Seq, &e.ID, &ts, &ws, &run, &actor, &typ, &payload)
@@ -140,7 +152,7 @@ func (l *SQLiteLog) ReadBefore(ctx context.Context, f Filter, afterSeq, beforeSe
 
 func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int, order string) ([]Event, error) {
 	query, args := readQuery(f, afterSeq, uptoSeq, limit, order)
-	rows, err := l.db.QueryContext(ctx, query, args...)
+	rows, err := l.reads.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("events: read log: %w", err)
 	}
@@ -233,7 +245,7 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 // mark, so a deleted newest row never has its seq handed out again.
 func (l *SQLiteLog) LastSeq(ctx context.Context) (uint64, error) {
 	var last uint64
-	err := l.db.QueryRowContext(ctx, `SELECT MAX(
+	err := l.reads.QueryRowContext(ctx, `SELECT MAX(
 		COALESCE((SELECT MAX(seq) FROM events), 0),
 		COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'events'), 0))`).Scan(&last)
 	if err != nil {
@@ -243,4 +255,4 @@ func (l *SQLiteLog) LastSeq(ctx context.Context) (uint64, error) {
 }
 
 // Close implements EventLog.
-func (l *SQLiteLog) Close() error { return l.db.Close() }
+func (l *SQLiteLog) Close() error { return errors.Join(l.reads.Close(), l.db.Close()) }

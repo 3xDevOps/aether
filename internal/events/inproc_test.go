@@ -546,6 +546,47 @@ func TestConcurrentPublishers(t *testing.T) {
 	}
 }
 
+func TestConcurrentDuplicatePublishesStoreOneEvent(t *testing.T) {
+	log := newTestLog(t)
+	b := newTestBus(t, log)
+	ctx := context.Background()
+	sub, err := b.Subscribe(ctx, SubscribeOptions{})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Close() //nolint:errcheck // test cleanup
+	e := statusEvent("w1", "r1", domain.RunRunning)
+	e.ID, e.Time = "coord-report:dup", time.Unix(0, 123).UTC()
+	const publishers = 8
+	got := make(chan Event, publishers)
+	errs := make(chan error, publishers)
+	for range publishers {
+		go func() {
+			published, pubErr := b.Publish(ctx, e)
+			errs <- pubErr
+			got <- published
+		}()
+	}
+	for range publishers {
+		if pubErr := <-errs; pubErr != nil {
+			t.Fatalf("publish: %v", pubErr)
+		}
+		if published := <-got; published.ID != e.ID || published.Seq != 1 {
+			t.Fatalf("publish result = %+v, want the one stored event", published)
+		}
+	}
+	collect(t, sub, 1)
+	select {
+	case duplicate := <-sub.Events():
+		t.Fatalf("duplicate publish fanned out: %+v", duplicate)
+	case <-time.After(50 * time.Millisecond):
+	}
+	stored, err := log.Read(ctx, Filter{}, 0, 0, 10)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored events = %d (err %v), want one", len(stored), err)
+	}
+}
+
 func TestEphemeralEventsReachLiveSubscribersOnly(t *testing.T) {
 	log := newTestLog(t)
 	b := newTestBus(t, log)
