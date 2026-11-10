@@ -973,3 +973,58 @@ func TestMemoryAddKeepsHiddenDuplicatesHidden(t *testing.T) {
 		t.Fatalf("Ola adds the same text = %+v, %v; want the duplicate %s", again, err, stored.ID)
 	}
 }
+
+// A visible note replaced by a note of a hidden session names no
+// replacement to a member who cannot see it.
+func TestAHiddenReplacementIsNotLinked(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	scoped, err := New(Config{Store: f.db, Bus: f.bus, Log: f.log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib := &domain.Workspace{Name: "lib", BaseBranch: domain.DefaultBaseBranch}
+	if err = f.db.CreateWorkspace(ctx, lib); err != nil {
+		t.Fatal(err)
+	}
+	ola := f.member("Ola", domain.RoleCollaborator)
+	for _, g := range []struct {
+		ws domain.WorkspaceID
+		m  *domain.Member
+	}{{f.ws.ID, f.dana}, {f.ws.ID, ola}, {lib.ID, ola}} {
+		if err = f.db.GrantWorkspace(ctx, g.ws, g.m.ID, "", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	original, err := f.agentAdd(f.run(f.dana, "claude", "One repository"), protocol.MemoryAddParams{
+		Kind: protocol.MemoryKindConvention, Text: "Use the old build script."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden := f.run(ola, "claude", "Two repositories")
+	if err = f.db.SetRunRepos(ctx, hidden.ID, []domain.RunRepo{{WorkspaceID: lib.ID, Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.agentAdd(hidden, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention, Text: "Use the private lib build.",
+		Supersedes: original.Item.ID}); err != nil {
+		t.Fatal(err)
+	}
+	for who, linked := range map[*domain.Member]bool{ola: true, f.dana: false} {
+		shown, err := scoped.Show(ctx, who.ID, protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: original.Item.ID})
+		if err != nil {
+			t.Fatalf("%s show: %v", who.DisplayName, err)
+		}
+		if (shown.Item.SupersededBy != "") != linked {
+			t.Errorf("%s sees the replacement link %q, want linked %v", who.DisplayName, shown.Item.SupersededBy, linked)
+		}
+		found, err := scoped.Search(ctx, who.ID, protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID), Replaced: true})
+		if err != nil {
+			t.Fatalf("%s search: %v", who.DisplayName, err)
+		}
+		for _, n := range found.Items {
+			if n.ID == original.Item.ID && (n.SupersededBy != "") != linked {
+				t.Errorf("%s search shows the replacement link %q, want linked %v", who.DisplayName, n.SupersededBy, linked)
+			}
+		}
+	}
+}

@@ -172,7 +172,7 @@ func TestMemberRemoveRechecksTheLastSuperAdminWhenDeleting(t *testing.T) {
 	asSuperAdmin(t, e)
 	_, second := addMember(t, e, "Second", domain.RoleSuperAdmin, false)
 	e.runs.whileTerminalStopped = func() {
-		if _, err := e.db.SetMemberRole(context.Background(), e.member.ID, domain.RoleAdmin); err != nil {
+		if _, err := e.db.SetMemberRole(context.Background(), e.member.ID, domain.RoleAdmin, ""); err != nil {
 			t.Errorf("demote the caller from the console: %v", err)
 		}
 	}

@@ -25,7 +25,7 @@ func (e *OwnsWorkspacesError) Error() string {
 	return fmt.Sprintf("store: member %s owns workspaces %s", e.Member, strings.Join(e.Workspaces, ", "))
 }
 
-func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.Role) (domain.Role, error) {
+func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.Role, by domain.MemberID) (domain.Role, error) {
 	if !role.Valid() {
 		return "", fmt.Errorf("store: set member role: invalid role %q", role)
 	}
@@ -34,6 +34,16 @@ func (d *DB) SetMemberRole(ctx context.Context, id domain.MemberID, role domain.
 		return "", fmt.Errorf("store: begin set member role: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if by != "" {
+		var super bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM members
+			WHERE id = ? AND role = 'super_admin' AND pending = 0 AND merged_into = '')`, by).Scan(&super); err != nil {
+			return "", fmt.Errorf("store: set member role: %w", err)
+		}
+		if !super {
+			return "", fmt.Errorf("%w: member %s is no longer a super admin", ErrConflict, by)
+		}
+	}
 	var was domain.Role
 	err = tx.QueryRowContext(ctx, `SELECT role FROM members WHERE id = ? AND merged_into = ''`, id).Scan(&was)
 	if errors.Is(err, sql.ErrNoRows) {

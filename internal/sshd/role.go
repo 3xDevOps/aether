@@ -94,7 +94,7 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	was := m.Role
 	update := func() error {
 		var err error
-		was, err = s.cfg.Store.SetMemberRole(ctx, m.ID, role)
+		was, err = s.cfg.Store.SetMemberRole(ctx, m.ID, role, member)
 		return err
 	}
 	if len(activeRuns) == 0 || s.cfg.Control == nil {

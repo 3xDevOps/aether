@@ -141,6 +141,32 @@ const runReached = `r.workspace_id IN (SELECT value FROM json_each(?)) AND NOT E
 // workspaces it had is no longer known.
 const memoryReached = `(m.run_id = '' OR EXISTS (SELECT 1 FROM runs r WHERE r.id = m.run_id AND ` + runReached + `))`
 
+// unlinkHidden clears, for a reader limited to workspaces, the replacement
+// a note names when that replacement is a note the reader cannot see.
+func (d *DB) unlinkHidden(ctx context.Context, workspaces []domain.WorkspaceID, notes ...*Memory) error {
+	if workspaces == nil {
+		return nil
+	}
+	reach, err := reachArgs(workspaces)
+	if err != nil {
+		return err
+	}
+	for _, n := range notes {
+		if n.SupersededBy == "" {
+			continue
+		}
+		var seen bool
+		if err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM memory m WHERE m.id = ? AND `+memoryReached+`)`,
+			append([]any{n.SupersededBy}, reach...)...).Scan(&seen); err != nil {
+			return err
+		}
+		if !seen {
+			n.SupersededBy = ""
+		}
+	}
+	return nil
+}
+
 func reachArgs(workspaces []domain.WorkspaceID) ([]any, error) {
 	ids, err := json.Marshal(workspaces)
 	if err != nil {
@@ -447,7 +473,14 @@ func (d *DB) SearchMemory(ctx context.Context, q MemoryQuery) ([]*Memory, error)
 	if err != nil {
 		return nil, fmt.Errorf("store: search memory: %w", err)
 	}
-	return collect(rows, scanMemory)
+	notes, err := collect(rows, scanMemory)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.unlinkHidden(ctx, q.Workspaces, notes...); err != nil {
+		return nil, fmt.Errorf("store: search memory: %w", err)
+	}
+	return notes, nil
 }
 
 // ftsPhrase quotes s as one FTS5 phrase, so no input is read as query
@@ -507,6 +540,9 @@ func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 	chain, err := collect(rows, scanMemory)
 	if err != nil {
 		return nil, nil, err
+	}
+	if err := d.unlinkHidden(ctx, workspaces, append([]*Memory{m}, chain...)...); err != nil {
+		return nil, nil, fmt.Errorf("store: read memory note %s: %w", id, err)
 	}
 	return m, chain, nil
 }

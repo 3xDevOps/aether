@@ -193,7 +193,7 @@ func TestClaimMemberOnlyOnEmptyServer(t *testing.T) {
 func mustCreateSuperAdmin(t *testing.T, db *DB) *domain.Member {
 	t.Helper()
 	m := mustCreateMember(t, db)
-	if _, err := db.SetMemberRole(context.Background(), m.ID, domain.RoleSuperAdmin); err != nil {
+	if _, err := db.SetMemberRole(context.Background(), m.ID, domain.RoleSuperAdmin, ""); err != nil {
 		t.Fatalf("SetMemberRole: %v", err)
 	}
 	m.Role = domain.RoleSuperAdmin
@@ -670,7 +670,7 @@ func TestApproveDeviceChecksTheApproverInTheWrite(t *testing.T) {
 		return dev
 	}
 	first := waiting()
-	if _, err := db.SetMemberRole(ctx, m.ID, domain.RoleSuperAdmin); err != nil {
+	if _, err := db.SetMemberRole(ctx, m.ID, domain.RoleSuperAdmin, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.ApproveDevice(ctx, first.ID, admin.ID); !errors.Is(err, ErrConflict) {

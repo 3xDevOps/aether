@@ -239,7 +239,7 @@ func TestWorkspaceGrantsBelowSuperAdminRefuseAdmins(t *testing.T) {
 		t.Fatalf("grant a collaborator: %v", err)
 	}
 	for _, id := range []domain.MemberID{user.ID, other.ID} {
-		if _, err := db.SetMemberRole(ctx, id, domain.RoleAdmin); err != nil {
+		if _, err := db.SetMemberRole(ctx, id, domain.RoleAdmin, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -367,10 +367,10 @@ func TestSetMemberRoleGuards(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.SetMemberRole(ctx, super.ID, domain.RoleAdmin); !errors.Is(err, ErrLastSuperAdmin) {
+	if _, err := db.SetMemberRole(ctx, super.ID, domain.RoleAdmin, ""); !errors.Is(err, ErrLastSuperAdmin) {
 		t.Fatalf("demote the last approved super admin = %v, want ErrLastSuperAdmin", err)
 	}
-	if was, err := db.SetMemberRole(ctx, pending.ID, domain.RoleViewer); err != nil || was != domain.RoleSuperAdmin {
+	if was, err := db.SetMemberRole(ctx, pending.ID, domain.RoleViewer, ""); err != nil || was != domain.RoleSuperAdmin {
 		t.Fatalf("demote the pending super admin = %s, %v", was, err)
 	}
 	w := &domain.Workspace{Name: "web", OwnerID: owner.ID}
@@ -383,7 +383,7 @@ func TestSetMemberRoleGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	var owns *OwnsWorkspacesError
-	if _, err := db.SetMemberRole(ctx, owner.ID, domain.RoleCollaborator); !errors.As(err, &owns) || len(owns.Workspaces) != 1 {
+	if _, err := db.SetMemberRole(ctx, owner.ID, domain.RoleCollaborator, ""); !errors.As(err, &owns) || len(owns.Workspaces) != 1 {
 		t.Fatalf("demote a workspace owner = %v, want OwnsWorkspacesError naming %s", err, w.ID)
 	}
 	if got, err := db.GetMember(ctx, owner.ID); err != nil || got.Role != domain.RoleAdmin {
@@ -395,13 +395,13 @@ func TestSetMemberRoleGuards(t *testing.T) {
 	if _, err := db.SetWorkspaceOwner(ctx, w.ID, super.ID, super.ID); err != nil {
 		t.Fatal(err)
 	}
-	if was, err := db.SetMemberRole(ctx, owner.ID, domain.RoleCollaborator); err != nil || was != domain.RoleAdmin {
+	if was, err := db.SetMemberRole(ctx, owner.ID, domain.RoleCollaborator, ""); err != nil || was != domain.RoleAdmin {
 		t.Fatalf("demote a former owner = %s, %v", was, err)
 	}
 	if _, err := db.GetInvitation(ctx, inv.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("demoted admin's invitation = %v, want ErrNotFound", err)
 	}
-	if _, err := db.SetMemberRole(ctx, "mem_missing", domain.RoleViewer); !errors.Is(err, ErrNotFound) {
+	if _, err := db.SetMemberRole(ctx, "mem_missing", domain.RoleViewer, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("role of a missing member = %v, want ErrNotFound", err)
 	}
 }
@@ -432,7 +432,7 @@ func TestDeleteMemberGuards(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := db.SetMemberRole(ctx, first.ID, domain.RoleAdmin); err != nil {
+			if _, err := db.SetMemberRole(ctx, first.ID, domain.RoleAdmin, ""); err != nil {
 				t.Fatal(err)
 			}
 			if err := del.fn(db, second.ID); !errors.Is(err, ErrLastSuperAdmin) {
@@ -636,7 +636,7 @@ func TestApproveMemberBelowAdminIsGuardedInTheWrite(t *testing.T) {
 	if err := db.CreateMember(ctx, pending); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SetMemberRole(ctx, pending.ID, domain.RoleSuperAdmin); err != nil {
+	if _, err := db.SetMemberRole(ctx, pending.ID, domain.RoleSuperAdmin, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.ApproveMember(ctx, pending.ID, false); !errors.Is(err, ErrConflict) {
@@ -647,5 +647,33 @@ func TestApproveMemberBelowAdminIsGuardedInTheWrite(t *testing.T) {
 	}
 	if err := db.ApproveMember(ctx, pending.ID, true); err != nil {
 		t.Fatalf("a super admin's approval: %v", err)
+	}
+}
+
+// A role change made by a member who is no longer a super admin is refused
+// in its own transaction, so a console demotion landing first wins.
+func TestSetMemberRoleChecksTheCallerInTheTransaction(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	caller := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#e6194b", Role: domain.RoleSuperAdmin}
+	other := &domain.Member{DisplayName: "Sue", PublicKey: testKey(t, "sue"), Color: "#3cb44b", Role: domain.RoleSuperAdmin}
+	target := &domain.Member{DisplayName: "Cam", PublicKey: testKey(t, "cam"), Color: "#ffe119", Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{caller, other, target} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.SetMemberRole(ctx, caller.ID, domain.RoleAdmin, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetMemberRole(ctx, target.ID, domain.RoleSuperAdmin, caller.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a demoted caller's promotion = %v, want ErrConflict", err)
+	}
+	if m, err := db.GetMember(ctx, target.ID); err != nil || m.Role != domain.RoleCollaborator {
+		t.Fatalf("target after the refused promotion = %+v, %v", m, err)
+	}
+	if _, err := db.SetMemberRole(ctx, target.ID, domain.RoleSuperAdmin, other.ID); err != nil {
+		t.Fatalf("a super admin's promotion: %v", err)
 	}
 }

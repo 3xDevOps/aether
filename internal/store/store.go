@@ -98,8 +98,10 @@ type Store interface {
 	// one transaction: it refuses demoting the last approved super admin
 	// (ErrLastSuperAdmin) and demoting below admin a member who owns
 	// workspaces (*OwnsWorkspacesError). Demoting a super admin, or an
-	// admin below admin, revokes the invitations they created.
-	SetMemberRole(ctx context.Context, id domain.MemberID, role domain.Role) (domain.Role, error)
+	// admin below admin, revokes the invitations they created. by, the
+	// caller, must still be a super admin in that transaction; an empty by
+	// is the machine's administrator.
+	SetMemberRole(ctx context.Context, id domain.MemberID, role domain.Role, by domain.MemberID) (domain.Role, error)
 	// ListMembers returns every member but those a merge absorbed.
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	UpdateMember(ctx context.Context, m *domain.Member) error

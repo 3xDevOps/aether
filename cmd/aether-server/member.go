@@ -49,7 +49,7 @@ func memberRole(ctx context.Context, w io.Writer, db *store.DB, id domain.Member
 	if err != nil {
 		return err
 	}
-	was, err := db.SetMemberRole(ctx, id, role)
+	was, err := db.SetMemberRole(ctx, id, role, "")
 	var owns *store.OwnsWorkspacesError
 	switch {
 	case errors.Is(err, store.ErrLastSuperAdmin):
