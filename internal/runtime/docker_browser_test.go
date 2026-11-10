@@ -64,12 +64,6 @@ func TestDockerBrowserCompanion(t *testing.T) {
 	if info.RunContainer != app || info.CreationKey != status.CreationKey || info.State != "running" || !strings.HasPrefix(info.Image, "sha256:") {
 		t.Fatalf("companion inspect: %+v", info)
 	}
-	listed, err := docker.ListBrowsers(ctx)
-	if err != nil || !slices.ContainsFunc(listed, func(b runtime.BrowserInfo) bool {
-		return b.ContainerID == status.ContainerID && b.RunContainer == app && b.CreationKey == status.CreationKey && b.State == "running"
-	}) {
-		t.Fatalf("companion list: %+v, %v", listed, err)
-	}
 	found, err := docker.FindByCreationKey(ctx, status.CreationKey)
 	if err != nil || found != status.ContainerID {
 		t.Fatalf("creation recovery: %q, %v", found, err)

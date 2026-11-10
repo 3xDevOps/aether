@@ -254,7 +254,8 @@ quiet sessions do not expire. **Close** keeps the session's container for seven 
 (`--run-container-ttl`) so you can **Relaunch** it, unless disk runs low first. The seven days pause
 while the session is relaunched and start over at its next close. Close
 removes the session's browser companion, the Chromium container behind its
-Browser tab; a relaunched session opens a new one.
+Browser tab; a relaunched session creates a new companion when its Browser
+tab is next used.
 [What stays after a session ends](failure-handling.md#what-stays-after-a-session-ends)
 covers Close, Kill, **Free container…** and Delete.
 

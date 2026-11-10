@@ -451,28 +451,3 @@ func (m *Manager) Journals() ([]Status, error) {
 	}
 	return out, errors.Join(errs...)
 }
-
-// Untracked returns companions that no journal records. The runtime is listed
-// before the journals are read and a journal is written before its companion
-// is created, so a companion being created is never reported.
-func (m *Manager) Untracked(ctx context.Context) ([]containerruntime.BrowserInfo, error) {
-	listed, err := m.browser.ListBrowsers(ctx)
-	if err != nil {
-		return nil, err
-	}
-	journals, err := m.Journals()
-	if err != nil {
-		return nil, err
-	}
-	recorded := make(map[string]bool, len(journals))
-	for _, status := range journals {
-		recorded[status.CreationKey] = true
-	}
-	var out []containerruntime.BrowserInfo
-	for _, info := range listed {
-		if !recorded[info.CreationKey] {
-			out = append(out, info)
-		}
-	}
-	return out, nil
-}

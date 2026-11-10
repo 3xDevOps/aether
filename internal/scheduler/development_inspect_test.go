@@ -33,10 +33,6 @@ func (r *companionRuntime) InspectBrowser(context.Context, runtime.ID) (runtime.
 	return r.info, nil
 }
 
-func (r *companionRuntime) ListBrowsers(context.Context) ([]runtime.BrowserInfo, error) {
-	return []runtime.BrowserInfo{r.info}, nil
-}
-
 func TestBrowserInspectReadsWithoutControlAndNamesAnOlderCompanion(t *testing.T) {
 	// The companion socket's path must stay under the 108-byte AF_UNIX bound.
 	state, err := os.MkdirTemp("", "inspect-")

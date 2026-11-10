@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/browser"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -191,46 +192,66 @@ func (d *developmentState) releaseBrowser(id domain.RunID) {
 	d.mu.Unlock()
 }
 
-// sweepBrowsers removes companions that no open session can use: their
-// session ended or is unknown to the store, or the session container whose
-// network they share is gone. A companion with no journal belongs to no
-// session this server can reach; it is removed only once that container is
-// gone, since another server on the same daemon may own it.
+const browserSweepTimeout = 30 * time.Second
+
+// sweepBrowsers removes this server's journaled companions that no open
+// session can reach: their session ended or is unknown to the store, or the
+// session container whose network they share is gone.
 func (s *Scheduler) sweepBrowsers(ctx context.Context) {
 	d := s.developmentState()
 	if d.manager == nil {
 		return
 	}
-	untracked, err := d.manager.Untracked(ctx)
-	if err != nil {
-		slog.Warn("scheduler: list browser companions", "error", err)
-	}
-	for _, info := range untracked {
-		if !s.containerGone(ctx, info.RunContainer) {
-			continue
-		}
-		if destroyErr := s.cfg.Runtime.Destroy(ctx, info.ContainerID); destroyErr != nil {
-			slog.Warn("scheduler: remove untracked browser companion", "container", info.ContainerID, "error", destroyErr)
-		}
-	}
 	journals, err := d.manager.Journals()
-	if err != nil {
-		slog.Warn("scheduler: read browser journals", "error", err)
-	}
+	d.reportSweep("journals", "scheduler: read browser journals", err)
 	for _, status := range journals {
 		id := domain.RunID(status.RunID)
-		lock := d.lock(id)
-		lock.Lock()
-		ended, err := s.browserSessionEnded(ctx, id, status.RunContainer)
-		if err == nil && ended {
-			if err = d.manager.RemoveObserved(ctx, status); err == nil {
-				d.releaseBrowser(id)
-			}
-		}
-		lock.Unlock()
-		if err != nil && !errors.Is(err, browser.ErrReplaced) {
-			slog.Warn("scheduler: remove ended session's browser companion", "run", id, "error", err)
-		}
+		d.reportSweep(status.RunID, "scheduler: remove ended session's browser companion", s.sweepBrowser(ctx, id, status))
+	}
+}
+
+func (s *Scheduler) sweepBrowser(ctx context.Context, id domain.RunID, status browser.Status) error {
+	ctx, cancel := context.WithTimeout(ctx, browserSweepTimeout)
+	defer cancel()
+	d := s.developmentState()
+	lock := d.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	ended, err := s.browserSessionEnded(ctx, id, status.RunContainer)
+	if err != nil || !ended {
+		return err
+	}
+	err = d.manager.RemoveObserved(ctx, status)
+	if errors.Is(err, browser.ErrReplaced) {
+		return nil
+	}
+	if err == nil {
+		d.releaseBrowser(id)
+	}
+	return err
+}
+
+// reportSweep warns once per distinct failure of key; the hourly sweep would
+// otherwise repeat a failure that needs an operator, such as a foreign journal.
+func (d *developmentState) reportSweep(key, msg string, err error) {
+	d.mu.Lock()
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	repeated := d.sweepFailures[key] == text
+	if text == "" {
+		delete(d.sweepFailures, key)
+	} else {
+		d.sweepFailures[key] = text
+	}
+	d.mu.Unlock()
+	switch {
+	case err == nil:
+	case repeated:
+		slog.Debug(msg, "key", key, "error", err)
+	default:
+		slog.Warn(msg, "key", key, "error", err)
 	}
 }
 

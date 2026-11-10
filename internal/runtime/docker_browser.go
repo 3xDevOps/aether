@@ -168,18 +168,3 @@ func (d *Docker) InspectBrowser(ctx context.Context, id ID) (BrowserInfo, error)
 	}
 	return BrowserInfo{ContainerID: id, RunContainer: ID(run), CreationKey: key, State: state, Image: info.Image}, nil
 }
-
-func (d *Docker) ListBrowsers(ctx context.Context) ([]BrowserInfo, error) {
-	list, err := d.cli.ContainerList(ctx, client.ContainerListOptions{
-		All:     true,
-		Filters: make(client.Filters).Add("label", labelManaged+"=true", labelBrowser+"=true"),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("runtime: list browser companions: %w", err)
-	}
-	out := make([]BrowserInfo, 0, len(list.Items))
-	for _, item := range list.Items {
-		out = append(out, BrowserInfo{ContainerID: ID(item.ID), RunContainer: ID(item.Labels[labelBrowserRun]), CreationKey: item.Labels[labelCreationKey], State: string(item.State), Image: item.ImageID})
-	}
-	return out, nil
-}

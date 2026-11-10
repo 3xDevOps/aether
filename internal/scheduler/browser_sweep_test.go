@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/browser"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type sweptBrowserRuntime struct {
@@ -36,16 +38,6 @@ func (r *sweptBrowserRuntime) InspectBrowser(_ context.Context, id runtime.ID) (
 	return info, nil
 }
 
-func (r *sweptBrowserRuntime) ListBrowsers(context.Context) ([]runtime.BrowserInfo, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]runtime.BrowserInfo, 0, len(r.browsers))
-	for _, info := range r.browsers {
-		out = append(out, info)
-	}
-	return out, nil
-}
-
 func (r *sweptBrowserRuntime) Destroy(ctx context.Context, id runtime.ID) error {
 	r.mu.Lock()
 	delete(r.browsers, id)
@@ -60,15 +52,31 @@ func (r *sweptBrowserRuntime) has(id runtime.ID) bool {
 	return ok
 }
 
-func newBrowserSweepEnv(t *testing.T) (*testEnv, *sweptBrowserRuntime) {
+// lookupFailingStore fails every session lookup while failing is set.
+type lookupFailingStore struct {
+	store.Store
+	failing atomic.Bool
+}
+
+func (s *lookupFailingStore) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
+	if s.failing.Load() {
+		return nil, context.DeadlineExceeded
+	}
+	return s.Store.GetRun(ctx, id)
+}
+
+func newBrowserSweepEnv(t *testing.T) (*testEnv, *sweptBrowserRuntime, *lookupFailingStore) {
 	t.Helper()
 	var rt *sweptBrowserRuntime
+	var db *lookupFailingStore
 	e := newTestEnv(t, func(c *Config) {
 		rt = &sweptBrowserRuntime{fakeRuntime: c.Runtime.(*fakeRuntime), browsers: make(map[runtime.ID]runtime.BrowserInfo)}
 		c.Runtime = rt
+		db = &lookupFailingStore{Store: c.Store}
+		c.Store = db
 		c.BrowserImage = "aether/browser:test"
 	})
-	return e, rt
+	return e, rt, db
 }
 
 // addCompanion records a running companion, and its journal when journaled.
@@ -99,8 +107,8 @@ func browserJournalDir(e *testEnv, run domain.RunID) string {
 	return filepath.Join(e.cfg.StateDir, "browser", hex.EncodeToString(digest[:16]))
 }
 
-func TestSweepBrowsersRemovesOnlyCompanionsNoOpenSessionCanUse(t *testing.T) {
-	e, rt := newBrowserSweepEnv(t)
+func TestSweepBrowsersRemovesOnlyCompanionsNoOpenSessionCanReach(t *testing.T) {
+	e, rt, _ := newBrowserSweepEnv(t)
 	ctx := t.Context()
 	open, openContainer := e.launchFake(t, "open")
 	moved, _ := e.launchFake(t, "moved to a new container")
@@ -117,18 +125,16 @@ func TestSweepBrowsersRemovesOnlyCompanionsNoOpenSessionCanUse(t *testing.T) {
 	e.addCompanion(t, rt, moved.ID, "fc-replaced", "moved-companion", true)
 	e.addCompanion(t, rt, ended.ID, endedContainer.id, "ended-companion", true)
 	e.addCompanion(t, rt, "run-deleted", "fc-deleted", "deleted-companion", true)
-	e.addCompanion(t, rt, "", "fc-gone", "stray-companion", false)
-	e.addCompanion(t, rt, "", openContainer.id, "foreign-companion", false)
+	e.addCompanion(t, rt, "", "fc-gone", "unjournaled-companion", false)
 
 	e.sched.sweepBrowsers(ctx)
 
 	for companion, kept := range map[runtime.ID]bool{
-		"open-companion":    true,
-		"foreign-companion": true,
-		"moved-companion":   false,
-		"ended-companion":   false,
-		"deleted-companion": false,
-		"stray-companion":   false,
+		"open-companion":        true,
+		"unjournaled-companion": true,
+		"moved-companion":       false,
+		"ended-companion":       false,
+		"deleted-companion":     false,
 	} {
 		if rt.has(companion) != kept {
 			t.Errorf("%s kept = %v, want %v", companion, !kept, kept)
@@ -145,8 +151,26 @@ func TestSweepBrowsersRemovesOnlyCompanionsNoOpenSessionCanUse(t *testing.T) {
 	}
 }
 
+func TestSweepBrowsersKeepsCompanionsWhenTheSessionLookupFails(t *testing.T) {
+	e, rt, db := newBrowserSweepEnv(t)
+	e.addCompanion(t, rt, "run-unanswered", "fc-unanswered", "unanswered-companion", true)
+	db.failing.Store(true)
+	e.sched.sweepBrowsers(t.Context())
+	if !rt.has("unanswered-companion") {
+		t.Fatal("a session lookup that timed out removed its companion")
+	}
+	if _, err := os.Stat(browserJournalDir(e, "run-unanswered")); err != nil {
+		t.Fatalf("journal after a failed lookup: %v", err)
+	}
+	db.failing.Store(false)
+	e.sched.sweepBrowsers(t.Context())
+	if rt.has("unanswered-companion") {
+		t.Fatal("companion of an unknown session survived the next sweep")
+	}
+}
+
 func TestStopDevelopmentRunRemovesCompanionWithoutRecordedContainer(t *testing.T) {
-	e, rt := newBrowserSweepEnv(t)
+	e, rt, _ := newBrowserSweepEnv(t)
 	e.addCompanion(t, rt, "run-lost", "fc-lost", "lost-companion", true)
 	if err := e.sched.StopDevelopmentRun(t.Context(), "run-lost"); err != nil {
 		t.Fatal(err)

@@ -103,13 +103,15 @@ type developmentState struct {
 	locks    map[domain.RunID]*sync.Mutex
 	reserved map[domain.RunID]bool
 	captures sync.Mutex
+	// sweepFailures is the last failure text sweepBrowsers reported per key.
+	sweepFailures map[string]string
 }
 
 func (s *Scheduler) developmentState() *developmentState {
 	s.developmentMu.Lock()
 	defer s.developmentMu.Unlock()
 	if s.development == nil {
-		d := &developmentState{locks: make(map[domain.RunID]*sync.Mutex), reserved: make(map[domain.RunID]bool)}
+		d := &developmentState{locks: make(map[domain.RunID]*sync.Mutex), reserved: make(map[domain.RunID]bool), sweepFailures: make(map[string]string)}
 		d.manager, d.reason = browser.NewManager(filepath.Join(s.cfg.StateDir, "browser"), s.cfg.Runtime, browser.Config{Image: s.cfg.BrowserImage, CPULimit: 1, MemoryLimitBytes: 1 << 30})
 		s.development = d
 	}

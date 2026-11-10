@@ -27,9 +27,6 @@ func (r *recoveryRuntime) CreateBrowser(context.Context, containerruntime.Browse
 func (r *recoveryRuntime) InspectBrowser(context.Context, containerruntime.ID) (containerruntime.BrowserInfo, error) {
 	return r.info, r.inspectErr
 }
-func (r *recoveryRuntime) ListBrowsers(context.Context) ([]containerruntime.BrowserInfo, error) {
-	return []containerruntime.BrowserInfo{r.info}, nil
-}
 func (r *recoveryRuntime) FindByCreationKey(context.Context, string) (containerruntime.ID, error) {
 	return "companion", nil
 }

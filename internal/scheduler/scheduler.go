@@ -726,7 +726,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		_ = limits.Close()
 		return recoveryError(err)
 	}
-	s.sweepBrowsers(ctx)
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
 	s.recovering.Store(false)
 	watchCtx, stopWatch := context.WithCancel(ctx)
@@ -749,6 +748,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 	}
 	s.sweepCaches(ctx, false)
+	s.sweepBrowsers(ctx)
 	gc := time.NewTicker(time.Hour)
 	defer gc.Stop()
 	for {
