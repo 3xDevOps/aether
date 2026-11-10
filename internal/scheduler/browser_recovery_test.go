@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -35,6 +36,22 @@ func serveCompanion(t *testing.T, dir string, post http.HandlerFunc) {
 	t.Cleanup(func() { _ = server.Close() })
 }
 
+type pausingBrowserRuntime struct{ *sweptBrowserRuntime }
+
+func (r pausingBrowserRuntime) Resume(ctx context.Context, id runtime.ID) error {
+	r.mu.Lock()
+	info, ok := r.browsers[id]
+	if ok {
+		info.State = "running"
+		r.browsers[id] = info
+	}
+	r.mu.Unlock()
+	if ok {
+		return nil
+	}
+	return r.fakeRuntime.Resume(ctx, id)
+}
+
 func TestStartupRecoversEverySessionWhenACompanionCannotReleaseInput(t *testing.T) {
 	// The companion socket's path must stay under the 108-byte AF_UNIX bound.
 	state, err := os.MkdirTemp("", "recover-")
@@ -45,7 +62,7 @@ func TestStartupRecoversEverySessionWhenACompanionCannotReleaseInput(t *testing.
 	var rt *sweptBrowserRuntime
 	e := newTestEnv(t, func(c *Config) {
 		rt = &sweptBrowserRuntime{fakeRuntime: c.Runtime.(*fakeRuntime), browsers: make(map[runtime.ID]runtime.BrowserInfo)}
-		c.Runtime = rt
+		c.Runtime = pausingBrowserRuntime{rt}
 		c.BrowserImage = "aether/browser:test"
 		c.Control = control.New(control.Config{})
 		c.StateDir = state
@@ -120,8 +137,16 @@ func TestStartupRecoversEverySessionWhenACompanionCannotReleaseInput(t *testing.
 		if status.Available || status.State != "unavailable" || !strings.Contains(status.Reason, "session "+string(run.ID)+" browser companion companion-"+string(run.ID)) {
 			t.Errorf("browser status of %s = %+v", run.ID, status)
 		}
-		if resumeErr := next.resumeDevelopmentBrowser(t.Context(), run.ID, next.developmentContainer(run.ID)); resumeErr != nil {
-			t.Errorf("resume %s with its browser unavailable: %v", run.ID, resumeErr)
+		companion := runtime.ID("companion-" + string(run.ID))
+		for _, state := range []string{"running", "paused"} {
+			rt.mu.Lock()
+			info := rt.browsers[companion]
+			info.State = state
+			rt.browsers[companion] = info
+			rt.mu.Unlock()
+			if resumeErr := next.resumeDevelopmentBrowser(t.Context(), run.ID, next.developmentContainer(run.ID)); resumeErr != nil {
+				t.Errorf("resume %s with its %s browser unavailable: %v", run.ID, state, resumeErr)
+			}
 		}
 		// A reset needs the surface; a companion that cannot release input
 		// must not keep it fenced.

@@ -154,14 +154,14 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 		return err
 	}
 	run := browser.Run{ID: string(id), ContainerID: cid}
-	if _, err := d.manager.Resume(ctx, run); err != nil {
+	if resumed, err := d.manager.Resume(ctx, run); err != nil {
+		if resumed.Unavailable != "" {
+			return nil
+		}
 		return err
 	}
 	status, client, reconcileErr = d.manager.Reconcile(ctx, run)
 	if reconcileErr != nil {
-		if status.Unavailable != "" {
-			return nil
-		}
 		return reconcileErr
 	}
 	return s.clearRecoveredBrowserInput(id, status, client)
