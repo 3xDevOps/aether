@@ -51,6 +51,9 @@ test('bar text ends in an ellipsis clear of the Needs you tag, and lanes and mar
   await expect(quick.locator('[data-lane-track]').getByText('Completed')).toHaveCount(0)
 
   // Each mark's target is at least 24px wide and answers a press on its own dot, even facing a neighbour's mark.
+  // At rest: a hovered or focused lane draws its mail as links, which take the marks' place.
+  await page.mouse.move(0, 0)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   const marks = page.locator('[data-lane-mail] g[data-mail]')
   await expect(marks).toHaveCount(2)
   for (const mark of await marks.all()) {

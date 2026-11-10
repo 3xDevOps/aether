@@ -19,7 +19,7 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
   /** Bundles drawn as links right now; their marks give way to them. */
   linked: (edge: LaneEdge) => boolean
   title: (edge: LaneEdge) => string
-  onPick: (edges: LaneEdge[], x: number, y: number) => void
+  onPick: (edges: LaneEdge[], x: number, y: number, lane?: string) => void
 }) {
   // Only a mark that arrives while the view is open fades in, and only the first time it shows.
   const seen = useRef<Set<string> | null>(null)
@@ -93,7 +93,7 @@ export const MailMarks = memo(function MailMarks({ marks, anchors, g, height, fo
               className="cursor-pointer"
               onClick={(event) => {
                 event.stopPropagation()
-                onPick(edges, x, y)
+                onPick(edges, x, y, mark.lane)
               }}
             />
           </g>

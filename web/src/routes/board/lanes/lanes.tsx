@@ -157,7 +157,7 @@ export function LanesView(props: LanesViewProps) {
 
   const popLane = pop?.kind === 'lane' ? byKey.get(pop.key) : undefined
   // An open popover keeps the lane it opened from in focus, wherever the pointer goes on its way to it.
-  const focusKey = popLane?.key ?? (pop?.kind === 'edge' ? pop.focus : undefined) ?? hovered ?? (treeFocused ? active : undefined)
+  const focusKey = popLane?.key ?? (pop?.kind === 'edge' && pop.focus && byKey.has(pop.focus) ? pop.focus : undefined) ?? hovered ?? (treeFocused ? active : undefined)
   const focusRef = useRef(focusKey)
   focusRef.current = focusKey
   const focusLane = focusKey ? byKey.get(focusKey) : undefined
@@ -294,6 +294,7 @@ export function LanesView(props: LanesViewProps) {
   /** Travel towards a pinned button: when it began and the closest the pointer has come. */
   const aim = useRef<{ since: number; gap: number } | null>(null)
   const settle = useRef<number | undefined>(undefined)
+  const onControl = useRef(false)
   useEffect(() => () => clearTimeout(settle.current), [])
   const hover = (key: string | null) => {
     clearTimeout(settle.current)
@@ -336,12 +337,17 @@ export function LanesView(props: LanesViewProps) {
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const target = event.target as Element
-    if (target.closest('[data-mail-control]')) {
+    pointer.current = { x: event.clientX, y: event.clientY }
+    onControl.current = Boolean(target.closest('[data-mail-control]'))
+    if (onControl.current) {
       clearTimeout(settle.current)
       aim.current = null
     }
     // React bubbles the portalled popover's events here: the pointer is on the popover, not on the lane under it.
-    else if (!event.currentTarget.contains(target)) hover(null)
+    else if (!event.currentTarget.contains(target)) {
+      pointer.current = null
+      hover(null)
+    }
     else hoverAt(event)
     const d = drag.current
     if (!d || d.id !== event.pointerId) return
@@ -364,6 +370,32 @@ export function LanesView(props: LanesViewProps) {
   const before = useRef<{ top: Map<string, number>; section: Map<string, string> } | null>(null)
   useLayoutEffect(() => {
     const previous = before.current
+    const el = scroller.current
+    // Lanes are placed absolutely, so the browser cannot anchor the scroll: the lane at the top of the view stays put when lanes above it come or go.
+    // At the bottom of shorter content the browser has already clamped scrollTop; the offset before the change is the one to correct.
+    const clamped = el !== null && el.scrollTop < viewport.top && el.scrollTop >= el.scrollHeight - el.clientHeight - 1
+    const scroll = clamped ? viewport.top : el?.scrollTop ?? 0
+    let moved = 0
+    if (previous && el && scroll > 0) {
+      // The lane at the top of the view, as a browser would anchor; if it left, the first lane that started in view.
+      let top: [string, number] | undefined
+      let below: [string, number] | undefined
+      for (const [key, y] of previous.top) {
+        if (y <= scroll && (!top || y > top[1])) top = [key, y]
+        if (y > scroll && layout.top.has(key) && (!below || y < below[1])) below = [key, y]
+      }
+      const anchor = top && layout.top.has(top[0]) ? top : below
+      moved = anchor ? layout.top.get(anchor[0])! - anchor[1] : 0
+      if (moved || clamped) el.scrollTop = scroll + moved
+    }
+    // A pointer at rest hovers the lane now under it once the lanes move; on a mark, link or pinned button it keeps the lane that drew it.
+    const shifted = hovered !== null && (moved !== 0 || previous?.top.get(hovered) !== layout.top.get(hovered))
+    // A scroll correction can move a pinned button before it re-renders, so a press still on a control keeps its lane while that lane exists.
+    const control = (onControl.current && hovered !== null && layout.top.has(hovered)) || (pointer.current && document.elementFromPoint(pointer.current.x, pointer.current.y)?.closest('[data-mail-control]'))
+    if (shifted && pointer.current && content.current && !aim.current && !control) {
+      const key = latestLaneAt.current(pointer.current.y - content.current.getBoundingClientRect().top)
+      if (key !== hovered) hover(key)
+    }
     before.current = { top: layout.top, section: new Map([...tree].map(([key, t]) => [key, t.section])) }
     if (!previous || windowed || prefersReducedMotion() || !content.current) return
     let entering = 0
@@ -452,13 +484,15 @@ export function LanesView(props: LanesViewProps) {
     if (!again) latestActivate.current(lane, x, chevron)
   }, [])
   // A click on a lane, mark, link or pinned button replaces or closes the open popover itself; Radix dismissing it after that click would close a new one.
-  const keep = useCallback((target: Element) => !drag.current?.moved && Boolean(content.current?.contains(target) && target.closest('[role=treeitem], [data-mail-control]')), [])
+  const keep = useCallback((target: Element) => !drag.current?.moved && Boolean(content.current?.contains(target) && target.closest('[role=treeitem], [data-mail-control]') && !target.closest('[role=treeitem] button')), [])
   const latestActivate = useRef(activate)
   latestActivate.current = activate
   const onRetry = useCallback((runID: string) => latest.current.onRetryAgents(runID), [])
   const onWiden = useCallback(() => latest.current.onWiden(), [])
-  const pickEdges = useCallback((edges: LaneEdge[], x: number, y: number) => {
-    if (!drag.current?.moved) setPop({ kind: 'edge', edges, x, y, focus: focusRef.current })
+  const pickEdges = useCallback((edges: LaneEdge[], x: number, y: number, lane?: string) => {
+    // The focused lane stays when the mail is its own; mail on another lane focuses the lane that drew it.
+    const focus = focusRef.current
+    if (!drag.current?.moved) setPop({ kind: 'edge', edges, x, y, focus: edges.some((edge) => edge.from.lane === focus || edge.to.lane === focus) ? focus : lane ?? (edges[0].from.lane || edges[0].to.lane) })
   }, [])
   // Swapping the lane popover for the reply composer unmounts its content too; only a real close returns focus.
   // Moving to a lane from a popover's message list closes the popover there, not on the lane it opened from.
@@ -469,6 +503,23 @@ export function LanesView(props: LanesViewProps) {
     // A drag closes the card without pulling the view back to its lane.
     if (!popRef.current && target && !drag.current?.moved) focusLaneEl(target)
   }
+
+  // The focused lane, kept so focus survives a live update that removes it: the browser drops it on the page.
+  const focused = useRef<{ key: string; index: number; run?: string } | null>(null)
+  const lost = focused.current && !byKey.has(focused.current.key) ? focused.current : null
+  // Lanes coming and going above the focused lane move it; its neighbour is found from where it is now.
+  useEffect(() => {
+    const now = focused.current
+    if (now && byKey.has(now.key)) now.index = model.lanes.findIndex((lane) => lane.key === now.key)
+  }, [model.lanes, byKey])
+  useEffect(() => {
+    if (!lost || popRef.current || (document.activeElement && document.activeElement !== document.body)) return
+    focused.current = null
+    const key = (lost.run && model.drawn.get(lost.run)) || model.lanes[Math.min(lost.index, model.lanes.length - 1)]?.key
+    if (!key) return
+    setActiveKey(key)
+    focusLaneEl(key)
+  }, [lost])
 
   // A live update can remove the selected lane; its popover closes and focus goes to the lane that draws its run now.
   const gone = pop?.kind === 'lane' && !popLane ? pop : undefined
@@ -553,6 +604,10 @@ export function LanesView(props: LanesViewProps) {
     popLane && { key: popLane.key, kind: 'selection' },
     !hoveredLane && !popLane && treeFocused && activeLane && activeLane.kind !== 'section' && { key: activeLane.key, kind: 'hover' },
   ].filter((item): item is { key: string; kind: 'hover' | 'selection' } => Boolean(item))
+  // A lane's popover follows its lane and the moment it was opened at, as live updates move them.
+  const anchor = pop?.kind === 'lane' && popLane
+    ? { x: pop.at === undefined ? pop.x : Math.min(g.width, Math.max(0, xOf(pop.at, g.window, g.width))), y: layout.top.get(popLane.key)! + (laneHeight(popLane, g.metrics) - pop.h) / 2 }
+    : { x: pop?.x ?? 0, y: pop?.y ?? 0 }
   const tickMarks = spaced(ticks(g.window, now), g)
   const popRun = popLane?.kind === 'run' ? popLane : undefined
   const totalWidth = g.labelWidth + g.width + trackGutter
@@ -621,10 +676,15 @@ export function LanesView(props: LanesViewProps) {
           onFocus={(event) => {
             setTreeFocused(true)
             const key = (event.target as HTMLElement).dataset.key
-            if (key) setActiveKey(key)
+            if (!key) return
+            setActiveKey(key)
+            const lane = byKey.get(key)
+            focused.current = { key, index: model.lanes.findIndex((item) => item.key === key), run: lane?.kind === 'run' ? lane.card.run.id : lane?.kind === 'family' ? lane.parentID : lane?.kind === 'agent' || lane?.kind === 'note' ? lane.runID : undefined }
           }}
           onBlur={(event) => {
-            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setTreeFocused(false)
+            if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+            setTreeFocused(false)
+            if ((event.target as Node).isConnected) focused.current = null
           }}
         >
           {shown.map((lane) => (
@@ -676,7 +736,7 @@ export function LanesView(props: LanesViewProps) {
         <Popover open={pop !== null} onOpenChange={(open) => { if (!open) setPop(null) }}>
           {pop && (
             <PopoverAnchor asChild>
-              <span aria-hidden className="pointer-events-none absolute w-px" style={{ left: g.labelWidth + pop.x, top: pop.y, height: pop.kind === 'lane' ? pop.h : 0 }} />
+              <span aria-hidden className="pointer-events-none absolute w-px" style={{ left: g.labelWidth + anchor.x, top: anchor.y, height: pop.kind === 'lane' ? pop.h : 0 }} />
             </PopoverAnchor>
           )}
           {pop?.kind === 'lane' && popRun && pop.reply ? (

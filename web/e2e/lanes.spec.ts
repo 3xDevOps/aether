@@ -3,7 +3,7 @@
 // how the view follows the pointer, not how sessions start, and a lane
 // layout needs sessions in known states at known times.
 
-import type { Page } from '@playwright/test'
+import type { Page, WebSocketRoute } from '@playwright/test'
 import { type Aether, expect, test } from './fixtures'
 import { memberID, seedWorkspace } from './harness/setup'
 
@@ -14,6 +14,21 @@ const minute = 60_000
  * newest first, and one message from Lead to Tester. `between` sessions go
  * between Reviewer and Tester, to push Tester below the fold.
  */
+/** Each page's events socket and Lead's run, so a test can deliver a live event the way the server would. */
+const live = new WeakMap<Page, { socket: WebSocketRoute; lead: Record<string, unknown> }>()
+let liveSeq = 1_000_000
+
+/** Session `id` changes status live; one the view has not seen starts now, read with `run.get` first. */
+async function liveStatus(page: Page, id: string, to: string, task = id) {
+  const { socket, lead } = live.get(page)!
+  const run = { ...lead, id, task, created_at: new Date().toISOString(), started_at: new Date().toISOString() }
+  await page.route('**/api/v1/run.get', (route) => route.fulfill({ json: { run } }))
+  socket.send(JSON.stringify({
+    id: `evt-live-${liveSeq}`, seq: liveSeq++, time: new Date().toISOString(), workspace_id: lead.workspace_id, run_id: id, actor_id: '',
+    type: 'run.status', payload: { to, status_seq: 1 },
+  }))
+}
+
 async function setUp(page: Page, aether: Aether, between = 0) {
   const alice = await aether.member('alice')
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('shop'), 'shop')
@@ -38,6 +53,10 @@ async function setUp(page: Page, aether: Aether, between = 0) {
   }
   await page.route('**/api/v1/run.list', (route) => route.fulfill({ json: { runs } }))
   await page.route('**/api/v1/workspace.timeline', (route) => route.fulfill({ json: { events: [mail], next_seq: 2, more: false } }))
+  await page.routeWebSocket(/\/ws\/events/, (socket) => {
+    socket.connectToServer()
+    live.set(page, { socket, lead: runs[0] })
+  })
   await page.goto(alice.url)
   // The view choice is kept per workspace; a click before the workspace settles can be undone.
   const tree = page.getByRole('tree', { name: 'Session lanes' })
@@ -198,4 +217,78 @@ test('dragging the track pans and closes the open card', async ({ page, aether }
   await page.mouse.up()
   await expect(page.getByRole('button', { name: 'Now', exact: true })).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('the view, a card and the hover stay on their lanes as a session above them leaves', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 600 })
+  const tree = await setUp(page, aether, 16)
+  const helper = tree.getByRole('treeitem', { name: /^Helper 8,/ })
+  await helper.scrollIntoViewIfNeeded()
+  const before = (await helper.boundingBox())!
+  await page.mouse.click(before.x + 300, before.y + before.height / 2)
+  const card = page.getByRole('dialog', { name: /^Helper 8,/ })
+  await expect(card).toBeVisible()
+  const gap = (await card.boundingBox())!.y - before.y
+  const resting = (await tree.getByRole('treeitem', { name: /^Helper 7,/ }).boundingBox())!
+  await page.mouse.move(resting.x + 120, resting.y + resting.height / 2)
+
+  // Helper 1, above the view, finishes and folds into Finished below.
+  await liveStatus(page, 'run-lanes-helper-0', 'completed')
+  await expect(tree.getByRole('treeitem', { name: /^Helper 1,/ })).toHaveCount(0)
+  await page.waitForTimeout(300)
+  expect((await helper.boundingBox())!.y).toBe(before.y)
+  await expect.poll(async () => (await card.boundingBox())!.y - before.y).toBe(gap)
+  expect((await page.locator('[data-lane-highlight="hover"]').boundingBox())!.y).toBe(resting.y)
+})
+
+test('an open card follows its lane when the lanes above it change', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const tree = await setUp(page, aether)
+  const tester = tree.getByRole('treeitem', { name: /^Test the checkout rewrite/ })
+  const before = (await tester.boundingBox())!
+  await page.mouse.click(before.x + 300, before.y + before.height / 2)
+  const card = page.getByRole('dialog', { name: /^Test the checkout rewrite/ })
+  await expect(card).toBeVisible()
+  const gap = (await card.boundingBox())!.y - before.y
+  await liveStatus(page, 'run-lanes-new', 'running', 'A session that just started')
+  await expect(tree.getByRole('treeitem', { name: /^A session that just started/ })).toBeAttached()
+  await expect.poll(async () => (await tester.boundingBox())!.y).toBe(before.y + before.height)
+  await expect.poll(async () => (await card.boundingBox())!.y - before.y - before.height).toBe(gap)
+})
+
+test('a resting pointer hovers the lane that moves under it, but keeps a pinned button', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 600 })
+  const tree = await setUp(page, aether, 16)
+  const reviewer = tree.getByRole('treeitem', { name: /^Review the checkout rewrite/ })
+  const box = (await reviewer.boundingBox())!
+  await page.mouse.move(box.x + 120, box.y + box.height / 2)
+  const band = page.locator('[data-lane-highlight="hover"]')
+  await expect.poll(async () => (await band.boundingBox())?.y).toBe(box.y)
+  await liveStatus(page, 'run-lanes-new', 'running', 'A session that just started')
+  await expect.poll(async () => (await reviewer.boundingBox())!.y).toBe(box.y + box.height)
+  // Lead moved down under the pointer: it takes the hover.
+  await expect.poll(async () => (await band.boundingBox())?.y).toBe(box.y)
+
+  const lead = (await tree.getByRole('treeitem', { name: /^Lead the checkout rewrite/ }).boundingBox())!
+  await page.mouse.move(lead.x + 300, lead.y + lead.height / 2)
+  const pinned = page.locator('[data-mail-pinned]')
+  await expect(pinned).toBeVisible()
+  await pinned.hover()
+  await liveStatus(page, 'run-lanes-newer', 'running', 'Another session that just started')
+  await expect(tree.getByRole('treeitem', { name: /^Another session that just started/ })).toBeAttached()
+  await page.waitForTimeout(300)
+  await expect(pinned).toBeVisible()
+})
+
+test('keyboard focus moves to the lane that draws a session whose own lane leaves', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const tree = await setUp(page, aether)
+  const reviewer = tree.getByRole('treeitem', { name: /^Review the checkout rewrite/ })
+  await reviewer.focus()
+  await expect(reviewer).toBeFocused()
+  await liveStatus(page, 'run-lanes-reviewer', 'completed')
+  await expect(reviewer).toHaveCount(0)
+  await expect(tree.getByRole('treeitem', { name: /^1 finished/ })).toBeFocused()
+  await page.keyboard.press('ArrowUp')
+  await expect(page.locator('[role=treeitem]:focus')).toHaveCount(1)
 })
