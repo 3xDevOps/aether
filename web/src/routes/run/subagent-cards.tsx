@@ -37,16 +37,16 @@ const launchPages = 5
  * replays only the newest items, which can leave out a launch that still runs. */
 export function useLiveLaunches(runID: string, enabled: boolean) {
   const paged = useRef({ generation: -1, pages: 0 })
-  const missing = useStore((s) => {
+  const generation = useStore((s) => {
     const session = s.acpSessions[runID]
-    return enabled && session !== undefined && session.more && !session.olderLoading && !session.olderError && launchUnloaded(session.agents, session.state?.tasks, session.oldestSeq)
+    const missing = enabled && session !== undefined && session.more && !session.olderLoading && !session.olderError && launchUnloaded(session.agents, session.state?.tasks, session.oldestSeq)
+    return missing ? session.historyGeneration : undefined
   })
   useEffect(() => {
-    if (!missing) return
-    const generation = useStore.getState().acpSessions[runID]!.historyGeneration
+    if (generation === undefined) return
     if (paged.current.generation !== generation) paged.current = { generation, pages: 0 }
     if (paged.current.pages++ < launchPages) void loadOlderItems(useStore, api, runID)
-  }, [missing, runID])
+  }, [generation, runID])
 }
 
 /** replace swaps the open subagent without a history entry. */

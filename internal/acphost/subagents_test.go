@@ -385,7 +385,7 @@ func TestBackgroundAgentsOutliveTheReplayWindow(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), textPrompt(acpmock.PromptFinishAgents), false, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the subagents to end", func() bool { return len(s.State().Tasks) == 0 })
+	waitFor(t, "the second turn to end", func() bool { return len(ofKind(items(t, s), KindTurnEnd)) > 1 && len(s.State().Tasks) == 0 })
 	ended := map[string]string{}
 	reads := map[string]string{}
 	for _, it := range ofKind(items(t, s), KindToolCall) {
