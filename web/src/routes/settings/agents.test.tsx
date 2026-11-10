@@ -30,7 +30,8 @@ describe('agents settings', () => {
     const list = await screen.findByRole('list', { name: 'Agents' })
     expect(within(list).getByText('Installed · No login found')).toBeDefined()
     expect(within(list).getByText('Installed · Login found')).toBeDefined()
-    await user.click(screen.getByRole('button', { name: 'Log in Claude Code' }))
+    expect(screen.queryByRole('button', { name: /Log in|Set up/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Open Agents' }))
     await waitFor(() => expect(useStore.getState().route.name).toBe('agents'))
   })
 

@@ -27,7 +27,7 @@ export type SettingEntry = {
 export const categories: Category[] = [
   { id: 'general', group: 'You', title: 'General', purpose: 'How this dashboard looks and responds, and who you are on this server.', Icon: Settings },
   { id: 'launch', group: 'You', title: 'Launch', purpose: 'The agent, mode, model, account and fallback your launches start from, on every device.', Icon: Rocket },
-  { id: 'agents', group: 'You', title: 'Agents', purpose: 'Which coding agents are installed and signed in for your account.', Icon: Bot },
+  { id: 'agents', group: 'You', title: 'Agents', purpose: 'Which coding agents this server has installed, and which you are signed in to.', Icon: Bot },
   { id: 'connections', group: 'You', title: 'Connections', purpose: 'Services Aether works with on your behalf.', Icon: Cable },
   { id: 'notifications', group: 'You', title: 'Notifications', purpose: 'Where and how often Aether pushes to you.', Icon: Bell },
   { id: 'watches', group: 'You', title: 'Watches', purpose: 'Sessions and pull requests the server watches for you, and what it told you.', Icon: Eye },
@@ -49,7 +49,7 @@ export const entries: SettingEntry[] = [
   { id: 'profile', category: 'general', label: 'Profile', help: 'Name, colour and git identity.', keywords: 'display name git email avatar account sharing', visible: (g) => g.member },
   { id: 'setup-guide', category: 'general', label: 'Setup guide', help: 'Link this computer, add a repository, set up an agent and start a first session.', keywords: 'onboarding wizard', visible: (g) => g.onboarding },
   { id: 'saved-launch-defaults', category: 'launch', label: 'Saved defaults', help: 'The agent, mode, model, account and fallback a launch starts from.', keywords: 'launch defaults agent mode model account fallback remember preselect shared', visible: (g) => g.member && g.cap.hasMethod('launch.defaults.get') },
-  { id: 'agents-list', category: 'agents', label: 'Sign in to agents', help: 'Each agent\'s sign-in state, with the Agents page to install, sign in or update.', keywords: 'agents agent claude codex opencode login log in sign in signin install update cli account', visible: (g) => g.cap.hasMethod('agent.list') },
+  { id: 'agents-list', category: 'agents', label: 'Agent sign-in', help: 'Each agent\'s sign-in state, with the Agents page to install, sign in or update.', keywords: 'agents agent claude codex opencode login log in sign in signin auth install update cli account', visible: (g) => g.cap.hasMethod('agent.list') },
   { id: 'connectors', category: 'connections', label: 'ChatGPT and Claude', help: 'Connect ChatGPT or Claude to Aether over MCP.', keywords: 'mcp connector chatgpt claude plugin oauth pairing code revoke' },
   { id: 'github', category: 'connections', label: 'GitHub', help: 'Connect GitHub to choose repositories and let sessions publish changes.', keywords: 'github oauth repository import', visible: (g) => g.admin && g.cap.hasMethod('github.oauth.status') },
   { id: 'push', category: 'notifications', label: 'Notify this device when a session needs me', help: 'Push notifications on this device.', keywords: 'notification alert phone browser push' },

@@ -12,7 +12,7 @@ test('Settings lists each agent and a search for sign in leads to it', async ({ 
 
   const nav = page.getByRole('navigation', { name: 'Settings' })
   await nav.getByRole('searchbox', { name: 'Search settings' }).fill('sign in')
-  await nav.getByRole('button', { name: /^Sign in to agents/ }).click()
+  await nav.getByRole('button', { name: /^Agent sign-in/ }).click()
   await expect(page.getByRole('heading', { level: 2, name: 'Agents' })).toBeVisible()
   const list = page.getByRole('list', { name: 'Agents' })
   await expect(list.getByText('Not installed').first()).toBeVisible()

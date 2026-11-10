@@ -8,19 +8,20 @@ import { useStore } from '@/store'
 
 export function AgentsSection({ client }: { client: Api }) {
   const navigate = useStore((s) => s.navigate)
-  const { agents, error, reload } = useAgentList(client)
-  const openAgents = () => navigate('agents')
+  const { agents, error, reload } = useAgentList(client, true)
   return (
     <>
-      <SettingsSection title="Agents" id="agents-list">
+      <SettingsSection title="Sign-in" id="agents-list" scope="Your account">
         <SettingRow
           label="Install, sign in and update"
-          help="Installing, signing in and updating happen on the Agents page."
-          control={<Button size="sm" variant="secondary" onClick={openAgents}>Open Agents</Button>}
+          help="Do these on the Agents page."
+          control={<Button size="sm" variant="secondary" onClick={() => navigate('agents')}>Open Agents</Button>}
         />
       </SettingsSection>
+      {agents === null && error === null && <p role="status" className="text-ui text-muted">Loading agents…</p>}
       {error && <Callout tone="failed" role="alert" actions={<Button size="sm" variant="secondary" onClick={reload}>Retry</Button>}>{error}</Callout>}
-      {agents && agents.length > 0 && <AgentList agents={agents} onSetUp={openAgents} />}
+      {agents?.length === 0 && <p className="text-ui text-muted">This server lists no agents.</p>}
+      {agents && agents.length > 0 && <AgentList agents={agents} />}
     </>
   )
 }
