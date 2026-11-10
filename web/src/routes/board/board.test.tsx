@@ -858,7 +858,11 @@ describe('lanes view', () => {
     const composer = await screen.findByRole('dialog', { name: /^Reply to / })
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
     expect(composer.isConnected).toBe(true)
-    expect(document.activeElement).toBe(within(composer).getByRole('textbox', { name: 'Message to the agent' }))
+    const box = within(composer).getByRole('textbox', { name: 'Message to the agent' })
+    expect(document.activeElement).toBe(box)
+    await userEvent.type(box, 'use the staging IdP')
+    expect((box as HTMLTextAreaElement).value).toBe('use the staging IdP')
+    expect(within(composer).getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
   })
 
   it('groups a run with its child runs under one lane', async () => {

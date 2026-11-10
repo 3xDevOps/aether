@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import { deliveryLabel } from '@/components/palette/inject-dialog'
@@ -95,15 +95,21 @@ export function ReplyComposer({
   onDone: () => void
   returnFocus: () => void
 }) {
-  const text = useReply((s) => s.reply?.text ?? '')
-  const sending = useReply((s) => Boolean(s.reply?.sending))
-  const error = useReply((s) => s.reply?.error)
+  const runId = card.run.id
+  // A board card claims the reply as it opens; a composer opened anywhere else, such as Lanes or Map, claims it here.
+  useLayoutEffect(() => {
+    if (useReply.getState().reply?.runId !== runId) setReplying(runId, true)
+  }, [runId])
+  const reply = useReply((s) => (s.reply?.runId === runId ? s.reply : null))
+  const text = reply?.text ?? ''
+  const sending = Boolean(reply?.sending)
+  const error = reply?.error
   const leftOutside = useRef(false)
 
   const send = async () => {
     const reply = useReply.getState().reply
     const payload = reply?.text.trim()
-    if (!reply || !payload || reply.sending) return
+    if (!reply || reply.runId !== runId || !payload || reply.sending) return
     const request = reply.request?.payload === payload ? reply.request : { payload, key: crypto.randomUUID() }
     const attempt = ++sends
     saveReply({ request, sending: attempt, error: undefined })
