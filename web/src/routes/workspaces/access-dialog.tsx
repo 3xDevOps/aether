@@ -23,17 +23,21 @@ async function refreshWorkspaces(client: Api) {
   if (same()) useStore.getState().setWorkspaces(list)
 }
 
-function useMembers(client: Api): Member[] {
+function useMembers(client: Api): [Member[], string | null] {
   const members = useStore((s) => s.members)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let live = true
     const same = sameIdentity()
-    useStore.getState().readMembers(client.memberList()).then((list) => live && same() && useStore.getState().setMemberList(list), () => {})
+    useStore.getState().readMembers(client.memberList()).then(
+      (list) => live && same() && useStore.getState().setMemberList(list),
+      (err: unknown) => live && same() && setError(`Could not list members: ${message(err)}`),
+    )
     return () => {
       live = false
     }
   }, [client])
-  return Object.values(members).filter((m) => !m.pending)
+  return [Object.values(members).filter((m) => !m.pending), error]
 }
 
 function useCloseOnIdentityChange(onClose: () => void) {
@@ -76,7 +80,7 @@ function MemberLine({ member, id, detail, selfID }: { member?: Member; id: strin
 export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { workspaceID: string; client: Api; onClose: () => void }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const superAdmin = useIsSuperAdmin()
-  const members = useMembers(client)
+  const [members, membersError] = useMembers(client)
   const byID = new Map(members.map((m) => [m.id, m]))
   const [access, setAccess] = useState<WorkspaceAccess | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -128,6 +132,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-3">
+          {membersError && <Callout tone="failed" role="alert">{membersError}</Callout>}
           {error && <Callout tone="failed" role="alert">{error}</Callout>}
           {!access && !error && (
             <div role="status" aria-label="Loading access" className="flex flex-col gap-0.5">
@@ -195,7 +200,8 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
 
 export function WorkspaceOwnerDialog({ workspaceID, client, onClose }: { workspaceID: string; client: Api; onClose: () => void }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
-  const members = useMembers(client).filter((m) => isAdminRole(m.role))
+  const [allMembers, membersError] = useMembers(client)
+  const members = allMembers.filter((m) => isAdminRole(m.role))
   const current = workspace?.owner_member_id ?? ''
   const [owner, setOwner] = useState(current)
   const selfID = useSelfID()
@@ -247,6 +253,7 @@ export function WorkspaceOwnerDialog({ workspaceID, client, onClose }: { workspa
               {previous.id === selfID ? 'You keep' : `${previous.display_name} keeps`} access as {previous.role === 'super_admin' ? 'a super admin' : 'a granted member'}.
             </p>
           )}
+          {membersError && <Callout tone="failed" role="alert">{membersError}</Callout>}
           {error && <Callout tone="failed" role="alert">{error}</Callout>}
         </div>
         <DialogFooter>

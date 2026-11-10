@@ -111,6 +111,16 @@ describe('workspace access', () => {
     await waitFor(() => expect(api.workspaceOwnerSet).toHaveBeenCalledWith(workspace.id, root.id))
   })
 
+  it('shows why the member list could not be read', async () => {
+    seed(admin, { owned: true })
+    const api = client({ memberList: vi.fn(async () => { throw new ApiError(500, 'members unavailable') }) })
+    render(<WorkspacesRoute params={{}} client={api} />)
+    expect(await screen.findByText(/Could not list members: .*members unavailable/)).toBeTruthy()
+    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
+    expect(await dialog.findByText(/Could not list members: .*members unavailable/)).toBeTruthy()
+  })
+
   it('never offers a super admin to add, and tells an owner who else only a super admin can add', async () => {
     seed(admin, { owned: true })
     const api = client({

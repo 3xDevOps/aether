@@ -122,3 +122,19 @@ describe('invite workspace rules', () => {
     await waitFor(() => expect(client.memberInvite).toHaveBeenCalledWith(undefined, [workspace.id]))
   })
 })
+
+describe('invites to a server without workspace access', () => {
+  it('keep the old admin choices: any role but super admin, and no workspace picker', async () => {
+    seed(admin)
+    useStore.setState({ info: { ...serverInfo, member: admin, features: [] } })
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+    const dialog = await inviteDialog()
+
+    expect(dialog.queryByText('Workspaces')).toBeNull()
+    fireEvent.change(dialog.getByLabelText('GitHub login'), { target: { value: 'octocat' } })
+    expect((dialog.getByRole('button', { name: 'Invite' }) as HTMLButtonElement).disabled).toBe(false)
+    await openSelect(dialog.getByLabelText('Role'))
+    expect(screen.getByRole('option', { name: /^Admin/ })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: /^Super admin/ })).toBeNull()
+  })
+})

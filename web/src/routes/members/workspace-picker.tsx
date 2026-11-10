@@ -9,14 +9,18 @@ export function administered(workspaces: Record<string, Workspace>, selfRole: Me
   return Object.values(workspaces).filter((w) => isAdminRole(w.role ?? selfRole))
 }
 
-/** Roles the caller may hand to an invitee: only a super admin invites an admin. */
-export function invitableRoles(selfRole: Member['role'] | null): Member['role'][] {
+/**
+ * Roles the caller may hand to an invitee: only a super admin invites an
+ * admin. A server without workspace access keeps its admin's old choices.
+ */
+export function invitableRoles(selfRole: Member['role'] | null, scoped = true): Member['role'][] {
+  if (!scoped) return ['viewer', 'collaborator', 'admin']
   return selfRole === 'super_admin' ? ['viewer', 'collaborator', 'admin', 'super_admin'] : ['viewer', 'collaborator']
 }
 
-/** Whether an invitation may be sent: anyone but a super admin names at least one workspace. */
-export function workspacesValid(selfRole: Member['role'] | null, picked: string[]): boolean {
-  return selfRole === 'super_admin' || picked.length > 0
+/** Whether an invitation may be sent: anyone but a super admin names at least one workspace, on a server that scopes access. */
+export function workspacesValid(selfRole: Member['role'] | null, picked: string[], scoped = true): boolean {
+  return !scoped || selfRole === 'super_admin' || picked.length > 0
 }
 
 export function WorkspacePicker({ workspaces, picked, required, onChange }: {

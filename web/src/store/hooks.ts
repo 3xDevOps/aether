@@ -226,6 +226,11 @@ export function useIsAdmin(): boolean {
  * of a server that predates workspace-scoped access, which reports its
  * administrator as admin. False until hydrated.
  */
+/** Whether the server scopes access by workspace; older servers do not. */
+export function useWorkspaceAccessServer(): boolean {
+  return useStore((s) => !!s.info?.features?.includes(workspaceAccessFeature))
+}
+
 export function useIsSuperAdmin(): boolean {
   return useStore((s) => {
     const role = s.info?.member.role

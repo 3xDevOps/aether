@@ -40,6 +40,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   const [accessing, setAccessing] = useState<Workspace | null>(null)
   const [chowning, setChowning] = useState<Workspace | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [membersError, setMembersError] = useState<string | null>(null)
   const loading = useDelayed(!loaded && error === null)
   const fetchVersion = useRef(0)
 
@@ -61,7 +62,10 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
     if (!caps.hasMethod('member.list')) return
     const { readMembers, setMemberList } = useStore.getState()
     const same = sameIdentity()
-    readMembers(client.memberList()).then((list) => same() && setMemberList(list), () => {})
+    readMembers(client.memberList()).then(
+      (list) => same() && setMemberList(list),
+      (err: unknown) => same() && setMembersError(`Could not list members: ${message(err)}`),
+    )
   }, [caps, client])
 
   useEffect(() => {
@@ -112,6 +116,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
               }} />
             </div>
           )}
+          {membersError && <Callout tone="failed" role="alert">{membersError}</Callout>}
           {error && (
             <Callout tone="failed" role="alert" actions={<Button size="sm" variant="secondary" onClick={() => void refetch()}>Retry</Button>}>
               {error}
