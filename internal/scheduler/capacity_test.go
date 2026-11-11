@@ -602,7 +602,9 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 		}
 	}
 	root := t.TempDir()
-	s := &Scheduler{cfg: Config{Runtime: &admissionRuntime{host: healthyAdmissionHost()}, MinFreeBytes: -1, procRoot: root}, capacityGate: make(chan struct{}, 1)}
+	procRoot = root
+	t.Cleanup(func() { procRoot = isolatedProcRoot })
+	s := &Scheduler{cfg: Config{Runtime: &admissionRuntime{host: healthyAdmissionHost()}, MinFreeBytes: -1}, capacityGate: make(chan struct{}, 1)}
 
 	write(root, "some avg10=99.00 avg60=20.00 avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=0\n")
 	_, err := s.tryReserveCapacity(t.Context())
@@ -617,10 +619,24 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 	}
 	release()
 
-	s.cfg.procRoot = t.TempDir()
+	procRoot = t.TempDir()
 	release, err = s.tryReserveCapacity(t.Context())
 	if err != nil {
 		t.Fatalf("host without /proc/pressure refused: %v", err)
 	}
 	release()
+}
+
+var isolatedProcRoot string
+
+// TestMain keeps the admission tests off the host's real /proc/pressure.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "procfs")
+	if err != nil {
+		panic(err)
+	}
+	isolatedProcRoot, procRoot = dir, dir
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }

@@ -34,6 +34,9 @@ const (
 	maxMemoryPressure = 20.0
 )
 
+// procRoot is a variable so tests can point the pressure check at a fake procfs.
+var procRoot = "/proc"
+
 // ValidateRunBudgets is shared by server startup and the scheduler. Zero selects
 // automatic limits; it does not disable protection for managed environments.
 func ValidateRunBudgets(cpus float64, memory, pids int64) error {
@@ -205,7 +208,7 @@ func hasProvisioningHeadroom(available, floor, allowance, outstanding uint64) bo
 // which MemAvailable does not show on a host that swaps or compresses memory.
 // A host without pressure accounting is not refused.
 func (s *Scheduler) checkMemoryPressure() error {
-	root := cmp.Or(s.cfg.procRoot, "/proc")
+	root := procRoot
 	pressure, err := sysstats.MemoryPressure(root)
 	if err != nil {
 		return fmt.Errorf("%w: host memory pressure: %w", ErrCapacityUnknown, err)

@@ -156,7 +156,6 @@ type Config struct {
 	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
 	filesystemCapacity   func(string) (disk.Usage, error)
-	procRoot             string
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
