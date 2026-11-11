@@ -422,7 +422,7 @@ type sentKey struct {
 // else a new one. dup is true when an identical message is in flight or was
 // sent. done ends the call with whether it succeeded and restarts the
 // window, since an assistant call waits for the member's approval first.
-func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key string, dup bool, done func(sent bool)) {
+func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key string, dup bool, done func(sent, refused bool)) {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00%s\x00%t\x00%s", member, p.RunID, p.Steer, p.Message))
 	fingerprint := string(sum[:])
 	sentKeys.Lock()
@@ -439,12 +439,15 @@ func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key s
 	}
 	dup = k.inflight > 0 || k.sent
 	k.inflight++
-	return k.key, dup, func(sent bool) {
+	return k.key, dup, func(sent, refused bool) {
 		sentKeys.Lock()
 		defer sentKeys.Unlock()
 		k.inflight--
 		k.at = time.Now()
 		k.sent = k.sent || sent
+		if refused {
+			k.key = uuid.NewString()
+		}
 	}
 }
 
@@ -455,13 +458,14 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 	}
 	l := links(info.DashboardURL)
 	params := protocol.RunInjectParams{RunID: in.RunID, Message: in.Message, Steer: in.Steer, IdempotencyKey: in.IdempotencyKey}
-	dup, done := false, func(bool) {}
+	dup, done := false, func(bool, bool) {}
 	if params.IdempotencyKey == "" {
 		params.IdempotencyKey, dup, done = messageKey(info.Member.ID, params, time.Now())
 	}
 	var res protocol.RunRoomPostResult
 	err = c.act(ctx, protocol.MethodRunInject, params, &res)
-	done(err == nil)
+	refused := err == nil && res.Message.State == protocol.RoomMessageNotSent
+	done(err == nil && !refused, refused)
 	if err != nil {
 		return "", nil, retryable(err, params.IdempotencyKey)
 	}
@@ -476,15 +480,20 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 				next = "unprotect it with aether_session_lifecycle; "
 			case "unsupported_image":
 				next = "drop the images; "
-			case "steer_denied", "access_revoked":
+			case "steer_denied":
 				next = "ask the session's owner or a workspace admin for access; "
+			case "access_revoked":
+				next = "aether_get_session shows whether the session still exists; if it does, ask a workspace admin for access; "
 			case "control_changed":
 				next = ""
 			}
 		}
+		again := "send it again"
+		if in.IdempotencyKey != "" {
+			again += " with a new idempotency_key, since " + in.IdempotencyKey + " returns this refusal"
+		}
 		return "", nil, &untrustedError{untrusted: map[string]any{"failure": m.Failure}, err: &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-			"message to session %s was not sent (%s; the error is under untrusted.failure); %ssend it again with a new idempotency_key, since %s returns this refusal",
-			in.RunID, code, next, params.IdempotencyKey)}}
+			"message to session %s was not sent (%s; the error is under untrusted.failure); %s%s", in.RunID, code, next, again)}}
 	}
 	out := map[string]any{"run_id": in.RunID, "state": m.State, "outcome": res.Outcome, "url": l.run(in.RunID), "idempotency_key": params.IdempotencyKey}
 	summary := fmt.Sprintf("Message to session %s is %s.", in.RunID, m.State)

@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"path"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
@@ -149,7 +152,14 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		case errors.Is(err, domain.ErrPromptNotSent):
 			code = "prompt_not_sent"
 		}
-		return ReceiptNotSent, "", &store.RoomMessageFailure{Code: code, Message: err.Error()}, nil
+		message := err.Error()
+		// Every workspace viewer reads the failure; an attached file's error
+		// names its host path.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			message = strings.ReplaceAll(message, pathErr.Path, path.Base(pathErr.Path))
+		}
+		return ReceiptNotSent, "", &store.RoomMessageFailure{Code: code, Message: message}, nil
 	}
 	return ReceiptSent, outcome, nil, nil
 }

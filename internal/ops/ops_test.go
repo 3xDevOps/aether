@@ -158,23 +158,23 @@ func TestMessageKeyKeepsInFlight(t *testing.T) {
 		t.Fatal("a first message is a duplicate")
 	}
 	other, _, otherDone := messageKey("mem-inflight", protocol.RunInjectParams{RunID: "run-1", Message: "another"}, start)
-	otherDone(true)
+	otherDone(true, false)
 	later := start.Add(2 * duplicateWindow)
 	again, dup, againDone := messageKey("mem-inflight", p, later)
 	if again != key || !dup {
 		t.Fatalf("a repeat while the first is in flight got key %q (dup %t), want %q", again, dup, key)
 	}
-	done(true)
-	againDone(true)
+	done(true, false)
+	againDone(true, false)
 	if k, _, d := messageKey("mem-inflight", protocol.RunInjectParams{RunID: "run-1", Message: "another"}, later); k == other {
 		t.Fatal("a finished message older than the window kept its key")
 	} else {
-		d(false)
+		d(false, false)
 	}
 	if k, dup, d := messageKey("mem-inflight", p, time.Now().Add(2*duplicateWindow)); k == key || dup {
 		t.Fatalf("a message repeated after the window got key %q (dup %t), want a new one", k, dup)
 	} else {
-		d(false)
+		d(false, false)
 	}
 }
 

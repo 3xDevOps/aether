@@ -1,8 +1,10 @@
 package collab
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"io/fs"
 	"testing"
 	"time"
 
@@ -63,10 +65,13 @@ func TestNotSentSteerRecordsTheDeliveryError(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		code string
+		want string
 	}{
-		{fmt.Errorf("%w: inject requires a running or needs-attention session", ptyhost.ErrNoSession), "session_unavailable"},
-		{fmt.Errorf("%w: wake the session: container start refused", domain.ErrPromptNotSent), "prompt_not_sent"},
-		{acphost.ErrUnsupportedImage, "unsupported_image"},
+		{fmt.Errorf("%w: scheduler: stat attached file: %w", domain.ErrPromptNotSent, &fs.PathError{Op: "stat", Path: "/srv/homes/member/files/shot.png", Err: fs.ErrNotExist}),
+			"prompt_not_sent", "agent prompt was not sent: scheduler: stat attached file: stat shot.png: file does not exist"},
+		{fmt.Errorf("%w: inject requires a running or needs-attention session", ptyhost.ErrNoSession), "session_unavailable", ""},
+		{fmt.Errorf("%w: wake the session: container start refused", domain.ErrPromptNotSent), "prompt_not_sent", ""},
+		{acphost.ErrUnsupportedImage, "unsupported_image", ""},
 	} {
 		st, clock, ws, owner, _, run := setupCollab(t)
 		pty := &collabPTY{err: tc.err}
@@ -79,7 +84,8 @@ func TestNotSentSteerRecordsTheDeliveryError(t *testing.T) {
 			t.Fatal(err)
 		}
 		f := result.Message.Failure
-		if result.Message.State != store.RoomMessageNotSent || f == nil || f.Code != tc.code || f.Message != tc.err.Error() {
+		want := cmp.Or(tc.want, tc.err.Error())
+		if result.Message.State != store.RoomMessageNotSent || f == nil || f.Code != tc.code || f.Message != want {
 			t.Fatalf("inject error %q: state %s failure %+v, want not_sent with code %s and the error", tc.err, result.Message.State, f, tc.code)
 		}
 	}
@@ -106,13 +112,16 @@ func TestSteerRedeliveredAfterTheRestartKeepsWhyItWasNotSent(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := service.Start(ctx); err != nil {
+	if err = service.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = service.Close() })
 	var got *store.RoomMessage
 	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if got, _ = st.GetRoomMessage(ctx, "unsent"); got.State == store.RoomMessageNotSent {
+		if got, err = st.GetRoomMessage(ctx, "unsent"); err != nil {
+			t.Fatal(err)
+		}
+		if got.State == store.RoomMessageNotSent {
 			break
 		}
 	}
@@ -128,6 +137,9 @@ func TestDelayedSteerRecordsWhyItWasNotSent(t *testing.T) {
 	}{
 		{"session_protected", func(_ *collabStore, run *domain.Run, _ *domain.Member) { run.Protected = true }},
 		{"access_revoked", func(st *collabStore, _ *domain.Run, other *domain.Member) { delete(st.members, other.ID) }},
+		{"steer_denied", func(st *collabStore, run *domain.Run, _ *domain.Member) {
+			st.workspaces[run.WorkspaceID].SteerOthers = domain.SteerOthersAdminsOnly
+		}},
 	} {
 		st, clock, ws, _, other, run := setupCollab(t)
 		pty := &collabPTY{}
