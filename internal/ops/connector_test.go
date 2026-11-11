@@ -469,6 +469,18 @@ func TestConnectorReadTools(t *testing.T) {
 		out["truncated_before"] != true || out["note"] != historyExpired {
 		t.Fatalf("aether_session_history of an expired terminal = %q %v", text, out)
 	}
+	answers := f.answers[protocol.MethodWorkspaceTimeline]
+	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-1", "waiting", "first"), reportEvent("run-1", "waiting", "second"),
+		reportEvent("run-1", "waiting", "third"))
+	_, out = run(t, cs, "aether_session_history", map[string]any{"run_id": "run-1", "limit": 2})
+	var summaries []string
+	for _, rep := range out["untrusted"].(map[string]any)["reports"].([]any) {
+		summaries = append(summaries, rep.(map[string]any)["summary"].(string))
+	}
+	if want := []string{"third", "second"}; !slices.Equal(summaries, want) {
+		t.Fatalf("aether_session_history limit 2 reports = %v, want %v", summaries, want)
+	}
+	f.answers[protocol.MethodWorkspaceTimeline] = answers
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: testRun})
 
 	text, out = run(t, cs, "aether_needs_attention", nil)

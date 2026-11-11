@@ -540,7 +540,7 @@ func runHistory(ctx context.Context, c calls, in historyInput) (string, any, err
 	if err != nil {
 		return "", nil, err
 	}
-	untrusted := map[string]any{"reports": reps}
+	untrusted := map[string]any{"reports": reps[:min(len(reps), limit)]}
 	out := map[string]any{"run_id": r.ID, "mode": r.Mode, "untrusted": untrusted}
 	if r.ACP {
 		var before int64
