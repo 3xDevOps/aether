@@ -300,11 +300,13 @@ raises the host-wide pressure that **Insights → System** charts (`some avg10` 
 `/proc/pressure/memory`). To read the number the gate uses:
 
 ```sh
-cat /sys/fs/cgroup"$(systemctl show -p ControlGroup --value aether-server)"/memory.pressure
+cat /sys/fs/cgroup"$(cut -d: -f3 /proc/"$(pgrep -xo aether-server)"/cgroup)"/memory.pressure
 ```
 
-Without cgroup v2 or without `memory.pressure` for the server's cgroup, the
-stall check is skipped and the server logs that once. A file it cannot read or
+A foreground server shares its cgroup with the shell that started it, so
+memory-heavy jobs in that shell count toward the server's stall. Without
+cgroup v2, with the server in the root cgroup, or without `memory.pressure` for
+its cgroup, the stall check is skipped and the server logs that once. A file it cannot read or
 parse refuses launches with `scheduler: host capacity unavailable`, like the
 other probes.
 

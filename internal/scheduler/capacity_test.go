@@ -643,6 +643,16 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 	}
 	release()
 
+	// A server in the root cgroup would read the host-wide file.
+	writeFile(filepath.Join(proc, strconv.Itoa(os.Getpid()), "cgroup"), "0::/\n")
+	writeFile(filepath.Join(cgroups, "memory.pressure"), psi("100.00", "100.00"))
+	release, err = s.tryReserveCapacity(t.Context())
+	if err != nil {
+		t.Fatalf("root cgroup refused: %v", err)
+	}
+	release()
+	writeFile(filepath.Join(proc, strconv.Itoa(os.Getpid()), "cgroup"), "0::/system.slice/aether-server.service\n")
+
 	writeFile(serverPressure, "garbage\n")
 	if _, err = s.tryReserveCapacity(t.Context()); !errors.Is(err, ErrCapacityUnknown) {
 		t.Fatalf("malformed memory.pressure: %v, want ErrCapacityUnknown", err)

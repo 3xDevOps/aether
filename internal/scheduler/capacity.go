@@ -189,10 +189,11 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 		// MemAvailable does not show a server that is stalling on memory. Only
 		// the server's own cgroup counts: a session stalled inside its own
 		// memory limit reclaims in its own cgroup and does not slow the server.
-		// A host without cgroup v2 pressure accounting is not refused.
+		// A host without cgroup v2 pressure accounting is not refused, nor is
+		// a server in the root cgroup, whose file would be host-wide.
 		var pressure *float64
 		cgroup, err := cgroupPath(procRoot, os.Getpid())
-		if err == nil {
+		if err == nil && cgroup != "/" {
 			pressure, err = sysstats.CgroupMemoryPressure(filepath.Join(cgroupRoot, cgroup))
 		}
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -200,7 +201,7 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 		}
 		if pressure == nil {
 			s.pressureSkipLog.Do(func() {
-				slog.Info("scheduler: skipping the memory pressure check; the server's cgroup has no memory.pressure", "cgroup_root", cgroupRoot)
+				slog.Info("scheduler: skipping the memory pressure check; the server has no cgroup of its own with memory.pressure", "cgroup_root", cgroupRoot)
 			})
 		} else if *pressure >= maxMemoryPressure {
 			return nil, fmt.Errorf("%w: the server stalled on memory for %.1f%% of the last 60s (its cgroup's memory.pressure, some avg60); launches are refused at %.0f%%",
