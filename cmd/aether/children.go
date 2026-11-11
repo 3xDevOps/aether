@@ -69,7 +69,7 @@ func listChildren(run string) error {
 			if ch.Model != "" {
 				agent += " " + ch.Model
 			}
-			line := fmt.Sprintf("%s  %-9s  %s  %s  account %s", ch.RunID, ch.State, agent, ch.Purpose, ch.AccountMemberID)
+			line := fmt.Sprintf("%s  %-12s  %s  %s  account %s", ch.RunID, ch.State, agent, ch.Purpose, ch.AccountMemberID)
 			if ch.Detached {
 				line += "  detached"
 			}

@@ -290,22 +290,20 @@ func (s *Service) noticeStopped(ctx context.Context) error {
 	return s.noticeSpells(ctx, "child-stopped:", stoppedNoticeAfter, domain.RunActivity.Stopped, func(c store.ChildSpell, _ time.Time) string {
 		id := string(c.Child.RunID)
 		msg := fmt.Sprintf("Subsession %s (%s) stopped (%s) and does not continue on its own.", id, c.Child.Purpose, c.Run.Activity)
-		switch c.Run.Activity {
-		case domain.ActivityDisconnected:
+		if c.Run.Activity == domain.ActivityDisconnected {
 			msg += "\nIts agent is not running, so messages wait unread until a person reopens it with Retry Enhanced in its Chat view."
-		case domain.ActivityNeedsYou:
-			msg += "\nIt waits for a person, who answers in its session."
-		default:
+		} else {
 			msg += "\nOnce the cause below is fixed, wake it with an instruction: aether-internal send --to " + id + " --body <text>."
 		}
 		return msg + "\nTo go on without it: aether-internal subsession cancel --run-id " + id
 	})
 }
 
-// noticeSpells tells each parent once per spell of states in accepts about
-// an attached child in it for over after, with the message head writes. The
-// notice's key holds the spell's start, so new work starts a new spell. A run
-// a person paused is left alone.
+// noticeSpells tells each parent once per spell about an attached child
+// whose states have satisfied in for longer than after; head writes the
+// first lines of the message. The notice's key holds the spell's start, so
+// new work starts a new spell. A run a person paused, or whose result already
+// reached its parent, is left alone.
 func (s *Service) noticeSpells(ctx context.Context, prefix string, after time.Duration, in func(domain.RunActivity, string) bool, head func(store.ChildSpell, time.Time) string) error {
 	now := s.cfg.Now()
 	spells, err := s.cfg.Store.ChildrenInSpell(ctx, now.Add(-after), in)
@@ -314,6 +312,11 @@ func (s *Service) noticeSpells(ctx context.Context, prefix string, after time.Du
 	}
 	for _, c := range spells {
 		if s.cfg.Runs.Paused(c.Child.RunID) {
+			continue
+		}
+		if reported, err := s.cfg.Store.ChildReported(ctx, c.Child.RunID); err != nil {
+			return err
+		} else if reported {
 			continue
 		}
 		// An idle body names a growing duration, so a resend under the same

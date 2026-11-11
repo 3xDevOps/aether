@@ -8,6 +8,7 @@ export type ChildState =
   | 'working'
   | 'waiting'
   | 'needs-you'
+  | 'disconnected'
   | 'finished'
   | 'failed'
   | 'ended'

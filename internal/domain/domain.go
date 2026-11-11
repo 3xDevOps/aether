@@ -150,10 +150,18 @@ func (a RunActivity) Quiet(reason string) bool {
 	return false
 }
 
-// Stopped reports whether a live run in this activity and reason stopped
-// with nothing it reported saying so: its agent is not running, a turn
-// failed, or it waits on a person for anything but a question or block it
-// reported.
+// These start the reasons of a needs-you run whose turn an error cut short:
+// an Enhanced turn interrupted or ended early, or a usage limit Aether does
+// not resume from.
+const (
+	InterruptedReason        = "turn interrupted"
+	StoppedShortReasonPrefix = "turn ended: "
+	UsageLimitReasonPrefix   = "Usage limit reached on "
+)
+
+// Stopped reports whether a live run in this activity and reason stopped on
+// an error with nothing it reported saying so: its agent is not running, a
+// turn failed, or a turn was cut short.
 func (a RunActivity) Stopped(reason string) bool {
 	switch a {
 	case ActivityDisconnected:
@@ -161,7 +169,7 @@ func (a RunActivity) Stopped(reason string) bool {
 	case ActivityFailed:
 		return !strings.HasPrefix(reason, ReportedFailureReason)
 	case ActivityNeedsYou:
-		return !strings.HasPrefix(reason, NeedsInputReasonPrefix) && !strings.HasPrefix(reason, BlockedReasonPrefix)
+		return reason == InterruptedReason || strings.HasPrefix(reason, StoppedShortReasonPrefix) || strings.HasPrefix(reason, UsageLimitReasonPrefix)
 	}
 	return false
 }

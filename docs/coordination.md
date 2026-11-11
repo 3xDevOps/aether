@@ -1284,13 +1284,15 @@ anything), `answered`, or waiting on a `needs-input` answer for over an hour
 while its parent is live sends the parent one message per quiet spell: its
 state and for how long, its status reason, its latest report, and the commands
 to wake it (`send --to <subsession>`) or stop it (`subsession cancel --run-id <subsession>`).
-A live attached subsession that has stopped for over a minute, with no report
-of its own saying so, sends one message per stopped spell the same way, with
-what can move it on. It has stopped when its agent is `disconnected` (not
-running, so mail waits unread until a person presses **Retry Enhanced**), a
-turn `failed` (such as `enhanced turn failed: ... Authentication required`), or
-it is `needs-you` for anything but a `needs-input` question or `blocked` report
-it sent. New work starts a new spell. A subsession a person paused sends none. A subsession's
+A live attached subsession that has stopped on an error for over a minute
+sends one message per stopped spell the same way, with what can move it on. It
+has stopped when its agent is `disconnected` (not running, so mail waits unread
+until a person presses **Retry Enhanced**), a turn `failed` (such as `enhanced
+turn failed: ... Authentication required`) other than by its own failure
+report, or a turn was cut short (`turn interrupted`, `turn ended: <reason>`, or
+`Usage limit reached on ...`). A permission prompt or question waiting for a
+person sends nothing, nor does a subsession whose result already reached its
+parent. New work starts a new spell. A subsession a person paused sends none. A subsession's
 `needs-input` question goes to its owner, and the parent is told in its inbox
 so it can answer within the task.
 

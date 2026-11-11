@@ -41,7 +41,7 @@ type ChildStore interface {
 	// closed parent left unreviewed.
 	ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error)
 	// ChildrenInSpell returns the attached started children of a live
-	// parent whose live run has been in states in accepts since before
+	// parent whose live run's states have all satisfied in since before
 	// cutoff, with when that spell began.
 	ChildrenInSpell(ctx context.Context, cutoff time.Time, in func(domain.RunActivity, string) bool) ([]ChildSpell, error)
 	// SetChildState moves a reservation from one of from to to.
@@ -234,10 +234,10 @@ func (d *DB) ChildrenInSpell(ctx context.Context, cutoff time.Time, in func(doma
 	return out, nil
 }
 
-// spellSince is when the run's current unbroken spell of states in accepts
-// began: the oldest of the newest transitions in accepts. A reason change
-// inside the spell keeps it going. It is zero when the newest transition is
-// not in the spell.
+// spellSince is when the run's current unbroken spell began: the oldest of
+// the newest transitions that all satisfy in. A reason change inside the
+// spell keeps it going. It is zero when the newest transition does not
+// satisfy in.
 func (d *DB) spellSince(ctx context.Context, run domain.RunID, in func(domain.RunActivity, string) bool) (time.Time, error) {
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT activity, reason, at FROM run_state_transitions WHERE run_id = ? ORDER BY rowid DESC`, run)
