@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -390,5 +392,58 @@ func TestASwitchedRunStaysAwake(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if e.sched.Sleep(run.ID).AsleepSince != nil || containerState(c) != "running" {
 		t.Fatal("a run whose container was created for Standard fell asleep")
+	}
+}
+
+// A sleep whose record fails leaves a companion an earlier sleep paused
+// marked for resume.
+func TestAFailedSleepRecordKeepsTheEarlierBrowserResume(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	entry.browserSlept = true
+	e.sched.mu.Unlock()
+	path := e.sched.sidecarPath(run.ID)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(path, "block"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.markAsleep(entry, false); err == nil {
+		t.Fatal("markAsleep succeeded over an unwritable sidecar")
+	}
+	e.sched.mu.Lock()
+	slept, asleep := entry.browserSlept, !entry.asleepSince.IsZero()
+	e.sched.mu.Unlock()
+	if !slept || asleep {
+		t.Fatalf("after a failed sleep record browserSlept=%v asleep=%v, want true false", slept, asleep)
+	}
+}
+
+// Recovery that adopted a sleeping closed run does not stop the container
+// a Relaunch started first.
+func TestRecoveryKeepsAReopenedContainerRunning(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	e.sleepRun(t, run.ID)
+	s2 := e.restartACP(t)
+	s2.mu.Lock()
+	adopted := s2.runs[run.ID]
+	s2.mu.Unlock()
+	if _, err := s2.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	s2.stopRecoveredAsleep(t.Context(), adopted)
+	if state := containerState(e.container(t, run.ID)); state != "running" {
+		t.Fatalf("reopened container is %s after recovery's stop, want running", state)
 	}
 }

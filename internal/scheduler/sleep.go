@@ -566,9 +566,10 @@ func (s *Scheduler) markAsleep(entry *supervised, browser bool) error {
 	defer s.mu.Unlock()
 	entry.asleepSince = time.Now().UTC()
 	entry.wakeErr = nil
+	slept := entry.browserSlept
 	entry.browserSlept = browser
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		entry.asleepSince, entry.browserSlept = time.Time{}, false
+		entry.asleepSince, entry.browserSlept = time.Time{}, slept
 		return fmt.Errorf("record the sleep: %w", err)
 	}
 	return nil
@@ -647,11 +648,27 @@ func (s *Scheduler) recoverAsleep(ctx context.Context, r *domain.Run, sc sidecar
 	s.mu.Unlock()
 	if entry != nil && err == nil && !info.Exited {
 		// Started by hand while the server was down: the agent is not in it.
-		if serr := s.cfg.Runtime.Stop(ctx, runtime.ID(sc.ContainerID), s.cfg.StopGrace); serr != nil {
-			slog.Warn("scheduler: stop a sleeping session's container", "run", r.ID, "error", serr)
-		}
+		s.stopRecoveredAsleep(ctx, entry)
 	}
 	return true
+}
+
+// stopRecoveredAsleep stops the running container of a run recovery adopted
+// asleep. A wake or Relaunch that won the lifecycle lock first and started
+// the container on purpose keeps it running.
+func (s *Scheduler) stopRecoveredAsleep(ctx context.Context, entry *supervised) {
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	s.mu.Lock()
+	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero()
+	cid := entry.containerID
+	s.mu.Unlock()
+	if !asleep {
+		return
+	}
+	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
+		slog.Warn("scheduler: stop a sleeping session's container", "run", entry.runID, "error", err)
+	}
 }
 
 // finalizeAsleep finishes a killed run whose container a sleep had already

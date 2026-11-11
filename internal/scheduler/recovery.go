@@ -804,16 +804,15 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		if sc.AsleepSince != nil {
 			info, ierr := s.cfg.Runtime.Inspect(ctx, runtime.ID(sc.ContainerID))
 			if !errors.Is(ierr, runtime.ErrNotFound) {
+				var owner *supervised
 				s.mu.Lock()
 				if s.runs[run] == nil {
-					s.adoptRetainedOwnerLocked(r, sc)
+					owner = s.adoptRetainedOwnerLocked(r, sc)
 				}
 				s.mu.Unlock()
 				// A server that stopped mid-sleep left the container frozen.
-				if ierr == nil && !info.Exited {
-					if serr := s.cfg.Runtime.Stop(ctx, runtime.ID(sc.ContainerID), s.cfg.StopGrace); serr != nil {
-						slog.Warn("scheduler: stop a sleeping closed session's container", "run", run, "error", serr)
-					}
+				if owner != nil && ierr == nil && !info.Exited {
+					s.stopRecoveredAsleep(ctx, owner)
 				}
 				continue
 			}
