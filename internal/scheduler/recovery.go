@@ -1377,7 +1377,8 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		s.finishRecoveredExit(ctx, r, sc)
 		return
 	}
-	if sc.AsleepSince != nil && s.recoverAsleep(ctx, r, sc) {
+	// A kill recorded while asleep finishes below, on the stopped container's exit.
+	if sc.AsleepSince != nil && !sc.KillRequested && s.recoverAsleep(ctx, r, sc) {
 		return
 	}
 	// The exit watcher started by supervision waits for the container to stop
@@ -1936,6 +1937,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		usageLimit:          sc.UsageLimit,
 		asleepSince:         asleepSince,
 		wakeErr:             wakeErr,
+		browserSlept:        sc.BrowserSlept,
 		done:                make(chan struct{}),
 	}
 }

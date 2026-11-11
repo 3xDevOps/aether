@@ -326,3 +326,26 @@ func TestARestartFinishesAnInterruptedSleep(t *testing.T) {
 		t.Fatalf("the restart finished a session it found asleep: %s", got.Status)
 	}
 }
+
+// A kill the server recorded for a sleeping run, and died before finishing,
+// finishes at restart.
+func TestARestartFinishesAKillRecordedWhileAsleep(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sleepRun(t, run.ID)
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	entry.killRequested, entry.killActor = true, e.member.ID
+	err := e.sched.writeSidecar(entry.sidecar())
+	e.sched.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.restartACP(t)
+	waitFor(t, "the killed session finished", func() bool {
+		got, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && got.Status == domain.RunAbandoned
+	})
+}

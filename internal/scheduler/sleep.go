@@ -493,7 +493,11 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 		return err
 	}
 	if err := s.prepareDevelopmentClose(ctx, run); err != nil {
-		return errors.Join(err, s.reopenDevelopment(context.WithoutCancel(ctx), run), s.unmarkAsleep(entry))
+		undo := context.WithoutCancel(ctx)
+		s.mu.Lock()
+		cid := entry.containerID
+		s.mu.Unlock()
+		return errors.Join(err, s.reopenDevelopment(undo, run), s.resumeDevelopmentBrowser(undo, run, cid), s.unmarkAsleep(entry))
 	}
 	s.mu.Lock()
 	entry.browserSlept = true
@@ -533,14 +537,10 @@ func (s *Scheduler) sleepClosed(ctx context.Context, entry *supervised) error {
 func (s *Scheduler) markAsleep(entry *supervised) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	exec, keeper := entry.agentExec, entry.agentKeeper
 	entry.asleepSince = time.Now().UTC()
 	entry.wakeErr = nil
-	// The container stop ends the agent's exec, so nothing reattaches to it.
-	entry.agentExec, entry.agentKeeper = nil, nil
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		entry.asleepSince = time.Time{}
-		entry.agentExec, entry.agentKeeper = exec, keeper
 		return fmt.Errorf("record the sleep: %w", err)
 	}
 	return nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -84,6 +85,9 @@ func (h *Host) WriteSessionInput(ctx context.Context, key SessionKey, admission 
 		return errors.New("ptyhost: input limit out of bounds")
 	}
 	return h.admitSession(ctx, key, admission, func(s *session) error {
+		s.mu.Lock()
+		s.lastIn = time.Now()
+		s.mu.Unlock()
 		return s.writeStdinContext(ctx, p)
 	})
 }
