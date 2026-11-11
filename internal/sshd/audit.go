@@ -239,10 +239,27 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 			}
 		}
 		runs := newRunScopes(s.cfg.Store)
-		// Another member's entry about a session is shown only to a reader
-		// who reaches every workspace of it; a deleted one only to super admins.
+		notes, _ := s.cfg.Store.(interface {
+			GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string, workspaces []domain.WorkspaceID) (*store.Memory, []*store.Memory, error)
+		})
+		// Another member's entry about a session, or about a note from
+		// one, is shown only to a reader who reaches every workspace of
+		// that session; one about a deleted session or note only to super
+		// admins.
 		shows = func(e *store.AuditEntry) bool {
-			return e.Member == member || !strings.HasPrefix(e.Target, "run-") || runs.reaches(ctx, actor, domain.RunID(e.Target))
+			switch {
+			case e.Member == member:
+				return true
+			case strings.HasPrefix(e.Target, "run-"):
+				return runs.reaches(ctx, actor, domain.RunID(e.Target))
+			case strings.HasPrefix(e.Method, "memory.") && e.Target != "":
+				if notes == nil {
+					return false
+				}
+				note, _, err := notes.GetMemory(ctx, domain.WorkspaceID(e.WorkspaceID), e.Target, nil)
+				return err == nil && (note.RunID == "" || runs.reaches(ctx, actor, note.RunID))
+			}
+			return true
 		}
 	}
 	var entries []*store.AuditEntry

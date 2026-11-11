@@ -469,6 +469,44 @@ func TestAuditLeavesOutSessionsTheReaderDoesNotReach(t *testing.T) {
 	}
 }
 
+// Another member's audit entry about a note is left out for a reader who
+// does not reach every workspace of the note's session.
+func TestAuditLeavesOutNotesOfSessionsTheReaderDoesNotReach(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	note := func(run *domain.Run) string {
+		t.Helper()
+		m := &store.Memory{WorkspaceID: w.wsA.ID, Kind: store.MemoryConvention, Scope: store.MemoryScopeWorkspace, Source: store.MemoryFromAgent,
+			Title: "from " + string(run.ID), Body: "from " + string(run.ID), AuthorID: run.MemberID, RunID: run.ID}
+		if _, err := w.e.db.InsertMemory(ctx, m, nil); err != nil {
+			t.Fatal(err)
+		}
+		return m.ID
+	}
+	shown, hidden := note(w.runUA), note(w.runA)
+	as := w.e.store.(store.AuditStore)
+	for _, target := range []string{shown, hidden} {
+		if err := as.AddAudit(ctx, &store.AuditEntry{At: time.Now(), Member: w.e.member.ID, Via: ViaConnector, Method: protocol.MethodMemoryPin,
+			WorkspaceID: string(w.wsA.ID), Target: target}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res protocol.AuditListResult
+	if err := w.call(t, "A", protocol.MethodAuditList, protocol.AuditListParams{}, &res); err != nil {
+		t.Fatalf("A audit.list: %v", err)
+	}
+	var got []string
+	for _, e := range res.Entries {
+		if e.Method == protocol.MethodMemoryPin {
+			got = append(got, e.Target)
+		}
+	}
+	if !slices.Equal(got, []string{shown}) {
+		t.Fatalf("A audit memory.pin targets = %v, want only %s", got, shown)
+	}
+}
+
 func TestWorkspaceScopeUnreachableReadsAsMissing(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
