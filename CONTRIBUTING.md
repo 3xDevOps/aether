@@ -203,7 +203,8 @@ make deploy                         # this machine
 2. It installs it as `/usr/local/bin/aether-server`, with one SSH
    connection and at most one `sudo` password prompt.
 3. It installs and enables `packaging/systemd/aether-server.service` only if
-   the target has no `aether-server` unit.
+   the target has no `aether-server` unit, and installs
+   `packaging/systemd/aether.slice` every time.
 4. It restarts the service and checks the new version is running, or fails
    with `deploy: aether-server is not running after restart; check
    journalctl -u aether-server`.
