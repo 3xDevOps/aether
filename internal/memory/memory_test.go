@@ -1028,3 +1028,30 @@ func TestAHiddenReplacementIsNotLinked(t *testing.T) {
 		}
 	}
 }
+
+// A member's pin, unpin and removal of an agent's note are published under
+// the note's session, so streams check every workspace of it, as reads do.
+func TestMemberChangesToAnAgentNoteNameItsSession(t *testing.T) {
+	f := newFixture(t)
+	run := f.run(f.dana, "codex", "task")
+	added, err := f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindDecision, Text: "Keep the lease."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	ws, id := string(f.ws.ID), added.Item.ID
+	if _, err = f.svc.Pin(ctx, f.dana.ID, protocol.MemoryPinParams{WorkspaceID: ws, ID: id}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.svc.Unpin(ctx, f.dana.ID, protocol.MemoryUnpinParams{WorkspaceID: ws, ID: id}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.svc.Remove(ctx, f.dana.ID, protocol.MemoryRmParams{WorkspaceID: ws, ID: id}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range f.changes() {
+		if e.RunID != run.ID {
+			t.Errorf("memory.change %+v names session %q, want %s", e.Payload, e.RunID, run.ID)
+		}
+	}
+}

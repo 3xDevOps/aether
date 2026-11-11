@@ -142,7 +142,7 @@ func TestMemoryMembersCurateAndViewersRead(t *testing.T) {
 		want = append(want, change{events.MemoryActionAdd, id, e.member.ID, e.run.ID})
 	}
 	for _, id := range byID {
-		want = append(want, change{events.MemoryActionRm, id, dana.ID, ""})
+		want = append(want, change{events.MemoryActionRm, id, dana.ID, e.run.ID})
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("memory.change events = %+v, want %+v", got, want)

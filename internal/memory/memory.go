@@ -422,7 +422,7 @@ func (s *Service) Pin(ctx context.Context, member domain.MemberID, p protocol.Me
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
-	if err := s.changed(ctx, workspace, "", member, events.MemoryActionPin, note.ID); err != nil {
+	if err := s.changed(ctx, workspace, note.RunID, member, events.MemoryActionPin, note.ID); err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
 	return protocol.MemoryPinResult{Item: protocol.MemoryItemFromStore(note)}, nil
@@ -445,7 +445,7 @@ func (s *Service) Unpin(ctx context.Context, member domain.MemberID, p protocol.
 	if err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
-	if err := s.changed(ctx, workspace, "", member, events.MemoryActionUnpin, note.ID); err != nil {
+	if err := s.changed(ctx, workspace, note.RunID, member, events.MemoryActionUnpin, note.ID); err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
 	return protocol.MemoryUnpinResult{Item: protocol.MemoryItemFromStore(note)}, nil
@@ -466,11 +466,16 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 	if err = s.visible(ctx, member, workspace, p.ID, domain.RunID(p.RunID)); err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
-	ids, vet := []string{p.ID}, mayChange(method, "remove", actor)
+	// The removed notes' session, so their memory.change events reach only
+	// those who reach it, as the notes did.
+	ids, source, may := []string{p.ID}, domain.RunID(p.RunID), mayChange(method, "remove", actor)
 	if p.RunID != "" {
-		ids, err = s.cfg.Store.DeleteMemoryByRun(ctx, workspace, domain.RunID(p.RunID), vet)
+		ids, err = s.cfg.Store.DeleteMemoryByRun(ctx, workspace, source, may)
 	} else {
-		err = s.cfg.Store.DeleteMemory(ctx, workspace, p.ID, vet)
+		err = s.cfg.Store.DeleteMemory(ctx, workspace, p.ID, func(n *store.Memory) error {
+			source = n.RunID
+			return may(n)
+		})
 	}
 	if err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
@@ -478,7 +483,7 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 	if ids == nil {
 		ids = []string{}
 	}
-	if err := s.changed(ctx, workspace, "", member, events.MemoryActionRm, ids...); err != nil {
+	if err := s.changed(ctx, workspace, source, member, events.MemoryActionRm, ids...); err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
 	return protocol.MemoryRmResult{IDs: ids}, nil
