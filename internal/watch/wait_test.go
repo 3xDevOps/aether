@@ -599,6 +599,42 @@ func TestAPullRequestClosedUnmergedResolvesAsAFailure(t *testing.T) {
 	}
 }
 
+// A merge queue that removes the pull request without merging it wakes a
+// merged wait with why; a removal before the wait began, or one that
+// merged it, does not.
+func TestAMergeQueueRemovalWakesAMergedWait(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	removed := func(at time.Time, reason string) map[string]any {
+		return map[string]any{"__typename": "RemovedFromMergeQueueEvent", "createdAt": at.UTC().Format(time.RFC3339), "reason": reason}
+	}
+	gh.set(func(f *fakeGitHub) { f.queued = removed(h.clock.now().Add(-time.Hour), "failed_checks") })
+	owner := h.run(h.ada, "Ship")
+	if resolved := h.mustReport(owner, "pr:acme/app#7:merged"); len(resolved) != 0 {
+		t.Fatalf("resolved = %+v on a removal before the wait, want pending", resolved)
+	}
+	gh.set(func(f *fakeGitHub) { f.queued = map[string]any{"__typename": "AddedToMergeQueueEvent"} })
+	h.clock.advance(2 * PRPollIdle)
+	h.settle()
+	gh.set(func(f *fakeGitHub) { f.queued = removed(h.clock.now(), "failed_checks") })
+	h.clock.advance(2 * PRPollIdle)
+	h.awaitWake(owner.ID)
+	w := h.only(owner.ID)
+	if w.Outcome != "removed-from-queue" || w.Detail != "reason: failed_checks" || !strings.Contains(w.Summary, "removed from the merge queue without merging") {
+		t.Fatalf("wait = %+v, want removed-from-queue with the reason", w)
+	}
+	if body := h.inbox.messages(owner.ID)[0].body; !strings.Contains(body, "queue it again and wait again") || !strings.Contains(body, `"reason: failed_checks"`) {
+		t.Fatalf("message = %q", body)
+	}
+	other := h.run(h.ada, "Follow up")
+	gh.set(func(f *fakeGitHub) { f.queued = removed(h.clock.now().Add(time.Hour), "merged") })
+	h.mustReport(other, "pr:acme/app#7:merged")
+	h.clock.advance(2 * PRPollIdle)
+	h.settle()
+	if w := h.only(other.ID); w.State != protocol.WaitPending || w.SourceCheckedAt == "" {
+		t.Fatalf("wait = %+v, want pending on the removal that merged it", w)
+	}
+}
+
 func TestFailedChecksWakeWithTheFailingNames(t *testing.T) {
 	h, gh := newWaitPRHarness(t)
 	gh.set(func(f *fakeGitHub) {
@@ -831,6 +867,10 @@ func (mergedPR) Evaluate(context.Context, PRCheck) (PRResult, error) { return PR
 func (mergedPR) Snapshot(_ context.Context, _ domain.MemberID, repo string, number int, _, _ bool) (github.Snapshot, error) {
 	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
 	return github.Snapshot{Repo: repo, Number: number, State: "closed", MergedAt: &at, HeadSHA: shaOne, URL: "https://github.com/acme/app/pull/7"}, nil
+}
+
+func (mergedPR) QueueRemoval(context.Context, domain.MemberID, string, int) (*github.QueueRemoval, error) {
+	return nil, nil
 }
 
 // A pull request that already merged resolves in the report, however

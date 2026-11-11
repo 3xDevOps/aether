@@ -18,6 +18,7 @@ import (
 // prSnapshots reads one pull request as it stands. Satisfied by *PRs.
 type prSnapshots interface {
 	Snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, fresh bool) (github.Snapshot, error)
+	QueueRemoval(ctx context.Context, member domain.MemberID, repo string, number int) (*github.QueueRemoval, error)
 }
 
 // Snapshot reads repo#number with member's GitHub credentials, as
@@ -46,13 +47,16 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 	if !ok {
 		return r, fmt.Errorf("%w: this server does not read pull requests", errWaitUnreadable)
 	}
-	snap, err := src.Snapshot(ctx, home, w.Repo, w.Number, w.Kind == protocol.WaitKindPRChecks, fresh)
-	if err != nil {
+	readErr := func(err error) error {
 		var pe *prError
 		if errors.As(err, &pe) && (!pe.transient || pe.noLogin) {
-			return r, fmt.Errorf("%w: %s", errWaitUnreadable, pe.msg)
+			return fmt.Errorf("%w: %s", errWaitUnreadable, pe.msg)
 		}
-		return r, err
+		return err
+	}
+	snap, err := src.Snapshot(ctx, home, w.Repo, w.Number, w.Kind == protocol.WaitKindPRChecks, fresh)
+	if err != nil {
+		return r, readErr(err)
 	}
 	checks := countedChecks(snap, w.CreatedAt, now)
 	r.observed = protocol.WaitObserved{
@@ -79,6 +83,17 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 		case snap.State == "closed":
 			r.done, r.outcome, r.summary, r.observation = true, "closed", ref+" closed without merging", "closed"
 		default:
+			removal, err := src.QueueRemoval(ctx, home, w.Repo, w.Number)
+			if err != nil {
+				return r, readErr(err)
+			}
+			// A removal before the wait began is the state it waits from.
+			if removal != nil && removal.At.After(w.CreatedAt) {
+				r.done, r.outcome, r.observation = true, "removed-from-queue", "removed-from-queue@"+removal.At.UTC().Format(time.RFC3339)
+				r.summary = ref + " was removed from the merge queue without merging, " + counts
+				r.detail = "reason: " + removal.Reason
+				break
+			}
 			r.summary = ref + " is open, " + counts
 		}
 	case protocol.WaitKindPRChecks:
@@ -218,6 +233,8 @@ func nextStep(w *store.RunWait) string {
 		return "the pull request merged; continue with the work that waited on it"
 	case "closed":
 		return "the pull request was closed without merging; decide whether to reopen it or report the change of plan"
+	case "removed-from-queue":
+		return "the merge queue removed the pull request without merging it; open the link to read why, fix it, queue it again and wait again"
 	case "passed":
 		return "the checks passed; continue"
 	case "failed":

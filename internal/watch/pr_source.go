@@ -42,6 +42,7 @@ type GitHub interface {
 	Credentials(ctx context.Context, member domain.MemberID) (string, github.Account, error)
 	PullRequestSnapshot(ctx context.Context, token, repo string, number int, prev *github.Snapshot) (github.Snapshot, error)
 	RequiredChecks(ctx context.Context, token string, prev, snap *github.Snapshot) error
+	MergeQueueRemoval(ctx context.Context, token, repo string, number int) (*github.QueueRemoval, error)
 }
 
 // PRStore is the persistence pull request watches use.
@@ -257,6 +258,38 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	moved = prev == nil || prev.State != snap.State || prev.HeadSHA != snap.HeadSHA ||
 		prev.Checks().Key != snap.Checks().Key || len(prev.Reviews) != len(snap.Reviews)
 	return snap, moved, nil
+}
+
+// QueueRemoval is when a merge queue last removed repo#number without
+// merging it, read with member's credentials; nil while it is queued, was
+// never queued, or the queue merged it.
+func (p *PRs) QueueRemoval(ctx context.Context, member domain.MemberID, repo string, number int) (*github.QueueRemoval, error) {
+	m := p.member(member)
+	if err := p.lock(ctx, m); err != nil {
+		return nil, err
+	}
+	defer p.unlock(m)
+	if m.limitErr != nil && p.now().Before(m.limitErr.retryAt) {
+		return nil, m.limitErr
+	}
+	token, err := p.token(ctx, member, m, false)
+	if err != nil {
+		return nil, err
+	}
+	removal, err := p.github.MergeQueueRemoval(ctx, token, repo, number)
+	var limited *github.RateLimitError
+	switch {
+	case err == nil:
+		return removal, nil
+	case errors.As(err, &limited):
+		return nil, p.limited(m, limited)
+	case errors.Is(err, github.ErrUnauthorized):
+		m.token = ""
+		return nil, credentialsError(err)
+	case ctx.Err() != nil:
+		return nil, err
+	}
+	return nil, &prError{msg: fmt.Sprintf("read the merge queue of pull request %s#%d: %v", repo, number, err), transient: true}
 }
 
 // read reads repo#number conditionally against prev, and the required
