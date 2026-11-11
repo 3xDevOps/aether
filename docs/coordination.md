@@ -1238,16 +1238,21 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
 
 - `subsession options` says whether this session may start subsessions and, if not,
   the exact reason `subsession start` would give. It lists the limit, how many
-  of this session's subsessions are busy and queued, and each agent
-  and account a subsession may use with its state: `ready`, `exhausted` (95% of
+  of this session's subsessions are busy and queued, and each agent on the
+  owner's own account and on every account shared with the owner whose owner
+  reaches the session's workspaces, with its state: `ready`, `exhausted` (95% of
   its quota used), `not-installed` or `not-signed-in`, with the sentence
-  that says how to fix it. `--harness` adds that agent's models.
+  that says how to fix it. A `ready` login the server found signed out says so
+  in its sentence. `--harness` adds that agent's models.
 - `subsession start` takes `--harness`, `--purpose` (3-8 words, shown in the
   dashboard) and `--task` or `--task-file` (at most 24 KiB, so the escaped request fits the socket's 64 KiB; `-` reads
   standard input), plus optional `--model`, `--mode
-  standard|enhanced|background` and `--account <member-id>`. `--account` takes
-  only the parent owner's own account: another member's is refused with
-  `-32001 subsessions use the owner's own <agent> account`. The server
+  standard|enhanced|background` and `--account <member-id>`. Without
+  `--account`, a subsession of the parent's agent starts on the parent's
+  account, and any other agent on the owner's own account. `--account` takes the
+  owner's account or one shared with them; any other is refused with `-32001
+  child.start: permission denied: member <id> has not shared their account with
+  you`. The server
   publishes the parent's branch and checks the subsession out from that commit;
   uncommitted changes are not included. The subsession inherits the parent's
   extra repositories (`--repo`) and permission tier. The receipt carries the subsession's

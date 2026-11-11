@@ -152,9 +152,6 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 	if perr != nil {
 		return protocol.ChildReceipt{}, perr
 	}
-	if err = s.admit(ctx, p, spec.account); err != nil {
-		return protocol.ChildReceipt{}, rpcErr(method, err)
-	}
 	base, err := s.cfg.Git.PublishRunBranch(ctx, p.parent.ID)
 	if err != nil {
 		return protocol.ChildReceipt{}, rpcErr(method, fmt.Errorf("publish the parent's branch: %w", err))

@@ -778,10 +778,10 @@ wrote. A subsession can orchestrate its own subagents. Agents start one for what
 their own subagents cannot give: another agent or model, a separate branch or
 build, long work that would crowd out their context, or an independent review,
 and whenever you ask for subsessions. Quick or tightly coupled work stays with
-the agent. A subsession starts on the parent owner's own agent account, moved
-only by the parent's launch fallback; another member's account cannot be
-chosen, so to delegate on someone else's account, they start the parent
-session or are handed it. The subsession appears under its parent in the
+the agent. A subsession of the parent's agent starts on the parent's account,
+so a session you launched on an account shared with you delegates on it too;
+any other agent starts on your own account. The agent can pick your account or
+any account shared with you instead. The subsession appears under its parent in the
 dashboard, with its purpose, agent, model, account and state, and you open,
 message, take over or stop it like any session. Its result reaches the parent's
 inbox, as does a notice when it has sat idle or waiting for over an hour, so
@@ -808,7 +808,7 @@ aether subsessions on
 aether session "fix the login bug" --agent claude --children off   # this session only
 ```
 
-A subsessions on your own account and uses its parent's launch fallback
+A subsession uses its parent's launch fallback
 policy: when its Claude or Codex account has used 95% of its quota, the
 subsession moves to the account with the most usage left among yours and those
 shared with you, as [usage fallback](#usage-fallback) does for every launch,
