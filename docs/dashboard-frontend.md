@@ -1656,9 +1656,9 @@ both show:
 | Unreviewed finish | **Review** |
 
 Every action but Approve and the card's Reply goes where the condition's
-`target` points: the session (requests and questions), its Terminal view
-(blocked, held, Enhanced failure), or its Changes view for an unreviewed
-finish.
+`target` points: the session's `defaultView` (requests and questions, so
+Terminal for Standard and Session for Enhanced), its Terminal view (blocked,
+held, Enhanced failure), or its Changes view for an unreviewed finish.
 
 While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so

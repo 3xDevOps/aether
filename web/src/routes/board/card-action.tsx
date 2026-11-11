@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { needsYouConditions, openAction, type NeedsYouTarget, type PrimaryAction } from '@/lib/needs-you'
 import type { BoardCard } from '@/routes/board/selectors'
-import { runRoute, type RunView } from '@/routes/run/views'
+import { defaultView, runRoute, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 import type { UiSlice, Route } from '@/store/ui'
@@ -49,8 +49,9 @@ let sends = 0
 
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
 
-export function targetRoute(run: Pick<RunRecord, 'id'>, target: NeedsYouTarget | undefined): Route {
-  return runRoute(run.id, target && targetView[target])
+// A request is answered on the session's own view, which shows it on a phone too.
+export function targetRoute(run: Pick<RunRecord, 'id' | 'mode' | 'acp'>, target: NeedsYouTarget | undefined): Route {
+  return runRoute(run.id, target === 'request' ? defaultView(run) : target && targetView[target])
 }
 
 export function openCard(card: BoardCard, navigate: UiSlice['navigate']) {

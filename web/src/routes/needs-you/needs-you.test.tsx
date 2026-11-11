@@ -41,6 +41,33 @@ describe('Needs you cards', () => {
     expect(useStore.getState().shownRunView).toEqual({ runId: 'run_q', view: 'changes' })
   })
 
+  it('opens a Standard request on Terminal and keeps the chosen tab', async () => {
+    const cards = await showNeedsYou([{
+      ...base, kind: 'question', run_id: 'run_q', title: 'pick a port', reason: 'Question: answer in the terminal',
+      request: { id: 'req_q', kind: 'question', title: 'Which port?' },
+    }])
+    useStore.getState().upsertRun(run({ id: 'run_q', task: 'pick a port' }))
+    useStore.setState({ runViewMemory: { run_q: 'changes' } })
+    fireEvent.click(await cards.findByRole('button', { name: 'Open terminal' }))
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_q', view: 'terminal' })
+    expect(useStore.getState().runViewMemory.run_q).toBe('changes')
+  })
+
+  it('reviews a permission in Chat and keeps the chosen tab', async () => {
+    const cards = await showNeedsYou([{
+      ...base, kind: 'permission', run_id: 'run_q', title: 'edit a file', reason: 'Permission requested',
+      request: {
+        id: 'req_q', kind: 'permission', title: 'Edit main.go',
+        options: [{ id: 'allow', label: 'Allow', kind: 'allow_once' }, { id: 'deny', label: 'Deny', kind: 'reject_once' }],
+      },
+    }])
+    useStore.getState().upsertRun(run({ id: 'run_q', task: 'edit a file', mode: 'acp', acp: true }))
+    useStore.setState({ runViewMemory: { run_q: 'changes' } })
+    fireEvent.click(cards.getByRole('button', { name: 'Review' }))
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_q', view: 'session' })
+    expect(useStore.getState().runViewMemory.run_q).toBe('changes')
+  })
+
   it('replies to a room question with run.room.post, correlated to the question', async () => {
     const posted: RoomPostResult = { message: roomMessage({ kind: 'reply', body: 'Use port 8080', state: 'sent' }) }
     const post = vi.spyOn(api, 'runRoomPost').mockResolvedValue(posted)

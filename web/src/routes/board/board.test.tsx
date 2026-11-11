@@ -315,7 +315,7 @@ describe('Needs you actions', () => {
     renderBoard()
 
     fireEvent.click(cardOf('still going').getByRole('button', { name: 'Open terminal' }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: working.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: working.id, view: 'terminal' } })
   })
 
   it('opens the changes of an unreviewed failure', () => {

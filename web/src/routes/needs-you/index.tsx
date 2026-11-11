@@ -38,15 +38,16 @@ import { registerRoute } from '@/routes/registry'
 import { choicePlan } from '@/routes/run/request-options'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
 import { useStore } from '@/store'
+import type { RunRecord } from '@/store/runs'
 import { stateContextOf } from '@/store/selectors'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 const tones: Partial<Record<AttentionItem['kind'], Tone>> = { failed: 'failed', disconnected: 'disconnected', ready: 'review' }
 
-function useOpen(item: AttentionItem) {
+function useOpen(item: AttentionItem, run: RunRecord | undefined) {
   const navigate = useStore((s) => s.navigate)
   return () => {
-    const route = targetRoute({ id: item.run_id }, needsYouConditions.find((c) => c.id === item.kind)?.target)
+    const route = run ? targetRoute(run, needsYouConditions.find((c) => c.id === item.kind)?.target) : runRoute(item.run_id)
     navigate(route.name, route.params, { remember: false })
   }
 }
@@ -91,7 +92,7 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
   // The permission's preview is in the session view, whatever tab the session last showed.
   const review = () => {
     const route = runRoute(item.run_id, 'session')
-    navigate(route.name, route.params)
+    navigate(route.name, route.params, { remember: false })
   }
   const decide = async (approve: boolean) => {
     onError(undefined)
@@ -252,9 +253,9 @@ function inline(item: AttentionItem, replies: boolean) {
 }
 
 function AttentionCard({ item }: { item: AttentionItem }) {
-  const openAction = useOpen(item)
   const navigate = useStore((s) => s.navigate)
   const run = useStore((s) => s.runs[item.run_id])
+  const openAction = useOpen(item, run)
   const [error, setError] = useState<string>()
   const condition = needsYouConditions.find((c) => c.id === item.kind)
   const action = run && condition?.action(run)
