@@ -315,9 +315,10 @@ func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt s
 	if !s.IdleEnhanced(run) {
 		return errACPBusy
 	}
-	// A wake outlasts a delivery's deadline; mail the deadline cut off is
-	// delivered on the coordination service's retry to the woken session.
-	awake, err := s.holdAwake(context.WithoutCancel(ctx), run)
+	// A wake this starts outlasts the delivery's deadline; mail the deadline
+	// cut off is delivered on the coordination service's retry to the woken
+	// session.
+	awake, err := s.holdAwake(ctx, run)
 	if err != nil {
 		return err
 	}
