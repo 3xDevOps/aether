@@ -446,6 +446,9 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 	if allowed != nil {
 		return nil, allowed
 	}
+	if dev.Status == domain.DeviceRevoked {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("device %s is already revoked", dev.ID)}
+	}
 	// Only while its status is the one the check above was made on: a
 	// device approved meanwhile is no longer an admin's to deny.
 	if err = ids.RevokeDevice(ctx, dev.ID, dev.Status); errors.Is(err, store.ErrNotFound) {
