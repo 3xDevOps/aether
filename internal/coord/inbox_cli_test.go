@@ -7,11 +7,13 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type closedStdout struct{}
@@ -93,5 +95,15 @@ func TestCLIInboxReadAcknowledgesThePreviousBatch(t *testing.T) {
 	third := read()
 	if len(third.Messages) != 1 || third.Messages[0].Body != "three" || third.Acked || unacked() != 1 {
 		t.Fatalf("read after an explicit ack = %+v with %d unacknowledged, want message three and nothing acknowledged twice", third, unacked())
+	}
+
+	for range 4 {
+		if err := h.db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: h.workspace, FromRun: b, ToRun: a, Body: strings.Repeat("x", protocol.CoordMaxBodyBytes)}, protocol.CoordMaxUnread); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cli(&acked, "ack", third.AckToken)
+	if acked.Waiting != 4 {
+		t.Fatalf("ack before four full messages = %+v, want all four waiting though the next batch holds three", acked)
 	}
 }

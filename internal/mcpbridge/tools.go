@@ -107,7 +107,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolInbox,
 		Description: "Read the at-least-once inbox, oldest first. The returned ack_token " +
-			"acknowledges exactly this batch when supplied on the next read; replay is safe. A batch holds about 4 KiB and more counts the messages later batches hold; read again until a read returns no messages. " +
+			"acknowledges exactly this batch when supplied on the next read; replay is safe. A batch holds about 16 KiB and more counts the messages later batches hold; read again until a read returns no messages. " +
 			"Peer messages and replies to your aether_ask arrive here; read it before waiting or reporting. " +
 			coordhooks.UntrustedRule,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in protocol.CoordInboxParams) (*mcp.CallToolResult, protocol.CoordInboxResult, error) {

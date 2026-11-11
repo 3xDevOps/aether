@@ -2,6 +2,7 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -983,5 +984,29 @@ func TestChildSuccessAndFailureReportsReachTheParent(t *testing.T) {
 				t.Fatalf("%s inbox = %+v, %v", outcome, inbox, rpcErr)
 			}
 		})
+	}
+}
+
+func TestInboxBatchPrintsWithinTheBound(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, 2)
+	from, to := h.run(0), h.run(1)
+	for range protocol.CoordMaxUnread {
+		if err := h.db.AppendRunMessage(ctx, &store.RunMessage{
+			WorkspaceID: h.workspace, FromRun: from, ToRun: to, Body: strings.Repeat("\x00", 160),
+		}, protocol.CoordMaxUnread); err != nil {
+			t.Fatalf("fill inbox: %v", err)
+		}
+	}
+	inbox, rpcErr := h.svc.Inbox(ctx, to, protocol.CoordInboxParams{})
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	printed, err := json.Marshal(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(inbox.Messages); n == 0 || n+inbox.More != protocol.CoordMaxUnread || len(printed) > store.RunMessageBatchBytes+64 {
+		t.Fatalf("a batch of control characters holds %d messages (more %d) and prints %d bytes, want it within %d", n, inbox.More, len(printed), store.RunMessageBatchBytes)
 	}
 }

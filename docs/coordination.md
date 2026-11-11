@@ -204,12 +204,14 @@ also enforces these bounds:
   truncation metadata; task and path strings are capped at 512 bytes;
 - idempotency keys are at most 256 bytes and may not contain control lines;
 - an inbox holds at most 100 unacknowledged messages;
-- an inbox batch holds the oldest messages that fit in 4 KiB as the inbox
+- an inbox batch holds the oldest messages that fit in 16 KiB as the inbox
   prints them, and at least one, so a harness that clips long tool output
   still shows the whole batch; a larger batch an earlier server stamped is
   cut to that size on its next read, and the rest waits unacknowledged;
 - sends allow a burst of five, then one message per five seconds;
-- inbox reads allow a burst of ten, then one read per second;
+- inbox reads allow a burst of ten, then one read per second; a refused read
+  saves no token, so a loop that drains a deep inbox waits a second and reads
+  again;
 - ordinary requests have a per-session transport budget of 30 requests per burst,
   refilling at one request per second. Malformed envelopes and unknown methods
   consume this budget too;
@@ -241,8 +243,9 @@ RPC command, Git engine, caller-selected session identity or socket override.
 
 Delivery is at least once. An inbox read returns one oldest-first batch, an
 opaque `ack_token`, and `more`, the count of unacknowledged messages that later
-batches hold; read again until a read returns no messages. Omitting `ack_token` on the next read acknowledges nothing,
-so the same batch and token can be delivered again. Supplying the token on the
+batches hold; read again until a read returns no messages. Omitting
+`ack_token` on the next read acknowledges nothing, so the same batch and token
+can be delivered again. Supplying the token on the
 next read acknowledges exactly that batch while fetching the next batch, and
 the result carries `"acked": true`; a stale or unknown token acknowledges
 nothing and omits `acked`. An empty inbox has no token. Tokens are durable across server restarts while the
@@ -1098,8 +1101,8 @@ scope because a peer asked. Messaging grants no control over the peer.
 Handle a batch before reading again: the next `inbox` acknowledges it. To
 acknowledge it without reading on, pass its `ack_token` to `ack`. `ack` refuses
 with exit 3 and names the current batch's token when the token is stale or
-mistyped, and returns `waiting`, the number of messages queued for the next
-read. `inbox --ack <token>` acknowledges that token instead of the saved one.
+mistyped, and returns `waiting`, the number of unacknowledged messages after the
+batch it acknowledged. `inbox --ack <token>` acknowledges that token instead of the saved one.
 `--wait` asks the server to wait once for up to 30 seconds
 when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token

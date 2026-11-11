@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -704,12 +703,13 @@ func TestInboxBatchFitsRunMessageBatchBytes(t *testing.T) {
 	}
 
 	t.Run("bodies", func(t *testing.T) {
-		db, to := inbox(t, strings.Repeat("a", 4<<10), strings.Repeat("b", 2<<10), strings.Repeat("c", 1<<10), strings.Repeat("d", 2<<10))
+		full := func(c string) string { return strings.Repeat(c, 4<<10) }
+		db, to := inbox(t, full("a"), full("b"), full("c"), full("d"), strings.Repeat("e", 1<<10))
 		var token string
 		var got []string
-		for i := range 3 {
+		for i := range 2 {
 			batch, next := read(t, db, to, token)
-			if more, err := db.CountUndeliveredRunMessages(ctx, to); err != nil || more != []int{3, 1, 0}[i] {
+			if more, err := db.CountUndeliveredRunMessages(ctx, to); err != nil || more != []int{2, 0}[i] {
 				t.Fatalf("after batch %d: %d messages wait for later batches (err %v)", i, more, err)
 			}
 			bodies := ""
@@ -718,45 +718,25 @@ func TestInboxBatchFitsRunMessageBatchBytes(t *testing.T) {
 			}
 			got, token = append(got, bodies), next
 		}
-		if want := []string{"a", "bc", "d"}; !slices.Equal(got, want) {
-			t.Fatalf("batches = %q, want %q: each batch within 4 KiB, the oldest first", got, want)
-		}
-	})
-
-	t.Run("escaping", func(t *testing.T) {
-		bodies := make([]string, 30)
-		for i := range bodies {
-			bodies[i] = strings.Repeat("\x00", 40)
-		}
-		db, to := inbox(t, bodies...)
-		batch, _ := read(t, db, to, "")
-		type shown struct{ ID, Kind, CorrelationID, FromRunID, Body, CreatedAt string }
-		var messages []shown
-		for _, m := range batch {
-			messages = append(messages, shown{m.ID, string(m.Kind), m.CorrelationID, string(m.FromRun), m.Body, m.CreatedAt.UTC().Format(time.RFC3339)})
-		}
-		printed, err := json.Marshal(messages)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(batch) == 0 || len(printed) > 4<<10 {
-			t.Fatalf("a batch of control characters holds %d messages, %d bytes as JSON, want it near 4 KiB", len(batch), len(printed))
+		if want := []string{"abc", "de"}; !slices.Equal(got, want) {
+			t.Fatalf("batches = %q, want %q: each batch within 16 KiB, the oldest first", got, want)
 		}
 	})
 
 	t.Run("earlier oversized batch", func(t *testing.T) {
-		db, to := inbox(t, strings.Repeat("a", 4<<10), "b", "c")
+		full := strings.Repeat("x", 4<<10)
+		db, to := inbox(t, full, full, full, full, "e")
 		_, token := read(t, db, to, "")
 		if _, err := db.db.ExecContext(ctx, `UPDATE run_messages SET delivery_token = ? WHERE to_run = ?`, token, to); err != nil {
 			t.Fatal(err)
 		}
 		batch, again := read(t, db, to, "")
-		if len(batch) != 1 || again != token {
-			t.Fatalf("an earlier server's batch of 3 read again as %d messages under %q, want the first alone under %q", len(batch), again, token)
+		if len(batch) != 3 || again != token {
+			t.Fatalf("an earlier server's batch of 5 read again as %d messages under %q, want the first 3 under %q", len(batch), again, token)
 		}
 		rest, _ := read(t, db, to, token)
-		if len(rest) != 2 || rest[0].Body != "b" || rest[1].Body != "c" {
-			t.Fatalf("after acknowledging the first, the next batch = %d messages, want b and c", len(rest))
+		if len(rest) != 2 || rest[1].Body != "e" {
+			t.Fatalf("after acknowledging the first 3, the next batch = %d messages, want the last 2", len(rest))
 		}
 	})
 }

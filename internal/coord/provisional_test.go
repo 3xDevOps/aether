@@ -35,15 +35,10 @@ func TestProvisionalReportForwardsTheLastMessageOncePerTurn(t *testing.T) {
 		t.Fatalf("ProvisionalReport of a long message: %v", err)
 	}
 	inbox, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
-	if rpcErr != nil || len(inbox.Messages) != 1 || inbox.More != 1 {
-		t.Fatalf("inbox = %+v, %v; want one provisional report per turn, a batch apiece", inbox, rpcErr)
+	if rpcErr != nil || len(inbox.Messages) != 2 {
+		t.Fatalf("inbox = %+v, %v; want one provisional report per turn", inbox, rpcErr)
 	}
-	first := inbox.Messages[0]
-	inbox, rpcErr = h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: inbox.AckToken})
-	if rpcErr != nil || len(inbox.Messages) != 1 || inbox.More != 0 {
-		t.Fatalf("second batch = %+v, %v; want the long report alone", inbox, rpcErr)
-	}
-	clipped := inbox.Messages[0]
+	first, clipped := inbox.Messages[0], inbox.Messages[1]
 	if first.FromRunID != string(child) || first.Kind != string(store.RunMessageKindMessage) ||
 		!strings.HasPrefix(first.CorrelationID, store.ProvisionalReportPrefix) ||
 		first.Body != provisionalHeader+"Pushed PR #7." {

@@ -492,7 +492,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 				args = append(args, m.ID)
 			}
 			if _, uerr := tx.ExecContext(ctx,
-				`UPDATE run_messages SET delivery_token = '' WHERE id IN (`+placeholders(len(args))+`)`, args...,
+				`UPDATE run_messages SET delivery_token = '', delivered_at = NULL WHERE id IN (`+placeholders(len(args))+`)`, args...,
 			); uerr != nil {
 				return nil, "", false, fmt.Errorf("store: split an oversized message batch: %w", uerr)
 			}
@@ -551,7 +551,7 @@ func (d *DB) RetireRunMessages(ctx context.Context, to domain.RunID) error {
 // RunMessageBatchBytes bounds one inbox batch as the inbox prints it, JSON
 // escaping and fields included, so an agent's harness shows it whole: the
 // next read acknowledges every message in it.
-const RunMessageBatchBytes = 4 << 10
+const RunMessageBatchBytes = 16 << 10
 
 // batchFit is how many of msgs, oldest first and at least one, fit in
 // RunMessageBatchBytes. 120 bytes covers each message's field names, kind
