@@ -8,7 +8,7 @@ import { type Api, api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import type { ChildChoice, ChildChoiceSetting, ChildSettings } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { saveChildSettings } from '@/store/children'
 
 function stateWords(choice: ChildChoice): string {
@@ -33,6 +33,11 @@ function ChoiceLabel({ label, choice, on, faint = false }: { label: string; choi
 
 const keepOpen = (event: Event) => event.preventDefault()
 
+/** Whether the server lists agents for the menu, or why it could not. */
+export function offersAgents(settings: ChildSettings): boolean {
+  return Boolean(settings.choices_error) || (settings.choices?.some((c) => c.status !== 'not-installed') ?? false)
+}
+
 // Saves run one after another, so the last response is the last change.
 let saving: Promise<unknown> = Promise.resolve()
 
@@ -49,13 +54,16 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
   for (const choice of settings.choices ?? []) {
     if (choice.status !== 'not-installed') groups.set(choice.harness, [...(groups.get(choice.harness) ?? []), choice])
   }
-  if (groups.size === 0) return null
+  if (groups.size === 0) return settings.choices_error ? <p role="alert" className="text-ui-sm text-state-failed">{settings.choices_error}</p> : null
   const offRows = [...groups].reduce((n, [harness, list]) => n + (agentOff(harness) ? 1 : list.filter((c) => accountOff(harness, c.account_member_id)).length), 0)
   const warnings = [...groups].flatMap(([harness, list]) => agentOff(harness) ? [] : list.filter((c) => !accountOff(harness, c.account_member_id) && stateWords(c)))
 
   // A refused change may still have been stored, so the menu then shows what the server holds.
+  // A save queued before another server was linked never reaches the new one.
   const turn = (choices: ChildChoiceSetting[]) => {
-    saving = saving.then(() => choices.reduce((done, choice) => done.then(() => saveChildSettings({ choice }, client)), Promise.resolve(settings))).catch((err: unknown) => {
+    const same = sameIdentity()
+    saving = saving.then(() => choices.reduce<Promise<unknown>>((done, choice) => done.then(() => same() ? saveChildSettings({ choice }, client) : undefined), Promise.resolve())).catch((err: unknown) => {
+      if (!same()) return
       toast.error(`Could not save subsession agents: ${errorSentence(err)}`)
       return saveChildSettings({}, client).catch(() => {})
     })

@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useEffect, useState } from 'react'
-import { SubsessionAgents } from '@/components/launch/subsession-agents'
+import { offersAgents, SubsessionAgents } from '@/components/launch/subsession-agents'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { Api } from '@/lib/api'
@@ -104,7 +104,7 @@ export function ChildRunsSection({ client }: { client: Api }) {
           <TryAgain onClick={() => { useChildSettings.setState({ error: null }); setAttempt((n) => n + 1) }} />
         )}
       </SettingRow>
-      {settings && (settings.choices?.some((c) => c.status !== 'not-installed') ?? false) && (
+      {settings && offersAgents(settings) && (
         <SettingRow
           label="Subsession agents"
           labelFor="settings-child-agents"

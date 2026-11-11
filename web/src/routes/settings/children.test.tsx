@@ -52,6 +52,12 @@ describe('child run settings', () => {
     expect(client.childSettings).toHaveBeenLastCalledWith({})
   })
 
+  it('shows why no agents are listed when every account fails to list them', async () => {
+    show(['*'], { childSettings: vi.fn(async () => ({ enabled: true, off: [], choices: [], choices_error: 'list the agents on account mem_bob: decode harness definition: boom' })) })
+    expect((await screen.findByRole('alert')).textContent).toBe('list the agents on account mem_bob: decode harness definition: boom')
+    expect(screen.queryByRole('button', { name: /^Subsession agents/ })).toBeNull()
+  })
+
   it('turns an agent, or one account of it, off for subsessions from the agents menu', async () => {
     const user = userEvent.setup()
     const choices: ChildChoice[] = [
