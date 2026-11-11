@@ -421,13 +421,15 @@ unprivileged; then every image needs a root user and self-update is off.
 
 The server creates every container it starts, for sessions, terminals, the
 assistant, harness updates, browser companions, the dictation engine and
-cleanup helpers, under one cgroup parent: `aether.slice`
-with Docker's systemd cgroup driver, the default on current Ubuntu and Debian,
-and `/aether` with the `cgroupfs` driver. `docker info --format
-'{{.CgroupDriver}}'` prints the driver. All sessions together then compete as
-one group with `system.slice`, which holds `aether-server`, `docker`,
-`containerd`, `ssh` and `tailscaled`, and with `user.slice`, which holds login
-shells.
+cleanup helpers, under one cgroup parent: `aether.slice` with Docker's systemd
+cgroup driver, the default on current Ubuntu and Debian, and `/aether` with the
+`cgroupfs` driver. `docker info --format '{{.CgroupDriver}}'` prints the
+driver. This parent overrides `cgroup-parent` in `/etc/docker/daemon.json`.
+The server reads the driver once, so after changing Docker's cgroup driver,
+restart it: `sudo systemctl restart aether-server`. All sessions together
+then compete as one group with `system.slice`, which holds `aether-server`,
+`docker`, `containerd`, `ssh` and `tailscaled`, and with `user.slice`, which
+holds login shells.
 
 `aether-server install` and `setup` write `/etc/systemd/system/aether.slice`
 beside the unit, with `CPUWeight=50` and `IOWeight=50`. `system.slice` and
@@ -435,9 +437,13 @@ beside the unit, with `CPUWeight=50` and `IOWeight=50`. `system.slice` and
 has, sessions get a fifth of CPU and disk and `system.slice` two fifths;
 against `system.slice` alone, sessions get a third. Weights only divide CPU
 and disk while they are contended; they cap nothing, so sessions use every
-core of an otherwise idle host. The slice sets no memory limit and never
-throttles, stops or kills a session. Its name has no dash because systemd
-nests `a-b.slice` inside `a.slice`, whose default weight would decide instead.
+core of an otherwise idle host. Image builds, pulls and other services on the
+host, such as a CI runner, stay in `system.slice` at twice the session group's
+weight. The slice sets no memory limit and never throttles, stops or kills a
+session. Its name has no dash because systemd nests `a-b.slice` inside
+`a.slice`, whose default weight would decide instead. `install` rewrites the
+file, so change the weights in a drop-in: `sudo systemctl edit aether.slice`,
+under `[Slice]`.
 
 A container created before the slice existed stays a `docker-<id>.scope` in
 `system.slice` at weight 100 until the session's container is recreated. With
@@ -470,9 +476,8 @@ docker inspect --format '{{.HostConfig.CgroupParent}}' <container>
 ```
 
 `systemctl status` shows the slice inactive until its first container starts.
-`cpu.weight` prints `50`. If the slice was already active before the file
-existed and still prints `100`, apply the weights to the live slice with
-`sudo systemctl set-property --runtime aether.slice CPUWeight=50 IOWeight=50`.
+`cpu.weight` prints `50`; `daemon-reload` applies the file to a slice that is
+already running.
 
 `MemoryLow=1G` makes the kernel reclaim the server's first gigabyte only after
 unprotected memory. Memory protection passes down the cgroup tree, so it
@@ -648,8 +653,8 @@ One from `v0.7.0-alpha.12` or older needs one restart by hand:
 - The systemd unit. When the release ships a different one, the journal warns
   with the command that applies it:
   `sudo aether-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart aether-server`.
-  When only `aether.slice` is missing or differs, the warning leaves out the
-  restart ([Keep the server reachable under load](#keep-the-server-reachable-under-load)).
+  When only `aether.slice` is missing or differs, and a local Docker uses the
+  systemd cgroup driver, the warning leaves out the restart ([Keep the server reachable under load](#keep-the-server-reachable-under-load)).
   Keep your own changes in a drop-in (`sudo systemctl edit aether-server`).
 - Sysbox's settings: rerun `sudo aether-server sysbox install`. With
   containers running, it prints `sudo systemctl restart sysbox` for later.
