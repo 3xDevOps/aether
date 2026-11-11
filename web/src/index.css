@@ -261,6 +261,7 @@
   --overlay-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -8px rgb(0 0 0 / 0.16);
   --dialog-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 32px -8px rgb(0 0 0 / 0.2);
   --scrim: rgb(0 0 0 / 0.56);
+  --scrim-strong: rgb(0 0 0 / 0.85);
 }
 
 .dark {
@@ -326,6 +327,7 @@
   --overlay-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -8px rgb(0 0 0 / 0.55);
   --dialog-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -8px rgb(0 0 0 / 0.6);
   --scrim: rgb(0 0 0 / 0.56);
+  --scrim-strong: rgb(0 0 0 / 0.85);
 }
 
 /* Theme-independent values. `static` emits every one to :root, so plain CSS
@@ -421,6 +423,7 @@
   --text-color-accent: var(--accent-text);
   --text-color-muted: var(--text-muted);
   --color-scrim: var(--scrim);
+  --color-scrim-strong: var(--scrim-strong);
 
   --shadow-card: var(--card-shadow);
   --shadow-card-hover: var(--card-hover-shadow);
