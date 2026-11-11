@@ -18,7 +18,7 @@ shown beside the status says why it is there.
 | The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`aether pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
-| Host memory is low | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | Close or kill sessions. A closed session's paused container still holds its memory; **Free container…** releases it. |
+| Host memory is low, or the server stalls on memory | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | [Recover from memory pressure](#recover-from-memory-pressure). |
 | An Enhanced Claude Code session is idle for `--run-sleep-after` (30 minutes) | The Chat view shows **Asleep since <time>**; `aether sessions` shows `(asleep)`. | Stops the container with `docker stop`, freeing its memory and CPU, and keeps its disk and checkout. | Nothing. The next message wakes it ([Idle sleep](#idle-sleep)). |
 | An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
 | A Standard agent exits | The session stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the session. |
@@ -281,6 +281,48 @@ on a different machine does not count. When Docker does not answer, the error
 ends with `the server's operator can check Docker with: sudo systemctl status
 docker`. If a filesystem cannot be read at all, the disk check lets the launch
 through.
+
+## Recover from memory pressure
+
+Every launch checks two things. Free memory must stay above the larger of 2 GiB
+and a tenth of the host's memory, plus 512 MiB for each launch already starting;
+otherwise the error ends `<n> available bytes; reserve <n> bytes plus ...`. The
+server's own cgroup must also not be stalling on memory: its `memory.pressure`
+`some avg60` must stay below 10%, which means tasks in the server's cgroup were
+blocked on memory for under 6 s of the last minute. Otherwise:
+
+```text
+scheduler: insufficient host memory headroom: the server stalled on memory for <n>% of the last 60s (its cgroup's memory.pressure, some avg60); launches are refused at 10%
+```
+
+Only the server's cgroup counts. A session that thrashes inside its own memory
+limit reclaims within its own cgroup and does not refuse launches, although it
+raises the host-wide pressure that **Insights → System** charts (`some avg10` of
+`/proc/pressure/memory`). To read the number the gate uses, for the service:
+
+```sh
+cat /sys/fs/cgroup"$(systemctl show -p ControlGroup --value aether-server)"/memory.pressure
+```
+
+For a foreground server, take its PID from the `aether-server serve` process
+(sessions run `aether-server mcp` processes that the host also sees):
+
+```sh
+cat /sys/fs/cgroup"$(cut -d: -f3 /proc/"$(pgrep -of 'aether-server serve')"/cgroup)"/memory.pressure
+```
+
+A foreground server shares its cgroup with the shell that started it, so
+memory-heavy jobs in that shell count toward the server's stall. Without
+cgroup v2, with the server in the root cgroup, or without `memory.pressure` for
+its cgroup, the stall check is skipped and the server logs that once. A file it cannot read or
+parse refuses launches with `scheduler: host capacity unavailable`, like the
+other probes.
+
+To recover, close or kill sessions. A closed session's paused container still
+holds its memory; **Free container…** releases it. An idle Enhanced Claude
+Code session, open or closed, frees its memory on its own after
+`--run-sleep-after` ([Idle sleep](#idle-sleep)). Running work is never
+stopped to make room.
 
 ## Capture an unresponsive host
 

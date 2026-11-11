@@ -9,6 +9,7 @@ import {
   roomMessage,
   run,
   stateContext,
+  workspace,
 } from '@/test/fixtures'
 
 const record = (over: Parameters<typeof run>[0] = {}): RunRecord => toRecord(run(over))
@@ -40,6 +41,15 @@ it.each(['tui', 'acp'] as const)('keeps actual requests ahead of a reported %s o
   expect(subsession).toMatchObject({ state: 'reported' })
   expect(groupOf(subsession)).toBe('finished')
   expect(needsYou({ ...ready, pending_inputs: [{ id: 'question_1', session_id: 'session_1', kind: 'question' }] }, stateContext())?.id).toBe('question')
+})
+
+it("asks an admin to answer a sudo request only where they administer the run's workspace", () => {
+  const sudo = record({ member_id: bob.id, pending_inputs: [{ id: 'sudo-1', session_id: 'aether-sudo', kind: 'permission', title: 'Run as root in /workspace: id' }] })
+  const viewing = (role: 'admin' | 'collaborator') => stateContext({
+    viewerID: alice.id, viewerRole: 'admin', workspaces: { [workspace.id]: { ...workspace, role } },
+  })
+  expect(needsYou(sudo, viewing('admin'))?.id).toBe('sudo')
+  expect(needsYou(sudo, viewing('collaborator'))).toBeUndefined()
 })
 
 const rows: {

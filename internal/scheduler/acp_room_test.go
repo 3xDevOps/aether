@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func TestEnhancedRunRoomMessageStaysQueuedUntilTheAgentTakesIt(t *testing.T) {
@@ -84,7 +85,7 @@ func TestEnhancedRunShutdownLeavesAQueuedRoomMessageQueued(t *testing.T) {
 func roomPoster(t *testing.T, e *testEnv, run *domain.Run) func(string) string {
 	t.Helper()
 	ctl := control.New(control.Config{})
-	room, err := collab.New(collab.Config{Store: e.db, Runs: e.db, Workspaces: e.db, Bus: e.bus, Control: ctl, Inject: e.sched.Inject})
+	room, err := collab.New(collab.Config{Store: e.db, Runs: storetest.Unscoped{DB: e.db}, Workspaces: e.db, Bus: e.bus, Control: ctl, Inject: e.sched.Inject})
 	if err != nil {
 		t.Fatal(err)
 	}

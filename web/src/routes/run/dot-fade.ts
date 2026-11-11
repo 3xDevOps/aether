@@ -2,11 +2,11 @@ import { useEffect, type RefObject } from 'react'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useMediaQuery, useReducedMotion } from '@/lib/hooks'
 
-const RADIUS_PX = 80
+const RADIUS_PX = 54
 /** The share of the radius over which opacity climbs back to full; the rest is held at MIN_OPACITY. */
 const FALLOFF = 1
 const MIN_OPACITY = 0
-const RETURN_MS = 600
+const RETURN_MS = 1200
 
 export const dotFadeShape = {
   '--dot-radius': `${RADIUS_PX}px`,

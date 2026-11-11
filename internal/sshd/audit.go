@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -54,6 +56,10 @@ var auditedMethods = map[string]bool{
 	protocol.MethodMemberMergeAccept:    true,
 	protocol.MethodSlackLink:            true,
 	protocol.MethodSlackUnlink:          true,
+
+	protocol.MethodWorkspaceAccessGrant:  true,
+	protocol.MethodWorkspaceAccessRevoke: true,
+	protocol.MethodWorkspaceOwnerSet:     true,
 }
 
 // assistantReads are the read-only methods the assistant calls that no
@@ -63,21 +69,39 @@ var assistantReads = map[string]bool{
 	protocol.MethodTerminalStatus: true,
 }
 
-type auditChangeKey struct{}
+type auditNoteKey struct{}
+
+// auditNote is what the call behind a dispatch learns for its audit entry:
+// whether it changed something, and the first workspace the server
+// resolved for it.
+type auditNote struct {
+	changed   bool
+	workspace domain.WorkspaceID
+}
 
 // noteChange marks the call behind ctx as having changed a connector, an
 // account share, a member or a Slack link, so its audit entry is kept
 // among the security entries.
 func noteChange(ctx context.Context) {
-	if changed, ok := ctx.Value(auditChangeKey{}).(*bool); ok {
-		*changed = true
+	if note, ok := ctx.Value(auditNoteKey{}).(*auditNote); ok {
+		note.changed = true
+	}
+}
+
+// noteWorkspace records ws as the workspace the call behind ctx acts in,
+// unless one was resolved before it.
+func noteWorkspace(ctx context.Context, ws domain.WorkspaceID) {
+	if note, ok := ctx.Value(auditNoteKey{}).(*auditNote); ok && note.workspace == "" {
+		note.workspace = ws
 	}
 }
 
 // auditCall records every write call by a connector or the assistant, and
 // every call of auditedMethods; changed is whether the call noted a
 // change. The entry holds the ids the params and result name, never the
-// params themselves, and the workspace of the run it acted on.
+// params themselves, and the workspace the server resolved for the call:
+// the result's, the guard's or an in-handler check's target, or the named
+// run's, kept only when the caller reaches it.
 // Recording happens after the call took effect, so a store failure is
 // logged rather than turned into the call's error.
 func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method string, params, result json.RawMessage, perr *protocol.Error, changed bool) {
@@ -104,7 +128,6 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		MemberID    string `json:"member_id"`
 		DeviceID    string `json:"device_id"`
 		ProposalID  string `json:"proposal_id"`
-		WorkspaceID string `json:"workspace_id"`
 	}
 	_ = json.Unmarshal(params, &ids)
 	type made struct {
@@ -123,12 +146,15 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	}
 	_ = json.Unmarshal(result, &res)
 	target := cmp.Or(res.Run.ID, res.Item.ID, ids.RunID, ids.ID)
-	workspace := cmp.Or(res.Run.WorkspaceID, res.Item.WorkspaceID, ids.WorkspaceID)
+	workspace := cmp.Or(res.Run.WorkspaceID, res.Item.WorkspaceID)
+	if note, ok := ctx.Value(auditNoteKey{}).(*auditNote); ok && workspace == "" {
+		workspace = string(note.workspace)
+	}
 	switch method {
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID
 	case protocol.MethodAccountShare, protocol.MethodAccountRevoke, protocol.MethodMemberRole, protocol.MethodMemberApprove,
-		protocol.MethodMemberRemove, protocol.MethodMemberIdentityRemove:
+		protocol.MethodMemberRemove, protocol.MethodMemberIdentityRemove, protocol.MethodWorkspaceAccessRevoke, protocol.MethodWorkspaceOwnerSet:
 		target = ids.MemberID
 	case protocol.MethodMemberDeviceRevoke:
 		target = ids.DeviceID
@@ -140,6 +166,11 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	if workspace == "" && ids.RunID != "" {
 		if r, err := s.cfg.Store.GetRun(ctx, domain.RunID(ids.RunID)); err == nil {
 			workspace = string(r.WorkspaceID)
+		}
+	}
+	if workspace != "" {
+		if actor, err := resolveActor(ctx, s.cfg.Store, member); err != nil || !actor.Reaches(domain.WorkspaceID(workspace)) {
+			workspace = ""
 		}
 	}
 	e := &store.AuditEntry{At: time.Now(), Member: member, Via: via, ConnectorID: connector, Client: client, Method: method,
@@ -196,13 +227,56 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	q := store.AuditQuery{ConnectorID: p.ConnectorID, Before: p.Before, Limit: cmp.Or(p.Limit, protocol.AuditListDefaultLimit)}
-	if m.Role != domain.RoleAdmin {
+	limit := cmp.Or(p.Limit, protocol.AuditListDefaultLimit)
+	q := store.AuditQuery{ConnectorID: p.ConnectorID, Before: p.Before, Limit: limit}
+	actor := permissions.ActorOf(m)
+	shows := func(*store.AuditEntry) bool { return true }
+	if permissions.Check(permissions.ServerAdmin, actor, permissions.Target{}) != nil {
 		q.Member = member
+		for ws := range m.Access.Owned {
+			if workspaceAdmin(actor, ws) {
+				q.Workspaces = append(q.Workspaces, ws)
+			}
+		}
+		runs := newRunScopes(s.cfg.Store)
+		notes, _ := s.cfg.Store.(interface {
+			GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string, workspaces []domain.WorkspaceID) (*store.Memory, []*store.Memory, error)
+		})
+		// Another member's entry about a session, or about a note from
+		// one, is shown only to a reader who reaches every workspace of
+		// that session; one about a deleted session or note, whose scope
+		// can no longer be checked, only to super admins.
+		shows = func(e *store.AuditEntry) bool {
+			switch {
+			case e.Member == member:
+				return true
+			case strings.HasPrefix(e.Target, "run-"):
+				return runs.reaches(ctx, actor, domain.RunID(e.Target))
+			case strings.HasPrefix(e.Method, "memory.") && e.Target != "":
+				if notes == nil {
+					return false
+				}
+				note, _, err := notes.GetMemory(ctx, domain.WorkspaceID(e.WorkspaceID), e.Target, nil)
+				return err == nil && (note.RunID == "" || runs.reaches(ctx, actor, note.RunID))
+			}
+			return true
+		}
 	}
-	entries, err := as.ListAudit(ctx, q)
-	if err != nil {
-		return nil, rpcError(err)
+	var entries []*store.AuditEntry
+	for len(entries) < limit {
+		page, err := as.ListAudit(ctx, q)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		for _, e := range page {
+			if len(entries) < limit && shows(e) {
+				entries = append(entries, e)
+			}
+		}
+		if len(page) < q.Limit {
+			break
+		}
+		q.Before = page[len(page)-1].Seq
 	}
 	out := protocol.AuditListResult{Entries: make([]protocol.AuditEntry, 0, len(entries))}
 	for _, e := range entries {
@@ -214,7 +288,7 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 		}
 		out.Entries = append(out.Entries, w)
 	}
-	if len(entries) == q.Limit {
+	if len(entries) == limit {
 		out.NextBefore = entries[len(entries)-1].Seq
 	}
 	return out, nil

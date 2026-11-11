@@ -21,7 +21,7 @@ func TestAdminConnectsTheirAccount(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	a := h.newServer(edgeproto.PolicyApprovedDevices)
-	admin, adminKey := keyMember(t, a, "Admin", domain.RoleAdmin)
+	admin, adminKey := keyMember(t, a, "Admin", domain.RoleSuperAdmin)
 	_, collabKey := keyMember(t, a, "Collab", domain.RoleCollaborator)
 	sc, err := dialKey(a, adminKey)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestAdminConnectsTheirAccount(t *testing.T) {
 	al, al2 := cs[0], cs[1]
 	code := call[protocol.ServerEdgeClaimCodeResult](t, ctl, protocol.MethodServerEdgeClaimCode, struct{}{}).Code
 	res, err := h.claim(al, code)
-	if err != nil || res.Info.Member.ID != string(admin.ID) || res.Info.Member.Role != string(domain.RoleAdmin) {
+	if err != nil || res.Info.Member.ID != string(admin.ID) || res.Info.Member.Role != string(domain.RoleSuperAdmin) {
 		t.Fatalf("claim with the admin's code: %+v %v; want the admin %s", res.Info.Member, err, admin.ID)
 	}
 	h.waitEdgeOwner(t, a, &alice)

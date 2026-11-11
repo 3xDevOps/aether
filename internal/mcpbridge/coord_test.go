@@ -111,7 +111,7 @@ func newCoordStack(t *testing.T) *coordStack {
 
 	svc, err := coord.New(coord.Config{
 		Dir:   filepath.Join(dir, "coord"),
-		Store: db,
+		Store: storetest.Unscoped{DB: db},
 		Mail:  db,
 		Bus:   bus,
 		Peers: livePeers{a: runs[0], b: runs[1]},

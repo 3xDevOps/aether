@@ -649,7 +649,7 @@ func (h *harness) claim(c *client, code string) (cli.LinkResult, error) {
 func (h *harness) claimServer(c *client, s *serverNode) {
 	h.t.Helper()
 	res, err := h.claim(c, s.claimCode(h.t, time.Now()))
-	if err != nil || res.Config.ServerID != s.id || res.Info.Member.Role != string(domain.RoleAdmin) {
+	if err != nil || res.Config.ServerID != s.id || res.Info.Member.Role != string(domain.RoleSuperAdmin) {
 		h.t.Fatalf("%s claims %s: %+v %v", c.user.Login, s.id, res.Info.Member, err)
 	}
 	eventually(h.t, "the edge records the claim", func() error {
@@ -993,11 +993,11 @@ func (s *serverNode) snapshot(t *testing.T) snapshot {
 	return out
 }
 
-// admins are the members with the admin role.
+// admins are the members with the admin or super admin role.
 func (sn snapshot) admins() []domain.MemberID {
 	var out []domain.MemberID
 	for id, role := range sn.members {
-		if role == domain.RoleAdmin {
+		if role.Admin() {
 			out = append(out, id)
 		}
 	}
@@ -1230,4 +1230,19 @@ func (h *harness) approveForDirect(ctl *protocol.Client, c *client, s *serverNod
 		t.Fatalf("%s's registered device directly: %v, want refused until approved", c.user.Login, err)
 	}
 	approve(t, ctl, s.pendingCode(t, c.user.Login+"'s registered device directly", r))
+}
+
+// grantEveryone grants ws to every member, as the upgrade to
+// workspace-scoped access does for a workspace made before it.
+func grantEveryone(t *testing.T, db *store.DB, ws domain.WorkspaceID) {
+	t.Helper()
+	members, err := db.ListMembers(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range members {
+		if err := db.GrantWorkspace(t.Context(), ws, m.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

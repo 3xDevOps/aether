@@ -15,7 +15,7 @@ import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { workspaceRuns } from '@/routes/board/selectors'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
+import { useCapability, useIsAdmin, useIsSuperAdmin, useSelf, useStateContext } from '@/store/hooks'
 
 /** The server retries a tailnet dashboard that cannot start, so its error can clear or appear while Settings is open. */
 const tailnetDashboardRecheckMs = 30_000
@@ -23,6 +23,7 @@ const tailnetDashboardRecheckMs = 30_000
 export function ServerSection({ client = api }: { client?: Api } = {}) {
   const info = useStore((s) => s.info)
   const admin = useIsAdmin()
+  const superAdmin = useIsSuperAdmin()
   const caps = useCapability()
   const update = useUpdateNotice(true)
   const { server, client: cli } = useUpdateTargets()
@@ -111,8 +112,8 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
       </SettingsSection>
       {admin && (caps.hasMethod('server.sysbox.status') || caps.hasMethod('run.release') || caps.hasMethod('server.run_limits')) && (
         <SettingsSection title="Admin" scope="Server · admins">
-          <RunLimitsRow client={client} />
-          <DockerInRunsRow client={client} />
+          {superAdmin && <RunLimitsRow client={client} />}
+          {superAdmin && <DockerInRunsRow client={client} />}
           <RetainedContainersRow />
         </SettingsSection>
       )}
@@ -229,8 +230,8 @@ function DockerInRunsRow({ client }: { client: Api }) {
 function RetainedContainersRow() {
   const ctx = useStateContext()
   const caps = useCapability()
-  const self = useSelf()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const self = useSelf(activeWorkspace)
   const workspaceName = useStore((s) => s.workspaces[s.activeWorkspace]?.name)
   const openDialog = useStore((s) => s.openPaletteDialog)
   if (!caps.hasMethod('run.release')) return null

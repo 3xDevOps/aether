@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -114,7 +113,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 // asked only when the rest of the rule holds, whether it can update
 // itself. A server that does not answer is not waited for.
 func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target string) bool {
-	admin := info.Member.Role == string(domain.RoleAdmin)
+	admin := cli.ServerAdmin(info)
 	if target == "" || !cli.ServerFirst(info.ServerVersion, target, admin, true) {
 		return false
 	}

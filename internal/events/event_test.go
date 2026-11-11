@@ -16,6 +16,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunRetentionPayload{ContainerRetainedUntil: "2026-10-08T12:34:56Z", CleanupPending: true, CleanupError: "Execution cleanup failed; cleanup will retry"},
 		RunRetentionPayload{},
 		RunDeletedPayload{},
+		RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{}},
+		RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{"ws_2"}},
 		WorkspaceDeletedPayload{},
 		RunTitlePayload{Title: "Fixing the login bug"},
 		RunProtectedPayload{Protected: true},

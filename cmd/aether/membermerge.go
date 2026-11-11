@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -109,8 +110,8 @@ func mergeProposal(plan protocol.MemberMergePlan, code, keep string, keepAdmin, 
 	if err := printMergeChoice(out, plan, keep); err != nil {
 		return params, err
 	}
-	if plan.RoleWithKeepAdmin != "" && plan.Proposer.Role == "admin" && !keepAdmin && !yes {
-		params.KeepAdmin = askKeepAdmin(out, in, plan)
+	if plan.RoleWithKeepAdmin != "" && domain.Role(plan.Proposer.Role).Admin() && !keepAdmin && !yes {
+		params.KeepAdmin = askKeepAdmin(out, in, plan, plan.Proposer.Role)
 	}
 	if !yes {
 		_, _ = fmt.Fprint(out, "discard these settings and merge? [y/N]: ")
@@ -193,12 +194,23 @@ func acceptDecision(p protocol.MemberMergeProposal, keepAdmin, yes, interactive 
 	if !interactive && !yes {
 		return params, fmt.Errorf("aether member merge accept: no terminal to ask on; pass --yes to accept the plan above: aether member merge accept %s --yes", p.ID)
 	}
-	if plan.RoleWithKeepAdmin != "" && plan.Minted.Role == "admin" && !keepAdmin && !yes && !p.ProposerKeepAdmin {
-		params.KeepAdmin = askKeepAdmin(out, in, plan)
+	if domain.Role(plan.Minted.Role).Admin() && !keepAdmin && !yes {
+		params.KeepAdmin = askKeepAdmin(out, in, plan, plan.Minted.Role)
 	}
-	role := plan.Role
-	if plan.RoleWithKeepAdmin != "" && (params.KeepAdmin || (p.ProposerKeepAdmin && plan.Proposer.Role == "admin")) {
-		role = plan.RoleWithKeepAdmin
+	// As store.MergePlan.Role: each side's keep flag lifts the result only
+	// to that side's own admin or super admin role.
+	rank := map[string]int{"viewer": 0, "collaborator": 1, "admin": 2, "super_admin": 3}
+	role := plan.Minted.Role
+	if rank[plan.Proposer.Role] < rank[role] {
+		role = plan.Proposer.Role
+	}
+	for _, side := range []struct {
+		keep bool
+		role string
+	}{{params.KeepAdmin, plan.Minted.Role}, {p.ProposerKeepAdmin, plan.Proposer.Role}} {
+		if side.keep && domain.Role(side.role).Admin() && rank[side.role] > rank[role] {
+			role = side.role
+		}
 	}
 	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s\n", role)
 	if !yes {
@@ -210,12 +222,12 @@ func acceptDecision(p protocol.MemberMergeProposal, keepAdmin, yes, interactive 
 	return params, nil
 }
 
-func askKeepAdmin(out io.Writer, in *bufio.Reader, plan protocol.MemberMergePlan) bool {
+func askKeepAdmin(out io.Writer, in *bufio.Reader, plan protocol.MemberMergePlan, own string) bool {
 	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s, the lower of the two roles", plan.Role)
 	if plan.KeepAdminRequired {
 		_, _ = fmt.Fprint(out, ", which leaves the server without an admin")
 	}
-	_, _ = fmt.Fprintf(out, ". keep it %s? every sign-in above then reaches the server as admin [y/N]: ", plan.RoleWithKeepAdmin)
+	_, _ = fmt.Fprintf(out, ". keep it %s? every sign-in above then reaches the server as %s [y/N]: ", own, own)
 	return yesAnswer(in)
 }
 

@@ -351,7 +351,9 @@ top to bottom:
    **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a
    quarter and the count in a `CountBadge`; the count stays in the button's
-   name. Every group starts expanded and lists all of its sessions; a group
+   name. **Mine** matches the count badge's height on fine pointers and keeps a
+   44px touch target on coarse pointers. Every group starts expanded and lists all
+   of its sessions; a group
    closes only when its header is pressed, and the list fades back in when
    the viewer reopens it (rows never glide their height, and a group that
    mounts with hydration does not fade). Until the first sessions arrive, six
@@ -616,11 +618,10 @@ while it shows. The views stay reachable while a command runs. Close, Stop
 and Delete are the same commands, with the same confirmations, as on
 desktop.
 
-Without a `view` in the address a phone lands on `defaultView`, never on the
-view the member last chose: Chat for an Enhanced session, Terminal for a
-Standard one. A link that names a view still opens it. A tab switch replaces
-the history entry instead of pushing one. Each history entry records its
-depth, and an entry of a session records the depth at which that session
+Without a `view` in the address a phone opens the session's last chosen view,
+or its default when none was chosen. A link that names a view still opens it.
+A tab switch replaces the history entry instead of pushing one. Each history
+entry records its depth, and an entry of a session records the depth at which that session
 was opened, carried across the session's own entries, a subagent's included
 (`pushedEntry` and `sessionEntry` in `src/lib/url-state.ts`; a
 notification's entry records them too). **Back** steps back to the entry
@@ -1010,6 +1011,17 @@ native menu - **Check for Updates…**, Minimize, Maximize or Restore, Close -
 from the window's `system-context-menu` event on a drag region and from
 `controls.showMenu(x, y)` elsewhere on the row.
 
+No platform has a View menu, so the shell zooms the window: Cmd on macOS
+and Ctrl on Windows and Linux, with `=` or `+` to zoom in, `-` to zoom out
+and `0` to return to 100%, matched on the character typed.
+`desktop/preload.js` acts only on a key the page has not claimed with
+`preventDefault`, so inside a terminal the same keys zoom the terminal
+instead. `desktop/zoom.js` scales the window's 960×600 minimum size with
+the zoom, so the layout never narrows into the phone toolbar, which has no
+window controls or drag region. It refuses a zoom whose minimum would not fit
+the display, and on macOS moves the traffic lights to stay centred in the
+row, stopping at 91% where the logo would reach them.
+
 On macOS, the shell keeps the native traffic lights, centers them in the
 44px navigation row and reserves 80px before the logo. The row uses
 `-webkit-app-region: drag`; navigation buttons and window controls use
@@ -1106,10 +1118,11 @@ desktop window bar or the phone top bar, and nothing in its own chrome
 scrolls sideways. A control pushed past an edge is unreachable, not merely off
 screen, so every row states what gives way first.
 
-`desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
-the desktop rules are designed against; a browser tab has no such floor, so
-the same rules degrade below it rather than break. A phone is the far end of
-that: `src/app/layout.tsx` exports the viewport the shell needs there.
+`desktop/zoom.js` sets `MIN_WIDTH = 960` and `MIN_HEIGHT = 600`, the
+window's minimum size at 100%. That is the size the desktop rules are
+designed against; a browser tab has no such floor, so the same rules degrade
+below it rather than break. A phone is the far end of that:
+`src/app/layout.tsx` exports the viewport the shell needs there.
 
 - `width=device-width, initial-scale=1` - the page is laid out at the device's
   own width rather than a desktop-sized canvas scaled down.
@@ -1657,9 +1670,12 @@ both show:
 | Unreviewed finish | **Review** |
 
 Every action but Approve and the card's Reply goes where the condition's
-`target` points: the session (requests and questions), its Terminal view
-(blocked, held, Enhanced failure), or its Changes view for an unreviewed
-finish.
+`target` points: an agent's request or question opens the session's
+`defaultView` (Terminal for Standard, Session for Enhanced), a blocked, held
+or failed Enhanced session its Terminal view, an unreviewed finish its Changes
+view, and a teammate's question or a usage limit the session's last chosen
+view. Until the session's record loads, an agent's request also opens the
+last chosen view.
 
 While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
@@ -2861,16 +2877,16 @@ palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one the member last
 chose for the session, else `defaultView`. Choosing a view means picking a tab
 (click, `[` or `]`) or following a link or command that names a
-view, such as Review changes or a file path; an opened `?view=` address shows its view without choosing it, since a reload reopens one too. Reply is not a choice. A Needs you target does not
-count: a sidebar or board row, the Needs you list, `u`, the header's primary
-action and a request's Open terminal show Terminal or Changes for a session
-that waits there, and the session reopens on its chosen view once it stops
-waiting. Back and forward show the view their entry names without choosing
-it. `runViewMemory` holds the choices, the newest 200 sessions per signed-in
+view, such as Review changes or a file path; an opened `?view=` address shows
+its view without choosing it, since a reload reopens one too. Reply is not a
+choice. Session rows, card titles and `u` open the last chosen view even when
+the session needs attention. Explicit actions, such as Open terminal or Review,
+open the view needed for that action without changing the choice. Back and
+forward show the view their entry names without choosing it. `runViewMemory`
+holds the choices, the newest 200 sessions per signed-in
 member, saved under `aether.ui` in `savedRunViews` by identity key, so they last as long as the browser origin's storage (the desktop app's origin changes each launch); deleting a
 session drops its entry. A chosen view the session no longer has, such as
-Files without a checkout, gives way to `defaultView`. A phone skips the
-memory, see [Phone session](#phone-session).
+Files without a checkout, gives way to `defaultView`.
 `defaultView` is
 Session for an Enhanced session or any session that streams a session (`acp: true`),
 Terminal otherwise. Trace follows Chat for a session with `acp: true` only.
@@ -3068,10 +3084,10 @@ truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
 With a mouse on a layout wider than the 767px phone breakpoint and motion allowed, the strip's
-dots fade to nothing under the pointer and return to full 80px away:
+dots fade to nothing under the pointer and return to full 54px away:
 `useDotFade` (`routes/run/dot-fade.ts`) writes the pointer position into a
 `mask-image` on `.control-matrix` from one `pointermove` listener, batched per
-frame, and eases the mask out over 600ms on `pointerleave`.
+frame, and eases the mask out over 1200ms on `pointerleave`.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates
@@ -6225,10 +6241,29 @@ sidebar's **Members** row stays current on both.
 
 **Members** is a roster table, each row filling on hover: name, role, whether you and that member share
 an agent account, and last seen (**Online**, a relative time, or
-**Offline**). An admin changes a role or removes a member from the row's
-menu; giving up your own admin role, and removing anyone, ask first. Members
+**Offline**). Roles are Viewer, Collaborator, Admin and Super admin. Only a
+super admin changes a role or removes a member from the row's menu; giving up
+your own super admin role, and removing anyone, ask first. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
-admins see **Open invitations** with **Revoke**.
+admins see **Open invitations** with **Revoke** and the workspaces each
+invitation grants.
+
+**Invite…** carries a workspace multi-select of the workspaces the inviter
+administers, for an account invitation and for an invite code. An admin who is
+not a super admin must pick at least one and may invite only a viewer or a
+collaborator; a super admin may pick any role and no workspace.
+
+**Manage workspaces** shows each workspace's owner. Where the caller's `role`
+in `workspace.list` is `admin`, the row menu offers **Settings…**, **Access…**
+and **Delete…**; **Access…** lists the owner and granted members, adds members
+(an admin sees only collaborators and viewers) and removes them, showing the
+server's error verbatim. Super admins also get **Change owner…**. A grant,
+revoke, `workspace.access` event or `member.access` event reloads the workspace
+list. `member.access` (workspace id `server`) goes only to the member whose
+access changed, so a member who just lost a workspace still gets it. Server-wide
+controls (server update, session limits, Docker inside sessions, remote access)
+show to super admins; the dashboard hides what the caller cannot use and the
+server refuses it regardless.
 
 A role change, **Approve**, and a confirmed **Revoke** follow
 [Actions](#actions): the radio moves, the member joins the roster, or the
@@ -6306,7 +6341,9 @@ from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
 **Approve** sends `member.device.approve` with the device id and the code.
-It revokes a device too, and shows every server refusal verbatim. The
+**Revoke** shows on the member's own devices, on a device still waiting,
+and, for a super admin, on every device; it shows every server refusal
+verbatim. The
 list is an `InsetList`; until it arrives, three row skeletons stand in after
 ~200ms ("Loading devices").
 

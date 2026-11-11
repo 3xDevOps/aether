@@ -82,6 +82,10 @@ func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, er
 	for _, src := range slices.Sorted(maps.Keys(spec.Writable)) {
 		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: src, Target: spec.Writable[src]})
 	}
+	cgroupParent, err := d.cgroupParent(ctx)
+	if err != nil {
+		return "", err
+	}
 	initEnabled := true
 	pids := int64(256)
 	host := &container.HostConfig{
@@ -93,7 +97,7 @@ func (d *Docker) StartDictation(ctx context.Context, spec DictationSpec) (ID, er
 		SecurityOpt:    []string{"no-new-privileges=true"},
 		Mounts:         mounts,
 		Resources: container.Resources{
-			NanoCPUs: nanoCPUs(spec.CPUs), Memory: spec.MemoryBytes, MemorySwap: spec.MemoryBytes, PidsLimit: &pids,
+			CgroupParent: cgroupParent, NanoCPUs: nanoCPUs(spec.CPUs), Memory: spec.MemoryBytes, MemorySwap: spec.MemoryBytes, PidsLimit: &pids,
 		},
 		LogConfig: container.LogConfig{Type: "none"},
 	}

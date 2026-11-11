@@ -108,7 +108,12 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 	if err != nil {
 		return fmt.Errorf("store: create session: fallback order: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx,
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: create session: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
@@ -123,6 +128,13 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		r.Limits.CPUs, r.Limits.MemoryBytes, r.Limits.Pids,
 	); err != nil {
 		return fmt.Errorf("store: create session: %w", mapConstraint(err, ErrNotFound))
+	}
+	// Readers judge a run by every workspace it touches, so its extras must exist as soon as it does.
+	if err := upsertRunRepos(ctx, tx, domain.RunID(id), r.Extras); err != nil {
+		return fmt.Errorf("store: create session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: create session: commit: %w", err)
 	}
 	r.ID, r.CreatedAt, r.StatusChangedAt = domain.RunID(id), ts, &ts
 	return nil
@@ -257,7 +269,7 @@ func liveStatusArgs() (string, []any) {
 
 // RunSummary is the slim view of a live run that coordination lists. Task
 // holds at most the requested prefix of the task in bytes; TaskBytes is the
-// full task's length.
+// full task's length. Extras is the workspace of each extra repository.
 type RunSummary struct {
 	ID        domain.RunID
 	MemberID  domain.MemberID
@@ -267,10 +279,11 @@ type RunSummary struct {
 	Protected bool
 	Task      string
 	TaskBytes int
+	Extras    []domain.WorkspaceID
 }
 
 // ListLiveRunSummaries returns the non-terminal runs in workspace, most
-// recently created or status-changed first. It reads only the runs table.
+// recently created or status-changed first.
 func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.WorkspaceID, taskBytes int) ([]*RunSummary, error) {
 	placeholders, statuses := liveStatusArgs()
 	rows, err := d.db.QueryContext(ctx,
@@ -282,10 +295,47 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return nil, fmt.Errorf("store: list live session summaries: %w", err)
 	}
-	return collect(rows, func(row interface{ Scan(...any) error }) (*RunSummary, error) {
+	summaries, err := collect(rows, func(row interface{ Scan(...any) error }) (*RunSummary, error) {
 		var r RunSummary
 		return &r, row.Scan(&r.ID, &r.MemberID, &r.Status, &r.Activity, &r.Reason, &r.Protected, &r.Task, &r.TaskBytes)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if len(summaries) == 0 {
+		return summaries, nil
+	}
+	byID := make(map[domain.RunID]*RunSummary, len(summaries))
+	ids := make([]any, 0, len(summaries))
+	for _, r := range summaries {
+		byID[r.ID] = r
+		ids = append(ids, r.ID)
+	}
+	// By ID, not status: a session that finished after the read above
+	// keeps its extra workspaces, so it is never listed without them.
+	extras, err := d.db.QueryContext(ctx,
+		`SELECT run_id, workspace_id FROM run_repos
+		 WHERE run_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`) ORDER BY run_id, position`, ids...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list live session extra repos: %w", err)
+	}
+	defer extras.Close() //nolint:errcheck // read-only iteration
+	for extras.Next() {
+		var (
+			id domain.RunID
+			ws domain.WorkspaceID
+		)
+		if err := extras.Scan(&id, &ws); err != nil {
+			return nil, fmt.Errorf("store: scan live session extra repo: %w", err)
+		}
+		if r := byID[id]; r != nil {
+			r.Extras = append(r.Extras, ws)
+		}
+	}
+	if err := extras.Err(); err != nil {
+		return nil, fmt.Errorf("store: list live session extra repos: %w", err)
+	}
+	return summaries, nil
 }
 
 // UpdateRun writes a run snapshot back. It never writes home_member_id: the

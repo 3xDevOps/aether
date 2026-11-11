@@ -12,15 +12,15 @@ import (
 )
 
 // memberRole implements `aether member role <member-id> <role>`: promote
-// or demote a member. Admins only; the server refuses to demote the last
-// admin.
+// or demote a member. Super admins only; the server refuses to demote the
+// last super admin.
 func memberRole(args []string) error {
 	if len(args) != 2 {
-		return fmt.Errorf("usage: aether member role <member-id> <viewer|collaborator|admin>")
+		return fmt.Errorf("usage: aether member role <member-id> <super_admin|admin|collaborator|viewer>")
 	}
 	memberID, role := args[0], args[1]
 	if !domain.Role(role).Valid() {
-		return fmt.Errorf("invalid role %q: want viewer, collaborator, or admin", role)
+		return fmt.Errorf("invalid role %q: want super_admin, admin, collaborator, or viewer", role)
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.MemberRoleResult

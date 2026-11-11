@@ -104,8 +104,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const files = hasFiles(run, cap)
   const views = runViews.filter((view) =>
     (view !== 'browser' || (browser && !docked)) && (view !== 'files' || files) && (view !== 'trace' || run.acp === true))
-  // A phone lands on the session's own view: Chat for Enhanced, Terminal for Standard.
-  const asked = isRunView(params.view) ? params.view : mobile ? undefined : remembered
+  const asked = isRunView(params.view) ? params.view : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
   const setShownRunView = useStore((s) => s.setShownRunView)
@@ -172,8 +171,10 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
 
   // A phone's tabs swap the view in place, so back leaves the session instead of stepping through them.
   const go = useCallback((next: RunView, options?: NavigateOptions) => {
-    if (mobile) replaceRouteKeepingFocus(runRoute(run.id, next))
-    else navigate('run', { runId: run.id, view: next }, options)
+    if (mobile) {
+      replaceRouteKeepingFocus(runRoute(run.id, next))
+      if (options?.remember !== false) useStore.getState().rememberRunView(run.id, next)
+    } else navigate('run', { runId: run.id, view: next }, options)
   }, [mobile, navigate, run.id])
   useEffect(() => {
     if (browserRequest !== undefined && browser && !docked) go('browser')

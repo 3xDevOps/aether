@@ -296,6 +296,16 @@ describe('devices tab', () => {
     )
   })
 
+  it("offers an admin Revoke on another member's device only while it waits", async () => {
+    seed({ ...alice, role: 'admin' })
+    const client = fakeApi({ memberDeviceList: vi.fn(async () => [device(), device({ id: 'dev_bob', member_id: bob.id, label: 'workstation' }), pendingDesktop]) })
+    render(<DevicesPanel client={client} />)
+
+    expect(await screen.findByRole('button', { name: 'Revoke laptop' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Revoke workstation' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Revoke desktop' })).toBeDefined()
+  })
+
   it('offers nothing on a revoked device', async () => {
     seed()
     const client = fakeApi({

@@ -14,6 +14,8 @@ type MemberChangedPayload struct {
 
 func (MemberChangedPayload) EventType() Type { return TypeMemberChanged }
 
+func (p MemberChangedPayload) NamedMembers() []domain.MemberID { return []domain.MemberID{p.MemberID} }
+
 func init() { registerPayload[MemberChangedPayload](TypeMemberChanged) }
 
 // TypeMemberMerged reports that a merge absorbed AbsorbedID into
@@ -28,5 +30,9 @@ type MemberMergedPayload struct {
 }
 
 func (MemberMergedPayload) EventType() Type { return TypeMemberMerged }
+
+func (p MemberMergedPayload) NamedMembers() []domain.MemberID {
+	return []domain.MemberID{p.SurvivorID, p.AbsorbedID}
+}
 
 func init() { registerPayload[MemberMergedPayload](TypeMemberMerged) }

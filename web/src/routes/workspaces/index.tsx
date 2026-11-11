@@ -16,15 +16,19 @@ import { useDelayed } from '@/lib/hooks'
 import { message } from '@/lib/format'
 import type { Workspace } from '@/lib/types'
 import { WorkspaceSettingsDialog } from '@/routes/admin-dialogs'
+import { WorkspaceAccessDialog, WorkspaceOwnerDialog } from '@/routes/workspaces/access-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { useStore } from '@/store'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { isAdminRole } from '@/lib/permissions'
+import { sameIdentity, useStore } from '@/store'
+import { useCapability, useIsAdmin, useIsSuperAdmin, useSelfRole, useWorkspaceAccessServer } from '@/store/hooks'
 
 export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const isAdmin = useIsAdmin()
-  const canDelete = isAdmin && caps.hasMethod('workspace.delete')
-  const canSettings = isAdmin && caps.hasMethod('workspace.settings')
+  const selfRole = useSelfRole()
+  const superAdmin = useIsSuperAdmin()
+  const scoped = useWorkspaceAccessServer()
+  const members = useStore((s) => s.members)
   const canAdd = isAdmin && (caps.hasMethod('workspace.add') || caps.hasMethod('workspace.import'))
   const navigate = useStore((s) => s.navigate)
   const active = useStore((s) => s.activeWorkspace)
@@ -34,7 +38,10 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState<Workspace | null>(null)
   const [settings, setSettings] = useState<Workspace | null>(null)
+  const [accessing, setAccessing] = useState<Workspace | null>(null)
+  const [chowning, setChowning] = useState<Workspace | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [membersError, setMembersError] = useState<string | null>(null)
   const loading = useDelayed(!loaded && error === null)
   const fetchVersion = useRef(0)
 
@@ -42,8 +49,9 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
     const version = ++fetchVersion.current
     setError(null)
     try {
+      const same = sameIdentity()
       const fresh = await client.workspaceListFull()
-      if (version !== fetchVersion.current) return
+      if (version !== fetchVersion.current || !same()) return
       useStore.getState().setWorkspaces(fresh)
       setLoaded(true)
     } catch (err) {
@@ -52,9 +60,28 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   }, [client])
 
   useEffect(() => {
+    if (!caps.hasMethod('member.list')) return
+    const { readMembers, setMemberList } = useStore.getState()
+    const same = sameIdentity()
+    setMembersError(null)
+    readMembers(client.memberList()).then(
+      (list) => same() && setMemberList(list),
+      (err: unknown) => same() && setMembersError(`Could not list members: ${message(err)}`),
+    )
+  }, [caps, client])
+
+  useEffect(() => {
     void refetch()
     return () => { fetchVersion.current += 1 }
   }, [refetch])
+
+  const administers = (workspace: Workspace) => isAdminRole(workspace.role ?? selfRole)
+  const selfID = useStore((s) => s.info?.member.id)
+  const ownerOf = (workspace: Workspace) => {
+    const id = workspace.owner_member_id
+    if (!id) return ''
+    return id === selfID ? 'you' : members[id]?.display_name ?? id
+  }
 
   const open = (workspace: Workspace) => {
     useStore.getState().setActiveWorkspace(workspace.id)
@@ -91,6 +118,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
               }} />
             </div>
           )}
+          {membersError && <Callout tone="failed" role="alert">{membersError}</Callout>}
           {error && (
             <Callout tone="failed" role="alert" actions={<Button size="sm" variant="secondary" onClick={() => void refetch()}>Retry</Button>}>
               {error}
@@ -111,7 +139,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                     <ListRow
                       aria-label={`Open ${workspace.name}`}
                       leading={<FolderGit2 />}
-                      trailing={workspace.id === active ? `Current · ${workspace.base_branch}` : workspace.base_branch}
+                      trailing={[workspace.id === active ? `Current · ${workspace.base_branch}` : workspace.base_branch, ownerOf(workspace) && `Owner: ${ownerOf(workspace)}`].filter(Boolean).join(' · ')}
                       onClick={() => open(workspace)}
                       hoverAction={(
                         <Menu>
@@ -125,8 +153,10 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                             {caps.hasMethod('workspace.environment.get') && (
                               <MenuItem onSelect={() => navigate('workspace', { workspaceId: workspace.id, section: 'environment' })}>Environment</MenuItem>
                             )}
-                            {canSettings && <MenuItem onSelect={() => setSettings(workspace)}>Settings…</MenuItem>}
-                            {canDelete && (
+                            {administers(workspace) && caps.hasMethod('workspace.settings') && <MenuItem onSelect={() => setSettings(workspace)}>Settings…</MenuItem>}
+                            {scoped && administers(workspace) && caps.hasMethod('workspace.access.list') && <MenuItem onSelect={() => setAccessing(workspace)}>Access…</MenuItem>}
+                            {scoped && superAdmin && caps.hasMethod('workspace.owner.set') && <MenuItem onSelect={() => setChowning(workspace)}>Change owner…</MenuItem>}
+                            {administers(workspace) && caps.hasMethod('workspace.delete') && (
                               <>
                                 <MenuSeparator />
                                 <MenuItem onSelect={() => setDeleting(workspace)}>Delete…</MenuItem>
@@ -156,7 +186,9 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           onClose={() => setSettings(null)}
         />
       )}
-      {deleting && canDelete && (
+      {accessing && <WorkspaceAccessDialog workspaceID={accessing.id} client={client} onClose={() => setAccessing(null)} />}
+      {chowning && <WorkspaceOwnerDialog workspaceID={chowning.id} client={client} onClose={() => setChowning(null)} />}
+      {deleting && (
         <Confirm
           title={`Delete ${deleting.name}?`}
           description="This permanently deletes the workspace, its finished sessions, retained containers, files, history and server repository. Members, their environments and external repositories stay."

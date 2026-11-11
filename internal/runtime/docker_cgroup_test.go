@@ -1,0 +1,68 @@
+package runtime
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/system"
+	"github.com/moby/moby/client"
+)
+
+func TestCreateCgroupParentFollowsDriver(t *testing.T) {
+	for _, tc := range []struct{ driver, want string }{
+		{"systemd", "aether.slice"},
+		{"cgroupfs", "/aether"},
+		{"none", ""},
+		{"", ""},
+	} {
+		t.Run(tc.driver, func(t *testing.T) {
+			api := &fakeDockerAPI{cgroupDriver: tc.driver}
+			srv := api.serve(t, "1.52")
+			cli, err := client.New(client.WithHost("tcp://"+srv.Listener.Addr().String()), client.WithAPIVersion("1.52"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cli.Close() })
+			d := &Docker{cli: cli}
+			for range 2 {
+				if _, err := d.Create(t.Context(), Spec{Image: "busybox", Command: []string{"true"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			api.mu.Lock()
+			defer api.mu.Unlock()
+			if api.infos != 1 {
+				t.Errorf("info requests = %d, want 1", api.infos)
+			}
+			for _, body := range api.bodies {
+				var request struct{ HostConfig container.HostConfig }
+				if err := json.Unmarshal([]byte(body), &request); err != nil {
+					t.Fatal(err)
+				}
+				if got := request.HostConfig.CgroupParent; got != tc.want {
+					t.Errorf("CgroupParent = %q, want %q", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestUsesSessionSliceNeedsLocalSystemdDaemon(t *testing.T) {
+	for driver, want := range map[string]bool{"systemd": true, "cgroupfs": false} {
+		d := capacityDocker(t, system.Info{CgroupDriver: driver})
+		if got, err := d.UsesSessionSlice(t.Context()); err != nil || got != want {
+			t.Errorf("local %s daemon: UsesSessionSlice = %v, %v; want %v", driver, got, err, want)
+		}
+	}
+	api := &fakeDockerAPI{cgroupDriver: "systemd"}
+	srv := api.serve(t, "1.52")
+	cli, err := client.New(client.WithHost("tcp://"+srv.Listener.Addr().String()), client.WithAPIVersion("1.52"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	if got, err := (&Docker{cli: cli}).UsesSessionSlice(t.Context()); err != nil || got {
+		t.Errorf("remote systemd daemon: UsesSessionSlice = %v, %v; want false", got, err)
+	}
+}

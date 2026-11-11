@@ -429,10 +429,11 @@ describe('run rows', () => {
     expect(rows[1].tabIndex).toBe(-1)
   })
 
-  it('opens what a Needs you row waits on, not always its terminal', () => {
+  it('opens a Needs you row on the last chosen view', () => {
+    useStore.setState({ runViewMemory: { run_3: 'session' } })
     render(<AppShell />)
     fireEvent.click(runList().getByRole('button', { name: /^Failed · docs-site · ship the invoice export/ }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_3', view: 'session' })
   })
 
   it('replies without making Session the view the session reopens on', () => {
@@ -444,12 +445,12 @@ describe('run rows', () => {
     useStore.setState({ runViewMemory: {} })
   })
 
-  it('opens a disconnected session on Terminal and reopens it later on the view the member chose', () => {
+  it('reopens a disconnected session on the view the member chose', () => {
     useStore.getState().upsertRun(run({ id: 'run_5', task: 'lost its agent', status: 'needs-attention', state: 'disconnected' }))
     act(() => useStore.getState().navigate('run', { runId: 'run_5', view: 'changes' }))
     render(<AppShell />)
     fireEvent.click(runList().getByRole('button', { name: /lost its agent/ }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_5', view: 'terminal' } })
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_5', view: 'changes' })
     expect(useStore.getState().runViewMemory.run_5).toBe('changes')
     useStore.setState({ runViewMemory: {} })
   })

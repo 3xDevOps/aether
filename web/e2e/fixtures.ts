@@ -39,7 +39,10 @@ export interface Aether {
   /** A repository with one commit on `main` and the fake agent's script. */
   seedRepo: (name: string) => Promise<string>
   cloneRepo: (source: string, name: string) => Promise<string>
-  /** Mints an invite code, which only an admin may do. */
+  /**
+   * Mints an invite code, which only an admin may do. The member it admits
+   * is granted every workspace the admin reaches now.
+   */
   invite: (admin: Member) => Promise<string>
   /**
    * Puts an executable in a member's environment home on the server. That
@@ -217,8 +220,11 @@ export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }
       member,
       seedRepo: (name) => seedRepo(path.join(dir, 'repos'), name),
       cloneRepo: (source, name) => cloneRepo(path.join(dir, 'repos'), source, name),
-      invite: async (admin) =>
-        (await admin.api.rpc<InviteResult>('member.invite')).code,
+      invite: async (admin) => {
+        const { workspaces } = await admin.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+        const workspace_ids = workspaces.map((w) => w.id)
+        return (await admin.api.rpc<InviteResult>('member.invite', { workspace_ids })).code
+      },
       giveGitIdentity: (member, name, email) => {
         writeFileSync(
           path.join(member.home, '.gitconfig'),

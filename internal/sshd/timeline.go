@@ -8,15 +8,16 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
 func init() {
-	registerMethod(protocol.MethodWorkspaceTimeline, (*Server).workspaceTimeline)
+	registerGuarded(protocol.MethodWorkspaceTimeline, permissions.View, workspaceTarget, (*Server).workspaceTimeline)
 }
 
-func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) workspaceTimeline(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	reader := s.cfg.Services.Timeline
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace.timeline: workspace history is not available"}
@@ -24,12 +25,6 @@ func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, param
 	p, perr := decodeParams[protocol.WorkspaceTimelineParams](params)
 	if perr != nil {
 		return nil, perr
-	}
-	if p.WorkspaceID == "" {
-		return nil, invalidParams("workspace_id is required")
-	}
-	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
-		return nil, rpcError(err)
 	}
 	types := make([]events.Type, 0, len(p.Types))
 	for _, t := range p.Types {
@@ -41,14 +36,18 @@ func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, param
 	if !p.Newest && p.BeforeSeq > 0 {
 		return nil, invalidParams("before_seq needs newest")
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	filter := timeline.Filter{
 		Workspace: domain.WorkspaceID(p.WorkspaceID),
 		Run:       domain.RunID(p.RunID),
 		Member:    domain.MemberID(p.MemberID),
 		Types:     types,
+		Scope:     s.eventScope(ctx, actor),
 	}
 	var page timeline.Page
-	var err error
 	if p.Newest {
 		page, err = reader.Before(ctx, filter, p.BeforeSeq, p.Limit)
 	} else {

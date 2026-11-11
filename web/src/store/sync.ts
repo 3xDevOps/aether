@@ -415,7 +415,7 @@ export async function applyEvent(
   // No workspace.created event exists; without this a new workspace's runs
   // would be stored but rendered nowhere. Device events carry the server
   // scope, which names no workspace.
-  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.type !== 'member.merged' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.type !== 'member.merged' && ev.type !== 'member.access' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
       .then(store.getState().setWorkspaces)
@@ -428,9 +428,26 @@ export async function applyEvent(
   }
 
   switch (ev.type) {
-    case 'workspace.deleted': {
+    case 'workspace.deleted':
+    case 'workspace.access':
+    case 'member.access': {
+      const { identityKey } = store.getState()
+      const stale = () => signal?.aborted || store.getState().identityKey !== identityKey
       try {
-        store.getState().setWorkspaces(await client.workspaceListFull())
+        const list = await client.workspaceListFull()
+        if (stale()) return false
+        store.getState().setWorkspaces(list)
+        // Losing a workspace drops its runs; regaining one must bring them back.
+        if (ev.type === 'member.access') {
+          const [runs, info] = await Promise.all([client.runList(), client.serverInfo()])
+          if (stale()) return false
+          store.getState().setInfo(info)
+          store.getState().setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
+        }
+        // Who a member sees follows workspace access.
+        const members = await store.getState().readMembers(client.memberList())
+        if (stale()) return false
+        store.getState().setMemberList(members)
       } catch (err) {
         noteUnreachable(store, client, err, signal)
         return false

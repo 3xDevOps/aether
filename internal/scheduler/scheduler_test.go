@@ -171,7 +171,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		t.Fatalf("memberhome.New: %v", err)
 	}
 	e.cfg = Config{
-		Store:         db,
+		Store:         storetest.Unscoped{DB: db},
 		Runtime:       e.rt,
 		Bus:           bus,
 		Git:           e.git,
@@ -188,6 +188,9 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		Harnesses: map[string]HarnessSpec{
 			"fake": {TUIArgs: []string{"fake-agent", "{task}"}, HeadlessArgs: []string{"fake-agent", "{task}"}},
 		},
+	}
+	if e.cfg.Profiles, err = profile.New(db); err != nil {
+		t.Fatalf("profile.New: %v", err)
 	}
 	if mutate != nil {
 		mutate(&e.cfg)

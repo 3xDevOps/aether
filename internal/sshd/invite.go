@@ -23,10 +23,12 @@ import (
 const defaultInviteTTL = 24 * time.Hour
 
 // inviteRecord is an open invite code. IssuedBy is the admin who minted
-// it, empty for codes minted before it was recorded.
+// it, empty for codes minted before it was recorded. Workspaces are
+// granted to the member it admits, those IssuedBy still administers.
 type inviteRecord struct {
-	ExpiresAt time.Time       `json:"expires_at"`
-	IssuedBy  domain.MemberID `json:"issued_by,omitempty"`
+	ExpiresAt  time.Time            `json:"expires_at"`
+	IssuedBy   domain.MemberID      `json:"issued_by,omitempty"`
+	Workspaces []domain.WorkspaceID `json:"workspaces,omitempty"`
 }
 
 // parseInviteUser recognizes SSH usernames of the form invite:<code> or
@@ -60,7 +62,7 @@ func invitePath(dir, code string) string {
 	return filepath.Join(dir, code)
 }
 
-func mintInvite(dir string, ttl time.Duration, issuer domain.MemberID) (code string, expires time.Time, err error) {
+func mintInvite(dir string, ttl time.Duration, issuer domain.MemberID, workspaces []domain.WorkspaceID) (code string, expires time.Time, err error) {
 	if dir == "" {
 		return "", time.Time{}, errors.New("sshd: invites directory not configured")
 	}
@@ -76,7 +78,7 @@ func mintInvite(dir string, ttl time.Duration, issuer domain.MemberID) (code str
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return "", time.Time{}, fmt.Errorf("sshd: create invites dir: %w", err)
 	}
-	rec := inviteRecord{ExpiresAt: expires, IssuedBy: issuer}
+	rec := inviteRecord{ExpiresAt: expires, IssuedBy: issuer, Workspaces: workspaces}
 	body, err := json.Marshal(rec)
 	if err != nil {
 		return "", time.Time{}, err
@@ -127,7 +129,8 @@ func (s *Server) inviteUsable(code string) bool {
 }
 
 // joinInviteMember burns a validated invite and registers the proven key
-// as a collaborator. Called only after the SSH handshake has verified
+// as a collaborator, granted the code's workspaces its issuer still
+// administers. Called only after the SSH handshake has verified
 // possession of the private key (same deferred-write pattern as bootstrap).
 func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display string) (*domain.Member, error) {
 	s.registerMu.Lock()
@@ -138,8 +141,13 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 	}
 	// A code grants what its issuer could, so it dies with the issuer's
 	// admin role, through member.role or a merge that demoted them.
-	if rec.IssuedBy != "" {
-		admin, aerr := s.inviteIssuerAdmin(ctx, rec.IssuedBy)
+	issuer := rec.IssuedBy
+	if issuer != "" {
+		var (
+			admin bool
+			aerr  error
+		)
+		issuer, admin, aerr = s.inviteIssuer(ctx, rec.IssuedBy)
 		if aerr != nil {
 			return nil, fmt.Errorf("sshd: invite join: %w", aerr)
 		}
@@ -168,25 +176,30 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 		Color:       attribution.NextColor(memberColorsOf(members)),
 		Role:        domain.RoleCollaborator,
 	}
-	if err := s.cfg.Store.CreateMember(ctx, m); err != nil {
-		_ = restoreInvite(s.cfg.InvitesDir, code, rec)
+	if err := s.cfg.Store.JoinMember(ctx, m, rec.Workspaces, issuer); err != nil {
+		// A code dies with its issuer's admin role, here demoted by
+		// aether-server member role since the check above.
+		if !errors.Is(err, store.ErrIssuerDemoted) {
+			_ = restoreInvite(s.cfg.InvitesDir, code, rec)
+		}
 		return nil, fmt.Errorf("sshd: invite join: %w", err)
 	}
+	s.accessChanged()
 	slog.Info("sshd: invite join: collaborator registered",
-		"member", m.ID, "key", fingerprintOf(keyLine), "display", display)
+		"member", m.ID, "key", fingerprintOf(keyLine), "display", display, "workspaces", rec.Workspaces)
 	return m, nil
 }
 
-// inviteIssuerAdmin reports whether issuer, or the member a merge made
-// it, is an admin. A removed issuer is not.
-func (s *Server) inviteIssuerAdmin(ctx context.Context, issuer domain.MemberID) (bool, error) {
+// inviteIssuer returns issuer, or the member a merge made it, and whether
+// it is an admin or super admin. A removed issuer is not.
+func (s *Server) inviteIssuer(ctx context.Context, issuer domain.MemberID) (domain.MemberID, bool, error) {
 	if ms, ok := s.cfg.Store.(store.MergeStore); ok {
 		into, err := ms.MergedInto(ctx, issuer)
 		if errors.Is(err, store.ErrNotFound) {
-			return false, nil
+			return issuer, false, nil
 		}
 		if err != nil {
-			return false, err
+			return issuer, false, err
 		}
 		if into != "" {
 			issuer = into
@@ -194,12 +207,12 @@ func (s *Server) inviteIssuerAdmin(ctx context.Context, issuer domain.MemberID) 
 	}
 	m, err := s.cfg.Store.GetMember(ctx, issuer)
 	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
+		return issuer, false, nil
 	}
 	if err != nil {
-		return false, err
+		return issuer, false, err
 	}
-	return m.Role == domain.RoleAdmin, nil
+	return issuer, m.Role.Admin(), nil
 }
 
 func restoreInvite(dir, code string, rec inviteRecord) error {

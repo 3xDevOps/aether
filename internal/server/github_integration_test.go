@@ -131,7 +131,7 @@ func TestIntegrationGitHubOAuthDisconnectedWithBudgetService(t *testing.T) {
 	member := &domain.Member{
 		DisplayName: "GitHub admin",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	if err := srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
@@ -196,7 +196,7 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 		DisplayName: "Octo",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
 		Color:       "#4363d8",
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	ws := &domain.Workspace{Name: "github", BaseBranch: domain.DefaultBaseBranch}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {

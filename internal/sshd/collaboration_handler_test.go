@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -131,8 +132,10 @@ type handlerEvidenceService struct {
 	captureSeen bool
 }
 
-func (f *handlerEvidenceService) List(context.Context, domain.WorkspaceID, domain.RunID, string, int) (protocol.EvidencePacketListResult, error) {
-	return f.list, nil
+func (f *handlerEvidenceService) List(_ context.Context, _ domain.WorkspaceID, _ domain.RunID, _ string, _ int, shows func(domain.RunID) bool) (protocol.EvidencePacketListResult, error) {
+	out := f.list
+	out.Packets = slices.DeleteFunc(slices.Clone(out.Packets), func(p protocol.EvidencePacket) bool { return !shows(domain.RunID(p.RunID)) })
+	return out, nil
 }
 
 func (f *handlerEvidenceService) Get(context.Context, domain.WorkspaceID, string) (protocol.EvidencePacket, error) {

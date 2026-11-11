@@ -339,6 +339,19 @@ func (s *collabStore) GetMember(_ context.Context, id domain.MemberID) (*domain.
 		return nil, store.ErrNotFound
 	}
 	copy := *m
+	if copy.Access.Owned == nil && copy.Access.Granted == nil {
+		// Members of this fake reach every workspace, as before
+		// workspace-scoped access.
+		reach := map[domain.WorkspaceID]bool{}
+		for ws := range s.workspaces {
+			reach[ws] = true
+		}
+		if copy.Role == domain.RoleAdmin {
+			copy.Access.Owned = reach
+		} else {
+			copy.Access.Granted = reach
+		}
+	}
 	return &copy, nil
 }
 func (s *collabStore) GetWorkspace(_ context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
@@ -1108,7 +1121,7 @@ func TestProtectedRunRejectsOwnerAndAdminSteering(t *testing.T) {
 // whose workspace allows steering others.
 func TestResolvePermissionsKindAndIdempotency(t *testing.T) {
 	st, clock, ws, owner, other, run := setupCollab(t)
-	admin := &domain.Member{ID: "admin", DisplayName: "Admin", Role: domain.RoleAdmin}
+	admin := &domain.Member{ID: "admin", DisplayName: "Admin", Role: domain.RoleAdmin, Access: domain.WorkspaceAccess{Owned: map[domain.WorkspaceID]bool{ws.ID: true}}}
 	third := &domain.Member{ID: "third", DisplayName: "Third", Role: domain.RoleCollaborator}
 	st.members[admin.ID], st.members[third.ID] = admin, third
 	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Now: clock.Now})
@@ -1308,6 +1321,51 @@ func TestDueDeliveryRechecksAuthorPermission(t *testing.T) {
 	}
 	if pty.Calls() != 0 {
 		t.Fatalf("revoked due PTY calls=%d, want 0", pty.Calls())
+	}
+}
+
+func TestSteeringNeedsEveryWorkspaceOfTheRun(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	st.workspaces["extra"] = &domain.Workspace{ID: "extra", Name: "extra"}
+	run.Extras = []domain.RunRepo{{WorkspaceID: "extra", Name: "extra"}}
+	pty := &collabPTY{}
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Inject: pty.Inject, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	st.members[other.ID].Access = domain.WorkspaceAccess{Granted: map[domain.WorkspaceID]bool{ws.ID: true}}
+	st.mu.Unlock()
+	if _, err = service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "no extra", IdempotencyKey: "no-extra",
+	}); !errors.Is(err, permissions.ErrNoAccess) {
+		t.Fatalf("steer without the extra workspace: err=%v, want ErrNoAccess", err)
+	}
+
+	st.mu.Lock()
+	st.members[other.ID].Access.Granted["extra"] = true
+	st.mu.Unlock()
+	result, err := service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "queued", IdempotencyKey: "queued",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	delete(st.members[other.ID].Access.Granted, "extra")
+	st.mu.Unlock()
+	clock.Add(SteeringDelay)
+	if _, err = service.DeliverDue(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetRoomMessage(context.Background(), result.Message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != store.RoomMessageNotSent || pty.Calls() != 0 {
+		t.Fatalf("queued after the extra grant was revoked: state=%q inject calls=%d, want not_sent and 0", got.State, pty.Calls())
 	}
 }
 

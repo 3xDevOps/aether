@@ -122,15 +122,17 @@ type MemberDeviceResult struct {
 // created by member.identity.link, which binds the account to that member
 // and carries no role of its own.
 type Invitation struct {
-	ID        string `json:"id"`
-	Provider  string `json:"provider,omitempty"`
-	Login     string `json:"login,omitempty"`
-	Email     string `json:"email,omitempty"`
-	Role      string `json:"role,omitempty"`
-	MemberID  string `json:"member_id,omitempty"`
-	CreatedBy string `json:"created_by"`
-	CreatedAt string `json:"created_at"`
-	ExpiresAt string `json:"expires_at"`
+	ID       string `json:"id"`
+	Provider string `json:"provider,omitempty"`
+	Login    string `json:"login,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Role     string `json:"role,omitempty"`
+	MemberID string `json:"member_id,omitempty"`
+	// WorkspaceIDs are granted to the member the invitation admits.
+	WorkspaceIDs []string `json:"workspace_ids,omitempty"`
+	CreatedBy    string   `json:"created_by"`
+	CreatedAt    string   `json:"created_at"`
+	ExpiresAt    string   `json:"expires_at"`
 }
 
 // MemberInvitationCreateParams are the params of member.invitation.create.
@@ -140,6 +142,9 @@ type MemberInvitationCreateParams struct {
 	Login string `json:"login,omitempty"`
 	Email string `json:"email,omitempty"`
 	Role  string `json:"role"`
+	// WorkspaceIDs are granted to the member on joining. An admin names at
+	// least one, and only workspaces they own.
+	WorkspaceIDs []string `json:"workspace_ids,omitempty"`
 }
 
 // MemberIdentityLinkParams are the params of member.identity.link, shaped

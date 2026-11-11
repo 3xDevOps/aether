@@ -746,13 +746,16 @@ SEQ  TIME                 MEMBER          VIA                                MET
 813  2026-10-26 14:01:40  mem-4f8x2kq9vd  connector ChatGPT con-7k2m9q4xbd    run.launch  run-d6ay38tj8j  ok
 ```
 
-You see your own entries; an admin sees everyone's. The `audit.list` RPC
+You see your own entries; a super admin sees everyone's. An admin also sees the
+entries in the workspaces they own, except another member's entries about a
+session they do not reach in every workspace, or one since deleted, and about a
+note from such a session or one since deleted. The `audit.list` RPC
 returns the same entries, at most 200 a page. The server keeps each member's
 newest 10,000 call entries and, apart from them, their newest 10,000 connector,
 account, member and Slack changes that took effect, so a flood of calls cannot
 push a security change out of the history. A call that changed nothing, such
 as revoking a share that does not exist, is a call entry. After a member merge, the absorbed member's entries
-keep their id, so only admins see them.
+keep their id, so only super admins see them.
 
 ## Revoke a connector
 
@@ -764,7 +767,8 @@ aether mcp revoke con-7k2m9q4xbd
 
 The connector's next call fails, including one in a session the app already has
 open, and so does its refresh token; the app asks you to connect again with a
-new code. You can revoke your own connectors, and an admin can revoke anyone's.
+new code. You can revoke your own connectors, and a super admin can revoke
+anyone's; any other connector id fails as an unknown one.
 Removing the connector in ChatGPT or Claude does not revoke it on the server.
 Revoke it here too.
 

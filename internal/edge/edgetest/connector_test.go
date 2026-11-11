@@ -230,6 +230,7 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 			if err := s.db.CreateWorkspace(t.Context(), ws); err != nil {
 				t.Fatal(err)
 			}
+			grantEveryone(t, s.db, ws.ID)
 			base := h.relayURL + edgeproto.MCPPath(s.id)
 			bearer := func(token string) (*http.Response, string) {
 				header := http.Header{"Content-Type": {"application/json"}, "Accept": {"application/json, text/event-stream"}}

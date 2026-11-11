@@ -641,9 +641,9 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised, m accountMov
 	return s.replaceContainer(ctx, entry, f, m, run, from, to, session)
 }
 
-// mayLaunch is the launch admission a member's own standing needs, checked
-// again for a move as for a launch.
-func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID) error {
+// mayLaunch is the launch admission a member's own standing needs in every
+// one of workspaces, checked again for a move as for a launch.
+func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID, workspaces []domain.WorkspaceID) error {
 	member, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
 		return err
@@ -651,7 +651,13 @@ func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID) error {
 	if member.Pending {
 		return fmt.Errorf("%w: %s's membership is pending admin approval", permissions.ErrDenied, member.DisplayName)
 	}
-	return permissions.Check(permissions.Launch, permissions.Actor{ID: member.ID, Role: member.Role}, permissions.Target{})
+	actor := permissions.ActorOf(member)
+	for _, ws := range workspaces {
+		if err := permissions.Check(permissions.Launch, actor, permissions.Target{Workspace: ws}); err != nil {
+			return fmt.Errorf("%s may not launch in workspace %s: %w", member.DisplayName, ws, err)
+		}
+	}
+	return nil
 }
 
 // chooseMove chooses the account under the authorization mutex and writes
@@ -673,8 +679,9 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 		return nil, "", nil, fmt.Errorf("the session moved to %s's account meanwhile", s.memberName(ctx, run.AccountMember()))
 	}
 	home := run.HomeMember()
+	workspaces := runWorkspaces(run)
 	for _, member := range slices.Compact([]domain.MemberID{home, run.MemberID}) {
-		if launchErr := s.mayLaunch(ctx, member); launchErr != nil {
+		if launchErr := s.mayLaunch(ctx, member, workspaces); launchErr != nil {
 			return nil, "", nil, launchErr
 		}
 	}
@@ -682,9 +689,9 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 	if run.ACP {
 		mode = domain.LaunchACP
 	}
-	to, excluded := fallback.Select(ctx, s.cfg.Store, measured, run.MemberID, from, run.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
+	to, excluded := fallback.Select(ctx, s.cfg.Store, measured, run.MemberID, from, workspaces, run.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
 		if home != run.MemberID {
-			if _, authErr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, home, string(account)); authErr != nil {
+			if _, authErr := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, home, string(account), workspaces); authErr != nil {
 				if errors.Is(authErr, permissions.ErrDenied) || errors.Is(authErr, store.ErrNotFound) {
 					return false, nil
 				}
@@ -776,11 +783,12 @@ func (s *Scheduler) commitMove(ctx context.Context, entry *supervised, f *UsageF
 	if current.MemberID != run.MemberID {
 		return 0, errors.New("the session was handed off meanwhile")
 	}
+	workspaces := runWorkspaces(current)
 	for _, member := range slices.Compact([]domain.MemberID{run.HomeMember(), run.MemberID}) {
-		if launchErr := s.mayLaunch(ctx, member); launchErr != nil {
+		if launchErr := s.mayLaunch(ctx, member, workspaces); launchErr != nil {
 			return 0, launchErr
 		}
-		if _, authErr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(to)); authErr != nil {
+		if _, authErr := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, member, string(to), workspaces); authErr != nil {
 			return 0, authErr
 		}
 	}

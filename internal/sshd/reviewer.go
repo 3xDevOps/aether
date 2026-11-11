@@ -20,19 +20,15 @@ func init() {
 
 // memberReviewerLink binds the edge's reviewer account to a member. The
 // reviewer signs in with a password the edge's operator shares with an
-// app directory, never through an invitation, so an admin binds it
+// app directory, never through an invitation, so a super admin binds it
 // directly, and only to a member who is no admin.
 func (s *Server) memberReviewerLink(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	const method = protocol.MethodMemberReviewerLink
 	if perr := s.requireApprovedCaller(ctx, method, true); perr != nil {
 		return nil, perr
 	}
-	caller, err := s.cfg.Store.GetMember(ctx, member)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	if caller.Role != domain.RoleAdmin {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: method + ": admins only"}
+	if perr := s.requireSuperAdmin(ctx, member, method); perr != nil {
+		return nil, perr
 	}
 	if !s.cfg.EdgeReviewer {
 		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: method + ": edge-reviewer is off, so this server takes no reviewer account; " +
@@ -53,8 +49,8 @@ func (s *Server) memberReviewerLink(ctx context.Context, member domain.MemberID,
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if target.Role == domain.RoleAdmin {
-		return nil, invalidParams(fmt.Sprintf("member %s is an admin; bind the reviewer account to a viewer or collaborator", target.ID))
+	if target.Role.Admin() {
+		return nil, invalidParams(fmt.Sprintf("member %s is %s; bind the reviewer account to a viewer or collaborator", target.ID, target.Role))
 	}
 	id := &domain.Identity{Member: target.ID, Provider: edgeproto.ProviderReviewer, Subject: p.Login, Login: p.Login, CreatedAt: time.Now().UTC()}
 	err = ids.BindIdentity(ctx, id)

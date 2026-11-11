@@ -219,12 +219,23 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 	if err != nil {
 		return fmt.Errorf("store: create workspace: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers, w.Origin,
-	); err != nil {
+	// The owner is checked in the insert itself: a role change made by
+	// another process, such as aether-server member role, cannot land
+	// between a caller's check and the workspace it creates.
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin, owner_member_id)
+		 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+		 WHERE ?8 = '' OR EXISTS (SELECT 1 FROM members
+		 	WHERE id = ?8 AND role IN ('admin', 'super_admin') AND pending = 0 AND merged_into = '')`,
+		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers, w.Origin, w.OwnerID,
+	)
+	if err != nil {
 		return fmt.Errorf("store: create workspace: %w", mapConstraint(err, ErrNotFound))
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: create workspace: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("store: create workspace: %w: %s is not an approved admin or super admin", ErrConflict, w.OwnerID)
 	}
 	w.ID, w.CreatedAt, w.Environment, w.BaseBranch = domain.WorkspaceID(id), ts, envDef, baseBranch
 	return nil
@@ -236,7 +247,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 		environment string
 		createdAt   int64
 	)
-	if err := row.Scan(&w.ID, &w.Name, &createdAt, &environment, &w.BaseBranch, &w.SteerOthers, &w.Origin); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &createdAt, &environment, &w.BaseBranch, &w.SteerOthers, &w.Origin, &w.OwnerID); err != nil {
 		return nil, err
 	}
 	if environment != "" && environment != "{}" {
@@ -248,7 +259,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 	return &w, nil
 }
 
-const workspaceCols = `id, name, created_at, environment, base_branch, steer_others, origin`
+const workspaceCols = `id, name, created_at, environment, base_branch, steer_others, origin, owner_member_id`
 
 func (d *DB) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
 	w, err := scanWorkspace(d.db.QueryRowContext(ctx,
@@ -643,6 +654,9 @@ func (d *DB) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member,
 	if mergedInto != "" {
 		return nil, fmt.Errorf("%w: member %s was merged into %s", ErrNotFound, id, mergedInto)
 	}
+	if m.Access, err = d.MemberWorkspaces(ctx, id); err != nil {
+		return nil, fmt.Errorf("store: get member: %w", err)
+	}
 	return m, nil
 }
 
@@ -686,13 +700,31 @@ func (d *DB) GetMemberByTailnetLogin(ctx context.Context, login string) (*domain
 	return m, nil
 }
 
-func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE members SET pending = 0 WHERE id = ?`, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: approve member: %w", err)
+func (d *DB) ApproveMember(ctx context.Context, id, by domain.MemberID) error {
+	res, err := d.db.ExecContext(ctx,
+		`UPDATE members SET pending = 0 WHERE id = ?1 AND (?2 = '' OR EXISTS (SELECT 1 FROM members c
+		 WHERE c.id = ?2 AND c.pending = 0 AND c.merged_into = ''
+		 AND (c.role = 'super_admin' OR (c.role = 'admin' AND members.role NOT IN ('admin', 'super_admin')))))`, id, by)
+	if err != nil {
+		return fmt.Errorf("store: approve member: %w", err)
 	}
-	return err
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: approve member: %w", err)
+	} else if n > 0 {
+		return nil
+	}
+	if _, err := d.GetMember(ctx, id); err != nil {
+		return err
+	}
+	var role domain.Role
+	if err := d.db.QueryRowContext(ctx,
+		`SELECT COALESCE((SELECT role FROM members WHERE id = ? AND pending = 0 AND merged_into = ''), '')`, by).Scan(&role); err != nil {
+		return fmt.Errorf("store: approve member: read the role of %s: %w", by, err)
+	}
+	if !role.Admin() {
+		return fmt.Errorf("%w: member %s is no longer an admin", ErrConflict, by)
+	}
+	return fmt.Errorf("%w: member %s is an admin or super admin now; only a super admin approves them", ErrConflict, id)
 }
 
 // UpdateMemberGitIdentity sets only the member's git author name and
@@ -702,6 +734,24 @@ func (d *DB) UpdateMemberGitIdentity(ctx context.Context, id domain.MemberID, na
 		`UPDATE members SET git_name = ?, git_email = ? WHERE id = ?`, name, email, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update member git identity: %w", err)
+	}
+	return err
+}
+
+func (d *DB) UpdateMemberDisplayName(ctx context.Context, id domain.MemberID, name string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE members SET display_name = ? WHERE id = ?`, name, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: update member display name: %w", err)
+	}
+	return err
+}
+
+func (d *DB) UpdateMemberColor(ctx context.Context, id domain.MemberID, color string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE members SET color = ? WHERE id = ?`, color, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: update member color: %w", err)
 	}
 	return err
 }
@@ -749,12 +799,18 @@ func (d *DB) UpdateMember(ctx context.Context, m *domain.Member) error {
 }
 
 // DeleteMember deletes member id and, recording each, its connectors.
-func (d *DB) DeleteMember(ctx context.Context, id domain.MemberID) error {
+func (d *DB) DeleteMember(ctx context.Context, id, by domain.MemberID) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin delete member: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = refuseRemoval(ctx, tx, id, by); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("store: delete member: %w", err)
+	}
 	if err = removeConnectors(ctx, tx, `member_id = ?`, id); err != nil {
 		return err
 	}

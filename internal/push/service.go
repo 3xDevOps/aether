@@ -28,6 +28,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -51,6 +52,7 @@ var (
 type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
+	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	store.PushStore
 }
@@ -585,13 +587,35 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 		return nil, nil, err
 	}
 	n := needOf(run, s.runs.PendingInputs(id), s.runs.Paused(id))
-	if n != nil {
-		n.member = run.MemberID
+	if n == nil {
+		return run, nil, nil
 	}
-	if n != nil {
-		n.key = string(n.member) + "|" + n.key
+	n.member = run.MemberID
+	n.key = string(n.member) + "|" + n.key
+	reaches, err := s.reachesRun(ctx, n.member, run)
+	if err != nil || !reaches {
+		return run, nil, err
 	}
 	return run, n, nil
+}
+
+// reachesRun reports whether member still reaches every workspace of run:
+// a need it raised is no longer theirs to hear once they lost one.
+func (s *Service) reachesRun(ctx context.Context, member domain.MemberID, run *domain.Run) (bool, error) {
+	m, err := s.store.GetMember(ctx, member)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	actor := permissions.ActorOf(m)
+	for _, ws := range append([]domain.WorkspaceID{run.WorkspaceID}, run.ExtraWorkspaces()...) {
+		if !actor.Reaches(ws) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func topicOf(id string) string {

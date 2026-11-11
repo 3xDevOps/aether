@@ -77,7 +77,8 @@ func (e *testEnv) restartWith(t *testing.T, policy edgeproto.AccessPolicy) *test
 func TestAccountAccessRegistersDevices(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
-	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
+	asSuperAdmin(t, e)
+	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleSuperAdmin})
 	laptop, phone := newSigner(t), newSigner(t)
 	laptopRPC := controlClientOn(t, e.mustDialEdge(t, octo, laptop, "laptop"))
 	e.mustDialEdge(t, octo, phone, "phone")
@@ -141,6 +142,7 @@ func TestSignInAloneMintsNoInviteCode(t *testing.T) {
 		c.EdgeAccess = edgeproto.PolicyAccount
 		c.InvitesDir = dir
 	})
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	laptop := newSigner(t)
 	var pe *protocol.Error
@@ -166,6 +168,7 @@ func TestConnectorIsJudgedByItsDevice(t *testing.T) {
 		c.EdgeAccess = edgeproto.PolicyAccount
 		c.InvitesDir = dir
 	})
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	laptop := newSigner(t)
 	e.mustDialEdge(t, octo, laptop, "laptop")
@@ -194,6 +197,7 @@ func TestConnectorIsJudgedByItsDevice(t *testing.T) {
 func TestTighteningInheritsNothing(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	laptop := newSigner(t)
 	e.mustDialEdge(t, octo, laptop, "laptop")
@@ -220,6 +224,7 @@ func TestApprovalShowsWhomTheCodeAdmits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	approveAsAdmin(t, e, e.refusedForApproval(t, octo, newSigner(t), "laptop"))
 	octoMember, err := identities(t, e).GetMemberByIdentity(ctx, octo.Provider, octo.Subject)
@@ -276,12 +281,14 @@ func TestApprovalShowsWhomTheCodeAdmits(t *testing.T) {
 }
 
 // A refusal carries the approval code only where nobody can approve the
-// device in the app: the device admits as the only admin, who has no
-// approved device. A device waiting on an invitation adding a new member,
-// or one admitting as an admin beside another, names only its id.
+// device in the app: the device admits as an admin or super admin no other
+// super admin can approve, who has no approved device. A device waiting on
+// an invitation adding a new member, or one beside another super admin,
+// names only its id.
 func TestApprovalCodeOnlyWithoutAnInAppApprover(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	refused := func(account edgeproto.Account, label string) *edgeproto.Refused {
 		t.Helper()
 		signer := newSigner(t)
@@ -302,8 +309,12 @@ func TestApprovalCodeOnlyWithoutAnInAppApprover(t *testing.T) {
 		t.Fatalf("a device adding a new member = %+v, want no code", r)
 	}
 	addMember(t, e, "Bob", domain.RoleAdmin, false)
-	if r := refused(ada, "phone"); r.ApprovalCode != "" {
-		t.Fatalf("an admin's device beside another admin = %+v, want no code", r)
+	if r := refused(ada, "phone"); r.ApprovalCode == "" {
+		t.Fatalf("the only super admin's device beside an admin, who approves no super admin's device = %+v, want its code", r)
+	}
+	addMember(t, e, "Carol", domain.RoleSuperAdmin, false)
+	if r := refused(ada, "tablet"); r.ApprovalCode != "" {
+		t.Fatalf("a super admin's device beside another super admin = %+v, want no code", r)
 	}
 }
 
@@ -366,7 +377,8 @@ func withDevice(member domain.MemberID, dev *domain.Device) context.Context {
 func TestPrivilegedMethodsRefuseAnUnapprovedDevice(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = filepath.Join(t.TempDir(), "invites") })
-	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
+	asSuperAdmin(t, e)
+	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleSuperAdmin})
 	approveAsAdmin(t, e, e.refusedForApproval(t, octo, newSigner(t), "phone"))
 	laptop := newSigner(t)
 	e.refusedForApproval(t, octo, laptop, "laptop")
@@ -470,6 +482,7 @@ func TestNoControlMethodChangesEdgeAccess(t *testing.T) {
 func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	laptop := newSigner(t)
 	live := e.mustDialEdge(t, octo, laptop, "laptop")
@@ -497,6 +510,7 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitClosed(t, live)
+	asSuperAdmin(t, e)
 	for _, c := range []*store.Connector{conn, signedIn} {
 		var audit protocol.AuditListResult
 		if err = controlClient(t, e).Call(protocol.MethodAuditList, protocol.AuditListParams{ConnectorID: c.ID}, &audit); err != nil ||
@@ -504,6 +518,7 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 			t.Fatalf("audit for connector %s = %+v, %v; want its one removal", c.ID, audit.Entries, err)
 		}
 	}
+	setRole(t, e, domain.RoleAdmin)
 	after, err := e.store.GetMember(context.Background(), domain.MemberID(m.ID))
 	if err != nil || after.Role != domain.RoleAdmin {
 		t.Fatalf("member after the notice = %+v, %v; want kept as admin", after, err)
@@ -519,7 +534,8 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 	if members, _ := e.store.ListMembers(context.Background()); len(members) != 2 {
 		t.Fatalf("members after the notices = %d, want 2", len(members))
 	}
-	// The member kept no credential, and an admin still changes its role.
+	// The member kept no credential, and a super admin still changes its role.
+	asSuperAdmin(t, e)
 	if err := controlClient(t, e).Call(protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: m.ID, Role: "viewer"}, nil); err != nil {
 		t.Fatalf("demote the member left without a credential: %v", err)
 	}
@@ -540,7 +556,7 @@ func TestDeviceRevokedElsewhereClosesItsConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := identities(t, e).RevokeDevice(context.Background(), dev.ID); err != nil {
+	if err := identities(t, e).RevokeDevice(context.Background(), dev.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitClosed(t, live)
@@ -586,6 +602,7 @@ func (f *fakeEdgeOwner) TransferOwner(owner edgeproto.Account) error {
 func TestServerOwnerTransfer(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	admin := controlClient(t, e)
 	transfer := func(member string) error {
 		return admin.Call(protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: member}, nil)
@@ -657,6 +674,7 @@ func (o lockedEdgeOwner) TransferOwner(edgeproto.Account) error {
 func TestOwnerTransferDuringAClaim(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	m := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, newSigner(t), "laptop")))
 	key := newSigner(t)

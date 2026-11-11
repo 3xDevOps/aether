@@ -295,10 +295,11 @@ func (s *Service) Delete(ctx context.Context, member domain.MemberID, p protocol
 
 // DeleteMember deletes the member and their preferences in one
 // transaction, recording each preference as deleted before it commits, so
-// that no restored copy of the database brings them back.
-func (s *Service) DeleteMember(ctx context.Context, member domain.MemberID) error {
+// that no restored copy of the database brings them back. by is the
+// super admin removing them, as for store.DB.DeleteMember.
+func (s *Service) DeleteMember(ctx context.Context, member, by domain.MemberID) error {
 	// Once the tombstones are synced the delete must commit, as in Delete.
-	err := s.store.DeleteMemberWithPreferences(context.WithoutCancel(ctx), member, func(ids []string) error {
+	err := s.store.DeleteMemberWithPreferences(context.WithoutCancel(ctx), member, by, func(ids []string) error {
 		return s.tombstones.deleted(ids...)
 	})
 	if err != nil {

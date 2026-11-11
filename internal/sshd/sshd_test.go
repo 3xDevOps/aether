@@ -386,6 +386,9 @@ type fakeRuns struct {
 	acpPending     map[domain.RunID][]acphost.Request
 	sudo           map[domain.RunID][]domain.RunInputRequest
 	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
+	// whileTerminalStopped, when set, runs inside WithStoppedTerminal
+	// before its callback.
+	whileTerminalStopped func()
 }
 
 func (f *fakeRuns) Retention(run *domain.Run) (scheduler.RetentionInfo, error) {
@@ -843,6 +846,9 @@ func (f *fakeRuns) WithStoppedTerminal(ctx context.Context, member domain.Member
 	if err := f.StopTerminal(ctx, member); err != nil {
 		return err
 	}
+	if f.whileTerminalStopped != nil {
+		f.whileTerminalStopped()
+	}
 	return afterStop()
 }
 
@@ -932,9 +938,12 @@ func (f *fakeRuns) ProbeGitHubCLI(_ context.Context, member domain.MemberID) (do
 func (f *fakeRuns) HoldShell() func() { return func() {} }
 
 type testEnv struct {
-	srv         *Server
-	addr        string
-	store       store.Store
+	srv   *Server
+	addr  string
+	store store.Store
+	// db is the store under the test's view of it: store is
+	// storetest.Unscoped unless the env was built by newScopedTestEnv.
+	db          *store.DB
 	bus         events.Bus
 	git         *fakeGit
 	pty         *fakePTY
@@ -946,6 +955,23 @@ type testEnv struct {
 	serveCancel context.CancelFunc
 	// joinSecrets maps an invitation id to the join secret of its link.
 	joinSecrets *sync.Map
+}
+
+// testDBOK is the *store.DB behind a Config's Store, through
+// storetest.Unscoped.
+func testDBOK(st store.Store) (*store.DB, bool) {
+	switch v := st.(type) {
+	case *store.DB:
+		return v, true
+	case storetest.Unscoped:
+		return v.DB, true
+	}
+	return nil, false
+}
+
+func testDB(st store.Store) *store.DB {
+	db, _ := testDBOK(st)
+	return db
 }
 
 func newSigner(t *testing.T) ssh.Signer {
@@ -969,15 +995,26 @@ func newTestEnv(t *testing.T, mod func(*Config)) *testEnv {
 // newFreshTestEnv uses an unseeded store, for bootstrap tests.
 func newFreshTestEnv(t *testing.T, mod func(*Config)) *testEnv {
 	t.Helper()
-	return buildTestEnv(t, mod, newSigner(t), false)
+	return buildTestEnv(t, mod, newSigner(t), false, false)
 }
 
 func newTestEnvWithSigner(t *testing.T, mod func(*Config), signer ssh.Signer) *testEnv {
 	t.Helper()
-	return buildTestEnv(t, mod, signer, true)
+	return buildTestEnv(t, mod, signer, true, false)
 }
 
-func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool) *testEnv {
+// newScopedTestEnv is newTestEnv with workspace-scoped access enforced:
+// members reach only the workspaces they own or were granted. The seeded
+// member is a super admin.
+func newScopedTestEnv(t *testing.T, mod func(*Config)) *testEnv {
+	t.Helper()
+	return buildTestEnv(t, mod, newSigner(t), true, true)
+}
+
+// buildTestEnv builds a server on a fresh store. Unless scoped, the server
+// sees it through storetest.Unscoped, so tests written before workspace
+// access existed keep every member reaching every workspace.
+func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed, scoped bool) *testEnv {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -992,8 +1029,13 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 	}
 	t.Cleanup(func() { _ = bus.Close() })
 
+	var view store.Store = storetest.Unscoped{DB: db}
+	if scoped {
+		view = db
+	}
 	e := &testEnv{
-		store:       db,
+		store:       view,
+		db:          db,
 		bus:         bus,
 		git:         &fakeGit{},
 		pty:         &fakePTY{resumeID: "fake-pty"},
@@ -1008,6 +1050,9 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 			PublicKey:   string(ssh.MarshalAuthorizedKey(e.signer.PublicKey())),
 			Color:       "#e6194b",
 			Role:        domain.RoleAdmin,
+		}
+		if scoped {
+			e.member.Role = domain.RoleSuperAdmin
 		}
 		if cerr := db.CreateMember(ctx, e.member); cerr != nil {
 			t.Fatalf("create member: %v", cerr)
@@ -1029,7 +1074,7 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 	cfg := Config{
 		Addr:        "127.0.0.1:0",
 		HostKeyPath: filepath.Join(dir, "ssh", "host_ed25519_key"),
-		Store:       db,
+		Store:       view,
 		Bus:         bus,
 		Git:         e.git,
 		PTY:         e.pty,

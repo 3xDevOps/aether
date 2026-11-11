@@ -15,6 +15,7 @@ import { applyEvent } from '@/store/sync'
 import { agentInfo, alice, bob, fakeApi, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { ApiError } from '@/lib/api'
 import { StubSocket } from '@/test/stub-socket'
+import { atViewport } from '@/test/viewport'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof apiModule>()
@@ -120,6 +121,16 @@ describe('run frame', () => {
     expect(StubSocket.opened).toHaveLength(1)
     expect(socket.closed).toBe(false)
     expect(useStore.getState().runViewMemory.run_1).toBe('terminal')
+  })
+
+  it('remembers a phone tab selection when reopening a session', () => {
+    atViewport(390, { pointer: 'coarse' })
+    const view = open()
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Changes' }))
+    expect(useStore.getState().runViewMemory.run_1).toBe('changes')
+    view.unmount()
+    open()
+    expect(screen.getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true')
   })
 
   it('keeps the chosen view across a mode switch while the session still has it', () => {

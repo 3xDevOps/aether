@@ -492,8 +492,11 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err != nil {
 		return err
 	}
-	// A share revoked since admission is refused here, before any agent
-	// starts with the owner's login; leaveIfRevoked covers a revoke after.
+	// A share or workspace grant revoked since admission is refused here,
+	// before any agent starts; leaveIfRevoked covers a revoke after.
+	if err = s.checkRunReach(ctx, run); err != nil {
+		return fmt.Errorf("check workspace access: %w", err)
+	}
 	if run.AccountMember() != run.HomeMember() {
 		if err = s.resolveRunAccount(ctx, run); err != nil {
 			return fmt.Errorf("check the account share: %w", err)
@@ -560,15 +563,12 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	return nil
 }
 
-// leaveIfRevoked moves a run that just started on another member's account
-// off it when the share was revoked while the run provisioned or moved: that
-// revoke found no container it could move. A revoke committed after this
-// check finds the run running and moves it itself. The check outlives the
-// request that started the run.
+// leaveIfRevoked moves a run that just started off its account, or stops
+// it, when a share or workspace grant it needs was revoked while the run
+// provisioned or moved: that revoke found no container it could move. A
+// revoke committed after this check finds the run running and moves it
+// itself. The check outlives the request that started the run.
 func (s *Scheduler) leaveIfRevoked(ctx context.Context, entry *supervised, run *domain.Run) {
-	if run.AccountMember() == run.HomeMember() {
-		return
-	}
 	revoked, err := s.accountRevoked(context.WithoutCancel(ctx), run)
 	if err != nil {
 		slog.Warn("scheduler: check the new session's account share", "run", run.ID, "error", err)

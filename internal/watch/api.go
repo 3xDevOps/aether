@@ -116,7 +116,7 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		if t.RunID == "" {
 			return "", "", nil, invalid("target.run_id is required")
 		}
-		run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
+		run, err := s.reachableRun(ctx, member, domain.RunID(t.RunID))
 		if err != nil {
 			return "", "", nil, fmt.Errorf("session %s: %w", t.RunID, err)
 		}
@@ -133,7 +133,7 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 			return "", "", nil, invalid("target.repo and target.number are required")
 		}
 		if t.RunID != "" {
-			run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
+			run, err := s.reachableRun(ctx, member, domain.RunID(t.RunID))
 			if err != nil {
 				return "", "", nil, fmt.Errorf("session %s: %w", t.RunID, err)
 			}
@@ -143,13 +143,23 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 	default:
 		return "", "", nil, invalid("target kind %q is not one of run, pr", t.Kind)
 	}
-	if ws != "" {
-		actor := permissions.Actor{ID: member.ID, Role: member.Role}
-		if err := permissions.Check(permissions.View, actor, permissions.Target{Workspace: ws}); err != nil {
-			return "", "", nil, fmt.Errorf("%w: %w", ErrDenied, err)
+	return ws, title, fired, nil
+}
+
+// reachableRun reads run id for member, answering a run with a workspace
+// they cannot reach exactly as a missing one.
+func (s *Service) reachableRun(ctx context.Context, member *domain.Member, id domain.RunID) (*domain.Run, error) {
+	run, err := s.store.GetRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	actor := permissions.ActorOf(member)
+	for _, ws := range append([]domain.WorkspaceID{run.WorkspaceID}, run.ExtraWorkspaces()...) {
+		if !actor.Reaches(ws) {
+			return nil, store.ErrNotFound
 		}
 	}
-	return ws, title, fired, nil
+	return run, nil
 }
 
 // ErrDenied marks a target the caller may not see.
@@ -345,7 +355,13 @@ func (s *Service) settledWatch(ctx context.Context, id string) (*store.Watch, er
 }
 
 func (s *Service) result(ctx context.Context, w *store.Watch) (protocol.WatchResult, error) {
-	out, err := s.toProto(ctx, w)
+	if err := s.allowed(ctx, w); errors.Is(err, errRevoked) {
+		return protocol.WatchResult{Watch: revokedProto(w, err),
+			Receipt: fmt.Sprintf("Not checking %s watch %s: %v. Delete it with watch.delete.", kindWords[w.TargetKind], w.ID, err)}, nil
+	} else if err != nil {
+		return protocol.WatchResult{}, err
+	}
+	out, err := s.readProto(ctx, w)
 	if err != nil {
 		return protocol.WatchResult{}, err
 	}
@@ -433,7 +449,18 @@ func stamp(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// toProto is w as its member may read it now.
 func (s *Service) toProto(ctx context.Context, w *store.Watch) (protocol.Watch, error) {
+	if err := s.allowed(ctx, w); errors.Is(err, errRevoked) {
+		return revokedProto(w, err), nil
+	} else if err != nil {
+		return protocol.Watch{}, err
+	}
+	return s.readProto(ctx, w)
+}
+
+// readProto is w in full, for a member allowed shows it to.
+func (s *Service) readProto(ctx context.Context, w *store.Watch) (protocol.Watch, error) {
 	out := protocol.Watch{
 		ID: w.ID, MemberID: string(w.MemberID), WorkspaceID: string(w.WorkspaceID), Target: targetOf(w),
 		TargetTitle: w.TargetTitle, Conditions: w.Conditions, State: w.State, Error: w.Error, Label: w.Label,
@@ -455,6 +482,16 @@ func (s *Service) toProto(ctx context.Context, w *store.Watch) (protocol.Watch, 
 		out.LastNotification = &n
 	}
 	return out, nil
+}
+
+// revokedProto is w for a member who no longer reaches what it watches:
+// enough to recognize and delete it, nothing it read.
+func revokedProto(w *store.Watch, err error) protocol.Watch {
+	return protocol.Watch{
+		ID: w.ID, MemberID: string(w.MemberID), Target: protocol.WatchTarget{Kind: w.TargetKind},
+		Conditions: w.Conditions, State: protocol.WatchError, Error: err.Error(), Label: w.Label, Source: w.Source,
+		CreatedAt: stamp(&w.CreatedAt), UpdatedAt: stamp(&w.UpdatedAt), ExpiresAt: stamp(&w.ExpiresAt), Link: WatchLink(w.ID),
+	}
 }
 
 func notificationProto(n *store.WatchNotification) protocol.WatchNotification {
@@ -509,7 +546,12 @@ func (s *Service) Get(ctx context.Context, member domain.MemberID, id string) (p
 	if err != nil {
 		return protocol.WatchGetResult{}, err
 	}
-	pw, err := s.toProto(ctx, w)
+	if aerr := s.allowed(ctx, w); errors.Is(aerr, errRevoked) {
+		return protocol.WatchGetResult{Watch: revokedProto(w, aerr), Notifications: []protocol.WatchNotification{}}, nil
+	} else if aerr != nil {
+		return protocol.WatchGetResult{}, aerr
+	}
+	pw, err := s.readProto(ctx, w)
 	if err != nil {
 		return protocol.WatchGetResult{}, err
 	}

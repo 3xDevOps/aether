@@ -96,7 +96,7 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 	t.Parallel()
 	e := newChangesEnv(t, "")
 	ctx := t.Context()
-	db := e.store.(*store.DB)
+	db := e.db
 	secondRun := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "Ship the checkout", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
 	if err := db.CreateRun(ctx, secondRun); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -312,7 +312,7 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 	if err := e.store.DeleteRun(ctx, doomed.ID); err != nil {
 		t.Fatalf("delete run: %v", err)
 	}
-	deleted := e.publish(t, e.ws.ID, doomed.ID, events.RunDeletedPayload{})
+	deleted := e.publish(t, e.ws.ID, doomed.ID, events.RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{}})
 
 	got, _ := pageAll(t, controlClient(t, e.testEnv), protocol.ChangesListParams{Cursor: "0", Limit: 1})
 	if want := []uint64{kept, alsoKept, deleted}; !slices.Equal(changeSeqs(got), want) {
@@ -343,6 +343,13 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 		t.Fatalf("delete workspace: %v", err)
 	}
 	notice := e.publish(t, gone.ID, "", events.WorkspaceDeletedPayload{})
+	// No owner or grant survives the deletion, so only a super admin
+	// still reaches it.
+	err = c.Call(protocol.MethodChangesList, protocol.ChangesListParams{Cursor: strconv.FormatUint(deleted, 10), WorkspaceID: string(gone.ID)}, nil)
+	if !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound || perr.Message != store.ErrNotFound.Error() {
+		t.Fatalf("an admin's changes of a deleted workspace: err = %v, want not found", err)
+	}
+	asSuperAdmin(t, e.testEnv)
 	for _, p := range []protocol.ChangesListParams{
 		{WorkspaceID: string(gone.ID)},
 		{WorkspaceID: string(gone.ID), RunID: "run-in-gone"},

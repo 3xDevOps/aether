@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -26,10 +27,10 @@ type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
-	InsertMemory(ctx context.Context, m *store.Memory) (bool, error)
-	SupersedeMemory(ctx context.Context, old string, m *store.Memory, agent bool, vet func(old *store.Memory) error) (duplicate, movedPin bool, err error)
+	InsertMemory(ctx context.Context, m *store.Memory, workspaces []domain.WorkspaceID) (bool, error)
+	SupersedeMemory(ctx context.Context, old string, m *store.Memory, agent bool, vet func(old *store.Memory) error, workspaces []domain.WorkspaceID) (duplicate, movedPin bool, err error)
 	SearchMemory(ctx context.Context, q store.MemoryQuery) ([]*store.Memory, error)
-	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*store.Memory, []*store.Memory, error)
+	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string, workspaces []domain.WorkspaceID) (*store.Memory, []*store.Memory, error)
 	PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope store.MemoryScope, vet func(*store.Memory) error) (*store.Memory, error)
 	UnpinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, vet func(*store.Memory) error) (*store.Memory, error)
 	DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id string, vet func(*store.Memory) error) error
@@ -120,15 +121,22 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		}
 		note.Source, note.RunID, note.Harness, note.Commit = store.MemoryFromAgent, run.ID, run.Harness, head
 	}
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return protocol.MemoryAddResult{}, fail(method, err)
+	}
 	var duplicate, movedPin bool
 	if p.Supersedes != "" {
+		if err = s.visible(ctx, member, workspace, p.Supersedes, ""); err != nil {
+			return protocol.MemoryAddResult{}, fail(method, err)
+		}
 		vet := mayChange(method, "replace", actor)
 		if run != nil {
 			vet = agentMayReplace(run)
 		}
-		duplicate, movedPin, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, run != nil, vet)
+		duplicate, movedPin, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, run != nil, vet, reach)
 	} else {
-		duplicate, err = s.cfg.Store.InsertMemory(ctx, note)
+		duplicate, err = s.cfg.Store.InsertMemory(ctx, note, reach)
 	}
 	if err != nil {
 		return protocol.MemoryAddResult{}, fail(method, err)
@@ -162,7 +170,7 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		}
 		item = pinned.Item
 	}
-	similar, err := s.similar(ctx, workspace, item.ID, text)
+	similar, err := s.similar(ctx, member, workspace, item.ID, text)
 	if err != nil {
 		return protocol.MemoryAddResult{}, err
 	}
@@ -230,10 +238,11 @@ func agentMayReplace(run *domain.Run) func(*store.Memory) error {
 }
 
 // mayChange lets actor change a member note only when it is theirs (see
-// store.Memory.Owner). Admins and workspace notes are unrestricted.
+// store.Memory.Owner). The workspace's admins and workspace notes are
+// unrestricted.
 func mayChange(method, verb string, actor *domain.Member) func(*store.Memory) error {
 	return func(n *store.Memory) error {
-		if n.Scope != store.MemoryScopeMember || actor.Role == domain.RoleAdmin || n.Owner() == actor.ID {
+		if n.Scope != store.MemoryScopeMember || adminIn(actor, n.WorkspaceID) || n.Owner() == actor.ID {
 			return nil
 		}
 		return denyOwner(method, verb, n)
@@ -252,13 +261,18 @@ func mayPin(method, scope string, actor *domain.Member) func(*store.Memory) erro
 		switch {
 		case n.Scope == store.MemoryScopeMember && n.Owner() != actor.ID:
 			return denyOwner(method, "pin", n)
-		case n.Scope == store.MemoryScopeWorkspace && n.AuthorNow != actor.ID && actor.Role != domain.RoleAdmin:
+		case n.Scope == store.MemoryScopeWorkspace && n.AuthorNow != actor.ID && !adminIn(actor, n.WorkspaceID):
 			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
 				"%s: permission denied: %s is a workspace note by %s; only they or an admin may pin it for themselves",
 				method, n.ID, name(n.AuthorName, string(n.AuthorID)))}
 		}
 		return nil
 	}
+}
+
+func adminIn(m *domain.Member, ws domain.WorkspaceID) bool {
+	role, _ := permissions.ActorOf(m).RoleIn(ws)
+	return role == domain.RoleAdmin
 }
 
 func denyOwner(method, verb string, n *store.Memory) error {
@@ -308,9 +322,14 @@ func (s *Service) head(ctx context.Context, run *domain.Run) (string, error) {
 
 const headDiffPage = 32
 
-// similar is the best live matches for text other than the note itself.
-func (s *Service) similar(ctx context.Context, workspace domain.WorkspaceID, self, text string) ([]protocol.MemoryItem, error) {
-	hits, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: workspace, Words: text, Limit: protocol.MemoryMaxSimilar + 1})
+// similar is the best live matches for text other than the note itself
+// that member reads.
+func (s *Service) similar(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, self, text string) ([]protocol.MemoryItem, error) {
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return nil, fail(protocol.MethodMemoryAdd, err)
+	}
+	hits, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: workspace, Workspaces: reach, Words: text, Limit: protocol.MemoryMaxSimilar + 1})
 	if err != nil {
 		return nil, fail(protocol.MethodMemoryAdd, err)
 	}
@@ -323,9 +342,9 @@ func (s *Service) similar(ctx context.Context, workspace domain.WorkspaceID, sel
 	return out, nil
 }
 
-// Search lists the workspace's notes matching p, best first. Every member
-// may read team memory, so it checks no permission.
-func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error) {
+// Search lists the workspace's notes matching p that member reads, best
+// first. Every member may read team memory, so it checks no permission.
+func (s *Service) Search(ctx context.Context, member domain.MemberID, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error) {
 	const method = protocol.MethodMemorySearch
 	if p.WorkspaceID == "" {
 		return protocol.MemorySearchResult{}, invalid(method, "workspace is required")
@@ -349,7 +368,11 @@ func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (pr
 		return protocol.MemorySearchResult{}, invalid(method,
 			fmt.Sprintf("limit must be between 1 and %d; got %d", protocol.MemorySearchMaxLimit, p.Limit))
 	}
-	notes, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: domain.WorkspaceID(p.WorkspaceID),
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return protocol.MemorySearchResult{}, fail(method, err)
+	}
+	notes, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: domain.WorkspaceID(p.WorkspaceID), Workspaces: reach,
 		Words: p.Words, Kind: store.MemoryKind(p.Kind), Source: store.MemorySource(p.Source), File: strings.TrimSpace(p.File),
 		All: p.All, Replaced: p.Replaced, Pinned: p.Pinned, Limit: p.Limit})
 	if err != nil {
@@ -358,13 +381,17 @@ func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (pr
 	return protocol.MemorySearchResult{Items: items(notes)}, nil
 }
 
-// Show returns one note and its supersede chain.
-func (s *Service) Show(ctx context.Context, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error) {
+// Show returns one note and its supersede chain as member reads them.
+func (s *Service) Show(ctx context.Context, member domain.MemberID, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error) {
 	const method = protocol.MethodMemoryShow
 	if p.WorkspaceID == "" || p.ID == "" {
 		return protocol.MemoryShowResult{}, invalid(method, "workspace and note ID are required")
 	}
-	note, chain, err := s.cfg.Store.GetMemory(ctx, domain.WorkspaceID(p.WorkspaceID), p.ID)
+	reach, err := s.reach(ctx, member)
+	if err != nil {
+		return protocol.MemoryShowResult{}, fail(method, err)
+	}
+	note, chain, err := s.cfg.Store.GetMemory(ctx, domain.WorkspaceID(p.WorkspaceID), p.ID, reach)
 	if err != nil {
 		return protocol.MemoryShowResult{}, fail(method, err)
 	}
@@ -388,11 +415,14 @@ func (s *Service) Pin(ctx context.Context, member domain.MemberID, p protocol.Me
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
+	if err = s.visible(ctx, member, workspace, p.ID, ""); err != nil {
+		return protocol.MemoryPinResult{}, fail(method, err)
+	}
 	note, err := s.cfg.Store.PinMemory(ctx, workspace, p.ID, member, store.MemoryScope(p.Scope), mayPin(method, p.Scope, actor))
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
-	if err := s.changed(ctx, workspace, "", member, events.MemoryActionPin, note.ID); err != nil {
+	if err := s.changed(ctx, workspace, note.RunID, member, events.MemoryActionPin, note.ID); err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
 	return protocol.MemoryPinResult{Item: protocol.MemoryItemFromStore(note)}, nil
@@ -408,11 +438,14 @@ func (s *Service) Unpin(ctx context.Context, member domain.MemberID, p protocol.
 	if err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
+	if err = s.visible(ctx, member, workspace, p.ID, ""); err != nil {
+		return protocol.MemoryUnpinResult{}, fail(method, err)
+	}
 	note, err := s.cfg.Store.UnpinMemory(ctx, workspace, p.ID, mayChange(method, "unpin", actor))
 	if err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
-	if err := s.changed(ctx, workspace, "", member, events.MemoryActionUnpin, note.ID); err != nil {
+	if err := s.changed(ctx, workspace, note.RunID, member, events.MemoryActionUnpin, note.ID); err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
 	return protocol.MemoryUnpinResult{Item: protocol.MemoryItemFromStore(note)}, nil
@@ -430,11 +463,19 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 	if err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
-	ids, vet := []string{p.ID}, mayChange(method, "remove", actor)
+	if err = s.visible(ctx, member, workspace, p.ID, domain.RunID(p.RunID)); err != nil {
+		return protocol.MemoryRmResult{}, fail(method, err)
+	}
+	// The removed notes' session, so their memory.change events reach only
+	// those who reach it, as the notes did.
+	ids, source, may := []string{p.ID}, domain.RunID(p.RunID), mayChange(method, "remove", actor)
 	if p.RunID != "" {
-		ids, err = s.cfg.Store.DeleteMemoryByRun(ctx, workspace, domain.RunID(p.RunID), vet)
+		ids, err = s.cfg.Store.DeleteMemoryByRun(ctx, workspace, source, may)
 	} else {
-		err = s.cfg.Store.DeleteMemory(ctx, workspace, p.ID, vet)
+		err = s.cfg.Store.DeleteMemory(ctx, workspace, p.ID, func(n *store.Memory) error {
+			source = n.RunID
+			return may(n)
+		})
 	}
 	if err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
@@ -442,7 +483,7 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 	if ids == nil {
 		ids = []string{}
 	}
-	if err := s.changed(ctx, workspace, "", member, events.MemoryActionRm, ids...); err != nil {
+	if err := s.changed(ctx, workspace, source, member, events.MemoryActionRm, ids...); err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
 	return protocol.MemoryRmResult{IDs: ids}, nil
@@ -455,7 +496,60 @@ func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspa
 	if err != nil {
 		return nil, err
 	}
-	return m, permissions.Check(permissions.Push, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{Workspace: workspace})
+	return m, permissions.Check(permissions.Push, permissions.ActorOf(m), permissions.Target{Workspace: workspace})
+}
+
+// visible answers a note, or the notes of a session, that member cannot see
+// exactly as one that does not exist, before anything is changed: a note
+// of a session with a workspace they do not reach is not theirs to touch.
+func (s *Service) visible(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, note string, run domain.RunID) error {
+	reach, err := s.reach(ctx, member)
+	if err != nil || reach == nil {
+		return err
+	}
+	if note != "" {
+		_, _, err = s.cfg.Store.GetMemory(ctx, workspace, note, reach)
+		return err
+	}
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	for _, ws := range append([]domain.WorkspaceID{r.WorkspaceID}, r.ExtraWorkspaces()...) {
+		if !slices.Contains(reach, ws) {
+			return store.ErrNotFound
+		}
+	}
+	return nil
+}
+
+// reach is the workspaces every one of members reaches, nil when they are
+// all super admins, who reach every workspace: a note of a session with a
+// workspace outside them, and the session itself, do not exist for them.
+func (s *Service) reach(ctx context.Context, members ...domain.MemberID) ([]domain.WorkspaceID, error) {
+	var actors []permissions.Actor
+	for _, id := range members {
+		m, err := s.cfg.Store.GetMember(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if actor := permissions.ActorOf(m); actor.Role != domain.RoleSuperAdmin {
+			actors = append(actors, actor)
+		}
+	}
+	if len(actors) == 0 {
+		return nil, nil
+	}
+	out := []domain.WorkspaceID{}
+	for _, set := range []map[domain.WorkspaceID]bool{actors[0].Access.Owned, actors[0].Access.Granted} {
+		for ws := range set {
+			if slices.ContainsFunc(actors, func(a permissions.Actor) bool { return !a.Reaches(ws) }) {
+				continue
+			}
+			out = append(out, ws)
+		}
+	}
+	return out, nil
 }
 
 // changed records each note's change for the activity feed. run is the
@@ -492,6 +586,8 @@ func fail(method string, err error) *protocol.Error {
 	var budget *store.MemoryPinBudgetError
 	code := protocol.CodeInternal
 	switch {
+	case errors.Is(err, permissions.ErrNoAccess):
+		code, err = protocol.CodeNotFound, store.ErrNotFound
 	case errors.Is(err, permissions.ErrDenied):
 		code = protocol.CodeDenied
 	case errors.Is(err, store.ErrNotFound):

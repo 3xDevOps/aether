@@ -69,10 +69,10 @@ func unsupported(a edgeproto.Account) error {
 }
 
 // Admit reports the role account a has on the claimed server serverID: a
-// member entry's role, the admin role for the owner, or a live
-// invitation's role, in that order. It fails with
-// edgeproto.RefusalUnknownServer, edgeproto.RefusalIdentityStale when only
-// an invitation could admit a and its identity is not current, or
+// member entry's role, the super admin role for the owner, whom a claim
+// makes super admin, or a live invitation's role, in that order. It fails
+// with edgeproto.RefusalUnknownServer, edgeproto.RefusalIdentityStale when
+// only an invitation could admit a and its identity is not current, or
 // edgeproto.RefusalNotMember.
 func (s *Service) Admit(ctx context.Context, serverID string, a edgeproto.Account) (string, error) {
 	acc, err := s.store.ServerAccess(ctx, serverID, a)
@@ -102,7 +102,7 @@ func roleOf(acc edgestore.Access, a edgeproto.Account, now time.Time) (string, b
 		}
 	}
 	if acc.Owner {
-		return string(domain.RoleAdmin), true
+		return string(domain.RoleSuperAdmin), true
 	}
 	for _, e := range acc.Entries {
 		if e.Kind == edgeproto.EntryInvitation && e.Matches(a, now) {

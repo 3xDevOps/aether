@@ -24,6 +24,7 @@ import (
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -95,6 +96,8 @@ func main() {
 		exitOn(edgeCmd(args))
 	case "device":
 		exitOn(deviceCmd(args))
+	case "member":
+		exitOn(memberCmd(args))
 	case "slack":
 		exitOn(slackCmd(args))
 	case "dictation":
@@ -152,6 +155,14 @@ when connected, 3 when not connected yet, and 1 on an error
 example:
   sudo aether-server edge status
 `,
+	"member": `usage: aether-server member role <member-id> <viewer|collaborator|admin|super_admin> [--config <file>]
+
+set a member's role in the store; the last super admin is never demoted, and
+a member who owns workspaces stays an admin
+
+example:
+  sudo aether-server member role <member-id> super_admin
+`,
 	"slack": `usage: aether-server slack setup [--config <file>]
        aether-server slack remove [--config <file>]
 
@@ -197,6 +208,7 @@ commands:
   update   [--version <tag>]: replace the server and aether binaries and restart the service
   edge     status | claim-code | trust | leave
   device   approve <code> | review: approve or revoke members' edge devices
+  member   role <member-id> <role>: set a member's role
   slack    setup | remove: store or remove the Slack bot's tokens (docs/slack.md)
   dictation install [--gpu] | status | remove: speech-to-text for the dashboard (docs/dictation.md)
   version  print the version (also --version)
@@ -400,7 +412,7 @@ func serve(args []string) error {
 	go commitWhenServing(ctx, srv, trial)
 	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
 		version.String(), *o.addr, *o.dataDir, from)
-	warnIfUnitOutdated()
+	go warnIfUnitOutdated()
 	err = srv.Run(ctx)
 	drainMu.Lock()
 	argv := drained
@@ -470,9 +482,10 @@ func applyConfigFile(fs *flag.FlagSet, path string, optional bool) (string, erro
 	return " from " + path, nil
 }
 
-// warnIfUnitOutdated tells the operator when the installed systemd unit is not
-// the one this release ships. It only reads the unit: a daemon-reload has
-// host-wide effects, so applying the new unit stays the operator's call.
+// warnIfUnitOutdated tells the operator when the installed systemd unit, or
+// the slice beside it on a host where Docker uses that slice, is not the one
+// this release ships. It only reads them: a daemon-reload has host-wide
+// effects, so applying them stays the operator's call.
 func warnIfUnitOutdated() {
 	if os.Getenv("INVOCATION_ID") == "" {
 		return
@@ -486,5 +499,29 @@ func warnIfUnitOutdated() {
 		slog.Warn("the installed systemd unit differs from this release's; apply it with: "+
 			"sudo aether-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart "+serversetup.ServiceName,
 			"unit", serversetup.UnitPath)
+		return
+	}
+	outdated, err = serversetup.SliceOutdated(serversetup.UnitPath)
+	if err != nil {
+		slog.Warn("could not check whether the systemd slice is up to date", "error", err)
+		return
+	}
+	if !outdated {
+		return
+	}
+	docker, err := runtime.NewDocker()
+	if err != nil {
+		slog.Warn("could not check whether Docker places session containers in the systemd slice", "error", err)
+		return
+	}
+	defer func() { _ = docker.Close() }()
+	applies, err := docker.UsesSessionSlice(context.Background())
+	if err != nil {
+		slog.Warn("could not check whether Docker places session containers in the systemd slice", "error", err)
+		return
+	}
+	if applies {
+		slog.Warn("the systemd slice for session containers is missing or differs from this release's; apply it, without a restart, with: " +
+			"sudo aether-server install --sysbox=false && sudo systemctl daemon-reload")
 	}
 }

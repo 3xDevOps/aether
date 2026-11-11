@@ -304,12 +304,15 @@ support for CPU quotas, memory and swap limits, and PID limits, or new
 containers are refused.
 
 Before it creates a session, environment, browser or agent-updater container,
-Aether checks that the host has free disk and memory. Otherwise the launch
-fails with `scheduler: insufficient disk headroom`, `scheduler: insufficient
-host memory headroom` or `scheduler: host capacity unavailable`. Aether never
-stops a running agent to make room, and reopening a retained session needs no
-check. [Recover from disk pressure](failure-handling.md#recover-from-disk-pressure)
-has the thresholds and what to do.
+Aether checks that the host has free disk and memory, and that the server is
+not stalling on memory (its cgroup's `memory.pressure`, `some avg60` below
+10%). Otherwise the launch fails with `scheduler: insufficient disk headroom`,
+`scheduler: insufficient host memory headroom` or `scheduler: host capacity
+unavailable`. Aether never stops a running agent to make room, and reopening a
+retained session needs no check. [Recover from disk
+pressure](failure-handling.md#recover-from-disk-pressure) and [Recover from
+memory pressure](failure-handling.md#recover-from-memory-pressure) have the
+thresholds and what to do.
 
 ## After a session closes
 

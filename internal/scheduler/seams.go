@@ -40,7 +40,7 @@ type EvidencePurger interface {
 // TeamMemory builds the team memory brief a run launched in workspace by
 // member carries, leaving run out of it; empty when there is nothing to say.
 type TeamMemory interface {
-	Brief(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, run domain.RunID) (string, error)
+	Brief(ctx context.Context, workspace domain.WorkspaceID, member, reader domain.MemberID, run domain.RunID) (string, error)
 }
 
 type GitEngine interface {

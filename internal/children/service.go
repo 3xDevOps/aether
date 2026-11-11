@@ -72,7 +72,7 @@ type Config struct {
 	Bus events.Bus
 	// Authorize is sshd.AuthorizeLaunch; AuthorizationMu the mutex callers
 	// hold across it and the launch's durable boundary.
-	Authorize       func(ctx context.Context, st store.Store, actor domain.MemberID, account string) (domain.MemberID, error)
+	Authorize       func(ctx context.Context, st store.Store, actor domain.MemberID, account string, workspaces []domain.WorkspaceID) (domain.MemberID, error)
 	AuthorizationMu *sync.Mutex
 	// Now is the clock the idle notice measures a quiet spell against;
 	// time.Now when unset.

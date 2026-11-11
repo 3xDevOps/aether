@@ -2,9 +2,10 @@ import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
 import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you'
+import { isAdminRole } from '@/lib/permissions'
 import { isSudo } from '@/lib/run-requests'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
-import type { GatewayCapabilities, Member, Run, RunStatusCause, RunWait } from '@/lib/types'
+import type { GatewayCapabilities, Member, Run, RunStatusCause, RunWait, ServerInfo } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
 import { runPeople, runWatchers } from '@/store/presence'
 import type { RunRecord } from '@/store/runs'
@@ -135,6 +136,8 @@ export function useListedRuns(workspace: string): RunRow[] {
   return useMemo(() => listedRuns(workspace, ctx), [workspace, ctx])
 }
 
+const workspaceAccessFeature = 'workspace-access'
+
 export interface Capability {
   hasMethod: (method: string) => boolean
   hasLocal: (verb: string) => boolean
@@ -197,10 +200,10 @@ export function useSelfRole(): Member['role'] | null {
   return useStore((s) => s.info?.member.role ?? null)
 }
 
-/** Both null before hydration. */
-export function useSelf(): { id: string | null; role: Member['role'] | null } {
+/** Both null before hydration. With a workspace, the role is the caller's there, which is what allowed() must be asked. */
+export function useSelf(workspaceID?: string | null): { id: string | null; role: Member['role'] | null } {
   const id = useStore((s) => s.info?.member.id ?? null)
-  const role = useStore((s) => s.info?.member.role ?? null)
+  const role = useWorkspaceRole(workspaceID)
   return useMemo(() => ({ id, role }), [id, role])
 }
 
@@ -213,9 +216,42 @@ export function useIdentityKnown(): boolean {
   return useStore((s) => s.identityKey !== null || s.hydrated)
 }
 
-/** Whether the caller holds the admin role. False until hydrated. */
+/** Whether the caller is an admin or a super admin: may create workspaces and invite. False until hydrated. */
 export function useIsAdmin(): boolean {
-  return useStore((s) => s.info?.member.role === 'admin')
+  return useStore((s) => isAdminRole(s.info?.member.role))
+}
+
+/**
+ * Whether the caller administers the server itself: a super admin, or an admin
+ * of a server that predates workspace-scoped access, which reports its
+ * administrator as admin. False until hydrated.
+ */
+/** Whether the server scopes access by workspace; older servers do not. */
+export function useWorkspaceAccessServer(): boolean {
+  return useStore((s) => !!s.info?.features?.includes(workspaceAccessFeature))
+}
+
+export function useIsSuperAdmin(): boolean {
+  return useStore((s) => administersServer(s.info))
+}
+
+/** useIsSuperAdmin outside a component. */
+export function administersServer(info: ServerInfo | null | undefined): boolean {
+  const role = info?.member.role
+  return role === 'super_admin' || (role === 'admin' && !info?.features?.includes(workspaceAccessFeature))
+}
+
+/**
+ * The caller's role in one workspace, as workspace.list reports it. A server
+ * that does not report one leaves the server role, which is the old rule.
+ */
+export function useWorkspaceRole(workspaceID: string | null | undefined): Member['role'] | null {
+  return useStore((s) => (workspaceID ? s.workspaces[workspaceID]?.role : undefined) ?? s.info?.member.role ?? null)
+}
+
+/** Whether the caller administers this workspace: its owner, or a super admin. */
+export function useIsWorkspaceAdmin(workspaceID: string | null | undefined): boolean {
+  return isAdminRole(useWorkspaceRole(workspaceID))
 }
 
 /** While `shown`, the phone top bar shrinks New run to an icon, so the page's own action stays the one filled button. */

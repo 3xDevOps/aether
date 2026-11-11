@@ -232,6 +232,7 @@ export interface UiSlice {
   setBoardMapFolded: (runKey: string, folded: boolean) => void
   rememberLaunch: (agent: string, mode: LaunchMode, model?: string) => void
   setLaunchDefault: (agent: string, mode: LaunchMode) => void
+  rememberRunView: (runId: string, view: RunView) => void
   navigate: (name: string, params?: Record<string, string>, options?: NavigateOptions) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
   clearDismissedUpdates: () => void
@@ -367,6 +368,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   // Keeps `at`, which ranks the agent the launch dialog preselects.
   setLaunchDefault: (agent, mode) =>
     set((s) => savedLaunch(s, { ...s.launchDefaults, [agent]: { ...s.launchDefaults[agent], mode, at: s.launchDefaults[agent]?.at ?? 0 } })),
+  rememberRunView: (runId, view) => set((s) => rememberedView(s, runId, view)),
   navigate: (name, params = {}, options) => {
     set((s) => ({
       route: { name, params },

@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type sessionState struct {
@@ -167,7 +170,8 @@ func parseGitCommand(cmd string) (op, wsID string, ok bool) {
 
 func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch ssh.Channel, op, wsID string) {
 	defer func() { _ = ch.Close() }()
-	if err := s.checkMember(ctx, member); err != nil {
+	wake := s.accessChange()
+	if err := s.gitAccess(ctx, member, op, domain.WorkspaceID(wsID)); err != nil {
 		_, _ = fmt.Fprintf(ch.Stderr(), "aether: %v\n", err)
 		sendExitStatus(ch, 128)
 		return
@@ -186,26 +190,96 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 		sendExitStatus(ch, 128)
 		return
 	}
-	// receive-pack writes to the workspace repository, so it is the Push
-	// capability; upload-pack is a read and stays open to every member.
+	gitCtx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	stderr := &lockedWriter{w: ch.Stderr()}
+	s.spawn(func() { s.stopGitOnAccessLoss(gitCtx, stop, wake, member, op, ws.ID, stderr) })
 	var code int
 	if op == "upload-pack" {
-		code, err = s.cfg.Git.UploadPack(ctx, ws.ID, ch, ch, ch.Stderr())
+		code, err = s.cfg.Git.UploadPack(gitCtx, ws.ID, ch, ch, stderr)
 	} else {
-		if perr := s.checkPush(ctx, member); perr != nil {
-			_, _ = fmt.Fprintf(ch.Stderr(), "aether: %v\n", perr)
-			sendExitStatus(ch, 128)
-			return
-		}
-		code, err = s.cfg.Git.ReceivePack(ctx, ws.ID, ch, ch, ch.Stderr())
+		code, err = s.cfg.Git.ReceivePack(gitCtx, ws.ID, ch, ch, stderr)
 	}
-	if err != nil {
-		_, _ = fmt.Fprintf(ch.Stderr(), "aether: git %s: %v\n", op, err)
-		if code == 0 {
-			code = 128
-		}
+	lost := errors.Is(context.Cause(gitCtx), errGitAccessLost)
+	if err != nil && !lost {
+		_, _ = fmt.Fprintf(stderr, "aether: git %s: %v\n", op, err)
+	}
+	if (err != nil || lost) && code == 0 {
+		code = 128
 	}
 	sendExitStatus(ch, code)
+}
+
+var errGitAccessLost = errors.New("stopped: access ended")
+
+// gitReasonWait bounds how long a transfer whose access ended waits for
+// its client to take the reason: a client that grants no window must not
+// keep it running.
+const gitReasonWait = time.Second
+
+// lockedWriter serializes writes from git's stderr copy and the access
+// watcher: an SSH channel's extended data must not be written concurrently.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// gitAccess is the check a git transfer passes to start and keeps passing
+// while it runs: an approved member with View in the workspace to fetch,
+// Push to push. A workspace they cannot reach reads as missing.
+func (s *Server) gitAccess(ctx context.Context, member domain.MemberID, op string, ws domain.WorkspaceID) error {
+	if err := s.checkMember(ctx, member); err != nil {
+		return err
+	}
+	var err error
+	if op == "upload-pack" {
+		err = checkIn(ctx, s.cfg.Store, member, permissions.View, ws)
+	} else {
+		err = s.checkPush(ctx, member, ws)
+	}
+	if errors.Is(err, permissions.ErrNoAccess) {
+		return fmt.Errorf("workspace %q: %w", ws, store.ErrNotFound)
+	}
+	return err
+}
+
+// stopGitOnAccessLoss re-runs gitAccess on every access change in this
+// process and every revalidateInterval for writes made outside it, and
+// stops the transfer the first time it fails, a store error included.
+func (s *Server) stopGitOnAccessLoss(ctx context.Context, stop context.CancelCauseFunc, wake <-chan struct{}, member domain.MemberID, op string, ws domain.WorkspaceID, stderr io.Writer) {
+	ticker := time.NewTicker(s.cfg.revalidateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+			wake = s.accessChange()
+		case <-ticker.C:
+		}
+		if err := s.gitAccess(ctx, member, op, ws); err != nil {
+			lost := fmt.Errorf("%w: %w", errGitAccessLost, err)
+			// Before stop: the cancelled transport half-closes the
+			// channel, after which nothing more reaches the client.
+			told := make(chan struct{})
+			s.spawn(func() {
+				defer close(told)
+				_, _ = fmt.Fprintf(stderr, "aether: git %s: %v\n", op, lost)
+			})
+			select {
+			case <-told:
+			case <-time.After(gitReasonWait):
+			}
+			stop(lost)
+			return
+		}
+	}
 }
 
 func sendExitStatus(ch ssh.Channel, code int) {

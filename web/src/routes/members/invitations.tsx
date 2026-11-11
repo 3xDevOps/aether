@@ -24,9 +24,10 @@ import { useReturnFocus } from '@/lib/hooks'
 import { memberName } from '@/lib/member-name'
 import type { Invitation, InvitationResult, Member } from '@/lib/types'
 import { draftKey, useFailure } from '@/components/failure'
-import { roleLabel, roles } from '@/routes/members/roster'
+import { roleDescription, roleLabel } from '@/routes/members/roster'
+import { administered, invitableRoles, WorkspacePicker, workspacesValid } from '@/routes/members/workspace-picker'
 import { sameIdentity, useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useSelfRole, useWorkspaceAccessServer } from '@/store/hooks'
 import type { ListedInvitation } from '@/store/members'
 import { optimistic, refusedByServer, stillWaiting, usePastDeadline } from '@/store/optimistic'
 
@@ -40,6 +41,7 @@ export interface InviteDraft {
   by: 'login' | 'email'
   who: string
   role: Member['role']
+  workspaceIDs: string[]
 }
 
 /** `member.invitation.create` carries no idempotency key, so an unanswered create is never resent. */
@@ -53,6 +55,7 @@ export function createInvitation(client: Api, draft: InviteDraft): Promise<Invit
     provider: 'github',
     ...target,
     role: draft.role,
+    workspace_ids: draft.workspaceIDs,
     created_by: info?.member.id ?? '',
     created_at: now,
     expires_at: now,
@@ -60,7 +63,7 @@ export function createInvitation(client: Api, draft: InviteDraft): Promise<Invit
   }
   addInvitation(provisional)
   const drop = () => same() && dropInvitation(provisional.id)
-  return client.memberInvitationCreate({ ...target, role: draft.role }).then(
+  return client.memberInvitationCreate({ ...target, role: draft.role, workspace_ids: draft.workspaceIDs.length > 0 ? draft.workspaceIDs : undefined }).then(
     (created) => {
       if (same()) addInvitation(created.invitation, provisional.id)
       return created
@@ -98,6 +101,7 @@ export function InvitationsSection({ client }: { client: Api }) {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const invitations = useStore((s) => s.invitations)
+  const workspaces = useStore((s) => s.workspaces)
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<Invitation | null>(null)
   const { failures, run } = useFailure()
@@ -157,6 +161,7 @@ export function InvitationsSection({ client }: { client: Api }) {
                 <span className="truncate text-ui font-medium text-text">{invitee(invitation)}</span>
                 <span className="truncate text-ui-sm text-muted">
                   {invitation.member_id ? `Links to ${nameOf(invitation.member_id)}` : invitation.role && roleLabel[invitation.role]}
+                  {invitation.workspace_ids?.length ? ` · ${invitation.workspace_ids.map((id) => workspaces[id]?.name ?? id).join(', ')}` : ''}
                   {' · invited by '}{nameOf(invitation.created_by)}
                   {invitation.provisional ? <Creating /> : <>{' · expires '}<RelativeTime at={invitation.expires_at} /></>}
                 </span>
@@ -242,6 +247,10 @@ function AccountInvite({ draft, error, pending, onClose, onInvite }: {
   const [by, setBy] = useState(draft?.by ?? 'login')
   const [who, setWho] = useState(draft?.who ?? '')
   const [role, setRole] = useState<Member['role']>(draft?.role ?? 'collaborator')
+  const selfRole = useSelfRole()
+  const scoped = useWorkspaceAccessServer()
+  const choices = administered(useStore((s) => s.workspaces), selfRole)
+  const [picked, setPicked] = useState(draft?.workspaceIDs ?? (choices.length === 1 && selfRole !== 'super_admin' ? [choices[0].id] : []))
   const late = usePastDeadline(pending)
 
   return (
@@ -250,7 +259,7 @@ function AccountInvite({ draft, error, pending, onClose, onInvite }: {
       className="flex min-w-0 flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
-        onInvite({ by, who, role })
+        onInvite({ by, who, role, workspaceIDs: role === 'super_admin' || !scoped ? [] : picked })
       }}
     >
       <div className="grid min-w-0 gap-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
@@ -277,12 +286,15 @@ function AccountInvite({ draft, error, pending, onClose, onInvite }: {
       <div className="flex min-w-0 flex-col gap-1">
         <Label htmlFor="invite-role">Role</Label>
         <Select value={role} onValueChange={(value) => setRole(value as Member['role'])}>
-          <SelectTrigger id="invite-role" className="w-44"><SelectValue /></SelectTrigger>
+          <SelectTrigger id="invite-role" className="w-full sm:w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {roles.map((r) => <SelectItem key={r} value={r}>{roleLabel[r]}</SelectItem>)}
+            {invitableRoles(selfRole, scoped).map((r) => <SelectItem key={r} value={r} description={roleDescription[r]}>{roleLabel[r]}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
+      {!scoped ? null : role === 'super_admin'
+        ? <p className="text-ui-sm text-muted">A super admin can use every workspace.</p>
+        : <WorkspacePicker workspaces={choices} picked={picked} required={selfRole !== 'super_admin'} onChange={setPicked} />}
       <Collapsible>
         <CollapsibleTrigger><span className="text-muted">Learn more</span></CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-2 pt-1 pl-4">
@@ -300,7 +312,7 @@ function AccountInvite({ draft, error, pending, onClose, onInvite }: {
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
       <DialogFooter>
         <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={pending || !who.trim()}>{late ? stillWaiting : pending ? 'Inviting…' : 'Invite'}</Button>
+        <Button type="submit" disabled={pending || !who.trim() || !(role === 'super_admin' || workspacesValid(selfRole, picked, scoped))}>{late ? stillWaiting : pending ? 'Inviting…' : 'Invite'}</Button>
       </DialogFooter>
     </form>
   )
@@ -338,12 +350,16 @@ function CodeInvite({ client, onClose }: { client: Api; onClose: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const late = usePastDeadline(busy)
+  const selfRole = useSelfRole()
+  const scoped = useWorkspaceAccessServer()
+  const choices = administered(useStore((s) => s.workspaces), selfRole)
+  const [picked, setPicked] = useState(choices.length === 1 && selfRole !== 'super_admin' ? [choices[0].id] : [])
 
   const generate = async () => {
     setBusy(true)
     setError(null)
     try {
-      setResult(await client.memberInvite())
+      setResult(await client.memberInvite(undefined, scoped && picked.length > 0 ? picked : undefined))
     } catch (err) {
       setError(message(err))
     } finally {
@@ -359,13 +375,16 @@ function CodeInvite({ client, onClose }: { client: Api; onClose: () => void }) {
           <p className="text-ui-sm text-muted">Hand it to the new member. It works once and expires {timeAgo(result.expires_at)}.</p>
         </>
       ) : (
-        <p className="text-ui text-muted">Generate a code and hand it to the new member yourself.</p>
+        <>
+          <p className="text-ui text-muted">Generate a code and hand it to the new member yourself.</p>
+          {scoped && <WorkspacePicker workspaces={choices} picked={picked} required={selfRole !== 'super_admin'} onChange={setPicked} />}
+        </>
       )}
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
       <DialogFooter>
         <Button variant="secondary" onClick={onClose}>{result ? 'Done' : 'Cancel'}</Button>
         {!result && (
-          <Button disabled={busy} onClick={() => void generate()}>
+          <Button disabled={busy || !workspacesValid(selfRole, picked, scoped)} onClick={() => void generate()}>
             {late ? stillWaiting : busy ? 'Generating…' : 'Generate code'}
           </Button>
         )}

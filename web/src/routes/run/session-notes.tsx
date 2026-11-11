@@ -13,6 +13,7 @@ import type { RoomMessage, RoomResolution } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import type { RunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
+import { useWorkspaceRole } from '@/store/hooks'
 import { byCreated, canResolveNote, isOpenNote, isProvisional } from '@/store/collaboration'
 import type { RunRecord } from '@/store/runs'
 
@@ -125,7 +126,7 @@ function StickyCard({ note, index, run, error, retryable, onResolve, onDismissEr
   const member = useStore((s) => resolveMember(s, note.actor_id).member)
   const name = useStore((s) => memberNameOr(s, note.actor_id, note.actor_display_name))
   const selfID = useStore((s) => s.info?.member.id)
-  const selfRole = useStore((s) => s.info?.member.role ?? null)
+  const selfRole = useWorkspaceRole(run.workspace_id)
   const may = canResolveNote({ id: selfID, role: selfRole }, note, run.member_id)
   const frame = useRef<HTMLLIElement>(null)
   const scratch = useRef<SVGSVGElement>(null)

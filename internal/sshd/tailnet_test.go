@@ -114,8 +114,8 @@ func TestTailnetBootstrapAdmin(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	m := serverInfoMember(t, controlClientOn(t, client))
-	if m.Role != string(domain.RoleAdmin) {
-		t.Errorf("bootstrap role = %q, want admin", m.Role)
+	if m.Role != string(domain.RoleSuperAdmin) {
+		t.Errorf("bootstrap role = %q, want super_admin", m.Role)
 	}
 	if m.Pending {
 		t.Error("bootstrap member must not be pending")
@@ -354,8 +354,8 @@ func TestKeyBootstrapAdminOnFreshServer(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 	m := serverInfoMember(t, controlClientOn(t, client))
-	if m.Role != string(domain.RoleAdmin) || m.Pending {
-		t.Errorf("key bootstrap member = %+v, want approved admin", m)
+	if m.Role != string(domain.RoleSuperAdmin) || m.Pending {
+		t.Errorf("key bootstrap member = %+v, want approved super admin", m)
 	}
 	if !strings.Contains(logs.String(), "bootstrap") {
 		t.Errorf("bootstrap audit log missing: %q", logs.String())
@@ -399,8 +399,8 @@ func TestKeyBootstrapWithAnEdgeNeedsLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first key from %s without an edge: %v", public, err)
 	}
-	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleAdmin) {
-		t.Fatalf("first key without an edge joined as %q, want admin", m.Role)
+	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleSuperAdmin) {
+		t.Fatalf("first key without an edge joined as %q, want super_admin", m.Role)
 	}
 
 	e := newFreshTestEnv(t, nil)
@@ -426,8 +426,8 @@ func TestKeyBootstrapWithAnEdgeNeedsLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first key from loopback with an edge: %v", err)
 	}
-	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleAdmin) {
-		t.Fatalf("first key from loopback joined as %q, want admin", m.Role)
+	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleSuperAdmin) {
+		t.Fatalf("first key from loopback joined as %q, want super_admin", m.Role)
 	}
 }
 
@@ -469,8 +469,8 @@ func TestKeyBootstrapOnATailnetNeedsTheTailnet(t *testing.T) {
 			if err != nil {
 				t.Fatalf("first key from %s: %v", tc.addr, err)
 			}
-			if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleAdmin) {
-				t.Fatalf("first key from %s joined as %q, want admin", tc.addr, m.Role)
+			if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleSuperAdmin) {
+				t.Fatalf("first key from %s joined as %q, want super_admin", tc.addr, m.Role)
 			}
 		})
 	}
@@ -509,8 +509,8 @@ func TestKeyBootstrapProbeIsSideEffectFree(t *testing.T) {
 		t.Fatalf("signed bootstrap dial: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleAdmin) {
-		t.Errorf("bootstrap role = %q, want admin", m.Role)
+	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleSuperAdmin) {
+		t.Errorf("bootstrap role = %q, want super_admin", m.Role)
 	}
 }
 

@@ -17,15 +17,16 @@ import (
 // Templates are workspace configuration, so creating, changing, and
 // deleting one is workspace administration. Using one is launching a run,
 // and so is scheduling one: a cron rule is a standing order for future
-// runs, checked again against its creator's role at every fire.
+// runs, checked again against its creator's role at every fire. Only its
+// creator or the workspace's admin replaces or deletes a schedule.
 func init() {
-	registerMethod(protocol.MethodTemplateList, (*Server).templateList)
-	registerGuarded(protocol.MethodTemplateSave, permissions.WorkspaceAdmin, nil, (*Server).templateSave)
-	registerGuarded(protocol.MethodTemplateDelete, permissions.WorkspaceAdmin, nil, (*Server).templateDelete)
-	registerGuarded(protocol.MethodTemplateLaunch, permissions.Launch, nil, (*Server).templateLaunch)
-	registerMethod(protocol.MethodScheduleList, (*Server).scheduleList)
-	registerGuarded(protocol.MethodScheduleSave, permissions.Launch, nil, (*Server).scheduleSave)
-	registerGuarded(protocol.MethodScheduleDelete, permissions.Launch, nil, (*Server).scheduleDelete)
+	registerGuarded(protocol.MethodTemplateList, permissions.View, workspaceTarget, (*Server).templateList)
+	registerGuarded(protocol.MethodTemplateSave, permissions.WorkspaceAdmin, workspaceTarget, (*Server).templateSave)
+	registerGuarded(protocol.MethodTemplateDelete, permissions.WorkspaceAdmin, workspaceTarget, (*Server).templateDelete)
+	registerGuarded(protocol.MethodTemplateLaunch, permissions.Launch, workspaceTarget, (*Server).templateLaunch)
+	registerGuarded(protocol.MethodScheduleList, permissions.View, workspaceTarget, (*Server).scheduleList)
+	registerGuarded(protocol.MethodScheduleSave, permissions.Launch, workspaceTarget, (*Server).scheduleSave)
+	registerGuarded(protocol.MethodScheduleDelete, permissions.Launch, workspaceTarget, (*Server).scheduleDelete)
 }
 
 func (s *Server) templates() (TemplateService, *protocol.Error) {
@@ -222,14 +223,23 @@ func (s *Server) scheduleSave(ctx context.Context, member domain.MemberID, param
 	if p.Template == "" || p.Cron == "" {
 		return nil, invalidParams("template and cron are required")
 	}
-	info, err := svc.SaveSchedule(ctx, workspace, p.Template, p.Cron, member)
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if perr = s.requireIn(ctx, member, permissions.Launch, workspace, protocol.MethodScheduleSave); perr != nil {
+		return nil, perr
+	}
+	admin, perr := s.scheduleAdmin(ctx, member, workspace)
+	if perr != nil {
+		return nil, perr
+	}
+	info, err := svc.SaveSchedule(ctx, workspace, p.Template, p.Cron, member, admin)
 	if err != nil {
-		return nil, templateError(err)
+		return nil, scheduleError(err, protocol.MethodScheduleSave)
 	}
 	return protocol.ScheduleSaveResult{Schedule: scheduleWire(*info)}, nil
 }
 
-func (s *Server) scheduleDelete(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) scheduleDelete(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.templates()
 	if perr != nil {
 		return nil, perr
@@ -245,10 +255,39 @@ func (s *Server) scheduleDelete(ctx context.Context, _ domain.MemberID, params j
 	if p.Template == "" {
 		return nil, invalidParams("template is required")
 	}
-	if err := svc.DeleteSchedule(ctx, workspace, p.Template); err != nil {
-		return nil, rpcError(err)
+	// As in scheduleSave: an owner change cannot land between this check
+	// and the delete that trusts it.
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	admin, perr := s.scheduleAdmin(ctx, member, workspace)
+	if perr != nil {
+		return nil, perr
+	}
+	owner := member
+	if admin {
+		owner = ""
+	}
+	if err := svc.DeleteSchedule(ctx, workspace, p.Template, owner); err != nil {
+		return nil, scheduleError(err, protocol.MethodScheduleDelete)
 	}
 	return struct{}{}, nil
+}
+
+// scheduleAdmin reports whether member administers workspace, and so may
+// replace or delete a schedule another member created.
+func (s *Server) scheduleAdmin(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (bool, *protocol.Error) {
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return false, rpcError(err)
+	}
+	return permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: workspace}) == nil, nil
+}
+
+func scheduleError(err error, method string) *protocol.Error {
+	if errors.Is(err, store.ErrScheduleOwner) {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": only the schedule's creator or the workspace's admin may replace or delete it"}
+	}
+	return templateError(err)
 }
 
 // templateError maps the service's own validation failures - a bad cron

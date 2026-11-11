@@ -27,8 +27,9 @@ type TemplateService interface {
 	Schedules(ctx context.Context, workspace domain.WorkspaceID) ([]templates.ScheduleInfo, error)
 	// SaveSchedule creates or replaces a template's cron rule, recording
 	// member as the identity every fire is attributed to and re-checked
-	// against.
-	SaveSchedule(ctx context.Context, workspace domain.WorkspaceID, template, spec string, member domain.MemberID) (*templates.ScheduleInfo, error)
-	// DeleteSchedule removes a template's cron rule.
-	DeleteSchedule(ctx context.Context, workspace domain.WorkspaceID, template string) error
+	// against. Unless replaceAny, it replaces only member's own rule.
+	SaveSchedule(ctx context.Context, workspace domain.WorkspaceID, template, spec string, member domain.MemberID, replaceAny bool) (*templates.ScheduleInfo, error)
+	// DeleteSchedule removes a template's cron rule; a non-empty owner
+	// removes only owner's.
+	DeleteSchedule(ctx context.Context, workspace domain.WorkspaceID, template string, owner domain.MemberID) error
 }

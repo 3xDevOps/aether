@@ -166,7 +166,7 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 // starts on both as that installation did: it opens no connection to any
 // edge and writes no edge state, keeps every row through the edge
 // identities migration, and its SSH key and tailnet members sign in as
-// before.
+// before, the key member, its earliest admin, now as super admin.
 func TestIntegrationUpgradeFromMainWithoutTheEdge(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -191,8 +191,8 @@ func TestIntegrationUpgradeFromMainWithoutTheEdge(t *testing.T) {
 	go func() { done <- srv.Run(runCtx) }()
 	addr := waitSSHAddr(t, srv)
 
-	if m := memberInfo(t, openControl(t, dialSSH(t, addr, signer))); m.ID != "m-key" || m.Role != string(domain.RoleAdmin) {
-		t.Fatalf("the SSH key member signs in as %+v, want m-key, admin", m)
+	if m := memberInfo(t, openControl(t, dialSSH(t, addr, signer))); m.ID != "m-key" || m.Role != string(domain.RoleSuperAdmin) {
+		t.Fatalf("the SSH key member signs in as %+v, want m-key, super admin", m)
 	}
 	whois.set(sshd.WhoIsIdentity{Login: "bo@example.com", NodeID: "node-bo"}, nil)
 	tailnet, err := dialNoAuth(addr, "bo", nil)

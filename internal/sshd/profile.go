@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	registerGuarded(protocol.MethodProfilePush, permissions.Launch, nil, (*Server).profilePush)
+	registerGuarded(protocol.MethodProfilePush, permissions.Launch, profilePushTarget, (*Server).profilePush)
 	registerMethod(protocol.MethodProfileStatus, (*Server).profileStatus)
 	registerGuarded(protocol.MethodProfileRollback, permissions.Launch, nil, (*Server).profileRollback)
 }
@@ -34,6 +34,16 @@ type ProfileService interface {
 	Latest(ctx context.Context, member, harness string) (domain.ProfileSnapshot, error)
 	List(ctx context.Context, member, harness string) ([]domain.ProfileSnapshot, error)
 	MaterializeRoot(ctx context.Context, id domain.ProfileSnapshotID, root *os.Root) error
+}
+
+// profilePushTarget checks profile.push in the workspace its timeline note
+// goes to, when it names one.
+func profilePushTarget(s *Server, ctx context.Context, params json.RawMessage) (permissions.Target, *protocol.Error) {
+	p, perr := decodeParams[protocol.ProfilePushParams](params)
+	if perr != nil || p.WorkspaceID == "" {
+		return permissions.Target{}, perr
+	}
+	return workspaceTarget(s, ctx, params)
 }
 
 func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

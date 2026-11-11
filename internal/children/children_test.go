@@ -206,8 +206,8 @@ func newHarness(t *testing.T) *harness {
 	h.svc, err = New(Config{
 		Store: db, Runs: h.runs, Git: &fakeGit{head: strings.Repeat("a", 40)},
 		Agents: func() Agents { return h.agents },
-		Authorize: func(ctx context.Context, st store.Store, actor domain.MemberID, account string) (domain.MemberID, error) {
-			return fallback.ResolveLaunchAccount(ctx, st, actor, account)
+		Authorize: func(ctx context.Context, st store.Store, actor domain.MemberID, account string, workspaces []domain.WorkspaceID) (domain.MemberID, error) {
+			return fallback.ResolveLaunchAccountIn(ctx, st, actor, account, workspaces)
 		},
 		AuthorizationMu: &mu,
 		Now:             func() time.Time { return h.now },
@@ -508,7 +508,9 @@ func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 	h := newHarness(t)
 	h.enable(h.bob.ID, protocol.ChildSettingsParams{Enabled: on()})
 	parent := h.run(h.bob.ID, domain.LaunchACP, "parent")
-	if _, err := h.svc.Allow(h.ctx, h.ada, parent.ID, domain.ChildrenOff); err != nil {
+	owner := *h.ada
+	owner.Access.Owned = map[domain.WorkspaceID]bool{h.ws.ID: true}
+	if _, err := h.svc.Allow(h.ctx, &owner, parent.ID, domain.ChildrenOff); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "off for this session;") {

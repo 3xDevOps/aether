@@ -23,7 +23,7 @@ import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useDeviceNeeds, useRun, useRunPeople, useSidebarGroups, useStateContext } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
-import { childRunsText, stateContextOf, type RunTree, type SidebarGroup, type TreeSummary } from '@/store/selectors'
+import { childRunsText, type RunTree, type SidebarGroup, type TreeSummary } from '@/store/selectors'
 import type { Route } from '@/store/ui'
 import type { RunStatusCause, RunWait } from '@/lib/types'
 
@@ -259,6 +259,7 @@ function MineToggle() {
     <Button
       variant={mineOnly ? 'secondary' : 'ghost'}
       size="sm"
+      className="h-4.5 rounded-chip px-1 text-ui-xs coarse:h-11 coarse:px-3"
       hint="Show only your sessions under Working and Finished"
       aria-pressed={mineOnly}
       onClick={() => setMineOnly(!mineOnly)}
@@ -320,12 +321,6 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
   const selected = useStore((s) => isRunRoute(s.route, run.id))
   const title = runLabel(run)
   const counts = childRuns ? `${childRunsText(childRuns)} · ${childRunCounts(childRuns)}` : ''
-  const open = () => {
-    if (waiting) {
-      const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
-      navigate(route.name, route.params, { remember: false })
-    } else navigate('run', { runId: run.id })
-  }
   const unopened = run.finish_unopened === true && (state === 'ready' || groupOf({ state }) === 'finished')
   const active = state === 'working' || state === 'waiting-agents' || state === 'waiting-ci' || state === 'waiting-tools'
   const recedes = !waiting && !unopened && (!active || run.member_id !== self)
@@ -374,7 +369,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
         aria-describedby={exactTime}
         aria-current={selected ? 'page' : undefined}
         selected={selected}
-        onClick={open}
+        onClick={() => navigate('run', { runId: run.id })}
         leading={
           <>
             <StatusDot tone={toneOf({ state, wait })} />

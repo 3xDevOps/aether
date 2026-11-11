@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -35,6 +36,7 @@ func TestMemberRoleRequiresAdmin(t *testing.T) {
 func TestMemberRolePromoteAndDemote(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
 	ctx := context.Background()
@@ -79,6 +81,7 @@ func TestMemberRolePromoteAndDemote(t *testing.T) {
 func TestMemberRoleIdempotent(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
 
@@ -93,10 +96,11 @@ func TestMemberRoleIdempotent(t *testing.T) {
 	}
 }
 
-// The deployment must keep one member able to administer it.
-func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
+// The server must keep one member able to administer it.
+func TestMemberRoleRefusesDemotingLastSuperAdmin(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	adminC := controlClient(t, e)
 
 	var pe *protocol.Error
@@ -104,17 +108,17 @@ func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
 		MemberID: string(e.member.ID), Role: string(domain.RoleViewer),
 	}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("demote last admin = %v, want CodeDenied", err)
+		t.Fatalf("demote last super admin = %v, want CodeDenied", err)
 	}
-	if !strings.Contains(pe.Message, "last admin") {
-		t.Errorf("message %q does not mention last admin", pe.Message)
+	if !strings.Contains(pe.Message, "refusing to demote the last super admin") {
+		t.Errorf("message %q does not mention the last super admin", pe.Message)
 	}
 	got, gerr := e.store.GetMember(context.Background(), e.member.ID)
 	if gerr != nil {
 		t.Fatalf("get member: %v", gerr)
 	}
-	if got.Role != domain.RoleAdmin {
-		t.Errorf("role after refused demotion = %q, want admin", got.Role)
+	if got.Role != domain.RoleSuperAdmin {
+		t.Errorf("role after refused demotion = %q, want super_admin", got.Role)
 	}
 }
 
@@ -122,6 +126,7 @@ func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
 func TestMemberRolePendingMember(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, pending := addMember(t, e, "Pat", domain.RoleViewer, true)
 	adminC := controlClient(t, e)
 
@@ -136,10 +141,37 @@ func TestMemberRolePendingMember(t *testing.T) {
 	}
 }
 
+// A pending super admin cannot call the server, so they do not count
+// towards keeping one: the last approved super admin stays one.
+func TestMemberRoleCountsOnlyApprovedSuperAdmins(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
+	_, pending := addMember(t, e, "Pat", domain.RoleViewer, true)
+	adminC := controlClient(t, e)
+	if err := adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(pending.ID), Role: string(domain.RoleSuperAdmin),
+	}, nil); err != nil {
+		t.Fatalf("make the pending member super admin: %v", err)
+	}
+	wantDenied(t, adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(e.member.ID), Role: string(domain.RoleAdmin),
+	}, nil), "demoting the last approved super admin")
+	wantDenied(t, adminC.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{
+		MemberID: string(e.member.ID),
+	}, nil), "removing the last approved super admin")
+	if err := adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(pending.ID), Role: string(domain.RoleViewer),
+	}, nil); err != nil {
+		t.Fatalf("demote the pending super admin: %v", err)
+	}
+}
+
 // Bad input is rejected before anything is written.
 func TestMemberRoleRejectsBadInput(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
 
@@ -205,5 +237,30 @@ func TestConcurrentDemotionsKeepAnAdmin(t *testing.T) {
 	}
 	if admins == 0 {
 		t.Fatal("both demotions succeeded: the deployment has no admin left")
+	}
+}
+
+// A role change notifies the member it changed, so their dashboard reloads
+// its role and workspace roles.
+func TestMemberRoleNotifiesTheChangedMember(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
+	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	stream, err := e.srv.Local(bob.ID).Events(context.Background(), protocol.SubscribeRequest{})
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	t.Cleanup(func() { _ = stream.Close() })
+	feed := eventLines(t, stream)
+	if err := controlClient(t, e).Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+		MemberID: string(bob.ID), Role: string(domain.RoleAdmin),
+	}, nil); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	for {
+		if ev := nextEvent(t, feed); ev.Type == string(events.TypeMemberAccess) {
+			return
+		}
 	}
 }

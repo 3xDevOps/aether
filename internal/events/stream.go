@@ -50,11 +50,49 @@ type private interface {
 	Recipient() domain.MemberID
 }
 
-// StreamWire pumps a subscription onto write in wire form, leaving out
-// what is private to a member other than member, until the subscription
-// ends (nil), the buffer dropped (ErrDropped), or a write or encode fails.
-// Framing belongs to the caller; ordering belongs here.
-func StreamWire(sub Subscription, member domain.MemberID, write func(protocol.Event) error) error {
+// repoScoped is a payload about one repository of a run, published under
+// the run's workspace. For an extra repository of a multi-repo run it names
+// that repository's workspace, which the member must reach too.
+type repoScoped interface {
+	RepoWorkspace() domain.WorkspaceID
+}
+
+// runScoped is a payload that names every extra workspace of its run, nil
+// when it could not.
+type runScoped interface {
+	RunExtraWorkspaces() []domain.WorkspaceID
+}
+
+// runNaming is a payload that names runs besides its event's own, each of
+// which the reader must reach.
+type runNaming interface {
+	NamedRuns() []domain.RunID
+}
+
+// memberNaming is a payload about members, which a reader sees only when
+// they see each of them and the event's actor. An empty id is a member
+// nobody but a super admin sees.
+type memberNaming interface {
+	NamedMembers() []domain.MemberID
+}
+
+// Scope is what one reader may be shown. Workspace reports whether it
+// reaches a workspace. Run, when set, reports whether it reaches every
+// workspace of a run, its extra repositories' included. Sees, when set,
+// reports whether it sees a member.
+type Scope struct {
+	Workspace func(domain.WorkspaceID) bool
+	Run       func(domain.RunID) bool
+	Sees      func(domain.MemberID) bool
+}
+
+// StreamWire pumps a subscription onto write in wire form, until the
+// subscription ends (nil), the buffer dropped (ErrDropped), or a write or
+// encode fails. A private event goes to its recipient alone, a ServerScope
+// event to everyone who sees the members it names, and any other event
+// only when it is Reachable. Framing belongs to the caller; ordering
+// belongs here.
+func StreamWire(sub Subscription, member domain.MemberID, scope Scope, write func(protocol.Event) error) error {
 	for ev := range sub.Events() {
 		// Check for drops before writing: an event already dequeued was
 		// dequeued before any drop, so ending the stream pre-write leaves
@@ -64,10 +102,10 @@ func StreamWire(sub Subscription, member domain.MemberID, write func(protocol.Ev
 		if sub.Dropped() > 0 {
 			return ErrDropped
 		}
-		if p, ok := ev.Payload.(private); ok && p.Recipient() != member {
+		if !deliverable(ev, member, scope) {
 			continue
 		}
-		we, err := wireEvent(ev)
+		we, err := wireEvent(Scoped(ev, scope))
 		if err != nil {
 			return err
 		}
@@ -76,6 +114,83 @@ func StreamWire(sub Subscription, member domain.MemberID, write func(protocol.Ev
 		}
 	}
 	return nil
+}
+
+// peerScoped is a payload that names other runs and drops, for a reader,
+// those the reader cannot fully reach.
+type peerScoped interface {
+	ScopedTo(reaches func(domain.RunID) bool) Payload
+}
+
+// Scoped is ev with the peers its payload names that scope cannot reach
+// removed.
+func Scoped(ev Event, scope Scope) Event {
+	if p, ok := ev.Payload.(peerScoped); ok && scope.Run != nil {
+		ev.Payload = p.ScopedTo(scope.Run)
+	}
+	return ev
+}
+
+func deliverable(ev Event, member domain.MemberID, scope Scope) bool {
+	if p, ok := ev.Payload.(private); ok {
+		return p.Recipient() == member
+	}
+	if ev.WorkspaceID == ServerScope {
+		return seesNamed(ev, scope)
+	}
+	return Reachable(ev, scope)
+}
+
+func seesNamed(ev Event, scope Scope) bool {
+	p, ok := ev.Payload.(memberNaming)
+	if !ok || scope.Sees == nil {
+		return true
+	}
+	if ev.ActorID != "" && !scope.Sees(ev.ActorID) {
+		return false
+	}
+	for _, id := range p.NamedMembers() {
+		if !scope.Sees(id) {
+			return false
+		}
+	}
+	return true
+}
+
+// Reachable reports whether scope allows ev's workspace, for an event
+// about an extra repository of a run that repository's workspace, for an
+// event of a run every workspace of the run and of every other run it
+// names, and the members ev names.
+// The workspaces a runScoped payload names stand in for scope.Run.
+func Reachable(ev Event, scope Scope) bool {
+	if !scope.Workspace(ev.WorkspaceID) {
+		return false
+	}
+	if r, ok := ev.Payload.(repoScoped); ok && r.RepoWorkspace() != "" && !scope.Workspace(r.RepoWorkspace()) {
+		return false
+	}
+	if ev.RunID != "" {
+		var extras []domain.WorkspaceID
+		if r, ok := ev.Payload.(runScoped); ok {
+			extras = r.RunExtraWorkspaces()
+		}
+		if extras == nil && scope.Run != nil && !scope.Run(ev.RunID) {
+			return false
+		}
+		for _, ws := range extras {
+			if !scope.Workspace(ws) {
+				return false
+			}
+		}
+	}
+	if r, ok := ev.Payload.(runNaming); ok && scope.Run != nil {
+		for _, id := range r.NamedRuns() {
+			if !scope.Run(id) {
+				return false
+			}
+		}
+	}
+	return seesNamed(ev, scope)
 }
 
 // wireEvent renders one event in its wire form.

@@ -180,7 +180,8 @@ func (f *wireRuns) GetRun(_ context.Context, id domain.RunID) (*domain.Run, erro
 }
 
 func (f *wireRuns) GetMember(_ context.Context, id domain.MemberID) (*domain.Member, error) {
-	return &domain.Member{ID: id, Role: domain.RoleCollaborator}, nil
+	return &domain.Member{ID: id, Role: domain.RoleCollaborator,
+		Access: domain.WorkspaceAccess{Granted: map[domain.WorkspaceID]bool{"ws_01": true}}}, nil
 }
 
 func (f *wireRuns) GetWorkspace(_ context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {

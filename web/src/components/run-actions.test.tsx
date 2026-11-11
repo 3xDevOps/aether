@@ -863,3 +863,14 @@ test.each([
   await selectMore('Relaunch')
   await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith(record.id))
 })
+
+test('an admin granted another owner\'s workspace acts there by their role in it', async () => {
+  const admin: Member = { ...bob, role: 'admin' }
+  const record = seed({ run: { status: 'merged', protected: true }, members: [alice, admin], self: admin })
+  const view = render(<RunActions run={record} />)
+  expect((await openMore()).queryByRole('menuitem', { name: 'Archive session' })).toBeTruthy()
+  view.unmount()
+  useStore.setState((s) => ({ workspaces: { [workspace.id]: { ...s.workspaces[workspace.id], role: 'collaborator' } } }))
+  render(<RunActions run={record} />)
+  expect((await openMore()).queryByRole('menuitem', { name: 'Archive session' })).toBeNull()
+})

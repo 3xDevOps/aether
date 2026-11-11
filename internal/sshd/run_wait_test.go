@@ -33,7 +33,7 @@ func (f fakeRunWaits) CancelRunWait(context.Context, domain.RunID, string, domai
 }
 
 // What a wait read with the owner's GitHub login, and the free text of how
-// it ended, is shown only to the run's owner and admins.
+// it ended, is shown only to the run's owner and its workspace's admins.
 func TestWaitConditionsLeaveOutTheOwnersReadsForOthers(t *testing.T) {
 	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
@@ -44,7 +44,7 @@ func TestWaitConditionsLeaveOutTheOwnersReadsForOthers(t *testing.T) {
 	for _, m := range []struct {
 		name string
 		role domain.Role
-	}{{"owner", domain.RoleCollaborator}, {"viewer", domain.RoleCollaborator}, {"admin", domain.RoleAdmin}} {
+	}{{"owner", domain.RoleCollaborator}, {"viewer", domain.RoleCollaborator}, {"admin", domain.RoleAdmin}, {"other-admin", domain.RoleAdmin}} {
 		members[m.name] = &domain.Member{DisplayName: m.name, TailnetLogin: m.name + "@example.com", Color: "#e6194b", Role: m.role}
 		if err := db.CreateMember(t.Context(), members[m.name]); err != nil {
 			t.Fatal(err)
@@ -57,8 +57,11 @@ func TestWaitConditionsLeaveOutTheOwnersReadsForOthers(t *testing.T) {
 		LastDeliveryError: "notify run: private",
 	}
 	s := &Server{cfg: Config{Store: db, Services: Services{Watches: fakeRunWaits{waits: []protocol.WaitCondition{w}}}}}
-	ws := &domain.Workspace{Name: "proj", BaseBranch: domain.DefaultBaseBranch}
+	ws := &domain.Workspace{Name: "proj", BaseBranch: domain.DefaultBaseBranch, OwnerID: members["admin"].ID}
 	if err := db.CreateWorkspace(t.Context(), ws); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GrantWorkspace(t.Context(), ws.ID, members["owner"].ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	run := &domain.Run{WorkspaceID: ws.ID, MemberID: members["owner"].ID, Task: "t", Harness: "claude", Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
@@ -75,9 +78,11 @@ func TestWaitConditionsLeaveOutTheOwnersReadsForOthers(t *testing.T) {
 		}
 		return out[0].WaitConditions[0]
 	}
-	if got := read("viewer"); got.Spec != w.Spec || got.State != w.State || got.Summary != "" || got.Detail != "" || got.HeadSHA != "" ||
-		got.LastError != "" || got.EndedCause != "" || got.LastDeliveryError != "" || got.Observed != (protocol.WaitObserved{}) {
-		t.Fatalf("viewer sees %+v, want only the condition and its state", got)
+	for _, m := range []string{"viewer", "other-admin"} {
+		if got := read(m); got.Spec != w.Spec || got.State != w.State || got.Summary != "" || got.Detail != "" || got.HeadSHA != "" ||
+			got.LastError != "" || got.EndedCause != "" || got.LastDeliveryError != "" || got.Observed != (protocol.WaitObserved{}) {
+			t.Fatalf("%s sees %+v, want only the condition and its state", m, got)
+		}
 	}
 	for _, m := range []string{"owner", "admin"} {
 		if got := read(m); got.Summary != w.Summary || got.Detail != w.Detail || got.EndedCause != w.EndedCause || got.Observed != w.Observed {

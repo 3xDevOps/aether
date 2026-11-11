@@ -55,8 +55,9 @@ func copyBounded(src io.Reader, dst io.Writer, limit int64) (truncated bool, sou
 	return truncated, sourceErr, nil
 }
 
-// List returns a bounded newest-first page scoped to one authorized workspace.
-func (s *Service) List(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, before string, limit int) (protocol.EvidencePacketListResult, error) {
+// List returns a bounded newest-first page scoped to one authorized
+// workspace, of the packets whose run shows accepts, or all when it is nil.
+func (s *Service) List(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, before string, limit int, shows func(domain.RunID) bool) (protocol.EvidencePacketListResult, error) {
 	if workspace == "" {
 		return protocol.EvidencePacketListResult{}, fmt.Errorf("%w: workspace is required", ErrInvalidRequest)
 	}
@@ -72,7 +73,7 @@ func (s *Service) List(ctx context.Context, workspace domain.WorkspaceID, run do
 			return out, nil
 		}
 		for _, raw := range page.Items {
-			if raw == nil || raw.WorkspaceID != workspace {
+			if raw == nil || raw.WorkspaceID != workspace || (shows != nil && !shows(raw.RunID)) {
 				continue
 			}
 			p := safePacket(protocol.EvidencePacketFromStore(raw))

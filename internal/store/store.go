@@ -42,6 +42,8 @@ var (
 // has a PublicKey, a TailnetLogin or an edge identity (IdentityStore), and
 // may have any of them.
 type Store interface {
+	WorkspaceAccessStore
+
 	CreateWorkspace(ctx context.Context, w *domain.Workspace) error
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	ListWorkspaces(ctx context.Context) ([]*domain.Workspace, error)
@@ -80,18 +82,37 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error)
 	GetMemberByTailnetLogin(ctx context.Context, login string) (*domain.Member, error)
-	// ApproveMember clears only the member's pending flag, leaving every
-	// other field untouched.
-	ApproveMember(ctx context.Context, id domain.MemberID) error
+	// ApproveMember clears only the member's pending flag on behalf of by:
+	// an approved super admin approves anyone, an approved admin a member
+	// below admin, and an empty by is the machine administrator. Both
+	// roles are read in the approving write, so a role change cannot land
+	// between check and approval; ErrConflict when by may not approve id.
+	ApproveMember(ctx context.Context, id, by domain.MemberID) error
 	// UpdateMemberImage sets only the member's saved environment image.
 	UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error
 	// UpdateMemberGitIdentity sets only the member's git author name and
 	// address. Either may be empty, restoring that half's fallback.
 	UpdateMemberGitIdentity(ctx context.Context, id domain.MemberID, name, email string) error
+	// UpdateMemberDisplayName and UpdateMemberColor set only that field.
+	UpdateMemberDisplayName(ctx context.Context, id domain.MemberID, name string) error
+	UpdateMemberColor(ctx context.Context, id domain.MemberID, color string) error
+	// SetMemberRole sets member id's role and returns the one it had, in
+	// one transaction: it refuses demoting the last approved super admin
+	// (ErrLastSuperAdmin) and demoting below admin a member who owns
+	// workspaces (*OwnsWorkspacesError). Demoting a super admin, or an
+	// admin below admin, revokes the invitations they created. by, the
+	// caller, must still be a super admin in that transaction; an empty by
+	// is the machine's administrator.
+	SetMemberRole(ctx context.Context, id domain.MemberID, role domain.Role, by domain.MemberID) (domain.Role, error)
 	// ListMembers returns every member but those a merge absorbed.
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	UpdateMember(ctx context.Context, m *domain.Member) error
-	DeleteMember(ctx context.Context, id domain.MemberID) error
+	// DeleteMember refuses, in its own transaction, removing the last
+	// approved super admin (ErrLastSuperAdmin) or a member who owns
+	// workspaces (*OwnsWorkspacesError), and removal on behalf of by,
+	// unless empty, when by is no longer an approved super admin
+	// (ErrConflict).
+	DeleteMember(ctx context.Context, id, by domain.MemberID) error
 
 	// ShareAccount and RevokeAccountShare report whether the grant changed:
 	// false for one that already existed or was already absent.

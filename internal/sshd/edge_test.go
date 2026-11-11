@@ -145,7 +145,9 @@ func identities(t *testing.T, e *testEnv) store.IdentityStore {
 // its link had been sent.
 func inviteAccount(t *testing.T, e *testEnv, inv domain.Invitation) *domain.Invitation {
 	t.Helper()
-	inv.CreatedBy = e.member.ID
+	if inv.CreatedBy == "" {
+		inv.CreatedBy = e.member.ID
+	}
 	if inv.ExpiresAt.IsZero() {
 		inv.ExpiresAt = time.Now().Add(edgeproto.InvitationTTL)
 	}
@@ -250,7 +252,7 @@ func TestEdgeIgnoresInviteCodeUserAndTailnet(t *testing.T) {
 		c.InvitesDir = dir
 		c.WhoIs = whois
 	})
-	code, _, err := mintInvite(dir, time.Hour, "")
+	code, _, err := mintInvite(dir, time.Hour, "", nil)
 	if err != nil {
 		t.Fatalf("mint invite: %v", err)
 	}
@@ -498,6 +500,7 @@ func TestEdgeExpiredInvitationRefused(t *testing.T) {
 func TestEdgeStaleIdentityMatchesNoInvitation(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	stale := octo
 	stale.IdentityAt = time.Now().Add(-edgeproto.IdentityMaxAge - time.Minute)
@@ -578,8 +581,8 @@ func TestEdgeFirstDevicePendingUntilApproved(t *testing.T) {
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	var pe *protocol.Error
 	err := approveByCode(controlAs(t, e, bob), code, nil)
-	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("other member approving = %v, want CodeDenied", err)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("other member approving = %v, want the invitation's device not found", err)
 	}
 	var approved protocol.MemberDeviceResult
 	if err = approveByCode(admin, strings.ToLower(code), &approved); err != nil {
@@ -629,6 +632,7 @@ func TestEdgeDeviceRevokeRefusesAndCloses(t *testing.T) {
 func TestEdgeMemberRemovalClosesLiveConnections(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
 	live := e.mustDialEdge(t, octo, newSigner(t), "laptop")
 	m := serverInfoMember(t, controlClientOn(t, live))
@@ -782,8 +786,8 @@ func TestClaimInsideSSH(t *testing.T) {
 		t.Fatalf("claim: %v (banner %q)", err, banner)
 	}
 	owner := serverInfoMember(t, controlClientOn(t, c))
-	if owner.Role != string(domain.RoleAdmin) || owner.DisplayName != "Octo Cat" {
-		t.Fatalf("claimed member = %+v, want the account as admin", owner)
+	if owner.Role != string(domain.RoleSuperAdmin) || owner.DisplayName != "Octo Cat" {
+		t.Fatalf("claimed member = %+v, want the account as super admin", owner)
 	}
 	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(laptop.PublicKey()))
 	if err != nil || dev.Status != domain.DeviceApproved || dev.ApprovedBy != "" {
@@ -864,6 +868,7 @@ func TestClaimThroughAnEdgeThatSubstitutesTheAccount(t *testing.T) {
 func TestRelayedConnectionThroughAnEdgeThatSubstitutesTheAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	forged := octo
 	forged.Subject = "6666"
@@ -910,6 +915,7 @@ func TestGrantKindIsServedOnlyAsItself(t *testing.T) {
 func TestMemberCannotLinkAnotherAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	carolKey, carol := addMember(t, e, "Carol", domain.RoleViewer, false)
 	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
 	if err := controlAs(t, e, carolKey).Call(protocol.MethodMemberIdentityLink,
@@ -925,11 +931,12 @@ func TestMemberCannotLinkAnotherAccount(t *testing.T) {
 }
 
 // An invitation grants its role when accepted, so it goes when its creator
-// stops being an admin.
+// is demoted.
 func TestDemotedAdminsInvitationsAreRevoked(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	carolKey, carol := addMember(t, e, "Carol", domain.RoleAdmin, false)
+	asSuperAdmin(t, e)
+	carolKey, carol := addMember(t, e, "Carol", domain.RoleSuperAdmin, false)
 	e.invite(t, controlAs(t, e, carolKey), protocol.MethodMemberInvitationCreate,
 		protocol.MemberInvitationCreateParams{Login: "octo", Role: "admin"})
 	if err := controlClient(t, e).Call(protocol.MethodMemberRole,
@@ -947,6 +954,7 @@ func TestDemotedAdminsInvitationsAreRevoked(t *testing.T) {
 func TestInvitationBeyondTheEdgeDirectoryIsRefused(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	for i := range edgeproto.MaxDirectoryEntries {
 		inviteAccount(t, e, domain.Invitation{Email: fmt.Sprintf("person%d@example.com", i), Role: domain.RoleViewer})
 	}
@@ -965,6 +973,7 @@ func TestInvitationBeyondTheEdgeDirectoryIsRefused(t *testing.T) {
 func TestEdgeInvitationRPCs(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	admin := controlClient(t, e)
 	bobKey, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	bob := controlAs(t, e, bobKey)
@@ -1008,8 +1017,8 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 		t.Fatalf("directory = %+v, %v", entries, err)
 	}
 	if err := bob.Call(protocol.MethodMemberInvitationRevoke,
-		protocol.MemberInvitationRevokeParams{InvitationID: created.Invitation.ID}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("collaborator revoking an admin's invitation = %v, want CodeDenied", err)
+		protocol.MemberInvitationRevokeParams{InvitationID: created.Invitation.ID}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("collaborator revoking an admin's invitation = %v, want it answered as a missing one", err)
 	}
 	var list protocol.MemberInvitationListResult
 	if err := bob.Call(protocol.MethodMemberInvitationList, struct{}{}, &list); err != nil || len(list.Invitations) != 0 {
@@ -1058,6 +1067,7 @@ func TestServerEdge(t *testing.T) {
 func TestUnclaimedServerRefusesInvitationsAndOwnerlessOneDoesNot(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	admin := controlClient(t, e)
 	e.srv.SetEdgeOwner(&fakeEdgeOwner{state: edgeproto.StateUnclaimed})
 	calls := map[string]any{
@@ -1119,6 +1129,12 @@ func TestEdgeDeviceKeyOnTheDirectPath(t *testing.T) {
 			if err != nil {
 				t.Fatalf("device: %v", err)
 			}
+			var pe *protocol.Error
+			if err := controlClient(t, e).Call(protocol.MethodMemberDeviceRevoke,
+				protocol.MemberDeviceRevokeParams{DeviceID: string(dev.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+				t.Fatalf("an admin revoking another member's approved device = %v, want CodeDenied", err)
+			}
+			setRole(t, e, domain.RoleSuperAdmin)
 			if err := controlClient(t, e).Call(protocol.MethodMemberDeviceRevoke,
 				protocol.MemberDeviceRevokeParams{DeviceID: string(dev.ID)}, nil); err != nil {
 				t.Fatalf("revoke: %v", err)
