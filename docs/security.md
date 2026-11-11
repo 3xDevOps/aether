@@ -115,8 +115,9 @@ member who may launch a session may pick any tier.
 | Messages to other sessions, team memory notes | Yes | Yes | Refused |
 
 - A tier governs `sudo`, the container and the network, never the agent's own
-  permission prompts. Those follow the agent's mode, which no tier sets, and
-  an agent can still ask in its no-prompt mode
+  permission prompts. Those follow the agent's launch flags or Enhanced mode
+  ([Modes](harnesses.md#modes-and-what-the-session-container-does)), which no
+  tier sets, and an agent can still ask for checks it never skips
   ([Permissions and input](enhanced-sessions.md#permissions-and-input)).
 - In every tier the agent runs as uid `1000`, or as the image's own user when
   that is not root. An image whose user is root, such as an environment you
