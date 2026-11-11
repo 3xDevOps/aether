@@ -91,12 +91,12 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 		case a.OwnAccountOnly:
 			c.Status = choiceNotInstalled
 			c.Detail = fmt.Sprintf("%s is your own agent definition, which runs only on your own account", a.Name)
-		case a.LoginMissing || (a.LoginFound != nil && !*a.LoginFound):
-			c.Status = choiceNotSignedIn
-			c.Detail = fmt.Sprintf("%s is not signed in to %s; they sign in with aether agent login %s", name, a.Name, a.Name)
 		case a.Unavailable != "":
 			c.Status = choiceNotSignedIn
 			c.Detail = a.Unavailable
+		case a.LoginMissing || (a.LoginFound != nil && !*a.LoginFound):
+			c.Status = choiceNotSignedIn
+			c.Detail = fmt.Sprintf("%s is not signed in to %s; they sign in with aether agent login %s", name, a.Name, a.Name)
 		default:
 			if used, ok := s.usedPercent(ctx, p.owner, account, a.Name); ok && used >= fallback.ExhaustedPercent {
 				c.Status = choiceExhausted
