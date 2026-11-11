@@ -111,6 +111,15 @@ describe('workspace access', () => {
     await waitFor(() => expect(api.workspaceOwnerSet).toHaveBeenCalledWith(workspace.id, root.id))
   })
 
+  it('clears a member list failure once a later read succeeds', async () => {
+    seed(admin, { owned: true })
+    const failing = client({ memberList: vi.fn(async () => { throw new ApiError(500, 'members unavailable') }) })
+    const { rerender } = render(<WorkspacesRoute params={{}} client={failing} />)
+    expect(await screen.findByText(/Could not list members/)).toBeTruthy()
+    rerender(<WorkspacesRoute params={{}} client={client()} />)
+    await waitFor(() => expect(screen.queryByText(/Could not list members/)).toBeNull())
+  })
+
   it('shows why the member list could not be read', async () => {
     seed(admin, { owned: true })
     const api = client({ memberList: vi.fn(async () => { throw new ApiError(500, 'members unavailable') }) })

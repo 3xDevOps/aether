@@ -63,6 +63,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
     if (!caps.hasMethod('member.list')) return
     const { readMembers, setMemberList } = useStore.getState()
     const same = sameIdentity()
+    setMembersError(null)
     readMembers(client.memberList()).then(
       (list) => same() && setMemberList(list),
       (err: unknown) => same() && setMembersError(`Could not list members: ${message(err)}`),
