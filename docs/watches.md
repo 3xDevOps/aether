@@ -426,7 +426,7 @@ is refused with that error.
 
 | Condition | Resolves | Outcome |
 | --- | --- | --- |
-| `pr:<owner>/<repo>#<n>:merged` | The pull request merged, closed without merging, or a merge queue removed it without merging it after the condition began; `detail` quotes GitHub's reason, such as `reason: failed_checks` or `reason: manual`. | `merged`, `closed`, or `removed-from-queue` |
+| `pr:<owner>/<repo>#<n>:merged` | The pull request merged, closed without merging, or a merge queue removed it without merging it after the condition began and it was not queued again within a minute; `detail` quotes GitHub's reason, such as `reason: failed_checks` or `reason: manual`. When GitHub refuses the merge queue read, the summary says `can't read its merge queue (<GitHub's error>)` and merged and closed still resolve it. | `merged`, `closed`, or `removed-from-queue` |
 | `pr:<owner>/<repo>#<n>:checks[@<sha>]` | Every counted check on its head commit finished, or one failed and nothing counted is still running, the named commit was replaced, or the pull request closed unmerged first. When the base branch requires checks only those count and `observed.checks.required_only` is `true`; a required check nothing reported keeps the wait pending, and the summary names it. Otherwise every check counts. Cancelled runs a rerun replaced are not counted, as for [`ci`](#pull-requests-and-ci). | `passed`, `failed`, `cancelled`, `superseded`, or `closed` |
 | `run:<run-id>:finished` | That session, in the same workspace, ended or reported success. | `completed`, `merged`, `failed`, `abandoned`, `interrupted`, or `reported-success` |
 

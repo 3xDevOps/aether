@@ -83,18 +83,25 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 		case snap.State == "closed":
 			r.done, r.outcome, r.summary, r.observation = true, "closed", ref+" closed without merging", "closed"
 		default:
+			r.summary = ref + " is open, " + counts
 			removal, err := src.QueueRemoval(ctx, home, w.Repo, w.Number)
-			if err != nil {
-				return r, readErr(err)
-			}
-			// A removal before the wait began is the state it waits from.
-			if removal != nil && after(removal.At, w.CreatedAt) {
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return r, err
+			case err != nil:
+				// The pull request read decides merged and closed; a queue
+				// GitHub will not show only goes unread.
+				r.summary += "; can't read its merge queue (" + err.Error() + ")"
+			case removal == nil || !after(removal.At, w.CreatedAt):
+				// A removal before the wait began is the state it waits from.
+			case now.Sub(removal.At) < queueSettle:
+				r.summary += "; removed from the merge queue at " + removal.At.UTC().Format(time.RFC3339) + ", read again in case it is queued again"
+				r.next = minTime(r.next, removal.At.Add(queueSettle))
+			default:
 				r.done, r.outcome, r.observation = true, "removed-from-queue", "removed-from-queue@"+removal.At.UTC().Format(time.RFC3339)
 				r.summary = ref + " was removed from the merge queue without merging, " + counts
 				r.detail = "reason: " + removal.Reason
-				break
 			}
-			r.summary = ref + " is open, " + counts
 		}
 	case protocol.WaitKindPRChecks:
 		named := strings.Contains(w.Spec, "@")
@@ -176,6 +183,11 @@ const (
 	headSeen       = "head-seen"
 	namedHeadGrace = 5 * time.Minute
 )
+
+// queueSettle is how long a merge queue removal must stand before it
+// resolves a merged wait: people dequeue and requeue within seconds to
+// reorder the queue.
+const queueSettle = time.Minute
 
 // maxUntrusted bounds the third-party text a wake quotes.
 const maxUntrusted = 300

@@ -58,15 +58,21 @@ func (s *Service) MergeQueueRemoval(ctx context.Context, token, repo string, num
 			} `json:"repository"`
 		} `json:"data"`
 		Errors []struct {
+			Type    string `json:"type"`
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	if _, _, err = s.request(ctx, token, http.MethodPost, "/graphql", query, "", &answer); err != nil {
+	header, _, err := s.request(ctx, token, http.MethodPost, "/graphql", query, "", &answer)
+	if err != nil {
 		return nil, err
 	}
 	if len(answer.Errors) > 0 {
-		message := strings.ReplaceAll(answer.Errors[0].Message, token, "[redacted]")
-		return nil, errors.New("github: GraphQL: " + truncate(message, errorMessageMax))
+		message := truncate(strings.ReplaceAll(answer.Errors[0].Message, token, "[redacted]"), errorMessageMax)
+		// GraphQL answers its rate limit with HTTP 200.
+		if answer.Errors[0].Type == "RATE_LIMITED" {
+			return nil, &RateLimitError{Status: http.StatusOK, Message: message, RetryAt: retryAt(header, time.Now())}
+		}
+		return nil, errors.New("github: GraphQL: " + message)
 	}
 	if answer.Data.Repository == nil || answer.Data.Repository.PullRequest == nil {
 		return nil, errors.New("github: GraphQL returned no pull request")

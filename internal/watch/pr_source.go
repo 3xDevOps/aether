@@ -84,6 +84,8 @@ type prMember struct {
 	token    string
 	tokenAt  time.Time
 	limitErr *prError
+	// queueLimit is GraphQL's rate limit, a budget apart from REST's.
+	queueLimit *prError
 	// refused is when each pull request, by repo#number, began answering
 	// 403 or 404; one alone may be GitHub's own glitch, and every read
 	// within prReuse of it counts as that one.
@@ -269,8 +271,8 @@ func (p *PRs) QueueRemoval(ctx context.Context, member domain.MemberID, repo str
 		return nil, err
 	}
 	defer p.unlock(m)
-	if m.limitErr != nil && p.now().Before(m.limitErr.retryAt) {
-		return nil, m.limitErr
+	if m.queueLimit != nil && p.now().Before(m.queueLimit.retryAt) {
+		return nil, m.queueLimit
 	}
 	cached := m.token != ""
 	token, err := p.token(ctx, member, m, false)
@@ -289,7 +291,8 @@ func (p *PRs) QueueRemoval(ctx context.Context, member domain.MemberID, repo str
 	case err == nil:
 		return removal, nil
 	case errors.As(err, &limited):
-		return nil, p.limited(m, limited)
+		m.queueLimit = &prError{msg: "GitHub GraphQL rate limit, retrying at " + limited.RetryAt.UTC().Format(time.RFC3339), transient: true, retryAt: limited.RetryAt}
+		return nil, m.queueLimit
 	case errors.Is(err, github.ErrUnauthorized):
 		m.token = ""
 		return nil, credentialsError(err)

@@ -66,8 +66,10 @@ type fakeGitHub struct {
 	required []string
 	suites   []map[string]any
 	gone     bool
-	// queued is the last merge queue event GraphQL answers, if any.
-	queued map[string]any
+	// queued is the last merge queue event GraphQL answers, if any;
+	// queueErr, when set, is the GraphQL error it answers instead.
+	queued   map[string]any
+	queueErr string
 	// refuse answers paths with these prefixes with the status, and with
 	// X-GitHub-SSO when sso is set.
 	refuse      map[string]int
@@ -186,6 +188,9 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		body = map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
 			"timelineItems": map[string]any{"nodes": nodes}}}}}
+		if f.queueErr != "" {
+			body = map[string]any{"data": nil, "errors": []any{map[string]any{"type": "FORBIDDEN", "message": f.queueErr}}}
+		}
 	case strings.HasPrefix(path, "/repos/acme/app/pulls/7/reviews?"):
 		reviews := []map[string]any{}
 		for _, rv := range f.reviews {

@@ -637,6 +637,46 @@ func TestAMergeQueueRemovalWakesAMergedWait(t *testing.T) {
 	}
 }
 
+// A removal a person may undo within seconds, to reorder the queue, wakes
+// nobody until it stood a minute.
+func TestAFreshMergeQueueRemovalWaitsAMinute(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	owner := h.run(h.ada, "Ship")
+	gh.set(func(f *fakeGitHub) {
+		f.queued = map[string]any{"__typename": "RemovedFromMergeQueueEvent", "createdAt": h.clock.now().Add(time.Minute).UTC().Format(time.RFC3339), "reason": "manual"}
+	})
+	if resolved := h.mustReport(owner, "pr:acme/app#7:merged"); len(resolved) != 0 {
+		t.Fatalf("resolved = %+v on a removal seconds old, want pending", resolved)
+	}
+	if w := h.only(owner.ID); !strings.Contains(w.Summary, "in case it is queued again") {
+		t.Fatalf("wait = %+v, want the removal named as not yet settled", w)
+	}
+	h.clock.advance(2 * PRPollIdle)
+	h.awaitWake(owner.ID)
+	if w := h.only(owner.ID); w.Outcome != "removed-from-queue" || w.Detail != "reason: manual" {
+		t.Fatalf("wait = %+v, want removed-from-queue once the removal stood", w)
+	}
+}
+
+// A merge queue GitHub will not show leaves a merged wait reading the pull
+// request, and the merge still resolves it.
+func TestAnUnreadableMergeQueueStillSeesTheMerge(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	gh.set(func(f *fakeGitHub) { f.queueErr = "Resource not accessible by integration" })
+	owner := h.run(h.ada, "Ship")
+	h.mustReport(owner, "pr:acme/app#7:merged")
+	if w := h.only(owner.ID); w.State != protocol.WaitPending || w.LastError != "" || !strings.Contains(w.Summary, "can't read its merge queue (") ||
+		!strings.Contains(w.Summary, "Resource not accessible by integration") {
+		t.Fatalf("wait = %+v, want pending with the queue's error in the summary", w)
+	}
+	gh.set(func(f *fakeGitHub) { f.state, f.mergedAt = "closed", "2026-10-27T00:00:00Z" })
+	h.clock.advance(2 * PRPollIdle)
+	h.awaitWake(owner.ID)
+	if w := h.only(owner.ID); w.Outcome != "merged" {
+		t.Fatalf("wait = %+v, want merged", w)
+	}
+}
+
 func TestFailedChecksWakeWithTheFailingNames(t *testing.T) {
 	h, gh := newWaitPRHarness(t)
 	gh.set(func(f *fakeGitHub) {
