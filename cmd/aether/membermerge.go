@@ -197,20 +197,8 @@ func acceptDecision(p protocol.MemberMergeProposal, keepAdmin, yes, interactive 
 	if domain.Role(plan.Minted.Role).Admin() && !keepAdmin && !yes {
 		params.KeepAdmin = askKeepAdmin(out, in, plan, plan.Minted.Role)
 	}
-	role := mergedRole(plan, params.KeepAdmin, p.ProposerKeepAdmin)
-	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s\n", role)
-	if !yes {
-		_, _ = fmt.Fprint(out, "accept this merge? [y/N]: ")
-		if !yesAnswer(in) {
-			return params, errors.New("aether member merge accept: not merged; aether member merge cancel drops the proposal")
-		}
-	}
-	return params, nil
-}
-
-// mergedRole mirrors store.MergePlan.Role: each side's keep flag lifts the
-// result only to that side's own admin or super admin role.
-func mergedRole(plan protocol.MemberMergePlan, mintedKeep, proposerKeep bool) string {
+	// As store.MergePlan.Role: each side's keep flag lifts the result only
+	// to that side's own admin or super admin role.
 	rank := map[string]int{"viewer": 0, "collaborator": 1, "admin": 2, "super_admin": 3}
 	role := plan.Minted.Role
 	if rank[plan.Proposer.Role] < rank[role] {
@@ -219,12 +207,19 @@ func mergedRole(plan protocol.MemberMergePlan, mintedKeep, proposerKeep bool) st
 	for _, side := range []struct {
 		keep bool
 		role string
-	}{{mintedKeep, plan.Minted.Role}, {proposerKeep, plan.Proposer.Role}} {
+	}{{params.KeepAdmin, plan.Minted.Role}, {p.ProposerKeepAdmin, plan.Proposer.Role}} {
 		if side.keep && domain.Role(side.role).Admin() && rank[side.role] > rank[role] {
 			role = side.role
 		}
 	}
-	return role
+	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s\n", role)
+	if !yes {
+		_, _ = fmt.Fprint(out, "accept this merge? [y/N]: ")
+		if !yesAnswer(in) {
+			return params, errors.New("aether member merge accept: not merged; aether member merge cancel drops the proposal")
+		}
+	}
+	return params, nil
 }
 
 func askKeepAdmin(out io.Writer, in *bufio.Reader, plan protocol.MemberMergePlan, own string) bool {
