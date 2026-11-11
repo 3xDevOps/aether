@@ -475,24 +475,28 @@ on land in the slice. Check it:
 systemctl status aether.slice
 systemd-cgls --unit aether.slice
 cat /sys/fs/cgroup/aether.slice/cpu.weight
-docker inspect --format '{{.HostConfig.CgroupParent}} {{.HostConfig.Runtime}}' <container>
-sudo cat /proc/"$(docker inspect --format '{{.State.Pid}}' <container>)"/cgroup
+sudo docker ps --filter label=aether.managed=true --format '{{.Names}}'
+sudo docker inspect --format '{{.HostConfig.CgroupParent}} {{.HostConfig.Runtime}}' <container>
+cat /proc/"$(sudo docker inspect --format '{{.State.Pid}}' <container>)"/cgroup
 ```
 
 `systemctl status` shows the slice inactive until its first container starts.
 `cpu.weight` prints `50`; `daemon-reload` applies the file to a slice that is
-already running. For a session started after the update, `docker inspect`
-prints `aether.slice` and the runtime (`runc`, or `sysbox-runc` for sessions
-with Docker inside), and `/proc/<pid>/cgroup` reads
-`0::/aether.slice/docker-<id>.scope`. Read the cgroup from the host: inside a
-Sysbox container, `/proc/self/cgroup` shows `0::/` because Sysbox gives the
-container its own cgroup namespace.
+already running, and `100` means the file is not loaded. With the systemd
+driver, a container created after the update prints `aether.slice` and its
+runtime: `sysbox-runc` for terminals and sessions that are not isolated when
+Sysbox is installed, `runc` otherwise. A container created before the slice
+prints an empty parent. Its `/proc/<pid>/cgroup` reads
+`0::/aether.slice/docker-<id>.scope`, with the full container ID and, under
+`sysbox-runc`, `/init.scope` appended. Read it on the host: inside a Sysbox
+container the cgroup namespace shows only `0::/init.scope`. With the
+`cgroupfs` driver the parent is `/aether` and the path `0::/aether/<id>`.
 
-The slice did not apply when a new session fails to start with an error that
-names the cgroup parent or `aether.slice`, or when `docker inspect` prints
-`aether.slice` but `/proc/<pid>/cgroup` still reads `0::/system.slice/...`.
-To go back, install the previous release:
-`sudo aether-server update --version <tag> --allow-downgrade`.
+If new sessions fail to start with `cgroup-parent for systemd cgroup should be
+a valid slice named as "xxx.slice"`, Docker's cgroup driver changed after the
+server started: `sudo systemctl restart aether-server`. To give sessions the
+default share again, `sudo systemctl set-property aether.slice CPUWeight=100
+IOWeight=100`.
 
 `MemoryLow=1G` makes the kernel reclaim the server's first gigabyte only after
 unprotected memory. Memory protection passes down the cgroup tree, so it
