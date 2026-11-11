@@ -156,6 +156,7 @@ type Config struct {
 	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
 	filesystemCapacity   func(string) (disk.Usage, error)
+	procRoot             string
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
@@ -210,6 +211,7 @@ type Scheduler struct {
 	// capacityGate protects admission probes/accounting, never lifecycle state.
 	capacityGate         chan struct{}
 	reclaimMu            sync.Mutex
+	pressureSkipLog      sync.Once
 	capacityReservations uint64
 
 	mu   sync.Mutex

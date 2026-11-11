@@ -304,7 +304,7 @@ support for CPU quotas, memory and swap limits, and PID limits, or new
 containers are refused.
 
 Before it creates a session, environment, browser or agent-updater container,
-Aether checks that the host has free disk and memory. Otherwise the launch
+Aether checks that the host has free disk and memory, and that the kernel is not stalling tasks on memory (`/proc/pressure/memory`, `some avg60` below 20%). Otherwise the launch
 fails with `scheduler: insufficient disk headroom`, `scheduler: insufficient
 host memory headroom` or `scheduler: host capacity unavailable`. Aether never
 stops a running agent to make room, and reopening a retained session needs no

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	goruntime "runtime"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/sysstats"
 )
 
 // Capacity refusals only affect new provisioning, never evict existing work.
@@ -27,6 +29,9 @@ const (
 	capacityProbeTimeout        = 5 * time.Second
 	startupDiskBytes     uint64 = 1 << 30
 	startupMemoryBytes   uint64 = 512 << 20
+	// maxMemoryPressure is the "some avg60" percentage of /proc/pressure/memory
+	// at which new launches are refused.
+	maxMemoryPressure = 20.0
 )
 
 // ValidateRunBudgets is shared by server startup and the scheduler. Zero selects
@@ -172,6 +177,9 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 			return nil, fmt.Errorf("%w: %d available bytes; reserve %d bytes plus %d bytes per provisioning (%d already in flight)",
 				ErrMemoryPressure, capacity.MemoryAvailableBytes, floor, startupMemoryBytes, s.capacityReservations)
 		}
+		if err := s.checkMemoryPressure(); err != nil {
+			return nil, err
+		}
 	}
 	if err := probeCtx.Err(); err != nil {
 		return nil, fmt.Errorf("%w: capacity probe: %w", ErrCapacityUnknown, err)
@@ -191,4 +199,26 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 // near uint64's limit. The next provisioning also needs its own allowance.
 func hasProvisioningHeadroom(available, floor, allowance, outstanding uint64) bool {
 	return available >= floor && (available-floor)/allowance > outstanding
+}
+
+// checkMemoryPressure refuses while the kernel reports tasks stalled on memory,
+// which MemAvailable does not show on a host that swaps or compresses memory.
+// A host without pressure accounting is not refused.
+func (s *Scheduler) checkMemoryPressure() error {
+	root := cmp.Or(s.cfg.procRoot, "/proc")
+	pressure, err := sysstats.MemoryPressure(root)
+	if err != nil {
+		return fmt.Errorf("%w: host memory pressure: %w", ErrCapacityUnknown, err)
+	}
+	if pressure == nil {
+		s.pressureSkipLog.Do(func() {
+			slog.Info("scheduler: skipping the memory pressure check; the kernel does not expose pressure accounting", "file", root+"/pressure/memory")
+		})
+		return nil
+	}
+	if *pressure >= maxMemoryPressure {
+		return fmt.Errorf("%w: tasks stalled on memory for %.1f%% of the last 60s (/proc/pressure/memory some avg60); launches are refused at %.0f%%",
+			ErrMemoryPressure, *pressure, maxMemoryPressure)
+	}
+	return nil
 }

@@ -590,3 +590,37 @@ func TestRunLimitsPrecedence(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestCapacityMemoryPressureAdmission(t *testing.T) {
+	write := func(root, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, "pressure"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "pressure", "memory"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := t.TempDir()
+	s := &Scheduler{cfg: Config{Runtime: &admissionRuntime{host: healthyAdmissionHost()}, MinFreeBytes: -1, procRoot: root}, capacityGate: make(chan struct{}, 1)}
+
+	write(root, "some avg10=99.00 avg60=20.00 avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=0\n")
+	_, err := s.tryReserveCapacity(t.Context())
+	if !errors.Is(err, ErrMemoryPressure) || !strings.Contains(err.Error(), "20.0% of the last 60s") || s.capacityReservations != 0 {
+		t.Fatalf("high pressure: %v (reservations %d)", err, s.capacityReservations)
+	}
+
+	write(root, "some avg10=99.00 avg60=19.99 avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=0\n")
+	release, err := s.tryReserveCapacity(t.Context())
+	if err != nil {
+		t.Fatalf("a short burst with low avg60 refused: %v", err)
+	}
+	release()
+
+	s.cfg.procRoot = t.TempDir()
+	release, err = s.tryReserveCapacity(t.Context())
+	if err != nil {
+		t.Fatalf("host without /proc/pressure refused: %v", err)
+	}
+	release()
+}
