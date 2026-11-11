@@ -4021,6 +4021,8 @@ measurement from FitAddon without resizing the renderer; `setGeometry()` queues
 the server resize and optional attach reset between xterm writes. A font or
 pane resize reports the local measurement, never the smaller rendered grid,
 so a viewer cannot accidentally pin the shared minimum after it grows.
+Terminal padding belongs to the xterm element, not its host: FitAddon subtracts
+the element's padding when calculating the rows and columns that fit.
 Queued geometry work is discarded when its terminal is disposed.
 The server queues geometry with terminal output. SSH and in-process dashboard
 attachments request ordered framing, and the gateway emits the geometry frame
