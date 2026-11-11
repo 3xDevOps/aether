@@ -1117,10 +1117,11 @@ desktop window bar or the phone top bar, and nothing in its own chrome
 scrolls sideways. A control pushed past an edge is unreachable, not merely off
 screen, so every row states what gives way first.
 
-`desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
-the desktop rules are designed against; a browser tab has no such floor, so
-the same rules degrade below it rather than break. A phone is the far end of
-that: `src/app/layout.tsx` exports the viewport the shell needs there.
+`desktop/zoom.js` sets `MIN_WIDTH = 960` and `MIN_HEIGHT = 600`, the
+window's minimum size at 100%. That is the size the desktop rules are
+designed against; a browser tab has no such floor, so the same rules degrade
+below it rather than break. A phone is the far end of that:
+`src/app/layout.tsx` exports the viewport the shell needs there.
 
 - `width=device-width, initial-scale=1` - the page is laid out at the device's
   own width rather than a desktop-sized canvas scaled down.
