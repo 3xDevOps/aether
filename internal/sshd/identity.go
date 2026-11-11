@@ -446,7 +446,12 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 	if allowed != nil {
 		return nil, allowed
 	}
-	if err = ids.RevokeDevice(ctx, dev.ID); err != nil {
+	// Only while its status is the one the check above was made on: a
+	// device approved meanwhile is no longer an admin's to deny.
+	if err = ids.RevokeDevice(ctx, dev.ID, dev.Status); errors.Is(err, store.ErrNotFound) {
+		return nil, rpcError(fmt.Errorf("device %s is no longer %s as it was read; nothing was revoked: %w", dev.ID, dev.Status, err))
+	}
+	if err != nil {
 		return nil, rpcError(err)
 	}
 	noteChange(ctx)

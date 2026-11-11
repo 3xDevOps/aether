@@ -220,7 +220,7 @@ func TestRevocationClosesLiveConnections(t *testing.T) {
 			// `aether-server device review` revokes from another process,
 			// which the running server notices at its next revalidation.
 			start = time.Now()
-			if err = a.console(t).RevokeDevice(context.Background(), a.deviceIDOf(t, ma)); err != nil {
+			if err = a.console(t).RevokeDevice(context.Background(), a.deviceIDOf(t, ma), ""); err != nil {
 				t.Fatal(err)
 			}
 			closedWithin(t, "device revoked on the console", live[ma], start, 5*time.Second)

@@ -556,7 +556,7 @@ func TestDeviceRevokedElsewhereClosesItsConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := identities(t, e).RevokeDevice(context.Background(), dev.ID); err != nil {
+	if err := identities(t, e).RevokeDevice(context.Background(), dev.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitClosed(t, live)

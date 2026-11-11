@@ -570,7 +570,7 @@ func deviceReview(ctx context.Context, w io.Writer, in io.Reader, db deviceStore
 		case "approve":
 			_, err = sshd.ApproveDevice(ctx, db, db, dev, "")
 		case "revoke":
-			err = db.RevokeDevice(ctx, dev.ID)
+			err = db.RevokeDevice(ctx, dev.ID, "")
 		}
 		if err != nil {
 			return fmt.Errorf("%s device %q: %w", action, dev.Label, err)

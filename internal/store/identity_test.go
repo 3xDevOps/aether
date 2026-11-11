@@ -347,7 +347,13 @@ func TestDeviceStatusIsTheCallers(t *testing.T) {
 	if _, err = db.GetDeviceByApprovalCode(ctx, registered.ApprovalCode); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("approval code still resolves after approval: %v", err)
 	}
-	if err = db.RevokeDevice(ctx, pending.ID); err != nil {
+	if err = db.RevokeDevice(ctx, registered.ID, domain.DeviceRegistered); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RevokeDevice of a device approved since it was read as registered = %v, want ErrNotFound", err)
+	}
+	if got, err = db.GetDevice(ctx, registered.ID); err != nil || got.Status != domain.DeviceApproved {
+		t.Fatalf("device after a refused revoke = %+v, %v; want it still approved", got, err)
+	}
+	if err = db.RevokeDevice(ctx, pending.ID, ""); err != nil {
 		t.Fatalf("RevokeDevice: %v", err)
 	}
 	if err = db.ApproveDevice(ctx, pending.ID, m.ID); !errors.Is(err, ErrNotFound) {

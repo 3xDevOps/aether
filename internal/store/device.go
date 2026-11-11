@@ -381,10 +381,10 @@ func (d *DB) ApproveDevice(ctx context.Context, id domain.DeviceID, approver dom
 	return fmt.Errorf("%w: only a super admin approves a device of an admin or super admin", ErrConflict)
 }
 
-func (d *DB) RevokeDevice(ctx context.Context, id domain.DeviceID) error {
+func (d *DB) RevokeDevice(ctx context.Context, id domain.DeviceID, from domain.DeviceStatus) error {
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE member_devices SET status = 'revoked', approval_code = ''
-		 WHERE id = ? AND status <> 'revoked'`, id))
+		 WHERE id = ?1 AND status <> 'revoked' AND (?2 = '' OR status = ?2)`, id, from))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: revoke device: %w", err)
 	}

@@ -103,7 +103,9 @@ type IdentityStore interface {
 	ApproveDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID) error
 	// RevokeDevice revokes a device that is not revoked yet. A revoked
 	// device still counts as its member's device.
-	RevokeDevice(ctx context.Context, id domain.DeviceID) error
+	// RevokeDevice revokes id while its status is from, or any status when
+	// from is empty.
+	RevokeDevice(ctx context.Context, id domain.DeviceID, from domain.DeviceStatus) error
 	TouchDevice(ctx context.Context, id domain.DeviceID, at time.Time) error
 }
 

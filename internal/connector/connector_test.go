@@ -173,7 +173,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	}
 
 	third := e.connect(t, allScopes...)
-	if err := e.db.RevokeDevice(ctx, e.deviceID); err != nil {
+	if err := e.db.RevokeDevice(ctx, e.deviceID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if status, _, body := e.bearer(third.token.AccessToken); status != http.StatusUnauthorized || !strings.Contains(body, "revoked") {
