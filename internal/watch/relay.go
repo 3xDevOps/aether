@@ -130,6 +130,11 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	if s.notifier == nil {
 		return settle(protocol.WatchStatusFailed, "This server has no session inboxes", nil)
 	}
+	if err := s.allowed(ctx, w); errors.Is(err, errRevoked) {
+		return settle(protocol.WatchStatusFailed, "Not relayed: "+err.Error(), nil)
+	} else if err != nil {
+		return err
+	}
 	if !slices.Contains(w.RelayTo, r.RunID) {
 		return settle(protocol.WatchStatusCleared, "Not delivered: the session was removed from relay_to", nil)
 	}

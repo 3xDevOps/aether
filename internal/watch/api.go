@@ -444,6 +444,11 @@ func stamp(t *time.Time) string {
 }
 
 func (s *Service) toProto(ctx context.Context, w *store.Watch) (protocol.Watch, error) {
+	if err := s.allowed(ctx, w); errors.Is(err, errRevoked) {
+		return revokedProto(w, err), nil
+	} else if err != nil {
+		return protocol.Watch{}, err
+	}
 	out := protocol.Watch{
 		ID: w.ID, MemberID: string(w.MemberID), WorkspaceID: string(w.WorkspaceID), Target: targetOf(w),
 		TargetTitle: w.TargetTitle, Conditions: w.Conditions, State: w.State, Error: w.Error, Label: w.Label,
@@ -465,6 +470,16 @@ func (s *Service) toProto(ctx context.Context, w *store.Watch) (protocol.Watch, 
 		out.LastNotification = &n
 	}
 	return out, nil
+}
+
+// revokedProto is w for a member who no longer reaches what it watches:
+// enough to recognize and delete it, nothing it read.
+func revokedProto(w *store.Watch, err error) protocol.Watch {
+	return protocol.Watch{
+		ID: w.ID, MemberID: string(w.MemberID), Target: protocol.WatchTarget{Kind: w.TargetKind},
+		Conditions: w.Conditions, State: protocol.WatchError, Error: err.Error(), Label: w.Label, Source: w.Source,
+		CreatedAt: stamp(&w.CreatedAt), UpdatedAt: stamp(&w.UpdatedAt), ExpiresAt: stamp(&w.ExpiresAt), Link: WatchLink(w.ID),
+	}
 }
 
 func notificationProto(n *store.WatchNotification) protocol.WatchNotification {
@@ -518,6 +533,9 @@ func (s *Service) Get(ctx context.Context, member domain.MemberID, id string) (p
 	w, err := s.owned(ctx, member, id)
 	if err != nil {
 		return protocol.WatchGetResult{}, err
+	}
+	if aerr := s.allowed(ctx, w); errors.Is(aerr, errRevoked) {
+		return protocol.WatchGetResult{Watch: revokedProto(w, aerr), Notifications: []protocol.WatchNotification{}}, nil
 	}
 	pw, err := s.toProto(ctx, w)
 	if err != nil {

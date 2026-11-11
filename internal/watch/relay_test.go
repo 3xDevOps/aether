@@ -2,6 +2,7 @@ package watch
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -193,5 +194,43 @@ func TestARelayWrittenBeforeAStopIsNotWrittenAgain(t *testing.T) {
 	})
 	if n := len(h.inbox.messages(integrate.ID)); n != 1 {
 		t.Fatalf("%d messages in the relay target's inbox, want 1", n)
+	}
+}
+
+// A saved watch of a session the member no longer fully reaches reads as
+// theirs to delete, without the session, its title or what was noticed.
+func TestASavedWatchOfASessionNoLongerReachedHidesWhatItRead(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	other := &domain.Workspace{Name: "other", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(h.ctx, other); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	run := h.run(h.bob, "Secret title")
+	if err := h.db.SetRunRepos(h.ctx, run.ID, []domain.RunRepo{{WorkspaceID: other.ID, Name: "other", Path: "/repos/other", Branch: "b", BaseBranch: "main"}}); err != nil {
+		t.Fatalf("SetRunRepos: %v", err)
+	}
+	if err := h.db.GrantWorkspace(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunFailed, "", "secret failure")
+	h.eventually("the end noticed", func() bool { return len(h.notices(w.ID)) == 1 })
+	if err := h.db.RevokeWorkspaceGrant(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	list, err := h.svc.List(h.ctx, h.ada.ID, protocol.WatchListParams{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got, err := h.svc.Get(h.ctx, h.ada.ID, w.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	for name, v := range map[string]any{"List": list, "Get": got} {
+		read := fmt.Sprintf("%+v", v)
+		if !strings.Contains(read, w.ID) || strings.Contains(read, string(run.ID)) || strings.Contains(read, "Secret") || strings.Contains(read, "secret") {
+			t.Errorf("%s = %s; want the watch without its session, title or notices", name, read)
+		}
 	}
 }
