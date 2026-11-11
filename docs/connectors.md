@@ -749,7 +749,7 @@ SEQ  TIME                 MEMBER          VIA                                MET
 You see your own entries; a super admin sees everyone's. An admin also sees the
 entries in the workspaces they own, except another member's entries about a
 session they do not reach in every workspace, or one since deleted, and about a
-note from such a session. The `audit.list` RPC
+note from such a session or one since deleted. The `audit.list` RPC
 returns the same entries, at most 200 a page. The server keeps each member's
 newest 10,000 call entries and, apart from them, their newest 10,000 connector,
 account, member and Slack changes that took effect, so a flood of calls cannot

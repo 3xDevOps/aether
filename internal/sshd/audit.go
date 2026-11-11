@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -245,8 +244,8 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 		})
 		// Another member's entry about a session, or about a note from
 		// one, is shown only to a reader who reaches every workspace of
-		// that session; one about a deleted session only to super admins.
-		// A deleted note's session is unknown, so its entries stay shown.
+		// that session; one about a deleted session or note, whose scope
+		// can no longer be checked, only to super admins.
 		shows = func(e *store.AuditEntry) bool {
 			switch {
 			case e.Member == member:
@@ -258,9 +257,6 @@ func (s *Server) auditList(ctx context.Context, member domain.MemberID, raw json
 					return false
 				}
 				note, _, err := notes.GetMemory(ctx, domain.WorkspaceID(e.WorkspaceID), e.Target, nil)
-				if errors.Is(err, store.ErrNotFound) {
-					return true
-				}
 				return err == nil && (note.RunID == "" || runs.reaches(ctx, actor, note.RunID))
 			}
 			return true
