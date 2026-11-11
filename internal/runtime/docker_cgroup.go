@@ -27,18 +27,23 @@ func sessionCgroupParent(driver string) string {
 	return ""
 }
 
-// cgroupParent asks the daemon for its cgroup driver once; a failed lookup is
-// not cached.
+// cgroupParent caches the daemon's cgroup driver once a lookup succeeds. The
+// lookup runs outside the lock so a slow daemon cannot hold a caller past
+// its own deadline.
 func (d *Docker) cgroupParent(ctx context.Context) (string, error) {
 	d.cgroupMu.Lock()
-	defer d.cgroupMu.Unlock()
-	if d.cgroupKnown {
-		return d.cgroupParentName, nil
+	parent, known := d.cgroupParentName, d.cgroupKnown
+	d.cgroupMu.Unlock()
+	if known {
+		return parent, nil
 	}
 	info, err := d.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return "", fmt.Errorf("runtime: read docker cgroup driver: %w", err)
 	}
-	d.cgroupParentName, d.cgroupKnown = sessionCgroupParent(info.Info.CgroupDriver), true
-	return d.cgroupParentName, nil
+	parent = sessionCgroupParent(info.Info.CgroupDriver)
+	d.cgroupMu.Lock()
+	d.cgroupParentName, d.cgroupKnown = parent, true
+	d.cgroupMu.Unlock()
+	return parent, nil
 }
