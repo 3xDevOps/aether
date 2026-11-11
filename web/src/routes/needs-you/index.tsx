@@ -47,7 +47,7 @@ const tones: Partial<Record<AttentionItem['kind'], Tone>> = { failed: 'failed', 
 function useOpen(item: AttentionItem, run: RunRecord | undefined) {
   const navigate = useStore((s) => s.navigate)
   return () => {
-    const route = run ? targetRoute(run, needsYouConditions.find((c) => c.id === item.kind)?.target) : runRoute(item.run_id)
+    const route = targetRoute(run ?? { id: item.run_id }, needsYouConditions.find((c) => c.id === item.kind)?.target)
     navigate(route.name, route.params, { remember: false })
   }
 }

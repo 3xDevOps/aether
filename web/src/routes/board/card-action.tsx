@@ -49,9 +49,10 @@ let sends = 0
 
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
 
-// A request is answered on the session's own view, which shows it on a phone too.
-export function targetRoute(run: Pick<RunRecord, 'id' | 'mode' | 'acp'>, target: NeedsYouTarget | undefined): Route {
-  return runRoute(run.id, target === 'request' ? defaultView(run) : target && targetView[target])
+// The view that shows a request depends on the run's mode, unknown until its record loads.
+export function targetRoute(run: Pick<RunRecord, 'id'> | RunRecord, target: NeedsYouTarget | undefined): Route {
+  const view = target === 'request' ? ('mode' in run ? defaultView(run) : undefined) : target && targetView[target]
+  return runRoute(run.id, view)
 }
 
 export function openCard(card: BoardCard, navigate: UiSlice['navigate']) {

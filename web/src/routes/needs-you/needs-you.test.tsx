@@ -41,6 +41,15 @@ describe('Needs you cards', () => {
     expect(useStore.getState().shownRunView).toEqual({ runId: 'run_q', view: 'changes' })
   })
 
+  it('opens a disconnected session on Terminal before its run loads', async () => {
+    const cards = await showNeedsYou([{
+      ...base, kind: 'disconnected', run_id: 'run_q', title: 'lost connection', reason: 'Agent disconnected',
+    }])
+    useStore.setState({ runViewMemory: { run_q: 'changes' } })
+    fireEvent.click(cards.getByRole('button', { name: 'Open' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_q', view: 'terminal' } })
+  })
+
   it('opens a Standard request on Terminal and keeps the chosen tab', async () => {
     const cards = await showNeedsYou([{
       ...base, kind: 'question', run_id: 'run_q', title: 'pick a port', reason: 'Question: answer in the terminal',

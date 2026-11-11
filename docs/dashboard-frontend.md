@@ -1656,9 +1656,12 @@ both show:
 | Unreviewed finish | **Review** |
 
 Every action but Approve and the card's Reply goes where the condition's
-`target` points: the session's `defaultView` (requests and questions, so
-Terminal for Standard and Session for Enhanced), its Terminal view (blocked,
-held, Enhanced failure), or its Changes view for an unreviewed finish.
+`target` points: an agent's request or question opens the session's
+`defaultView` (Terminal for Standard, Session for Enhanced), a blocked, held
+or failed Enhanced session its Terminal view, an unreviewed finish its Changes
+view, and a teammate's question or a usage limit the session's last chosen
+view. Until the session's record loads, an agent's request also opens the
+last chosen view.
 
 While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
