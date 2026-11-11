@@ -349,3 +349,27 @@ func TestARestartFinishesAKillRecordedWhileAsleep(t *testing.T) {
 		return err == nil && got.Status == domain.RunAbandoned
 	})
 }
+
+// A closed run whose sleep was recorded but whose container was never
+// stopped has it stopped at restart.
+func TestARestartFinishesAnInterruptedClosedSleep(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(entry); err != nil {
+		t.Fatal(err)
+	}
+	s2 := e.restartACP(t)
+	c := e.container(t, run.ID)
+	waitFor(t, "the container stopped", func() bool { return containerState(c) == "stopped" })
+	if s2.Sleep(run.ID).AsleepSince == nil {
+		t.Fatal("the restart lost the closed session's sleep")
+	}
+}

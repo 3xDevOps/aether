@@ -694,11 +694,12 @@ func (e *awakeExec) Detach() error {
 }
 
 // wakesRun reports a development call that starts work in the container: a
-// terminal or a browser operation. The reads an open Browser tab polls,
-// status, pages, console and network, neither wake a run nor keep it awake.
+// terminal, a browser operation, or taking control for one. The reads an
+// open Browser tab polls, status, pages, console and network, neither wake a
+// run nor keep it awake.
 func wakesRun(method string) bool {
 	switch method {
-	case protocol.MethodDevTerminalStart, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserNavigate,
+	case protocol.MethodDevTerminalStart, protocol.MethodDevControlAcquire, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserNavigate,
 		protocol.MethodDevBrowserAction, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserReset,
 		protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserInspect, protocol.MethodDevBrowserScreenshot,
 		protocol.MethodDevBrowserWait:
