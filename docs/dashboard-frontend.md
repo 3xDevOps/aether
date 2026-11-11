@@ -3604,28 +3604,26 @@ ACP row whose `resource_link` URIs name attached files matches the room
 message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
 URLs when identity, session or row changes, and shows each other file as a chip
-named by its basename with the path as its title. Thumbnails keep each image's
-aspect ratio within 320×192px; their composer radius shrinks on short images so
+named by its basename with the path as its title. Attachments wrap within
+320px so image-only message bubbles do not expand beyond their thumbnails.
+Thumbnails keep each image's aspect ratio within 320×192px; their composer radius shrinks on short images so
 the corners do not meet. Each image is named by its place in the row
 ("Image 2 of 3", or "Attached image" when it is alone), and its thumbnail is a
 button that opens the same blob in a `Dialog` filling the window
 (the whole screen on a phone). The dialog shows only the image on a near-black
-backdrop, with the composer's thin border and corner radius, at up to 80% of
-the viewport width and height. A top-bar row keeps the image clear of macOS
-window controls and holds a 44px Close button; the image name stays for screen
-readers. Each image fits the frame, enlarging small images when needed. Zoom
+backdrop, centered in the viewport with the composer's thin border and corner
+radius, at up to 80% of the viewport width and height. A 44px Close button sits
+at the top right, clear of macOS window controls; the image name stays for
+screen readers. Each image fits the frame, enlarging small images when needed. Zoom
 runs from fitted to 400% of the larger of the image's native size or fitted
 size, in a frame that scrolls and takes keyboard focus; the focus outline
-follows the image. A trackpad pinch (a ctrl wheel, or Safari's gesture events,
-both kept from zooming the page) or a two-finger touch pinch zooms about the
-fingers or pointer, including over gallery controls. `Mod+=`/`Mod+-` step
-by 1.25 about the frame's centre while
+follows the image. The mouse wheel, trackpad pinch (a ctrl wheel, or Safari's
+gesture events), or two-finger touch pinch zooms about the fingers or pointer.
+Zooming out stops at fit. `Mod+=`/`Mod+-` step by 1.25 about the frame's centre while
 `Mod+0` fits again. A click on a fitted image zooms downscaled images to 100%
 or enlarged images to 125% of fit, preserving the clicked point. In a
-multi-image gallery, Previous image and Next image buttons appear on hover or
-keyboard focus; touch keeps them visible.
-They step through loaded images. `ArrowLeft` and `ArrowRight`, or a horizontal
-swipe, do the same while the image is fitted, stopping at either end;
+multi-image gallery, `ArrowLeft` and `ArrowRight`, or a horizontal swipe, step
+through loaded images while the image is fitted, stopping at either end;
 zoomed in, or with a modifier key held or the page pinch-zoomed, they do not
 switch. With the image fitted, clicking beside it closes the dialog; while
 zoomed, the outer gutters close it and the frame remains scrollable. Losing an
