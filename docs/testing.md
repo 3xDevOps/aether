@@ -735,6 +735,11 @@ Start Menu and the registry, so they refuse to run unless
 fails, `scripts/defender-diagnostics.ps1` prints Defender's detections in the
 job log. The screenshots are uploaded as `windows-desktop-*` artifacts.
 
+When `update-smoke.ps1` cannot move `aether.exe` because another process
+holds it open, it prints the processes Windows Restart Manager names and
+waits up to 30 s for them to close it. It fails if Restart Manager names no
+process, or if the move still fails after the wait.
+
 Before they run, `scripts/windows-defender.ps1 -Mode Prepare` removes the
 runner image's Defender exclusions and adds one for GitHub's own agent,
 `provjobd.exe*` in the runner user's Temp. On `windows-11-arm`, Defender
