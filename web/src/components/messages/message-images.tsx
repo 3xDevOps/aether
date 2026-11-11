@@ -237,7 +237,8 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
       >
         <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
       </div>
-      <div className="absolute right-4 top-[calc(var(--safe-top)_+_1rem)]">
+      <div className="absolute right-4 top-[calc(var(--safe-top)_+_1rem)] flex items-center gap-3">
+        {gallery && <span aria-hidden className="rounded-control bg-chrome px-3 py-2 text-ui-sm text-muted">{name} · ← →</span>}
         <DialogTitle className="sr-only">{name}</DialogTitle>
         <DialogDescription className="sr-only">
           {[
