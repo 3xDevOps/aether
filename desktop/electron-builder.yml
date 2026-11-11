@@ -20,6 +20,7 @@ files:
   - cli-binding.js
   - notify.js
   - sidecar-exit.js
+  - zoom.js
   - preload.js
   - package.json
 

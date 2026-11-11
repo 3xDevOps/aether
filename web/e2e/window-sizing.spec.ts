@@ -21,17 +21,16 @@ import { repoRoot, scratchDir } from './harness/paths'
  * layout that needs more than this is broken for somebody.
  */
 function minimumWindow(): { width: number; height: number } {
-  const main = readFileSync(path.join(repoRoot, 'desktop', 'main.js'), 'utf8')
+  const zoom = readFileSync(path.join(repoRoot, 'desktop', 'zoom.js'), 'utf8')
   const read = (key: string): number => {
-    const found = [...main.matchAll(new RegExp(`${key}:\\s*(\\d+)`, 'g'))]
-    // More than one window would mean this reads the wrong one, and none
-    // would mean the shell stopped enforcing a floor at all.
+    const found = [...zoom.matchAll(new RegExp(`const ${key} = (\\d+)`, 'g'))]
+    // None would mean the shell stopped enforcing a floor at all.
     if (found.length !== 1) {
-      throw new Error(`desktop/main.js sets ${found.length} ${key} values, expected 1`)
+      throw new Error(`desktop/zoom.js sets ${found.length} ${key} values, expected 1`)
     }
     return Number(found[0][1])
   }
-  return { width: read('minWidth'), height: read('minHeight') }
+  return { width: read('MIN_WIDTH'), height: read('MIN_HEIGHT') }
 }
 
 /** update.check with a release out, in the shape internal/localgw answers. */
