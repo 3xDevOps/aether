@@ -122,7 +122,8 @@ type peerScoped interface {
 	ScopedTo(reaches func(domain.RunID) bool) Payload
 }
 
-// Scoped is ev as a reader with scope may see it.
+// Scoped is ev with the peers its payload names that scope cannot reach
+// removed.
 func Scoped(ev Event, scope Scope) Event {
 	if p, ok := ev.Payload.(peerScoped); ok && scope.Run != nil {
 		ev.Payload = p.ScopedTo(scope.Run)

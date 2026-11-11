@@ -11,7 +11,6 @@ const TypeWorkspaceAccess Type = "workspace.access"
 // a member who just lost the workspace and with it that event.
 const TypeMemberAccess Type = "member.access"
 
-// Workspace access actions.
 const (
 	AccessGranted = "granted"
 	AccessRevoked = "revoked"
