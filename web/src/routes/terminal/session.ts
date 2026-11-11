@@ -176,6 +176,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const previousStatusRef = useRef(run?.status)
   const relaunchPendingRef = useRef(false)
   const previousAccountRef = useRef(run?.account_member_id)
+  const previousAsleepRef = useRef(run?.asleep_since)
   terminalRef.current = terminal
   // Render the new authority as revoked immediately; the layout cleanup below
   // makes the stored lease match before the browser can paint.
@@ -571,6 +572,16 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     relaunchPendingRef.current = true
     relaunchIfEnded()
   }, [relaunchIfEnded, run?.account_member_id])
+
+  // A wake starts the session's terminal anew, which the stream the sleep
+  // ended never reconnects to on its own.
+  useEffect(() => {
+    const previous = previousAsleepRef.current
+    previousAsleepRef.current = run?.asleep_since
+    if (previous === undefined || run?.asleep_since !== undefined) return
+    relaunchPendingRef.current = true
+    relaunchIfEnded()
+  }, [relaunchIfEnded, run?.asleep_since])
 
   useLayoutEffect(() => {
     const previousAuthority = previousAuthorityRef.current

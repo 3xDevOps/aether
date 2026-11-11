@@ -220,7 +220,7 @@ agents-image:
 # needs Docker and real git, and `make agents-image` first.
 test-agents:
 	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test $(if $(INTEGRATION_NORACE),,-race) -count=1 -timeout=15m -tags integration \
-		-run '^(TestIntegrationRealAgents|TestIntegrationSilentModelParksAsPossibleStall)$$' -v ./internal/server
+		-run '^(TestIntegrationRealAgents|TestIntegrationSilentModelParksAsPossibleStall|TestIntegrationClaudeEnhancedSleepsAndWakes)$$' -v ./internal/server
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on

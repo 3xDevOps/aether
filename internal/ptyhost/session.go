@@ -89,6 +89,7 @@ type session struct {
 	ended              bool
 	stopped            bool
 	lastOut            time.Time
+	lastIn             time.Time
 	paintQuietUntil    time.Time
 	done               chan struct{}
 	title              titleScanner
@@ -484,6 +485,15 @@ func (s *session) lastOutput() (time.Time, bool) {
 	return s.lastOut, true
 }
 
+func (s *session) lastInput() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return time.Time{}, false
+	}
+	return s.lastIn, true
+}
+
 func (s *session) addClient(c *client) error {
 	return s.addClientCommitted(context.Background(), c)
 }
@@ -635,6 +645,7 @@ func (s *session) writeClientStdinContext(ctx context.Context, c *client, p []by
 		s.mu.Unlock()
 		return ErrWriteDenied
 	}
+	s.lastIn = time.Now()
 	s.mu.Unlock()
 	return s.writeStdinContextLocked(ctx, p)
 }

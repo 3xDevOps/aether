@@ -42,6 +42,9 @@ const (
 	TypeRunMode       Type = "run.mode"
 	TypeRunModel      Type = "run.model"
 	TypeRunEffort     Type = "run.effort"
+	// TypeRunSleep carries an idle session's sleep state after it fell
+	// asleep, started waking, woke, or failed to wake.
+	TypeRunSleep Type = "run.sleep"
 	// TypeRunArchived carries a run's archive state: a nil ArchivedAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -271,6 +274,18 @@ type RunEffortPayload struct {
 func (RunEffortPayload) EventType() Type { return TypeRunEffort }
 
 func init() { registerPayload[RunEffortPayload](TypeRunEffort) }
+
+// RunSleepPayload reports a run's sleep state. A nil AsleepSince means the
+// run is awake; WakeError is the last wake's failure while it stays asleep.
+type RunSleepPayload struct {
+	AsleepSince *time.Time `json:"asleep_since,omitempty"`
+	Waking      bool       `json:"waking,omitempty"`
+	WakeError   string     `json:"wake_error,omitempty"`
+}
+
+func (RunSleepPayload) EventType() Type { return TypeRunSleep }
+
+func init() { registerPayload[RunSleepPayload](TypeRunSleep) }
 
 // RunArchivedPayload reports a run's archive state as RFC3339. A nil
 // ArchivedAt means the run was restored.

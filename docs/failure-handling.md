@@ -19,6 +19,7 @@ shown beside the status says why it is there.
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
 | Host memory is low | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | Close or kill sessions. A closed session's paused container still holds its memory; **Free container…** releases it. |
+| An Enhanced Claude Code session is idle for `--run-sleep-after` (30 minutes) | The Chat view shows **Asleep since <time>**; `aether sessions` shows `(asleep)`. | Stops the container with `docker stop`, freeing its memory and CPU, and keeps its disk and checkout. | Nothing. The next message wakes it ([Idle sleep](#idle-sleep)). |
 | An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
 | A Standard agent exits | The session stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the session. |
 | A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the session's transcript. |
@@ -502,11 +503,52 @@ open files` means the instance limit, or the server's own file descriptors.
 Sessions launched afterwards watch again. A session that is already polling keeps
 polling until it is reopened.
 
+## Idle sleep
+
+An Enhanced session of an agent whose conversation survives a container
+restart falls asleep after `--run-sleep-after` (default `30m`) without
+activity: Aether runs `docker stop` on its container. Memory and CPU are
+freed; the container's files, the checkout, the transcript and the
+conversation stay. Only Claude Code sleeps
+([harnesses.md](harnesses.md#supported-agents), **Idle sleep**); every other
+agent, and every Standard or Background session, stays awake.
+
+Activity is any of these within the window: a turn, queued prompt, background
+task or open permission request or question; agent output or a file change in
+the checkout; output or typing in the session's terminal or a shell tab; an
+`aether ssh` process still running; a Browser tab operation; a member typing in
+the composer. A session that waits for you after its turn ended, or waits for
+CI or another session, is idle. A session that waits for a process, a session
+you paused and a session switching modes or accounts never sleep.
+
+The session wakes when you send a message or answer, mail reaches it, you type
+in its terminal, open a shell tab, use its Browser tab, start `aether ssh`, or
+choose **Wake** in the Chat view. The request that woke it waits while the
+container starts and the agent restores its conversation, then goes through.
+Two wakes at once start the container once. Waking counts against the same
+memory and disk checks as a launch; a refused or failed wake returns its error
+to the request that caused it, keeps the session asleep and shows the error
+under **Asleep since**. A wake never starts a new conversation: when the agent
+cannot restore its own, the wake fails with the agent's error.
+
+Processes that ran in the container before the sleep and open connections do
+not survive; the terminal and the Chat view say so after the wake. Shell tabs
+from before the sleep show as ended. The Browser tab's companion is paused
+while the session sleeps and resumed by the wake; if its pages stop loading,
+choose **Reset** in the Browser tab.
+
+A closed Enhanced Claude Code session's paused container is stopped the same
+way once it has been closed for `--run-sleep-after`. **Relaunch** starts it
+again and restores the conversation. `--run-container-ttl` and `--checkout-ttl`
+work as before for sleeping sessions.
+
+`sudo aether-server config set run-sleep-after 0` keeps every session awake.
+
 ## What stays after a session ends
 
 | Action | Container | Checkout | Reopen |
 | --- | --- | --- | --- |
-| **Close** (`aether close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
+| **Close** (`aether close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
 | A Background session finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the session ends. | No. |
 | **Kill run** (`aether kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
 | **Free container…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
@@ -575,6 +617,7 @@ sudo systemctl restart aether-server
 | `--poll-interval` | `30s` | How often stalls, retention and disk are checked. Values above `1m` act as `1m`. | Keep it at a third of the threshold or less. |
 | `--checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps every checkout, and disk cleanup leaves them alone. | Lower on a small disk. |
 | `--run-container-ttl` | `168h` | How long a closed session's container is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
+| `--run-sleep-after` | `30m` | How long an idle Enhanced session of an agent that can restore its conversation, open or closed, keeps its container running ([Idle sleep](#idle-sleep)). `0` keeps every session awake. | Lower on a host short of memory; `0` when processes in idle sessions must keep running. |
 | `--min-free-disk` | automatic | The free-space reserve per filesystem, in bytes. Negative turns the disk check off; the memory check stays. | See below. |
 | `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per session and environment. | Lower to share a small host. |
 | `--run-memory` | 8 GiB | Memory ceiling per session and environment, in bytes. Swap adds a quarter of it. | Raise when sessions hit out-of-memory kills. |

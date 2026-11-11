@@ -275,6 +275,14 @@ func (s *Scheduler) CallDevelopment(ctx context.Context, id domain.RunID, p cont
 	if err := auth(); err != nil {
 		return nil, err
 	}
+	if wakesRun(method) {
+		awake, err := s.holdAwake(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		defer awake()
+		s.noteBrowsed(id, method)
+	}
 	var result any
 	var err error
 	switch {

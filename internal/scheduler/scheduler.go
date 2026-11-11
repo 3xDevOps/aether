@@ -118,6 +118,10 @@ type Config struct {
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
 	RunContainerTTL      time.Duration // default 1h; negative destroys on close/completion
+	// RunSleepAfter is how long an Enhanced session of an agent with
+	// harness.Capabilities.Sleep stays idle, open or closed, before its
+	// container is stopped; zero keeps every session awake.
+	RunSleepAfter time.Duration
 	// DefaultBrowserImage is this build's browser image; its repository is
 	// swept of unused tags.
 	DefaultBrowserImage string
@@ -153,6 +157,7 @@ type Config struct {
 	// installed in the member home.
 	HarnessUpdateDisabled bool
 	// Test-only overrides of the matching default* constants.
+	sleepAnyAgent        bool
 	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
 	filesystemCapacity   func(string) (disk.Usage, error)
@@ -511,6 +516,25 @@ type supervised struct {
 	// because a move held the claim: nothing waits on the container until
 	// the move finalizes it or restarts supervision.
 	waitYielded bool
+	// asleepSince is when idleness stopped the container, zero while awake,
+	// and sleeping is set while the sleep is stopping it, until sleepDone
+	// closes. sleepGen counts sleeps and wakes: a Wait that began under
+	// another one ignores the exit it sees. waking is closed when the wake
+	// in flight settles, and wakeErr is the last wake's failure.
+	asleepSince time.Time
+	sleeping    bool
+	sleepDone   chan struct{}
+	sleepGen    uint64
+	waking      chan struct{}
+	wakeErr     error
+	// awake counts callers the container must not stop under: a delivery,
+	// an exec or a browser operation in flight.
+	awake int
+	// typedAt, browsedAt and execAt are when a member last typed in the
+	// composer, used the development browser, and had an exec running.
+	typedAt   time.Time
+	browsedAt time.Time
+	execAt    time.Time
 }
 
 type pendingRun struct {
@@ -774,6 +798,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-sweep.C:
 			s.checkStalls(ctx)
+			s.sleepIdle(ctx)
 			s.refreshActivities(ctx)
 			s.finishOverdueReports()
 			s.sweepRetained(ctx)

@@ -43,7 +43,7 @@ func (s *Scheduler) admitRunExec(ctx context.Context, id domain.RunID, p control
 	if err != nil {
 		return LiveRun{}, err
 	}
-	if s.Paused(id) {
+	if s.Paused(id) || s.Sleep(id).AsleepSince != nil {
 		return LiveRun{}, ErrRunPaused
 	}
 	if err = s.checkDevelopmentOpen(id, live.ContainerID); err != nil {
@@ -55,6 +55,14 @@ func (s *Scheduler) admitRunExec(ctx context.Context, id domain.RunID, p control
 // StartRunExec starts spec as an owned execution, so stopping it reaps every
 // process it started.
 func (s *Scheduler) StartRunExec(ctx context.Context, id domain.RunID, p control.Principal, spec RunExec, authorize func() error) (runtime.ManagedExec, error) {
+	if err := s.developmentAuthorization(ctx, id, p, authorize); err != nil {
+		return nil, err
+	}
+	awake, err := s.holdAwake(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	defer awake()
 	live, err := s.admitRunExec(ctx, id, p, authorize)
 	if err != nil {
 		return nil, err
@@ -67,8 +75,14 @@ func (s *Scheduler) StartRunExec(ctx context.Context, id domain.RunID, p control
 		Argv: spec.Argv, WorkingDir: live.Workdir, Env: spec.Env,
 		Cols: spec.Cols, Rows: spec.Rows, CreationKey: "ssh-" + rand.Text(), Lossless: true,
 	}
+	var started runtime.ManagedExec
 	if spec.TTY {
-		return managed.StartExecTTY(ctx, live.ContainerID, exec)
+		started, err = managed.StartExecTTY(ctx, live.ContainerID, exec)
+	} else {
+		started, err = managed.StartExecPipe(ctx, live.ContainerID, exec)
 	}
-	return managed.StartExecPipe(ctx, live.ContainerID, exec)
+	if err != nil {
+		return nil, err
+	}
+	return s.keepAwake(id, started), nil
 }

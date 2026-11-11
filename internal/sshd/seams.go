@@ -95,6 +95,13 @@ type RunController interface {
 	// Paused reports whether the run's container is currently frozen;
 	// unknown or finished runs report false.
 	Paused(run domain.RunID) bool
+	// Sleep is the live run's idle sleep; a run that is awake has none.
+	Sleep(run domain.RunID) scheduler.SleepState
+	// WakeRun starts a sleeping run's container and restores its agent,
+	// returning once it can take input or with the wake's error.
+	WakeRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error
+	// NoteTyping records a member typing in the run's composer.
+	NoteTyping(run domain.RunID)
 	// Cause is what chose activity for the live run; empty when unknown or
 	// when the run's activity has since changed.
 	Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause

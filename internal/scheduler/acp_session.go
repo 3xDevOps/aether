@@ -155,6 +155,11 @@ func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
 }
 
 func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error {
+	awake, err := s.holdAwake(context.Background(), run)
+	if err != nil {
+		return err
+	}
+	defer awake()
 	sess, err := s.acp.live(context.Background(), run)
 	if err != nil {
 		return err
@@ -267,11 +272,17 @@ func (s *Scheduler) attachedAppServer(run domain.RunID) bool {
 	return entry != nil && entry.appServer && !entry.paused
 }
 
+// IdleEnhanced counts a sleeping open Enhanced session as idle: a prompt
+// wakes it.
 func (s *Scheduler) IdleEnhanced(run domain.RunID) bool {
 	s.mu.Lock()
 	entry := s.runs[run]
+	asleep := entry != nil && entry.launchMode == domain.LaunchACP && !entry.retained && (entry.sleeping || !entry.asleepSince.IsZero())
 	enhanced := entry != nil && entry.launchMode == domain.LaunchACP && !entry.paused && entry.switching == ""
 	s.mu.Unlock()
+	if asleep {
+		return true
+	}
 	if !enhanced {
 		return false
 	}
@@ -284,6 +295,14 @@ func (s *Scheduler) IdleEnhanced(run domain.RunID) bool {
 }
 
 func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt string) error {
+	if !s.IdleEnhanced(run) {
+		return errACPBusy
+	}
+	awake, err := s.holdAwake(ctx, run)
+	if err != nil {
+		return err
+	}
+	defer awake()
 	if !s.IdleEnhanced(run) {
 		return errACPBusy
 	}

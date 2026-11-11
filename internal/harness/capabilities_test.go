@@ -14,8 +14,8 @@ func TestCapabilityTable(t *testing.T) {
 	yes := map[bool]string{true: "yes", false: "no"}
 	suggests := map[bool]string{true: "Enhanced", false: "Standard"}
 	var want strings.Builder
-	want.WriteString("| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Set up suggests |\n")
-	want.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
+	want.WriteString("| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Idle sleep | Set up suggests |\n")
+	want.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, p := range Profiles() {
 		if p.Name == "custom" {
 			continue
@@ -34,8 +34,8 @@ func TestCapabilityTable(t *testing.T) {
 		if len(mail) == 0 {
 			mail = []string{"none"}
 		}
-		fmt.Fprintf(&want, "| `%s` | %s | %s | %s | %s | %s | %s |\n", p.Name, status[c.Status], strings.Join(mail, " and "),
-			enhanced[p.EnhancedSupport()], yes[c.ModeSwitch], yes[c.BackgroundTasks], suggests[c.EnhancedDefault])
+		fmt.Fprintf(&want, "| `%s` | %s | %s | %s | %s | %s | %s | %s |\n", p.Name, status[c.Status], strings.Join(mail, " and "),
+			enhanced[p.EnhancedSupport()], yes[c.ModeSwitch], yes[c.BackgroundTasks], yes[c.Sleep], suggests[c.EnhancedDefault])
 	}
 	doc, err := os.ReadFile("../../docs/harnesses.md")
 	if err != nil {
@@ -52,7 +52,7 @@ func TestCapabilitiesNeedTheirLaunch(t *testing.T) {
 		if c.IdleWake && c.Hooks != HooksManaged && !c.Steer {
 			t.Errorf("%s: idle wake rides on the managed hooks or the app-server", p.Name)
 		}
-		if (c.EnhancedDefault || c.ModeSwitch || c.BackgroundTasks) && p.EnhancedSupport() == EnhancedNone {
+		if (c.EnhancedDefault || c.ModeSwitch || c.BackgroundTasks || c.Sleep) && p.EnhancedSupport() == EnhancedNone {
 			t.Errorf("%s: declares an Enhanced capability with no ACP command", p.Name)
 		}
 		if c.ModeSwitch && len(p.ResumeArgs) == 0 {

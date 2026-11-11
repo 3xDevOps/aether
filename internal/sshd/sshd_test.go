@@ -696,6 +696,12 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 	return f.paused[run]
 }
 
+func (f *fakeRuns) Sleep(domain.RunID) scheduler.SleepState { return scheduler.SleepState{} }
+
+func (f *fakeRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+
+func (f *fakeRuns) NoteTyping(domain.RunID) {}
+
 func (f *fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
 func (f *fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 

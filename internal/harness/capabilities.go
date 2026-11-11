@@ -38,6 +38,10 @@ type Capabilities struct {
 	// and the turns it starts on its own when one ends. Only Claude's adapter
 	// reports them, so setting it also sends that adapter's session meta.
 	BackgroundTasks bool
+	// Sleep: an idle Enhanced session's container may be stopped and started
+	// again on its next use, the agent restoring its conversation. Set only
+	// once a test shows the conversation surviving a container restart.
+	Sleep bool
 }
 
 type Hooks int

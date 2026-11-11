@@ -54,6 +54,9 @@ func (s *Server) presenceTyping(ctx context.Context, member domain.MemberID, par
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	if s.cfg.Runs != nil && !p.Stopped {
+		s.cfg.Runs.NoteTyping(run.ID)
+	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: run.WorkspaceID,
 		RunID:       run.ID,

@@ -62,6 +62,9 @@ type runView struct {
 	PendingInputs []pendingInput  `json:"pending_inputs"`
 	Branch        string          `json:"branch"`
 	Report        *runReport      `json:"report,omitempty"`
+	// AsleepSince is when idleness stopped the session's container.
+	AsleepSince *string `json:"asleep_since,omitempty"`
+	WakeError   string  `json:"wake_error,omitempty"`
 }
 
 // pendingInput.Options are those aether answer accepts; a standard run's
@@ -81,6 +84,7 @@ func viewOf(r protocol.Run, workspace string, items []protocol.AttentionItem, re
 	v := runView{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Workspace: workspace, Status: displayStatus(r), State: r.Status,
 		Reason: r.Reason, Wait: r.Wait, WaitText: r.Wait.Text(time.Now()), Branch: r.Branch, PendingInputs: []pendingInput{},
+		AsleepSince: r.AsleepSince, WakeError: r.WakeError,
 	}
 	offered := map[string][]protocol.AttentionOption{}
 	for _, it := range items {
@@ -211,6 +215,12 @@ func printRunView(w io.Writer, v runView, items []protocol.AttentionItem) error 
 	if v.WaitText != "" {
 		_, _ = fmt.Fprintf(tw, "wait\t%s\n", printable(v.WaitText))
 	}
+	if v.AsleepSince != nil {
+		_, _ = fmt.Fprintf(tw, "asleep\tsince %s; its container is stopped until a prompt, a typed terminal or aether ssh wakes it\n", *v.AsleepSince)
+	}
+	if v.WakeError != "" {
+		_, _ = fmt.Fprintf(tw, "wake failed\t%s\n", printable(v.WakeError))
+	}
 	_, _ = fmt.Fprintf(tw, "workspace\t%s (%s)\n", v.Workspace, v.WorkspaceID)
 	_, _ = fmt.Fprintf(tw, "branch\t%s\n", v.Branch)
 	_, _ = fmt.Fprintf(tw, "state\t%s\n", v.State)
@@ -293,8 +303,12 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 		if r.RequestedAccountMemberID != "" {
 			account += " (fallback)"
 		}
+		status := displayStatus(r)
+		if r.AsleepSince != nil {
+			status += " (asleep)"
+		}
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, displayStatus(r), r.Harness, memberName(r.MemberID), account, overlapOf[r.ID], title, task); err != nil {
+			r.ID, status, r.Harness, memberName(r.MemberID), account, overlapOf[r.ID], title, task); err != nil {
 			return err
 		}
 	}

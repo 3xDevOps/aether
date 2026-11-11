@@ -889,6 +889,7 @@ type fakePTYSession struct {
 	mu    sync.Mutex
 	out   bytes.Buffer
 	last  time.Time
+	typed time.Time
 	ended bool
 }
 
@@ -1012,6 +1013,18 @@ func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	return sess.last, true
+}
+
+func (p *fakePTY) LastInput(key ptyhost.SessionKey) (time.Time, bool) {
+	p.mu.Lock()
+	sess, ok := p.sessions[key]
+	p.mu.Unlock()
+	if !ok {
+		return time.Time{}, false
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	return sess.typed, true
 }
 
 func (p *fakePTY) LastLine(ctx context.Context, run domain.RunID, wait time.Duration) (string, error) {

@@ -367,6 +367,10 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 	out := protocol.RunFromDomain(run)
 	if s.cfg.Runs != nil {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
+		if sleep := s.cfg.Runs.Sleep(run.ID); sleep.AsleepSince != nil {
+			since := sleep.AsleepSince.UTC().Format(time.RFC3339Nano)
+			out.AsleepSince, out.Waking, out.WakeError = &since, sleep.Waking, sleep.WakeError
+		}
 		out.Cause = string(s.cfg.Runs.Cause(run.ID, run.Activity))
 		out.Wait = s.cfg.Runs.Wait(run.ID, run.Activity)
 		if l, ok := s.cfg.Runs.Liveness(run.ID); ok {
@@ -467,6 +471,10 @@ func (s *Server) runResume(ctx context.Context, member domain.MemberID, params j
 	return s.runAct(ctx, member, params, s.cfg.Runs.Resume)
 }
 
+func (s *Server) runWake(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	return s.runAct(ctx, member, params, s.cfg.Runs.WakeRun)
+}
+
 func (s *Server) runAct(ctx context.Context, member domain.MemberID, params json.RawMessage, act func(context.Context, domain.RunID, domain.MemberID) error) (any, *protocol.Error) {
 	id, perr := runIDParams(params)
 	if perr != nil {
@@ -498,6 +506,10 @@ func (s *Server) runInject(ctx context.Context, member domain.MemberID, params j
 	}
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
 	if err != nil {
+		return nil, rpcError(err)
+	}
+	// Woken before the room's delivery admission, which a wake must not hold.
+	if err = s.cfg.Runs.WakeRun(ctx, run.ID, member); err != nil {
 		return nil, rpcError(err)
 	}
 	result, err := rooms.Post(ctx, collab.MessageInput{
