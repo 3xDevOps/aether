@@ -255,6 +255,10 @@ func (s *Server) scheduleDelete(ctx context.Context, member domain.MemberID, par
 	if p.Template == "" {
 		return nil, invalidParams("template is required")
 	}
+	// As in scheduleSave: an owner change cannot land between this check
+	// and the delete that trusts it.
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
 	admin, perr := s.scheduleAdmin(ctx, member, workspace)
 	if perr != nil {
 		return nil, perr
