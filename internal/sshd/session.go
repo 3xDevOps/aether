@@ -192,21 +192,19 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 	}
 	gitCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
-	s.spawn(func() { s.stopGitOnAccessLoss(gitCtx, stop, wake, member, op, ws.ID) })
+	s.spawn(func() { s.stopGitOnAccessLoss(gitCtx, stop, wake, member, op, ws.ID, ch.Stderr()) })
 	var code int
 	if op == "upload-pack" {
 		code, err = s.cfg.Git.UploadPack(gitCtx, ws.ID, ch, ch, ch.Stderr())
 	} else {
 		code, err = s.cfg.Git.ReceivePack(gitCtx, ws.ID, ch, ch, ch.Stderr())
 	}
-	if lost := context.Cause(gitCtx); errors.Is(lost, errGitAccessLost) {
-		err = lost
-	}
-	if err != nil {
+	lost := errors.Is(context.Cause(gitCtx), errGitAccessLost)
+	if err != nil && !lost {
 		_, _ = fmt.Fprintf(ch.Stderr(), "aether: git %s: %v\n", op, err)
-		if code == 0 {
-			code = 128
-		}
+	}
+	if (err != nil || lost) && code == 0 {
+		code = 128
 	}
 	sendExitStatus(ch, code)
 }
@@ -235,7 +233,7 @@ func (s *Server) gitAccess(ctx context.Context, member domain.MemberID, op strin
 // stopGitOnAccessLoss re-runs gitAccess on every access change in this
 // process and every revalidateInterval for writes made outside it, and
 // stops the transfer the first time it fails, a store error included.
-func (s *Server) stopGitOnAccessLoss(ctx context.Context, stop context.CancelCauseFunc, wake <-chan struct{}, member domain.MemberID, op string, ws domain.WorkspaceID) {
+func (s *Server) stopGitOnAccessLoss(ctx context.Context, stop context.CancelCauseFunc, wake <-chan struct{}, member domain.MemberID, op string, ws domain.WorkspaceID, stderr io.Writer) {
 	ticker := time.NewTicker(s.cfg.revalidateInterval)
 	defer ticker.Stop()
 	for {
@@ -247,7 +245,11 @@ func (s *Server) stopGitOnAccessLoss(ctx context.Context, stop context.CancelCau
 		case <-ticker.C:
 		}
 		if err := s.gitAccess(ctx, member, op, ws); err != nil {
-			stop(fmt.Errorf("%w: %w", errGitAccessLost, err))
+			lost := fmt.Errorf("%w: %w", errGitAccessLost, err)
+			// Before stop: the cancelled transport half-closes the
+			// channel, after which nothing more reaches the client.
+			_, _ = fmt.Fprintf(stderr, "aether: git %s: %v\n", op, lost)
+			stop(lost)
 			return
 		}
 	}

@@ -235,7 +235,8 @@ func TestGitTransportNeedsTheWorkspace(t *testing.T) {
 }
 
 // stalledGit advertises refs and then waits for its context, as a
-// receive-pack does while the client holds back its pack.
+// receive-pack does while the client holds back its pack. Cancelled, it
+// half-closes stdout as the real transport does.
 type stalledGit struct {
 	fakeGit
 	started chan struct{}
@@ -247,6 +248,9 @@ func (g *stalledGit) ReceivePack(ctx context.Context, _ domain.WorkspaceID, _ io
 	}
 	close(g.started)
 	<-ctx.Done()
+	if c, ok := stdout.(interface{ CloseWrite() error }); ok {
+		_ = c.CloseWrite()
+	}
 	return 128, ctx.Err()
 }
 
