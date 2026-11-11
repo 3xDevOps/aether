@@ -483,6 +483,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 	if len(msgs) == 0 {
 		return nil, "", acked, commitBatch(tx)
 	}
+	msgs = boundBatch(msgs)
 	token, err := newID("ack")
 	if err != nil {
 		return nil, "", false, err
@@ -518,6 +519,23 @@ func (d *DB) RetireRunMessages(ctx context.Context, to domain.RunID) error {
 		return fmt.Errorf("store: retire session messages for %s: %w", to, err)
 	}
 	return nil
+}
+
+// RunMessageBatchBytes bounds the bodies of one inbox batch, so a batch
+// prints small enough for an agent's harness to show it whole: the next
+// read acknowledges every message in it.
+const RunMessageBatchBytes = 4 << 10
+
+// boundBatch keeps the oldest messages whose bodies fit RunMessageBatchBytes,
+// and always the first.
+func boundBatch(msgs []*RunMessage) []*RunMessage {
+	size := len(msgs[0].Body)
+	for i, m := range msgs[1:] {
+		if size += len(m.Body); size > RunMessageBatchBytes {
+			return msgs[:i+1]
+		}
+	}
+	return msgs
 }
 
 func outstandingToken(ctx context.Context, tx *sql.Tx, to domain.RunID) (string, error) {

@@ -381,6 +381,7 @@ Check the inbox before waiting or reporting. Wait for mail inside your turn:
   aether-internal inbox --wait 30
 Handle each batch before reading again: the next read acknowledges it.
 To acknowledge it without reading on: aether-internal ack <ack_token>.
+A batch holds 4 KiB of bodies; read again while it shows more.
 Read the inbox once more before reporting:
   aether-internal report --help
 `

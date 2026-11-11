@@ -468,7 +468,11 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 			CreatedAt:     m.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return protocol.CoordInboxResult{Messages: out, AckToken: token, Acked: acked}, nil
+	unread, err := s.cfg.Mail.CountUnackedRunMessages(ctx, run)
+	if err != nil {
+		return protocol.CoordInboxResult{}, internalError(method, err)
+	}
+	return protocol.CoordInboxResult{Messages: out, AckToken: token, Acked: acked, More: max(unread-len(out), 0)}, nil
 }
 
 // resolveRun loads a run, mapping the unknown case to CodeNotFound.

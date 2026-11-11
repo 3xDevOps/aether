@@ -68,7 +68,7 @@ line. The base coordination method set is:
 | --- | --- | --- |
 | `coord.status` | none | v3 wire version, this session's identity and assignment, authorized peers, unread count, and capabilities |
 | `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id`, `recipient_status` |
-| `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages` and the `ack_token` for that batch |
+| `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages`, the `ack_token` for that batch, and `more`, the unacknowledged messages after it |
 | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
 | `coord.report` | `outcome`, `summary`, optional `waiting_for`, `until` and `evidence_refs`, `idempotency_key` | outcome, summary and next action; for success, failure and blocked also the durable `report_id`, evidence references, and automatic `evidence_ref` |
@@ -204,6 +204,9 @@ also enforces these bounds:
   truncation metadata; task and path strings are capped at 512 bytes;
 - idempotency keys are at most 256 bytes and may not contain control lines;
 - an inbox holds at most 100 unacknowledged messages;
+- an inbox batch holds the oldest messages whose bodies fit in 4 KiB, and at
+  least one, so a harness that clips long tool output still shows the whole
+  batch;
 - sends allow a burst of five, then one message per five seconds;
 - inbox reads allow a burst of ten, then one read per second;
 - ordinary requests have a per-session transport budget of 30 requests per burst,
@@ -235,8 +238,9 @@ RPC command, Git engine, caller-selected session identity or socket override.
 
 ## Delivery, acknowledgement, and retries
 
-Delivery is at least once. An inbox read returns one oldest-first batch and an
-opaque `ack_token`. Omitting `ack_token` on the next read acknowledges nothing,
+Delivery is at least once. An inbox read returns one oldest-first batch, an
+opaque `ack_token`, and `more`, the count of unacknowledged messages that later
+batches hold; read again until `more` is absent. Omitting `ack_token` on the next read acknowledges nothing,
 so the same batch and token can be delivered again. Supplying the token on the
 next read acknowledges exactly that batch while fetching the next batch, and
 the result carries `"acked": true`; a stale or unknown token acknowledges

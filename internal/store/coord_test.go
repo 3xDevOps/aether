@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -673,5 +675,36 @@ func TestCoordReportPersistenceAndIdempotency(t *testing.T) {
 		Summary: "bad", IdempotencyKey: "bad",
 	}); err == nil {
 		t.Fatal("invalid outcome accepted")
+	}
+}
+
+func TestInboxBatchFitsRunMessageBatchBytes(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	for _, body := range []string{strings.Repeat("a", 4<<10), strings.Repeat("b", 3<<10), strings.Repeat("c", 1<<10), "d"} {
+		if err := db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: body}, 100); err != nil {
+			t.Fatalf("AppendRunMessage: %v", err)
+		}
+	}
+	var token string
+	var got []string
+	for range 3 {
+		batch, next, _, err := db.DeliverRunMessages(ctx, to.ID, token, 100)
+		if err != nil {
+			t.Fatalf("DeliverRunMessages: %v", err)
+		}
+		bodies := ""
+		for _, msg := range batch {
+			bodies += msg.Body[:1]
+		}
+		got, token = append(got, bodies), next
+	}
+	if want := []string{"a", "bc", "d"}; !slices.Equal(got, want) {
+		t.Fatalf("batches = %q, want %q: each batch's bodies within 4 KiB, the oldest first", got, want)
 	}
 }
