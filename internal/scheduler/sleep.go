@@ -37,12 +37,13 @@ type SleepState struct {
 	WakeError   string
 }
 
-// Sleep reports run's sleep state; a run that is not asleep has none.
+// Sleep reports run's sleep state; a run that is awake, or still falling
+// asleep, has none.
 func (s *Scheduler) Sleep(run domain.RunID) SleepState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.runs[run]
-	if entry == nil || entry.asleepSince.IsZero() {
+	if entry == nil || entry.asleepSince.IsZero() || entry.sleeping {
 		return SleepState{}
 	}
 	since := entry.asleepSince
@@ -155,9 +156,9 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 		s.mu.Lock()
 		entry.waking = nil
 		entry.wakeErr = err
-		if s.runs[entry.runID] == entry {
+		if err != nil && s.runs[entry.runID] == entry {
 			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
-				slog.Warn("scheduler: persist the session's wake", "run", entry.runID, "error", werr)
+				err = errors.Join(err, fmt.Errorf("record the failed wake: %w", werr))
 			}
 		}
 		close(done)
@@ -213,15 +214,41 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) error {
 	if err = s.reopenDevelopment(ctx, run); err != nil {
 		return stop(err)
 	}
-	if err = s.resumeDevelopmentBrowser(ctx, run, cid); err != nil {
-		slog.Warn("scheduler: resume the woken session's browser companion", "run", run, "error", err)
-	}
 	s.mu.Lock()
 	entry.asleepSince = time.Time{}
 	entry.quietFrom = time.Now().UTC()
-	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
-		slog.Warn("scheduler: persist the woken session", "run", run, "error", werr)
+	err = s.writeSidecar(entry.sidecar())
+	if err != nil {
+		entry.asleepSince = entry.quietFrom
 	}
+	s.mu.Unlock()
+	if err != nil {
+		return stop(fmt.Errorf("record the wake: %w", err))
+	}
+	return nil
+}
+
+// resumeSleptBrowser thaws the browser companion a sleep paused, on the
+// first browser or development-control call after the run woke. It runs
+// there rather than in the wake, which may hold the run's control
+// admission that the companion's input release also takes.
+func (s *Scheduler) resumeSleptBrowser(ctx context.Context, run domain.RunID) error {
+	s.mu.Lock()
+	entry := s.runs[run]
+	due := entry != nil && entry.browserSlept && entry.asleepSince.IsZero() && !entry.sleeping
+	var cid runtime.ID
+	if due {
+		cid = entry.containerID
+	}
+	s.mu.Unlock()
+	if !due {
+		return nil
+	}
+	if err := s.resumeDevelopmentBrowser(ctx, run, cid); err != nil {
+		return fmt.Errorf("resume the browser companion paused while the session slept: %w", err)
+	}
+	s.mu.Lock()
+	entry.browserSlept = false
 	s.mu.Unlock()
 	return nil
 }
@@ -468,6 +495,9 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 	if err := s.prepareDevelopmentClose(ctx, run); err != nil {
 		return errors.Join(err, s.reopenDevelopment(context.WithoutCancel(ctx), run), s.unmarkAsleep(entry))
 	}
+	s.mu.Lock()
+	entry.browserSlept = true
+	s.mu.Unlock()
 	s.cfg.Git.StopDiffWatch(run)
 	// The container stop below ends an agent this could not stop.
 	if err := s.entryDriver(entry).Stop(ctx, run); err != nil {
@@ -503,10 +533,14 @@ func (s *Scheduler) sleepClosed(ctx context.Context, entry *supervised) error {
 func (s *Scheduler) markAsleep(entry *supervised) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	exec, keeper := entry.agentExec, entry.agentKeeper
 	entry.asleepSince = time.Now().UTC()
 	entry.wakeErr = nil
+	// The container stop ends the agent's exec, so nothing reattaches to it.
+	entry.agentExec, entry.agentKeeper = nil, nil
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		entry.asleepSince = time.Time{}
+		entry.agentExec, entry.agentKeeper = exec, keeper
 		return fmt.Errorf("record the sleep: %w", err)
 	}
 	return nil
@@ -542,25 +576,17 @@ func (s *Scheduler) stopSleeping(ctx context.Context, entry *supervised) error {
 }
 
 // endSleep settles a sleep: asleep once the container stopped, else awake
-// as before.
+// as before. markAsleep already recorded the sleep; recovery adopts a
+// sleeping run paused.
 func (s *Scheduler) endSleep(entry *supervised, asleep bool) {
 	s.mu.Lock()
 	entry.sleeping = false
-	var persistErr error
 	if asleep {
 		entry.paused = true
 		entry.agentExec, entry.agentKeeper = nil, nil
-		if s.runs[entry.runID] == entry {
-			persistErr = s.writeSidecar(entry.sidecar())
-		}
 	}
 	close(entry.sleepDone)
 	s.mu.Unlock()
-	if persistErr != nil {
-		// The sleep marker is already durable; this write only drops the
-		// stopped agent's exec, which a wake replaces anyway.
-		slog.Warn("scheduler: persist the sleeping session", "run", entry.runID, "error", persistErr)
-	}
 	if asleep {
 		s.publishSleep(entry)
 	}

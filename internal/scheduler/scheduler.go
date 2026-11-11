@@ -527,6 +527,9 @@ type supervised struct {
 	sleepGen    uint64
 	waking      chan struct{}
 	wakeErr     error
+	// browserSlept marks a browser companion a sleep paused, which the
+	// first browser call after the wake resumes.
+	browserSlept bool
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int

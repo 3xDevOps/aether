@@ -283,6 +283,11 @@ func (s *Scheduler) CallDevelopment(ctx context.Context, id domain.RunID, p cont
 		defer awake()
 		s.noteBrowsed(id, method)
 	}
+	if strings.HasPrefix(method, "dev.browser.") || strings.HasPrefix(method, "dev.control.") {
+		if err := s.resumeSleptBrowser(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	var result any
 	var err error
 	switch {

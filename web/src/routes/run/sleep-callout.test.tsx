@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { api } from '@/lib/api'
 import { SleepCallout } from '@/routes/run/sleep-callout'
+import { useStore } from '@/store'
 import { run, runRecords } from '@/test/fixtures'
+
+beforeEach(() => {
+  useStore.setState({ info: { member: { id: 'mem_admin', role: 'admin' } } } as never)
+})
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -27,6 +32,16 @@ describe('SleepCallout', () => {
     await waitFor(() => expect(wake).toHaveBeenCalledWith('run_1'))
     expect(await screen.findByText('Wake failed')).toBeDefined()
     expect(screen.getByText(/insufficient host memory headroom: 1.2 GiB available/)).toBeDefined()
+  })
+
+  it('offers no Wake to a member who cannot steer, nor for a closed session', () => {
+    useStore.setState({ info: { member: { id: 'mem_viewer', role: 'viewer' } } } as never)
+    render(<SleepCallout run={record({ asleep_since: since })} />)
+    expect(screen.getByText(/Asleep since/)).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Wake' })).toBeNull()
+    useStore.setState({ info: { member: { id: 'mem_admin', role: 'admin' } } } as never)
+    const { container } = render(<SleepCallout run={record({ asleep_since: since, status: 'merged' })} />)
+    expect(container.textContent).toBe('')
   })
 
   it('shows a wake in progress without offering another', () => {
