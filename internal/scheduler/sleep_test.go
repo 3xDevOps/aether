@@ -738,3 +738,38 @@ func TestAWakeAfterAnInterruptedSleepEndsItsOldTerminals(t *testing.T) {
 	}
 	waitItems(t, s2, run.ID, "a turn after the crash", turnEnded("end_turn", 2))
 }
+
+// Resume that arrives while the session is falling asleep wakes it once the
+// sleep finishes, instead of thawing a stopped container.
+func TestResumeDuringTheSleepWakesTheSession(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	probed, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	e.onForegroundProbe(func() (string, error) {
+		once.Do(func() { close(probed) })
+		<-release
+		return "", nil
+	})
+	waitFor(t, "the sleep's probe", func() bool {
+		e.sched.sleepIdle(t.Context())
+		select {
+		case <-probed:
+			return true
+		default:
+			return false
+		}
+	})
+	resumed := make(chan error, 1)
+	go func() { resumed <- e.sched.Resume(context.Background(), run.ID, e.member.ID) }()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	if err := <-resumed; err != nil {
+		t.Fatalf("Resume during the sleep: %v", err)
+	}
+	if e.sched.Sleep(run.ID).AsleepSince != nil || containerState(e.container(t, run.ID)) != "running" {
+		t.Fatal("Resume during the sleep left the session asleep")
+	}
+}

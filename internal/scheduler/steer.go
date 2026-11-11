@@ -550,8 +550,14 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 		return s.WakeRun(ctx, run, actor)
 	}
 	entry.lifecycleMu.Lock()
-	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
+	// A sleep that held the lifecycle lock may have finished meanwhile.
+	if !entry.asleepSince.IsZero() && !entry.retained {
+		s.mu.Unlock()
+		entry.lifecycleMu.Unlock()
+		return s.WakeRun(ctx, run, actor)
+	}
+	defer entry.lifecycleMu.Unlock()
 	if s.runs[run] != entry || entry.containerID == "" ||
 		entry.status.Terminal() || entry.retained || entry.destroyPending || entry.finalizing {
 		s.mu.Unlock()
