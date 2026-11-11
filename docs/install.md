@@ -271,6 +271,9 @@ CLI is moved or deleted, the app's error names the path; restore it, set
 `aether update` rebuilds the app ([Upgrading](#upgrading)). On Windows, close
 Aether before rebuilding by hand.
 
+On Windows the app runs its dashboard server without opening a console window.
+To diagnose startup failures, run `aether gui` in a terminal.
+
 ## Android app
 
 The Android app shows the dashboard full screen on a phone. It is not on
