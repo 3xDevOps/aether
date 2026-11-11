@@ -172,9 +172,13 @@ the image before sending.
 
 ## Permissions and input
 
-A new session starts in the agent's no-prompt setting, so a request arrives only
-after you switch to a mode that asks, or from an agent whose own configuration
-still asks. Each request marks the session **Needs you** and docks above the
+A new session starts in the agent's no-prompt setting, so a request arrives
+after you switch to a mode that asks, from an agent whose own configuration
+still asks, or for a check the agent never skips. Claude Code in
+`bypassPermissions` still asks for an explicit `ask` rule in its settings, a
+tool that needs a person, and its own safety checks, at every
+[permission tier](security.md#permission-tiers). Answer here, with `aether
+answer`, or with a connector's `aether_decide_approval`. Each request marks the session **Needs you** and docks above the
 composer, one at a time (`1 of N`). The composer stays shut until you answer.
 **Interrupt** stops the turn and cancels the request instead.
 
