@@ -21,7 +21,10 @@ const (
 	agentModelsTTL     = time.Hour
 	agentModelsFailTTL = time.Minute
 	agentModelsTimeout = 30 * time.Second
-	codexModelsCache   = ".codex/models_cache.json"
+	// agentModelsStartTimeout bounds starting the environment terminal, which
+	// the probe waits for before its own agentModelsTimeout begins.
+	agentModelsStartTimeout = 2 * time.Minute
+	codexModelsCache        = ".codex/models_cache.json"
 
 	claudeModelsRequest = `{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}`
 	claudeModelsScript  = `exe=$1; req=$2; shift 2
@@ -170,7 +173,7 @@ func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, ex
 	if s.agentModels == nil {
 		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
 	}
-	probed, current := now, s.agentModels[key].updates
+	probed, current := s.cfg.Now(), s.agentModels[key].updates
 	if current != updates {
 		probed = time.Time{}
 	}
@@ -237,7 +240,10 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 		args = []string{fmt.Sprintf(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"aether","version":%q}}}`, version.Version), codexModelsList}
 	}
 	if start {
-		if _, err := s.EnsureTerminal(ctx, key.account); err != nil {
+		startCtx, cancelStart := context.WithTimeout(ctx, agentModelsStartTimeout)
+		_, err := s.EnsureTerminal(startCtx, key.account)
+		cancelStart()
+		if err != nil {
 			return modelList{}, fmt.Errorf("%s models: %w", key.name, err)
 		}
 	}
