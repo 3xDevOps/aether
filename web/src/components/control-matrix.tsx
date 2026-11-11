@@ -7,15 +7,17 @@ export type ControlAppearance = 'active' | 'release' | 'takeover' | 'hidden'
 export function ControlMatrix({
   appearance,
   takeoverProgress,
+  breathing = true,
 }: {
   appearance: ControlAppearance
   takeoverProgress?: number
+  breathing?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const previousTakeoverProgress = useRef<number | undefined>(undefined)
   const [settled, setSettled] = useState(false)
   const reducedMotion = useReducedMotion()
-  const steady = settled && appearance === 'active' && takeoverProgress === undefined
+  const steady = settled && appearance === 'active' && takeoverProgress === undefined && breathing
 
   useLayoutEffect(() => {
     const light = ref.current
@@ -57,7 +59,7 @@ export function ControlMatrix({
       light.style.color = current.color
       animation.cancel()
     }
-  }, [appearance, reducedMotion])
+  }, [appearance, breathing, reducedMotion])
 
   useLayoutEffect(() => {
     previousTakeoverProgress.current = takeoverProgress

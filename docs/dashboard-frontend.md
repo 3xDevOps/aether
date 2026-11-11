@@ -3052,11 +3052,19 @@ and below 30rem **Multiplayer** keeps only its icon. The controller summary
 truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
-With a mouse on a layout wider than the 767px phone breakpoint and motion allowed, the strip's
-dots fade to nothing under the pointer and return to full 54px away:
-`useDotFade` (`routes/run/dot-fade.ts`) writes the pointer position into a
-`mask-image` on `.control-matrix` from one `pointermove` listener, batched per
-frame, and eases the mask out over 1200ms on `pointerleave`.
+With a mouse or touch pointer on the multiplayer strip, `useDotFade`
+(`routes/run/dot-fade.ts`) renders an interactive copy of the dot texture.
+Each dot springs away from the pointer; pointer speed adds a two-branch V wake
+with a 1.02 overshoot, and a click or tap displaces and swells a ring. The
+clear bars behind text feather motion to 25% of the response. `--dot-color`,
+`--dot-accent-color`, `--dot-ring-color`, `--dot-intensity` (0–1),
+`--dot-breathing` and `--dot-drift`
+are CSS custom properties; breathing and drift default to off. A focused strip
+accepts Enter for a ring and arrow keys to move the point. An
+`IntersectionObserver` and page visibility listener pause the loop offscreen or
+in the background, and the loop sleeps when the dots settle. Reduced motion
+keeps the composed layout still with a frozen ring; the static CSS texture is
+the rest state.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates
