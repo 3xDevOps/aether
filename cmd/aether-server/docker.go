@@ -21,6 +21,17 @@ var dockerCheck = func(ctx context.Context) error {
 	return d.CheckSubpathAPI(ctx)
 }
 
+// sessionSliceApplies reports whether the local Docker daemon places
+// containers in runtime.SessionSlice, where the installed slice file applies.
+var sessionSliceApplies = func(ctx context.Context) (bool, error) {
+	d, err := runtime.NewDocker()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = d.Close() }()
+	return d.UsesSessionSlice(ctx)
+}
+
 const dockerInstall = "https://docs.docker.com/engine/install/"
 
 // checkDocker reports whether the Docker daemon answers, and says what it

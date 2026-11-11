@@ -466,9 +466,10 @@ func applyConfigFile(fs *flag.FlagSet, path string, optional bool) (string, erro
 	return " from " + path, nil
 }
 
-// warnIfUnitOutdated tells the operator when the installed systemd unit or
-// the slice beside it is not the one this release ships. It only reads them: a daemon-reload has
-// host-wide effects, so applying the new unit stays the operator's call.
+// warnIfUnitOutdated tells the operator when the installed systemd unit, or
+// the slice beside it on a host where Docker uses that slice, is not the one
+// this release ships. It only reads them: a daemon-reload has host-wide
+// effects, so applying them stays the operator's call.
 func warnIfUnitOutdated() {
 	if os.Getenv("INVOCATION_ID") == "" {
 		return
@@ -489,7 +490,17 @@ func warnIfUnitOutdated() {
 		slog.Warn("could not check whether the systemd slice is up to date", "error", err)
 		return
 	}
-	if outdated {
+	if !outdated {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	applies, err := sessionSliceApplies(ctx)
+	if err != nil {
+		slog.Warn("could not check whether Docker places session containers in the systemd slice", "error", err)
+		return
+	}
+	if applies {
 		slog.Warn("the systemd slice for session containers is missing or differs from this release's; apply it, without a restart, with: " +
 			"sudo aether-server install --sysbox=false && sudo systemctl daemon-reload")
 	}

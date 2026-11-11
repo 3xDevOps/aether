@@ -19,12 +19,13 @@ type InstallResult struct {
 }
 
 // Install writes the systemd unit, the slice beside it and the config file.
-// The unit and slice are always rewritten because they are package-owned; an existing config file is kept
-// unless force is set because it is operator-owned. The written config is
-// ServiceDefaults with values layered over it, so a fresh install keeps the
-// posture the unit's ExecStart used to hardcode. Install never activates
-// anything: the caller prints ActivateCommand instead, so an install cannot
-// restart a running server behind the operator's back.
+// The unit and slice are always rewritten because they are package-owned; an
+// existing config file is kept unless force is set because it is
+// operator-owned. The written config is ServiceDefaults with values layered
+// over it, so a fresh install keeps the posture the unit's ExecStart used to
+// hardcode. Install never activates anything: the caller prints
+// ActivateCommand instead, so an install cannot restart a running server
+// behind the operator's back.
 func Install(unitPath, configPath string, values map[string]string, force bool) (InstallResult, error) {
 	res := InstallResult{UnitPath: unitPath, SlicePath: filepath.Join(filepath.Dir(unitPath), sliceFile), ConfigPath: configPath}
 	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
