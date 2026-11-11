@@ -342,7 +342,7 @@ func TestConnectorRunChangesPages(t *testing.T) {
 	if out["next_commits_offset"] != float64(20) || out["next_diff_file"] != float64(10) || out["diff_files"] != float64(12) || out["diff_truncated"] != true || len(out["repos"].([]any)) != 2 {
 		t.Fatalf("first page = %v", out)
 	}
-	if got := called(f, protocol.MethodRunGitDiff); got[0].params != `{"repo":"ws-2","run_id":"run-1"}` {
+	if got := called(f, protocol.MethodRunGitDiff); got[0].params != `{"repo":"ws-2","run_id":"run-1","base":true}` {
 		t.Fatalf("diff params = %s", got[0].params)
 	}
 	if len(called(f, protocol.MethodRunEvidenceList)) != 0 {
@@ -382,10 +382,10 @@ func TestConnectorRunChangesPages(t *testing.T) {
 		t.Fatalf("conflict diff = %v files %s", out["diff_files"], got)
 	}
 
-	// A session that committed everything has no uncommitted diff: the page is an empty list with a note, never null.
-	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{})
+	// A session whose worktree matches its base has no diff: the page is an empty list with a note, never null.
+	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{BaseRef: "origin/main"})
 	_, out = run(t, cs, "aether_session_changes", map[string]any{"run_id": "run-1", "include_diff": true})
-	if page, ok := out["untrusted"].(map[string]any)["diff"].([]any); !ok || len(page) != 0 || out["diff_files"] != float64(0) || !strings.Contains(fmt.Sprint(out["diff_note"]), "uncommitted") {
+	if page, ok := out["untrusted"].(map[string]any)["diff"].([]any); !ok || len(page) != 0 || out["diff_files"] != float64(0) || !strings.Contains(fmt.Sprint(out["diff_note"]), "origin/main") {
 		t.Fatalf("empty diff = %#v note %v", out["untrusted"].(map[string]any)["diff"], out["diff_note"])
 	}
 }

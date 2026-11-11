@@ -747,7 +747,7 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 	}
 	if in.IncludeDiff {
 		var diff protocol.RunGitDiffResult
-		switch err := c.read(ctx, protocol.MethodRunGitDiff, protocol.RunGitDiffParams{RunID: r.ID, Repo: in.Repo}, &diff); {
+		switch err := c.read(ctx, protocol.MethodRunGitDiff, protocol.RunGitDiffParams{RunID: r.ID, Repo: in.Repo, Base: true}, &diff); {
 		case err != nil:
 			out["diff_error"] = err.Error()
 		case diff.Error != "":
@@ -803,7 +803,7 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 			}
 			if page == nil {
 				page = []string{}
-				out["diff_note"] = "run.git.diff covers only uncommitted, unstaged changes of tracked files; this session has none. Its committed changes are in untrusted.commits"
+				out["diff_note"] = "tracked files in the worktree match " + cmp.Or(diff.BaseRef, "the session's base") + "; untracked files are not in a diff"
 			}
 			untrusted["diff"] = page
 		}

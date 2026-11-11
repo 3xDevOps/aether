@@ -255,8 +255,8 @@ func (s *Server) runGitDiff(ctx context.Context, member domain.MemberID, raw jso
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	diff, err := call.native.Diff(ctx, call.execution, runrepo.DiffRequest{Paths: p.Paths, Staged: p.Staged})
-	return protocol.RunGitDiffResult{Repo: p.Repo, State: diff.State, Output: runrepo.FailureOutput(diff.Output, err), Error: repoError(err)}, nil
+	diff, err := call.native.Diff(ctx, call.execution, runrepo.DiffRequest{Paths: p.Paths, Staged: p.Staged, Base: p.Base, BaseBranch: call.repo.BaseBranch, ForkPoint: call.repo.BaseCommit})
+	return protocol.RunGitDiffResult{Repo: p.Repo, BaseRef: diff.BaseRef, State: diff.State, Output: runrepo.FailureOutput(diff.Output, err), Error: repoError(err)}, nil
 }
 
 func (s *Server) runGitCommit(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {

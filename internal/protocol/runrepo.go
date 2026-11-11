@@ -120,13 +120,18 @@ type RunGitDiffParams struct {
 	RunID  string   `json:"run_id"`
 	Paths  []string `json:"paths,omitempty"`
 	Staged bool     `json:"staged,omitempty"`
+	// Base diffs the worktree against the merge base with the session's
+	// upstream base instead of against the index.
+	Base bool `json:"base,omitempty"`
 }
 
 type RunGitDiffResult struct {
-	Repo   string               `json:"repo,omitempty"`
-	State  RunGitExpected       `json:"state"`
-	Output RunRepoCommandOutput `json:"output"`
-	Error  string               `json:"error,omitempty"`
+	Repo string `json:"repo,omitempty"`
+	// BaseRef names what a Base diff compared against.
+	BaseRef string               `json:"base_ref,omitempty"`
+	State   RunGitExpected       `json:"state"`
+	Output  RunRepoCommandOutput `json:"output"`
+	Error   string               `json:"error,omitempty"`
 }
 
 type RunGitCommitParams struct {
