@@ -107,7 +107,7 @@ func (s *Service) options(ctx context.Context, run domain.RunID, req protocol.Ch
 	}
 	if req.Harness != "" {
 		for i, c := range out.Choices {
-			if c.Harness != req.Harness || c.Model != "" {
+			if c.Harness != req.Harness || c.Model != "" || (c.Status != choiceReady && c.Status != choiceExhausted) {
 				continue
 			}
 			models, err := s.cfg.Runs.AgentModels(ctx, p.owner, domain.MemberID(c.AccountMemberID), c.Harness, false)

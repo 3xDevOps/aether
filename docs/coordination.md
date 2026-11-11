@@ -1249,10 +1249,12 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
   standard input), plus optional `--model`, `--mode
   standard|enhanced|background` and `--account <member-id>`. Without
   `--account`, a subsession of the parent's agent starts on the parent's
-  account, and any other agent on the owner's own account. `--account` takes the
-  owner's account or one shared with them; any other is refused with `-32001
-  child.start: permission denied: member <id> has not shared their account with
-  you`. The server
+  account, and any other agent, or a parent handed over from another member, on
+  the owner's own account. `--account` takes the owner's account or one shared
+  with them whose owner reaches every workspace of the parent; any other is
+  refused with `-32001 child.start: permission denied: member <id> has not
+  shared their account with you` or `... the owner of account <id> has no
+  access to workspace <id>`. The server
   publishes the parent's branch and checks the subsession out from that commit;
   uncommitted changes are not included. The subsession inherits the parent's
   extra repositories (`--repo`) and permission tier. The receipt carries the subsession's

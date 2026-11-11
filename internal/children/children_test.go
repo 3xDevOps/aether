@@ -547,6 +547,14 @@ func TestSubsessionsRunOnTheParentsOrASharedAccount(t *testing.T) {
 	if len(h.runs.accounts) != 2 || h.runs.accounts[0] != h.bob.ID || h.runs.accounts[1] != h.bob.ID {
 		t.Fatalf("launched on %v, want Bob's account twice", h.runs.accounts)
 	}
+
+	handed := &domain.Run{WorkspaceID: h.ws.ID, MemberID: h.ada.ID, HomeMemberID: h.bob.ID, AccountMemberID: h.bob.ID, Task: "handed", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	if err := h.db.CreateRun(h.ctx, handed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.start(handed.ID, protocol.ChildStartParams{Harness: "claude", Task: "after a handoff"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Ada is not signed in to claude") {
+		t.Fatalf("same agent under a session handed to Ada = %v, want Ada's own account, not the launcher's", err)
+	}
 }
 
 func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {

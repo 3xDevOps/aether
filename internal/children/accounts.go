@@ -48,7 +48,7 @@ func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoic
 	}
 	var out []protocol.ChildChoice
 	for _, account := range accounts {
-		if _, err := s.cfg.Authorize(ctx, s.cfg.Store, p.owner, string(account), p.workspaces()); errors.Is(err, permissions.ErrDenied) {
+		if _, err := s.cfg.Authorize(ctx, s.cfg.Store, p.owner, string(account), p.workspaces()); errors.Is(err, permissions.ErrDenied) || errors.Is(err, permissions.ErrNoAccess) {
 			continue
 		} else if err != nil {
 			return nil, err
@@ -97,12 +97,12 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 		case a.Unavailable != "":
 			c.Status = choiceNotSignedIn
 			c.Detail = a.Unavailable
-		case a.LoginProblem != "":
-			c.Detail = fmt.Sprintf("%s's %s login may be signed out: %s", name, a.Name, a.LoginProblem)
 		default:
 			if used, ok := s.usedPercent(ctx, p.owner, account, a.Name); ok && used >= fallback.ExhaustedPercent {
 				c.Status = choiceExhausted
 				c.Detail = fmt.Sprintf("%s's %s usage is at %.0f%%", name, a.Name, used)
+			} else if a.LoginProblem != "" {
+				c.Detail = fmt.Sprintf("%s's %s login may be signed out: %s", name, a.Name, a.LoginProblem)
 			}
 		}
 		out = append(out, c)
@@ -154,7 +154,7 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 	switch {
 	case req.AccountMemberID != "":
 		account = domain.MemberID(req.AccountMemberID)
-	case req.Harness == p.parent.Harness:
+	case req.Harness == p.parent.Harness && p.parent.HomeMember() == p.owner:
 		account = p.parent.AccountMember()
 	}
 	if err := s.admit(ctx, p, account); err != nil {

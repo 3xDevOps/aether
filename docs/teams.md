@@ -780,8 +780,9 @@ build, long work that would crowd out their context, or an independent review,
 and whenever you ask for subsessions. Quick or tightly coupled work stays with
 the agent. A subsession of the parent's agent starts on the parent's account,
 so a session you launched on an account shared with you delegates on it too;
-any other agent starts on your own account. The agent can pick your account or
-any account shared with you instead. The subsession appears under its parent in the
+any other agent, or a session handed to you, starts on your own account. The
+agent can pick your account or any account shared with you whose owner reaches
+the session's workspaces instead. The subsession appears under its parent in the
 dashboard, with its purpose, agent, model, account and state, and you open,
 message, take over or stop it like any session. Its result reaches the parent's
 inbox, as does a notice when it has sat idle or waiting for over an hour, so
