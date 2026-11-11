@@ -638,7 +638,7 @@ func TestAMergeQueueRemovalWakesAMergedWait(t *testing.T) {
 }
 
 // A removal a person may undo within seconds, to reorder the queue, wakes
-// nobody until it stood a minute.
+// nobody until it stood a minute, and none once it is queued again.
 func TestAFreshMergeQueueRemovalWaitsAMinute(t *testing.T) {
 	h, gh := newWaitPRHarness(t)
 	owner := h.run(h.ada, "Ship")
@@ -651,6 +651,15 @@ func TestAFreshMergeQueueRemovalWaitsAMinute(t *testing.T) {
 	if w := h.only(owner.ID); !strings.Contains(w.Summary, "in case it is queued again") {
 		t.Fatalf("wait = %+v, want the removal named as not yet settled", w)
 	}
+	gh.set(func(f *fakeGitHub) { f.queued = map[string]any{"__typename": "AddedToMergeQueueEvent"} })
+	h.clock.advance(2 * PRPollIdle)
+	h.settle()
+	if w := h.only(owner.ID); w.State != protocol.WaitPending || strings.Contains(w.Summary, "merge queue") || len(h.inbox.messages(owner.ID)) != 0 {
+		t.Fatalf("wait = %+v, want pending without a wake once queued again", w)
+	}
+	gh.set(func(f *fakeGitHub) {
+		f.queued = map[string]any{"__typename": "RemovedFromMergeQueueEvent", "createdAt": h.clock.now().UTC().Format(time.RFC3339), "reason": "manual"}
+	})
 	h.clock.advance(2 * PRPollIdle)
 	h.awaitWake(owner.ID)
 	if w := h.only(owner.ID); w.Outcome != "removed-from-queue" || w.Detail != "reason: manual" {
