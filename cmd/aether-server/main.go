@@ -24,6 +24,7 @@ import (
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -396,7 +397,7 @@ func serve(args []string) error {
 	go commitWhenServing(ctx, srv, trial)
 	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
 		version.String(), *o.addr, *o.dataDir, from)
-	warnIfUnitOutdated()
+	go warnIfUnitOutdated()
 	err = srv.Run(ctx)
 	drainMu.Lock()
 	argv := drained
@@ -493,9 +494,13 @@ func warnIfUnitOutdated() {
 	if !outdated {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	applies, err := sessionSliceApplies(ctx)
+	docker, err := runtime.NewDocker()
+	if err != nil {
+		slog.Warn("could not check whether Docker places session containers in the systemd slice", "error", err)
+		return
+	}
+	defer func() { _ = docker.Close() }()
+	applies, err := docker.UsesSessionSlice(context.Background())
 	if err != nil {
 		slog.Warn("could not check whether Docker places session containers in the systemd slice", "error", err)
 		return
