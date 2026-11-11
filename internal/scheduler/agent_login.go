@@ -43,20 +43,27 @@ func (s *Scheduler) LoginProblem(account domain.MemberID, agent string, profile 
 	if err != nil || problem != "" {
 		return problem, problem != "", err
 	}
+	key := loginKey{account, agent}
+	s.mu.Lock()
+	refusal, refused := s.loginRefusals[key]
+	s.mu.Unlock()
+	if !refused {
+		return "", false, nil
+	}
 	paths, _ := profile.LoginPaths()
 	stamp, err := s.loginStamp(account, paths)
 	if err != nil {
 		return "", false, err
 	}
-	key := loginKey{account, agent}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	refusal, refused := s.loginRefusals[key]
-	if refused && refusal.stamp != stamp {
-		delete(s.loginRefusals, key)
-		return "", false, nil
+	if refusal.stamp == stamp {
+		return refusal.problem, false, nil
 	}
-	return refusal.problem, false, nil
+	s.mu.Lock()
+	if s.loginRefusals[key] == refusal {
+		delete(s.loginRefusals, key)
+	}
+	s.mu.Unlock()
+	return "", false, nil
 }
 
 // loginFileProblem is LoginProblem from the login file alone.
@@ -89,13 +96,17 @@ func (s *Scheduler) loginStamp(account domain.MemberID, paths []string) (string,
 
 // loginRefused records that agent refused on account for want of a sign-in,
 // while the account's login files read stamp. Only the agent's own message
-// is kept: the error around it can carry the agent's stderr, and everyone
-// the account is shared with reads this.
+// is kept, and bounded: the error around it can carry the agent's stderr,
+// and everyone the account is shared with reads this.
 func (s *Scheduler) loginRefused(account domain.MemberID, agent, stamp string, cause error) {
-	problem := "the agent refused: Authentication required"
+	message := "Authentication required"
 	if refused := (*acp.RequestError)(nil); errors.As(cause, &refused) && refused.Message != "" {
-		problem = "the agent refused: " + refused.Message
+		message = refused.Message
 	}
+	if runes := []rune(message); len(runes) > maxExitDetail {
+		message = string(runes[:maxExitDetail-3]) + "..."
+	}
+	problem := "the agent refused: " + message
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.loginRefusals == nil {
@@ -182,11 +193,7 @@ func (s *Scheduler) runLogin(ctx context.Context, runID domain.RunID) runLogin {
 	if login.profile, _, err = s.launchProfile(ctx, run.MemberID, login.account, run.Harness); err != nil {
 		return runLogin{}
 	}
-	mode := run.Mode
-	if run.ACP {
-		mode = domain.LaunchACP
-	}
-	if byEnv, envErr := s.environmentSignsIn(ctx, run.WorkspaceID, login.agent, login.profile, mode); envErr != nil || byEnv {
+	if byEnv, envErr := s.environmentSignsIn(ctx, run.WorkspaceID, login.agent, login.profile, run.Mode); envErr != nil || byEnv {
 		return runLogin{}
 	}
 	if login.fileProblem, err = s.loginFileProblem(login.account, login.agent, login.profile); err != nil {
@@ -251,11 +258,18 @@ func (s *Scheduler) turnWorked(ctx context.Context, runID domain.RunID) {
 	if none {
 		return
 	}
-	login := s.runLogin(ctx, runID)
-	if !login.known {
+	run, err := s.cfg.Store.GetRun(ctx, runID)
+	if err != nil {
+		return
+	}
+	key := loginKey{run.AccountMember(), run.Harness}
+	s.mu.Lock()
+	_, refused := s.loginRefusals[key]
+	s.mu.Unlock()
+	if !refused || !s.runLogin(ctx, runID).known {
 		return
 	}
 	s.mu.Lock()
-	delete(s.loginRefusals, loginKey{login.account, login.agent})
+	delete(s.loginRefusals, key)
 	s.mu.Unlock()
 }

@@ -235,7 +235,7 @@ While the server knows a login is signed out:
 | `aether agent list` | `signed out` under `LOGIN FILE`, then `claude is signed out: <problem>` and `sign in again: ...` |
 | `aether status` | `agent: claude: installed, signed out: <problem>` and `next:` naming `aether agent login claude` |
 | `aether agent list --json`, `agent.list` | `login_problem`, and `login_blocks_launch` |
-| Connector `aether_launch_options`, `aether_list_workspaces` | `signed_in: false` and `signed_out` with the problem and the way to sign in; `refused` when a launch would be |
+| Connector `aether_launch_options`, `aether_list_workspaces` | `signed_in: false` and `signed_out` with the problem, the way to sign in, and whether a launch is refused until then |
 | A refused turn or open | The session's reason ends with whose login it is and where to sign in ([enhanced-sessions.md](enhanced-sessions.md)) |
 
 The problem is the server's own finding, verbatim:

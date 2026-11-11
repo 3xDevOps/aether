@@ -168,9 +168,9 @@ var launchOps = []Op{
 }
 
 // agentRow is an agent on one account. Refused is why a launch on the
-// account would be refused; Modes are the modes a run may start in.
-// SignedOut is why the account's login cannot sign the agent in and how its
-// owner signs in again.
+// account would be refused whatever the workspace; Modes are the modes a
+// run may start in. SignedOut is why the account's login cannot sign the
+// agent in and how its owner signs in again.
 type agentRow struct {
 	Name        string   `json:"name"`
 	Installed   bool     `json:"installed"`
@@ -182,12 +182,21 @@ type agentRow struct {
 }
 
 // signedIn is whether a login is there and the server knows no reason it
-// cannot sign the agent in; signedOut is that reason with the way back in.
+// cannot sign the agent in; signedOut is that reason with the way back in,
+// and what it means for a launch, which only the launch can decide: it
+// knows the workspace's variables.
 func signedIn(a protocol.AgentInfo) (in *bool, signedOut string) {
 	if a.LoginProblem == "" {
 		return a.LoginFound, ""
 	}
-	return new(bool), a.LoginProblem + "; the account's owner signs in again on the dashboard's Agents page or with: aether agent login " + a.Name
+	signedOut = a.LoginProblem + "; the account's owner signs in again on the dashboard's Agents page or with: aether agent login " + a.Name
+	if a.LoginCommand == "" {
+		signedOut = a.LoginProblem + "; the account's owner signs in again from: aether terminal"
+	}
+	if a.LoginBlocksLaunch {
+		signedOut += "; a launch is refused until then, unless a workspace variable signs the agent in"
+	}
+	return new(bool), signedOut
 }
 
 // rowOfAgent follows the dashboard's launch dialog: Enhanced needs it
@@ -200,8 +209,6 @@ func rowOfAgent(a protocol.AgentInfo) agentRow {
 		row.Refused = "not installed"
 	case a.LoginMissing:
 		row.Refused = "the account's owner is not signed in to it"
-	case a.LoginBlocksLaunch:
-		row.Refused = "signed out, unless a workspace variable signs the agent in: " + row.SignedOut
 	case a.OwnAccountOnly:
 		row.Refused = "a member's own agent runs only on their own account"
 	case a.Unavailable != "":

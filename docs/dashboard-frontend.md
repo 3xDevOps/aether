@@ -6004,10 +6004,11 @@ the member's own `agent.list` has `login_problem`: a needs-you band with one
 line per agent, "Claude Code is signed out" when the login file cannot sign
 it in (`login_blocks_launch`) or "Claude Code's sign-in was refused" when an
 agent refused, then the problem verbatim, and one **Sign in on Agents**. It
-is one row at `md` and wider and stacks below. It is absent where the same
-finding already sits beside its own sign-in action: the Agents page, and a
-session whose reason is a refused turn or open. It cannot be dismissed; it
-goes when a read no longer reports the problem. `agent.list`
+is one row at `md` and wider and stacks below. It leaves out what already
+sits beside its own sign-in action: everything on the Agents page, and, in
+the Chat view of a session on the member's own account whose reason is a
+refused turn or open, that session's agent. It cannot be dismissed; it goes
+when a read no longer reports the problem. `agent.list`
 has no event, so it reads again every 60 seconds while the page is visible,
 on window focus, and when one of the member's runs gets a new
 `enhanced turn failed: ` or `enhanced session failed: ` reason.

@@ -50,12 +50,21 @@ describe('SignedOutAlert', () => {
     unmount()
 
     const reason = 'enhanced turn failed: acphost: session/prompt: {"code":-32000,"message":"Authentication required"}; Alice\'s Claude Code login is signed out'
-    useStore.setState({ agentList: null, route: { name: 'run', params: { runId: 'run_1' } }, runs: runRecords(run({ id: 'run_1', member_id: alice.id, reason }), run({ id: 'run_2', member_id: alice.id, reason: 'turn ended' })) })
+    list.mockResolvedValue([claude({ login_problem: refusal }), agentInfo({ name: 'codex', display_name: 'Codex', login_problem: fileProblem, login_blocks_launch: true })])
+    useStore.setState({
+      agentList: null,
+      route: { name: 'run', params: { runId: 'run_1' } },
+      shownRunView: { runId: 'run_1', view: 'session' },
+      runs: runRecords(run({ id: 'run_1', harness: 'claude', member_id: alice.id, reason }), run({ id: 'run_2', harness: 'claude', member_id: alice.id, reason: 'turn ended' })),
+    })
     render(<SignedOutAlert />)
-    await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
-    expect(screen.queryByRole('alert')).toBeNull()
-    act(() => { useStore.setState({ route: { name: 'run', params: { runId: 'run_2' } } }) })
-    expect((await screen.findByRole('alert')).textContent).toContain(refusal)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Codex is signed out')
+    expect(alert.textContent).not.toContain('Claude Code')
+    act(() => { useStore.setState({ shownRunView: { runId: 'run_1', view: 'terminal' } }) })
+    expect(alert.textContent).toContain("Claude Code's sign-in was refused")
+    act(() => { useStore.setState({ route: { name: 'run', params: { runId: 'run_2' } }, shownRunView: { runId: 'run_2', view: 'session' } }) })
+    expect(alert.textContent).toContain("Claude Code's sign-in was refused")
   })
 
   it('shows nothing for a working login or an agent that is not installed', async () => {

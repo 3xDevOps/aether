@@ -335,3 +335,27 @@ func TestRefusedSessionOpenSaysHowToSignIn(t *testing.T) {
 		t.Fatalf("LoginProblem = %q, %v, want %q", problem, blocks, refusedProblem)
 	}
 }
+
+// A Background run keeps its mode when the server asks how it signed in:
+// Codex's CODEX_API_KEY signs in Background runs only, over ACP too, and a
+// run it signed in is not the account's login.
+func TestBackgroundRunOverACPSignedInByTheWorkspaceIsNotTheAccountsLogin(t *testing.T) {
+	t.Parallel()
+	e, _ := newBackgroundEnv(t, "codex", true)
+	run := e.launchBackground(t, "codex", "say pong")
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || !row.ACP || row.Mode != domain.LaunchHeadless {
+		t.Fatalf("run = %+v, %v, want a Background run over ACP", row, err)
+	}
+	if !e.sched.runLogin(t.Context(), run.ID).known {
+		t.Fatal("runLogin without a workspace key is not the account's login")
+	}
+	e.ws.Environment.Variables["CODEX_API_KEY"] = "fixture-key"
+	if err = e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatal(err)
+	}
+	if e.sched.runLogin(t.Context(), run.ID).known {
+		t.Fatal("runLogin with CODEX_API_KEY in the workspace is the account's login, want the workspace's key")
+	}
+}

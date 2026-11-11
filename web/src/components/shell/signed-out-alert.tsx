@@ -36,14 +36,17 @@ export function SignedOutAlert() {
   const { agents, reload } = useAgentList()
   useLoginWatch(reload)
   const navigate = useStore((s) => s.navigate)
-  // The Agents page and a session whose turn was refused show the finding beside their own sign-in action.
-  const shownInPlace = useStore((s) => {
-    if (s.route.name === 'agents') return true
-    const reason = s.route.name === 'run' ? s.runs[s.route.params.runId ?? '']?.reason : undefined
-    return reason !== undefined && refusable.test(reason) && reason.includes('Authentication required')
+  // The Agents page shows every finding beside its Log in, and a session's
+  // Chat shows its own agent's beside Sign in on Agents after a refusal.
+  const onAgents = useStore((s) => s.route.name === 'agents')
+  const inChat = useStore((s) => {
+    const run = s.route.name === 'run' ? s.runs[s.route.params.runId ?? ''] : undefined
+    const refused = run?.reason !== undefined && refusable.test(run.reason) && run.reason.includes('Authentication required')
+    const own = (run?.account_member_id || run?.member_id) === s.info?.member.id
+    return refused && own && s.shownRunView?.runId === run?.id && s.shownRunView?.view === 'session' ? run?.harness : undefined
   })
-  const signedOut = agents?.filter((agent) => agent.installed && agent.login_problem) ?? []
-  if (!signedOut.length || shownInPlace) return null
+  const signedOut = agents?.filter((agent) => agent.installed && agent.login_problem && agent.name !== inChat) ?? []
+  if (!signedOut.length || onAgents) return null
   const { text, soft } = toneClasses('needs-you')
   return (
     <div role="alert" data-tone="needs-you" className={cn('flex flex-col gap-x-3 gap-y-1 border-b border-seam px-3 py-1.5 text-ui text-text md:flex-row md:items-center', soft)}>
