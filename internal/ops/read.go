@@ -803,7 +803,7 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 			}
 			if page == nil {
 				page = []string{}
-				out["diff_note"] = "tracked files in the worktree match " + cmp.Or(diff.BaseRef, "the session's base") + "; untracked files are not in a diff"
+				out["diff_note"] = "tracked files in the worktree match the merge base with " + cmp.Or(diff.BaseRef, "the session's base") + "; untracked files are not in a diff"
 			}
 			untrusted["diff"] = page
 		}
