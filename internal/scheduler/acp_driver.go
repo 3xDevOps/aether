@@ -415,6 +415,12 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen)
 	if err := d.open(ctx, entry, how); err != nil {
 		if acphost.AuthRequired(err) {
 			err = fmt.Errorf("%w; %s", err, d.s.loginRefusedAdvice(d.s.runLogin(ctx, entry.runID), err, refusedUnrestarted))
+			// A Background run's exit detail keeps only its start.
+			d.s.mu.Lock()
+			if entry.launchMode == domain.LaunchHeadless {
+				entry.failReason = acpFailedReason + err.Error()
+			}
+			d.s.mu.Unlock()
 		}
 		d.fail(entry, err)
 	}

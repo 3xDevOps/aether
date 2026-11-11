@@ -336,6 +336,41 @@ func TestRefusedSessionOpenSaysHowToSignIn(t *testing.T) {
 	}
 }
 
+// A Background session whose agent refuses to open its conversation fails
+// with the whole sign-in text, which the exit detail's cap would cut.
+func TestBackgroundRefusedOpenKeepsTheSignInText(t *testing.T) {
+	t.Parallel()
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	rt.fixture.RefuseSessions = true
+	run := e.launchBackground(t, enhancedAgent, "say pong")
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	want := acpFailedReason + `open the agent conversation: acphost: session/new: {"code":-32000,"message":"Authentication required"}; ` +
+		"Ada's OpenCode login may be signed out. Sign in: dashboard Agents page, or aether agent login opencode"
+	if got.Reason != want {
+		t.Fatalf("reason %q, want %q", got.Reason, want)
+	}
+}
+
+// A turn that ends well clears the refusal it saw, not one recorded while it
+// was reading the login.
+func TestClearingARefusalLeavesALaterOne(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	key := loginKey{e.member.ID, "claude"}
+	e.sched.loginRefused(e.member.ID, "claude", "", acp.NewAuthRequired(nil))
+	e.sched.mu.Lock()
+	seen := e.sched.loginRefusals[key]
+	e.sched.mu.Unlock()
+	time.Sleep(time.Millisecond)
+	e.sched.loginRefused(e.member.ID, "claude", "", acp.NewAuthRequired(nil))
+	e.sched.mu.Lock()
+	later := e.sched.loginRefusals[key]
+	e.sched.mu.Unlock()
+	if later == seen {
+		t.Fatal("a later refusal equals the earlier one, so clearing the earlier would clear it")
+	}
+}
+
 // A Background run keeps its mode when the server asks how it signed in:
 // Codex's CODEX_API_KEY signs in Background runs only, over ACP too, and a
 // run it signed in is not the account's login.

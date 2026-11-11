@@ -26,10 +26,12 @@ type loginKey struct {
 
 // loginRefusal is an agent's refusal for want of a sign-in. stamp is the
 // account's login files then: the refusal stands until they change or a turn
-// on the account ends well.
+// on the account ends well. at tells it from a later refusal, which whoever
+// clears this one after reading the login must leave.
 type loginRefusal struct {
 	problem string
 	stamp   string
+	at      time.Time
 }
 
 // LoginProblem is why the login of agent, which profile describes, in
@@ -112,7 +114,7 @@ func (s *Scheduler) loginRefused(account domain.MemberID, agent, stamp string, c
 	if s.loginRefusals == nil {
 		s.loginRefusals = make(map[loginKey]loginRefusal)
 	}
-	s.loginRefusals[loginKey{account, agent}] = loginRefusal{problem: problem, stamp: stamp}
+	s.loginRefusals[loginKey{account, agent}] = loginRefusal{problem: problem, stamp: stamp, at: time.Now()}
 }
 
 // signInSteps is where the owner of an account signs agent in again. Only a
@@ -264,12 +266,14 @@ func (s *Scheduler) turnWorked(ctx context.Context, runID domain.RunID) {
 	}
 	key := loginKey{run.AccountMember(), run.Harness}
 	s.mu.Lock()
-	_, refused := s.loginRefusals[key]
+	refusal, refused := s.loginRefusals[key]
 	s.mu.Unlock()
 	if !refused || !s.runLogin(ctx, runID).known {
 		return
 	}
 	s.mu.Lock()
-	delete(s.loginRefusals, key)
+	if s.loginRefusals[key] == refusal {
+		delete(s.loginRefusals, key)
+	}
 	s.mu.Unlock()
 }
