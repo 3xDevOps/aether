@@ -51,7 +51,6 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
   const hydrated = useStore((s) => s.hydrated)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspaces = useStore(useShallow((s) => Object.values(s.workspaces)))
-  const canWrite = allowed('push', useSelf(activeWorkspace))
   const hasPreferences = useCapability().hasMethod('preference.list')
   const problem = useConnectionProblem()
   const mobile = useIsMobile()
@@ -60,6 +59,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
   const [picked, setPicked] = useState<string | null>(null)
   // Notes belong to one workspace, so there is no "all" reading.
   const workspaceID = picked ?? (activeWorkspace || workspaces[0]?.id || '')
+  const canWrite = allowed('push', useSelf(workspaceID))
   const [typed, setTyped] = useState('')
   const [words, setWords] = useState('')
   const [filter, setFilter] = useState<Filter>('all')

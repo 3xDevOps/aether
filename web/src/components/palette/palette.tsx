@@ -66,6 +66,7 @@ export function PaletteBody({
   const stale = useStale()
   const cap = useCapability()
   const self = useSelf(activeWorkspace)
+  const focusedSelf = useSelf(route.params.runId ? runMap[route.params.runId]?.workspace_id : undefined)
   const [search, setSearch] = useState('')
   const selected = useRef<Command | null>(null)
   const complete = () => {
@@ -132,7 +133,7 @@ export function PaletteBody({
     stale,
     cap,
     members,
-    self,
+    self: focusedSelf,
     steerOthers: workspaces[focused.workspace_id]?.steer_others,
   }
   const focusedCommands = focusedContext

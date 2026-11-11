@@ -206,6 +206,20 @@ describe('command palette', () => {
     await waitFor(() => expect(document.activeElement).toBe(terminal))
   })
 
+  it('offers commands on the open run by the role in its workspace, not the active one', async () => {
+    const theirs = run({ id: 'run_theirs', workspace_id: otherWorkspace.id, member_id: alice.id, protected: true })
+    useStore.setState({
+      info: { ...serverInfo, member: { ...bob, role: 'admin' } },
+      members: { [alice.id]: alice, [bob.id]: bob },
+      runs: { [active.id]: toRecord(active), [theirs.id]: toRecord(theirs) },
+      workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: { ...otherWorkspace, role: 'collaborator' } },
+      route: { name: 'run', params: { runId: theirs.id } },
+    })
+    open()
+    await screen.findByRole('combobox')
+    expect(screen.queryByRole('option', { name: 'Kill session' })).toBeNull()
+  })
+
   it('starts with navigation rather than a focused destructive command', async () => {
     useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     open()
