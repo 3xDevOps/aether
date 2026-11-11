@@ -23,7 +23,8 @@ Dispatch fresh-context subsessions on other agents and models, within what this
 session's owner allows, and manage them. A subsession cannot start subsessions.
   options [--harness <agent>]   whether you may start subsessions, the limits,
                                 and each agent and account with its state
-                                (ready, exhausted, not-installed, not-signed-in);
+                                (ready, exhausted, not-installed, not-signed-in,
+                                off: your session owner turned it off);
                                 --harness also lists that agent's models
   start --harness <agent> --purpose <words> (--task <text> | --task-file <path|->)
         [--model <id>] [--mode standard|enhanced|background]
@@ -201,8 +202,9 @@ Accounts: a subsession of this session's agent starts on this session's
 account; any other agent starts on your session owner's own sign-in.
 --account picks the owner's account or one a teammate shared with the owner,
 from the accounts options lists; a choice that is not signed in is refused
-with the reason. This session's launch fallback can still move it to another
-account, as for any launch.
+with the reason. A choice the owner turned off (state off) is refused; pick
+one options lists as ready. This session's launch fallback can still move it
+to another account the owner left on, as for any launch.
 A subsession cannot start subsessions.
 `
 

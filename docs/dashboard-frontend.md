@@ -346,7 +346,13 @@ top to bottom:
    it does when the saved choices name an agent or model the account cannot
    use. The panel's **Subsessions** switch follows your Settings choice and
    sends `children` only when flipped, for that session alone; it is off and
-   disabled for a Background session.
+   disabled for a Background session. While it is on, **Subsession agents**
+   (`subsession-agents.tsx`) opens a menu of checkboxes, one per installed
+   agent with its accounts under it when it has several, each with its login
+   state; a change saves the member setting at once with `child.settings`
+   `choice`, one save after another, and **Settings → Subsessions** shows the
+   same menu. An account whose agents could not be listed is named, with the
+   server's error, below the row (`choices_error`).
 3. **Sessions** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a
@@ -6823,8 +6829,10 @@ Categories:
   start subsessions** (`enabled`, on by default), with a **What subsessions
   cover** list (what it allows, that budgets and limits apply, how to override it for one session). The switch saves
   on change; a refused change rereads the setting and keeps the error under
-  the row. Where the server offers `workspace.child_limits`, a read-only row
-  gives the active workspace's limit.
+  the row. **Subsession agents**, once the server lists `choices`, is the
+  launch panel's agents menu; a refused change there shows the server's error
+  in a toast and rereads the setting. Where the server offers
+  `workspace.child_limits`, a read-only row gives the active workspace's limit.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you. A provider that reports `unauthenticated` keeps the
   server's error and adds **Sign in on Agents**.

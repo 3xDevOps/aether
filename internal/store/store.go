@@ -156,6 +156,9 @@ type Store interface {
 	// UnfinishedChildren counts parent's attached children still queued,
 	// starting or not done, and their mail to parent unread since since.
 	UnfinishedChildren(ctx context.Context, parent domain.RunID, since time.Time) (unfinished, unread int, err error)
+	// ChildSettings is member's subsession setting, which a subsession's
+	// usage move reads for the accounts its owner turned off.
+	ChildSettings(ctx context.Context, member domain.MemberID) (ChildSettings, error)
 	// LastCoordReportAt is when run last reported an outcome of any kind,
 	// zero when it never did.
 	LastCoordReportAt(ctx context.Context, run domain.RunID) (time.Time, error)

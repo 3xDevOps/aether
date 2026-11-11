@@ -5,6 +5,7 @@ import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
+import { useChildSettings } from '@/store/children'
 import { useLaunchDefaults } from '@/store/launch-defaults'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { agentInfo, alice, bob, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
@@ -90,6 +91,18 @@ describe('child runs switch', () => {
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
     expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).toMatchObject({ children: 'off' })
     for (const [params] of vi.mocked(api.launchDefaultsSet).mock.calls) expect(JSON.stringify(params)).not.toContain('children')
+  })
+
+  it('offers the subsession agents while subsessions are on for the launch', async () => {
+    useChildSettings.setState({ settings: null, error: null })
+    vi.mocked(api.childSettings).mockResolvedValue({ enabled: true, off: [{ harness: 'codex' }], choices: [
+      { account_member_id: alice.id, account_name: 'Alice', harness: 'claude', display_name: 'Claude Code', status: 'ready' },
+      { account_member_id: alice.id, account_name: 'Alice', harness: 'codex', display_name: 'Codex', status: 'ready' },
+    ] })
+    await open()
+    expect(await screen.findByRole('button', { name: 'Subsession agents: 1 off' })).toBeDefined()
+    fireEvent.click(childSwitch())
+    expect(screen.queryByRole('button', { name: /^Subsession agents/ })).toBeNull()
   })
 
   it('is off and disabled for a Background run', async () => {

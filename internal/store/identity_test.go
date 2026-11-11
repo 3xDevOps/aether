@@ -21,7 +21,7 @@ import (
 // keys on would have emptied.
 func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw := openLegacy(t, path, len(migrations)-1)
+	raw := openLegacy(t, path, 110)
 	key := testKey(t, "")
 	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image, git_name, git_email)

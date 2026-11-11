@@ -689,7 +689,18 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 	if run.ACP {
 		mode = domain.LaunchACP
 	}
+	var off domain.ChildChoicesOff
+	if run.ParentRunID != "" && !run.Detached {
+		settings, settingsErr := s.cfg.Store.ChildSettings(ctx, run.MemberID)
+		if settingsErr != nil {
+			return nil, "", nil, fmt.Errorf("read the owner's subsession agents: %w", settingsErr)
+		}
+		off = settings.Off
+	}
 	to, excluded := fallback.Select(ctx, s.cfg.Store, measured, run.MemberID, from, workspaces, run.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
+		if off.Covers(run.Harness, account) {
+			return false, nil
+		}
 		if home != run.MemberID {
 			if _, authErr := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, home, string(account), workspaces); authErr != nil {
 				if errors.Is(authErr, permissions.ErrDenied) || errors.Is(authErr, store.ErrNotFound) {

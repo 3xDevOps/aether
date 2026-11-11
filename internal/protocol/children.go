@@ -56,6 +56,7 @@ type ChildChoice struct {
 	AccountMemberID string   `json:"account_member_id"`
 	AccountName     string   `json:"account_name"`
 	Harness         string   `json:"harness"`
+	DisplayName     string   `json:"display_name,omitempty"`
 	Modes           []string `json:"modes"`
 	DefaultMode     string   `json:"default_mode"`
 	// Model is the exact model a choice fixes; empty with Models empty
@@ -66,7 +67,8 @@ type ChildChoice struct {
 	// the last list that worked, or none.
 	ModelsError string `json:"models_error,omitempty"`
 	// Status is "ready", "exhausted" (usage at the fallback threshold),
-	// "not-installed" or "not-signed-in"; Detail is the exact sentence.
+	// "not-installed", "not-signed-in" or "off" (the owner turned it off for
+	// subsessions); Detail is the exact sentence.
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
 }
@@ -159,14 +161,30 @@ type ChildFetchResult struct {
 }
 
 // ChildSettings is a member's child-run setting; child runs are on until
-// the member turns them off.
+// the member turns them off. Off lists the agents and accounts subsessions
+// may not use, an entry with no account turning the agent off on every
+// account. Choices is each agent on the member's own account and on every
+// account shared with them, with its login state; ChoicesError says which
+// accounts' agents could not be listed.
 type ChildSettings struct {
-	Enabled bool `json:"enabled"`
+	Enabled      bool                 `json:"enabled"`
+	Off          []ChildChoiceSetting `json:"off"`
+	Choices      []ChildChoice        `json:"choices"`
+	ChoicesError string               `json:"choices_error,omitempty"`
+}
+
+// ChildChoiceSetting turns one agent on or off for subsessions, on one
+// account or, with no account, on every account.
+type ChildChoiceSetting struct {
+	Harness         string `json:"harness"`
+	AccountMemberID string `json:"account_member_id,omitempty"`
+	On              bool   `json:"on,omitempty"`
 }
 
 // ChildSettingsParams: a nil field keeps its value.
 type ChildSettingsParams struct {
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled *bool               `json:"enabled,omitempty"`
+	Choice  *ChildChoiceSetting `json:"choice,omitempty"`
 }
 
 type RunChildrenParams struct {

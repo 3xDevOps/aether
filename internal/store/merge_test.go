@@ -227,6 +227,9 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	w := mustCreateWorkspace(t, db)
 	runB := mustCreateRun(t, db, w.ID, b.ID, domain.RunCompleted)
 	runC := mustCreateRun(t, db, w.ID, c.ID, domain.RunCompleted)
+	if err := db.PutChildSettings(ctx, c.ID, ChildSettings{Enabled: true, Off: domain.ChildChoicesOff{{Harness: "claude", Account: b.ID}, {Harness: "codex"}, {Harness: "claude", Account: a.ID}}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.BindIdentity(ctx, &domain.Identity{Member: b.ID, Provider: "github", Subject: "42", Login: "ada"}); err != nil {
 		t.Fatal(err)
 	}
@@ -386,6 +389,9 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	}
 	if perr := db.PutLaunchDefaults(ctx, c.ID, LaunchDefaults{Source: "member"}, launchRevisions[c.ID]); !errors.Is(perr, ErrConflict) {
 		t.Fatalf("PutLaunchDefaults with the revision read before the merge = %v, want ErrConflict", perr)
+	}
+	if cs, gerr := db.ChildSettings(ctx, c.ID); gerr != nil || !slices.Equal(cs.Off, domain.ChildChoicesOff{{Harness: "claude", Account: a.ID}, {Harness: "codex"}}) {
+		t.Fatalf("Cy's subsession agents off = %+v, %v; want the absorbed member's account moved to the survivor", cs.Off, gerr)
 	}
 	if got, gerr := db.GetWatch(ctx, watchB.ID); gerr != nil || got.MemberID != a.ID || got.Version == watchB.Version {
 		t.Fatalf("absorbed member's watch = %+v, %v; want it moved with a new version", got, gerr)

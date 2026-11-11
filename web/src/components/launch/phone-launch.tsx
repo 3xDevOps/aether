@@ -124,8 +124,8 @@ export function PhoneLaunchSheet({
               )}
             </CollapsibleTrigger>
             <CollapsibleContent className="flex flex-col gap-4 pt-2">
-              {options}
               {!choice.noAgents && <Button type="button" variant="link" size="sm" className="self-start" disabled={disabled} onClick={onSetUp}>Install more agents...</Button>}
+              {options}
             </CollapsibleContent>
           </Collapsible>
           {notes}

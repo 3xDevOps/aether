@@ -17,6 +17,7 @@ const (
 	choiceExhausted    = "exhausted"
 	choiceNotInstalled = "not-installed"
 	choiceNotSignedIn  = "not-signed-in"
+	choiceOff          = "off"
 )
 
 var modeNames = map[string]domain.LaunchMode{
@@ -38,13 +39,9 @@ func modeName(m domain.LaunchMode) string {
 // agent on the owner's own account and on each account shared with the owner
 // whose owner reaches the parent's workspaces.
 func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoice, error) {
-	sharers, err := s.cfg.Store.ListAccountOwners(ctx, p.owner)
+	accounts, err := s.sharedAccounts(ctx, p.owner)
 	if err != nil {
 		return nil, err
-	}
-	accounts := []domain.MemberID{p.owner}
-	for _, m := range sharers {
-		accounts = append(accounts, m.ID)
 	}
 	var out []protocol.ChildChoice
 	for _, account := range accounts {
@@ -53,21 +50,54 @@ func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoic
 		} else if err != nil {
 			return nil, err
 		}
-		list, err := s.agentChoices(ctx, p, account)
+		list, err := s.agentChoices(ctx, p.owner, account)
 		if err != nil {
 			return nil, err
+		}
+		for i, c := range list {
+			switch {
+			case c.Status == choiceNotInstalled:
+			case p.settings.Off.Covers(c.Harness, account):
+				list[i].Status, list[i].Detail = choiceOff, offDetail(p.settings.Off, c.Harness, account, c.AccountName)
+			case c.Status == choiceReady:
+				if used, ok := s.usedPercent(ctx, p.owner, account, c.Harness); ok && used >= fallback.ExhaustedPercent {
+					list[i].Status, list[i].Detail = choiceExhausted, fmt.Sprintf("%s's %s usage is at %.0f%%", c.AccountName, c.Harness, used)
+				}
+			}
 		}
 		out = append(out, list...)
 	}
 	return out, nil
 }
 
+func (s *Service) sharedAccounts(ctx context.Context, member domain.MemberID) ([]domain.MemberID, error) {
+	sharers, err := s.cfg.Store.ListAccountOwners(ctx, member)
+	if err != nil {
+		return nil, err
+	}
+	accounts := []domain.MemberID{member}
+	for _, m := range sharers {
+		accounts = append(accounts, m.ID)
+	}
+	return accounts, nil
+}
+
+// offDetail names the command that turns harness back on for account: the
+// agent's own entry when it is off everywhere, else the account's.
+func offDetail(off domain.ChildChoicesOff, harness string, account domain.MemberID, accountName string) string {
+	on := "aether subsessions on --agent " + harness
+	if !off.Covers(harness, "") {
+		on += " --account " + string(account)
+	}
+	return fmt.Sprintf("%s on %s's account is off for subsessions in the owner's settings (Subsession agents in the launch panel, or %s)", harness, accountName, on)
+}
+
 // agentChoices lists every agent on account, which the caller authorized.
-func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.MemberID) ([]protocol.ChildChoice, error) {
+func (s *Service) agentChoices(ctx context.Context, owner, account domain.MemberID) ([]protocol.ChildChoice, error) {
 	if s.cfg.Agents == nil || s.cfg.Agents() == nil {
 		return nil, fmt.Errorf("agent listing is unavailable")
 	}
-	agents, err := s.cfg.Agents().ListAgents(ctx, p.owner, account)
+	agents, err := s.cfg.Agents().ListAgents(ctx, owner, account)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +107,7 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 	}
 	out := make([]protocol.ChildChoice, 0, len(agents))
 	for _, a := range agents {
-		c := protocol.ChildChoice{AccountMemberID: string(account), AccountName: name, Harness: a.Name, Status: choiceReady}
+		c := protocol.ChildChoice{AccountMemberID: string(account), AccountName: name, Harness: a.Name, DisplayName: a.DisplayName, Status: choiceReady}
 		c.Modes = []string{"standard", "background"}
 		c.DefaultMode = "standard"
 		if a.EnhancedInstalled {
@@ -97,13 +127,8 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 		case a.LoginMissing || (a.LoginFound != nil && !*a.LoginFound):
 			c.Status = choiceNotSignedIn
 			c.Detail = fmt.Sprintf("%s is not signed in to %s; they sign in with aether agent login %s", name, a.Name, a.Name)
-		default:
-			if used, ok := s.usedPercent(ctx, p.owner, account, a.Name); ok && used >= fallback.ExhaustedPercent {
-				c.Status = choiceExhausted
-				c.Detail = fmt.Sprintf("%s's %s usage is at %.0f%%", name, a.Name, used)
-			} else if a.LoginProblem != "" {
-				c.Detail = fmt.Sprintf("%s's %s login may be signed out: %s", name, a.Name, a.LoginProblem)
-			}
+		case a.LoginProblem != "":
+			c.Detail = fmt.Sprintf("%s's %s login may be signed out: %s", name, a.Name, a.LoginProblem)
 		}
 		out = append(out, c)
 	}
@@ -160,8 +185,14 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 	if err := s.admit(ctx, p, account); err != nil {
 		return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
 	}
-	spec := launchSpec{harness: req.Harness, account: account, mode: mode, model: req.Model, fallback: p.parent.Fallback}
-	choices, err := s.agentChoices(ctx, p, account)
+	if p.settings.Off.Covers(req.Harness, account) {
+		name, err := s.memberName(ctx, account)
+		if err != nil {
+			return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
+		}
+		return launchSpec{}, denied("%s; aether-internal subsession options lists the agents and accounts that are on", offDetail(p.settings.Off, req.Harness, account, name))
+	}
+	choices, err := s.agentChoices(ctx, p.owner, account)
 	if err != nil {
 		return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
 	}
@@ -170,6 +201,7 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 			return launchSpec{}, denied("%s", c.Detail)
 		}
 	}
+	spec := launchSpec{harness: req.Harness, account: account, mode: mode, model: req.Model, fallback: p.parent.Fallback}
 	defaultMode, err := s.cfg.Runs.DefaultMode(ctx, p.owner, spec.account, spec.harness)
 	if err != nil {
 		return launchSpec{}, invalid("agent %q: %s; aether-internal subsession options lists the agents", req.Harness, err.Error())

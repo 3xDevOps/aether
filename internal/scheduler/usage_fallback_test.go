@@ -414,6 +414,40 @@ func TestHandedOffRunMovesOnlyToAccountsSharedWithItsHome(t *testing.T) {
 	}
 }
 
+// A subsession never moves onto an account its owner turned its agent off
+// on, even one turned off after it started.
+func TestSubsessionMovesOnlyToAccountsItsOwnerLeftOn(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	parent := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "parent", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	if err := e.db.CreateRun(t.Context(), parent); err != nil {
+		t.Fatal(err)
+	}
+	reserved, _, err := e.db.ReserveChild(t.Context(), &domain.ChildReservation{ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID),
+		WorkspaceID: e.ws.ID, OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "claude", Mode: domain.LaunchACP, Purpose: "review", Task: "t", IdempotencyKey: "k", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP, domain.LaunchOptions{ReservedRunID: reserved.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if err = e.db.PutChildSettings(t.Context(), e.member.ID, store.ChildSettings{Enabled: true, Off: domain.ChildChoicesOff{{Harness: "claude", Account: e.owner.ID}}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+	var got *domain.Run
+	waitFor(t, "the usage limit's outcome", func() bool {
+		got, err = e.db.GetRun(t.Context(), run.ID)
+		return err == nil && (strings.HasPrefix(got.Reason, "Usage limit reached") || got.AccountMember() != e.member.ID)
+	})
+	if !strings.HasPrefix(got.Reason, "Usage limit reached on Ada's account; ") || got.AccountMember() != e.member.ID || len(notes.all()) != 0 {
+		t.Fatalf("subsession = reason %q account %s notes %v; want it kept off Grace's account, which its owner turned off", got.Reason, got.AccountMember(), notes.all())
+	}
+}
+
 // A container that exits while the move waits to choose an account is
 // finalized when the run stays where it is, not left live with nothing
 // supervising it.

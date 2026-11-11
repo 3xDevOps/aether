@@ -115,10 +115,14 @@ func (g *fakeGit) FetchRunBranch(context.Context, domain.WorkspaceID, string, do
 	return g.head, nil
 }
 
-// fakeAgents signs every member in to every agent except those in missing.
-type fakeAgents struct{ missing map[domain.MemberID]bool }
+// fakeAgents signs every member in to every agent except those in missing,
+// and cannot list the agents on an account in broken.
+type fakeAgents struct{ missing, broken map[domain.MemberID]bool }
 
 func (a fakeAgents) ListAgents(_ context.Context, _, account domain.MemberID) ([]protocol.AgentInfo, error) {
+	if a.broken[account] {
+		return nil, errors.New("decode harness definition: boom")
+	}
 	found := !a.missing[account]
 	var out []protocol.AgentInfo
 	for _, name := range []string{"claude", "codex"} {
@@ -195,7 +199,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db, paused: map[domain.RunID]bool{}}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db, paused: map[domain.RunID]bool{}}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}, broken: map[domain.MemberID]bool{}}}
 	h.now = time.Now()
 	h.ws = &domain.Workspace{Name: "app"}
 	if err = db.CreateWorkspace(ctx, h.ws); err != nil {
@@ -554,6 +558,76 @@ func TestSubsessionsRunOnTheParentsOrASharedAccount(t *testing.T) {
 	}
 	if _, err := h.start(handed.ID, protocol.ChildStartParams{Harness: "claude", Task: "after a handoff"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Ada is not signed in to claude") {
 		t.Fatalf("same agent under a session handed to Ada = %v, want Ada's own account, not the launcher's", err)
+	}
+}
+
+func TestOwnersTurnSubsessionAgentsOff(t *testing.T) {
+	h := newHarness(t)
+	carol := h.member("Carol", domain.RoleCollaborator)
+	if _, err := h.db.ShareAccount(h.ctx, h.bob.ID, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.GrantWorkspace(h.ctx, h.ws.ID, h.bob.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	turn := func(harness string, account domain.MemberID, on bool) (protocol.ChildSettings, error) {
+		return h.svc.SetSettings(h.ctx, h.ada.ID, protocol.ChildSettingsParams{Choice: &protocol.ChildChoiceSetting{Harness: harness, AccountMemberID: string(account), On: on}})
+	}
+	if _, err := turn("claude", h.ada.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := turn("codex", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.Off) != 2 || len(settings.Choices) != 4 || !settings.Enabled {
+		t.Fatalf("settings = %+v, want claude on Ada's account and codex everywhere off, with claude and codex on Ada's and Bob's accounts listed", settings)
+	}
+	if _, unshared := turn("claude", carol.ID, false); !errors.Is(unshared, permissions.ErrDenied) {
+		t.Fatalf("turning off an account not shared with Ada = %v, want denied", unshared)
+	}
+	if _, bad := turn("bad name!", "", false); code(bad) != protocol.CodeInvalidParams {
+		t.Fatalf("turning off an invalid agent name = %v, want invalid params", bad)
+	}
+
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	raw, _ := json.Marshal(protocol.ChildOptionsParams{})
+	out, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildOptions, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, c := range out.(protocol.ChildOptionsResult).Choices {
+		states[c.AccountMemberID+"/"+c.Harness] = c.Status
+	}
+	if states[string(h.ada.ID)+"/claude"] != choiceOff || states[string(h.bob.ID)+"/codex"] != choiceOff || states[string(h.bob.ID)+"/claude"] != choiceReady {
+		t.Fatalf("options = %v, want Ada's claude and every codex off, Bob's claude ready", states)
+	}
+	if _, own := h.start(parent.ID, protocol.ChildStartParams{Harness: "claude", Task: "own"}); code(own) != protocol.CodeDenied ||
+		!strings.Contains(own.Error(), "off for subsessions") || !strings.Contains(own.Error(), "aether subsessions on --agent claude --account "+string(h.ada.ID)) {
+		t.Fatalf("claude on Ada's own account = %v, want denied as off, naming the command that turns that account back on", own)
+	}
+	if _, codex := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", AccountMemberID: string(h.bob.ID), Task: "codex"}); code(codex) != protocol.CodeDenied ||
+		!strings.HasSuffix(strings.SplitN(codex.Error(), "(", 2)[1], "aether subsessions on --agent codex); aether-internal subsession options lists the agents and accounts that are on") {
+		t.Fatalf("codex on Bob's account = %v, want denied: codex is off on every account, turned back on without --account", codex)
+	}
+	onBob := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", AccountMemberID: string(h.bob.ID), Task: "bob"})
+
+	if _, err = turn("claude", h.bob.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	if queued, getErr := h.db.GetChild(h.ctx, domain.RunID(onBob.RunID)); getErr != nil || queued.State != domain.ChildRefused || !strings.Contains(queued.Error, "turned off for subsessions after this one was queued") {
+		t.Fatalf("queued subsession after its account was turned off = %+v, %v; want refused", queued, getErr)
+	}
+	if settings, err = turn("codex", "", true); err != nil || len(settings.Off) != 2 {
+		t.Fatalf("turning codex back on = %+v, %v; want only the two claude entries left", settings, err)
+	}
+
+	h.agents.broken[h.bob.ID] = true
+	if settings, err = h.svc.Settings(h.ctx, h.ada.ID); err != nil || !settings.Enabled || len(settings.Choices) != 2 ||
+		!strings.Contains(settings.ChoicesError, "list the agents on account "+string(h.bob.ID)+": decode harness definition: boom") {
+		t.Fatalf("settings while Bob's agents cannot be listed = %+v, %v; want Ada's choices and the error, not a failed read", settings, err)
 	}
 }
 

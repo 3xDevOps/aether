@@ -1241,8 +1241,9 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
   of this session's subsessions are busy and queued, and each agent on the
   owner's own account and on every account shared with the owner whose owner
   reaches the session's workspaces, with its state: `ready`, `exhausted` (95% of
-  its quota used), `not-installed` or `not-signed-in`, with the sentence
-  that says how to fix it. A `ready` login the server found signed out says so
+  its quota used), `not-installed`, `not-signed-in` or `off` (the owner turned it
+  off for subsessions, [teams.md](teams.md#choose-the-agents-subsessions-use)),
+  with the sentence that says how to fix it. A `ready` login the server found signed out says so
   in its sentence. `--harness` adds that agent's models.
 - `subsession start` takes `--harness`, `--purpose` (3-8 words, shown in the
   dashboard) and `--task` or `--task-file` (at most 24 KiB, so the escaped request fits the socket's 64 KiB; `-` reads

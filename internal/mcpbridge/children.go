@@ -20,7 +20,7 @@ func registerChildTools(ctx context.Context, srv *mcp.Server, socket string) {
 	}
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "aether_subsession_options",
-		Description: "Whether this session may start subsessions, why not, the tree's limits and usage, and each agent and account a subsession may use with its state: ready, exhausted, not-installed or not-signed-in. " +
+		Description: "Whether this session may start subsessions, why not, the tree's limits and usage, and each agent and account a subsession may use with its state: ready, exhausted, not-installed, not-signed-in or off (the owner turned it off for subsessions). " +
 			"Call it once before aether_subsession_start, and again only after an error. Pass harness to list that agent's models.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.ChildOptionsParams) (*mcp.CallToolResult, protocol.ChildOptionsResult, error) {
 		var out protocol.ChildOptionsResult

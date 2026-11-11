@@ -6,7 +6,8 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { accessLabel, asFallback, type Readiness, ReadinessText } from '@/components/launch/account-picker'
 import { limitsText, type LimitsDraft, parseLimits, RunLimitsFields } from '@/components/launch/run-limits'
-import type { Member, RunLimits, Workspace } from '@/lib/types'
+import { AgentsError, offersAgents, SubsessionAgents } from '@/components/launch/subsession-agents'
+import type { ChildSettings, Member, RunLimits, Workspace } from '@/lib/types'
 
 /** `order` stays null, the server's automatic order, until the reader reorders or unticks an account. */
 export type Fallback = { off: boolean; order: string[] | null; excluded: string[] }
@@ -123,11 +124,13 @@ export function FallbackOptions({
 export type ChildRunsChoice = '' | 'on' | 'off'
 
 /** Whether this run may start child runs; it follows the member setting until flipped, and only a flip is sent. */
-export function ChildRunsSwitch({ value, onChange, enabled, readError, unavailable, disabled }: {
+export function ChildRunsSwitch({ value, onChange, enabled, settings, readError, unavailable, disabled }: {
   value: ChildRunsChoice
   onChange: (value: ChildRunsChoice) => void
   /** The member setting, unknown until read. */
   enabled: boolean | undefined
+  /** The member's whole setting, whose agents the switch offers while on. */
+  settings?: ChildSettings | null
   /** Why the setting could not be read; the switch then sets this run alone. */
   readError?: string | null
   /** Why this run cannot start child runs whatever the setting says. */
@@ -150,6 +153,15 @@ export function ChildRunsSwitch({ value, onChange, enabled, readError, unavailab
       <p id="launch-child-runs-help" className="text-ui-sm text-muted">
         {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your subsessions setting…') : ['Lets the agent start other agents as subsessions.', value ? 'Set for this session only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
       </p>
+      {on && settings && offersAgents(settings) && (
+        <>
+          <div className="flex min-h-7 items-center justify-between gap-3 coarse:min-h-11">
+            <Label htmlFor="launch-child-agents" className="text-muted">Subsession agents</Label>
+            <SubsessionAgents id="launch-child-agents" settings={settings} disabled={disabled} />
+          </div>
+          <AgentsError settings={settings} />
+        </>
+      )}
     </div>
   )
 }

@@ -2646,6 +2646,11 @@ UPDATE events SET run_id = '', payload = json_set(payload, '$.to_run_id', '')
 WHERE type = 'coord.message.acked' AND json_extract(payload, '$.to_run_id') <> '' AND NOT EXISTS (
 	SELECT 1 FROM runs r WHERE r.id = json_extract(events.payload, '$.to_run_id') AND r.workspace_id = events.workspace_id);
 `,
+	// v112: the agents and accounts a member's subsessions may not use, a
+	// JSON array of {harness, account_member_id}.
+	`
+ALTER TABLE child_settings ADD COLUMN off TEXT NOT NULL DEFAULT '[]';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
