@@ -485,14 +485,17 @@ cat /proc/"$(sudo docker inspect --format '{{.State.Pid}}' <container>)"/cgroup
 already running. While the slice is inactive the file does not exist, and `100`
 without a drop-in of your own means the file is not loaded. With the systemd
 driver, a container created after the update prints `aether.slice` and its
-runtime: `sysbox-runc` for terminals and sessions that are not isolated when
-Sysbox is installed and usable, `runc` otherwise. A container created before
-the slice prints an empty parent and sits under `system.slice`. A new
-container's `/proc/<pid>/cgroup` reads `0::/aether.slice/docker-<id>.scope`,
-with the full container ID and, under `sysbox-runc`, `/init.scope` appended.
-Read it on the host: inside a Sysbox container the cgroup namespace shows only
-`0::/init.scope`. With the `cgroupfs` driver the parent is `/aether` and the
-path `0::/aether/<id>`.
+runtime: with the default `container-runtime auto`, `sysbox-runc` for terminals
+and sessions that are not isolated when Sysbox is installed and usable,
+otherwise Docker's default runtime, usually `runc`. A container created before
+the slice prints an empty parent and sits under Docker's default parent:
+`system.slice`, unless `cgroup-parent` in `/etc/docker/daemon.json` names
+another. On cgroup v2, a new container's `/proc/<pid>/cgroup` reads
+`0::/aether.slice/docker-<id>.scope`, with the full container ID and, under
+`sysbox-runc`, `/init.scope` appended. Read it on the host: inside a Sysbox
+container the cgroup namespace shows only `0::/init.scope`. With the `cgroupfs`
+driver the parent is `/aether` and the path `0::/aether/<id>`. On cgroup v1 the
+file has one line per controller, each ending in the same path.
 
 If new sessions fail to start with `cgroup-parent for systemd cgroup should be
 a valid slice named as "xxx.slice"`, Docker's cgroup driver changed after the
