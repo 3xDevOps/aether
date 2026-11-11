@@ -23,12 +23,12 @@ function stateWords(choice: ChildChoice): string {
   return ''
 }
 
-function ChoiceLabel({ label, choice, on }: { label: string; choice: ChildChoice; on: boolean }) {
+function ChoiceLabel({ label, choice, on, faint = false }: { label: string; choice: ChildChoice; on: boolean; faint?: boolean }) {
   const state = stateWords(choice)
   return (
     <span className="flex min-w-0 flex-1 items-center gap-3" title={choice.detail}>
-      <span className={cn('min-w-0 truncate', !on && 'text-muted')}>{label}</span>
-      {state && <span className="ml-auto shrink-0 text-ui-sm text-state-needs-you">{state}</span>}
+      <span className={cn('min-w-0 truncate', !on && !faint && 'text-muted')}>{label}</span>
+      {state && <span className={cn('ml-auto shrink-0 text-ui-sm', faint ? 'text-icon-faint' : 'text-state-needs-you')}>{state}</span>}
     </span>
   )
 }
@@ -60,14 +60,15 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
     })
   }
   const accountLabel = (choice: ChildChoice) => choice.account_member_id === self ? 'Your account' : `${choice.account_name}'s account`
+  const rowLabel = (choice: ChildChoice) => `${choice.display_name || choice.harness} · ${accountLabel(choice)}`
 
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button id={id} type="button" variant="secondary" size="sm" disabled={disabled}>
+        <Button id={id} type="button" variant="secondary" size="sm" disabled={disabled} title={warnings.map((c) => `${rowLabel(c)}: ${stateWords(c)}`).join('\n') || undefined}>
           {warnings.length > 0 && <StatusDot tone="needs-you" />}
           {offRows === 0 ? 'All on' : `${offRows} off`}
-          {warnings.length > 0 && <span className="sr-only">, {warnings.length} needs attention</span>}
+          {warnings.length > 0 && <span className="sr-only">, {warnings.length} {warnings.length === 1 ? 'needs' : 'need'} attention</span>}
           <ChevronDown />
         </Button>
       </MenuTrigger>
@@ -88,7 +89,7 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
                 onSelect={keepOpen}
                 onCheckedChange={(next) => turn(next ? [{ harness, on: true }, { harness, account_member_id: choice.account_member_id, on: true }] : [{ harness }])}
               >
-                <ChoiceLabel label={choice.account_member_id === self ? name : `${name} · ${accountLabel(choice)}`} choice={choice} on={on} />
+                <ChoiceLabel label={choice.account_member_id === self ? name : rowLabel(choice)} choice={choice} on={on} />
               </MenuCheckboxItem>
             )
           }
@@ -106,7 +107,7 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
                   onSelect={keepOpen}
                   onCheckedChange={(next) => turn([{ harness, account_member_id: choice.account_member_id, on: next }])}
                 >
-                  <ChoiceLabel label={accountLabel(choice)} choice={choice} on={!accountOff(harness, choice.account_member_id)} />
+                  <ChoiceLabel label={accountLabel(choice)} choice={choice} on={!accountOff(harness, choice.account_member_id)} faint={agentOff(harness)} />
                 </MenuCheckboxItem>
               ))}
             </Fragment>
