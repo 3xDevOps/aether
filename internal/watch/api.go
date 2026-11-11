@@ -355,7 +355,13 @@ func (s *Service) settledWatch(ctx context.Context, id string) (*store.Watch, er
 }
 
 func (s *Service) result(ctx context.Context, w *store.Watch) (protocol.WatchResult, error) {
-	out, err := s.toProto(ctx, w)
+	if err := s.allowed(ctx, w); errors.Is(err, errRevoked) {
+		return protocol.WatchResult{Watch: revokedProto(w, err),
+			Receipt: fmt.Sprintf("Not checking %s watch %s: %v. Delete it with watch.delete.", kindWords[w.TargetKind], w.ID, err)}, nil
+	} else if err != nil {
+		return protocol.WatchResult{}, err
+	}
+	out, err := s.readProto(ctx, w)
 	if err != nil {
 		return protocol.WatchResult{}, err
 	}
@@ -443,12 +449,18 @@ func stamp(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// toProto is w as its member may read it now.
 func (s *Service) toProto(ctx context.Context, w *store.Watch) (protocol.Watch, error) {
 	if err := s.allowed(ctx, w); errors.Is(err, errRevoked) {
 		return revokedProto(w, err), nil
 	} else if err != nil {
 		return protocol.Watch{}, err
 	}
+	return s.readProto(ctx, w)
+}
+
+// readProto is w in full, for a member allowed shows it to.
+func (s *Service) readProto(ctx context.Context, w *store.Watch) (protocol.Watch, error) {
 	out := protocol.Watch{
 		ID: w.ID, MemberID: string(w.MemberID), WorkspaceID: string(w.WorkspaceID), Target: targetOf(w),
 		TargetTitle: w.TargetTitle, Conditions: w.Conditions, State: w.State, Error: w.Error, Label: w.Label,
@@ -536,8 +548,10 @@ func (s *Service) Get(ctx context.Context, member domain.MemberID, id string) (p
 	}
 	if aerr := s.allowed(ctx, w); errors.Is(aerr, errRevoked) {
 		return protocol.WatchGetResult{Watch: revokedProto(w, aerr), Notifications: []protocol.WatchNotification{}}, nil
+	} else if aerr != nil {
+		return protocol.WatchGetResult{}, aerr
 	}
-	pw, err := s.toProto(ctx, w)
+	pw, err := s.readProto(ctx, w)
 	if err != nil {
 		return protocol.WatchGetResult{}, err
 	}

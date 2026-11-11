@@ -213,11 +213,25 @@ func TestASavedWatchOfASessionNoLongerReachedHidesWhatItRead(t *testing.T) {
 	if err := h.db.GrantWorkspace(h.ctx, other.ID, h.ada.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	w := h.watch(h.ada, runTarget(run)).Watch
-	h.status(run, domain.RunFailed, "", "secret failure")
-	h.eventually("the end noticed", func() bool { return len(h.notices(w.ID)) == 1 })
-	if err := h.db.RevokeWorkspaceGrant(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+	created := protocol.WatchCreateParams{Target: runTarget(run), IdempotencyKey: "secret-watch"}
+	res, err := h.svc.Create(h.ctx, h.ada.ID, created)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	w := res.Watch
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "secret question")
+	h.eventually("the need noticed", func() bool { return len(h.notices(w.ID)) == 1 })
+	if err = h.db.RevokeWorkspaceGrant(h.ctx, other.ID, h.ada.ID, ""); err != nil {
 		t.Fatal(err)
+	}
+	replayed, err := h.svc.Create(h.ctx, h.ada.ID, created)
+	if err != nil {
+		t.Fatalf("replayed Create: %v", err)
+	}
+	label := "mine"
+	updated, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: w.ID, Label: &label})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
 	}
 	list, err := h.svc.List(h.ctx, h.ada.ID, protocol.WatchListParams{})
 	if err != nil {
@@ -227,7 +241,7 @@ func TestASavedWatchOfASessionNoLongerReachedHidesWhatItRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	for name, v := range map[string]any{"List": list, "Get": got} {
+	for name, v := range map[string]any{"List": list, "Get": got, "replayed Create": replayed, "Update": updated} {
 		read := fmt.Sprintf("%+v", v)
 		if !strings.Contains(read, w.ID) || strings.Contains(read, string(run.ID)) || strings.Contains(read, "Secret") || strings.Contains(read, "secret") {
 			t.Errorf("%s = %s; want the watch without its session, title or notices", name, read)

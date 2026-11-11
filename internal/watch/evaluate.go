@@ -196,7 +196,8 @@ func (s *Service) allowed(ctx context.Context, w *store.Watch) error {
 		return nil
 	}
 	if _, err := s.store.GetWorkspace(ctx, w.WorkspaceID); errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("%w: the workspace no longer exists", errRevoked)
+		// Worded as lost access: only super admins learn of a deletion.
+		return fmt.Errorf("%w: %w", errRevoked, permissions.ErrNoAccess)
 	} else if err != nil {
 		return err
 	}
