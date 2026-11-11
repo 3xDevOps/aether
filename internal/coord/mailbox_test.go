@@ -925,12 +925,15 @@ func TestBlockedReportRetriesFullInboxAndPreservesChildReason(t *testing.T) {
 	if err != nil || report.State != store.CoordReportFinalized || report.PublishedAt != nil {
 		t.Fatalf("full-inbox report = %+v, %v; want finalized with publication pending", report, err)
 	}
-	batch, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
-	if rpcErr != nil {
-		t.Fatalf("read earlier messages: %v", rpcErr)
-	}
-	if _, ackErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: batch.AckToken}); ackErr != nil {
-		t.Fatalf("ack earlier messages: %v", ackErr)
+	var token string
+	for {
+		batch, readErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: token})
+		if readErr != nil {
+			t.Fatalf("read earlier messages: %v", readErr)
+		}
+		if token = batch.AckToken; token == "" {
+			break
+		}
 	}
 	if _, _, drainErr := h.svc.drainOutboxPage(ctx); drainErr != nil {
 		t.Fatalf("retry blocked publication: %v", drainErr)

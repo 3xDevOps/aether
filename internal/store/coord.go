@@ -484,6 +484,20 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 		if rerr != nil {
 			return nil, "", false, rerr
 		}
+		// A batch an earlier server stamped can exceed the bound; its
+		// tail goes back to wait for a later batch, unacknowledged.
+		if fit := batchFit(msgs); fit < len(msgs) {
+			args := make([]any, 0, len(msgs)-fit)
+			for _, m := range msgs[fit:] {
+				args = append(args, m.ID)
+			}
+			if _, uerr := tx.ExecContext(ctx,
+				`UPDATE run_messages SET delivery_token = '' WHERE id IN (`+placeholders(len(args))+`)`, args...,
+			); uerr != nil {
+				return nil, "", false, fmt.Errorf("store: split an oversized message batch: %w", uerr)
+			}
+			msgs = msgs[:fit]
+		}
 		return msgs, outstanding, acked, commitBatch(tx)
 	}
 
@@ -496,13 +510,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 	if len(msgs) == 0 {
 		return nil, "", acked, commitBatch(tx)
 	}
-	size := len(msgs[0].Body)
-	for i, m := range msgs[1:] {
-		if size += len(m.Body); size > RunMessageBatchBytes {
-			msgs = msgs[:i+1]
-			break
-		}
-	}
+	msgs = msgs[:batchFit(msgs)]
 	token, err := newID("ack")
 	if err != nil {
 		return nil, "", false, err
@@ -540,10 +548,24 @@ func (d *DB) RetireRunMessages(ctx context.Context, to domain.RunID) error {
 	return nil
 }
 
-// RunMessageBatchBytes bounds the bodies of one inbox batch, oldest first
-// and at least one message, so a batch prints small enough for an agent's
-// harness to show it whole: the next read acknowledges every message in it.
+// RunMessageBatchBytes bounds one inbox batch as the inbox prints it, JSON
+// escaping and fields included, so an agent's harness shows it whole: the
+// next read acknowledges every message in it.
 const RunMessageBatchBytes = 4 << 10
+
+// batchFit is how many of msgs, oldest first and at least one, fit in
+// RunMessageBatchBytes. 120 bytes covers each message's field names, kind
+// and timestamp.
+func batchFit(msgs []*RunMessage) int {
+	size := 0
+	for i, m := range msgs {
+		body, _ := json.Marshal(m.Body)
+		if size += len(body) + len(m.ID) + len(m.FromRun) + len(m.CorrelationID) + 120; i > 0 && size > RunMessageBatchBytes {
+			return i
+		}
+	}
+	return len(msgs)
+}
 
 func outstandingToken(ctx context.Context, tx *sql.Tx, to domain.RunID) (string, error) {
 	var token string
