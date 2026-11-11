@@ -120,3 +120,36 @@ func TestSteerRedeliveredAfterTheRestartKeepsWhyItWasNotSent(t *testing.T) {
 		t.Fatalf("redelivered steer = %q %+v, want not_sent with the delivery error", got.State, got.Failure)
 	}
 }
+
+func TestDelayedSteerRecordsWhyItWasNotSent(t *testing.T) {
+	for _, tc := range []struct {
+		code   string
+		change func(*collabStore, *domain.Run, *domain.Member)
+	}{
+		{"session_protected", func(_ *collabStore, run *domain.Run, _ *domain.Member) { run.Protected = true }},
+		{"access_revoked", func(st *collabStore, _ *domain.Run, other *domain.Member) { delete(st.members, other.ID) }},
+	} {
+		st, clock, ws, _, other, run := setupCollab(t)
+		pty := &collabPTY{}
+		service, err := New(Config{Store: st, Runs: st, Workspaces: st, Inject: pty.Inject, Control: control.New(control.Config{Now: clock.Now}), Now: clock.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		posted, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "later", IdempotencyKey: tc.code})
+		if err != nil || posted.Message.DeliverAfter == nil {
+			t.Fatalf("post = %+v, %v; want a delayed steer", posted.Message, err)
+		}
+		tc.change(st, run, other)
+		clock.Add(SteeringDelay + time.Second)
+		if _, deliverErr := service.DeliverDue(context.Background(), 0); deliverErr != nil {
+			t.Fatal(deliverErr)
+		}
+		got, err := st.GetRoomMessage(context.Background(), posted.Message.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != store.RoomMessageNotSent || got.Failure == nil || got.Failure.Code != tc.code || got.Failure.Message == "" || pty.Calls() != 0 {
+			t.Fatalf("%s: state %s failure %+v, %d injects; want not_sent with the reason and nothing sent", tc.code, got.State, got.Failure, pty.Calls())
+		}
+	}
+}
