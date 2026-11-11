@@ -61,8 +61,7 @@ describe('child run settings', () => {
       { account_member_id: alice.id, account_name: 'Alice', harness: 'gemini', display_name: 'Gemini', status: 'not-installed' },
     ]
     const client = show(['*'], { childSettings: vi.fn(async () => ({ enabled: true, off: [], choices })) })
-    const trigger = await screen.findByRole('button', { name: 'Subsession agents' })
-    expect(trigger.textContent).toBe('All on, 1 needs attention')
+    const trigger = await screen.findByRole('button', { name: 'Subsession agents: All on, 1 needs attention' })
     await user.click(trigger)
     const menu = screen.getByRole('menu')
     const item = (name: RegExp) => within(menu).getByRole('menuitemcheckbox', { name })
@@ -78,6 +77,6 @@ describe('child run settings', () => {
     await user.click(item(/Codex/))
     expect(client.childSettings).toHaveBeenLastCalledWith({ choice: { harness: 'codex' } })
     await user.keyboard('{Escape}')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Subsession agents' }).textContent).toBe('2 off'))
+    expect(await screen.findByRole('button', { name: 'Subsession agents: 2 off' })).toBeDefined()
   })
 })

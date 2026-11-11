@@ -350,7 +350,9 @@ top to bottom:
    (`subsession-agents.tsx`) opens a menu of checkboxes, one per installed
    agent with its accounts under it when it has several, each with its login
    state; a change saves the member setting at once with `child.settings`
-   `choice`, and **Settings → Subsessions** shows the same menu.
+   `choice`, one save after another, and **Settings → Subsessions** shows the
+   same menu. An account whose agents could not be listed is named, with the
+   server's error, at the menu's foot (`choices_error`).
 3. **Sessions** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a

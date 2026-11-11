@@ -30,21 +30,24 @@ func (s *Service) Settings(ctx context.Context, member domain.MemberID) (protoco
 
 // SetSettings changes member's own setting.
 func (s *Service) SetSettings(ctx context.Context, member domain.MemberID, p protocol.ChildSettingsParams) (protocol.ChildSettings, error) {
-	s.settingsMu.Lock()
-	defer s.settingsMu.Unlock()
-	st, err := s.cfg.Store.ChildSettings(ctx, member)
-	if err != nil {
-		return protocol.ChildSettings{}, err
-	}
-	if p.Enabled != nil {
-		st.Enabled = *p.Enabled
-	}
-	if p.Choice != nil {
-		if st.Off, err = s.turnChoice(ctx, member, st.Off, *p.Choice); err != nil {
-			return protocol.ChildSettings{}, err
+	st, err := func() (store.ChildSettings, error) {
+		s.settingsMu.Lock()
+		defer s.settingsMu.Unlock()
+		st, err := s.cfg.Store.ChildSettings(ctx, member)
+		if err != nil {
+			return st, err
 		}
-	}
-	if err := s.cfg.Store.PutChildSettings(ctx, member, st); err != nil {
+		if p.Enabled != nil {
+			st.Enabled = *p.Enabled
+		}
+		if p.Choice != nil {
+			if st.Off, err = s.turnChoice(ctx, member, st.Off, *p.Choice); err != nil {
+				return st, err
+			}
+		}
+		return st, s.cfg.Store.PutChildSettings(ctx, member, st)
+	}()
+	if err != nil {
 		return protocol.ChildSettings{}, err
 	}
 	s.Kick()
@@ -86,6 +89,7 @@ func (s *Service) settingsWire(ctx context.Context, member domain.MemberID, st s
 	if err != nil {
 		return protocol.ChildSettings{}, err
 	}
+	var failed []string
 	for _, account := range accounts {
 		if _, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(account)); errors.Is(err, permissions.ErrDenied) {
 			continue
@@ -94,10 +98,12 @@ func (s *Service) settingsWire(ctx context.Context, member domain.MemberID, st s
 		}
 		list, err := s.agentChoices(ctx, member, account)
 		if err != nil {
-			return protocol.ChildSettings{}, err
+			failed = append(failed, fmt.Sprintf("list the agents on account %s: %v", account, err))
+			continue
 		}
 		out.Choices = append(out.Choices, list...)
 	}
+	out.ChoicesError = strings.Join(failed, "; ")
 	return out, nil
 }
 

@@ -818,8 +818,10 @@ account whose subscription no longer works, open **Subsession agents** under
 the **Subsessions** switch in the launch panel, or in **Settings →
 Subsessions**, and untick it. An agent available on several accounts lists
 each account under it; unticking the agent turns it off on every account,
-those shared with you later included. Each change is saved at once and applies
-to every session you own, however it was launched. From the CLI:
+those shared with you later included. An agent on one account is one row:
+unticking it on your own account turns the agent off everywhere, on a
+teammate's only that account. Each change is saved at once and applies to
+every session you own, however it was launched. From the CLI:
 
 ```sh
 aether subsessions                                        # what is on and off
@@ -832,7 +834,8 @@ An agent's `subsession start` on a choice you turned off fails with `-32001
 claude on <name>'s account is off for subsessions in the owner's settings
 ...`, `subsession options` lists it as `off`, and a subsession queued before
 you turned its choice off is refused when its turn comes. A subsession's usage
-fallback never moves it onto an account you turned its agent off on.
+fallback, at launch or while it runs, never moves it onto an account you turned
+its agent off on, even one turned off after it started.
 
 A subsession uses its parent's launch fallback
 policy: when its Claude or Codex account has used 95% of its quota, the

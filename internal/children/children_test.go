@@ -115,10 +115,14 @@ func (g *fakeGit) FetchRunBranch(context.Context, domain.WorkspaceID, string, do
 	return g.head, nil
 }
 
-// fakeAgents signs every member in to every agent except those in missing.
-type fakeAgents struct{ missing map[domain.MemberID]bool }
+// fakeAgents signs every member in to every agent except those in missing,
+// and cannot list the agents on an account in broken.
+type fakeAgents struct{ missing, broken map[domain.MemberID]bool }
 
 func (a fakeAgents) ListAgents(_ context.Context, _, account domain.MemberID) ([]protocol.AgentInfo, error) {
+	if a.broken[account] {
+		return nil, errors.New("decode harness definition: boom")
+	}
 	found := !a.missing[account]
 	var out []protocol.AgentInfo
 	for _, name := range []string{"claude", "codex"} {
@@ -195,7 +199,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db, paused: map[domain.RunID]bool{}}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db, paused: map[domain.RunID]bool{}}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}, broken: map[domain.MemberID]bool{}}}
 	h.now = time.Now()
 	h.ws = &domain.Workspace{Name: "app"}
 	if err = db.CreateWorkspace(ctx, h.ws); err != nil {
@@ -606,23 +610,22 @@ func TestOwnersTurnSubsessionAgentsOff(t *testing.T) {
 		t.Fatalf("codex on Bob's account = %v, want denied: codex is off on every account", codex)
 	}
 	onBob := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", AccountMemberID: string(h.bob.ID), Task: "bob"})
-	queued, err := h.db.GetChild(h.ctx, domain.RunID(onBob.RunID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if queued.Fallback.Disabled || !slices.Equal(queued.Fallback.Order, []domain.MemberID{h.bob.ID}) {
-		t.Fatalf("subsession fallback = %+v, want only Bob's account: Ada turned claude off on her own", queued.Fallback)
-	}
 
 	if _, err = turn("claude", h.bob.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	h.settle()
-	if queued, err = h.db.GetChild(h.ctx, domain.RunID(onBob.RunID)); err != nil || queued.State != domain.ChildRefused || !strings.Contains(queued.Error, "turned off for subsessions after this one was queued") {
-		t.Fatalf("queued subsession after its account was turned off = %+v, %v; want refused", queued, err)
+	if queued, getErr := h.db.GetChild(h.ctx, domain.RunID(onBob.RunID)); getErr != nil || queued.State != domain.ChildRefused || !strings.Contains(queued.Error, "turned off for subsessions after this one was queued") {
+		t.Fatalf("queued subsession after its account was turned off = %+v, %v; want refused", queued, getErr)
 	}
 	if settings, err = turn("codex", "", true); err != nil || len(settings.Off) != 2 {
 		t.Fatalf("turning codex back on = %+v, %v; want only the two claude entries left", settings, err)
+	}
+
+	h.agents.broken[h.bob.ID] = true
+	if settings, err = h.svc.Settings(h.ctx, h.ada.ID); err != nil || !settings.Enabled || len(settings.Choices) != 2 ||
+		!strings.Contains(settings.ChoicesError, "list the agents on account "+string(h.bob.ID)+": decode harness definition: boom") {
+		t.Fatalf("settings while Bob's agents cannot be listed = %+v, %v; want Ada's choices and the error, not a failed read", settings, err)
 	}
 }
 

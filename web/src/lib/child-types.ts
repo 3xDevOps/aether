@@ -93,6 +93,7 @@ export interface ChildSettings {
   enabled: boolean
   off?: ChildChoiceSetting[]
   choices?: ChildChoice[]
+  choices_error?: string
 }
 
 /** An absent field keeps its value. */

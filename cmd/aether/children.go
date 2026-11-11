@@ -61,28 +61,32 @@ func runChildren(args []string) error {
 }
 
 // printChildChoices lists each installed agent and account with whether
-// subsessions may use it, and the agents turned off that none lists.
+// subsessions may use it, then every off entry, those no listed agent shows
+// included.
 func printChildChoices(s protocol.ChildSettings) {
 	off := make(domain.ChildChoicesOff, 0, len(s.Off))
 	for _, c := range s.Off {
 		off = append(off, domain.ChildChoice{Harness: c.Harness, Account: domain.MemberID(c.AccountMemberID)})
 	}
-	listed := map[string]bool{}
 	for _, c := range s.Choices {
 		if c.Status == "not-installed" {
 			continue
 		}
-		listed[c.Harness] = true
 		use := "on"
 		if off.Covers(c.Harness, domain.MemberID(c.AccountMemberID)) {
 			use = "off"
 		}
 		fmt.Printf("  %-3s  %-10s  %s's account (%s)  %s\n", use, c.Harness, c.AccountName, c.AccountMemberID, c.Status)
 	}
+	if s.ChoicesError != "" {
+		fmt.Println("  could not list every account's agents: " + s.ChoicesError)
+	}
 	for _, c := range s.Off {
-		if c.AccountMemberID == "" && !listed[c.Harness] {
-			fmt.Printf("  off  %-10s  every account\n", c.Harness)
+		account := "every account"
+		if c.AccountMemberID != "" {
+			account = "account " + c.AccountMemberID
 		}
+		fmt.Printf("off: %s on %s\n", c.Harness, account)
 	}
 }
 

@@ -164,11 +164,13 @@ type ChildFetchResult struct {
 // the member turns them off. Off lists the agents and accounts subsessions
 // may not use, an entry with no account turning the agent off on every
 // account. Choices is each agent on the member's own account and on every
-// account shared with them, with its state.
+// account shared with them, with its login state; ChoicesError says which
+// accounts' agents could not be listed.
 type ChildSettings struct {
-	Enabled bool                 `json:"enabled"`
-	Off     []ChildChoiceSetting `json:"off"`
-	Choices []ChildChoice        `json:"choices"`
+	Enabled      bool                 `json:"enabled"`
+	Off          []ChildChoiceSetting `json:"off"`
+	Choices      []ChildChoice        `json:"choices"`
+	ChoicesError string               `json:"choices_error,omitempty"`
 }
 
 // ChildChoiceSetting turns one agent on or off for subsessions, on one

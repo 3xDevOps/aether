@@ -100,10 +100,9 @@ describe('child runs switch', () => {
       { account_member_id: alice.id, account_name: 'Alice', harness: 'codex', display_name: 'Codex', status: 'ready' },
     ] })
     await open()
-    const agents = await screen.findByRole('button', { name: 'Subsession agents' })
-    expect(agents.textContent).toBe('1 off')
+    expect(await screen.findByRole('button', { name: 'Subsession agents: 1 off' })).toBeDefined()
     fireEvent.click(childSwitch())
-    expect(screen.queryByRole('button', { name: 'Subsession agents' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Subsession agents/ })).toBeNull()
   })
 
   it('is off and disabled for a Background run', async () => {

@@ -15,8 +15,6 @@ function stateWords(choice: ChildChoice): string {
   switch (choice.status) {
     case 'not-signed-in':
       return 'Not signed in'
-    case 'exhausted':
-      return 'Usage used up'
     case 'ready':
       return choice.detail ? 'Signed out' : ''
   }
@@ -34,6 +32,9 @@ function ChoiceLabel({ label, choice, on, faint = false }: { label: string; choi
 }
 
 const keepOpen = (event: Event) => event.preventDefault()
+
+// Saves run one after another, so the last response is the last change.
+let saving: Promise<unknown> = Promise.resolve()
 
 /**
  * The agents and accounts the member's subsessions may use, as a menu of
@@ -54,21 +55,30 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
 
   // A refused change may still have been stored, so the menu then shows what the server holds.
   const turn = (choices: ChildChoiceSetting[]) => {
-    choices.reduce((done, choice) => done.then(() => saveChildSettings({ choice }, client)), Promise.resolve(settings)).catch((err: unknown) => {
+    saving = saving.then(() => choices.reduce((done, choice) => done.then(() => saveChildSettings({ choice }, client)), Promise.resolve(settings))).catch((err: unknown) => {
       toast.error(`Could not save subsession agents: ${errorSentence(err)}`)
-      void saveChildSettings({}, client).catch(() => {})
+      return saveChildSettings({}, client).catch(() => {})
     })
   }
   const accountLabel = (choice: ChildChoice) => choice.account_member_id === self ? 'Your account' : `${choice.account_name}'s account`
   const rowLabel = (choice: ChildChoice) => `${choice.display_name || choice.harness} · ${accountLabel(choice)}`
+  const summary = offRows === 0 ? 'All on' : `${offRows} off`
+  const attention = warnings.length === 0 ? '' : `, ${warnings.length} ${warnings.length === 1 ? 'needs' : 'need'} attention`
 
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button id={id} type="button" variant="secondary" size="sm" disabled={disabled} title={warnings.map((c) => `${rowLabel(c)}: ${stateWords(c)}`).join('\n') || undefined}>
+        <Button
+          id={id}
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={disabled}
+          aria-label={`Subsession agents: ${summary}${attention}`}
+          title={warnings.map((c) => `${rowLabel(c)}: ${stateWords(c)}`).join('\n') || undefined}
+        >
           {warnings.length > 0 && <StatusDot tone="needs-you" />}
-          {offRows === 0 ? 'All on' : `${offRows} off`}
-          {warnings.length > 0 && <span className="sr-only">, {warnings.length} {warnings.length === 1 ? 'needs' : 'need'} attention</span>}
+          {summary}
           <ChevronDown />
         </Button>
       </MenuTrigger>
@@ -81,13 +91,17 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
           const name = list[0].display_name || harness
           if (list.length === 1) {
             const [choice] = list
-            const on = !agentOff(harness) && !accountOff(harness, choice.account_member_id)
+            const account = choice.account_member_id
+            const on = !agentOff(harness) && !accountOff(harness, account)
+            // The member's own sole account turns the agent off everywhere; a
+            // teammate's turns off that account alone, as its label says.
+            const off = account === self ? [{ harness }] : [{ harness, account_member_id: account }]
             return (
               <MenuCheckboxItem
                 key={harness}
                 checked={on}
                 onSelect={keepOpen}
-                onCheckedChange={(next) => turn(next ? [{ harness, on: true }, { harness, account_member_id: choice.account_member_id, on: true }] : [{ harness }])}
+                onCheckedChange={(next) => turn(next ? [{ harness, on: true }, { harness, account_member_id: account, on: true }] : off)}
               >
                 <ChoiceLabel label={choice.account_member_id === self ? name : rowLabel(choice)} choice={choice} on={on} />
               </MenuCheckboxItem>
@@ -113,6 +127,7 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
             </Fragment>
           )
         })}
+        {settings.choices_error && <p role="alert" className="max-w-80 px-2 py-1.5 text-ui-sm text-state-failed">{settings.choices_error}</p>}
       </MenuContent>
     </Menu>
   )

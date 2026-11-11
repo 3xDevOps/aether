@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -56,8 +55,14 @@ func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoic
 			return nil, err
 		}
 		for i, c := range list {
-			if c.Status != choiceNotInstalled && p.settings.Off.Covers(c.Harness, account) {
+			switch {
+			case c.Status == choiceNotInstalled:
+			case p.settings.Off.Covers(c.Harness, account):
 				list[i].Status, list[i].Detail = choiceOff, offDetail(c.Harness, c.AccountName)
+			case c.Status == choiceReady:
+				if used, ok := s.usedPercent(ctx, p.owner, account, c.Harness); ok && used >= fallback.ExhaustedPercent {
+					list[i].Status, list[i].Detail = choiceExhausted, fmt.Sprintf("%s's %s usage is at %.0f%%", c.AccountName, c.Harness, used)
+				}
 			}
 		}
 		out = append(out, list...)
@@ -116,13 +121,8 @@ func (s *Service) agentChoices(ctx context.Context, owner, account domain.Member
 		case a.LoginMissing || (a.LoginFound != nil && !*a.LoginFound):
 			c.Status = choiceNotSignedIn
 			c.Detail = fmt.Sprintf("%s is not signed in to %s; they sign in with aether agent login %s", name, a.Name, a.Name)
-		default:
-			if used, ok := s.usedPercent(ctx, owner, account, a.Name); ok && used >= fallback.ExhaustedPercent {
-				c.Status = choiceExhausted
-				c.Detail = fmt.Sprintf("%s's %s usage is at %.0f%%", name, a.Name, used)
-			} else if a.LoginProblem != "" {
-				c.Detail = fmt.Sprintf("%s's %s login may be signed out: %s", name, a.Name, a.LoginProblem)
-			}
+		case a.LoginProblem != "":
+			c.Detail = fmt.Sprintf("%s's %s login may be signed out: %s", name, a.Name, a.LoginProblem)
 		}
 		out = append(out, c)
 	}
@@ -195,11 +195,7 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 			return launchSpec{}, denied("%s", c.Detail)
 		}
 	}
-	policy, err := s.childFallback(ctx, p, req.Harness)
-	if err != nil {
-		return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
-	}
-	spec := launchSpec{harness: req.Harness, account: account, mode: mode, model: req.Model, fallback: policy}
+	spec := launchSpec{harness: req.Harness, account: account, mode: mode, model: req.Model, fallback: p.parent.Fallback}
 	defaultMode, err := s.cfg.Runs.DefaultMode(ctx, p.owner, spec.account, spec.harness)
 	if err != nil {
 		return launchSpec{}, invalid("agent %q: %s; aether-internal subsession options lists the agents", req.Harness, err.Error())
@@ -208,28 +204,6 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 		spec.mode = defaultMode
 	}
 	return spec, nil
-}
-
-// childFallback is the parent's fallback policy without the accounts the
-// owner turned harness off on, so no usage move lands a subsession there.
-func (s *Service) childFallback(ctx context.Context, p *policy, harness string) (domain.AccountFallback, error) {
-	policy := p.parent.Fallback
-	if policy.Disabled || !slices.ContainsFunc(p.settings.Off, func(c domain.ChildChoice) bool { return c.Harness == harness }) {
-		return policy, nil
-	}
-	order := policy.Order
-	if len(order) == 0 {
-		accounts, err := s.sharedAccounts(ctx, p.owner)
-		if err != nil {
-			return domain.AccountFallback{}, err
-		}
-		order = accounts
-	}
-	order = slices.DeleteFunc(slices.Clone(order), func(account domain.MemberID) bool { return p.settings.Off.Covers(harness, account) })
-	if len(order) == 0 {
-		return domain.AccountFallback{Disabled: true}, nil
-	}
-	return domain.AccountFallback{Order: order}, nil
 }
 
 func trimPurpose(s string) string {
