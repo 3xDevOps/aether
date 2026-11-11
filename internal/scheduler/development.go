@@ -298,6 +298,20 @@ func (s *Scheduler) CallDevelopment(ctx context.Context, id domain.RunID, p cont
 			s.mu.Unlock()
 		}
 	}
+	if strings.HasPrefix(method, "dev.browser.") {
+		s.mu.Lock()
+		entry := s.runs[id]
+		left := entry != nil && entry.browserLeft
+		s.mu.Unlock()
+		if left {
+			if err := s.removeDevelopmentBrowser(ctx, id); err != nil {
+				return nil, fmt.Errorf("remove the browser companion left from before the sleep: %w", err)
+			}
+			s.mu.Lock()
+			entry.browserLeft = false
+			s.mu.Unlock()
+		}
+	}
 	var result any
 	var err error
 	switch {

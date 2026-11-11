@@ -531,6 +531,9 @@ type supervised struct {
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int
+	// browserLeft marks a browser companion a sleep could not remove,
+	// which the next Browser call removes before it acts.
+	browserLeft bool
 	// typedAt, browsedAt and execAt are when a member last typed in the
 	// composer, used the development browser, and had an exec running.
 	typedAt   time.Time

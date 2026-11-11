@@ -92,6 +92,55 @@ func (s *Scheduler) HoldRunAwake(ctx context.Context, run domain.RunID) (func(),
 	}), nil
 }
 
+// SettleSleep waits for a sleep of run that is under way to finish, for a
+// caller that must then act on the run inside control admission, which a
+// wait must not hold.
+func (s *Scheduler) SettleSleep(ctx context.Context, run domain.RunID) error {
+	s.mu.Lock()
+	entry := s.runs[run]
+	var done chan struct{}
+	if entry != nil && entry.sleeping {
+		done = entry.sleepDone
+	}
+	s.mu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for the session to finish falling asleep: %w", ctx.Err())
+	}
+}
+
+var (
+	errAsleep        = fmt.Errorf("%w: the session is asleep; wake it first", ErrInvalidTransition)
+	errFallingAsleep = fmt.Errorf("%w: the session is falling asleep; try again", ErrInvalidTransition)
+)
+
+// holdAwakeNow is holdAwake for a caller inside control admission: it never
+// waits, and refuses a run that is asleep or falling asleep.
+func (s *Scheduler) holdAwakeNow(run domain.RunID) (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.runs[run]
+	switch {
+	case entry == nil:
+		return func() {}, nil
+	case entry.sleeping:
+		return nil, errFallingAsleep
+	case !entry.asleepSince.IsZero():
+		return nil, errAsleep
+	}
+	entry.awake++
+	return func() {
+		s.mu.Lock()
+		entry.awake--
+		s.mu.Unlock()
+	}, nil
+}
+
 // holdAwake wakes run if it is asleep and keeps it from falling asleep
 // until release. A run with no live entry is left to the caller's own
 // lookup to refuse.
@@ -718,9 +767,12 @@ func (s *Scheduler) stopLeftoverAsleep(ctx context.Context, entry *supervised) e
 	cid := entry.containerID
 	entry.sleepGen++
 	s.mu.Unlock()
-	// A companion left behind holds no agent; the next Browser use replaces it.
+	// A companion left behind holds no agent: the container still stops,
+	// and the next Browser call removes the companion or reports why not.
 	if err := s.removeDevelopmentBrowser(ctx, entry.runID); err != nil {
-		slog.Warn("scheduler: remove a sleeping session's browser companion", "run", entry.runID, "error", err)
+		s.mu.Lock()
+		entry.browserLeft = true
+		s.mu.Unlock()
 	}
 	return s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace)
 }

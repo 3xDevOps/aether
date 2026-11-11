@@ -702,6 +702,7 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 func (f *fakeRuns) Sleep(domain.RunID) scheduler.SleepState { return scheduler.SleepState{} }
 
 func (f *fakeRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (f *fakeRuns) SettleSleep(context.Context, domain.RunID) error              { return nil }
 
 func (f *fakeRuns) HoldRunAwake(context.Context, domain.RunID) (func(), error) { return func() {}, nil }
 

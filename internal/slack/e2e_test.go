@@ -65,6 +65,7 @@ func (r *e2eRuns) answers() []string {
 func (*e2eRuns) Paused(domain.RunID) bool                                     { return false }
 func (*e2eRuns) Sleep(domain.RunID) scheduler.SleepState                      { return scheduler.SleepState{} }
 func (*e2eRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (*e2eRuns) SettleSleep(context.Context, domain.RunID) error              { return nil }
 func (*e2eRuns) Switching(domain.RunID) domain.LaunchMode                     { return "" }
 func (*e2eRuns) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil

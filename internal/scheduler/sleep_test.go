@@ -539,7 +539,6 @@ func TestWakeTriggers(t *testing.T) {
 		return control.Principal{Kind: control.PrincipalMember, MemberID: e.member.ID}
 	}
 	for name, trigger := range map[string]func(*testEnv, domain.RunID){
-		"an answer": func(e *testEnv, run domain.RunID) { _ = e.sched.ACPAnswer(run, "gone", "allow", nil) },
 		"an exec": func(e *testEnv, run domain.RunID) {
 			if exec, err := e.sched.StartRunExec(t.Context(), run, member(e), RunExec{Argv: []string{"true"}}, func() error { return nil }); err == nil {
 				_ = exec.Detach()
@@ -549,7 +548,6 @@ func TestWakeTriggers(t *testing.T) {
 			raw, _ := json.Marshal(protocol.DevBrowserOpenParams{DevRunParams: protocol.DevRunParams{RunID: string(run)}})
 			_, _ = e.sched.CallDevelopment(t.Context(), run, member(e), protocol.MethodDevBrowserOpen, raw, func() error { return nil })
 		},
-		"a model choice": func(e *testEnv, run domain.RunID) { _ = e.sched.ACPSetOption(t.Context(), run, "model", "other") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -780,7 +778,8 @@ func TestResumeDuringTheSleepWakesTheSession(t *testing.T) {
 }
 
 // Cancel during a sleep that the agent's own turn undoes waits for the
-// sleep to settle and cancels that turn.
+// sleep to settle and cancels that turn; inside control admission it never
+// waits.
 func TestCancelDuringAnUndoneSleepCancelsTheTurn(t *testing.T) {
 	t.Parallel()
 	e, _ := newSleepEnv(t)
@@ -811,7 +810,15 @@ func TestCancelDuringAnUndoneSleepCancelsTheTurn(t *testing.T) {
 		}
 	})
 	cancelled := make(chan error, 1)
-	go func() { cancelled <- e.sched.ACPCancel(context.Background(), run.ID) }()
+	// As the run.acp.cancel handler does: settle outside control admission,
+	// then cancel inside it without waiting.
+	go func() {
+		if err := e.sched.SettleSleep(context.Background(), run.ID); err != nil {
+			cancelled <- err
+			return
+		}
+		cancelled <- e.sched.ACPCancel(context.Background(), run.ID)
+	}()
 	time.Sleep(50 * time.Millisecond)
 	close(release)
 	if err := <-cancelled; err != nil {
@@ -821,4 +828,25 @@ func TestCancelDuringAnUndoneSleepCancelsTheTurn(t *testing.T) {
 	if e.sched.Sleep(run.ID).AsleepSince != nil {
 		t.Fatal("the session fell asleep")
 	}
+}
+
+func TestACPCallsInsideControlAdmissionDoNotWaitForASleep(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	entry.sleeping, entry.sleepDone = true, make(chan struct{})
+	e.sched.mu.Unlock()
+	if err := e.sched.ACPCancel(t.Context(), run.ID); !errors.Is(err, errFallingAsleep) {
+		t.Fatalf("Cancel while falling asleep = %v, want errFallingAsleep", err)
+	}
+	if err := e.sched.ACPSetOption(t.Context(), run.ID, "model", "other"); !errors.Is(err, errFallingAsleep) {
+		t.Fatalf("SetOption while falling asleep = %v, want errFallingAsleep", err)
+	}
+	e.sched.mu.Lock()
+	entry.sleeping = false
+	close(entry.sleepDone)
+	e.sched.mu.Unlock()
 }

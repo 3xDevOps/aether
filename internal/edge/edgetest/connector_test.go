@@ -105,6 +105,7 @@ func (l launcher) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, 
 func (launcher) Paused(domain.RunID) bool                                     { return false }
 func (launcher) Sleep(domain.RunID) scheduler.SleepState                      { return scheduler.SleepState{} }
 func (launcher) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (launcher) SettleSleep(context.Context, domain.RunID) error              { return nil }
 func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
 }

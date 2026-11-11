@@ -574,7 +574,7 @@ paused; a session that hit its usage limit; a session switching modes or
 accounts; and a session started in Standard and switched to Enhanced, whose
 container would rerun its launch command.
 
-The session wakes when you send a message or answer, change its model, mail
+The session wakes when you send a message, change its model, mail
 reaches it, you type in its terminal, open a shell tab, use its Browser tab,
 start `aether ssh` or a port forward to it, run `aether resume <session-id>`,
 or choose **Wake** in the Chat view. Opening the session or its Browser tab

@@ -50,6 +50,9 @@ func (s *Server) runInputRespond(ctx context.Context, member domain.MemberID, ra
 	if perr := s.connectorAnswerRefusal(ctx, run, p.RequestID); perr != nil {
 		return nil, perr
 	}
+	if err := s.cfg.Runs.SettleSleep(ctx, run); err != nil {
+		return nil, rpcError(err)
+	}
 	answer := func() error {
 		if err := checkSteer(ctx, s.cfg.Store, member, run); err != nil {
 			return err
