@@ -160,8 +160,8 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       accentSVG.setAttribute('preserveAspectRatio', 'none')
       for (let y = 3; y < height; y += DOT_GAP) {
         for (let x = 3; x < width; x += DOT_GAP) {
-          const neutral = circle('control-matrix-dot', x, y, DOT_RADIUS, 'var(--dot-color, currentColor)')
-          const accent = circle('control-matrix-dot', x, y, DOT_RADIUS, 'var(--dot-accent-color, currentColor)')
+          const neutral = circle('control-matrix-dot', x, y, DOT_RADIUS, 'currentColor')
+          const accent = circle('control-matrix-dot', x, y, DOT_RADIUS, 'currentColor')
           neutralSVG.appendChild(neutral)
           accentSVG.appendChild(accent)
           dots.push({ x, y, dx: 0, dy: 0, vx: 0, vy: 0, burst: 0, neutral, accent })

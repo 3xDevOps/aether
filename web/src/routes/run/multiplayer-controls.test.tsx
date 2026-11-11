@@ -63,11 +63,17 @@ it('springs and wakes dots without blocking existing controls', async () => {
   size(strip)
 
   fireEvent.pointerMove(strip, { pointerType: 'mouse', clientX: 40, clientY: 12 })
-  const dot = [...strip.querySelectorAll<SVGCircleElement>('.control-matrix-grid .control-matrix-dot')]
+  const grids = [...strip.querySelectorAll<SVGSVGElement>('.control-matrix-grid')]
+  expect(grids).toHaveLength(2)
+  const neutralDot = [...grids[0]!.querySelectorAll<SVGCircleElement>('.control-matrix-dot')]
     .find((element) => element.getAttribute('cx') === '45' && element.getAttribute('cy') === '9')!
-  const before = Number(dot.getAttribute('cx'))
+  const accentDot = [...grids[1]!.querySelectorAll<SVGCircleElement>('.control-matrix-dot')]
+    .find((element) => element.getAttribute('cx') === '45' && element.getAttribute('cy') === '9')!
+  const neutralBefore = Number(neutralDot.getAttribute('cx'))
+  const accentBefore = Number(accentDot.getAttribute('cx'))
   tick()
-  expect(Number(dot.getAttribute('cx'))).toBeGreaterThan(before)
+  expect(Number(neutralDot.getAttribute('cx'))).toBeGreaterThan(neutralBefore)
+  expect(Number(accentDot.getAttribute('cx'))).toBeGreaterThan(accentBefore)
 
   const releaseButton = screen.getByRole('button', { name: /Release/ })
   releaseButton.focus()

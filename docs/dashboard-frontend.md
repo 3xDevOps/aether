@@ -3076,13 +3076,15 @@ generation. Takeover denials belong to the requester, not the holder.
 `MultiplayerControls` renders `ControlMatrix` as the strip's background,
 and `TerminalPane` renders it behind the agent terminal's toolbar. The
 component is a neutral dot layer, one `radial-gradient` tile, under a
-colored copy of the same dots. The bars give each group of text and
-buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
-shadow of the same colour that hides the dots under the group and fades
-them back in around it. A rule on the matrix's siblings turns
-`text-muted` on the bar to `--text`. The copy is clipped from the left by
-`--control-reach`, a registered `@property` number (1 empty, 0 full), so it
-is revealed from the right edge, where the control button sits. The
+colored copy of the same dots. Interactive SVG copies sit above those static
+layers, remain pointer-transparent, and use the same control-edge clipping
+for the colored copy.
+The bars give each group of text and buttons `.control-matrix-clear`, a 90%
+`--chrome` fill with a blurred shadow of the same colour that hides the dots
+under the group and fades them back in around it. A rule on the matrix's
+siblings turns `text-muted` on the bar to `--text`. The copy is clipped from the
+left by `--control-reach`, a registered `@property` number (1 empty, 0 full),
+so it is revealed from the right edge, where the control button sits. The
 acquisition, release and takeover animations drive `--control-reach` and
 `color` on the colored layer. Its opacity is a separate animation: 70%
 while the dots move or a hold is under way, then half once acquisition
