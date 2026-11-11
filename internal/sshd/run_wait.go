@@ -121,8 +121,8 @@ func (s *Server) waitVisibility(ctx context.Context, actor permissions.Actor, pr
 }
 
 // storedWait is wait id's condition as waitVisibility judges it, the run
-// that waits on it and that run's member; ok is false when no run waits
-// on id.
+// that waits on it and that run's current member, as run.get judges it
+// after a handoff; ok is false when no run waits on id.
 func (s *Server) storedWait(ctx context.Context, id string) (cond protocol.WaitCondition, owner domain.RunID, waiter domain.MemberID, ok bool, err error) {
 	waits, has := s.cfg.Store.(store.RunWaitStore)
 	if !has || id == "" {
@@ -135,7 +135,14 @@ func (s *Server) storedWait(ctx context.Context, id string) (cond protocol.WaitC
 	if err != nil {
 		return cond, "", "", false, err
 	}
-	return protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.TargetRun)}, w.OwnerRunID, w.MemberID, true, nil
+	run, err := s.cfg.Store.GetRun(ctx, w.OwnerRunID)
+	if errors.Is(err, store.ErrNotFound) {
+		return cond, "", "", false, nil
+	}
+	if err != nil {
+		return cond, "", "", false, err
+	}
+	return protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.TargetRun)}, w.OwnerRunID, run.MemberID, true, nil
 }
 
 // redactWait leaves out of w what only the run's owner and admins read:

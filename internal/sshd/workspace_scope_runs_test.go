@@ -114,7 +114,7 @@ func TestAHiddenWaitStaysHiddenInHistoryAndCancel(t *testing.T) {
 	now := time.Now()
 	const spec = "pr:acme/b#7:merged"
 	waits := []*store.RunWait{{
-		Watch: store.Watch{MemberID: w.u.ID, WorkspaceID: w.wsA.ID, TargetKind: protocol.WatchTargetPR, Repo: "acme/b", Number: 7, TargetTitle: spec,
+		Watch: store.Watch{MemberID: w.a.ID, WorkspaceID: w.wsA.ID, TargetKind: protocol.WatchTargetPR, Repo: "acme/b", Number: 7, TargetTitle: spec,
 			Conditions: []string{protocol.WaitKindPRMerged}, Source: protocol.WatchSourceAgent, CreatedAt: now, UpdatedAt: now,
 			ExpiresAt: now.Add(time.Hour), NextCheckAt: &now},
 		Spec: spec, Kind: protocol.WaitKindPRMerged}}
@@ -171,7 +171,9 @@ func TestAHiddenWaitStaysHiddenInHistoryAndCancel(t *testing.T) {
 // A wait on a private workspace's repository stays hidden once that
 // workspace's origin changes and no workspace has the repository: only a
 // super admin and the member whose session waits read it and its wake,
-// not an admin of the session's workspace.
+// not an admin of the session's workspace. The session's current member
+// is its waiter, so A, who registered the wait before handing the session
+// to U, no longer reads it.
 func TestAWaitOnARepositoryNoWorkspaceHasIsItsWaitersAlone(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
@@ -184,7 +186,7 @@ func TestAWaitOnARepositoryNoWorkspaceHasIsItsWaitersAlone(t *testing.T) {
 	now := time.Now()
 	const spec = "pr:acme/b#7:merged"
 	waits := []*store.RunWait{{
-		Watch: store.Watch{MemberID: w.u.ID, WorkspaceID: w.wsA.ID, TargetKind: protocol.WatchTargetPR, Repo: "acme/b", Number: 7, TargetTitle: spec,
+		Watch: store.Watch{MemberID: w.a.ID, WorkspaceID: w.wsA.ID, TargetKind: protocol.WatchTargetPR, Repo: "acme/b", Number: 7, TargetTitle: spec,
 			Conditions: []string{protocol.WaitKindPRMerged}, Source: protocol.WatchSourceAgent, CreatedAt: now, UpdatedAt: now,
 			ExpiresAt: now.Add(time.Hour), NextCheckAt: &now},
 		Spec: spec, Kind: protocol.WaitKindPRMerged}}
