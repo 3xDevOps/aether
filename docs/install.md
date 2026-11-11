@@ -475,12 +475,33 @@ on land in the slice. Check it:
 systemctl status aether.slice
 systemd-cgls --unit aether.slice
 cat /sys/fs/cgroup/aether.slice/cpu.weight
-docker inspect --format '{{.HostConfig.CgroupParent}}' <container>
+sudo docker ps --filter label=aether.managed=true --format '{{.Names}}'
+sudo docker inspect --format '{{.HostConfig.CgroupParent}} {{.HostConfig.Runtime}}' <container>
+cat /proc/"$(sudo docker inspect --format '{{.State.Pid}}' <container>)"/cgroup
 ```
 
 `systemctl status` shows the slice inactive until its first container starts.
 `cpu.weight` prints `50`; `daemon-reload` applies the file to a slice that is
-already running.
+already running. While the slice is inactive the file does not exist, and `100`
+without a drop-in of your own means the file is not loaded. With the systemd
+driver, a container created after the update prints `aether.slice` and its
+runtime: with the default `container-runtime auto`, `sysbox-runc` for terminals
+and sessions that are not isolated when Sysbox is installed and usable,
+otherwise Docker's default runtime, usually `runc`. A container created before
+the slice prints an empty parent and sits under Docker's default parent:
+`system.slice`, unless `cgroup-parent` in `/etc/docker/daemon.json` names
+another. On cgroup v2, a new container's `/proc/<pid>/cgroup` reads
+`0::/aether.slice/docker-<id>.scope`, with the full container ID and, under
+`sysbox-runc`, `/init.scope` appended. Read it on the host: inside a Sysbox
+container the cgroup namespace shows only `0::/init.scope`. With the `cgroupfs`
+driver the parent is `/aether` and the path `0::/aether/<id>`. On cgroup v1 the
+file has one line per controller, each ending in the same path.
+
+If new sessions fail to start with `cgroup-parent for systemd cgroup should be
+a valid slice named as "xxx.slice"`, Docker's cgroup driver changed after the
+server started: `sudo systemctl restart aether-server`. To give the session
+group the default weight again, remove any `systemctl edit` drop-in and run
+`sudo systemctl set-property aether.slice CPUWeight=100 IOWeight=100`.
 
 `MemoryLow=1G` makes the kernel reclaim the server's first gigabyte only after
 unprotected memory. Memory protection passes down the cgroup tree, so it
