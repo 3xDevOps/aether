@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -242,5 +244,31 @@ func TestAuditWorkspaceComesFromTheServer(t *testing.T) {
 		if en.MemberID == string(w.n.ID) {
 			t.Errorf("B's audit view shows N's entry %+v", en)
 		}
+	}
+}
+
+// An accepted invitation adds a member its inviter's open streams see at
+// once: the member.device event that follows names them.
+func TestAStreamSeesAMemberItsInvitationJustAdded(t *testing.T) {
+	t.Parallel()
+	w := newScopeWorld(t)
+	ctx := t.Context()
+	ids := w.e.store.(store.IdentityStore)
+	inv := &domain.Invitation{Provider: "github", Login: "newcomer", Role: domain.RoleCollaborator, CreatedBy: w.a.ID,
+		Workspaces: []domain.WorkspaceID{w.wsA.ID}, ExpiresAt: time.Now().Add(time.Hour), SecretHash: edgeproto.HashToken(edgeproto.NewJoinSecret())}
+	if err := ids.CreateInvitation(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	access := &streamAccess{s: w.e.srv, member: w.a.ID}
+	access.load(ctx)
+	if access.seesMember(ctx, w.n.ID) {
+		t.Fatal("A sees N before any invitation")
+	}
+	m, err := w.e.srv.acceptInvitation(ctx, ids, inv, edgeproto.Account{Provider: "github", Subject: "gh-newcomer", Login: "newcomer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !access.seesMember(ctx, m.ID) {
+		t.Error("A's stream does not see the member A's invitation just added")
 	}
 }

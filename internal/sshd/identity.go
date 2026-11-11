@@ -374,6 +374,7 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		return nil, rpcError(err)
 	}
 	if invitation != "" {
+		s.accessChanged()
 		s.notifyDirectory()
 	}
 	s.publishDevice(ctx, member, dev.ID, dev.Status)

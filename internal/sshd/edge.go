@@ -535,6 +535,7 @@ func (s *Server) acceptInvitation(ctx context.Context, ids store.IdentityStore, 
 	if err != nil {
 		return nil, fmt.Errorf("sshd: accept invitation %s: %w", inv.ID, err)
 	}
+	s.accessChanged()
 	s.notifyDirectory()
 	slog.Info("sshd: edge invitation accepted", "invitation", inv.ID, "member", m.ID, "role", m.Role,
 		"provider", account.Provider, "subject", account.Subject)
@@ -740,6 +741,7 @@ func (s *Server) claimMember(ctx context.Context, ids store.IdentityStore, accou
 		if err != nil {
 			return nil, fmt.Errorf("sshd: claim: %w", err)
 		}
+		s.accessChanged()
 		return m, nil
 	}
 	return nil, edgeproto.RefusalClaimed
