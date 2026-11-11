@@ -150,8 +150,6 @@ func (s *Scheduler) expireAgentModels(account domain.MemberID, name string) {
 }
 
 func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, executable string, passthrough []string, start bool) protocol.AgentModelsResult {
-	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
-	defer cancel()
 	now := s.cfg.Now().UTC()
 	s.agentModelsMu.Lock()
 	updates := s.agentModels[key].updates
@@ -251,6 +249,10 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 		return modelList{}, fmt.Errorf("%s models: %w", key.name, ErrTerminalNotRunning)
 	}
 
+	// The budget starts here: a cold environment terminal can take most of
+	// it to start, and the agent then has none left.
+	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
+	defer cancel()
 	argv := append([]string{"/bin/sh", "-c", script, "sh", executable}, args...)
 	for _, name := range passthrough {
 		if value, ok := os.LookupEnv(name); ok && value != "" {

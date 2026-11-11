@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -42,6 +43,7 @@ type fakeRuntime struct {
 	// inspectHook runs at the start of every Inspect.
 	inspectHook func(id runtime.ID)
 	startHook   func(c *fakeContainer)
+	startDelay  time.Duration
 	stopHook    func()
 	commitErr   error
 	commits     []fakeCommitCall
@@ -57,7 +59,8 @@ type fakeRuntime struct {
 	execCalls   []fakeExecTTYCall
 	// execHandler answers Exec with an exit code and stdout; the default
 	// is exit 0 with no output, and nothing ever writes stderr.
-	execHandler func(id runtime.ID, argv []string) (int, string, error)
+	execDeadline atomic.Pointer[time.Time]
+	execHandler  func(id runtime.ID, argv []string) (int, string, error)
 	// execStderr is what every exec writes to stderr, so a test can see
 	// what an answer built from both streams looks like.
 	execStderr   string
@@ -210,6 +213,7 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 	if r.startErr != nil {
 		return r.startErr
 	}
+	time.Sleep(r.startDelay)
 	c, err := r.get(id)
 	if err != nil {
 		return err
@@ -362,6 +366,9 @@ func (r *fakeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, wo
 	handler := r.execHandler
 	stderr := r.execStderr
 	r.mu.Unlock()
+	if d, ok := ctx.Deadline(); ok {
+		r.execDeadline.Store(&d)
+	}
 	if handler == nil {
 		return 0, "", stderr, nil
 	}

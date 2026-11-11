@@ -401,3 +401,22 @@ func TestAgentModelsUpdateDuringAProbe(t *testing.T) {
 		t.Fatalf("a third call ran a probe (%d) or failed: %v", calls.Load(), err)
 	}
 }
+
+func TestAgentModelsColdTerminalStartDoesNotSpendTheProbeBudget(t *testing.T) {
+	t.Parallel()
+	e, _ := newModelsEnv(t)
+	e.rt.startDelay = 500 * time.Millisecond
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) {
+		return 0, modelsFixture(t, "claude-initialize.jsonl"), nil
+	}
+	if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil {
+		t.Fatal(err)
+	}
+	d := e.rt.execDeadline.Load()
+	if d == nil {
+		t.Fatal("the probe never ran")
+	}
+	if left := time.Until(*d); left < agentModelsTimeout-250*time.Millisecond {
+		t.Fatalf("the probe had %s left after starting the terminal, want about %s", left, agentModelsTimeout)
+	}
+}
