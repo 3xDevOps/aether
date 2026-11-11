@@ -192,16 +192,17 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 	}
 	gitCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
-	s.spawn(func() { s.stopGitOnAccessLoss(gitCtx, stop, wake, member, op, ws.ID, ch.Stderr()) })
+	stderr := &lockedWriter{w: ch.Stderr()}
+	s.spawn(func() { s.stopGitOnAccessLoss(gitCtx, stop, wake, member, op, ws.ID, stderr) })
 	var code int
 	if op == "upload-pack" {
-		code, err = s.cfg.Git.UploadPack(gitCtx, ws.ID, ch, ch, ch.Stderr())
+		code, err = s.cfg.Git.UploadPack(gitCtx, ws.ID, ch, ch, stderr)
 	} else {
-		code, err = s.cfg.Git.ReceivePack(gitCtx, ws.ID, ch, ch, ch.Stderr())
+		code, err = s.cfg.Git.ReceivePack(gitCtx, ws.ID, ch, ch, stderr)
 	}
 	lost := errors.Is(context.Cause(gitCtx), errGitAccessLost)
 	if err != nil && !lost {
-		_, _ = fmt.Fprintf(ch.Stderr(), "aether: git %s: %v\n", op, err)
+		_, _ = fmt.Fprintf(stderr, "aether: git %s: %v\n", op, err)
 	}
 	if (err != nil || lost) && code == 0 {
 		code = 128
@@ -210,6 +211,24 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 }
 
 var errGitAccessLost = errors.New("stopped: access ended")
+
+// gitReasonWait bounds how long a transfer whose access ended waits for
+// its client to take the reason: a client that grants no window must not
+// keep it running.
+const gitReasonWait = time.Second
+
+// lockedWriter serializes writes from git's stderr copy and the access
+// watcher: an SSH channel's extended data must not be written concurrently.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
 
 // gitAccess is the check a git transfer passes to start and keeps passing
 // while it runs: an approved member with View in the workspace to fetch,
@@ -248,7 +267,15 @@ func (s *Server) stopGitOnAccessLoss(ctx context.Context, stop context.CancelCau
 			lost := fmt.Errorf("%w: %w", errGitAccessLost, err)
 			// Before stop: the cancelled transport half-closes the
 			// channel, after which nothing more reaches the client.
-			_, _ = fmt.Fprintf(stderr, "aether: git %s: %v\n", op, lost)
+			told := make(chan struct{})
+			s.spawn(func() {
+				defer close(told)
+				_, _ = fmt.Fprintf(stderr, "aether: git %s: %v\n", op, lost)
+			})
+			select {
+			case <-told:
+			case <-time.After(gitReasonWait):
+			}
 			stop(lost)
 			return
 		}

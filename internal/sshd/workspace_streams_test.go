@@ -291,6 +291,41 @@ func TestGitPushEndsWhenAccessIsRevoked(t *testing.T) {
 	}
 }
 
+// stuckWriter blocks every write until the test ends, as an SSH channel
+// does whose client grants no more window.
+type stuckWriter struct{ done <-chan struct{} }
+
+func (w stuckWriter) Write([]byte) (int, error) {
+	<-w.done
+	return 0, io.ErrClosedPipe
+}
+
+// A transfer whose access ended stops even when its client takes no more
+// output, so the reason it is told cannot hold the push open.
+func TestGitAccessLossStopsATransferWhoseClientStopsReading(t *testing.T) {
+	t.Parallel()
+	w := newScopedWorld(t, func(c *Config) { c.revalidateInterval = time.Hour })
+	_, u := w.granted(t, "Una", domain.RoleCollaborator, w.foreign.ID)
+	ctx, stop := context.WithCancelCause(t.Context())
+	defer stop(nil)
+	go w.srv.stopGitOnAccessLoss(ctx, stop, w.srv.accessChange(), u.ID, "receive-pack", w.foreign.ID, stuckWriter{t.Context().Done()})
+	raw, err := json.Marshal(protocol.WorkspaceAccessRevokeParams{WorkspaceID: string(w.foreign.ID), MemberID: string(u.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := w.srv.workspaceAccessRevoke(t.Context(), w.member.ID, raw); perr != nil {
+		t.Fatalf("revoke: %+v", perr)
+	}
+	select {
+	case <-ctx.Done():
+		if !errors.Is(context.Cause(ctx), errGitAccessLost) {
+			t.Fatalf("transfer stopped with %v, want access ended", context.Cause(ctx))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the transfer still runs after its member's grant was revoked")
+	}
+}
+
 // A launch needs every workspace it names, and a shared account's owner
 // must reach them too.
 func TestLaunchNeedsEveryWorkspace(t *testing.T) {
