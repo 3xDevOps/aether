@@ -718,7 +718,11 @@ func (s *Scheduler) stopLeftoverAsleep(ctx context.Context, entry *supervised) e
 	cid := entry.containerID
 	entry.sleepGen++
 	s.mu.Unlock()
-	return errors.Join(s.removeDevelopmentBrowser(ctx, entry.runID), s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace))
+	// A companion left behind holds no agent; the next Browser use replaces it.
+	if err := s.removeDevelopmentBrowser(ctx, entry.runID); err != nil {
+		slog.Warn("scheduler: remove a sleeping session's browser companion", "run", entry.runID, "error", err)
+	}
+	return s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace)
 }
 
 // finalizeAsleep finishes, with exit code, a run whose container a sleep had

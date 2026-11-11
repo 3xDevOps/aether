@@ -168,12 +168,28 @@ func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string, valu
 }
 
 func (s *Scheduler) ACPCancel(ctx context.Context, run domain.RunID) error {
-	s.mu.Lock()
-	entry := s.runs[run]
-	asleep := entry != nil && (entry.sleeping || !entry.asleepSince.IsZero())
-	s.mu.Unlock()
-	if asleep {
-		return nil
+	// A sleeping session runs no turn. One falling asleep may still have a
+	// turn the agent started, which undoes the sleep.
+	for {
+		s.mu.Lock()
+		entry := s.runs[run]
+		var sleepDone chan struct{}
+		if entry != nil && entry.sleeping {
+			sleepDone = entry.sleepDone
+		}
+		asleep := entry != nil && !entry.sleeping && !entry.asleepSince.IsZero()
+		s.mu.Unlock()
+		if asleep {
+			return nil
+		}
+		if sleepDone == nil {
+			break
+		}
+		select {
+		case <-sleepDone:
+		case <-ctx.Done():
+			return fmt.Errorf("wait for the session to finish falling asleep: %w", ctx.Err())
+		}
 	}
 	awake, err := s.holdAwake(ctx, run)
 	if err != nil {
