@@ -98,7 +98,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	}
 	out = append(out, work...)
 	if deps.Messages > 0 {
-		senders, labels := s.visibleRuns(ctx, actor, known, deps.Senders)
+		senders, labels := s.visibleRuns(ctx, actor, known, deps.Senders, false)
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningMessages, Count: deps.Messages, RunIDs: senders,
 			Detail: fmt.Sprintf("%d %s from %s %s unread or arrived in the last 30 minutes", deps.Messages, plural(deps.Messages, "message", "messages"),
 				labels, plural(deps.Messages, "is", "are"))})
@@ -106,7 +106,7 @@ func (s *Server) closeWarnings(ctx context.Context, actor permissions.Actor, id 
 	tree := func(w domain.RunID) bool { return w == id || slices.Contains(deps.Children, w) }
 	out = append(out, s.awaitedWarnings(ctx, actor, known, slices.DeleteFunc(deps.Awaiting, tree))...)
 	if len(deps.Children) > 0 {
-		children, labels := s.visibleRuns(ctx, actor, known, deps.Children)
+		children, labels := s.visibleRuns(ctx, actor, known, deps.Children, true)
 		out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningSubsessions, Count: len(deps.Children), RunIDs: children,
 			Detail: fmt.Sprintf("%d %s close with it: %s", len(deps.Children), plural(len(deps.Children), "subsession", "subsessions"), labels)})
 	}
@@ -187,16 +187,17 @@ func (s *Server) awaitedWarnings(ctx context.Context, actor permissions.Actor, k
 	if len(waiters) == 0 {
 		return nil
 	}
-	ids, labels := s.visibleRuns(ctx, actor, known, waiters)
+	ids, labels := s.visibleRuns(ctx, actor, known, waiters, false)
 	return []protocol.CloseWarning{{Kind: protocol.CloseWarningAwaited, RunIDs: ids, Detail: "Waiting for it to finish: " + labels}}
 }
 
 // visibleRuns is the IDs and labels of the runs in ids that actor reaches;
 // the rest are counted only, as "other sessions". It reads each run once
 // per check: known holds what the check already read, and a nil entry a
-// run with no record yet, which is a subsession still queued under the
-// checked run.
-func (s *Server) visibleRuns(ctx context.Context, actor permissions.Actor, known map[domain.RunID]*domain.Run, ids []domain.RunID) ([]string, string) {
+// run with no record yet. With queued set, ids are the checked run's
+// subsessions and such a run is one still queued under it; otherwise it
+// was deleted and is left out.
+func (s *Server) visibleRuns(ctx context.Context, actor permissions.Actor, known map[domain.RunID]*domain.Run, ids []domain.RunID, queued bool) ([]string, string) {
 	visible, labels := []string{}, []string{}
 	for _, id := range ids {
 		r, read := known[id]
@@ -212,7 +213,7 @@ func (s *Server) visibleRuns(ctx context.Context, actor permissions.Actor, known
 		_, cached := known[id]
 		label := string(id)
 		switch {
-		case cached && r == nil:
+		case queued && cached && r == nil:
 			label += " (queued)"
 		case r == nil || !reachesRun(actor, r):
 			continue

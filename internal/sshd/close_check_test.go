@@ -321,3 +321,45 @@ func TestRunCloseCheckChildReadFails(t *testing.T) {
 		t.Fatalf("a check whose subsession cannot be read = %+v, want its error", res.Runs)
 	}
 }
+
+type runGone struct {
+	store.Store
+	gone domain.RunID
+}
+
+func (s runGone) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
+	if id == s.gone {
+		return nil, fmt.Errorf("store: get session %s: %w", id, store.ErrNotFound)
+	}
+	return s.Store.GetRun(ctx, id)
+}
+
+// A sender deleted after the check listed it is counted, not named: only a
+// subsession may be missing because it is still queued.
+func TestRunCloseCheckLeavesOutADeletedSender(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	sender := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "sender", Harness: "claude",
+		Mode: domain.LaunchTUI, Status: domain.RunRunning, Branch: "aether/run-sender"}
+	if err := e.db.CreateRun(ctx, sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: e.ws.ID, FromRun: sender.ID, ToRun: e.run.ID, Body: "hi",
+		Kind: store.RunMessageKindMessage, CreatedAt: time.Now()}, 100); err != nil {
+		t.Fatal(err)
+	}
+	e.srv.cfg.Store = runGone{Store: e.store, gone: sender.ID}
+	var res protocol.RunCloseCheckResult
+	if err := controlClient(t, e).Call(protocol.MethodRunCloseCheck, protocol.RunCloseCheckParams{RunIDs: []string{string(e.run.ID)}}, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Runs) != 1 {
+		t.Fatalf("close check = %+v", res.Runs)
+	}
+	for _, w := range res.Runs[0].Warnings {
+		if w.Kind == protocol.CloseWarningMessages && (len(w.RunIDs) != 0 || strings.Contains(w.Detail, string(sender.ID))) {
+			t.Fatalf("messages warning = %+v, want the deleted sender counted, not named", w)
+		}
+	}
+}
