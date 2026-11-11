@@ -470,7 +470,8 @@ func TestAuditLeavesOutSessionsTheReaderDoesNotReach(t *testing.T) {
 }
 
 // Another member's audit entry about a note is left out for a reader who
-// does not reach every workspace of the note's session.
+// does not reach every workspace of the note's session. A deleted note's
+// session is unknown, so its entries stay shown.
 func TestAuditLeavesOutNotesOfSessionsTheReaderDoesNotReach(t *testing.T) {
 	t.Parallel()
 	w := newScopeWorld(t)
@@ -484,9 +485,12 @@ func TestAuditLeavesOutNotesOfSessionsTheReaderDoesNotReach(t *testing.T) {
 		}
 		return m.ID
 	}
-	shown, hidden := note(w.runUA), note(w.runA)
+	shown, hidden, deleted := note(w.runUA), note(w.runA), note(w.runUA)
+	if err := w.e.db.DeleteMemory(ctx, w.wsA.ID, deleted, func(*store.Memory) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
 	as := w.e.store.(store.AuditStore)
-	for _, target := range []string{shown, hidden} {
+	for _, target := range []string{shown, hidden, deleted} {
 		if err := as.AddAudit(ctx, &store.AuditEntry{At: time.Now(), Member: w.e.member.ID, Via: ViaConnector, Method: protocol.MethodMemoryPin,
 			WorkspaceID: string(w.wsA.ID), Target: target}); err != nil {
 			t.Fatal(err)
@@ -502,8 +506,8 @@ func TestAuditLeavesOutNotesOfSessionsTheReaderDoesNotReach(t *testing.T) {
 			got = append(got, e.Target)
 		}
 	}
-	if !slices.Equal(got, []string{shown}) {
-		t.Fatalf("A audit memory.pin targets = %v, want only %s", got, shown)
+	if want := []string{deleted, shown}; !slices.Equal(got, want) {
+		t.Fatalf("A audit memory.pin targets = %v, want %v", got, want)
 	}
 }
 
