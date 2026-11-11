@@ -62,11 +62,11 @@ describe('child run settings', () => {
     ]
     const client = show(['*'], { childSettings: vi.fn(async () => ({ enabled: true, off: [], choices })) })
     const trigger = await screen.findByRole('button', { name: 'Subsession agents' })
-    expect(trigger.textContent).toBe('All agents')
+    expect(trigger.textContent).toBe('All on, 1 needs attention')
     await user.click(trigger)
     const menu = screen.getByRole('menu')
     const item = (name: RegExp) => within(menu).getByRole('menuitemcheckbox', { name })
-    expect(within(menu).getAllByRole('menuitemcheckbox').map((el) => el.textContent)).toEqual(['Claude Code', 'Your accountMay be signed out', "Bob's account", 'Codex'])
+    expect(within(menu).getAllByRole('menuitemcheckbox').map((el) => el.textContent)).toEqual(['Claude Code', 'Your accountSigned out', "Bob's account", 'Codex'])
 
     vi.mocked(client.childSettings).mockResolvedValueOnce({ enabled: true, off: [{ harness: 'claude', account_member_id: alice.id }], choices })
     await user.click(item(/Your account/))
@@ -78,6 +78,6 @@ describe('child run settings', () => {
     await user.click(item(/Codex/))
     expect(client.childSettings).toHaveBeenLastCalledWith({ choice: { harness: 'codex' } })
     await user.keyboard('{Escape}')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Subsession agents' }).textContent).toBe('1 of 3 on'))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Subsession agents' }).textContent).toBe('2 off'))
   })
 })

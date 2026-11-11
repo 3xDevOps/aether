@@ -101,7 +101,7 @@ describe('child runs switch', () => {
     ] })
     await open()
     const agents = await screen.findByRole('button', { name: 'Subsession agents' })
-    expect(agents.textContent).toBe('1 of 2 on')
+    expect(agents.textContent).toBe('1 off')
     fireEvent.click(childSwitch())
     expect(screen.queryByRole('button', { name: 'Subsession agents' })).toBeNull()
   })
