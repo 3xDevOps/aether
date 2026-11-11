@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useEffect, useState } from 'react'
-import { offersAgents, SubsessionAgents } from '@/components/launch/subsession-agents'
+import { AgentsError, offersAgents, SubsessionAgents } from '@/components/launch/subsession-agents'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { Api } from '@/lib/api'
@@ -110,7 +110,9 @@ export function ChildRunsSection({ client }: { client: Api }) {
           labelFor="settings-child-agents"
           help="The agents and accounts subsessions may use. Turn off an agent you do not want, or an account whose subscription no longer works."
           control={<SubsessionAgents id="settings-child-agents" settings={settings} disabled={busy} client={client} />}
-        />
+        >
+          <AgentsError settings={settings} />
+        </SettingRow>
       )}
       {workspace && cap.hasMethod('workspace.child_limits') && <WorkspaceLimits client={client} />}
     </SettingsSection>

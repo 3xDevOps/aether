@@ -38,6 +38,11 @@ export function offersAgents(settings: ChildSettings): boolean {
   return Boolean(settings.choices_error) || (settings.choices?.some((c) => c.status !== 'not-installed') ?? false)
 }
 
+/** Which accounts' agents the server could not list, shown below the row so it wraps. */
+export function AgentsError({ settings }: { settings: ChildSettings }) {
+  return settings.choices_error ? <p role="alert" className="text-ui-sm break-words text-state-failed">{settings.choices_error}</p> : null
+}
+
 // Saves run one after another, so the last response is the last change.
 let saving: Promise<unknown> = Promise.resolve()
 
@@ -54,7 +59,7 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
   for (const choice of settings.choices ?? []) {
     if (choice.status !== 'not-installed') groups.set(choice.harness, [...(groups.get(choice.harness) ?? []), choice])
   }
-  if (groups.size === 0) return settings.choices_error ? <p role="alert" className="text-ui-sm text-state-failed">{settings.choices_error}</p> : null
+  if (groups.size === 0) return null
   const offRows = [...groups].reduce((n, [harness, list]) => n + (agentOff(harness) ? 1 : list.filter((c) => accountOff(harness, c.account_member_id)).length), 0)
   const warnings = [...groups].flatMap(([harness, list]) => agentOff(harness) ? [] : list.filter((c) => !accountOff(harness, c.account_member_id) && stateWords(c)))
 
@@ -135,7 +140,6 @@ export function SubsessionAgents({ settings, id, disabled, client = api }: { set
             </Fragment>
           )
         })}
-        {settings.choices_error && <p role="alert" className="max-w-80 px-2 py-1.5 text-ui-sm text-state-failed">{settings.choices_error}</p>}
       </MenuContent>
     </Menu>
   )

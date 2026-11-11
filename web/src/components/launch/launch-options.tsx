@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { accessLabel, asFallback, type Readiness, ReadinessText } from '@/components/launch/account-picker'
 import { limitsText, type LimitsDraft, parseLimits, RunLimitsFields } from '@/components/launch/run-limits'
-import { offersAgents, SubsessionAgents } from '@/components/launch/subsession-agents'
+import { AgentsError, offersAgents, SubsessionAgents } from '@/components/launch/subsession-agents'
 import type { ChildSettings, Member, RunLimits, Workspace } from '@/lib/types'
 
 /** `order` stays null, the server's automatic order, until the reader reorders or unticks an account. */
@@ -154,10 +154,13 @@ export function ChildRunsSwitch({ value, onChange, enabled, settings, readError,
         {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your subsessions setting…') : ['Lets the agent start other agents as subsessions.', value ? 'Set for this session only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
       </p>
       {on && settings && offersAgents(settings) && (
-        <div className="flex min-h-7 items-center justify-between gap-3 coarse:min-h-11">
-          <Label htmlFor="launch-child-agents" className="text-muted">Subsession agents</Label>
-          <SubsessionAgents id="launch-child-agents" settings={settings} disabled={disabled} />
-        </div>
+        <>
+          <div className="flex min-h-7 items-center justify-between gap-3 coarse:min-h-11">
+            <Label htmlFor="launch-child-agents" className="text-muted">Subsession agents</Label>
+            <SubsessionAgents id="launch-child-agents" settings={settings} disabled={disabled} />
+          </div>
+          <AgentsError settings={settings} />
+        </>
       )}
     </div>
   )

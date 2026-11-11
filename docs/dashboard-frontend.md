@@ -352,7 +352,7 @@ top to bottom:
    state; a change saves the member setting at once with `child.settings`
    `choice`, one save after another, and **Settings → Subsessions** shows the
    same menu. An account whose agents could not be listed is named, with the
-   server's error, at the menu's foot (`choices_error`).
+   server's error, below the row (`choices_error`).
 3. **Sessions** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a
