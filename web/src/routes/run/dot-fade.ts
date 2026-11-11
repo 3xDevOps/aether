@@ -71,6 +71,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     const matrix = strip?.querySelector<HTMLElement>('.control-matrix')
     const reach = matrix?.querySelector<HTMLElement>('.control-matrix-reach')
     if (!strip || !matrix || !reach) return
+    const host = strip
 
     let frame = 0
     let lastFrame = 0
@@ -187,6 +188,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       const dt = lastFrame ? clamp((now - lastFrame) / 16.67, 0.25, 2) : 1
       lastFrame = now
       let moving = false
+      updateZones(host.getBoundingClientRect())
       const breathingAmount = breathing ? 0.92 + Math.sin(now / 3600) * 0.08 : 1
       if (neutralSVG) neutralSVG.style.opacity = String(breathingAmount)
       if (accentSVG) accentSVG.style.opacity = String(breathingAmount)
@@ -245,6 +247,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     }
     const pulseAt = (point: Point) => {
       if (!neutralSVG) createGrid()
+      else updateZones(host.getBoundingClientRect())
       pulse = { ...point, started: performance.now() }
       for (const dot of dots) {
         const dx = dot.x - point.x
@@ -265,7 +268,8 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       } else schedule()
     }
     const pointOf = (event: PointerEvent): Point | undefined => {
-      const rect = strip.getBoundingClientRect()
+      const rect = host.getBoundingClientRect()
+      updateZones(rect)
       const nextWidth = rect.width || rect.right - rect.left
       const nextHeight = rect.height || rect.bottom - rect.top
       const x = event.clientX - rect.left
@@ -326,6 +330,12 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       }
       schedule()
     }
+    const cancelPointer = (event: PointerEvent) => {
+      if (activePointerID !== undefined && event.pointerId !== activePointerID) return
+      activePointerID = undefined
+      pointer = undefined
+      schedule()
+    }
     const leave = (event: PointerEvent) => {
       if (event.pointerType === 'mouse' && activePointerID === undefined) {
         pointer = undefined
@@ -333,6 +343,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       }
     }
     const key = (event: KeyboardEvent) => {
+      if (event.target !== strip) return
       if (event.key !== 'Enter' && event.key !== ' ' && !event.key.startsWith('Arrow')) return
       event.preventDefault()
       const rect = strip.getBoundingClientRect()
@@ -378,7 +389,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     window.addEventListener('pointermove', move, { passive: true })
     window.addEventListener('pointerdown', down, { passive: true })
     window.addEventListener('pointerup', up, { passive: true })
-    window.addEventListener('pointercancel', up, { passive: true })
+    window.addEventListener('pointercancel', cancelPointer, { passive: true })
     document.addEventListener('visibilitychange', visibility)
     observer?.observe(strip)
     resize?.observe(strip)
@@ -395,7 +406,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerdown', down)
       window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
+      window.removeEventListener('pointercancel', cancelPointer)
       document.removeEventListener('visibilitychange', visibility)
       observer?.disconnect()
       resize?.disconnect()

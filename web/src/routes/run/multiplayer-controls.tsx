@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ControlMatrix } from '@/components/control-matrix'
 import { Shield, Users } from '@/components/icons'
@@ -61,6 +61,7 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   onPeople: () => void
 }) {
   const self = useSelf()
+  const keyboardHelpID = useId()
   const strip = useRef<HTMLDivElement>(null)
   useDotFade(strip)
   const members = useStore((s) => s.members)
@@ -89,6 +90,7 @@ export function MultiplayerControls({ run, agent, onPeople }: {
       tabIndex={0}
       role="group"
       aria-label="Multiplayer controls"
+      aria-describedby={keyboardHelpID}
       className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus">
       <ControlMatrix
         appearance={agent.localControl ? 'active'
@@ -96,6 +98,7 @@ export function MultiplayerControls({ run, agent, onPeople }: {
         takeoverProgress={agent.takeover.holderProgress}
         breathing={false}
       />
+      <span id={keyboardHelpID} className="sr-only">Use arrow keys to move the dot interaction point; press Enter or Space to pulse it.</span>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <Button size="sm" variant="ghost" className="control-matrix-clear shrink-0" hint="See people and notes for this session" onClick={onPeople}>
           <Users />

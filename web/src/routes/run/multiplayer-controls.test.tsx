@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { MultiplayerControls } from '@/routes/run/multiplayer-controls'
 import type { RunRecord } from '@/store/runs'
+import { useStore } from '@/store'
 
 const run = { id: 'run_1', workspace_id: 'ws_1', member_id: 'mem_1' } as RunRecord
 
@@ -51,7 +53,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('springs and wakes dots without blocking existing controls', () => {
+it('springs and wakes dots without blocking existing controls', async () => {
+  const user = userEvent.setup()
   const release = vi.fn()
   const people = vi.fn()
   const view = render(<MultiplayerControls run={run} agent={agent(release)} onPeople={people} />)
@@ -66,11 +69,17 @@ it('springs and wakes dots without blocking existing controls', () => {
   tick()
   expect(Number(dot.getAttribute('cx'))).toBeGreaterThan(before)
 
-  fireEvent.pointerDown(screen.getByRole('button', { name: /Release/ }), { pointerType: 'mouse', button: 0 })
-  expect(strip.querySelector('.control-matrix-ring')).not.toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: /Release/ }))
-  fireEvent.click(screen.getByRole('button', { name: /Multiplayer/ }))
+  const releaseButton = screen.getByRole('button', { name: /Release/ })
+  releaseButton.focus()
+  await user.keyboard('{Enter}')
   expect(release).toHaveBeenCalledTimes(1)
+  fireEvent.pointerDown(releaseButton, { pointerType: 'mouse', button: 0 })
+  expect(strip.querySelector('.control-matrix-ring')).not.toBeNull()
+  fireEvent.pointerUp(releaseButton, { pointerType: 'mouse', button: 0 })
+
+  const peopleButton = screen.getByRole('button', { name: /Multiplayer/ })
+  peopleButton.focus()
+  await user.keyboard('{Enter}')
   expect(people).toHaveBeenCalledTimes(1)
 
   fireEvent.pointerMove(strip, { pointerType: 'mouse', clientX: 40, clientY: 90 })
@@ -80,18 +89,34 @@ it('springs and wakes dots without blocking existing controls', () => {
   expect(frames.size).toBe(0)
 })
 
-it('supports touch drag and keyboard points', () => {
+it('supports touch drag, cancellation, and keyboard points', async () => {
+  const user = userEvent.setup()
+  useStore.setState({
+    roomStatus: {
+      [run.id]: { workspace_id: run.workspace_id, run_id: run.id, protected: false, watchers: ['mem_2'], queued_steers: 0 },
+    },
+  })
   const view = render(<MultiplayerControls run={run} agent={agent(vi.fn())} onPeople={vi.fn()} />)
   const strip = screen.getByRole('group', { name: 'Multiplayer controls' })
   size(strip)
   strip.focus()
   fireEvent.keyDown(strip, { key: 'ArrowRight' })
   expect(strip.querySelector('.control-matrix-ring')).not.toBeNull()
+
+  const watchers = screen.getByRole('group', { name: 'Session watchers' })
+  const keydowns: KeyboardEvent[] = []
+  watchers.addEventListener('keydown', (event) => keydowns.push(event))
+  watchers.focus()
+  await user.keyboard('{ArrowRight}')
+  expect(keydowns).toHaveLength(1)
+  expect(keydowns[0]?.defaultPrevented).toBe(false)
+
   fireEvent.pointerDown(strip, { pointerType: 'touch', pointerId: 7, clientX: 20, clientY: 12 })
   fireEvent.pointerMove(window, { pointerType: 'touch', pointerId: 7, clientX: 70, clientY: 12 })
   expect(frames.size).toBeGreaterThan(0)
-  fireEvent.pointerUp(window, { pointerType: 'touch', pointerId: 7 })
+  fireEvent.pointerCancel(window, { pointerType: 'touch', pointerId: 7 })
   for (let i = 0; i < 400 && frames.size; i++) tick()
+  expect(strip.querySelector<HTMLElement>('.control-matrix')?.hasAttribute('data-dot-grid-active')).toBe(false)
   view.unmount()
 })
 

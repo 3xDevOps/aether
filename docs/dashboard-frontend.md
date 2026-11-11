@@ -3060,7 +3060,8 @@ clear bars behind text feather motion to 25% of the response. `--dot-color`,
 `--dot-accent-color`, `--dot-ring-color`, `--dot-intensity` (0–1),
 `--dot-breathing` and `--dot-drift`
 are CSS custom properties; breathing and drift default to off. A focused strip
-accepts Enter for a ring and arrow keys to move the point. An
+accepts Enter or Space for a ring and arrow keys to move the point; its
+accessible instructions describe these keys. An
 `IntersectionObserver` and page visibility listener pause the loop offscreen or
 in the background, and the loop sleeps when the dots settle. Reduced motion
 keeps the composed layout still with a frozen ring; the static CSS texture is
