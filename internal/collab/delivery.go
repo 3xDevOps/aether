@@ -139,11 +139,17 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		if !attempted {
 			return "", "", nil, err
 		}
-		receipt := ClassifyReceipt(err)
-		if receipt == ReceiptNotSent {
-			return receipt, "", &store.RoomMessageFailure{Code: notSentCode(err), Message: err.Error()}, nil
+		if ClassifyReceipt(err) != ReceiptNotSent {
+			return ReceiptUncertain, "", nil, nil
 		}
-		return receipt, "", nil, nil
+		code := "session_unavailable"
+		switch {
+		case errors.Is(err, acphost.ErrUnsupportedImage):
+			code = "unsupported_image"
+		case errors.Is(err, domain.ErrPromptNotSent):
+			code = "prompt_not_sent"
+		}
+		return ReceiptNotSent, "", &store.RoomMessageFailure{Code: code, Message: err.Error()}, nil
 	}
 	return ReceiptSent, outcome, nil, nil
 }
@@ -164,7 +170,10 @@ func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr err
 	ctx, cancel := context.WithTimeout(ctx, agentDeliveryTimeout)
 	defer cancel()
 	var failure *store.RoomMessageFailure
+	var notSent notSentError
 	switch {
+	case errors.As(deliveryErr, &notSent):
+		failure = notSent.failure
 	case errors.Is(deliveryErr, acphost.ErrClosed):
 		failure = &store.RoomMessageFailure{Code: "agent_disconnected", Message: deliveryErr.Error()}
 	case deliveryErr != nil:
@@ -182,6 +191,12 @@ func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr err
 	}
 	return nil
 }
+
+// notSentError is a redelivery the server did not send, saved with its
+// failure rather than as the agent's.
+type notSentError struct{ failure *store.RoomMessageFailure }
+
+func (e notSentError) Error() string { return e.failure.Message }
 
 func (s *Service) dropAgentQueued(ctx context.Context) error {
 	ids, err := s.cfg.Store.DropAgentQueuedRoomMessages(ctx, &store.RoomMessageFailure{Code: "agent_disconnected", Message: acphost.ErrClosed.Error()})
@@ -263,12 +278,15 @@ func (s *Service) redeliver(ctx context.Context, msg *store.RoomMessage) (bool, 
 	}
 	var receipt Receipt
 	var outcome string
+	var failure *store.RoomMessageFailure
 	if err == nil {
-		receipt, outcome, _, err = s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, nil), false)
+		receipt, outcome, failure, err = s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, nil), false)
 	}
 	switch {
 	case err != nil:
 		return true, fmt.Errorf("collab: send again after the restart: %w", err)
+	case failure != nil:
+		return true, notSentError{failure}
 	case receipt != ReceiptSent:
 		return true, acphost.ErrClosed
 	}

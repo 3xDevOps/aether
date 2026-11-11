@@ -91,16 +91,6 @@ type ProtectedStore interface {
 	SetRunProtected(context.Context, domain.RunID, bool) error
 }
 
-func notSentCode(err error) string {
-	switch {
-	case errors.Is(err, acphost.ErrUnsupportedImage):
-		return "unsupported_image"
-	case errors.Is(err, domain.ErrPromptNotSent):
-		return "prompt_not_sent"
-	}
-	return "session_unavailable"
-}
-
 // ClassifyReceipt maps delivery outcomes to the wire contract. Missing terminal
 // sessions, unsupported images, and explicit pre-delivery failures prove no
 // write occurred; other errors are uncertain.
@@ -411,10 +401,9 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 	}
 
 	var (
-		msg           *store.RoomMessage
-		deliveryProof *control.Snapshot
-		immediate     *Result
-		// immediateFailure is why an immediate delivery was not sent.
+		msg              *store.RoomMessage
+		deliveryProof    *control.Snapshot
+		immediate        *Result
 		immediateFailure *store.RoomMessageFailure
 	)
 	createSteer := func(current control.Snapshot, hasController bool) error {

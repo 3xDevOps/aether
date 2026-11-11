@@ -879,8 +879,9 @@ func TestConnectorMessageNotSentFailsWithTheReason(t *testing.T) {
 	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-1", State: protocol.RoomMessageNotSent,
 		Failure: &protocol.RoomMessageFailure{Code: "session_protected", Message: "the session was protected before delivery"}}})
 	text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "use postgres", "idempotency_key": "m1"})
-	if !failed || !strings.Contains(text, "message to session run-1 was not sent (session_protected: the session was protected before delivery); unprotect it with aether_session_lifecycle") ||
-		!strings.Contains(text, "new idempotency_key, since m1 returns this refusal") {
+	if !failed || !strings.Contains(text, "message to session run-1 was not sent (session_protected; the error is under untrusted.failure); unprotect it with aether_session_lifecycle") ||
+		!strings.Contains(text, "new idempotency_key, since m1 returns this refusal") ||
+		!strings.Contains(text, `"untrusted":{"failure":{"code":"session_protected","message":"the session was protected before delivery"}}`) {
 		t.Fatalf("a message the session refused = %q (failed %v), want a failed call with the reason", text, failed)
 	}
 }

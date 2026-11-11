@@ -84,3 +84,39 @@ func TestNotSentSteerRecordsTheDeliveryError(t *testing.T) {
 		}
 	}
 }
+
+func TestSteerRedeliveredAfterTheRestartKeepsWhyItWasNotSent(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	st.messages["unsent"] = &store.RoomMessage{
+		ID: "unsent", WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "after this turn",
+		State: store.RoomMessageSent, AgentDelivery: store.AgentQueued, CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
+	}
+	clock.Add(time.Second)
+	injectErr := fmt.Errorf("%w: inject requires a running or needs-attention session", ptyhost.ErrNoSession)
+	service, err := New(Config{
+		Store: st, Runs: st, Workspaces: st, Now: clock.Now, WorkerInterval: time.Hour,
+		Inject: func(context.Context, domain.RunID, domain.MemberID, domain.AgentPrompt, bool, func(error)) (string, error) {
+			return "", injectErr
+		},
+		Reattached: func(domain.RunID) ([]string, Reattach) { return nil, Adopted },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	var got *store.RoomMessage
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if got, _ = st.GetRoomMessage(ctx, "unsent"); got.State == store.RoomMessageNotSent {
+			break
+		}
+	}
+	if got.State != store.RoomMessageNotSent || got.Failure == nil || got.Failure.Code != "session_unavailable" || got.Failure.Message != injectErr.Error() {
+		t.Fatalf("redelivered steer = %q %+v, want not_sent with the delivery error", got.State, got.Failure)
+	}
+}

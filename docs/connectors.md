@@ -328,10 +328,11 @@ retry with the same key returns the first result. A write's result has
 `write: "done"`, or `"pending"` while a launch is starting or a message waits
 for approval, and the key it used. `write` says only that the call finished;
 a message's `state` says whether it reached the agent. A message the session
-did not take fails the call with the server's reason and the way forward, for
-example `message to session run-… was not sent (session_unavailable: ptyhost:
-no terminal for session: inject requires a running or needs-attention
-session)`; send it again with a new `idempotency_key`. A failure that leaves it unknown whether the
+did not take fails the call with the failure code and the way forward, for
+example `message to session run-… was not sent (session_protected; …);
+unprotect it with aether_session_lifecycle`, and the real error under
+`untrusted.failure`, since an agent's refusal is the agent's text. Send it
+again with a new `idempotency_key`. A failure that leaves it unknown whether the
 write happened, such as a timeout, ends with the key to retry with. A
 teammate answer retried with its key after the question stopped
 waiting returns the saved answer; an `answer_id` that is not a teammate

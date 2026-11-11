@@ -467,7 +467,24 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 	}
 	m := res.Message
 	if m.State == protocol.RoomMessageNotSent {
-		return "", nil, notSent(in.RunID, m.Failure, params.IdempotencyKey)
+		code, next := "no reason recorded", "aether_get_session shows the session's state; "
+		if f := m.Failure; f != nil {
+			code = f.Code
+			f.Message = clip(f.Message, 1024)
+			switch f.Code {
+			case "session_protected":
+				next = "unprotect it with aether_session_lifecycle; "
+			case "unsupported_image":
+				next = "drop the images; "
+			case "steer_denied", "access_revoked":
+				next = "ask the session's owner or a workspace admin for access; "
+			case "control_changed":
+				next = ""
+			}
+		}
+		return "", nil, &untrustedError{untrusted: map[string]any{"failure": m.Failure}, err: &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+			"message to session %s was not sent (%s; the error is under untrusted.failure); %ssend it again with a new idempotency_key, since %s returns this refusal",
+			in.RunID, code, next, params.IdempotencyKey)}}
 	}
 	out := map[string]any{"run_id": in.RunID, "state": m.State, "outcome": res.Outcome, "url": l.run(in.RunID), "idempotency_key": params.IdempotencyKey}
 	summary := fmt.Sprintf("Message to session %s is %s.", in.RunID, m.State)
@@ -480,27 +497,6 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 		summary = fmt.Sprintf("You sent this message to session %s within the last 60s; returning it (%s) instead of sending it again. Pass a new idempotency_key to send the same text again.", in.RunID, m.State)
 	}
 	return summary, out, nil
-}
-
-// notSent fails a message the session never received with the server's
-// reason and the way forward.
-func notSent(run string, f *protocol.RoomMessageFailure, key string) error {
-	reason, next := "the server recorded no reason", "aether_get_session shows the session's state; "
-	if f != nil {
-		reason = f.Code + ": " + f.Message
-		switch f.Code {
-		case "session_protected":
-			next = "unprotect it with aether_session_lifecycle; "
-		case "unsupported_image":
-			next = "drop the images; "
-		case "steer_denied", "access_revoked":
-			next = "ask the session's owner or a workspace admin for access; "
-		case "control_changed":
-			next = ""
-		}
-	}
-	return &protocol.Error{Code: protocol.CodeInvalidState,
-		Message: fmt.Sprintf("message to session %s was not sent (%s); %ssend it again with a new idempotency_key, since %s returns this refusal", run, reason, next, key)}
 }
 
 func pendingItem(ctx context.Context, read Call, runID, id string) (protocol.AttentionItem, error) {
