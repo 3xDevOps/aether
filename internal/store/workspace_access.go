@@ -281,6 +281,10 @@ func (d *DB) SetWorkspaceOwner(ctx context.Context, ws domain.WorkspaceID, owner
 	return previous, nil
 }
 
+// ErrIssuerDemoted refuses an invite code whose issuer is no longer an
+// admin or super admin when it is redeemed.
+var ErrIssuerDemoted = errors.New("the invite's issuer is no longer an admin")
+
 func (d *DB) JoinMember(ctx context.Context, m *domain.Member, workspaces []domain.WorkspaceID, issuer domain.MemberID) error {
 	if m.PublicKey == "" {
 		return errors.New("store: join member: a public key is required")
@@ -290,6 +294,16 @@ func (d *DB) JoinMember(ctx context.Context, m *domain.Member, workspaces []doma
 		return fmt.Errorf("store: begin join member: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if issuer != "" {
+		var admin bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM members WHERE id = ?
+			AND role IN ('admin', 'super_admin') AND pending = 0 AND merged_into = '')`, issuer).Scan(&admin); err != nil {
+			return fmt.Errorf("store: join member: read the role of %s: %w", issuer, err)
+		}
+		if !admin {
+			return fmt.Errorf("store: join member: %s: %w", issuer, ErrIssuerDemoted)
+		}
+	}
 	if err := insertMember(ctx, tx, m); err != nil {
 		return err
 	}

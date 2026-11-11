@@ -177,7 +177,11 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 		Role:        domain.RoleCollaborator,
 	}
 	if err := s.cfg.Store.JoinMember(ctx, m, rec.Workspaces, issuer); err != nil {
-		_ = restoreInvite(s.cfg.InvitesDir, code, rec)
+		// A code dies with its issuer's admin role, here demoted by
+		// aether-server member role since the check above.
+		if !errors.Is(err, store.ErrIssuerDemoted) {
+			_ = restoreInvite(s.cfg.InvitesDir, code, rec)
+		}
 		return nil, fmt.Errorf("sshd: invite join: %w", err)
 	}
 	s.accessChanged()

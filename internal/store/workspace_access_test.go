@@ -549,6 +549,23 @@ func TestJoiningGrantsWhatTheIssuerAdministers(t *testing.T) {
 	if err != nil || len(grants) != 1 || grants[0].GrantedBy != super.ID {
 		t.Fatalf("grants on %s = %+v, %v; want one by the super admin", others.ID, grants, err)
 	}
+
+	// A code dies with its issuer's admin role, even when the host command
+	// demotes them after the server checked it.
+	ivy := &domain.Member{DisplayName: "Ivy", PublicKey: testKey(t, "ivy"), Color: "#911eb4", Role: domain.RoleAdmin}
+	if err = db.CreateMember(ctx, ivy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.SetMemberRole(ctx, ivy.ID, domain.RoleCollaborator, ""); err != nil {
+		t.Fatal(err)
+	}
+	late := &domain.Member{DisplayName: "Late", PublicKey: testKey(t, "late"), Color: "#46f0f0", Role: domain.RoleCollaborator}
+	if err = db.JoinMember(ctx, late, nil, ivy.ID); !errors.Is(err, ErrIssuerDemoted) {
+		t.Fatalf("join through a demoted issuer's code = %v, want ErrIssuerDemoted", err)
+	}
+	if _, err = db.GetMemberByPublicKey(ctx, late.PublicKey); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("member through a demoted issuer's code: %v, want none", err)
+	}
 }
 
 // A merge that would leave a workspace owner below admin is refused,
