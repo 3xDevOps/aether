@@ -227,7 +227,7 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	w := mustCreateWorkspace(t, db)
 	runB := mustCreateRun(t, db, w.ID, b.ID, domain.RunCompleted)
 	runC := mustCreateRun(t, db, w.ID, c.ID, domain.RunCompleted)
-	if err := db.PutChildSettings(ctx, c.ID, ChildSettings{Enabled: true, Off: domain.ChildChoicesOff{{Harness: "claude", Account: b.ID}, {Harness: "codex"}}}); err != nil {
+	if err := db.PutChildSettings(ctx, c.ID, ChildSettings{Enabled: true, Off: domain.ChildChoicesOff{{Harness: "claude", Account: b.ID}, {Harness: "codex"}, {Harness: "claude", Account: a.ID}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.BindIdentity(ctx, &domain.Identity{Member: b.ID, Provider: "github", Subject: "42", Login: "ada"}); err != nil {

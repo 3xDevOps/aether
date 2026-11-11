@@ -603,11 +603,13 @@ func TestOwnersTurnSubsessionAgentsOff(t *testing.T) {
 	if states[string(h.ada.ID)+"/claude"] != choiceOff || states[string(h.bob.ID)+"/codex"] != choiceOff || states[string(h.bob.ID)+"/claude"] != choiceReady {
 		t.Fatalf("options = %v, want Ada's claude and every codex off, Bob's claude ready", states)
 	}
-	if _, own := h.start(parent.ID, protocol.ChildStartParams{Harness: "claude", Task: "own"}); code(own) != protocol.CodeDenied || !strings.Contains(own.Error(), "off for subsessions") {
-		t.Fatalf("claude on Ada's own account = %v, want denied as off", own)
+	if _, own := h.start(parent.ID, protocol.ChildStartParams{Harness: "claude", Task: "own"}); code(own) != protocol.CodeDenied ||
+		!strings.Contains(own.Error(), "off for subsessions") || !strings.Contains(own.Error(), "aether subsessions on --agent claude --account "+string(h.ada.ID)) {
+		t.Fatalf("claude on Ada's own account = %v, want denied as off, naming the command that turns that account back on", own)
 	}
-	if _, codex := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", AccountMemberID: string(h.bob.ID), Task: "codex"}); code(codex) != protocol.CodeDenied {
-		t.Fatalf("codex on Bob's account = %v, want denied: codex is off on every account", codex)
+	if _, codex := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", AccountMemberID: string(h.bob.ID), Task: "codex"}); code(codex) != protocol.CodeDenied ||
+		!strings.HasSuffix(strings.SplitN(codex.Error(), "(", 2)[1], "aether subsessions on --agent codex); aether-internal subsession options lists the agents and accounts that are on") {
+		t.Fatalf("codex on Bob's account = %v, want denied: codex is off on every account, turned back on without --account", codex)
 	}
 	onBob := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", AccountMemberID: string(h.bob.ID), Task: "bob"})
 

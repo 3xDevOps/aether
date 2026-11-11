@@ -58,7 +58,7 @@ func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoic
 			switch {
 			case c.Status == choiceNotInstalled:
 			case p.settings.Off.Covers(c.Harness, account):
-				list[i].Status, list[i].Detail = choiceOff, offDetail(c.Harness, c.AccountName)
+				list[i].Status, list[i].Detail = choiceOff, offDetail(p.settings.Off, c.Harness, account, c.AccountName)
 			case c.Status == choiceReady:
 				if used, ok := s.usedPercent(ctx, p.owner, account, c.Harness); ok && used >= fallback.ExhaustedPercent {
 					list[i].Status, list[i].Detail = choiceExhausted, fmt.Sprintf("%s's %s usage is at %.0f%%", c.AccountName, c.Harness, used)
@@ -82,8 +82,14 @@ func (s *Service) sharedAccounts(ctx context.Context, member domain.MemberID) ([
 	return accounts, nil
 }
 
-func offDetail(harness, accountName string) string {
-	return fmt.Sprintf("%s on %s's account is off for subsessions in the owner's settings (Subsession agents in the launch panel, or aether subsessions on --agent %s)", harness, accountName, harness)
+// offDetail names the command that turns harness back on for account: the
+// agent's own entry when it is off everywhere, else the account's.
+func offDetail(off domain.ChildChoicesOff, harness string, account domain.MemberID, accountName string) string {
+	on := "aether subsessions on --agent " + harness
+	if !off.Covers(harness, "") {
+		on += " --account " + string(account)
+	}
+	return fmt.Sprintf("%s on %s's account is off for subsessions in the owner's settings (Subsession agents in the launch panel, or %s)", harness, accountName, on)
 }
 
 // agentChoices lists every agent on account, which the caller authorized.
@@ -184,7 +190,7 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 		if err != nil {
 			return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
 		}
-		return launchSpec{}, denied("%s; aether-internal subsession options lists the agents and accounts that are on", offDetail(req.Harness, name))
+		return launchSpec{}, denied("%s; aether-internal subsession options lists the agents and accounts that are on", offDetail(p.settings.Off, req.Harness, account, name))
 	}
 	choices, err := s.agentChoices(ctx, p.owner, account)
 	if err != nil {

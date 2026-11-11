@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -371,6 +372,12 @@ func (d *DB) ChildSettings(ctx context.Context, member domain.MemberID) (ChildSe
 	if len(s.Off) == 0 {
 		s.Off = nil
 	}
+	seen := map[domain.ChildChoice]bool{}
+	s.Off = slices.DeleteFunc(s.Off, func(c domain.ChildChoice) bool {
+		dup := seen[c]
+		seen[c] = true
+		return dup
+	})
 	return s, nil
 }
 
