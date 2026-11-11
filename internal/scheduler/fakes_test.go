@@ -59,8 +59,8 @@ type fakeRuntime struct {
 	execCalls   []fakeExecTTYCall
 	// execHandler answers Exec with an exit code and stdout; the default
 	// is exit 0 with no output, and nothing ever writes stderr.
-	execDeadline atomic.Pointer[time.Time]
-	execHandler  func(id runtime.ID, argv []string) (int, string, error)
+	execBudget  atomic.Int64
+	execHandler func(id runtime.ID, argv []string) (int, string, error)
 	// execStderr is what every exec writes to stderr, so a test can see
 	// what an answer built from both streams looks like.
 	execStderr   string
@@ -367,7 +367,7 @@ func (r *fakeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, wo
 	stderr := r.execStderr
 	r.mu.Unlock()
 	if d, ok := ctx.Deadline(); ok {
-		r.execDeadline.Store(&d)
+		r.execBudget.Store(int64(time.Until(d)))
 	}
 	if handler == nil {
 		return 0, "", stderr, nil

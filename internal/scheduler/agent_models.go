@@ -21,9 +21,8 @@ const (
 	agentModelsTTL     = time.Hour
 	agentModelsFailTTL = time.Minute
 	agentModelsTimeout = 30 * time.Second
-	// agentModelsStartTimeout bounds starting the environment terminal, which
-	// the probe waits for before its own agentModelsTimeout begins.
-	agentModelsStartTimeout = 2 * time.Minute
+	// Start plus the script's 25s kill stays inside the connector's 40s budget.
+	agentModelsStartTimeout = 10 * time.Second
 	codexModelsCache        = ".codex/models_cache.json"
 
 	claudeModelsRequest = `{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}`
@@ -255,8 +254,6 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 		return modelList{}, fmt.Errorf("%s models: %w", key.name, ErrTerminalNotRunning)
 	}
 
-	// The budget starts here: a cold environment terminal can take most of
-	// it to start, and the agent then has none left.
 	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
 	defer cancel()
 	argv := append([]string{"/bin/sh", "-c", script, "sh", executable}, args...)

@@ -412,11 +412,24 @@ func TestAgentModelsColdTerminalStartDoesNotSpendTheProbeBudget(t *testing.T) {
 	if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil {
 		t.Fatal(err)
 	}
-	d := e.rt.execDeadline.Load()
-	if d == nil {
-		t.Fatal("the probe never ran")
-	}
-	if left := time.Until(*d); left < agentModelsTimeout-250*time.Millisecond {
+	if left := time.Duration(e.rt.execBudget.Load()); left < agentModelsTimeout-250*time.Millisecond {
 		t.Fatalf("the probe had %s left after starting the terminal, want about %s", left, agentModelsTimeout)
+	}
+}
+
+func TestAgentModelsSlowFailureStaysCachedFromProbeEnd(t *testing.T) {
+	t.Parallel()
+	e, clock := newModelsEnv(t)
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) {
+		clock.advance(2 * agentModelsFailTTL)
+		return 127, "", nil
+	}
+	for range 2 {
+		if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(e.rt.execRuns()); n != 1 {
+		t.Fatalf("%d probes, want the second call served from the failure cache", n)
 	}
 }
