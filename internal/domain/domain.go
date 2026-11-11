@@ -150,6 +150,16 @@ func (a RunActivity) Quiet(reason string) bool {
 	return false
 }
 
+// These start the reasons of a needs-you run an error stopped: an Enhanced
+// turn interrupted or ended early, a usage limit Aether does not resume
+// from, or a wait whose wake was never delivered.
+const (
+	InterruptedReason        = "turn interrupted"
+	StoppedShortReasonPrefix = "turn ended: "
+	UsageLimitReasonPrefix   = "Usage limit reached on "
+	WaitBrokenReasonPrefix   = "wait broken: "
+)
+
 // RunReview is whether the run's owner has dealt with the success its agent
 // reported: empty when no success awaits them.
 type RunReview string
@@ -168,6 +178,10 @@ const BlockedReasonPrefix = "blocked: "
 // completed, before any retention suffix. A live run in that standing has
 // ActivityFinished instead.
 const ReportedSuccessReason = "agent reported success"
+
+// ReportedFailureReason is the reason of a run its agent's failure report
+// parked or ended, before any retention suffix.
+const ReportedFailureReason = "agent reported failure"
 
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether sessions --needs-you and

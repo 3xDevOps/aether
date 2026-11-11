@@ -392,6 +392,9 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 			return protocol.Child{}, err
 		}
 		out.State, out.Branch, out.AccountMemberID, out.Model = childState(r), r.Branch, string(r.AccountMember()), r.Model
+		if stopped(r.Activity, r.Reason) {
+			out.Error = r.Reason
+		}
 	}
 	if report, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil && report != nil {
 		out.Report = &protocol.ChildReport{Outcome: string(report.Outcome), Summary: report.Summary, At: report.CreatedAt.UTC().Format(time.RFC3339)}
@@ -399,7 +402,7 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 		if reportedErr != nil {
 			return protocol.Child{}, reportedErr
 		}
-		if reported && (out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting || out.State == protocol.ChildEnded) {
+		if reported && (out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting || out.State == protocol.ChildDisconnected || out.State == protocol.ChildEnded) {
 			switch report.Outcome {
 			case store.CoordOutcomeSuccess:
 				out.State = protocol.ChildFinished
@@ -443,6 +446,8 @@ func childState(r *domain.Run) string {
 		return protocol.ChildFailed
 	case domain.ActivityNeedsYou:
 		return protocol.ChildNeedsYou
+	case domain.ActivityDisconnected:
+		return protocol.ChildDisconnected
 	case domain.ActivityWaiting, domain.ActivityWaitingAgents, domain.ActivityIdle:
 		return protocol.ChildWaiting
 	}

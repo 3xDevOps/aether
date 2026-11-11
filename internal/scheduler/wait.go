@@ -55,7 +55,7 @@ const wakeGrace = 5 * time.Minute
 
 // waitBrokenReasonPrefix starts the reason of a run whose wait resolved and
 // whose wake was not delivered within wakeGrace.
-const waitBrokenReasonPrefix = "wait broken: "
+const waitBrokenReasonPrefix = domain.WaitBrokenReasonPrefix
 
 // classifyWait judges a reported wait by its conditions at now. stranded
 // names the conditions the agent will not be woken by: one that left

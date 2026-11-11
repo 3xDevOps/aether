@@ -24,7 +24,7 @@ const reportFinishDeadline = 2 * time.Minute
 
 const (
 	reportedSuccessReason         = domain.ReportedSuccessReason
-	reportedFailureReason         = "agent reported failure"
+	reportedFailureReason         = domain.ReportedFailureReason
 	reportedSuccessRetainedReason = reportedSuccessReason + "; retained container"
 	reportedFailureRetainedReason = reportedFailureReason + "; retained container"
 	blockedReasonPrefix           = domain.BlockedReasonPrefix

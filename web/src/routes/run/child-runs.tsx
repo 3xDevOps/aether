@@ -26,6 +26,7 @@ const childState: Record<ChildState, { label: string; tone: Tone }> = {
   working: { label: 'Working', tone: 'working' },
   waiting: { label: 'Waiting', tone: 'waiting' },
   'needs-you': { label: 'Needs you', tone: 'needs-you' },
+  disconnected: { label: 'Disconnected', tone: 'disconnected' },
   finished: { label: 'Finished', tone: 'done' },
   failed: { label: 'Failed', tone: 'failed' },
   ended: { label: 'Ended without a report', tone: 'ended' },

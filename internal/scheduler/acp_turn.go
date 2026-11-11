@@ -10,6 +10,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 // The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
@@ -22,8 +23,8 @@ const (
 // Idle reasons of an interactive enhanced turn that did not end normally.
 const (
 	acpCancelledReason   = "turn cancelled"
-	acpInterruptedReason = "turn interrupted"
-	acpStoppedReason     = "turn ended: "
+	acpInterruptedReason = domain.InterruptedReason
+	acpStoppedReason     = domain.StoppedShortReasonPrefix
 )
 
 func backgroundWork(report agentstatus.Report) bool {

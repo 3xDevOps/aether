@@ -50,7 +50,7 @@ func (s *Scheduler) usageFallbackSeam() *UsageFallback {
 // usageLimitReason starts the reason of a run whose account ran out with no
 // account to continue on, or whose move to one failed. The dashboard matches
 // it (web/src/lib/needs-you.ts).
-const usageLimitReason = "Usage limit reached on "
+const usageLimitReason = domain.UsageLimitReasonPrefix
 
 // usageLimitSegment is the reason an account segment records for a move.
 const usageLimitSegment = "usage limit"
