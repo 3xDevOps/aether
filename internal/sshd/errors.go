@@ -61,6 +61,9 @@ func rpcError(err error) *protocol.Error {
 	if errors.As(err, &typed) && typed != nil {
 		return typed
 	}
+	if errors.Is(err, permissions.ErrNoAccess) {
+		return &protocol.Error{Code: protocol.CodeNotFound, Message: store.ErrNotFound.Error()}
+	}
 	code := protocol.CodeInternal
 	switch mirrorKind(err) {
 	case gitengine.MirrorErrorAuthFailed:

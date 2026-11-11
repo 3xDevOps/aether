@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func (h *coordHarness) dial(t *testing.T, run domain.RunID) *protocol.Client {
@@ -380,7 +381,7 @@ func (h *coordHarness) restart(t *testing.T, disabled bool, opts ...func(*Config
 	t.Helper()
 	svcCfg := Config{
 		Dir:      filepath.Join(h.dir, "coord"),
-		Store:    h.db,
+		Store:    storetest.Unscoped{DB: h.db},
 		Mail:     h.db,
 		Bus:      h.bus,
 		Peers:    h.peers,

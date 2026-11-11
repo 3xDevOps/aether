@@ -35,7 +35,8 @@ async function pickMenu(trigger: string, item: string, role: 'menuitem' | 'menui
   screen.getByRole('button', { name: trigger }).focus()
   await userEvent.keyboard('{Enter}')
   const menu = await screen.findByRole('menu')
-  fireEvent.click(within(menu).getByRole(role, { name: item }))
+  const name = role === 'menuitemradio' ? new RegExp(`^${item}`) : item
+  fireEvent.click(within(menu).getByRole(role, { name }))
 }
 
 const row = (name: string) => within(screen.getByRole('region', { name: 'Roster' })).getByText(name).closest('tr')!
@@ -62,6 +63,18 @@ describe('members page', () => {
     expect(within(row('Vera')).getByText('Not shared')).toBeDefined()
     expect(within(row('Alice')).getByText('(you)')).toBeDefined()
     expect(within(row('Alice')).getByText('Offline')).toBeDefined()
+  })
+
+  it('tells everyone but a super admin which members the roster leaves out', async () => {
+    const note = 'You see super admins and the members of workspaces you can use.'
+    seed({ info: { ...serverInfo, member: { ...alice, role: 'admin' } } })
+    const view = render(<MembersRoute params={{}} client={fakeApi()} />)
+    expect(await screen.findByText(note)).toBeDefined()
+    view.unmount()
+    seed({ info: { ...serverInfo, member: { ...alice, role: 'super_admin' } } })
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+    await screen.findByRole('region', { name: 'Roster' })
+    expect(screen.queryByText(note)).toBeNull()
   })
 
   it('shows a pending member approved before the server answers, with no second Approve', async () => {
@@ -168,7 +181,7 @@ describe('members page', () => {
     const menu = await screen.findByRole('menu')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Admin' }))
+      fireEvent.click(within(menu).getByRole('menuitemradio', { name: /^Admin/ }))
       act(() => useStore.getState().setMembers([alice, { ...bob, role: 'admin' }]))
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       await act(async () => {})

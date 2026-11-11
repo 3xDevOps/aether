@@ -351,7 +351,9 @@ top to bottom:
    **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a
    quarter and the count in a `CountBadge`; the count stays in the button's
-   name. Every group starts expanded and lists all of its sessions; a group
+   name. **Mine** matches the count badge's height on fine pointers and keeps a
+   44px touch target on coarse pointers. Every group starts expanded and lists all
+   of its sessions; a group
    closes only when its header is pressed, and the list fades back in when
    the viewer reopens it (rows never glide their height, and a group that
    mounts with hydration does not fade). Until the first sessions arrive, six
@@ -3081,10 +3083,10 @@ truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
 With a mouse on a layout wider than the 767px phone breakpoint and motion allowed, the strip's
-dots fade to nothing under the pointer and return to full 80px away:
+dots fade to nothing under the pointer and return to full 54px away:
 `useDotFade` (`routes/run/dot-fade.ts`) writes the pointer position into a
 `mask-image` on `.control-matrix` from one `pointermove` listener, batched per
-frame, and eases the mask out over 600ms on `pointerleave`.
+frame, and eases the mask out over 1200ms on `pointerleave`.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates
@@ -3588,24 +3590,34 @@ ACP row whose `resource_link` URIs name attached files matches the room
 message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
 URLs when identity, session or row changes, and shows each other file as a chip
-named by its basename with the path as its title. Each image is named by its place
-in the row ("Image 2 of 3", or "Attached image" when it is alone), and its
-thumbnail is a button that opens the same blob in a `Dialog` filling the window
-(the whole screen on a phone), fitted to it. Zoom runs from fitted to 400% of
-the image's pixels, in a frame that scrolls and takes keyboard focus: a
-trackpad pinch (a ctrl wheel, or Safari's gesture events, both kept from
-zooming the page) or a two-finger touch pinch zooms about the fingers or
-pointer, and `Mod+=`/`Mod+-` step by 1.25 about the frame's centre while
-`Mod+0` fits again. When the image is larger than the frame, **Actual size**
-in the header, or a click on the image, switches between fitted and 100% about
-the clicked point; the header shows the zoom level while zoomed. One dialog serves the
-row: while the image is fitted, `ArrowLeft` and `ArrowRight`, or a horizontal
-swipe, step to the previous or next image that loaded, stopping at either end;
+named by its basename with the path as its title. Thumbnails keep each image's
+aspect ratio within 320×192px; their composer radius shrinks on short images so
+the corners do not meet. Each image is named by its place in the row
+("Image 2 of 3", or "Attached image" when it is alone), and its thumbnail is a
+button that opens the same blob in a `Dialog` filling the window
+(the whole screen on a phone). The dialog shows only the image on a near-black
+backdrop, with the composer's thin border and corner radius, at up to 80% of
+the viewport width and height. A top-bar row keeps the image clear of macOS
+window controls and holds a 44px Close button; the image name stays for screen
+readers. Each image fits the frame, enlarging small images when needed. Zoom
+runs from fitted to 400% of the larger of the image's native size or fitted
+size, in a frame that scrolls and takes keyboard focus; the focus outline
+follows the image. A trackpad pinch (a ctrl wheel, or Safari's gesture events,
+both kept from zooming the page) or a two-finger touch pinch zooms about the
+fingers or pointer, including over gallery controls. `Mod+=`/`Mod+-` step
+by 1.25 about the frame's centre while
+`Mod+0` fits again. A click on a fitted image zooms downscaled images to 100%
+or enlarged images to 125% of fit, preserving the clicked point. In a
+multi-image gallery, Previous image and Next image buttons appear on hover or
+keyboard focus; touch keeps them visible.
+They step through loaded images. `ArrowLeft` and `ArrowRight`, or a horizontal
+swipe, do the same while the image is fitted, stopping at either end;
 zoomed in, or with a modifier key held or the page pinch-zoomed, they do not
-switch. Losing an image's blob, as on reconnect, closes the dialog if it was
-showing that image. Each image opens fitted, and
-closing returns focus to the thumbnail of the image last shown. Attachments sit outside the
-text-collapse area and remain available through history and reconnect.
+switch. With the image fitted, clicking beside it closes the dialog; while
+zoomed, the outer gutters close it and the frame remains scrollable. Losing an
+image's blob, as on reconnect, closes the dialog if it was showing that image.
+Closing returns focus to the thumbnail of the image last shown. Attachments sit
+outside the text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider
 group with search by name, ID and description. Selections use
@@ -4040,6 +4052,8 @@ measurement from FitAddon without resizing the renderer; `setGeometry()` queues
 the server resize and optional attach reset between xterm writes. A font or
 pane resize reports the local measurement, never the smaller rendered grid,
 so a viewer cannot accidentally pin the shared minimum after it grows.
+Terminal padding belongs to the xterm element, not its host: FitAddon subtracts
+the element's padding when calculating the rows and columns that fit.
 Queued geometry work is discarded when its terminal is disposed.
 The server queues geometry with terminal output. SSH and in-process dashboard
 attachments request ordered framing, and the gateway emits the geometry frame
@@ -6252,10 +6266,29 @@ sidebar's **Members** row stays current on both.
 
 **Members** is a roster table, each row filling on hover: name, role, whether you and that member share
 an agent account, and last seen (**Online**, a relative time, or
-**Offline**). An admin changes a role or removes a member from the row's
-menu; giving up your own admin role, and removing anyone, ask first. Members
+**Offline**). Roles are Viewer, Collaborator, Admin and Super admin. Only a
+super admin changes a role or removes a member from the row's menu; giving up
+your own super admin role, and removing anyone, ask first. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
-admins see **Open invitations** with **Revoke**.
+admins see **Open invitations** with **Revoke** and the workspaces each
+invitation grants.
+
+**Invite…** carries a workspace multi-select of the workspaces the inviter
+administers, for an account invitation and for an invite code. An admin who is
+not a super admin must pick at least one and may invite only a viewer or a
+collaborator; a super admin may pick any role and no workspace.
+
+**Manage workspaces** shows each workspace's owner. Where the caller's `role`
+in `workspace.list` is `admin`, the row menu offers **Settings…**, **Access…**
+and **Delete…**; **Access…** lists the owner and granted members, adds members
+(an admin sees only collaborators and viewers) and removes them, showing the
+server's error verbatim. Super admins also get **Change owner…**. A grant,
+revoke, `workspace.access` event or `member.access` event reloads the workspace
+list. `member.access` (workspace id `server`) goes only to the member whose
+access changed, so a member who just lost a workspace still gets it. Server-wide
+controls (server update, session limits, Docker inside sessions, remote access)
+show to super admins; the dashboard hides what the caller cannot use and the
+server refuses it regardless.
 
 A role change, **Approve**, and a confirmed **Revoke** follow
 [Actions](#actions): the radio moves, the member joins the roster, or the
@@ -6333,7 +6366,9 @@ from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
 **Approve** sends `member.device.approve` with the device id and the code.
-It revokes a device too, and shows every server refusal verbatim. The
+**Revoke** shows on the member's own devices, on a device still waiting,
+and, for a super admin, on every device; it shows every server refusal
+verbatim. The
 list is an `InsetList`; until it arrives, three row skeletons stand in after
 ~200ms ("Loading devices").
 

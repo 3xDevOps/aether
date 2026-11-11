@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cost"
@@ -34,8 +35,8 @@ type budgetDue struct {
 	seq   uint64
 }
 
-// budget tells every admin once that a workspace's spend rose past its
-// budget's warning or its cap; a fall re-arms what it fell below.
+// budget tells each of a workspace's admins once that its spend rose past
+// its budget's warning or its cap; a fall re-arms what it fell below.
 func (s *Service) budget(ctx context.Context, e events.Event, p events.BudgetPayload) {
 	if level(p.State) <= level(p.From) {
 		return
@@ -43,12 +44,10 @@ func (s *Service) budget(ctx context.Context, e events.Event, p events.BudgetPay
 	workspace, d := e.WorkspaceID, budgetDue{p.State, e.Seq}
 	s.wg.Go(func() {
 		for {
-			members, err := s.store.ListMembers(ctx)
+			admins, err := s.workspaceAdmins(ctx, workspace)
 			if err == nil {
-				for _, m := range members {
-					if m.Role == domain.RoleAdmin && !m.Pending {
-						s.due(ctx, budgetKey{workspace, m.ID}, d)
-					}
+				for _, m := range admins {
+					s.due(ctx, budgetKey{workspace, m}, d)
 				}
 				return
 			}
@@ -60,6 +59,26 @@ func (s *Service) budget(ctx context.Context, e events.Event, p events.BudgetPay
 			}
 		}
 	})
+}
+
+// workspaceAdmins are the members told of a workspace's budget: its owner
+// while an admin, and every super admin.
+func (s *Service) workspaceAdmins(ctx context.Context, workspace domain.WorkspaceID) ([]domain.MemberID, error) {
+	ws, err := s.store.GetWorkspace(ctx, workspace)
+	if err != nil {
+		return nil, fmt.Errorf("push: read workspace %s: %w", workspace, err)
+	}
+	members, err := s.store.ListMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.MemberID
+	for _, m := range members {
+		if !m.Pending && (m.Role == domain.RoleSuperAdmin || (m.Role == domain.RoleAdmin && m.ID == ws.OwnerID)) {
+			out = append(out, m.ID)
+		}
+	}
+	return out, nil
 }
 
 func level(state events.BudgetState) int {
@@ -137,9 +156,10 @@ func (s *Service) unwatchBudget(k budgetKey, next chan budgetDue) bool {
 	return true
 }
 
-// sendBudget reads the budget again and, while it stands at state, sends it
-// to the admin's devices unless they have had it, then to the sink. It
-// reports whether it is done: sent, or no longer standing.
+// sendBudget reads the budget again and, while it stands at state and the
+// member is still one of the workspace's admins, sends it to their devices
+// unless they have had it, then to the sink. It reports whether it is done:
+// sent, or no longer standing.
 func (s *Service) sendBudget(ctx context.Context, k budgetKey, state events.BudgetState, devices *bool) (bool, error) {
 	member, workspace := k.member, k.workspace
 	st, err := s.budgets.Budget(ctx, workspace)
@@ -147,6 +167,13 @@ func (s *Service) sendBudget(ctx context.Context, k budgetKey, state events.Budg
 		return false, err
 	}
 	if st.State != state {
+		return true, nil
+	}
+	admins, err := s.workspaceAdmins(ctx, workspace)
+	if err != nil {
+		return false, err
+	}
+	if !slices.Contains(admins, member) {
 		return true, nil
 	}
 	ws, err := s.store.GetWorkspace(ctx, workspace)

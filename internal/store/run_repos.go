@@ -8,24 +8,37 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// SetRunRepos writes a run's extras once, whole: their position names their git engine checkout.
+// SetRunRepos writes a run's extras whole: their position names their git
+// engine checkout. CreateRun already wrote them, so this fills in what
+// checkout creation learned.
 func (d *DB) SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.RunRepo) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: set session repos: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	for i, repo := range repos {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO run_repos (run_id, position, workspace_id, name, mount_path, branch, base_branch, base_commit, worktree)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, i+1, repo.WorkspaceID, repo.Name, repo.Path, repo.Branch, repo.BaseBranch, repo.BaseCommit, repo.Worktree,
-		); err != nil {
-			return fmt.Errorf("store: set session repos: %w", mapConstraint(err, ErrNotFound))
-		}
+	if err := upsertRunRepos(ctx, tx, id, repos); err != nil {
+		return fmt.Errorf("store: set session repos: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: set session repos: commit: %w", err)
+	}
+	return nil
+}
+
+func upsertRunRepos(ctx context.Context, tx *sql.Tx, id domain.RunID, repos []domain.RunRepo) error {
+	for i, repo := range repos {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO run_repos (run_id, position, workspace_id, name, mount_path, branch, base_branch, base_commit, worktree)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (run_id, position) DO UPDATE SET
+			   workspace_id = excluded.workspace_id, name = excluded.name, mount_path = excluded.mount_path,
+			   branch = excluded.branch, base_branch = excluded.base_branch, base_commit = excluded.base_commit,
+			   worktree = excluded.worktree`,
+			id, i+1, repo.WorkspaceID, repo.Name, repo.Path, repo.Branch, repo.BaseBranch, repo.BaseCommit, repo.Worktree,
+		); err != nil {
+			return fmt.Errorf("repo %d: %w", i+1, mapConstraint(err, ErrNotFound))
+		}
 	}
 	return nil
 }

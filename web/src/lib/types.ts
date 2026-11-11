@@ -307,6 +307,23 @@ export interface Workspace {
   /** The upstream git URL a run checkout's `origin` remote points at;
    * absent until a clone with an origin is linked. */
   origin?: string
+  /** The admin who owns the workspace; absent from a server older than workspace access. */
+  owner_member_id?: string
+  /** The caller's role in this workspace; absent from a server older than workspace access. */
+  role?: Member['role']
+}
+
+/** workspace.access.list: the owner and every member granted the workspace. */
+export interface WorkspaceAccess {
+  workspace_id: string
+  owner_member_id: string
+  grants: WorkspaceGrant[]
+}
+
+export interface WorkspaceGrant {
+  member_id: string
+  granted_by?: string
+  created_at: string
 }
 
 /** `value` is absent for a secret: the server never returns one. */
@@ -331,7 +348,7 @@ export interface Member {
   id: string
   display_name: string
   color: string
-  role: 'viewer' | 'collaborator' | 'admin'
+  role: 'viewer' | 'collaborator' | 'admin' | 'super_admin'
   pending?: boolean
   /** The name commits made in this member's runs are authored as; absent
    * until the member sets one, when the server falls back. */
@@ -1517,6 +1534,8 @@ export interface Invitation {
   login?: string
   email?: string
   role?: Member['role']
+  /** Workspaces the invitation grants on joining. */
+  workspace_ids?: string[]
   member_id?: string
   created_by: string
   created_at: string

@@ -271,6 +271,9 @@ CLI is moved or deleted, the app's error names the path; restore it, set
 `aether update` rebuilds the app ([Upgrading](#upgrading)). On Windows, close
 Aether before rebuilding by hand.
 
+On Windows the app runs its dashboard server without opening a console window.
+To diagnose startup failures, run `aether gui` in a terminal.
+
 ## Android app
 
 The Android app shows the dashboard full screen on a phone. It is not on
@@ -360,7 +363,7 @@ sudo journalctl -u aether-server -f
 
 On first start the server creates its database, repositories and SSH host
 key. Do not delete the key: clients pin it, and the edge knows the server by
-it. The first identity to link becomes the admin: the SSH key or tailnet login
+it. The first identity to link becomes the super admin: the SSH key or tailnet login
 of whoever runs `aether link` first, or the account that uses the claim code.
 With the edge on, a first SSH key must come from the server itself or an SSH
 tunnel ([networking.md](networking.md#the-first-admin)).
@@ -369,7 +372,7 @@ For automation, `aether-server install` writes the same files from flags,
 such as `--edge-url https://edge.onaether.dev --edge-access approved-devices`.
 It installs Sysbox unless you pass `--sysbox=false`, turns the edge on only
 with `--edge-url`, and issues no claim code. With Tailscale on the host, the
-first tailnet login becomes the admin unless you pass `--tailnet-require-key`.
+first tailnet login becomes the super admin unless you pass `--tailnet-require-key`.
 With the edge on, install also prints the edge, policy and server id. It
 prints one `warning:` line naming what the host lacks (git, ssh-keygen, a
 running systemd, or the memory and disk above), without failing, and ends on
@@ -523,12 +526,12 @@ than itself, and a client newer than its server gains nothing.
 
 ### Update the server
 
-A server admin can update from any client or from the dashboard's
+A super admin can update from any client or from the dashboard's
 **Updates** dialog ([dashboard-frontend.md](dashboard-frontend.md#update-prompts)),
 and root can update on the server host:
 
 ```sh
-aether server update [--version <tag>]        # from any client, as an admin
+aether server update [--version <tag>]        # from any client, as a super admin
 sudo aether-server update [--version <tag>]   # on the server host
 ```
 
@@ -578,7 +581,7 @@ signature, then rebuilds the desktop app if one is installed (`--no-app` skips
 that). `--version <tag>` picks a release, and `--check`, with `--json` for a
 script, only reports whether a newer one exists. When this CLI is behind its
 server, it installs the server's release instead. When the server is behind
-and you are its admin, it refuses unless you pass `--force`:
+and you are a super admin, it refuses unless you pass `--force`:
 
 ```
 aether: update the server first: aether server update (the server runs v0.8.0 and this installs v0.9.0; --force skips this check)

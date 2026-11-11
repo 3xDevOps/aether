@@ -2,6 +2,7 @@ package watch
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,75 @@ func TestARelayWakesTheTargetOnceAcrossARestart(t *testing.T) {
 	}
 	if n := len(h.inbox.messages(build.ID)); n != 0 {
 		t.Fatalf("%d messages in the watched session's inbox, want none", n)
+	}
+}
+
+func TestASessionInAnUnreachableWorkspaceIsAnsweredAsMissing(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	hidden := &domain.Workspace{Name: "hidden", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(h.ctx, hidden); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	ended := &domain.Run{WorkspaceID: hidden.ID, MemberID: h.bob.ID, Task: "Secret", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	live := &domain.Run{WorkspaceID: hidden.ID, MemberID: h.bob.ID, Task: "Secret live", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	for _, r := range []*domain.Run{ended, live} {
+		if err := h.db.CreateRun(h.ctx, r); err != nil {
+			t.Fatalf("create run: %v", err)
+		}
+	}
+	h.status(ended, domain.RunFailed, "", "secret failure")
+
+	_, want := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-missing"}})
+	_, got := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(ended)})
+	if !errors.Is(got, store.ErrNotFound) || strings.ReplaceAll(got.Error(), string(ended.ID), "run-missing") != want.Error() {
+		t.Fatalf("watching an unreachable ended session: %v, want %v", got, want)
+	}
+
+	build := h.run(h.ada, "Build")
+	_, want = h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(build), RelayTo: []string{"run-missing"}})
+	_, got = h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(build), RelayTo: []string{string(live.ID)}})
+	if !errors.Is(got, store.ErrNotFound) || strings.ReplaceAll(got.Error(), string(live.ID), "run-missing") != want.Error() {
+		t.Fatalf("relaying to an unreachable session: %v, want %v", got, want)
+	}
+}
+
+// A session with an extra repository in a workspace the member cannot
+// reach does not exist for them: watching it reads as a missing session,
+// and losing that workspace stops a watch without announcing the need.
+func TestASessionWithAnUnreachableRepoIsAnsweredAsMissing(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	other := &domain.Workspace{Name: "other", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(h.ctx, other); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	run := h.run(h.bob, "Two repos")
+	if err := h.db.SetRunRepos(h.ctx, run.ID, []domain.RunRepo{{WorkspaceID: other.ID, Name: "other", Path: "/repos/other", Branch: "b", BaseBranch: "main"}}); err != nil {
+		t.Fatalf("SetRunRepos: %v", err)
+	}
+	_, want := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-missing"}})
+	_, got := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(run)})
+	if !errors.Is(got, store.ErrNotFound) || strings.ReplaceAll(got.Error(), string(run.ID), "run-missing") != want.Error() {
+		t.Fatalf("watching a session with an unreachable repo: %v, want %v", got, want)
+	}
+
+	if err := h.db.GrantWorkspace(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	w := h.watch(h.ada, runTarget(run)).Watch
+	if err := h.db.RevokeWorkspaceGrant(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "secret question")
+	h.eventually("the watch to fail", func() bool { return h.watchState(w.ID).State == protocol.WatchError })
+	if got := h.watchState(w.ID); !strings.HasPrefix(got.Error, "access revoked") || strings.Contains(string(got.Observed), "secret") {
+		t.Fatalf("watch = error %q, observed %s; want access revoked and the need unread", got.Error, got.Observed)
+	}
+	if got := h.notices(w.ID); len(got) != 0 {
+		t.Fatalf("notices = %q, want none", bodies(got))
 	}
 }
 
@@ -124,5 +194,57 @@ func TestARelayWrittenBeforeAStopIsNotWrittenAgain(t *testing.T) {
 	})
 	if n := len(h.inbox.messages(integrate.ID)); n != 1 {
 		t.Fatalf("%d messages in the relay target's inbox, want 1", n)
+	}
+}
+
+// A saved watch of a session the member no longer fully reaches reads as
+// theirs to delete, without the session, its title or what was noticed.
+func TestASavedWatchOfASessionNoLongerReachedHidesWhatItRead(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	other := &domain.Workspace{Name: "other", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(h.ctx, other); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	run := h.run(h.bob, "Secret title")
+	if err := h.db.SetRunRepos(h.ctx, run.ID, []domain.RunRepo{{WorkspaceID: other.ID, Name: "other", Path: "/repos/other", Branch: "b", BaseBranch: "main"}}); err != nil {
+		t.Fatalf("SetRunRepos: %v", err)
+	}
+	if err := h.db.GrantWorkspace(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	created := protocol.WatchCreateParams{Target: runTarget(run), IdempotencyKey: "secret-watch"}
+	res, err := h.svc.Create(h.ctx, h.ada.ID, created)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	w := res.Watch
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "secret question")
+	h.eventually("the need noticed", func() bool { return len(h.notices(w.ID)) == 1 })
+	if err = h.db.RevokeWorkspaceGrant(h.ctx, other.ID, h.ada.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := h.svc.Create(h.ctx, h.ada.ID, created)
+	if err != nil {
+		t.Fatalf("replayed Create: %v", err)
+	}
+	label := "mine"
+	updated, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: w.ID, Label: &label})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	list, err := h.svc.List(h.ctx, h.ada.ID, protocol.WatchListParams{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got, err := h.svc.Get(h.ctx, h.ada.ID, w.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	for name, v := range map[string]any{"List": list, "Get": got, "replayed Create": replayed, "Update": updated} {
+		read := fmt.Sprintf("%+v", v)
+		if !strings.Contains(read, w.ID) || strings.Contains(read, string(run.ID)) || strings.Contains(read, "Secret") || strings.Contains(read, "secret") {
+			t.Errorf("%s = %s; want the watch without its session, title or notices", name, read)
+		}
 	}
 }

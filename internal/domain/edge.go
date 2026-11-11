@@ -92,4 +92,7 @@ type Invitation struct {
 	// SecretHash is edgeproto.HashToken of the join secret in the
 	// invitation's link; empty admits no join.
 	SecretHash string
+	// Workspaces are granted to the member the invitation adds, those its
+	// creator still administers when it is accepted.
+	Workspaces []WorkspaceID
 }

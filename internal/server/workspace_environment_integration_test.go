@@ -77,8 +77,12 @@ func TestIntegrationWorkspaceEnvironment(t *testing.T) {
 			t.Fatalf("seed member: %v", err)
 		}
 	}
+	ws.OwnerID = admin.ID
 	if err = srv.Store().CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
+	}
+	if err = srv.Store().GrantWorkspace(ctx, ws.ID, launcher.ID, admin.ID); err != nil {
+		t.Fatalf("grant workspace: %v", err)
 	}
 
 	sub, err := srv.Bus().Subscribe(ctx, events.SubscribeOptions{Buffer: 4096})

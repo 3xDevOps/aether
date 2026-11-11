@@ -186,10 +186,16 @@ type RunInputPayload struct {
 
 func (RunInputPayload) EventType() Type { return TypeRunInput }
 
-// RunDeletedPayload signals that a run's durable record was removed.
-type RunDeletedPayload struct{}
+// RunDeletedPayload signals that a run's durable record was removed. With
+// no record left to read them from, it names the run's extra workspaces;
+// one logged before it did reads nil.
+type RunDeletedPayload struct {
+	ExtraWorkspaceIDs []domain.WorkspaceID `json:"extra_workspace_ids"`
+}
 
 func (RunDeletedPayload) EventType() Type { return TypeRunDeleted }
+
+func (p RunDeletedPayload) RunExtraWorkspaces() []domain.WorkspaceID { return p.ExtraWorkspaceIDs }
 
 // WorkspaceDeletedPayload invalidates the deleted workspace in connected clients.
 type WorkspaceDeletedPayload struct{}
@@ -356,6 +362,8 @@ type RunDiffPayload struct {
 
 func (RunDiffPayload) EventType() Type { return TypeRunDiff }
 
+func (p RunDiffPayload) RepoWorkspace() domain.WorkspaceID { return p.Repo }
+
 // RunCostPayload reports token usage for a run. Metered is false for
 // PTY-only runs where counts are best-effort estimates or unavailable.
 // Increment marks usage spent since the run's previous report, which adds
@@ -459,6 +467,8 @@ type GitBranchPayload struct {
 }
 
 func (GitBranchPayload) EventType() Type { return TypeGitBranch }
+
+func (p GitBranchPayload) RepoWorkspace() domain.WorkspaceID { return p.WorkspaceID }
 
 // AgentEventKind classifies an agent activity event.
 type AgentEventKind string

@@ -400,6 +400,7 @@ func TestInteractiveAttachLaterGrantRevocationContinuesWatching(t *testing.T) {
 
 func TestInteractiveAttachRevocationPreservesObserving(t *testing.T) {
 	e := controlAttachEnv(t)
+	asSuperAdmin(t, e)
 	collabSigner, collab := addMember(t, e, "Interactive collaborator", domain.RoleCollaborator, false)
 	interactive := &interactiveTestPTY{fakePTY: e.pty}
 	e.srv.cfg.PTY = interactive

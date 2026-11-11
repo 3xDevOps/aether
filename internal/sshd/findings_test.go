@@ -353,7 +353,7 @@ func TestRemovedMemberLosesAccess(t *testing.T) {
 		t.Fatalf("server.info before removal: %v", cerr)
 	}
 
-	if derr := e.store.DeleteMember(context.Background(), ghost.ID); derr != nil {
+	if derr := e.store.DeleteMember(context.Background(), ghost.ID, ""); derr != nil {
 		t.Fatalf("delete member: %v", derr)
 	}
 

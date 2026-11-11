@@ -75,7 +75,11 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 		refuse(e.Code, e.Message)
 		return
 	}
-	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	err = checkRunView(ctx, s.cfg.Store, member, domain.RunID(req.RunID))
+	var run *domain.Run
+	if err == nil {
+		run, err = s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	}
 	if err != nil {
 		e := rpcError(err)
 		refuse(e.Code, e.Message)

@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -39,33 +40,77 @@ func (s *Server) rpcIdentityStore() (store.IdentityStore, *protocol.Error) {
 	return ids, nil
 }
 
-// actingOn loads the caller and allows the call when it acts on the
-// caller's own member or the caller is an admin.
+// actingOn allows an approval on owner's member: approving it, a device or
+// a sign-in, or reading what it signs in with. Its own member and super
+// admins may, and an admin may for a member below admin. A member the
+// caller does not see reads as one that does not exist.
 func (s *Server) actingOn(ctx context.Context, caller, owner domain.MemberID, method string) *protocol.Error {
+	return s.actingAs(ctx, caller, owner, "", method)
+}
+
+// actingAs is actingOn for owner, or, when owner is empty, for the new
+// member with role an invitation adds.
+func (s *Server) actingAs(ctx context.Context, caller, owner domain.MemberID, role domain.Role, method string) *protocol.Error {
 	m, err := s.cfg.Store.GetMember(ctx, caller)
 	if err != nil {
 		return rpcError(err)
 	}
-	if caller != owner && m.Role != domain.RoleAdmin {
-		return &protocol.Error{Code: protocol.CodeDenied,
-			Message: method + ": only its own member or an admin may do this"}
+	if caller == owner || m.Role == domain.RoleSuperAdmin {
+		return nil
 	}
-	return nil
+	if owner != "" {
+		target, err := s.visibleMember(ctx, caller, owner)
+		if err != nil {
+			return rpcError(err)
+		}
+		role = target.Role
+	}
+	if m.Role == domain.RoleAdmin && !role.Admin() {
+		return nil
+	}
+	return &protocol.Error{Code: protocol.CodeDenied,
+		Message: method + ": only its own member, a super admin, or an admin for a member below admin may do this"}
+}
+
+// editing allows a change to owner's member, its devices, sign-ins or
+// connectors only to that member and super admins. A member the caller
+// does not see reads as one that does not exist.
+func (s *Server) editing(ctx context.Context, caller, owner domain.MemberID, method string) *protocol.Error {
+	if caller == owner || s.superAdmin(ctx, caller) {
+		return nil
+	}
+	if _, err := s.visibleMember(ctx, caller, owner); err != nil {
+		return rpcError(err)
+	}
+	return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": only the member themself or a super admin may do this"}
 }
 
 // actingOnDevice is actingOn for dev's member. A device waiting on an
 // invitation acts for the member a link invitation names, and otherwise
-// for nobody but an admin.
+// for the new member the invitation adds.
 func (s *Server) actingOnDevice(ctx context.Context, ids store.IdentityStore, caller domain.MemberID, dev *domain.Device, method string) *protocol.Error {
-	owner := dev.Member
+	owner, role := dev.Member, domain.Role("")
 	if dev.Invitation != "" {
 		inv, err := ids.GetInvitation(ctx, dev.Invitation)
 		if err != nil {
 			return rpcError(err)
 		}
-		owner = inv.Member
+		owner, role = inv.Member, inv.Role
+		// A device on an invitation that adds a member is its creator's to
+		// approve: approving it grants the creator's workspaces. Anyone
+		// else but a super admin is answered as the device list answers
+		// them, which leaves it out.
+		if inv.Member == "" && caller != inv.CreatedBy {
+			m, err := s.cfg.Store.GetMember(ctx, caller)
+			if err != nil {
+				return rpcError(err)
+			}
+			if m.Role != domain.RoleSuperAdmin {
+				return rpcError(store.ErrNotFound)
+			}
+		}
 	}
-	return s.actingOn(ctx, caller, owner, method)
+	return s.actingAs(ctx, caller, owner, role, method)
 }
 
 func deviceToWire(d *domain.Device) protocol.Device {
@@ -82,12 +127,16 @@ func deviceToWire(d *domain.Device) protocol.Device {
 }
 
 func invitationToWire(inv *domain.Invitation) protocol.Invitation {
-	return protocol.Invitation{
+	out := protocol.Invitation{
 		ID: string(inv.ID), Provider: inv.Provider, Login: inv.Login, Email: inv.Email,
 		Role: string(inv.Role), MemberID: string(inv.Member), CreatedBy: string(inv.CreatedBy),
 		CreatedAt: inv.CreatedAt.UTC().Format(time.RFC3339),
 		ExpiresAt: inv.ExpiresAt.UTC().Format(time.RFC3339),
 	}
+	for _, w := range inv.Workspaces {
+		out.WorkspaceIDs = append(out.WorkspaceIDs, string(w))
+	}
+	return out
 }
 
 func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
@@ -99,23 +148,42 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	sees, err := s.visibleMembers(ctx, permissions.ActorOf(caller))
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	devs, err := ids.ListDevices(ctx, "")
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Device, 0, len(devs))
 	for _, d := range devs {
-		if caller.Role != domain.RoleAdmin && d.Member != member {
-			linked, err := linksTo(ctx, ids, d, member)
+		mine := caller.Role == domain.RoleSuperAdmin || d.Member == member
+		if !mine {
+			if mine, err = linksTo(ctx, ids, d, member); err != nil {
+				return nil, rpcError(err)
+			}
+		}
+		if !mine && caller.Role != domain.RoleAdmin {
+			continue
+		}
+		if !mine && d.Invitation == "" && !sees(d.Member) {
+			continue
+		}
+		if !mine && d.Invitation != "" {
+			inv, err := ids.GetInvitation(ctx, d.Invitation)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
 			if err != nil {
 				return nil, rpcError(err)
 			}
-			if !linked {
+			if inv.CreatedBy != member {
 				continue
 			}
 		}
 		w := deviceToWire(d)
-		if d.Status.AwaitsApproval() {
+		if d.Status.AwaitsApproval() || !mine {
 			_, name, role, err := s.admitsAs(ctx, ids, d)
 			if errors.Is(err, store.ErrNotFound) {
 				continue
@@ -123,7 +191,12 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 			if err != nil {
 				return nil, rpcError(err)
 			}
-			w.DisplayName, w.Role = name, string(role)
+			if !mine && role.Admin() {
+				continue
+			}
+			if d.Status.AwaitsApproval() {
+				w.DisplayName, w.Role = name, string(role)
+			}
 		}
 		out = append(out, w)
 	}
@@ -175,7 +248,7 @@ func deviceByCode(ctx context.Context, ids store.IdentityStore, code string) (*d
 	dev, err := ids.GetDeviceByApprovalCode(ctx, code)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("no device is waiting for approval with code %q", code)}
+		return nil, noDeviceWithCode(code)
 	case errors.Is(err, store.ErrConflict):
 		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
 			"approval code %q names more than one waiting device, so it approves none; approve the right one on the server with `sudo aether-server device review`", code)}
@@ -183,6 +256,10 @@ func deviceByCode(ctx context.Context, ids store.IdentityStore, code string) (*d
 		return nil, rpcError(err)
 	}
 	return dev, nil
+}
+
+func noDeviceWithCode(code string) *protocol.Error {
+	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("no device is waiting for approval with code %q", code)}
 }
 
 func awaitingApproval(dev *domain.Device) *protocol.Error {
@@ -220,8 +297,12 @@ func (s *Server) memberDeviceLookup(ctx context.Context, member domain.MemberID,
 		return nil, perr
 	}
 	// The status is checked only once the caller may act on the device, so
-	// it is not revealed for another member's device.
+	// it is not revealed for another member's device, and a code is not
+	// told apart from an unknown one.
 	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceLookup); perr != nil {
+		if p.DeviceID == "" {
+			return nil, noDeviceWithCode(p.Code)
+		}
 		return nil, perr
 	}
 	if perr := awaitingApproval(dev); perr != nil {
@@ -275,6 +356,9 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		defer s.registerMu.Unlock()
 	}
 	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceApprove); perr != nil {
+		if p.Code != "" {
+			return nil, noDeviceWithCode(p.Code)
+		}
 		return nil, perr
 	}
 	if perr := awaitingApproval(dev); perr != nil {
@@ -290,6 +374,7 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		return nil, rpcError(err)
 	}
 	if invitation != "" {
+		s.accessChanged()
 		s.notifyDirectory()
 	}
 	s.publishDevice(ctx, member, dev.ID, dev.Status)
@@ -354,10 +439,22 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceRevoke); perr != nil {
-		return nil, perr
+	allowed := s.editing(ctx, member, dev.Member, protocol.MethodMemberDeviceRevoke)
+	if dev.Status.AwaitsApproval() {
+		allowed = s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceRevoke)
 	}
-	if err = ids.RevokeDevice(ctx, dev.ID); err != nil {
+	if allowed != nil {
+		return nil, allowed
+	}
+	if dev.Status == domain.DeviceRevoked {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("device %s is already revoked", dev.ID)}
+	}
+	// Only while its status is the one the check above was made on: a
+	// device approved meanwhile is no longer an admin's to deny.
+	if err = ids.RevokeDevice(ctx, dev.ID, dev.Status); errors.Is(err, store.ErrNotFound) {
+		return nil, rpcError(fmt.Errorf("device %s is no longer %s as it was read; nothing was revoked: %w", dev.ID, dev.Status, err))
+	}
+	if err != nil {
 		return nil, rpcError(err)
 	}
 	noteChange(ctx)
@@ -406,13 +503,36 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	}
 	role := domain.Role(p.Role)
 	if !role.Valid() {
-		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, or admin", p.Role))
+		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, admin, or super_admin", p.Role))
 	}
 	inv, perr := newInvitation(p.Login, p.Email, role, member)
 	if perr != nil {
 		return nil, perr
 	}
+	for _, w := range p.WorkspaceIDs {
+		inv.Workspaces = append(inv.Workspaces, domain.WorkspaceID(w))
+	}
 	return s.createInvitation(ctx, ids, inv, protocol.MethodMemberInvitationCreate)
+}
+
+// checkInvitation refuses inv, which adds a member, unless its creator
+// may invite with its role into its workspaces: a super admin any role
+// into any workspaces, an admin a collaborator or viewer into at least
+// one workspace they own and no other.
+func (s *Server) checkInvitation(ctx context.Context, inv *domain.Invitation, method string) *protocol.Error {
+	creator, err := s.cfg.Store.GetMember(ctx, inv.CreatedBy)
+	if err != nil {
+		return rpcError(err)
+	}
+	switch {
+	case creator.Role == domain.RoleSuperAdmin:
+	case creator.Role != domain.RoleAdmin:
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + " requires the admin role"}
+	case inv.Role.Admin():
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+			"%s: an admin invites collaborators and viewers, not %s; a super admin invites admins", method, inv.Role)}
+	}
+	return s.inviteWorkspaces(ctx, inv.CreatedBy, inv.Workspaces, method)
 }
 
 // memberIdentityLink names an edge account to bind to the caller's own
@@ -456,12 +576,12 @@ func (s *Server) memberIdentityList(ctx context.Context, member domain.MemberID,
 	if target == "" {
 		return nil, invalidParams("member_id is required")
 	}
-	if perr := s.actingOn(ctx, member, target, protocol.MethodMemberIdentityList); perr != nil {
-		return nil, perr
-	}
-	m, err := s.cfg.Store.GetMember(ctx, target)
+	m, err := s.visibleMember(ctx, member, target)
 	if err != nil {
 		return nil, rpcError(err)
+	}
+	if perr := s.actingOn(ctx, member, target, protocol.MethodMemberIdentityList); perr != nil {
+		return nil, perr
 	}
 	all, err := ids.ListIdentities(ctx)
 	if err != nil {
@@ -507,7 +627,10 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	if target == "" || p.Provider == "" || p.Subject == "" {
 		return nil, invalidParams("member_id, provider and subject are required")
 	}
-	if perr := s.actingOn(ctx, member, target, method); perr != nil {
+	if _, err := s.visibleMember(ctx, member, target); err != nil {
+		return nil, rpcError(err)
+	}
+	if perr := s.editing(ctx, member, target, method); perr != nil {
 		return nil, perr
 	}
 	if perr := s.requireApprovedCaller(ctx, method, false); perr != nil {
@@ -534,7 +657,8 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	return out, nil
 }
 
-// createInvitation stores inv while its creator is an admin, or for a link,
+// createInvitation stores inv while its creator may invite with its role
+// into its workspaces (checkInvitation), or for a link,
 // while its creator is the approved member it links to; a link replaces
 // that member's open one. member.role revokes a demoted admin's
 // invitations under registerMu, so checking under it too keeps any
@@ -554,7 +678,7 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 	defer s.registerMu.Unlock()
 	var replaced []*domain.Device
 	if inv.Member == "" {
-		if perr := s.requireAdmin(ctx, inv.CreatedBy, method); perr != nil {
+		if perr := s.checkInvitation(ctx, inv, method); perr != nil {
 			return nil, perr
 		}
 	} else {
@@ -616,7 +740,7 @@ func (s *Server) memberInvitationList(ctx context.Context, member domain.MemberI
 	}
 	out := make([]protocol.Invitation, 0, len(invs))
 	for _, inv := range invs {
-		if caller.Role == domain.RoleAdmin || inv.CreatedBy == member {
+		if caller.Role == domain.RoleSuperAdmin || inv.CreatedBy == member {
 			out = append(out, invitationToWire(inv))
 		}
 	}
@@ -639,8 +763,8 @@ func (s *Server) memberInvitationRevoke(ctx context.Context, member domain.Membe
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if perr := s.actingOn(ctx, member, inv.CreatedBy, protocol.MethodMemberInvitationRevoke); perr != nil {
-		return nil, perr
+	if inv.CreatedBy != member && !s.superAdmin(ctx, member) {
+		return nil, rpcError(store.ErrNotFound)
 	}
 	devs, err := ids.ListDevices(ctx, "")
 	if err != nil {

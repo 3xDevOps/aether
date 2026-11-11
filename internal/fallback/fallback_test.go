@@ -59,6 +59,7 @@ func TestSelect(t *testing.T) {
 		order     []string
 		disabled  bool
 		revoke    string
+		outside   string
 		failing   string
 		modelOnly []string
 		used      map[string]float64
@@ -73,6 +74,8 @@ func TestSelect(t *testing.T) {
 		{name: "explicit order excludes unlisted accounts", requested: "Ada", order: []string{"Ada", "Dee", "Cy"},
 			used: map[string]float64{"Ada": 99, "Lena": 0, "Bo": 0, "Cy": 96, "Dee": 0}, want: "Ada"},
 		{name: "revoked share is skipped", requested: "Ada", revoke: "Bo",
+			used: map[string]float64{"Ada": 100, "Lena": 60, "Bo": 0, "Cy": 70}, want: "Lena"},
+		{name: "an owner without the workspace is skipped", requested: "Ada", outside: "Bo",
 			used: map[string]float64{"Ada": 100, "Lena": 60, "Bo": 0, "Cy": 70}, want: "Lena"},
 		{name: "unreadable requested stays", requested: "Ada", used: map[string]float64{"Bo": 0}, want: "Ada"},
 		{name: "agent without quota stays", requested: "Ada", harness: "opencode",
@@ -105,6 +108,18 @@ func TestSelect(t *testing.T) {
 					t.Fatal(createErr)
 				}
 				ids[name], names[m.ID] = m.ID, name
+			}
+			ws := &domain.Workspace{Name: "app"}
+			if wsErr := db.CreateWorkspace(ctx, ws); wsErr != nil {
+				t.Fatal(wsErr)
+			}
+			for name, id := range ids {
+				if name == tc.outside {
+					continue
+				}
+				if grantErr := db.GrantWorkspace(ctx, ws.ID, id, ""); grantErr != nil {
+					t.Fatal(grantErr)
+				}
 			}
 			launcher := ids["Lena"]
 			for _, owner := range []string{"Ada", "Bo", "Cy"} {
@@ -150,7 +165,7 @@ func TestSelect(t *testing.T) {
 					return true, nil
 				}
 			}
-			got, excluded := Select(ctx, db, measured, launcher, ids[tc.requested], policy, launchable)
+			got, excluded := Select(ctx, db, measured, launcher, ids[tc.requested], []domain.WorkspaceID{ws.ID}, policy, launchable)
 			if got != ids[tc.want] || (excluded != nil) != (tc.failing != "") ||
 				(excluded != nil && !strings.Contains(excluded.Error(), "input/output error")) {
 				t.Fatalf("Select = %s, excluded %v; want %s", names[got], excluded, tc.want)
@@ -256,9 +271,41 @@ func TestMeasureNextTriesUnknownUsageLast(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, excluded := Select(ctx, db, measured, launcher, ids["Ada"], policy, nil); got != ids[tc.want] || excluded != nil {
+			if got, excluded := Select(ctx, db, measured, launcher, ids["Ada"], nil, policy, nil); got != ids[tc.want] || excluded != nil {
 				t.Fatalf("Select = %s, excluded %v; want %s", names[got], excluded, tc.want)
 			}
 		})
+	}
+}
+
+// An account that was not shared with the launcher answers the same whether
+// its owner exists, is pending or does not exist.
+func TestResolveLaunchAccountWithoutAShareRevealsNoOwner(t *testing.T) {
+	ctx := context.Background()
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "fallback.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	member := func(name string, pending bool) domain.MemberID {
+		m := &domain.Member{DisplayName: name, TailnetLogin: strings.ToLower(name) + "@example.com", Color: "#3cb44b",
+			Role: domain.RoleCollaborator, Pending: pending}
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+		return m.ID
+	}
+	launcher, owner, pending := member("Lena", false), member("Ada", false), member("Pia", true)
+	for _, id := range []domain.MemberID{owner, pending, "mem-doesnotexist"} {
+		want := "permission denied: member " + string(id) + " has not shared their account with you"
+		if _, err := ResolveLaunchAccount(ctx, db, launcher, string(id)); err == nil || err.Error() != want {
+			t.Errorf("ResolveLaunchAccount(%s) = %v, want %q", id, err, want)
+		}
+	}
+	if _, err := db.ShareAccount(ctx, pending, launcher); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveLaunchAccount(ctx, db, launcher, string(pending)); err == nil || !strings.Contains(err.Error(), "pending admin approval") {
+		t.Errorf("ResolveLaunchAccount(shared pending) = %v, want the pending refusal", err)
 	}
 }

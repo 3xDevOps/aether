@@ -13,9 +13,9 @@ import (
 )
 
 func init() {
-	registerMethod(protocol.MethodCostReport, (*Server).costReport)
-	registerMethod(protocol.MethodBudgetGet, (*Server).budgetGet)
-	registerGuarded(protocol.MethodBudgetSet, permissions.WorkspaceAdmin, nil, (*Server).budgetSet)
+	registerGuarded(protocol.MethodCostReport, permissions.View, workspaceTarget, (*Server).costReport)
+	registerGuarded(protocol.MethodBudgetGet, permissions.View, workspaceTarget, (*Server).budgetGet)
+	registerGuarded(protocol.MethodBudgetSet, permissions.WorkspaceAdmin, workspaceTarget, (*Server).budgetSet)
 }
 
 // GuardRuns wraps a run controller so launches and retained-run reopens are
@@ -84,7 +84,9 @@ func (s *Server) costWorkspace(ctx context.Context, id string) (domain.Workspace
 	return domain.WorkspaceID(id), nil
 }
 
-func (s *Server) costReport(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+// costReport counts every run of the workspace in its totals but lists
+// only the runs the caller reaches in every workspace.
+func (s *Server) costReport(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.costs()
 	if perr != nil {
 		return nil, perr
@@ -101,6 +103,11 @@ func (s *Server) costReport(ctx context.Context, _ domain.MemberID, params json.
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	runs := newRunScopes(s.cfg.Store)
 	out := protocol.CostReportResult{
 		WorkspaceID: string(workspace),
 		Total:       rollupWire(rep.Total),
@@ -114,6 +121,9 @@ func (s *Server) costReport(ctx context.Context, _ domain.MemberID, params json.
 		})
 	}
 	for _, c := range rep.Runs {
+		if !runs.reaches(ctx, actor, c.RunID) {
+			continue
+		}
 		out.Runs = append(out.Runs, protocol.RunCost{
 			RunID:        string(c.RunID),
 			MemberID:     string(c.MemberID),

@@ -80,7 +80,7 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 	lead := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "waiting for 2 subsessions", domain.ActivityWaitingAgents)
 	child := func(reason string, activity domain.RunActivity) *domain.Run {
 		t.Helper()
-		reserved, _, err := e.store.(*store.DB).ReserveChild(ctx, &domain.ChildReservation{
+		reserved, _, err := e.db.ReserveChild(ctx, &domain.ChildReservation{
 			ParentRunID: lead.ID, RootRunID: lead.ID, TreeKey: string(lead.ID), WorkspaceID: e.ws.ID,
 			OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "codex", Mode: domain.LaunchACP, Task: "subtask",
 			IdempotencyKey: reason, RequestHash: reason,
@@ -89,7 +89,7 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 			t.Fatal(err)
 		}
 		run := &domain.Run{ID: reserved.RunID, WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "subtask", Harness: "codex", Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
-		if err := e.store.(*store.DB).CreateRunWithID(ctx, run); err != nil {
+		if err := e.db.CreateRunWithID(ctx, run); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := e.store.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, activity, nil, nil); err != nil {

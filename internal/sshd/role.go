@@ -3,21 +3,25 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func init() {
 	registerMethod(protocol.MethodMemberRole, (*Server).memberRole)
 }
 
-// memberRole sets a member's role. Only admins may call it, and the last
-// admin can never be demoted: the deployment must keep at least one
-// member able to administer it.
+// memberRole sets a member's role. Only super admins may call it, and the
+// last super admin can never be demoted: the server must keep at least
+// one member able to administer it. A member who owns workspaces stays an
+// admin until each has a new owner.
 //
 // Every permission check resolves the actor's role from the store at the
 // moment of the call (resolveActor, gate.go), so a role change takes
@@ -27,7 +31,7 @@ func init() {
 // Approval and role are orthogonal: a pending member's role may be set,
 // and they remain pending until an admin approves them.
 func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
 		return nil, err
 	}
 	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberRole, false); err != nil {
@@ -42,18 +46,17 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	}
 	role := domain.Role(p.Role)
 	if !role.Valid() {
-		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, or admin", p.Role))
+		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, admin, or super_admin", p.Role))
 	}
-	// The last-admin check below reads the member table and then writes to
-	// it. Without serialization two admins demoting each other at once
-	// would both count two admins, both proceed, and leave the deployment
-	// with none and no way back. registerMu is the same lock bootstrap
-	// uses to keep its own read-then-write of this table honest.
+	// SetMemberRole checks the last super admin and owned workspaces in
+	// its own transaction, so `aether-server member role` cannot race it.
+	// registerMu still orders the change against invitations, workspace
+	// owners and merges, which read roles in this process.
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
 		return nil, err
 	}
 
@@ -64,32 +67,21 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	if m.Role == role {
 		return protocol.MemberRoleResult{Member: protocol.MemberFromDomain(m)}, nil
 	}
-	if m.Role == domain.RoleAdmin {
-		admins, cerr := s.countAdmins(ctx)
-		if cerr != nil {
-			return nil, cerr
-		}
-		if admins <= 1 {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to demote the last admin"}
-		}
-	}
-	was := m.Role
-	// An invitation grants its role when accepted, and only admins create
-	// them, so a demoted admin's open invitations go with the role.
-	// createInvitation and acceptInvitation hold registerMu too.
-	if was == domain.RoleAdmin {
-		ids, perr := s.rpcIdentityStore()
-		if perr != nil {
+	// An invitation grants its role and workspaces when accepted, and only
+	// admins create them, so SetMemberRole revokes an admin's open
+	// invitations with any demotion. createInvitation and
+	// acceptInvitation hold registerMu too.
+	var (
+		ids  store.IdentityStore
+		devs []*domain.Device
+	)
+	if m.Role == domain.RoleSuperAdmin || (m.Role == domain.RoleAdmin && !role.Admin()) {
+		if ids, perr = s.rpcIdentityStore(); perr != nil {
 			return nil, perr
 		}
-		devs, err := ids.ListDevices(ctx, "")
-		if err != nil {
+		if devs, err = ids.ListDevices(ctx, ""); err != nil {
 			return nil, rpcError(err)
 		}
-		if err := ids.DeleteInvitationsBy(ctx, m.ID); err != nil {
-			return nil, rpcError(err)
-		}
-		s.publishDroppedDevices(ctx, member, ids, devs)
 	}
 	var activeRuns []*domain.Run
 	if s.cfg.Control != nil {
@@ -99,11 +91,15 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 			return nil, rpcError(listErr)
 		}
 	}
-	m.Role = role
-	update := func() error { return s.cfg.Store.UpdateMember(ctx, m) }
+	was := m.Role
+	update := func() error {
+		var err error
+		was, err = s.cfg.Store.SetMemberRole(ctx, m.ID, role, member)
+		return err
+	}
 	if len(activeRuns) == 0 || s.cfg.Control == nil {
 		if uerr := update(); uerr != nil {
-			return nil, rpcError(uerr)
+			return nil, memberGuardError(uerr, m.ID, "demote", "demoting")
 		}
 	} else {
 		updated := false
@@ -118,18 +114,40 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 				updated = true
 				return nil
 			}); uerr != nil {
-				return nil, rpcError(uerr)
+				return nil, memberGuardError(uerr, m.ID, "demote", "demoting")
 			}
 		}
 		if !updated {
 			if uerr := update(); uerr != nil {
-				return nil, rpcError(uerr)
+				return nil, memberGuardError(uerr, m.ID, "demote", "demoting")
 			}
 		}
 	}
+	m.Role = role
+	if ids != nil {
+		s.publishDroppedDevices(ctx, member, ids, devs)
+	}
 	noteChange(ctx)
+	s.accessChanged()
+	// The change is committed, so a failed notice is logged, not returned;
+	// the member's streams also reload their access on the next tick.
+	if _, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: events.ServerScope, ActorID: member,
+		Payload: events.MemberAccessPayload{MemberID: m.ID, Action: events.AccessGranted}}); err != nil {
+		slog.Warn("sshd: publish member.access", "member", m.ID, "error", err)
+	}
 	s.notifyDirectory()
 	slog.Info("sshd: member role changed",
 		"actor", member, "member", m.ID, "from", was, "to", role)
 	return protocol.MemberRoleResult{Member: protocol.MemberFromDomain(m)}, nil
+}
+
+func memberGuardError(err error, id domain.MemberID, verb, gerund string) *protocol.Error {
+	var owns *store.OwnsWorkspacesError
+	switch {
+	case errors.Is(err, store.ErrLastSuperAdmin):
+		return &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to " + verb + " the last super admin"}
+	case errors.As(err, &owns):
+		return ownerRefusal(gerund, id, owns.Workspaces)
+	}
+	return rpcError(err)
 }

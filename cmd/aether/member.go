@@ -24,7 +24,7 @@ func init() {
 			"aether member git [--name <name>] [--email <email>] [<member-id>]\n" +
 			"aether member assistant [--auto-approve <on|off>]\n" +
 			"aether member assistant rules [--revoke <rule-id>]\n" +
-			"aether member role <member-id> <viewer|collaborator|admin>\n" +
+			"aether member role <member-id> <super_admin|admin|collaborator|viewer>\n" +
 			"aether member link --github <login>\n" +
 			"aether member link --email <address>\n" +
 			"aether member link --reviewer <login> <member-id>\n" +

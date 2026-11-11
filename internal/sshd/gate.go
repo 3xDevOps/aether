@@ -40,41 +40,69 @@ func checkSteer(ctx context.Context, st store.Store, member domain.MemberID, run
 	return permissions.Check(permissions.Steer, actor, target)
 }
 
-// checkPush authorizes git receive-pack: pushing writes to the workspace
-// repository, so it needs Push. The role is read at exec time, so a
-// demoted member cannot push on an already-open connection.
-func (s *Server) checkPush(ctx context.Context, member domain.MemberID) error {
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
+// checkRunView is View on the run: whether the member may still see its
+// terminal, transcript and files.
+func checkRunView(ctx context.Context, st store.Store, member domain.MemberID, run domain.RunID) error {
+	actor, err := resolveActor(ctx, st, member)
 	if err != nil {
 		return err
 	}
-	return permissions.Check(permissions.Push, actor, permissions.Target{})
+	target, err := resolveRunTarget(ctx, st, run)
+	if err != nil {
+		return err
+	}
+	return permissions.Check(permissions.View, actor, target)
 }
 
-// resolveActor loads the member's current role for a permission check.
+// checkPush authorizes git receive-pack in workspace ws: pushing writes to
+// the workspace repository, so it needs Push there. Access is read at exec
+// time, so a demoted or revoked member cannot push on an already-open
+// connection.
+func (s *Server) checkPush(ctx context.Context, member domain.MemberID, ws domain.WorkspaceID) error {
+	return checkIn(ctx, s.cfg.Store, member, permissions.Push, ws)
+}
+
+// resolveActor loads the member's current role and workspace access for a
+// permission check.
 func resolveActor(ctx context.Context, st store.Store, id domain.MemberID) (permissions.Actor, error) {
 	m, err := st.GetMember(ctx, id)
 	if err != nil {
 		return permissions.Actor{}, err
 	}
-	return permissions.Actor{ID: m.ID, Role: m.Role}, nil
+	return permissions.ActorOf(m), nil
 }
 
 // resolveRunTarget loads the run's ownership and protection plus its
-// workspace's steer-others policy for a permission check.
+// workspace's steer-others policy for a permission check. The run's extra
+// workspaces are in the target: its container mounts every repository, so
+// whoever acts on the run must reach all of them.
 func resolveRunTarget(ctx context.Context, st store.Store, id domain.RunID) (permissions.Target, error) {
 	run, err := st.GetRun(ctx, id)
 	if err != nil {
 		return permissions.Target{}, err
 	}
+	noteWorkspace(ctx, run.WorkspaceID)
 	ws, err := st.GetWorkspace(ctx, run.WorkspaceID)
 	if err != nil {
 		return permissions.Target{}, err
 	}
 	return permissions.Target{
 		Workspace:   run.WorkspaceID,
+		Extra:       runWorkspaces(run)[1:],
 		Owner:       run.MemberID,
 		Protected:   run.Protected,
 		SteerOthers: ws.SteerOthers,
 	}, nil
+}
+
+// checkIn is Check of cap in workspace ws for member. A workspace member
+// cannot reach is permissions.ErrNoAccess, which rpcError reports exactly
+// as a workspace that does not exist.
+func checkIn(ctx context.Context, st store.Store, member domain.MemberID, cap permissions.Capability, ws domain.WorkspaceID) error {
+	actor, err := resolveActor(ctx, st, member)
+	if err != nil {
+		return err
+	}
+	noteWorkspace(ctx, ws)
+	return permissions.Check(cap, actor, permissions.Target{Workspace: ws})
 }

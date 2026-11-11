@@ -256,10 +256,14 @@ func (s *Service) transcribe(ctx context.Context, n *store.WatchNotification) er
 	if w.State == protocol.WatchPaused {
 		return nil
 	}
-	err = s.assistant.Transcribe(ctx, n.MemberID, AssistantNotice{
-		WatchID: w.ID, WorkspaceID: w.WorkspaceID, TargetKind: w.TargetKind, RunID: w.RunID,
-		Condition: n.Condition, Key: n.Key, Title: w.TargetTitle, Body: n.Body, Link: n.Link, WatchLink: WatchLink(w.ID),
-	})
+	if err = s.allowed(ctx, w); err == nil {
+		err = s.assistant.Transcribe(ctx, n.MemberID, AssistantNotice{
+			WatchID: w.ID, WorkspaceID: w.WorkspaceID, TargetKind: w.TargetKind, RunID: w.RunID,
+			Condition: n.Condition, Key: n.Key, Title: w.TargetTitle, Body: n.Body, Link: n.Link, WatchLink: WatchLink(w.ID),
+		})
+	} else if !errors.Is(err, errRevoked) {
+		return err
+	}
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}

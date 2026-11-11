@@ -56,7 +56,7 @@ func TestIntegrationTheSchedulerJudgesWaitsByTheirConditions(t *testing.T) {
 		}
 	}
 	keyPath, signer := writeClientKey(t)
-	member := &domain.Member{DisplayName: "Ada", PublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Color: "#e6194b", Role: domain.RoleAdmin}
+	member := &domain.Member{DisplayName: "Ada", PublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Color: "#e6194b", Role: domain.RoleSuperAdmin}
 	ws := &domain.Workspace{Name: "conditions", BaseBranch: domain.DefaultBaseBranch}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatal(err)

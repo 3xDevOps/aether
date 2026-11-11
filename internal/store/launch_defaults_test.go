@@ -64,7 +64,7 @@ func TestLaunchDefaultsRoundTripRevisionsAndCascade(t *testing.T) {
 	if err = db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "member"}, got.Revision); !errors.Is(err, ErrConflict) {
 		t.Fatalf("PutLaunchDefaults with the revision of a cleared row = %v, want ErrConflict", err)
 	}
-	if err = db.DeleteMember(ctx, bo.ID); err != nil {
+	if err = db.DeleteMember(ctx, bo.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.LaunchDefaults(ctx, bo.ID); !errors.Is(err, ErrNotFound) {

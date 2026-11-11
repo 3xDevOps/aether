@@ -206,7 +206,7 @@ func TestDevelopmentRetentionWithdrawnBeforePublication(t *testing.T) {
 				case "workspace-steer":
 					revokeErr = e.db.SetWorkspaceSteerOthers(t.Context(), e.ws.ID, domain.SteerOthersAdminsOnly)
 				case "removed-membership":
-					revokeErr = e.db.DeleteMember(t.Context(), actor.ID)
+					revokeErr = e.db.DeleteMember(t.Context(), actor.ID, "")
 				}
 				gate.Unlock()
 				if revokeErr != nil {

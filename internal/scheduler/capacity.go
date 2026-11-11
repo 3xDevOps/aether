@@ -5,7 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"math"
+	"os"
+	"path/filepath"
 	goruntime "runtime"
 	"sync"
 	"time"
@@ -13,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/sysstats"
 )
 
 // Capacity refusals only affect new provisioning, never evict existing work.
@@ -27,6 +32,15 @@ const (
 	capacityProbeTimeout        = 5 * time.Second
 	startupDiskBytes     uint64 = 1 << 30
 	startupMemoryBytes   uint64 = 512 << 20
+	// maxMemoryPressure is the "some avg60" percentage of the server's own
+	// cgroup memory.pressure at which new launches are refused.
+	maxMemoryPressure = 10.0
+)
+
+// Variables so tests can point the pressure check at a fake procfs and cgroup tree.
+var (
+	procRoot   = "/proc"
+	cgroupRoot = "/sys/fs/cgroup"
 )
 
 // ValidateRunBudgets is shared by server startup and the scheduler. Zero selects
@@ -171,6 +185,27 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 		if !hasProvisioningHeadroom(capacity.MemoryAvailableBytes, floor, startupMemoryBytes, s.capacityReservations) {
 			return nil, fmt.Errorf("%w: %d available bytes; reserve %d bytes plus %d bytes per provisioning (%d already in flight)",
 				ErrMemoryPressure, capacity.MemoryAvailableBytes, floor, startupMemoryBytes, s.capacityReservations)
+		}
+		// MemAvailable does not show a server that is stalling on memory. Only
+		// the server's own cgroup counts: a session stalled inside its own
+		// memory limit reclaims in its own cgroup and does not slow the server.
+		// A host without cgroup v2 pressure accounting is not refused, nor is
+		// a server in the root cgroup, whose file would be host-wide.
+		var pressure *float64
+		cgroup, err := cgroupPath(procRoot, os.Getpid())
+		if err == nil && cgroup != "/" {
+			pressure, err = sysstats.CgroupMemoryPressure(filepath.Join(cgroupRoot, cgroup))
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: server memory pressure: %w", ErrCapacityUnknown, err)
+		}
+		if pressure == nil {
+			s.pressureSkipLog.Do(func() {
+				slog.Info("scheduler: skipping the memory pressure check; the server has no cgroup of its own with memory.pressure", "cgroup_root", cgroupRoot)
+			})
+		} else if *pressure >= maxMemoryPressure {
+			return nil, fmt.Errorf("%w: the server stalled on memory for %.1f%% of the last 60s (its cgroup's memory.pressure, some avg60); launches are refused at %.0f%%",
+				ErrMemoryPressure, *pressure, maxMemoryPressure)
 		}
 	}
 	if err := probeCtx.Err(); err != nil {

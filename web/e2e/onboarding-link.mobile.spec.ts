@@ -42,7 +42,7 @@ test('the Connect step stays usable at the height a keyboard leaves', async ({
   await link.scrollIntoViewIfNeeded()
   await expect(link).toBeInViewport({ ratio: 1 })
   await link.tap()
-  await expect(wizard.connect.section).toContainText('(admin)')
+  await expect(wizard.connect.section).toContainText('(super_admin)')
 
   await restoreViewport()
   const next = wizard.connect.continue()

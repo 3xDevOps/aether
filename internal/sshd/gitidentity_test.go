@@ -50,7 +50,14 @@ func TestMemberGit(t *testing.T) {
 		t.Fatalf("non-admin set other = %v, want CodeDenied", err)
 	}
 
-	// Admin setting another member's identity: allowed.
+	// An admin may not set another member's identity; a super admin may.
+	err = adminC.Call(protocol.MethodMemberGit, protocol.MemberGitParams{
+		MemberID: string(bob.ID), Name: "Grace Hopper", Email: "grace@example.com",
+	}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("admin set other = %v, want CodeDenied", err)
+	}
+	setRole(t, e, domain.RoleSuperAdmin)
 	if aerr := adminC.Call(protocol.MethodMemberGit, protocol.MemberGitParams{
 		MemberID: string(bob.ID), Name: "Grace Hopper", Email: "grace@example.com",
 	}, &res); aerr != nil {

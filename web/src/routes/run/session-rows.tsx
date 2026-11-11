@@ -135,7 +135,7 @@ export interface RowContext {
 }
 
 export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavigation, room?: RunRoom): RowContext {
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const free = useStore((s) => (run.controller_member_id !== undefined ? !run.controller_member_id : !s.roomStatus[run.id]?.controller))
   const latest = useRef({ agent, nav, room })

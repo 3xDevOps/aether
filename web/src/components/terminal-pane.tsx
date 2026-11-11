@@ -392,7 +392,7 @@ export function TerminalPane({
         ref={controller.hostRef}
         inert={replaying || !!readingSurface}
         className={cn(
-          'min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-canvas p-2 text-text',
+          'min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-canvas text-text [&>.xterm]:p-2',
           className,
         )}
         style={{

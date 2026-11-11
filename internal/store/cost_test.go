@@ -439,7 +439,7 @@ func TestDeleteMemberAfterDeletedRunCost(t *testing.T) {
 	if err := db.DeleteRun(ctx, r.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
 	}
-	if err := db.DeleteMember(ctx, m.ID); err != nil {
+	if err := db.DeleteMember(ctx, m.ID, ""); err != nil {
 		t.Fatalf("DeleteMember after a deleted run folded its cost: %v", err)
 	}
 	got, err := db.SummarizeRunCosts(ctx, w.ID)

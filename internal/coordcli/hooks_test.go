@@ -78,7 +78,7 @@ func hookRun(t *testing.T, files []string, unread bool) (*coord.Service, *store.
 	}
 	admission := control.New(control.Config{})
 	service, err := coord.New(coord.Config{
-		Dir: filepath.Join(dir, "coord"), Store: db, Mail: db, Bus: bus, Peers: peers,
+		Dir: filepath.Join(dir, "coord"), Store: storetest.Unscoped{DB: db}, Mail: db, Bus: bus, Peers: peers,
 		WakeAdmission: func(_ context.Context, run domain.RunID, dispatch func() error) error {
 			return admission.Admit(string(run), dispatch)
 		},

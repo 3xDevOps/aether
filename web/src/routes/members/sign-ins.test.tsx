@@ -158,6 +158,15 @@ describe('propose a merge', () => {
     expect(screen.getByText(/The merged member will be/).textContent).toContain('or Admin if the admin side keeps admin when it accepts')
   })
 
+  it('offers keeping the role to a super admin side and shows the role it keeps', () => {
+    seed()
+    const superPlan = { ...plan, proposer: { ...proposer, role: 'super_admin' as const }, role_with_keep_admin: 'super_admin' as const, keep_admin_required: true }
+    render(<ProposeForm client={fakeApi()} self={alice} code="C" plan={superPlan} onProposed={() => {}} onRefused={() => {}} />)
+    expect(screen.getByText(/The merged member will be/).textContent).toContain('will be Collaborator.')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Keep the merged member an admin' }))
+    expect(screen.getByText(/The merged member will be/).textContent).toContain('will be Super admin.')
+  })
+
   it('shows a refused proposal verbatim and drops the plan, so only a new preview proposes', async () => {
     seed()
     const refusal = 'member.merge.propose: the members changed since the preview; preview again'

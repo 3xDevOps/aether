@@ -5,7 +5,7 @@ One Aether server can serve several people. Each person is a **member** with a
 workspace is one repository plus its settings). A solo setup is a team of one,
 so there is nothing to switch on: you add members.
 
-You need a running server and a first member, who is the admin. See
+You need a running server and a first member, who is its super admin. See
 [quickstart.md](quickstart.md). New terms are in the
 [glossary](README.md#concepts).
 
@@ -16,7 +16,7 @@ the server.
 
 | Method | Use it when | Who approves |
 | --- | --- | --- |
-| Tailnet | Everyone is on your Tailscale network | An admin, once per person |
+| Tailnet | Everyone is on your Tailscale network | An admin or super admin, once per person |
 | Edge | People sign in with GitHub through an [edge](edge.md) (a relay that lets people reach the server without sharing a network) | The invitation, then a device approval |
 | Invite code | A person has neither, and you can send a code | Nobody: the code is the approval |
 
@@ -31,7 +31,7 @@ aether link my-server
 ```
 
 Tailscale proves who they are, and the server adds them as a pending
-collaborator. `aether link` prints `linked to <server> as <name> (collaborator,
+collaborator with no workspaces. `aether link` prints `linked to <server> as <name> (collaborator,
 pending); an admin runs: aether member approve <member-id>`. Until an admin
 does, their commands fail with `membership pending admin approval; ask an admin
 to run: aether member approve <member-id>`.
@@ -47,15 +47,20 @@ revocation.
 
 ### Through an edge
 
-An admin invites a teammate by GitHub login, or by the verified primary email of
-their GitHub account:
+An admin or super admin invites a teammate by GitHub login, or by the verified
+primary email of their GitHub account. `--workspace` names a workspace the
+teammate is granted on joining, by name or id, and repeats ([Workspace
+access](#workspace-access)):
 
 ```sh
-aether invite --github dana --role collaborator
-aether invite --email dana@example.com --role viewer
+aether invite --github dana --role collaborator --workspace web --workspace api
+aether invite --email dana@example.com --role viewer --workspace web
 ```
 
-`--role` is `viewer`, `collaborator` (the default) or `admin`. The command prints
+`--role` is `viewer`, `collaborator` (the default), `admin` or, from a super
+admin, `super_admin`. An admin may invite only a collaborator or viewer, into
+at least one workspace they own and only into workspaces they own; a super admin
+may invite any role into any workspaces, or none. The command prints
 an invite link of the form `https://<edge host>/join/<server id>/<invitation
 id>#<secret>`. It is shown once. In the dashboard, **Members → Invite…** shows it
 with **Copy link**. Send it to the teammate, who opens it and selects **Join** in
@@ -84,6 +89,9 @@ revoke <invitation-id>`.
 | `<account> is invited to this server; open the invitation link the admin sent, or run: aether link <link>` | They ran `aether link <server id>` instead of using the link |
 | `the invitation link is not valid for this server: wrong, revoked or expired; ask the admin for a new one` | The link was used, revoked or expired |
 
+Joining creates the member and their grants together. A member who joins with no
+workspaces sees none until someone grants them one.
+
 ### Approve devices
 
 Each client install is a **device** with its own key. Under `approved-devices`,
@@ -91,7 +99,7 @@ every new device waits for approval, a member's own second laptop included.
 Approve from the dashboard's **Needs you** card, or:
 
 ```sh
-aether device list                         # yours; an admin sees everyone's
+aether device list                         # yours; a super admin sees everyone's
 aether device approve <code or device-id>
 aether device revoke <device-id>
 sudo aether-server device review           # on the server
@@ -103,22 +111,23 @@ device gets that member's access. There is no flag that skips the question.
 Any answer other than `y`, or no answer on stdin, fails with `device approve:
 not approved; a person must check the device shown above and confirm with y in
 their own terminal: aether device approve <code or device-id>, or approve it
-from the dashboard's Needs you card`. If the only admin has no approved device,
-the refusal includes a code, and the admin runs `sudo aether-server device
+from the dashboard's Needs you card`. If the only super admin has no approved device,
+the refusal includes a code, and they run `sudo aether-server device
 approve <code>` on the server. At most 10 devices wait per account.
 
 ### By invite code
 
 For someone with neither a tailnet nor a GitHub sign-in. An admin mints a
-one-time code, and the teammate redeems it, which registers their SSH key:
+one-time code, and the teammate redeems it, which registers their SSH key.
+The code carries the same `--workspace` grants as an invitation:
 
 ```sh
-aether invite --ttl 3600      # seconds; default 86400
+aether invite --ttl 3600 --workspace web   # seconds; default 86400
 aether link my-server:2222 --invite <code> --name "Dana"
 ```
 
 The member is a collaborator at once, because the code was the approval. A code
-stops working when the admin who minted it stops being an admin.
+stops working when the member who minted it stops being an admin or super admin.
 
 ### Link or merge sign-ins
 
@@ -138,8 +147,11 @@ schedules, devices and accounts, and the lower of the two roles. The absorbed
 member's home moves to `<data-dir>/merged/<merge id>/home` and their private
 signing key to `signing-key` beside it. Both hold credentials, so remove the
 directory with `sudo rm -r` once nothing in it is needed. A merge is
-refused, with the reason, when either member is pending or has an unfinished session
-or terminal. Nothing undoes a merge.
+refused, with the reason, when either member is pending or has an unfinished
+session or terminal. It is also refused when the merged role would be below
+admin and either member owns workspaces: reassign them with `aether workspace
+owner <workspace> <member-id>`, or keep the admin role with `--keep-admin`.
+Nothing undoes a merge.
 
 ### Remove access
 
@@ -151,8 +163,11 @@ sign-in authorized. `aether invite revoke <id>` kills
 a link.
 
 `aether member remove` fails with `in use` while sessions or schedules still belong
-to the member. Delete those first. `aether member transfer <member id>` makes
-another admin the server's owner at its edge.
+to the member. Delete those first. It is also refused while the member owns
+workspaces, with an error that names them and the command to reassign them
+(`aether workspace owner`, [below](#workspace-access)). Only super admins remove
+members. Only a super admin runs `aether member transfer <member id>`; it makes
+another admin or super admin the server's owner at its edge.
 
 ### Single sign-on
 
@@ -186,27 +201,86 @@ It fails with `in use` until their sessions and schedules are gone
 
 ## Roles
 
-| Role | Own sessions | Other members' sessions | Workspace |
-| --- | --- | --- | --- |
-| viewer | Cannot launch | View | Read the feed |
-| collaborator (default) | Everything | View, message, steer, stop | Launch sessions, push, use templates, set schedules, add memory notes |
-| admin | Everything | Everything | Also members, workspaces and their settings, budgets, saving templates, `aether server update` |
+A member has one server role. Where that role applies depends on the workspace:
+a role is never wider than the workspaces the member owns or was granted
+([Workspace access](#workspace-access)).
+
+| Role | Where | In those workspaces |
+| --- | --- | --- |
+| super_admin | Every workspace | Everything an admin does, in all of them. Also members, roles, `aether server update`, run limits, the edge and audit history of everyone |
+| admin | Workspaces they own | Everything: settings, budgets, templates, schedules, mirrors, delete, and granting members |
+| admin | Workspaces they were granted | Acts as a collaborator |
+| collaborator (default) | Workspaces they were granted | Launch sessions, push, use templates, set schedules, add memory notes; view, message, steer and stop others' sessions |
+| viewer | Workspaces they were granted | Read the feed; view sessions; cannot launch |
 
 Steering a session means typing into its terminal, messaging its agent, answering
 its permission prompts and pausing or resuming it. Pushing means writing to the
-workspace's git repository. Everyone who joins is a collaborator, so teammates
-can message and stop each other's agents with no setup. Every such act is
-recorded in the workspace timeline with who did it. Change a role with
-`aether member role <id> viewer|collaborator|admin`. It applies to connections
-that are already open: a demoted member's live attach drops with
-`detached: you can no longer control this session`. Member approvals,
-removals and role changes, account shares and connector writes are kept in the
-audit history; `aether audit` shows yours, or everyone's to an admin
+workspace's git repository. Everyone who joins is a collaborator unless invited
+otherwise, so teammates can message and stop each other's agents in a shared
+workspace with no setup. Every such act is recorded in the workspace timeline
+with who did it.
+
+Only a super admin changes a role or removes a member. An admin may approve or
+deny a pending member or device only when it admits a member below admin, or is
+their own, and may list the sign-ins of a member below admin. Renaming,
+recoloring or setting the git identity of another member, revoking their
+approved device, unlinking their sign-in or revoking their connector is for
+that member and super admins only. An admin revokes only invitations they
+created. An approval code for a device you may not approve fails as an unknown
+code does, and another member's connector as an unknown connector id.
+
+```sh
+aether member role <id> super_admin|admin|collaborator|viewer
+sudo aether-server member role <id> super_admin   # on the server
+```
+
+`aether-server member role <member-id> <role>` writes the role straight to the
+server's database, like `aether-server device approve`. Use it from a script or
+to restore a locked-out server. The role applies to connections that are
+already open: a demoted member's live attach drops with `detached: you can no
+longer control this session`. An approval, removal, role or owner change,
+grant, revocation or session limit change that was already running re-reads
+its caller's role as it writes, so a demotion landing first refuses it with
+`aether: rpc error -32003: store: conflict: member <id> is no longer a super
+admin` (or `... no longer an admin`, `... no longer administers workspace
+<id>`). Member approvals, removals and role changes,
+account shares and connector writes are kept in the audit history; `aether
+audit` shows yours, or everyone's to a super admin
 ([connectors.md](connectors.md#audit-history)).
 
-The last admin cannot be removed or demoted: `refusing to delete the last admin`
-or `refusing to demote the last admin`. Admin-only commands fail for others with
-`aether: rpc error -32001: workspace.add requires the admin role`.
+The last super admin cannot be removed or demoted. A member who owns workspaces
+cannot be removed or demoted below admin until a super admin reassigns the
+workspaces. Commands your role may not run in a workspace fail the way an
+unknown workspace does ([below](#what-an-unreachable-workspace-looks-like)); a
+command no workspace can allow fails with `aether: rpc error -32001: <method>
+requires the admin role`.
+
+### After an upgrade
+
+A server that predates workspace access migrates once, when it first starts the
+new version:
+
+- The earliest approved admin becomes the super admin and owns every existing
+  workspace.
+- Every approved member, other admins included, keeps every workspace as a
+  grant, so nobody loses access. Members still pending get no grants.
+- Other admins keep the admin role but administer no existing workspace: in
+  one they don't own they act as a collaborator, with no settings, budget,
+  grants or delete. The super admin hands each workspace to its admin with
+  `aether workspace owner <workspace> <member-id>`, and trims access with
+  `aether workspace revoke`.
+- Invitations and invite codes created before the upgrade carry no
+  workspaces: whoever joins with one gets no grants until an owner or super
+  admin grants them.
+
+A server with no approved admin before the upgrade gets no super admin. Every
+member keeps their access, but nobody can administer the server until you
+promote an approved member on the server itself. Find their member id with
+`aether member list` from that member's own sign-in, then run:
+
+```sh
+sudo aether-server member role <member-id> super_admin
+```
 
 To limit who can control sessions:
 
@@ -228,7 +302,7 @@ templates, schedules, costs and the budget all belong to one. A
 session and its shells use the launching member's saved image, or the server's
 standard image ([environments.md](environments.md)).
 
-An admin creates a workspace. In the dashboard, open **Manage workspaces** from
+An admin or super admin creates a workspace, and owns it. In the dashboard, open **Manage workspaces** from
 the workspace selector, select **Add workspace**, choose **GitHub**, pick a
 repository you can read and accept its first revision. From the CLI:
 
@@ -239,6 +313,8 @@ aether workspace add myproject [--base <branch>]
 ```
 
 `import` and `add` refuse a name already in use and print its id.
+`aether workspace list` prints each workspace you reach with its `OWNER` and
+your `ROLE` there.
 
 Each member links their own clone, which adds an `aether` git remote.
 `aether workspace import <path>` links a clone whose `origin` matches the
@@ -259,7 +335,7 @@ brings a session's branches into the linked clones.
 | Message-others policy | `everyone` | Whether collaborators can message and stop each other's sessions |
 
 A session can also check out other workspaces beside its own; see [Working across
-repos](quickstart.md#working-across-repos).
+repos](quickstart.md#working-across-repos). The launcher must reach every one of them.
 
 A later clone that points elsewhere does not overwrite the publish destination.
 Change it on purpose; a change reaches new sessions only:
@@ -275,7 +351,8 @@ authenticate over HTTPS only.
 ### Source mirror
 
 A local-only workspace lets collaborators push the base branch directly. A
-mirror makes an upstream repository own it instead. An admin configures one:
+mirror makes an upstream repository own it instead. The workspace's admin
+configures one:
 
 ```sh
 aether workspace mirror configure --workspace myproject \
@@ -302,12 +379,88 @@ aether: rejected write to protected ref refs/heads/<base>: this mirrored base is
 A scheduled session refreshes the mirror first and creates no session if that fails. See
 [security.md](security.md#workspace-source-mirrors).
 
+### Workspace access
+
+A workspace has one **owner**, the admin or super admin who created it. A
+**grant** lets one member into one workspace, with the role they already have:
+a granted collaborator acts as a collaborator in it, a granted viewer as a
+viewer. A grant carries no role of its own, and a member who is neither owner nor
+granted cannot reach the workspace.
+
+| Role | Reaches |
+| --- | --- |
+| super_admin | Every workspace, as admin |
+| admin | Workspaces they own as admin; workspaces they were granted as collaborator |
+| collaborator, viewer | Workspaces they were granted |
+
+```sh
+aether workspace access <workspace>               # the owner and every grant
+aether workspace grant <workspace> <member-id>... # owner or super admin
+aether workspace revoke <workspace> <member-id>
+aether workspace owner <workspace> <member-id>    # super admin only
+```
+
+`<workspace>` is a name or an id. `access` lists who reaches the workspace; a super
+admin reaches every workspace without a grant, so none is listed. An admin grants
+and revokes collaborators and viewers in workspaces they own. A super admin
+grants any member into any workspace and changes its owner, which must be an
+admin or super admin. Revoking is refused while the member has a live session or
+a schedule in the workspace, counting a session handed off from them that still
+runs on their home or agent account. A live session whose home member loses the
+workspace another way, such as a role change, is stopped; one on a shared account
+whose owner loses it moves off that account. A `git fetch` or `git push` over
+SSH in progress stops when its member loses the workspace, with `aether: git
+receive-pack: stopped: access ended: ...` on stderr.
+
+Invitations and invite codes carry `--workspace` grants
+([Join the server](#join-the-server)). The dashboard's **Manage workspaces**
+shows each workspace's owner, and **Access…** lists the grants and adds or
+removes members.
+
+Members see each other through workspaces. A super admin sees every member.
+Anyone else sees themselves, the super admins, and every member who owns, was
+granted or has a session in a workspace they reach, or whose account or home
+such a session uses; an admin also sees members waiting for approval. A member you do not see is absent from `aether member
+list`, device lists and attention. Naming them in `aether workspace grant`,
+`aether account share`, `aether member identities` or `aether member unlink`
+fails as for an id that never existed. An admin therefore grants only members
+they see: to bring in someone new, invite them with `--workspace` or ask a super
+admin to grant them.
+
+#### What an unreachable workspace looks like
+
+A workspace you cannot reach does not exist for you. It is absent from your
+workspace list, sessions, attention, insights, changes, search, memory, counts and
+the event feed. A command that names it, by id, fails exactly as for an id that
+never existed:
+
+```
+aether: rpc error -32000: store: not found
+```
+
+The same holds for `git fetch` and `git push` to its remote. This is on purpose:
+the error never says whether the workspace is real.
+
+A session with an extra repository in a workspace you cannot reach does not
+exist for you either: it is absent from `aether sessions`, attention, the recent
+sessions in insights, the overlap column, watches and your event feed, `aether
+timeline` and `aether changes`, and a command that names it fails as above.
+Insights and cost totals still count it. A session's wait on a pull request
+whose repository no workspace has any more, because the origin it named was
+changed or cleared, and the wait's wake message, reach only super admins and
+the member whose session waits. Once a session is deleted, its
+remaining events reach only super admins, apart from its deletion notice, which
+reaches everyone who reached the session. Events about a member you do not see,
+such as a rename, a device change or a merge, are left out the same way.
+
 ### Delete a workspace
 
-`aether workspace delete myproject --yes` removes the workspace with its sessions,
+The owner or a super admin runs `aether workspace delete myproject --yes`, which removes the workspace with its sessions,
 checkouts, transcripts, templates, budget and costs. Member accounts,
 local clones and the upstream repository stay. It never stops work: stop active
-sessions and remove schedules first. The error names what blocks it.
+sessions and remove schedules first. The error names what blocks it. A session
+in another workspace that mounted this one as an extra repository stays, and
+from then on only super admins see it.
 
 ## Work together
 
@@ -429,7 +582,7 @@ new sessions are refused and running sessions finish. Claude Code reports spend 
 Background and Enhanced sessions, and OpenCode and omp in Enhanced sessions and
 Background sessions over ACP. An Enhanced session's spend counts as each turn ends.
 Every other session is unmetered, so totals are a floor. Deleting a session or a member
-keeps their spend in the totals. Only an admin sets a budget. Every admin is
+keeps their spend in the totals. Only the workspace's admin sets a budget. The workspace's admins and super admins are
 [notified](networking.md#notifications) once when spend reaches the warning and
 once at the cap; a budget change that puts spend back below either re-arms it.
 
@@ -711,7 +864,7 @@ counted as unmetered, so totals read "at least".
 
 ## Limits
 
-- Roles are viewer, collaborator and admin. There are no custom roles.
+- Roles are viewer, collaborator, admin and super admin. There are no custom roles, and a grant has no role of its own.
 - The permissive default lets any collaborator stop any session. Use `aether protect`
   or `--message-others admins-only` to narrow it.
 - A session's extra repos (`aether session --repo`) share its primary workspace's

@@ -253,7 +253,7 @@ func TestDeletedRunSpendStillCountsAgainstTheBudget(t *testing.T) {
 		t.Fatalf("NewInProc: %v", err)
 	}
 	defer func() { _ = bus.Close() }()
-	svc, err := New(Config{Store: db, Bus: bus})
+	svc, err := New(Config{Store: storetest.Unscoped{DB: db}, Bus: bus})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

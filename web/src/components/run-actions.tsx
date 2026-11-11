@@ -38,7 +38,7 @@ export function RunActions({ run, views = [], extra = [], compact = false }: {
   const members = useStore((s) => s.members)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const stale = useStale()
   const perform = useCommandRunner()
   const [asking, setAsking] = useState<Command | null>(null)

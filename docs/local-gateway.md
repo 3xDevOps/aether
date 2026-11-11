@@ -766,7 +766,8 @@ error names the blocker. In-flight control or Git operations return `-32003`
 instead of waiting behind them. Cleanup errors leave the workspace available
 for retry but do not restore already removed data. Success publishes
 `workspace.deleted` with the workspace ID in the event envelope and `{}` as
-the payload.
+the payload, and a `member.access` notice with action `revoked` to the owner
+and each granted member, whose streams may no longer carry `workspace.deleted`.
 
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished session from the board
@@ -784,7 +785,7 @@ Archiving does not schedule deletion; the obsolete `deletes_at` field is no
 longer emitted. Both calls publish `run.archived` with `archived_at` (null on
 restore) and a matching timeline note. Explicit Delete remains separate.
 
-`member.rename` accepts `{"display_name":"..."}` (and `member_id`, admin
+`member.rename` accepts `{"display_name":"..."}` (and `member_id`, super admin
 only, to rename someone else) and returns `{"member":Member}`. The name is
 trimmed and must be 1 to 64 characters with no control characters; a bad
 name is `-32602` with the reason. Each rename publishes `member.changed`
@@ -2082,12 +2083,20 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   to `edge.claim`.
 
 A device recorded pending, approved or revoked is published as the
-`member.device` event, `{"device_id":"...","status":"..."}`, and a merge
-as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`,
+`member.device` event, `{"device_id":"...","status":"...","member_id":"..."}`,
+and a merge as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`,
 under the workspace id `server`, which names no workspace, so a server without
-workspaces still reports it. The shapes are in
+workspaces still reports it. `member_id` is the member the device signs in
+as, or for a device waiting on an invitation the member it links or the
+invitation's creator. Either event reaches only a member who sees every
+member it names (`member.list`), and a device event without `member_id`
+only super admins. The shapes are in
 `internal/protocol/identity.go` and `internal/protocol/edge.go`, and
-[edge.md](edge.md) describes what each does.
+[edge.md](edge.md) describes what each does. A workspace grant, revoke or
+owner change is also published under `server` as `member.access`,
+`{"workspace_id":"...","member_id":"...","action":"granted|revoked|owner"}`,
+to the member it changed alone, so a member who just lost the workspace still
+receives it.
 
 `workspace.selection` stores only the last selected workspace ID in
 `workspace-selection/<hash>.json` beside the CLI's `config.json`. The hash

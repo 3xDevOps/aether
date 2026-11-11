@@ -35,6 +35,21 @@ func addMember(t *testing.T, e *testEnv, name string, role domain.Role, pending 
 	return signer, m
 }
 
+// asSuperAdmin makes e's seeded member a super admin, for tests of
+// server-wide operations.
+func asSuperAdmin(t *testing.T, e *testEnv) {
+	t.Helper()
+	m, err := e.db.GetMember(context.Background(), e.member.ID)
+	if err != nil {
+		t.Fatalf("get seeded member: %v", err)
+	}
+	m.Role = domain.RoleSuperAdmin
+	if err := e.db.UpdateMember(context.Background(), m); err != nil {
+		t.Fatalf("make seeded member super admin: %v", err)
+	}
+	e.member.Role = domain.RoleSuperAdmin
+}
+
 func controlAs(t *testing.T, e *testEnv, signer ssh.Signer) *protocol.Client {
 	t.Helper()
 	client, err := e.dialWith(signer, nil)
@@ -93,6 +108,7 @@ func TestAdminWorkspaceAddAndInvite(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
+	asSuperAdmin(t, e)
 	c := controlClient(t, e)
 
 	var ws protocol.WorkspaceAddResult
@@ -134,16 +150,41 @@ func TestAdminWorkspaceAddAndInvite(t *testing.T) {
 	}
 }
 
-func TestRefuseDeletingLastAdmin(t *testing.T) {
+func TestRefuseDeletingLastSuperAdmin(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	c := controlClient(t, e)
 	var pe *protocol.Error
 	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(e.member.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("delete last admin = %v, want CodeDenied", err)
+		t.Fatalf("delete last super admin = %v, want CodeDenied", err)
 	}
-	if pe != nil && !strings.Contains(pe.Message, "last admin") {
-		t.Errorf("message %q does not mention last admin", pe.Message)
+	if pe != nil && !strings.Contains(pe.Message, "last super admin") {
+		t.Errorf("message %q does not mention the last super admin", pe.Message)
+	}
+}
+
+// A console demotion landing after member.remove counted the other super
+// admin must not let the removal take the last one: the delete re-reads
+// the demoted caller's role and refuses.
+func TestMemberRemoveRechecksTheLastSuperAdminWhenDeleting(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
+	_, second := addMember(t, e, "Second", domain.RoleSuperAdmin, false)
+	e.runs.whileTerminalStopped = func() {
+		if _, err := e.db.SetMemberRole(context.Background(), e.member.ID, domain.RoleAdmin, ""); err != nil {
+			t.Errorf("demote the caller from the console: %v", err)
+		}
+	}
+	c := controlClient(t, e)
+	var pe *protocol.Error
+	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(second.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeConflict ||
+		!strings.Contains(pe.Message, "member "+string(e.member.ID)+" is no longer a super admin") {
+		t.Fatalf("remove the super admin left after a console demotion = %v, want the demoted caller refused", err)
+	}
+	if got, err := e.db.GetMember(context.Background(), second.ID); err != nil || got.Role != domain.RoleSuperAdmin {
+		t.Fatalf("last super admin after the refused removal = %+v, %v", got, err)
 	}
 }
 
@@ -155,6 +196,7 @@ func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
+	asSuperAdmin(t, e)
 	_, target := addMember(t, e, "Target", domain.RoleCollaborator, false)
 	home, err := homes.Path(target.ID)
 	if err != nil {
@@ -202,6 +244,7 @@ func TestMemberRemoveDeletesTheSigningKey(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = signer.Close() })
 	e := newTestEnv(t, func(c *Config) { c.Homes, c.Signing = homes, signer })
+	asSuperAdmin(t, e)
 	_, removed := addMember(t, e, "Removed", domain.RoleCollaborator, false)
 	_, stuck := addMember(t, e, "Stuck", domain.RoleCollaborator, false)
 	if err = os.WriteFile(filepath.Join(keys, string(removed.ID)), []byte("key"), 0o600); err != nil {
@@ -236,6 +279,7 @@ func TestMemberRemovePreservesIdentityAndHomeWhenRetryMarkerCannotBeWritten(t *t
 		t.Fatal(err)
 	}
 	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
+	asSuperAdmin(t, e)
 	_, target := addMember(t, e, "Target", domain.RoleCollaborator, false)
 	home, err := homes.Path(target.ID)
 	if err != nil {
@@ -290,6 +334,7 @@ func TestMemberRemoveKeepsDeletedLegacyOwnerDiscoverableAfterHomeCleanupFailure(
 		t.Fatal(err)
 	}
 	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
+	asSuperAdmin(t, e)
 	_, target = addMember(t, e, "Legacy target", domain.RoleCollaborator, false)
 	home, err := homes.Path(target.ID)
 	if err != nil {
@@ -333,6 +378,7 @@ func TestMemberRemoveKeepsDeletedLegacyOwnerDiscoverableAfterHomeCleanupFailure(
 
 func TestMemberRemoveAllowsRoomOnlyParticipant(t *testing.T) {
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, target := addMember(t, e, "Room participant", domain.RoleCollaborator, false)
 	rooms, ok := e.srv.cfg.Services.Rooms.(*persistentRoomService)
 	if !ok {
@@ -377,6 +423,7 @@ func TestMemberRemoveAllowsRoomOnlyParticipant(t *testing.T) {
 func TestMemberRemoveRetainsMemberWhenTerminalCleanupFails(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	_, target := addMember(t, e, "Target", domain.RoleCollaborator, false)
 	stopErr := errors.New("terminal is still using member credentials")
 	e.runs.setTerminalStopErr(stopErr)
@@ -397,7 +444,7 @@ func TestInviteJoinRegistersCollaboratorAndBurns(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
-	code, _, err := mintInvite(dir, time.Hour, "")
+	code, _, err := mintInvite(dir, time.Hour, "", nil)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -432,7 +479,7 @@ func TestInviteProbeIsSideEffectFree(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
-	code, _, err := mintInvite(dir, time.Hour, "")
+	code, _, err := mintInvite(dir, time.Hour, "", nil)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}

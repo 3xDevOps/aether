@@ -259,6 +259,7 @@ function MineToggle() {
     <Button
       variant={mineOnly ? 'secondary' : 'ghost'}
       size="sm"
+      className="h-4.5 rounded-chip px-1 text-ui-xs coarse:h-11 coarse:px-3"
       hint="Show only your sessions under Working and Finished"
       aria-pressed={mineOnly}
       onClick={() => setMineOnly(!mineOnly)}

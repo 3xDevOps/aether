@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -102,7 +103,9 @@ type IdentityStore interface {
 	ApproveDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID) error
 	// RevokeDevice revokes a device that is not revoked yet. A revoked
 	// device still counts as its member's device.
-	RevokeDevice(ctx context.Context, id domain.DeviceID) error
+	// RevokeDevice revokes id while its status is from, or any status when
+	// from is empty.
+	RevokeDevice(ctx context.Context, id domain.DeviceID, from domain.DeviceStatus) error
 	TouchDevice(ctx context.Context, id domain.DeviceID, at time.Time) error
 }
 
@@ -292,7 +295,7 @@ func (d *DB) BindIdentity(ctx context.Context, identity *domain.Identity) error 
 	return insertIdentity(ctx, d.db, identity)
 }
 
-const invitationCols = `id, provider, login, email, role, member_id, created_by, created_at, expires_at, consumed_at, secret_hash`
+const invitationCols = `id, provider, login, email, role, member_id, created_by, created_at, expires_at, consumed_at, secret_hash, workspaces`
 
 func scanInvitation(row interface{ Scan(...any) error }) (*domain.Invitation, error) {
 	var (
@@ -300,10 +303,14 @@ func scanInvitation(row interface{ Scan(...any) error }) (*domain.Invitation, er
 		member               sql.NullString
 		createdAt, expiresAt int64
 		consumedAt           *int64
+		workspaces           string
 	)
 	if err := row.Scan(&inv.ID, &inv.Provider, &inv.Login, &inv.Email, &inv.Role, &member,
-		&inv.CreatedBy, &createdAt, &expiresAt, &consumedAt, &inv.SecretHash); err != nil {
+		&inv.CreatedBy, &createdAt, &expiresAt, &consumedAt, &inv.SecretHash, &workspaces); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(workspaces), &inv.Workspaces); err != nil {
+		return nil, fmt.Errorf("invitation %s workspaces: %w", inv.ID, err)
 	}
 	inv.Member = domain.MemberID(member.String)
 	inv.CreatedAt, inv.ExpiresAt = decodeTime(createdAt), decodeTime(expiresAt)
@@ -338,6 +345,13 @@ func (d *DB) CreateInvitation(ctx context.Context, inv *domain.Invitation) error
 	if inv.Member != "" {
 		member = inv.Member
 	}
+	if inv.Workspaces == nil {
+		inv.Workspaces = []domain.WorkspaceID{}
+	}
+	workspaces, err := json.Marshal(inv.Workspaces)
+	if err != nil {
+		return fmt.Errorf("store: create invitation: %w", err)
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin create invitation: %w", err)
@@ -348,8 +362,8 @@ func (d *DB) CreateInvitation(ctx context.Context, inv *domain.Invitation) error
 		return fmt.Errorf("store: create invitation: replace open links: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO identity_invitations (`+invitationCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-		id, inv.Provider, inv.Login, inv.Email, inv.Role, member, inv.CreatedBy, createdAt, expiresAt, inv.SecretHash,
+		`INSERT INTO identity_invitations (`+invitationCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+		id, inv.Provider, inv.Login, inv.Email, inv.Role, member, inv.CreatedBy, createdAt, expiresAt, inv.SecretHash, string(workspaces),
 	); err != nil {
 		return fmt.Errorf("store: create invitation: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -487,9 +501,24 @@ func acceptInTx(ctx context.Context, tx *sql.Tx, id domain.InvitationID, identit
 			return nil, fmt.Errorf("store: accept invitation: linked member: %w", err)
 		}
 	} else {
+		// An invitation may predate its creator's demotion, or the
+		// super admin role: its role must be one the creator grants now.
+		var grants bool
+		if err = tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM members WHERE id = ? AND pending = 0 AND merged_into = ''
+			 AND (role = 'super_admin' OR (role = 'admin' AND ? NOT IN ('admin', 'super_admin'))))`,
+			inv.CreatedBy, inv.Role).Scan(&grants); err != nil {
+			return nil, fmt.Errorf("store: accept invitation: creator: %w", err)
+		}
+		if !grants {
+			return nil, fmt.Errorf("%w: invitation %s grants %s, which its creator %s may no longer grant", ErrNotFound, id, inv.Role, inv.CreatedBy)
+		}
 		m.Role, m.Pending = inv.Role, false
 		if err = insertMember(ctx, tx, m); err != nil {
 			return nil, err
+		}
+		if err = grantAdministered(ctx, tx, m.ID, inv.CreatedBy, inv.Workspaces, now); err != nil {
+			return nil, fmt.Errorf("store: accept invitation: %w", err)
 		}
 	}
 	identity.Member = m.ID

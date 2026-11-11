@@ -268,7 +268,7 @@ func TestDeletedMemberImageFailureRetainsDiscoverableRetry(t *testing.T) {
 	tag := memberImageRepo(e.member.ID) + ":obsolete"
 	e.rt.images = map[string]string{tag: "image"}
 	e.rt.holdImage(tag, true)
-	if err := e.db.DeleteMember(t.Context(), e.member.ID); err != nil {
+	if err := e.db.DeleteMember(t.Context(), e.member.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.sweepCaches(t.Context(), true)
@@ -614,7 +614,7 @@ func TestMemberDeletionExcludesEnsureAcrossStoppedTerminalCallback(t *testing.T)
 			if err := e.sched.cfg.Homes.SetCacheCleanupError(e.member.ID, "terminal", ""); err != nil {
 				return err
 			}
-			if err := e.db.DeleteMember(t.Context(), e.member.ID); err != nil {
+			if err := e.db.DeleteMember(t.Context(), e.member.ID, ""); err != nil {
 				return err
 			}
 			return e.sched.cfg.Homes.Remove(t.Context(), e.member.ID)

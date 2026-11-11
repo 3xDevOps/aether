@@ -45,8 +45,8 @@ func (s *Scheduler) retainDevelopmentArtifacts(ctx context.Context, id domain.Ru
 			return err
 		}
 		return permissions.Check(permissions.Steer,
-			permissions.Actor{ID: member.ID, Role: member.Role},
-			permissions.Target{Workspace: run.WorkspaceID, Owner: run.MemberID, Protected: run.Protected, SteerOthers: workspace.SteerOthers})
+			permissions.ActorOf(member),
+			permissions.Target{Workspace: run.WorkspaceID, Extra: run.ExtraWorkspaces(), Owner: run.MemberID, Protected: run.Protected, SteerOthers: workspace.SteerOthers})
 	}
 	if err := currentAuthority(); err != nil {
 		return nil, err

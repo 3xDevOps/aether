@@ -86,6 +86,8 @@ the system theme over the native error and update panels.
 | `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces, secondary buttons |
 | `--seam` | `border-seam` | black 8% | white 8% | Every border; the default border colour |
 | `--control-border` | `border-control` | `#8a8a8a` | `#767676` | Fields, checkboxes, radios |
+| `--scrim` | `bg-scrim` | black 56% | black 56% | Dialogs and sheets |
+| `--scrim-strong` | `bg-scrim-strong` | black 85% | black 85% | ACP image viewer |
 | `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
 | `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
 | `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |

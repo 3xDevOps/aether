@@ -115,7 +115,7 @@ type deleteMemberAfterReadStore struct {
 func (s *deleteMemberAfterReadStore) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
 	member, err := s.Store.GetMember(ctx, id)
 	if err == nil && id == s.member && s.armed.CompareAndSwap(true, false) {
-		s.deleted <- s.DeleteMember(ctx, id)
+		s.deleted <- s.DeleteMember(ctx, id, "")
 	}
 	return member, err
 }
@@ -157,7 +157,7 @@ func TestLocalEventsEndWhenMembershipIsRevoked(t *testing.T) {
 		t.Fatalf("events: %v", err)
 	}
 	defer func() { _ = stream.Close() }()
-	if derr := e.store.DeleteMember(context.Background(), cm.ID); derr != nil {
+	if derr := e.store.DeleteMember(context.Background(), cm.ID, ""); derr != nil {
 		t.Fatal(derr)
 	}
 	done := make(chan error, 1)
@@ -315,7 +315,7 @@ func TestTailnetMemberMapsAddressesLikeSSHAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Role != domain.RoleAdmin || first.Pending || first.TailnetLogin != "alice@example.com" {
+	if first.Role != domain.RoleSuperAdmin || first.Pending || first.TailnetLogin != "alice@example.com" {
 		t.Fatalf("first contact = %+v, want an approved admin", first)
 	}
 	again, err := e.srv.TailnetMember(ctx, "100.64.0.1:40001")

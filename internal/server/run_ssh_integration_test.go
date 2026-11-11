@@ -323,6 +323,9 @@ echo 'f00dfeed: end'
 	if err = server.srv.Store().CreateMember(ctx, cy); err != nil {
 		t.Fatal(err)
 	}
+	if err = server.srv.Store().GrantWorkspace(ctx, e.ws.ID, cy.ID, e.ada.id); err != nil {
+		t.Fatal(err)
+	}
 	stranger := newSSHUser(t, aether, server.addr, cyKey)
 	if stdout, stderr, code = stranger.run("", "ssh", host, "echo reached"); code != 255 || stdout != "" ||
 		!strings.Contains(stderr, "has not shared their account with you") {

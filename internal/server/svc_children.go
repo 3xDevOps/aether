@@ -39,8 +39,8 @@ func init() {
 				}
 				return d.SSH.Services.Costs
 			},
-			Authorize: func(ctx context.Context, st store.Store, actor domain.MemberID, account string) (domain.MemberID, error) {
-				admission, err := sshd.AuthorizeLaunch(ctx, st, actor, account)
+			Authorize: func(ctx context.Context, st store.Store, actor domain.MemberID, account string, workspaces []domain.WorkspaceID) (domain.MemberID, error) {
+				admission, err := sshd.AuthorizeLaunch(ctx, st, actor, account, workspaces)
 				if err != nil {
 					return "", err
 				}

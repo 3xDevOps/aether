@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	registerGuarded(protocol.MethodWorkspaceSettings, permissions.WorkspaceAdmin, nil, (*Server).workspaceSettings)
+	registerGuarded(protocol.MethodWorkspaceSettings, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceSettings)
 	registerGuarded(protocol.MethodWorkspaceOrigin, permissions.Push, workspaceTarget, (*Server).workspaceOrigin)
 	registerGuarded(protocol.MethodRunProtect, permissions.Protect, runTarget, (*Server).runProtect)
 }
@@ -41,11 +41,11 @@ func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{}); cerr != nil {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodWorkspaceSettings + ": " + cerr.Error()}
+	id := domain.WorkspaceID(p.WorkspaceID)
+	if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: id}); cerr != nil {
+		return nil, checkError(protocol.MethodWorkspaceSettings, cerr)
 	}
 
-	id := domain.WorkspaceID(p.WorkspaceID)
 	var workspaceRuns []*domain.Run
 	if s.cfg.Control != nil {
 		var listErr error

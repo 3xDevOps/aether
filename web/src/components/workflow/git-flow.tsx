@@ -75,7 +75,7 @@ function Conflicts({ log, head }: { log: RunGitLogResult; head: HeadRow }) {
 
 function Card({ run, compact, send, agentName }: { run: RunRecord; compact: boolean; send: AgentSend | null; agentName: string }) {
   const caps = useCapability()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const live = run.status === 'running' || run.status === 'needs-attention'
   const tracked = usePullRequest(run, live && caps.hasMethod('run.git.status') && caps.hasMethod('run.pr.feedback'))
   const reads = live && caps.hasMethod('run.git.log')

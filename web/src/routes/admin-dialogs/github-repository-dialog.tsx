@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { GitHubConnection } from '@/components/github-connection'
 import { WorkspaceMirrorDialog } from '@/components/workspace-mirror-dialog'
@@ -62,7 +63,7 @@ export function GitHubRepositoryDialog({ client = api, onCreated, onClose }: {
     const { identityKey, connectionEpoch, info } = useStore.getState()
     return () => {
       const state = useStore.getState()
-      return version === generation.current && identityKey === state.identityKey && connectionEpoch === state.connectionEpoch && info?.member.id === state.info?.member.id && state.info?.member.role === 'admin'
+      return version === generation.current && identityKey === state.identityKey && connectionEpoch === state.connectionEpoch && info?.member.id === state.info?.member.id && isAdminRole(state.info?.member.role)
     }
   }
 

@@ -318,18 +318,18 @@ func (s *Server) dispatch(ctx context.Context, member domain.MemberID, method st
 		s.auditCall(ctx, member, method, params, nil, perr, false)
 		return nil, perr
 	}
-	changed := new(bool)
-	ctx = context.WithValue(ctx, auditChangeKey{}, changed)
+	note := new(auditNote)
+	ctx = context.WithValue(ctx, auditNoteKey{}, note)
 	result, rpcErr := handler(s, ctx, member, params)
 	if rpcErr != nil {
-		s.auditCall(ctx, member, method, params, nil, rpcErr, *changed)
+		s.auditCall(ctx, member, method, params, nil, rpcErr, note.changed)
 		return nil, rpcErr
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "marshal result: " + err.Error()}
 	}
-	s.auditCall(ctx, member, method, params, raw, nil, *changed)
+	s.auditCall(ctx, member, method, params, raw, nil, note.changed)
 	return raw, nil
 }
 

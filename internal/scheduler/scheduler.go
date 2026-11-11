@@ -210,6 +210,7 @@ type Scheduler struct {
 	// capacityGate protects admission probes/accounting, never lifecycle state.
 	capacityGate         chan struct{}
 	reclaimMu            sync.Mutex
+	pressureSkipLog      sync.Once
 	capacityReservations uint64
 
 	mu   sync.Mutex

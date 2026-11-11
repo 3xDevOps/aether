@@ -125,6 +125,7 @@ func TestConnectorToolsThroughTheEdge(t *testing.T) {
 	if err := s.db.CreateWorkspace(t.Context(), ws); err != nil {
 		t.Fatal(err)
 	}
+	grantEveryone(t, s.db, ws.ID)
 	base := h.relayURL + edgeproto.MCPPath(s.id)
 	bctl := h.control(bo, s)
 
@@ -238,6 +239,7 @@ func TestConnectorLaunchPermissionThroughTheEdge(t *testing.T) {
 	if err := s.db.CreateWorkspace(t.Context(), ws); err != nil {
 		t.Fatal(err)
 	}
+	grantEveryone(t, s.db, ws.ID)
 	session := connectAs(t, h.control(clients[1], s), client, h.relayURL+edgeproto.MCPPath(s.id), "write")
 	launch := func(key string, extra map[string]any) map[string]any {
 		args := map[string]any{"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "idempotency_key": key}

@@ -70,7 +70,7 @@ sudo aether-server edge leave                 # unenroll at the old edge, forget
 sudo aether-server config set edge-url https://<edge-host>
 sudo aether-server edge trust                 # compare the key with the one the edge's operator publishes, type yes
 sudo systemctl restart aether-server
-sudo aether-server edge claim-code --admin <member id>   # or, from an admin's linked terminal: aether edge connect
+sudo aether-server edge claim-code --admin <member id>   # or, from a super admin's linked terminal: aether edge connect
 ```
 
 ### Server id and claiming
@@ -95,14 +95,14 @@ and without `--admin` while it has members.
    takes the bare code and claims through `--edge`, else the one edge you are
    signed in to.
 
-The claiming account becomes the owner and an admin, and its device is approved
+The claiming account becomes the owner and the super admin, and its device is approved
 under either policy, because the code came from the machine's console. A claim
 from a device signed in as another account is refused with `this device claims
 as github account <subject>, but the edge signed the connection in as github
 account <login>; the claim was not attempted`.
 
-On a server that already has members (its first admin joined with an SSH key or
-over the tailnet), an admin claims it under **Settings → Remote access → Connect
+On a server that already has members (its first super admin joined with an SSH key or
+over the tailnet), a super admin claims it under **Settings → Remote access → Connect
 my GitHub account**, or from a linked terminal:
 
 ```sh
@@ -158,7 +158,7 @@ edge key changed: pinned SHA256:<old>, edge presents SHA256:<new>; if the edge's
 ```
 
 The server has no owner under a key it was not claimed with, so it reports itself
-ownerless as it reconnects. An admin's **Connect my GitHub account**, or `edge
+ownerless as it reconnects. A super admin's **Connect my GitHub account**, or `edge
 claim-code --admin <member id>`, gives it an owner again.
 
 ### Signing in and linking
@@ -222,7 +222,7 @@ or on the server:
   sudo aether-server device review
 ```
 
-If the device would be the server's only admin and that admin has no approved
+If the device would be the server's only super admin and that super admin has no approved
 device, the refusal carries an approval code for `sudo aether-server device
 approve <code>` instead.
 
@@ -285,7 +285,7 @@ then lists the member SSH keys and tailnet logins that reach the server whatever
 
 | An attacker with | `account` | `approved-devices` |
 | --- | --- | --- |
-| A member's GitHub account | Signs in and lists the member's servers. Reaches a workspace with the member's role. If the member is an admin, can invite accounts, change roles and transfer ownership, but not approve a device | Signs in and lists servers. The new device is pending and reaches nothing |
+| A member's GitHub account | Signs in and lists the member's servers. Reaches a workspace with the member's role. If the member is a super admin, can invite accounts, change roles and transfer ownership, but not approve a device. An admin's account can invite only into the workspaces that admin owns | Signs in and lists servers. The new device is pending and reaches nothing |
 | That account plus the join link sent to it | Completes the join with the invited role | A pending device that waits for an admin's click |
 | That account without the join link | Refused: `<account> is invited to this server; open the invitation link the admin sent, or run: aether link <link>` | The same |
 | A compromised edge or its signing key | Forges a grant for any account and reaches the workspace of every `account` server as any member | Forged grants yield pending devices. It cannot admit one |
@@ -346,8 +346,8 @@ expire, and stay on every server until revoked.
 2. On each server, run `aether device list` and `aether device revoke
    <device-id>` for each unknown device. On the machine, `sudo aether-server
    device review` shows each device with its account and first-seen time.
-3. Under `account`, if the account was an admin's, check what an admin could have
-   done: `aether member list`, `aether invite list`, and the SSH keys and tailnet
+3. Under `account`, if the account was an admin's or super admin's, check what
+   they could have done: `aether member list`, `aether invite list`, and the SSH keys and tailnet
    logins `device review` lists. Revoke with `aether invite revoke <id>` and
    `aether member remove <id>`. An invite code minted by an approved device is a
    file in the server's invites directory until redeemed or expired, and no
@@ -367,15 +367,15 @@ Revoke them anyway so nobody approves one by mistake.
 
 ### Console recovery
 
-An admin who reached the server only through the edge and lost that account is
-restored on the machine. The server must have no owner, as after the owner
+An admin or super admin who reached the server only through the edge and lost that
+account is restored on the machine. The server must have no owner, as after the owner
 deletes their account:
 
 ```sh
 sudo aether-server edge claim-code --admin <member id>
 ```
 
-This prints a claim link bound to that admin. The admin opens it signed in with
+This prints a claim link bound to that member. They open it signed in with
 the account they now use, or runs `aether link --claim <code>`. The server binds
 the account to that member, approves the device and becomes owned by that
 account. It creates no member and raises no role: a member who is not an admin is
@@ -384,12 +384,12 @@ bound to another member. Find the member id with `aether member list`.
 
 ### Ownership and deleting an account
 
-`aether member transfer <member-id>` hands ownership at the edge to another admin
-with a linked GitHub account. It fails with `ownership report refused: <reason>`
+`aether member transfer <member-id>` hands ownership at the edge to an admin or super
+admin with a linked GitHub account. Only a super admin can run it. It fails with `ownership report refused: <reason>`
 when the edge refuses or does not answer within 10 seconds, and the server keeps
 its previous owner. It is refused while the server is not connected to the edge
 or has no owner, or when the target has two linked accounts (remove one with
-`aether member unlink`). A transfer never creates an admin or changes a role.
+`aether member unlink`). A transfer never creates a super admin or changes a role.
 
 When the owner's identity leaves the server (the member was removed or the account
 deleted), the server is **ownerless**. It stays enrolled and keeps relaying for
@@ -413,8 +413,8 @@ member, role or data. An SSH key or tailnet identity of the same person keeps
 working until an admin removes it, and invitations to the login or email stay
 until revoked. Signing in again creates a new account that no server knows: link
 it with `aether member link`, or an admin invites it, which creates a new member.
-Before deleting the only way an admin reaches a server, make sure another admin
-exists or that the admin also has an SSH key or tailnet identity there.
+Before deleting the only way a super admin reaches a server, make sure another super admin
+exists or that they also have an SSH key or tailnet identity there.
 Otherwise only the machine's administrator can restore them
 ([Console recovery](#console-recovery)).
 
