@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -74,10 +75,22 @@ func launchShareRun(t *testing.T, e *testEnv, docker *runtime.Docker, cli *clien
 	t.Cleanup(func() {
 		cctx, ccancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer ccancel()
-		_ = docker.Destroy(cctx, id)
+		// The scheduler may already be removing the container, which Docker
+		// refuses as a conflict; its volumes stay in use until that ends.
+		if err := docker.Destroy(cctx, id); err != nil && !cerrdefs.IsConflict(err) {
+			t.Errorf("cleanup destroy session container: %v", err)
+		}
+		removed := cli.ContainerWait(cctx, string(id), client.ContainerWaitOptions{Condition: container.WaitConditionRemoved})
+		select {
+		case <-removed.Result:
+		case err := <-removed.Error:
+			if !cerrdefs.IsNotFound(err) {
+				t.Errorf("cleanup wait for the session container's removal: %v", err)
+			}
+		}
 		for _, v := range volumes {
 			if _, err := cli.VolumeRemove(cctx, v, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
-				t.Errorf("cleanup VolumeRemove(%s) error: %v", v, err)
+				t.Errorf("cleanup VolumeRemove(%s) error: %v; containers using it: %s", v, err, volumeUsers(cctx, cli, v))
 			}
 		}
 	})
@@ -95,6 +108,19 @@ func launchShareRun(t *testing.T, e *testEnv, docker *runtime.Docker, cli *clien
 		t.Fatalf("harness did not print login %q; pty output = %q", wantLogin, out)
 	}
 	return shareRun{run: run, docker: docker, id: id, mounts: info.Container.Mounts}
+}
+
+// volumeUsers names the containers mounting volume, with their labels.
+func volumeUsers(ctx context.Context, cli *client.Client, volume string) string {
+	list, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("volume", volume)})
+	if err != nil {
+		return "unknown: " + err.Error()
+	}
+	var users []string
+	for _, c := range list.Items {
+		users = append(users, fmt.Sprintf("%.12s %v %v", c.ID, c.Names, c.Labels))
+	}
+	return strings.Join(users, "; ")
 }
 
 func (r shareRun) sh(t *testing.T, script string) (int, string) {

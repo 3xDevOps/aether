@@ -277,9 +277,9 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	if _, err := e.sched.EnsureTerminal(ctx, ada); err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
 	}
-	// The terminal mounts Ada's home volume, which the runs' cleanups
-	// remove. DestroyStoppedTerminal leaves the container whenever the
-	// terminal's supervisor holds its lock, as it does when the stop wakes it.
+	// The terminal mounts Ada's home volume, which the runs' cleanups remove.
+	// A non-nil afterStop makes WithStoppedTerminal destroy the kept container
+	// under the terminal lock, which the supervisor takes when the stop wakes it.
 	t.Cleanup(func() {
 		if err := e.sched.WithStoppedTerminal(context.Background(), ada, func() error { return nil }); err != nil {
 			t.Errorf("stop and destroy the terminal: %v", err)
