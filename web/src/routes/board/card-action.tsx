@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { needsYouConditions, openAction, type NeedsYouTarget, type PrimaryAction } from '@/lib/needs-you'
 import type { BoardCard } from '@/routes/board/selectors'
-import { runRoute, type RunView } from '@/routes/run/views'
+import { defaultView, runRoute, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 import type { UiSlice, Route } from '@/store/ui'
@@ -49,8 +49,10 @@ let sends = 0
 
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
 
-export function targetRoute(run: Pick<RunRecord, 'id'>, target: NeedsYouTarget | undefined): Route {
-  return runRoute(run.id, target && targetView[target])
+// The view that shows a request depends on the run's mode, unknown until its record loads.
+export function targetRoute(run: Pick<RunRecord, 'id'> | RunRecord, target: NeedsYouTarget | undefined): Route {
+  const view = target === 'request' ? ('mode' in run ? defaultView(run) : undefined) : target && targetView[target]
+  return runRoute(run.id, view)
 }
 
 export function openCard(card: BoardCard, navigate: UiSlice['navigate']) {
