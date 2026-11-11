@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -431,5 +432,37 @@ func TestAgentModelsSlowFailureStaysCachedFromProbeEnd(t *testing.T) {
 	}
 	if n := len(e.rt.execRuns()); n != 1 {
 		t.Fatalf("%d probes, want the second call served from the failure cache", n)
+	}
+}
+
+func TestAgentModelsCallerReturnsAtItsDeadlineWhileTheProbeFinishes(t *testing.T) {
+	t.Parallel()
+	e, _ := newModelsEnv(t)
+	release := make(chan struct{})
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) {
+		<-release
+		return 0, modelsFixture(t, "claude-initialize.jsonl"), nil
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	began := time.Now()
+	got, err := e.sched.AgentModels(ctx, e.member.ID, e.member.ID, "claude", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(began) > 5*time.Second || len(got.Models) != 0 || !strings.Contains(got.Error, "still being listed") {
+		t.Fatalf("after %s: %+v", time.Since(began), got)
+	}
+	close(release)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, ok := e.sched.CachedAgentModels(e.member.ID, "claude")
+		if ok && got.Source == protocol.ModelSourceAgent {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the detached probe never filled the cache")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

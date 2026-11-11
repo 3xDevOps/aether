@@ -18,11 +18,10 @@ import (
 )
 
 const (
-	agentModelsTTL     = time.Hour
-	agentModelsFailTTL = time.Minute
-	agentModelsTimeout = 30 * time.Second
-	// Start plus the script's 25s kill stays inside the connector's 40s budget.
-	agentModelsStartTimeout = 10 * time.Second
+	agentModelsTTL          = time.Hour
+	agentModelsFailTTL      = time.Minute
+	agentModelsTimeout      = 30 * time.Second
+	agentModelsStartTimeout = 2 * time.Minute
 	codexModelsCache        = ".codex/models_cache.json"
 
 	claudeModelsRequest = `{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}`
@@ -81,7 +80,8 @@ var errNoModelsAnswer = errors.New("no answer")
 // AgentModels lists the models agent name offers on account, probing the
 // agent in account's environment terminal and caching the answer for an hour.
 // A failed probe still answers, with its error and the last good list, cached
-// for a minute. Another member's account is probed only while its owner's
+// for a minute. A caller whose context ends first gets an empty list with
+// that error while the probe finishes in the background. Another member's account is probed only while its owner's
 // terminal is running.
 func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error) {
 	none := protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Models: []protocol.AgentModel{}}
@@ -114,10 +114,19 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 		}
 	}
 	start := account == member
-	result, _, _ := s.modelProbes.Do(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
+	probe := s.modelProbes.DoChan(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
 		return s.probeAgentModels(context.WithoutCancel(ctx), key, cli[0], profile.EnvPassthrough, start), nil
 	})
-	return result.(protocol.AgentModelsResult), nil
+	select {
+	case got := <-probe:
+		return got.Val.(protocol.AgentModelsResult), nil
+	case <-ctx.Done():
+		return protocol.AgentModelsResult{
+			Models: []protocol.AgentModel{},
+			Source: protocol.ModelSourceNone,
+			Error:  fmt.Sprintf("%s models: still being listed (%v); the probe keeps running, so ask again shortly", name, ctx.Err()),
+		}, nil
+	}
 }
 
 // CachedAgentModels is the model list AgentModels last answered for agent
