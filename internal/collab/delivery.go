@@ -51,7 +51,7 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	// Do not publish the uncertain claim before attempting PTY delivery. A
 	// publication outage must never turn an otherwise unattempted steer into
 	// a durable "uncertain" result.
-	receipt, outcome, deliveryErr := s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, deliveryProof), steer)
+	receipt, outcome, failure, deliveryErr := s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, deliveryProof), steer)
 	if deliveryErr != nil {
 		return Result{}, deliveryErr
 	}
@@ -59,11 +59,11 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	// depend on the caller staying connected.
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentDeliveryTimeout)
 	defer cancel()
-	return s.settleResult(settleCtx, msg, receipt, outcome)
+	return s.settleResult(settleCtx, msg, receipt, outcome, failure)
 }
 
-func (s *Service) settleResult(ctx context.Context, msg *store.RoomMessage, receipt Receipt, outcome string) (Result, error) {
-	if err := s.settleRoomMessage(ctx, msg, receipt, outcome == acphost.OutcomeQueued); err != nil {
+func (s *Service) settleResult(ctx context.Context, msg *store.RoomMessage, receipt Receipt, outcome string, failure *store.RoomMessageFailure) (Result, error) {
+	if err := s.settleRoomMessage(ctx, msg, receipt, outcome == acphost.OutcomeQueued, failure); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			stored, getErr := s.cfg.Store.GetRoomMessage(ctx, msg.ID)
 			if getErr != nil {
@@ -98,26 +98,27 @@ func (s *Service) deliveryAdmission(run domain.RunID, deliveryProof *control.Sna
 
 // deliver rechecks mutable membership and workspace policy inside admit. The
 // callback must not call back into Control.
-func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, admit func(func() error) error, steer bool) (Receipt, string, error) {
-	var attempted, revoked bool
+func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, admit func(func() error) error, steer bool) (Receipt, string, *store.RoomMessageFailure, error) {
+	var attempted bool
+	var revoked *store.RoomMessageFailure
 	var outcome string
 	accept := func() error {
 		freshRun, freshActor, ws, err := s.scope(ctx, msg.WorkspaceID, msg.RunID, msg.ActorID)
 		if err != nil {
 			if errors.Is(err, ErrNotMember) || errors.Is(err, store.ErrNotFound) {
-				revoked = true
+				revoked = &store.RoomMessageFailure{Code: "access_revoked", Message: err.Error()}
 				return nil
 			}
 			return err
 		}
 		if freshRun.Protected {
-			revoked = true
+			revoked = &store.RoomMessageFailure{Code: "session_protected", Message: "the session was protected before delivery; it takes no messages until it is unprotected"}
 			return nil
 		}
-		if permissions.Check(permissions.Steer,
+		if denied := permissions.Check(permissions.Steer,
 			permissions.ActorOf(freshActor),
-			permissions.Target{Workspace: ws.ID, Extra: freshRun.ExtraWorkspaces(), Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: ws.SteerOthers}) != nil {
-			revoked = true
+			permissions.Target{Workspace: ws.ID, Extra: freshRun.ExtraWorkspaces(), Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: ws.SteerOthers}); denied != nil {
+			revoked = &store.RoomMessageFailure{Code: "steer_denied", Message: denied.Error()}
 			return nil
 		}
 		// The initial values are retained only for low-level test injectors;
@@ -128,19 +129,23 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		return err
 	}
 	err := admit(accept)
-	if revoked {
-		return ReceiptNotSent, "", nil
+	if revoked != nil {
+		return ReceiptNotSent, "", revoked, nil
 	}
 	if err != nil {
 		if !attempted && errors.Is(err, control.ErrStale) {
-			return ReceiptNotSent, "", nil
+			return ReceiptNotSent, "", &store.RoomMessageFailure{Code: "control_changed", Message: "control of the session changed before delivery: " + err.Error()}, nil
 		}
 		if !attempted {
-			return "", "", err
+			return "", "", nil, err
 		}
-		return ClassifyReceipt(err), "", nil
+		receipt := ClassifyReceipt(err)
+		if receipt == ReceiptNotSent {
+			return receipt, "", &store.RoomMessageFailure{Code: notSentCode(err), Message: err.Error()}, nil
+		}
+		return receipt, "", nil, nil
 	}
-	return ReceiptSent, outcome, nil
+	return ReceiptSent, outcome, nil, nil
 }
 
 func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, steer bool) (string, error) {
@@ -259,7 +264,7 @@ func (s *Service) redeliver(ctx context.Context, msg *store.RoomMessage) (bool, 
 	var receipt Receipt
 	var outcome string
 	if err == nil {
-		receipt, outcome, err = s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, nil), false)
+		receipt, outcome, _, err = s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, nil), false)
 	}
 	switch {
 	case err != nil:

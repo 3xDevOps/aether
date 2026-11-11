@@ -1002,6 +1002,13 @@ carries `agent_delivery: "queued"` until the agent takes it
 (`"delivered"`), or turns `not_sent` with `failure.code` `agent_refused` or
 `agent_disconnected`; each change publishes `workspace.room_message`
 ([enhanced-sessions.md](enhanced-sessions.md#permissions-and-input)).
+A message the server could not hand to the agent at all is `not_sent` with
+`failure.message` the real error and `failure.code`: `session_unavailable`
+(no running agent, or a mode switch in flight), `prompt_not_sent` (such as a
+sleeping session that failed to wake), `unsupported_image`,
+`session_protected`, `steer_denied` or `access_revoked` (the sender lost
+**Steer** or membership before delivery), or `control_changed` (the session's
+control lease changed before delivery).
 
 `run.inject` also accepts `attachments`, an ordered array of at most eight
 references returned by `terminal.image` or `terminal.file`. Text may be empty

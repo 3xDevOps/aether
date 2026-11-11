@@ -872,6 +872,19 @@ func TestConnectorMessage(t *testing.T) {
 	}
 }
 
+func TestConnectorMessageNotSentFailsWithTheReason(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-bo"}})
+	cs := connectorSession(t, f, ScopeWrite)
+	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-1", State: protocol.RoomMessageNotSent,
+		Failure: &protocol.RoomMessageFailure{Code: "session_protected", Message: "the session was protected before delivery"}}})
+	text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "use postgres", "idempotency_key": "m1"})
+	if !failed || !strings.Contains(text, "message to session run-1 was not sent (session_protected: the session was protected before delivery); unprotect it with aether_session_lifecycle") ||
+		!strings.Contains(text, "new idempotency_key, since m1 returns this refusal") {
+		t.Fatalf("a message the session refused = %q (failed %v), want a failed call with the reason", text, failed)
+	}
+}
+
 func TestConnectorAnswerAndDecide(t *testing.T) {
 	items := []protocol.AttentionItem{
 		{Kind: protocol.AttentionKindRoomQuestion, RunID: "run-2", WorkspaceID: "ws-1", Message: &protocol.AttentionMessage{ID: "rm-1", Body: "Ready?"}},

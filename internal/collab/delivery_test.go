@@ -2,11 +2,14 @@ package collab
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -53,5 +56,31 @@ func TestDeliveredMessageSettlesAfterTheCallerGoesAway(t *testing.T) {
 	}
 	if result.Receipt != ReceiptSent || stored.State != store.RoomMessageSent {
 		t.Fatalf("receipt %q, stored state %q, want both sent", result.Receipt, stored.State)
+	}
+}
+
+func TestNotSentSteerRecordsTheDeliveryError(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{fmt.Errorf("%w: inject requires a running or needs-attention session", ptyhost.ErrNoSession), "session_unavailable"},
+		{fmt.Errorf("%w: wake the session: container start refused", domain.ErrPromptNotSent), "prompt_not_sent"},
+		{acphost.ErrUnsupportedImage, "unsupported_image"},
+	} {
+		st, clock, ws, owner, _, run := setupCollab(t)
+		pty := &collabPTY{err: tc.err}
+		service, err := New(Config{Store: st, Runs: st, Workspaces: st, Inject: pty.Inject, Control: control.New(control.Config{Now: clock.Now}), Now: clock.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "hello", IdempotencyKey: tc.code})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := result.Message.Failure
+		if result.Message.State != store.RoomMessageNotSent || f == nil || f.Code != tc.code || f.Message != tc.err.Error() {
+			t.Fatalf("inject error %q: state %s failure %+v, want not_sent with code %s and the error", tc.err, result.Message.State, f, tc.code)
+		}
 	}
 }
