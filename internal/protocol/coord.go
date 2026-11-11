@@ -294,8 +294,7 @@ type CoordInboxResult struct {
 	AckToken string         `json:"ack_token,omitempty"`
 	// Acked reports that the request's ack_token acknowledged a batch.
 	Acked bool `json:"acked,omitempty"`
-	// More counts the unacknowledged messages after this batch; the next
-	// read returns them.
+	// More counts the unacknowledged messages later batches hold.
 	More int `json:"more,omitempty"`
 }
 

@@ -693,10 +693,13 @@ func TestInboxBatchFitsRunMessageBatchBytes(t *testing.T) {
 	}
 	var token string
 	var got []string
-	for range 3 {
+	for i := range 3 {
 		batch, next, _, err := db.DeliverRunMessages(ctx, to.ID, token, 100)
 		if err != nil {
 			t.Fatalf("DeliverRunMessages: %v", err)
+		}
+		if more, err := db.CountUndeliveredRunMessages(ctx, to.ID); err != nil || more != []int{3, 1, 0}[i] {
+			t.Fatalf("after batch %d: %d messages wait for later batches (err %v)", i, more, err)
 		}
 		bodies := ""
 		for _, msg := range batch {

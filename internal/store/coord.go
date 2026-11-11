@@ -193,6 +193,9 @@ type MessageStore interface {
 	// CountUnackedRunMessages returns how many live messages the run has not
 	// acknowledged yet, delivered or not.
 	CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int, error)
+	// CountUndeliveredRunMessages returns how many live messages wait for a
+	// later inbox batch than the one outstanding.
+	CountUndeliveredRunMessages(ctx context.Context, to domain.RunID) (int, error)
 	// LastSentRunMessages returns the newest message from sent each recipient.
 	LastSentRunMessages(ctx context.Context, from domain.RunID) (map[domain.RunID]*RunMessage, error)
 	// DeliverRunMessages acknowledges ackToken's batch, then returns the
@@ -423,6 +426,16 @@ func (d *DB) CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int,
 	return n, nil
 }
 
+func (d *DB) CountUndeliveredRunMessages(ctx context.Context, to domain.RunID) (int, error) {
+	var n int
+	if err := d.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND delivery_token = '' AND `+unreadMessage, to,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count undelivered session messages for %s: %w", to, err)
+	}
+	return n, nil
+}
+
 func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error) {
 	if to == "" {
 		return nil, "", false, errors.New("store: deliver session messages: to_run is required")
@@ -483,7 +496,13 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 	if len(msgs) == 0 {
 		return nil, "", acked, commitBatch(tx)
 	}
-	msgs = boundBatch(msgs)
+	size := len(msgs[0].Body)
+	for i, m := range msgs[1:] {
+		if size += len(m.Body); size > RunMessageBatchBytes {
+			msgs = msgs[:i+1]
+			break
+		}
+	}
 	token, err := newID("ack")
 	if err != nil {
 		return nil, "", false, err
@@ -521,22 +540,10 @@ func (d *DB) RetireRunMessages(ctx context.Context, to domain.RunID) error {
 	return nil
 }
 
-// RunMessageBatchBytes bounds the bodies of one inbox batch, so a batch
-// prints small enough for an agent's harness to show it whole: the next
-// read acknowledges every message in it.
+// RunMessageBatchBytes bounds the bodies of one inbox batch, oldest first
+// and at least one message, so a batch prints small enough for an agent's
+// harness to show it whole: the next read acknowledges every message in it.
 const RunMessageBatchBytes = 4 << 10
-
-// boundBatch keeps the oldest messages whose bodies fit RunMessageBatchBytes,
-// and always the first.
-func boundBatch(msgs []*RunMessage) []*RunMessage {
-	size := len(msgs[0].Body)
-	for i, m := range msgs[1:] {
-		if size += len(m.Body); size > RunMessageBatchBytes {
-			return msgs[:i+1]
-		}
-	}
-	return msgs
-}
 
 func outstandingToken(ctx context.Context, tx *sql.Tx, to domain.RunID) (string, error) {
 	var token string

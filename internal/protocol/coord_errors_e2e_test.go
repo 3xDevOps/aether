@@ -220,6 +220,8 @@ func (fullMail) AppendRunMessage(context.Context, *store.RunMessage, int) error 
 
 func (fullMail) CountUnackedRunMessages(context.Context, domain.RunID) (int, error) { return 0, nil }
 
+func (fullMail) CountUndeliveredRunMessages(context.Context, domain.RunID) (int, error) { return 0, nil }
+
 func (fullMail) DeliverRunMessages(context.Context, domain.RunID, string, int) ([]*store.RunMessage, string, bool, error) {
 	return nil, "", false, nil
 }
