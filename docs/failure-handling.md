@@ -297,10 +297,17 @@ scheduler: insufficient host memory headroom: the server stalled on memory for <
 Only the server's cgroup counts. A session that thrashes inside its own memory
 limit reclaims within its own cgroup and does not refuse launches, although it
 raises the host-wide pressure that **Insights → System** charts (`some avg10` of
-`/proc/pressure/memory`). To read the number the gate uses:
+`/proc/pressure/memory`). To read the number the gate uses, for the service:
 
 ```sh
-cat /sys/fs/cgroup"$(cut -d: -f3 /proc/"$(pgrep -xo aether-server)"/cgroup)"/memory.pressure
+cat /sys/fs/cgroup"$(systemctl show -p ControlGroup --value aether-server)"/memory.pressure
+```
+
+For a foreground server, take its PID from the `aether-server serve` process
+(sessions run `aether-server mcp` processes that the host also sees):
+
+```sh
+cat /sys/fs/cgroup"$(cut -d: -f3 /proc/"$(pgrep -of 'aether-server serve')"/cgroup)"/memory.pressure
 ```
 
 A foreground server shares its cgroup with the shell that started it, so
