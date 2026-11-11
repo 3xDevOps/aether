@@ -12,7 +12,7 @@ import { useCapability } from '@/store/hooks'
 export const childRunsLabel = 'Let my sessions start subsessions'
 
 const scope: [string, string][] = [
-  ['Allows', 'An agent in one of your sessions starts another agent as a subsession, on your account, then messages it and receives its result. You own every subsession.'],
+  ['Allows', "An agent in one of your sessions starts another agent as a subsession, on your account or one shared with you, then messages it and receives its result. You own every subsession."],
   ['Limits', "The workspace budget and the workspace's subsession limits apply to every subsession."],
   ['One session', "Options → Subsessions in the launch dialog, or More → Allow subsessions on a session, overrides this for that session."],
 ]

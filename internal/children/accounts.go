@@ -2,11 +2,13 @@ package children
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -32,15 +34,39 @@ func modeName(m domain.LaunchMode) string {
 	return "standard"
 }
 
-// choices lists what the policy lets a child run, each with its state.
+// choices lists what the policy lets a child run, each with its state: every
+// agent on the owner's own account and on each account shared with the owner
+// whose owner reaches the parent's workspaces.
 func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoice, error) {
+	sharers, err := s.cfg.Store.ListAccountOwners(ctx, p.owner)
+	if err != nil {
+		return nil, err
+	}
+	accounts := []domain.MemberID{p.owner}
+	for _, m := range sharers {
+		accounts = append(accounts, m.ID)
+	}
+	var out []protocol.ChildChoice
+	for _, account := range accounts {
+		if _, err := s.cfg.Authorize(ctx, s.cfg.Store, p.owner, string(account), p.workspaces()); errors.Is(err, permissions.ErrDenied) || errors.Is(err, permissions.ErrNoAccess) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		list, err := s.agentChoices(ctx, p, account)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, list...)
+	}
+	return out, nil
+}
+
+// agentChoices lists every agent on account, which the caller authorized.
+func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.MemberID) ([]protocol.ChildChoice, error) {
 	if s.cfg.Agents == nil || s.cfg.Agents() == nil {
 		return nil, fmt.Errorf("agent listing is unavailable")
 	}
-	return s.agentChoices(ctx, p, p.owner)
-}
-
-func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.MemberID) ([]protocol.ChildChoice, error) {
 	agents, err := s.cfg.Agents().ListAgents(ctx, p.owner, account)
 	if err != nil {
 		return nil, err
@@ -62,6 +88,12 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 		case !a.Installed:
 			c.Status = choiceNotInstalled
 			c.Detail = fmt.Sprintf("%s is not installed in %s's environment; they run aether agent add %s", a.Name, name, a.Name)
+		case a.OwnAccountOnly:
+			c.Status = choiceNotInstalled
+			c.Detail = fmt.Sprintf("%s is your own agent definition, which runs only on your own account", a.Name)
+		case a.Unavailable != "":
+			c.Status = choiceNotSignedIn
+			c.Detail = a.Unavailable
 		case a.LoginMissing || (a.LoginFound != nil && !*a.LoginFound):
 			c.Status = choiceNotSignedIn
 			c.Detail = fmt.Sprintf("%s is not signed in to %s; they sign in with aether agent login %s", name, a.Name, a.Name)
@@ -69,6 +101,8 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 			if used, ok := s.usedPercent(ctx, p.owner, account, a.Name); ok && used >= fallback.ExhaustedPercent {
 				c.Status = choiceExhausted
 				c.Detail = fmt.Sprintf("%s's %s usage is at %.0f%%", name, a.Name, used)
+			} else if a.LoginProblem != "" {
+				c.Detail = fmt.Sprintf("%s's %s login may be signed out: %s", name, a.Name, a.LoginProblem)
 			}
 		}
 		out = append(out, c)
@@ -116,11 +150,18 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 	if err := domain.ValidModel(req.Model); err != nil {
 		return launchSpec{}, invalid("%s", err.Error())
 	}
-	if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) != p.owner {
-		return launchSpec{}, denied("subsessions use the owner's own %s account", req.Harness)
+	account := p.owner
+	switch {
+	case req.AccountMemberID != "":
+		account = domain.MemberID(req.AccountMemberID)
+	case req.Harness == p.parent.Harness && p.parent.HomeMember() == p.owner:
+		account = p.parent.AccountMember()
 	}
-	spec := launchSpec{harness: req.Harness, account: p.owner, mode: mode, model: req.Model, fallback: p.parent.Fallback}
-	choices, err := s.choices(ctx, p)
+	if err := s.admit(ctx, p, account); err != nil {
+		return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
+	}
+	spec := launchSpec{harness: req.Harness, account: account, mode: mode, model: req.Model, fallback: p.parent.Fallback}
+	choices, err := s.agentChoices(ctx, p, account)
 	if err != nil {
 		return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
 	}

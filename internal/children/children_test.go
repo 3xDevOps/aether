@@ -504,6 +504,59 @@ func TestTreeUsageCountsEachRunOnceOnThePayingAccount(t *testing.T) {
 	}
 }
 
+func TestSubsessionsRunOnTheParentsOrASharedAccount(t *testing.T) {
+	h := newHarness(t)
+	carol := h.member("Carol", domain.RoleCollaborator)
+	if _, err := h.db.ShareAccount(h.ctx, h.bob.ID, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.GrantWorkspace(h.ctx, h.ws.ID, h.bob.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	h.agents.missing[h.ada.ID] = true
+	parent := &domain.Run{WorkspaceID: h.ws.ID, MemberID: h.ada.ID, AccountMemberID: h.bob.ID, Task: "parent", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	if err := h.db.CreateRun(h.ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, _ := json.Marshal(protocol.ChildOptionsParams{})
+	out, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildOptions, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]string{}
+	for _, c := range out.(protocol.ChildOptionsResult).Choices {
+		listed[c.AccountMemberID+"/"+c.Harness] = c.Status
+	}
+	if len(listed) != 4 || listed[string(h.bob.ID)+"/claude"] != choiceReady || listed[string(h.ada.ID)+"/claude"] != choiceNotSignedIn {
+		t.Fatalf("options = %v, want claude and codex on Ada's and Bob's accounts only, Ada's not signed in", listed)
+	}
+
+	same := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", Task: "same agent"})
+	shared := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", AccountMemberID: string(h.bob.ID), Task: "named"})
+	if same.AccountMemberID != string(h.bob.ID) || shared.AccountMemberID != string(h.bob.ID) {
+		t.Fatalf("accounts = %s, %s, want Bob's parent account and the named shared account", same.AccountMemberID, shared.AccountMemberID)
+	}
+	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "other agent"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Ada is not signed in to codex") {
+		t.Fatalf("another agent with no account = %v, want the owner's own account refused as not signed in", err)
+	}
+	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", AccountMemberID: string(carol.ID), Task: "unshared"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "has not shared their account") {
+		t.Fatalf("an account not shared with the owner = %v, want denied", err)
+	}
+	h.settle()
+	if len(h.runs.accounts) != 2 || h.runs.accounts[0] != h.bob.ID || h.runs.accounts[1] != h.bob.ID {
+		t.Fatalf("launched on %v, want Bob's account twice", h.runs.accounts)
+	}
+
+	handed := &domain.Run{WorkspaceID: h.ws.ID, MemberID: h.ada.ID, HomeMemberID: h.bob.ID, AccountMemberID: h.bob.ID, Task: "handed", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	if err := h.db.CreateRun(h.ctx, handed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.start(handed.ID, protocol.ChildStartParams{Harness: "claude", Task: "after a handoff"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Ada is not signed in to claude") {
+		t.Fatalf("same agent under a session handed to Ada = %v, want Ada's own account, not the launcher's", err)
+	}
+}
+
 func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 	h := newHarness(t)
 	h.enable(h.bob.ID, protocol.ChildSettingsParams{Enabled: on()})

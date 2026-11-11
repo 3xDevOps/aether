@@ -107,7 +107,7 @@ func (s *Service) options(ctx context.Context, run domain.RunID, req protocol.Ch
 	}
 	if req.Harness != "" {
 		for i, c := range out.Choices {
-			if c.Harness != req.Harness || c.Model != "" {
+			if c.Harness != req.Harness || c.Model != "" || (c.Status != choiceReady && c.Status != choiceExhausted) {
 				continue
 			}
 			models, err := s.cfg.Runs.AgentModels(ctx, p.owner, domain.MemberID(c.AccountMemberID), c.Harness, false)
@@ -151,9 +151,6 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 	spec, perr := s.choose(ctx, p, req)
 	if perr != nil {
 		return protocol.ChildReceipt{}, perr
-	}
-	if err = s.admit(ctx, p, spec.account); err != nil {
-		return protocol.ChildReceipt{}, rpcErr(method, err)
 	}
 	base, err := s.cfg.Git.PublishRunBranch(ctx, p.parent.ID)
 	if err != nil {

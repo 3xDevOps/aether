@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -270,6 +271,8 @@ func rpcErr(method string, err error) *protocol.Error {
 		code = protocol.CodeConflict
 	case errors.Is(err, store.ErrNotFound):
 		code = protocol.CodeNotFound
+	case errors.Is(err, permissions.ErrDenied):
+		code = protocol.CodeDenied
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
