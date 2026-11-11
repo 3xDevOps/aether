@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -747,12 +748,15 @@ func TestHijackStdinCancellationDoesNotCloseSharedConnection(t *testing.T) {
 	}
 }
 
-// fakeDockerAPI answers ping as an engine speaking engineAPI and records
-// every create request's version path and body.
+// fakeDockerAPI answers ping as an engine speaking engineAPI, reports
+// cgroupDriver from info, and records every create request's version path
+// and body.
 type fakeDockerAPI struct {
-	mu      sync.Mutex
-	creates []string
-	bodies  []string
+	mu           sync.Mutex
+	cgroupDriver string
+	infos        int
+	creates      []string
+	bodies       []string
 }
 
 func (f *fakeDockerAPI) serve(t *testing.T, engineAPI string) *httptest.Server {
@@ -762,6 +766,12 @@ func (f *fakeDockerAPI) serve(t *testing.T, engineAPI string) *httptest.Server {
 		switch {
 		case r.URL.Path == "/_ping":
 			_, _ = io.WriteString(w, "OK")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			f.mu.Lock()
+			f.infos++
+			f.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"CgroupDriver":%q}`, f.cgroupDriver)
 		case strings.HasSuffix(r.URL.Path, "/containers/create"):
 			body, _ := io.ReadAll(r.Body)
 			f.mu.Lock()

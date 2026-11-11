@@ -66,6 +66,8 @@ func (f *fakeNetworkAPI) serve(t *testing.T) *Docker {
 		case r.URL.Path == "/_ping":
 			w.Header().Set("Api-Version", "1.52")
 			_, _ = io.WriteString(w, "OK")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = io.WriteString(w, `{"CgroupDriver":"systemd"}`)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/networks/"+AgentNetwork):
 			if f.current == nil {
 				w.WriteHeader(http.StatusNotFound)
