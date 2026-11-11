@@ -235,6 +235,9 @@ func (s *Service) reconcile(ctx context.Context) {
 	if err := s.noticeIdle(ctx); err != nil && ctx.Err() == nil {
 		slog.Warn("children: idle notices failed", "error", err)
 	}
+	if err := s.noticeStopped(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("children: stopped notices failed", "error", err)
+	}
 }
 
 func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, key string) error {

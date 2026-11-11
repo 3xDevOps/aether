@@ -32,16 +32,17 @@ const (
 // Child states. queued, starting, cancelled and refused come from the
 // reservation; the rest from the started run.
 const (
-	ChildQueued    = "queued"
-	ChildStarting  = "starting"
-	ChildWorking   = "working"
-	ChildWaiting   = "waiting"
-	ChildNeedsYou  = "needs-you"
-	ChildFinished  = "finished"
-	ChildFailed    = "failed"
-	ChildEnded     = "ended"
-	ChildCancelled = "cancelled"
-	ChildRefused   = "refused"
+	ChildQueued       = "queued"
+	ChildStarting     = "starting"
+	ChildWorking      = "working"
+	ChildWaiting      = "waiting"
+	ChildNeedsYou     = "needs-you"
+	ChildDisconnected = "disconnected"
+	ChildFinished     = "finished"
+	ChildFailed       = "failed"
+	ChildEnded        = "ended"
+	ChildCancelled    = "cancelled"
+	ChildRefused      = "refused"
 )
 
 // ChildLimits bound a parent's child runs: MaxLive are busy at once, more
@@ -124,8 +125,10 @@ type Child struct {
 	Branch          string       `json:"branch,omitempty"`
 	BaseCommit      string       `json:"base_commit,omitempty"`
 	Report          *ChildReport `json:"report,omitempty"`
-	Error           string       `json:"error,omitempty"`
-	CreatedAt       string       `json:"created_at"`
+	// Error is why the child was refused, or why a started child stopped
+	// (domain.RunActivity.Stopped).
+	Error     string `json:"error,omitempty"`
+	CreatedAt string `json:"created_at"`
 	// CostUSD is nil when the run reported no cost.
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 }

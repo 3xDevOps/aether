@@ -1256,9 +1256,11 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
   same key with other inputs is refused with `-32003`. The CLI generates a
   key when none is given and prints it to stderr.
 - `subsession list` returns each subsession's `state` (`queued`, `starting`,
-  `working`, `waiting`, `needs-you`, `finished`, `failed`, `ended`,
-  `cancelled` or `refused`), its latest report, branch, the account it runs
-  on and its cost when metered.
+  `working`, `waiting`, `needs-you`, `disconnected`, `finished`, `failed`,
+  `ended`, `cancelled` or `refused`), its latest report, branch, the account it
+  runs on and its cost when metered. `error` is why it was refused, or why a
+  started subsession stopped, such as `enhanced session ended: the agent's ACP
+  server exited with code 137`.
 - `subsession cancel` stops a subsession or drops it from the queue; a subsession still
   starting answers `-32002`, so cancel again a few seconds later. A handoff of
   either session to another member detaches the subsession from its parent: the parent
@@ -1282,7 +1284,13 @@ anything), `answered`, or waiting on a `needs-input` answer for over an hour
 while its parent is live sends the parent one message per quiet spell: its
 state and for how long, its status reason, its latest report, and the commands
 to wake it (`send --to <subsession>`) or stop it (`subsession cancel --run-id <subsession>`).
-New work starts a new spell. A subsession a person paused sends none. A subsession's
+A live attached subsession that has stopped for over a minute, with no report
+of its own saying so, sends one message per stopped spell the same way, with
+what can move it on. It has stopped when its agent is `disconnected` (not
+running, so mail waits unread until a person presses **Retry Enhanced**), a
+turn `failed` (such as `enhanced turn failed: ... Authentication required`), or
+it is `needs-you` for anything but a `needs-input` question or `blocked` report
+it sent. New work starts a new spell. A subsession a person paused sends none. A subsession's
 `needs-input` question goes to its owner, and the parent is told in its inbox
 so it can answer within the task.
 

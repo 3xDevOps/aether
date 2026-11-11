@@ -269,23 +269,56 @@ func finished(r *domain.Run) bool {
 // told.
 const idleNoticeAfter = time.Hour
 
+// stoppedNoticeAfter is how long a child stays stopped before its parent is
+// told, so Aether's own restart of a refused or lost agent can settle first.
+const stoppedNoticeAfter = time.Minute
+
 // noticeIdle tells each parent once per quiet spell about an attached child
-// that has waited, answered or asked its owner for over idleNoticeAfter. The
+// that has waited, answered or asked its owner for over idleNoticeAfter.
+func (s *Service) noticeIdle(ctx context.Context) error {
+	return s.noticeSpells(ctx, "child-idle:", idleNoticeAfter, domain.RunActivity.Quiet, func(c store.ChildSpell, now time.Time) string {
+		return fmt.Sprintf("Subsession %s (%s) has been %s for %s.", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute)) +
+			"\nCheck what it is doing, then wake it with an instruction: aether-internal send --to " + string(c.Child.RunID) +
+			" --body <text>, or stop it: aether-internal subsession cancel --run-id " + string(c.Child.RunID)
+	})
+}
+
+// noticeStopped tells each parent once per stopped spell about an attached
+// child that stopped for over stoppedNoticeAfter with no report of its own
+// saying so (domain.RunActivity.Stopped).
+func (s *Service) noticeStopped(ctx context.Context) error {
+	return s.noticeSpells(ctx, "child-stopped:", stoppedNoticeAfter, domain.RunActivity.Stopped, func(c store.ChildSpell, _ time.Time) string {
+		id := string(c.Child.RunID)
+		msg := fmt.Sprintf("Subsession %s (%s) stopped (%s) and does not continue on its own.", id, c.Child.Purpose, c.Run.Activity)
+		switch c.Run.Activity {
+		case domain.ActivityDisconnected:
+			msg += "\nIts agent is not running, so messages wait unread until a person reopens it with Retry Enhanced in its Chat view."
+		case domain.ActivityNeedsYou:
+			msg += "\nIt waits for a person, who answers in its session."
+		default:
+			msg += "\nOnce the cause below is fixed, wake it with an instruction: aether-internal send --to " + id + " --body <text>."
+		}
+		return msg + "\nTo go on without it: aether-internal subsession cancel --run-id " + id
+	})
+}
+
+// noticeSpells tells each parent once per spell of states in accepts about
+// an attached child in it for over after, with the message head writes. The
 // notice's key holds the spell's start, so new work starts a new spell. A run
 // a person paused is left alone.
-func (s *Service) noticeIdle(ctx context.Context) error {
+func (s *Service) noticeSpells(ctx context.Context, prefix string, after time.Duration, in func(domain.RunActivity, string) bool, head func(store.ChildSpell, time.Time) string) error {
 	now := s.cfg.Now()
-	idle, err := s.cfg.Store.IdleChildren(ctx, now.Add(-idleNoticeAfter))
+	spells, err := s.cfg.Store.ChildrenInSpell(ctx, now.Add(-after), in)
 	if err != nil {
 		return err
 	}
-	for _, c := range idle {
+	for _, c := range spells {
 		if s.cfg.Runs.Paused(c.Child.RunID) {
 			continue
 		}
-		// The body names a growing duration, so a resend under the same key
-		// would be refused as a different message.
-		key := "child-idle:" + string(c.Child.RunID) + ":" + c.Since.UTC().Format(time.RFC3339Nano)
+		// An idle body names a growing duration, so a resend under the same
+		// key would be refused as a different message.
+		key := prefix + string(c.Child.RunID) + ":" + c.Since.UTC().Format(time.RFC3339Nano)
 		if _, err := s.cfg.Store.GetRunMessageByIdempotency(ctx, c.Child.RunID, key); err == nil {
 			continue
 		} else if !errors.Is(err, store.ErrNotFound) {
@@ -293,9 +326,7 @@ func (s *Service) noticeIdle(ctx context.Context) error {
 		}
 		// The commands come before the reason and report, which a long
 		// question can push past the mailbox's body limit.
-		msg := fmt.Sprintf("Subsession %s (%s) has been %s for %s.", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute)) +
-			"\nCheck what it is doing, then wake it with an instruction: aether-internal send --to " + string(c.Child.RunID) +
-			" --body <text>, or stop it: aether-internal subsession cancel --run-id " + string(c.Child.RunID)
+		msg := head(c, now)
 		if c.Run.Reason != "" {
 			msg += "\nIts status reason: " + truncateSummary(c.Run.Reason)
 		}

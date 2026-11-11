@@ -804,6 +804,94 @@ func TestParentIsToldOncePerIdleSpell(t *testing.T) {
 	}
 }
 
+func TestParentIsToldWhenASubsessionStops(t *testing.T) {
+	h := newHarness(t)
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	crashed := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "review", Task: "c"})
+	refused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "fix", Task: "r"})
+	reported := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "f"})
+	asked := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "q"})
+	paused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "p"})
+	h.settle()
+	h.mail.db = h.db
+	park := func(id, reason string, activity domain.RunActivity) {
+		t.Helper()
+		if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(id), domain.RunNeedsAttention, reason, activity, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped := func(id string) (bodies []string) {
+		for _, m := range h.mail.sent {
+			if m.from == domain.RunID(id) && strings.Contains(m.body, "stopped") {
+				bodies = append(bodies, m.body)
+			}
+		}
+		return bodies
+	}
+	exited := "enhanced session ended: the agent's ACP server exited with code 137"
+	signedOut := `enhanced turn failed: acphost: session/prompt: {"code":-32000,"message":"Authentication required"}`
+	park(crashed.RunID, exited, domain.ActivityDisconnected)
+	park(refused.RunID, signedOut, domain.ActivityFailed)
+	park(reported.RunID, domain.ReportedFailureReason, domain.ActivityFailed)
+	park(asked.RunID, domain.NeedsInputReasonPrefix+"which branch?", domain.ActivityNeedsYou)
+	park(paused.RunID, exited, domain.ActivityDisconnected)
+	h.runs.paused[domain.RunID(paused.RunID)] = true
+
+	h.settle()
+	if len(h.mail.sent) != 0 {
+		t.Fatalf("notices before a minute = %+v, want none", h.mail.sent)
+	}
+	h.now = h.now.Add(2 * time.Minute)
+	h.settle()
+	h.settle()
+	if len(h.mail.sent) != 2 || len(stopped(crashed.RunID)) != 1 || len(stopped(refused.RunID)) != 1 {
+		t.Fatalf("notices = %+v, want one each for the crashed and refused subsessions only", h.mail.sent)
+	}
+	for id, want := range map[string][]string{
+		crashed.RunID: {"review", "disconnected", exited, "Retry Enhanced", "subsession cancel --run-id " + crashed.RunID},
+		refused.RunID: {"fix", "failed", "Authentication required", "aether-internal send --to " + refused.RunID, "subsession cancel --run-id " + refused.RunID},
+	} {
+		body := stopped(id)[0]
+		for _, w := range append(want, id) {
+			if !strings.Contains(body, w) {
+				t.Fatalf("notice %q lacks %q", body, w)
+			}
+		}
+	}
+	for _, m := range h.mail.sent {
+		if m.to != parent.ID {
+			t.Fatalf("notice went to %s, want the parent", m.to)
+		}
+	}
+
+	raw, _ := json.Marshal(protocol.ChildListParams{RunID: crashed.RunID})
+	listed, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildList, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := listed.(protocol.ChildListResult).Children[0]; c.State != protocol.ChildDisconnected || c.Error != exited {
+		t.Fatalf("listed as %q with error %q, want %q with %q", c.State, c.Error, protocol.ChildDisconnected, exited)
+	}
+
+	// The spell goes on through a reason or activity change.
+	park(crashed.RunID, signedOut, domain.ActivityFailed)
+	h.now = h.now.Add(5 * time.Minute)
+	h.settle()
+	if len(stopped(crashed.RunID)) != 1 || len(h.mail.errs) != 0 {
+		t.Fatalf("later passes in the spell sent %+v, errors %v; want the one notice", h.mail.sent, h.mail.errs)
+	}
+
+	// Work ends the spell; stopping again is told again.
+	park(crashed.RunID, "", domain.ActivityWorking)
+	h.settle()
+	park(crashed.RunID, exited, domain.ActivityDisconnected)
+	h.now = time.Now().Add(2 * time.Minute)
+	h.settle()
+	if len(stopped(crashed.RunID)) != 2 || len(h.mail.errs) != 0 {
+		t.Fatalf("notices after a second stop = %+v, errors %v; want 2", h.mail.sent, h.mail.errs)
+	}
+}
+
 func TestEndNoticeSavedWithAnOlderBodyCounts(t *testing.T) {
 	h := newHarness(t)
 	h.mail.db = h.db

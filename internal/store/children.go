@@ -40,10 +40,10 @@ type ChildStore interface {
 	// whose parent ended or was deleted, and completed children their
 	// closed parent left unreviewed.
 	ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error)
-	// IdleChildren returns the attached started children of a live parent
-	// whose live run has been quiet (domain.RunActivity.Quiet) since before
+	// ChildrenInSpell returns the attached started children of a live
+	// parent whose live run has been in states in accepts since before
 	// cutoff, with when that spell began.
-	IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, error)
+	ChildrenInSpell(ctx context.Context, cutoff time.Time, in func(domain.RunActivity, string) bool) ([]ChildSpell, error)
 	// SetChildState moves a reservation from one of from to to.
 	SetChildState(ctx context.Context, run domain.RunID, to domain.ChildState, errText string, from ...domain.ChildState) error
 	// MarkChildEndNotified reports whether this call set the flag.
@@ -195,16 +195,16 @@ func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, 
 		 ORDER BY rc.created_at`)
 }
 
-// IdleChild is a child run in an unbroken quiet spell.
-type IdleChild struct {
+// ChildSpell is a child run in an unbroken spell of states.
+type ChildSpell struct {
 	Child *domain.ChildReservation
 	Run   *domain.Run
 	Since time.Time
 }
 
-func (d *DB) IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, error) {
+func (d *DB) ChildrenInSpell(ctx context.Context, cutoff time.Time, in func(domain.RunActivity, string) bool) ([]ChildSpell, error) {
 	live, args := liveStatusArgs()
-	cands, err := d.listChildren(ctx, "idle children",
+	cands, err := d.listChildren(ctx, "children in a spell",
 		`SELECT `+childCols+` FROM run_children rc
 		 JOIN runs child ON child.id = rc.run_id
 		 JOIN runs parent ON parent.id = rc.parent_run_id
@@ -214,31 +214,31 @@ func (d *DB) IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, e
 	if err != nil {
 		return nil, err
 	}
-	var out []IdleChild
+	var out []ChildSpell
 	for _, c := range cands {
 		run, err := d.GetRun(ctx, c.RunID)
 		if err != nil {
 			return nil, err
 		}
-		if !run.Activity.Quiet(run.Reason) {
+		if !in(run.Activity, run.Reason) {
 			continue
 		}
-		since, err := d.quietSince(ctx, c.RunID)
+		since, err := d.spellSince(ctx, c.RunID, in)
 		if err != nil {
 			return nil, err
 		}
 		if !since.IsZero() && !since.After(cutoff) {
-			out = append(out, IdleChild{Child: c, Run: run, Since: since})
+			out = append(out, ChildSpell{Child: c, Run: run, Since: since})
 		}
 	}
 	return out, nil
 }
 
-// quietSince is when the run's current unbroken quiet spell began: the
-// oldest of the newest transitions that are all quiet. A reason change
+// spellSince is when the run's current unbroken spell of states in accepts
+// began: the oldest of the newest transitions in accepts. A reason change
 // inside the spell keeps it going. It is zero when the newest transition is
-// not quiet.
-func (d *DB) quietSince(ctx context.Context, run domain.RunID) (time.Time, error) {
+// not in the spell.
+func (d *DB) spellSince(ctx context.Context, run domain.RunID, in func(domain.RunActivity, string) bool) (time.Time, error) {
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT activity, reason, at FROM run_state_transitions WHERE run_id = ? ORDER BY rowid DESC`, run)
 	if err != nil {
@@ -255,7 +255,7 @@ func (d *DB) quietSince(ctx context.Context, run domain.RunID) (time.Time, error
 		if err := rows.Scan(&activity, &reason, &at); err != nil {
 			return time.Time{}, fmt.Errorf("store: read run %s transitions: %w", run, err)
 		}
-		if !activity.Quiet(reason) {
+		if !in(activity, reason) {
 			break
 		}
 		since = at

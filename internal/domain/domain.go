@@ -150,6 +150,22 @@ func (a RunActivity) Quiet(reason string) bool {
 	return false
 }
 
+// Stopped reports whether a live run in this activity and reason stopped
+// with nothing it reported saying so: its agent is not running, a turn
+// failed, or it waits on a person for anything but a question or block it
+// reported.
+func (a RunActivity) Stopped(reason string) bool {
+	switch a {
+	case ActivityDisconnected:
+		return true
+	case ActivityFailed:
+		return !strings.HasPrefix(reason, ReportedFailureReason)
+	case ActivityNeedsYou:
+		return !strings.HasPrefix(reason, NeedsInputReasonPrefix) && !strings.HasPrefix(reason, BlockedReasonPrefix)
+	}
+	return false
+}
+
 // RunReview is whether the run's owner has dealt with the success its agent
 // reported: empty when no success awaits them.
 type RunReview string
@@ -168,6 +184,10 @@ const BlockedReasonPrefix = "blocked: "
 // completed, before any retention suffix. A live run in that standing has
 // ActivityFinished instead.
 const ReportedSuccessReason = "agent reported success"
+
+// ReportedFailureReason is the reason of a run its agent's failure report
+// parked or ended, before any retention suffix.
+const ReportedFailureReason = "agent reported failure"
 
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether sessions --needs-you and

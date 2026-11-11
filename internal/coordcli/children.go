@@ -159,7 +159,7 @@ func childSkill(status *protocol.CoordStatusResult) string {
 		return "Subsessions: `aether-internal subsession start` runs part of your task as a separate Aether session with a fresh context and its own container and branch, on any installed agent and model, on your session owner's own account; its report reaches your inbox and wakes you. " +
 			"Use one for what your own subagents cannot give: another agent or model, a separate branch or build, long work that would crowd out your context, or an independent review; honor the number of subsessions and agents the user asks for. " +
 			"When to start one, the steps, the task format and the account rules: `aether-internal skill subsessions`. " +
-			"Account for unfinished subsessions before reporting success. A subsession idle or waiting for over an hour is reported to your inbox: check it, then wake it with `send --to <subsession>` or stop it with `subsession cancel`.\n"
+			"Account for unfinished subsessions before reporting success. A subsession idle or waiting for over an hour, or stopped on an error for a minute, is reported to your inbox: check it, then wake it with `send --to <subsession>` or stop it with `subsession cancel`.\n"
 	case slices.Contains(status.Capabilities, protocol.MethodChildOptions):
 		return "Subsessions: not available to this session now; `aether-internal subsession options` gives the reason. If the user asks for one, tell them that reason.\n"
 	}
