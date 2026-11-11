@@ -235,7 +235,7 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) error {
 func (s *Scheduler) resumeSleptBrowser(ctx context.Context, run domain.RunID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
-	due := entry != nil && entry.browserSlept && entry.asleepSince.IsZero() && !entry.sleeping
+	due := entry != nil && entry.browserSlept && entry.asleepSince.IsZero() && !entry.sleeping && !entry.paused
 	var cid runtime.ID
 	if due {
 		cid = entry.containerID
@@ -488,7 +488,7 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 		s.endSleep(entry, false)
 		return errStayAwake
 	}
-	if err := s.markAsleep(entry); err != nil {
+	if err := s.markAsleep(entry, true); err != nil {
 		s.endSleep(entry, false)
 		return err
 	}
@@ -499,9 +499,6 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 		s.mu.Unlock()
 		return errors.Join(err, s.reopenDevelopment(undo, run), s.resumeDevelopmentBrowser(undo, run, cid), s.unmarkAsleep(entry))
 	}
-	s.mu.Lock()
-	entry.browserSlept = true
-	s.mu.Unlock()
 	s.cfg.Git.StopDiffWatch(run)
 	// The container stop below ends an agent this could not stop.
 	if err := s.entryDriver(entry).Stop(ctx, run); err != nil {
@@ -524,7 +521,7 @@ func (s *Scheduler) sleepClosed(ctx context.Context, entry *supervised) error {
 	entry.sleeping = true
 	entry.sleepDone = make(chan struct{})
 	s.mu.Unlock()
-	if err := s.markAsleep(entry); err != nil {
+	if err := s.markAsleep(entry, false); err != nil {
 		s.endSleep(entry, false)
 		return err
 	}
@@ -533,14 +530,15 @@ func (s *Scheduler) sleepClosed(ctx context.Context, entry *supervised) error {
 
 // markAsleep records the sleep durably before anything stops, so a server
 // that restarts from here on recovers the run asleep rather than finishing
-// it on the container's exit.
-func (s *Scheduler) markAsleep(entry *supervised) error {
+// it on the container's exit. browser marks the companion the sleep pauses.
+func (s *Scheduler) markAsleep(entry *supervised, browser bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry.asleepSince = time.Now().UTC()
 	entry.wakeErr = nil
+	entry.browserSlept = browser
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		entry.asleepSince = time.Time{}
+		entry.asleepSince, entry.browserSlept = time.Time{}, false
 		return fmt.Errorf("record the sleep: %w", err)
 	}
 	return nil
@@ -549,7 +547,7 @@ func (s *Scheduler) markAsleep(entry *supervised) error {
 // unmarkAsleep takes back a sleep that stopped nothing.
 func (s *Scheduler) unmarkAsleep(entry *supervised) error {
 	s.mu.Lock()
-	entry.asleepSince = time.Time{}
+	entry.asleepSince, entry.browserSlept = time.Time{}, false
 	err := s.writeSidecar(entry.sidecar())
 	s.mu.Unlock()
 	s.endSleep(entry, false)

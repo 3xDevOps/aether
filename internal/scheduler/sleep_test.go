@@ -312,7 +312,7 @@ func TestARestartFinishesAnInterruptedSleep(t *testing.T) {
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
-	if err := e.sched.markAsleep(entry); err != nil {
+	if err := e.sched.markAsleep(entry, true); err != nil {
 		t.Fatal(err)
 	}
 	s2 := e.restartACP(t)
@@ -363,7 +363,7 @@ func TestARestartFinishesAnInterruptedClosedSleep(t *testing.T) {
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
-	if err := e.sched.markAsleep(entry); err != nil {
+	if err := e.sched.markAsleep(entry, false); err != nil {
 		t.Fatal(err)
 	}
 	s2 := e.restartACP(t)
