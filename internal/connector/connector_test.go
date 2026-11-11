@@ -30,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -1007,7 +1008,10 @@ func (*fakeRuns) Paused(domain.RunID) bool { return false }
 func (*fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
 }
-func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
+func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
+func (*fakeRuns) LoginProblem(domain.MemberID, string, harness.Profile) (string, bool, error) {
+	return "", false, nil
+}
 func (*fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
 func (*fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 func (*fakeRuns) Liveness(domain.RunID) (domain.RunLiveness, bool) {
