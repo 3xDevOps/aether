@@ -263,6 +263,9 @@ func (s *Server) workspaceOwnerSet(ctx context.Context, member domain.MemberID, 
 	ws := domain.WorkspaceID(p.WorkspaceID)
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
+	// Ordered with writes that checked the previous owner's rights under it.
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
 	if perr := s.requireSuperAdmin(ctx, member, method); perr != nil {
 		return nil, perr
 	}
