@@ -5,7 +5,7 @@ import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you
 import { isAdminRole } from '@/lib/permissions'
 import { isSudo } from '@/lib/run-requests'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
-import type { GatewayCapabilities, Member, Run, RunStatusCause, RunWait } from '@/lib/types'
+import type { GatewayCapabilities, Member, Run, RunStatusCause, RunWait, ServerInfo } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
 import { runPeople, runWatchers } from '@/store/presence'
 import type { RunRecord } from '@/store/runs'
@@ -232,10 +232,13 @@ export function useWorkspaceAccessServer(): boolean {
 }
 
 export function useIsSuperAdmin(): boolean {
-  return useStore((s) => {
-    const role = s.info?.member.role
-    return role === 'super_admin' || (role === 'admin' && !s.info?.features?.includes(workspaceAccessFeature))
-  })
+  return useStore((s) => administersServer(s.info))
+}
+
+/** useIsSuperAdmin outside a component. */
+export function administersServer(info: ServerInfo | null | undefined): boolean {
+  const role = info?.member.role
+  return role === 'super_admin' || (role === 'admin' && !info?.features?.includes(workspaceAccessFeature))
 }
 
 /**

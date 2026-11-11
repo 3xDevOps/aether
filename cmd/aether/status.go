@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -233,7 +234,7 @@ func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []proto
 		return "aether agent add <name>"
 	}
 	if slices.ContainsFunc(installed, func(a protocol.AgentInfo) bool { return a.LoginFound == nil || *a.LoginFound }) {
-		return mirrorStep(workspaces, mirrors, unseeded)
+		return mirrorStep(m, workspaces, mirrors, unseeded)
 	}
 	agent := installed[0]
 	switch {
@@ -249,10 +250,11 @@ func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []proto
 // commit as its accepted base. A local one cannot until its base branch
 // has a commit; unseeded maps such a workspace to its linked clone, or "".
 // A step is the caller's own only where their role in that workspace is
-// admin.
-func mirrorStep(workspaces []protocol.Workspace, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
+// admin. A server older than workspace access reports no workspace role,
+// so there the caller's server role applies.
+func mirrorStep(self protocol.Member, workspaces []protocol.Workspace, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
 	for _, ws := range workspaces {
-		admin := ws.Role == string(domain.RoleAdmin)
+		admin := cmp.Or(ws.Role, self.Role) == string(domain.RoleAdmin)
 		who := "an admin runs: "
 		if admin {
 			who = ""

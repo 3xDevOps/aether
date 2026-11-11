@@ -59,6 +59,7 @@ func TestStatusNextStep(t *testing.T) {
 		{"mirror adopted", admin, ws, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "ready", ObservedCommit: sha, AcceptedCommit: sha}}, ""},
 		{"mirror fetched, not an admin", protocol.Member{Role: "member"}, memberWS, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "ready", Generation: 3, ObservedCommit: sha}}, "an admin runs: aether workspace mirror adopt --workspace ws-1 --generation 3 --commit " + sha + " --yes"},
 		{"mirror never fetched, not an admin", protocol.Member{Role: "member"}, memberWS, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "auth-failed"}}, "an admin runs: aether workspace mirror refresh --workspace ws-1"},
+		{"mirror never fetched, older server's admin", admin, []protocol.Workspace{{ID: "ws-1", Name: "app"}}, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "auth-failed"}}, "aether workspace mirror refresh --workspace ws-1"},
 	} {
 		if got := nextStep(tc.member, tc.workspaces, tc.agents, tc.mirrors, nil); got != tc.want {
 			t.Errorf("%s: next = %q, want %q", tc.name, got, tc.want)
