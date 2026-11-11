@@ -252,7 +252,7 @@ The connector has these tools and no others:
 | `aether_list_workspaces` | Workspaces, and agents (installed, signed in, Enhanced) | `read` |
 | `aether_launch_options` | What you can launch and on which account: workspaces, your accounts with their usage, each account's agents and modes, fallback, a workspace's templates, and an agent's models when asked for ([Launch options](#launch-options)) | `read` |
 | `aether_list_sessions`, `aether_get_session` | Your sessions (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one session with what it waits on, its `wait_conditions`, its latest report and its pull request; `evidence: true` adds [progress evidence](#progress-evidence) | `read` |
-| `aether_session_history` | A page of a session's conversation (Enhanced) or terminal, with its newest reports; `limit` (default 20, at most 50) caps both | `read` |
+| `aether_session_history` | A page of a session's conversation (Enhanced) or terminal, with the session's newest reports, the same on every page; `limit` (default 20, at most 50) caps the page and the reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your sessions did today, yesterday or this week, in your time zone | `read` |
 | `aether_session_changes`, `aether_pr_status` | A session's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
