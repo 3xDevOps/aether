@@ -351,7 +351,9 @@ top to bottom:
    **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a
    quarter and the count in a `CountBadge`; the count stays in the button's
-   name. Every group starts expanded and lists all of its sessions; a group
+   name. **Mine** matches the count badge's height on fine pointers and keeps a
+   44px touch target on coarse pointers. Every group starts expanded and lists all
+   of its sessions; a group
    closes only when its header is pressed, and the list fades back in when
    the viewer reopens it (rows never glide their height, and a group that
    mounts with hydration does not fade). Until the first sessions arrive, six
