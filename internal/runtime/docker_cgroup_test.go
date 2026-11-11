@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/client"
 )
 
@@ -44,5 +45,24 @@ func TestCreateCgroupParentFollowsDriver(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUsesSessionSliceNeedsLocalSystemdDaemon(t *testing.T) {
+	for driver, want := range map[string]bool{"systemd": true, "cgroupfs": false} {
+		d := capacityDocker(t, system.Info{CgroupDriver: driver})
+		if got, err := d.UsesSessionSlice(t.Context()); err != nil || got != want {
+			t.Errorf("local %s daemon: UsesSessionSlice = %v, %v; want %v", driver, got, err, want)
+		}
+	}
+	api := &fakeDockerAPI{cgroupDriver: "systemd"}
+	srv := api.serve(t, "1.52")
+	cli, err := client.New(client.WithHost("tcp://"+srv.Listener.Addr().String()), client.WithAPIVersion("1.52"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	if got, err := (&Docker{cli: cli}).UsesSessionSlice(t.Context()); err != nil || got {
+		t.Errorf("remote systemd daemon: UsesSessionSlice = %v, %v; want false", got, err)
 	}
 }

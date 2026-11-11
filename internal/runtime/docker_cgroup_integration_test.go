@@ -24,7 +24,10 @@ func TestDockerSessionCgroupParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := sessionCgroupParent(info.Info.CgroupDriver)
+	want, err := d.cgroupParent(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if want == "" {
 		t.Skipf("docker cgroup driver %q has no session parent", info.Info.CgroupDriver)
 	}
