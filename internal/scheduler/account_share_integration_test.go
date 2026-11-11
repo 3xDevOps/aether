@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -89,8 +88,18 @@ func launchShareRun(t *testing.T, e *testEnv, docker *runtime.Docker, cli *clien
 			}
 		}
 		for _, v := range volumes {
-			if _, err := cli.VolumeRemove(cctx, v, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
-				t.Errorf("cleanup VolumeRemove(%s) error: %v; containers using it: %s", v, err, volumeUsers(cctx, cli, v))
+			_, err := cli.VolumeRemove(cctx, v, client.VolumeRemoveOptions{})
+			if err == nil || cerrdefs.IsNotFound(err) {
+				continue
+			}
+			users, listErr := cli.ContainerList(cctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("volume", v)})
+			t.Errorf("cleanup VolumeRemove(%s) error: %v", v, err)
+			if listErr != nil {
+				t.Errorf("list the containers using %s: %v", v, listErr)
+				continue
+			}
+			for _, c := range users.Items {
+				t.Errorf("%s is used by %.12s %v %v", v, c.ID, c.Names, c.Labels)
 			}
 		}
 	})
@@ -108,19 +117,6 @@ func launchShareRun(t *testing.T, e *testEnv, docker *runtime.Docker, cli *clien
 		t.Fatalf("harness did not print login %q; pty output = %q", wantLogin, out)
 	}
 	return shareRun{run: run, docker: docker, id: id, mounts: info.Container.Mounts}
-}
-
-// volumeUsers names the containers mounting volume, with their labels.
-func volumeUsers(ctx context.Context, cli *client.Client, volume string) string {
-	list, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("volume", volume)})
-	if err != nil {
-		return "unknown: " + err.Error()
-	}
-	var users []string
-	for _, c := range list.Items {
-		users = append(users, fmt.Sprintf("%.12s %v %v", c.ID, c.Names, c.Labels))
-	}
-	return strings.Join(users, "; ")
 }
 
 func (r shareRun) sh(t *testing.T, script string) (int, string) {
