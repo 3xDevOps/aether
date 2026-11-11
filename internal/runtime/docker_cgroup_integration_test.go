@@ -80,8 +80,10 @@ func TestDockerSessionCgroupParent(t *testing.T) {
 		if info.Info.CgroupDriver == "systemd" {
 			leaf = "/" + want + "/docker-" + string(tc.id) + ".scope"
 		}
-		if in := strings.Contains(string(cgroup), leaf+"\n"); in != (tc.parent != "") {
-			t.Fatalf("/proc/<pid>/cgroup = %q; under %s: %v, want %v", cgroup, leaf, in, tc.parent != "")
+		// The legacy container lands wherever the daemon's default parent is,
+		// which may be configured to the same place.
+		if tc.parent != "" && !strings.Contains(string(cgroup), leaf+"\n") {
+			t.Fatalf("/proc/<pid>/cgroup = %q, want it under %s", cgroup, leaf)
 		}
 
 		if err = d.Pause(t.Context(), tc.id); err != nil {
