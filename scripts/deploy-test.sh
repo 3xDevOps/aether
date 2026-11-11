@@ -13,6 +13,7 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 mkdir -p "$tmp/repo/scripts" "$tmp/repo/web/dist" "$tmp/repo/packaging/systemd"
 cp "$script_dir/deploy.sh" "$tmp/repo/scripts/deploy.sh"
 printf '%s\n' unit >"$tmp/repo/packaging/systemd/aether-server.service"
+printf '%s\n' slice >"$tmp/repo/packaging/systemd/aether.slice"
 
 bin="$tmp/bin"
 log="$tmp/cmd.log"
@@ -122,6 +123,8 @@ assert "ssh -tt user@testhost sudo sh -c"
 assert "install -m0755 -o root -g root '/tmp/deploy-test/aether-server' '/usr/local/bin/aether-server'"
 assert "install -m0644 -o root -g root '/tmp/deploy-test/aether-server.service' '/etc/systemd/system/aether-server.service'"
 assert "systemctl daemon-reload && systemctl enable aether-server"
+assert "scp packaging/systemd/aether.slice user@testhost:/tmp/deploy-test/aether.slice"
+assert "install -m0644 -o root -g root '/tmp/deploy-test/aether.slice' '/etc/systemd/system/aether.slice'"
 assert "systemctl restart aether-server"
 assert "ssh user@testhost rm -rf '/tmp/deploy-test'"
 assert "ssh user@testhost systemctl is-active --quiet aether-server"
@@ -136,7 +139,8 @@ UNIT_EXISTS=1 DEPLOY_HOST=user@testhost sh "$tmp/repo/scripts/deploy.sh" >/dev/n
 
 refute "scp packaging/systemd/aether-server.service"
 refute "systemctl enable"
-assert "systemctl restart aether-server"
+assert "install -m0644 -o root -g root '/tmp/deploy-test/aether.slice' '/etc/systemd/system/aether.slice'"
+assert "systemctl daemon-reload && systemctl restart aether-server"
 
 # --- a version mismatch on the target must fail the deploy ----------------
 

@@ -9,7 +9,8 @@
 #
 # The target needs systemd and Docker. If the aether-server unit is not
 # installed yet, the first deploy installs packaging/systemd/
-# aether-server.service and enables it.
+# aether-server.service and enables it. Every deploy installs
+# packaging/systemd/aether.slice, the slice session containers run in.
 #
 # A remote deploy authenticates SSH once (every later ssh/scp multiplexes
 # over the same connection) and runs all privileged steps in one sudo
@@ -33,6 +34,8 @@ HOST="${DEPLOY_HOST:-}"
 BIN=/usr/local/bin/aether-server
 UNIT_SRC=packaging/systemd/aether-server.service
 UNIT_DST=/etc/systemd/system/aether-server.service
+SLICE_SRC=packaging/systemd/aether.slice
+SLICE_DST=/etc/systemd/system/aether.slice
 
 # The server binary embeds web/dist; building with an unbuilt SPA would
 # silently ship an empty dashboard. `make deploy` builds it first.
@@ -89,13 +92,16 @@ copy dist/aether-server-deploy "$tmp/aether-server"
 # replacing the binary of a running server never hits ETXTBSY, and root
 # ownership keeps a root-executed binary out of reach of the deploying
 # user (same concern as install.sh).
-privileged="install -m0755 -o root -g root '$tmp/aether-server' '$BIN'"
+copy "$SLICE_SRC" "$tmp/aether.slice"
+privileged="install -m0755 -o root -g root '$tmp/aether-server' '$BIN' && install -m0644 -o root -g root '$tmp/aether.slice' '$SLICE_DST'"
+enable=""
 if ! target 'systemctl cat aether-server.service >/dev/null 2>&1'; then
 	say "systemd unit missing; it will be installed and enabled"
 	copy "$UNIT_SRC" "$tmp/aether-server.service"
-	privileged="$privileged && install -m0644 -o root -g root '$tmp/aether-server.service' '$UNIT_DST' && systemctl daemon-reload && systemctl enable aether-server"
+	privileged="$privileged && install -m0644 -o root -g root '$tmp/aether-server.service' '$UNIT_DST'"
+	enable=" && systemctl enable aether-server"
 fi
-privileged="$privileged && systemctl restart aether-server"
+privileged="$privileged && systemctl daemon-reload$enable && systemctl restart aether-server"
 
 say "installing ${BIN} on ${HOST:-this machine} (sudo may ask for a password)"
 target_tty "$SUDO sh -c \"$privileged\""
