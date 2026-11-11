@@ -1,7 +1,5 @@
 'use strict'
 
-// Window zoom for the shell, which has no View menu to provide it.
-
 const { screen } = require('electron')
 
 // The floor the dashboard's own layout is designed against; see
