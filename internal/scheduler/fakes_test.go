@@ -39,6 +39,8 @@ type fakeRuntime struct {
 	startErr    error
 	waitErr     error
 	inspectWait time.Duration
+	// inspectHook runs at the start of every Inspect.
+	inspectHook func(id runtime.ID)
 	startHook   func(c *fakeContainer)
 	stopHook    func()
 	commitErr   error
@@ -432,8 +434,11 @@ func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStat
 
 func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
 	r.mu.Lock()
-	waitErr, delay := r.waitErr, r.inspectWait
+	waitErr, delay, hook := r.waitErr, r.inspectWait, r.inspectHook
 	r.mu.Unlock()
+	if hook != nil {
+		hook(id)
+	}
 	if waitErr != nil {
 		return runtime.ContainerInfo{}, waitErr
 	}

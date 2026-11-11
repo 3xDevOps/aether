@@ -578,7 +578,9 @@ The session wakes when you send a message or answer, change its model, mail
 reaches it, you type in its terminal, open a shell tab, use its Browser tab,
 start `aether ssh` or a port forward to it, run `aether resume <session-id>`,
 or choose **Wake** in the Chat view. Opening the session or its Browser tab
-without acting does not wake it. The request that woke it waits while the
+without acting does not wake it. A port forward wakes the session, but a server
+that ran detached, such as one started with `nohup`, stopped with the sleep:
+the connection is refused until you start it again. The request that woke it waits while the
 container starts and the agent restores its conversation, then goes through.
 Two wakes at once start the container once. Waking counts against the same
 memory and disk checks as a launch. A refused or failed wake returns its

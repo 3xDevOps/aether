@@ -650,20 +650,54 @@ func TestRecoveryStopsAFrozenSleeperAFailedRelaunchAdopted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The Relaunch adopts the run while recovery inspects its container.
+	var once sync.Once
 	e.rt.mu.Lock()
-	e.rt.inspectWait = 300 * time.Millisecond
+	e.rt.inspectHook = func(id runtime.ID) {
+		if id != c.id {
+			return
+		}
+		once.Do(func() {
+			s2.mu.Lock()
+			s2.runs[run.ID] = s2.entryFromSidecar(r, sc)
+			s2.mu.Unlock()
+		})
+	}
 	e.rt.mu.Unlock()
-	swept := make(chan struct{})
-	go func() {
-		defer close(swept)
-		s2.cleanupTerminalSidecars(context.Background())
-	}()
-	time.Sleep(100 * time.Millisecond)
-	s2.mu.Lock()
-	s2.runs[run.ID] = s2.entryFromSidecar(r, sc)
-	s2.mu.Unlock()
-	<-swept
+	s2.cleanupTerminalSidecars(t.Context())
 	if state := containerState(c); state != "stopped" {
 		t.Fatalf("the frozen sleeper's container is %s after recovery, want stopped", state)
+	}
+}
+
+// A Relaunch of a closed session whose sleep a crash interrupted, with the
+// container still frozen, stops it and starts it again.
+func TestRelaunchFinishesAnInterruptedClosedSleep(t *testing.T) {
+	t.Parallel()
+	e, rt := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(entry); err != nil {
+		t.Fatal(err)
+	}
+	c := e.container(t, run.ID)
+	if state := containerState(c); state != "paused" {
+		t.Fatalf("the closed session's container is %s, want paused", state)
+	}
+	before := len(rt.all())
+	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	if state := containerState(c); state != "running" {
+		t.Fatalf("reopened container is %s, want running", state)
+	}
+	if methods := rt.all()[before].agent.Methods(); !slices.Contains(methods, acp.AgentMethodSessionResume) {
+		t.Fatalf("reopened with %v, want session/resume", methods)
 	}
 }

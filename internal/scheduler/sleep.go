@@ -265,6 +265,13 @@ func (s *Scheduler) startAsleep(ctx context.Context, entry *supervised) error {
 	s.mu.Lock()
 	cid := entry.containerID
 	s.mu.Unlock()
+	// A sleep a crash interrupted left the container frozen or running,
+	// which docker start refuses.
+	if info, err := s.cfg.Runtime.Inspect(ctx, cid); err == nil && !info.Exited {
+		if err = s.stopLeftoverAsleep(ctx, entry); err != nil {
+			return err
+		}
+	}
 	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
 		return err
 	}
@@ -477,6 +484,8 @@ done`
 // foregroundJob names a command running in the foreground of one of the
 // container's terminals, which keeps the session awake.
 func (s *Scheduler) foregroundJob(ctx context.Context, cid runtime.ID) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", foregroundJobScript}, "")
 	if err == nil && code != 0 {
 		err = fmt.Errorf("exit %d: %s", code, strings.TrimSpace(stderr))
@@ -526,7 +535,10 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 	}
 	if job, err := s.foregroundJob(ctx, cid); err != nil || job != "" {
 		s.endSleep(entry, false)
-		return errors.Join(errStayAwake, err)
+		if err != nil {
+			slog.Warn("scheduler: keep a session awake whose terminals could not be read", "run", run, "error", err)
+		}
+		return errStayAwake
 	}
 	if err := s.markAsleep(entry); err != nil {
 		s.endSleep(entry, false)
@@ -682,17 +694,24 @@ func (s *Scheduler) stopRecoveredAsleep(ctx context.Context, entry *supervised) 
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero()
-	cid := entry.containerID
 	s.mu.Unlock()
 	if !asleep {
 		return
 	}
-	if err := s.removeDevelopmentBrowser(ctx, entry.runID); err != nil {
-		slog.Warn("scheduler: remove a sleeping session's browser companion", "run", entry.runID, "error", err)
-	}
-	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
+	if err := s.stopLeftoverAsleep(ctx, entry); err != nil {
 		slog.Warn("scheduler: stop a sleeping session's container", "run", entry.runID, "error", err)
 	}
+}
+
+// stopLeftoverAsleep finishes a sleep a crash interrupted: it removes the
+// browser companion and stops the container. Caller holds
+// entry.lifecycleMu.
+func (s *Scheduler) stopLeftoverAsleep(ctx context.Context, entry *supervised) error {
+	s.mu.Lock()
+	cid := entry.containerID
+	entry.sleepGen++
+	s.mu.Unlock()
+	return errors.Join(s.removeDevelopmentBrowser(ctx, entry.runID), s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace))
 }
 
 // finalizeAsleep finishes, with exit code, a run whose container a sleep had

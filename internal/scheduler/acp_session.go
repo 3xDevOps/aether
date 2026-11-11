@@ -168,7 +168,11 @@ func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string, valu
 }
 
 func (s *Scheduler) ACPCancel(ctx context.Context, run domain.RunID) error {
-	if s.Sleep(run).AsleepSince != nil {
+	s.mu.Lock()
+	entry := s.runs[run]
+	asleep := entry != nil && (entry.sleeping || !entry.asleepSince.IsZero())
+	s.mu.Unlock()
+	if asleep {
 		return nil
 	}
 	awake, err := s.holdAwake(ctx, run)
