@@ -13,7 +13,7 @@ import { isTerminal, type RunRecord } from '@/store/runs'
 /** An idle session whose container Aether stopped, and the wake that starts it again. */
 export function SleepCallout({ run }: { run: RunRecord }) {
   const now = useClock()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const [busy, setBusy] = useState(false)
