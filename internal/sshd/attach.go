@@ -229,8 +229,8 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		}
 	}
 
-	// A viewer only watches; a member who would type wakes a sleeping run.
-	if wantsControl && s.cfg.Runs != nil {
+	// A viewer only watches; a member who may type wakes a sleeping run.
+	if wantsControl && s.cfg.Runs != nil && checkSteer(ctx, s.cfg.Store, member, run.ID) == nil {
 		if werr := s.cfg.Runs.WakeRun(ctx, run.ID, member); werr != nil {
 			e := rpcError(werr)
 			_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})

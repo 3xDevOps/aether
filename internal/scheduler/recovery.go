@@ -106,6 +106,18 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("%w: session %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new session",
 			ErrInvalidTransition, run)
 	}
+	s.mu.Lock()
+	reserved := !entry.asleepSince.IsZero()
+	s.mu.Unlock()
+	if reserved {
+		// Outside lifecycleMu: the disk reclaim a reservation may run can
+		// pick this closed run and take its lock.
+		release, capErr := s.reserveCapacity(ctx)
+		if capErr != nil {
+			return nil, capErr
+		}
+		defer release()
+	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
@@ -348,11 +360,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	}
 
 	if paused && asleep {
-		release, capErr := s.reserveCapacity(ctx)
-		if capErr != nil {
-			return nil, rollback(capErr)
+		if !reserved {
+			return nil, rollback(retainedTransitionError())
 		}
-		defer release()
 		waking := make(chan struct{})
 		s.mu.Lock()
 		entry.waking = waking

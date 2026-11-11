@@ -447,36 +447,34 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 	defer entry.lifecycleMu.Unlock()
 	run := entry.runID
 	s.mu.Lock()
-	if s.runs[run] != entry || entry.sleeping || !entry.asleepSince.IsZero() || s.liveFactsLocked(entry).busy != "" {
+	facts := s.liveFactsLocked(entry)
+	if s.runs[run] != entry || entry.sleeping || !entry.asleepSince.IsZero() || facts.busy != "" {
 		s.mu.Unlock()
 		return errStayAwake
 	}
 	entry.sleeping = true
 	entry.sleepDone = make(chan struct{})
 	s.mu.Unlock()
-	// An autonomous turn may have started since the sweep read the session.
-	if facts := s.sessionFacts(run, idleFacts{}); facts.busy != "" {
+	// Activity since the sweep read the run, an autonomous turn included,
+	// keeps it awake.
+	if last, ok := idleSince(s.sessionFacts(run, facts)); !ok || time.Since(last) < s.cfg.RunSleepAfter {
 		s.endSleep(entry, false)
 		return errStayAwake
 	}
-	if err := s.prepareDevelopmentClose(ctx, run); err != nil {
+	if err := s.markAsleep(entry); err != nil {
 		s.endSleep(entry, false)
-		return errors.Join(err, s.reopenDevelopment(context.WithoutCancel(ctx), run))
+		return err
+	}
+	if err := s.prepareDevelopmentClose(ctx, run); err != nil {
+		return errors.Join(err, s.reopenDevelopment(context.WithoutCancel(ctx), run), s.unmarkAsleep(entry))
 	}
 	s.cfg.Git.StopDiffWatch(run)
+	// The container stop below ends an agent this could not stop.
 	if err := s.entryDriver(entry).Stop(ctx, run); err != nil {
 		slog.Warn("scheduler: stop the agent of a session falling asleep", "run", run, "error", err)
 	}
 	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(run, "")))
-	s.mu.Lock()
-	cid := entry.containerID
-	entry.sleepGen++
-	s.mu.Unlock()
-	// A container the stop could not reach is still marked asleep: its agent
-	// is gone, and a wake starts it the same way.
-	stopErr := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace)
-	s.endSleep(entry, true)
-	return stopErr
+	return s.stopSleeping(ctx, entry)
 }
 
 // sleepClosed stops a closed session's frozen container. Its agent already
@@ -491,32 +489,78 @@ func (s *Scheduler) sleepClosed(ctx context.Context, entry *supervised) error {
 	}
 	entry.sleeping = true
 	entry.sleepDone = make(chan struct{})
-	entry.sleepGen++
+	s.mu.Unlock()
+	if err := s.markAsleep(entry); err != nil {
+		s.endSleep(entry, false)
+		return err
+	}
+	return s.stopSleeping(ctx, entry)
+}
+
+// markAsleep records the sleep durably before anything stops, so a server
+// that restarts from here on recovers the run asleep rather than finishing
+// it on the container's exit.
+func (s *Scheduler) markAsleep(entry *supervised) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry.asleepSince = time.Now().UTC()
+	entry.wakeErr = nil
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		entry.asleepSince = time.Time{}
+		return fmt.Errorf("record the sleep: %w", err)
+	}
+	return nil
+}
+
+// unmarkAsleep takes back a sleep that stopped nothing.
+func (s *Scheduler) unmarkAsleep(entry *supervised) error {
+	s.mu.Lock()
+	entry.asleepSince = time.Time{}
+	err := s.writeSidecar(entry.sidecar())
+	s.mu.Unlock()
+	s.endSleep(entry, false)
+	if err != nil {
+		return fmt.Errorf("take back the sleep: %w", err)
+	}
+	return nil
+}
+
+// stopSleeping stops the container of a run marked asleep. A container the
+// stop could not reach stays marked asleep: its agent is gone, and a wake
+// starts it the same way.
+func (s *Scheduler) stopSleeping(ctx context.Context, entry *supervised) error {
+	s.mu.Lock()
 	cid := entry.containerID
+	entry.sleepGen++
 	s.mu.Unlock()
 	stopErr := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace)
 	s.endSleep(entry, true)
-	return stopErr
+	if stopErr != nil {
+		return fmt.Errorf("stop the sleeping session's container: %w", stopErr)
+	}
+	return nil
 }
 
-// endSleep settles a sleep: asleep when the container stopped, else awake
+// endSleep settles a sleep: asleep once the container stopped, else awake
 // as before.
 func (s *Scheduler) endSleep(entry *supervised, asleep bool) {
 	s.mu.Lock()
 	entry.sleeping = false
+	var persistErr error
 	if asleep {
-		entry.asleepSince = time.Now().UTC()
 		entry.paused = true
-		entry.wakeErr = nil
 		entry.agentExec, entry.agentKeeper = nil, nil
 		if s.runs[entry.runID] == entry {
-			if err := s.writeSidecar(entry.sidecar()); err != nil {
-				slog.Warn("scheduler: persist the sleeping session", "run", entry.runID, "error", err)
-			}
+			persistErr = s.writeSidecar(entry.sidecar())
 		}
 	}
 	close(entry.sleepDone)
 	s.mu.Unlock()
+	if persistErr != nil {
+		// The sleep marker is already durable; this write only drops the
+		// stopped agent's exec, which a wake replaces anyway.
+		slog.Warn("scheduler: persist the sleeping session", "run", entry.runID, "error", persistErr)
+	}
 	if asleep {
 		s.publishSleep(entry)
 	}
@@ -624,15 +668,17 @@ func (e *awakeExec) Detach() error {
 }
 
 // wakesRun reports a development call that starts work in the container: a
-// terminal, or any browser operation but reading its status or closing it.
+// terminal or a browser operation. The reads an open Browser tab polls,
+// status, pages, console and network, neither wake a run nor keep it awake.
 func wakesRun(method string) bool {
 	switch method {
-	case protocol.MethodDevTerminalStart:
+	case protocol.MethodDevTerminalStart, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserNavigate,
+		protocol.MethodDevBrowserAction, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserReset,
+		protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserInspect, protocol.MethodDevBrowserScreenshot,
+		protocol.MethodDevBrowserWait:
 		return true
-	case protocol.MethodDevBrowserStatus, protocol.MethodDevBrowserClose:
-		return false
 	}
-	return strings.HasPrefix(method, "dev.browser.")
+	return false
 }
 
 func (s *Scheduler) noteBrowsed(run domain.RunID, method string) {

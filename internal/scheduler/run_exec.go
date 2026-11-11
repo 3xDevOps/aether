@@ -28,7 +28,12 @@ type RunExec struct {
 // CheckRunExec reports why p may not start a process in the run now. It is
 // the admission StartRunExec applies: the development authorization shell
 // tabs use, then a live, unpaused container still open to new surfaces.
+// A sleeping run passes once authorized: the process that StartRunExec then
+// starts wakes it.
 func (s *Scheduler) CheckRunExec(ctx context.Context, id domain.RunID, p control.Principal, authorize func() error) error {
+	if s.Sleep(id).AsleepSince != nil {
+		return s.developmentAuthorization(ctx, id, p, authorize)
+	}
 	_, err := s.admitRunExec(ctx, id, p, authorize)
 	return err
 }
@@ -43,7 +48,7 @@ func (s *Scheduler) admitRunExec(ctx context.Context, id domain.RunID, p control
 	if err != nil {
 		return LiveRun{}, err
 	}
-	if s.Paused(id) || s.Sleep(id).AsleepSince != nil {
+	if s.Paused(id) {
 		return LiveRun{}, ErrRunPaused
 	}
 	if err = s.checkDevelopmentOpen(id, live.ContainerID); err != nil {

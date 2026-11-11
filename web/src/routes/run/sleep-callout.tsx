@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Spinner } from '@/components/ui/spinner'
 import { api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { clockTime, errorSentence } from '@/lib/format'
-import type { RunRecord } from '@/store/runs'
+import { isTerminal, type RunRecord } from '@/store/runs'
 
 /** An idle session whose container Aether stopped, and the wake that starts it again. */
 export function SleepCallout({ run }: { run: RunRecord }) {
@@ -13,7 +13,10 @@ export function SleepCallout({ run }: { run: RunRecord }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const since = run.asleep_since
-  if (!since) return null
+  // A failure belongs to one sleep; the next one starts clean.
+  useEffect(() => setError(undefined), [since])
+  // A closed session reopens through Relaunch, which its composer offers.
+  if (!since || isTerminal(run.status)) return null
   const waking = run.waking === true || busy
   const failure = error ?? run.wake_error
   const wake = async () => {

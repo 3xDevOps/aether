@@ -61,7 +61,10 @@ func (e *testEnv) sleepRun(t *testing.T, run domain.RunID) {
 	t.Helper()
 	waitFor(t, "the session asleep", func() bool {
 		e.sched.sleepIdle(t.Context())
-		return e.sched.Sleep(run).AsleepSince != nil
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		entry := e.sched.runs[run]
+		return entry != nil && !entry.asleepSince.IsZero() && !entry.sleeping
 	})
 }
 
@@ -297,4 +300,29 @@ func TestKillingASleepingRunFinishesIt(t *testing.T) {
 		got, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && got.Status == domain.RunAbandoned
 	})
+}
+
+// A server that dies after recording a sleep and before stopping the
+// container finds the run asleep at restart, and stops the container then.
+func TestARestartFinishesAnInterruptedSleep(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(entry); err != nil {
+		t.Fatal(err)
+	}
+	s2 := e.restartACP(t)
+	if s2.Sleep(run.ID).AsleepSince == nil {
+		t.Fatal("the restart lost the recorded sleep")
+	}
+	c := e.container(t, run.ID)
+	waitFor(t, "the container stopped", func() bool { return containerState(c) == "stopped" })
+	time.Sleep(50 * time.Millisecond)
+	if got, _ := e.db.GetRun(t.Context(), run.ID); got.Status.Terminal() {
+		t.Fatalf("the restart finished a session it found asleep: %s", got.Status)
+	}
 }
