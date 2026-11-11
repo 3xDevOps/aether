@@ -180,6 +180,7 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 		_ = restoreInvite(s.cfg.InvitesDir, code, rec)
 		return nil, fmt.Errorf("sshd: invite join: %w", err)
 	}
+	s.accessChanged()
 	slog.Info("sshd: invite join: collaborator registered",
 		"member", m.ID, "key", fingerprintOf(keyLine), "display", display, "workspaces", rec.Workspaces)
 	return m, nil
