@@ -59,6 +59,9 @@ type Filter struct {
 	// NoRereads leaves out run.status rereads even when Types asks for
 	// run.status.
 	NoRereads bool
+	// Scope, when its Workspace is set, keeps only the events it makes
+	// events.Reachable.
+	Scope events.Scope
 }
 
 // Page is one slice of history, oldest first. NextSeq is the cursor to
@@ -117,7 +120,7 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 			if !f.keeps(e) {
 				continue
 			}
-			out = append(out, e)
+			out = append(out, events.Scoped(e, f.Scope))
 			if len(out) == limit {
 				break
 			}
@@ -168,7 +171,7 @@ func (r *Reader) Before(ctx context.Context, f Filter, beforeSeq uint64, limit i
 			if !f.keeps(e) {
 				continue
 			}
-			out = append(out, e)
+			out = append(out, events.Scoped(e, f.Scope))
 			if len(out) == limit {
 				break
 			}
@@ -211,6 +214,9 @@ func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, 
 
 func (f Filter) keeps(e events.Event) bool {
 	if f.Member != "" && e.ActorID != f.Member {
+		return false
+	}
+	if f.Scope.Workspace != nil && !events.Reachable(e, f.Scope) {
 		return false
 	}
 	if p, ok := e.Payload.(events.TimelinePayload); ok && len(f.TimelineKinds) > 0 && !slices.Contains(f.TimelineKinds, p.Kind) {

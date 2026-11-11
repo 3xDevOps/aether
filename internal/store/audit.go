@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -49,8 +50,11 @@ type AuditEntry struct {
 // AuditQuery selects audit entries, newest first: Member's alone unless
 // empty, ConnectorID's calls and its revocation alone unless empty, and
 // only those before seq Before unless it is 0.
+// AuditQuery selects audit entries. A set Member keeps that member's
+// entries and those in Workspaces.
 type AuditQuery struct {
 	Member      domain.MemberID
+	Workspaces  []domain.WorkspaceID
 	ConnectorID string
 	Before      int64
 	Limit       int
@@ -134,8 +138,11 @@ func removeConnectors(ctx context.Context, tx *sql.Tx, where string, args ...any
 func (d *DB) ListAudit(ctx context.Context, q AuditQuery) ([]*AuditEntry, error) {
 	query, args := `SELECT seq, ts, member_id, via, connector_id, client, method, workspace_id, target, code, security FROM audit WHERE 1 = 1`, []any{}
 	if q.Member != "" {
-		query += ` AND member_id = ?`
+		query += ` AND (member_id = ?` + strings.Repeat(` OR workspace_id = ?`, len(q.Workspaces)) + `)`
 		args = append(args, q.Member)
+		for _, ws := range q.Workspaces {
+			args = append(args, ws)
+		}
 	}
 	if q.ConnectorID != "" {
 		query += ` AND (connector_id = ? OR (method = 'connector.revoke' AND target = ?))`

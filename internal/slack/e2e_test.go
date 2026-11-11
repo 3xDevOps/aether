@@ -99,6 +99,9 @@ type (
 func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
+	if err := h.db.GrantWorkspace(ctx, h.ws.ID, h.ada.ID, ""); err != nil {
+		t.Fatalf("GrantWorkspace: %v", err)
+	}
 	bus, err := events.NewInProc(ctx, nil)
 	if err != nil {
 		t.Fatalf("bus: %v", err)

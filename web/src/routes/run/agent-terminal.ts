@@ -34,7 +34,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
   const workspaceID = run.workspace_id
   const steerOthers = useStore((s) => s.workspaces[workspaceID]?.steer_others)
   const capability = useCapability()
-  const self = useSelf()
+  const self = useSelf(workspaceID)
   const identityKey = useStore((s) => s.identityKey)
   const terminalCacheEpoch = useStore((s) => s.terminalCacheEpoch)
   const roomStatus = useStore((s) => s.roomStatus[runID])

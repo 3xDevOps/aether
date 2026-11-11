@@ -173,7 +173,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	}
 
 	third := e.connect(t, allScopes...)
-	if err := e.db.RevokeDevice(ctx, e.deviceID); err != nil {
+	if err := e.db.RevokeDevice(ctx, e.deviceID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if status, _, body := e.bearer(third.token.AccessToken); status != http.StatusUnauthorized || !strings.Contains(body, "revoked") {
@@ -267,6 +267,9 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 		Role: domain.RoleCollaborator}
 	for _, m := range []*domain.Member{grace, bo} {
 		if err := e.db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.db.GrantWorkspace(ctx, e.ws.ID, m.ID, domain.MemberID(info.Member.ID)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -620,7 +623,7 @@ func newEnv(t *testing.T) *env {
 	if err = db.RegisterDevice(ctx, dev); err != nil {
 		t.Fatal(err)
 	}
-	ws := &domain.Workspace{Name: "proj", BaseBranch: "main"}
+	ws := &domain.Workspace{Name: "proj", BaseBranch: "main", OwnerID: member.ID}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatal(err)
 	}

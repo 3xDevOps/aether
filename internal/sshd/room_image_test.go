@@ -174,7 +174,7 @@ func TestRoomImageRevocationAndDeletionStopOpenStream(t *testing.T) {
 			}
 			defer func() { _ = stream.Close() }()
 			if cause == "membership" {
-				if deleteErr := e.store.DeleteMember(t.Context(), viewer.ID); deleteErr != nil {
+				if deleteErr := e.store.DeleteMember(t.Context(), viewer.ID, ""); deleteErr != nil {
 					t.Fatal(deleteErr)
 				}
 			} else {

@@ -18,6 +18,7 @@ import (
 func TestServerEdgeClaimCode(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	admin := controlClient(t, e)
 	method := protocol.MethodServerEdgeClaimCode
@@ -70,7 +71,7 @@ func TestServerEdgeClaimCode(t *testing.T) {
 		t.Fatalf("claim with the issued code: %v (banner %q)", err, banner)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	if m, err := identities(t, e).GetMemberByIdentity(ctx, octo.Provider, octo.Subject); err != nil || m.ID != e.member.ID || m.Role != domain.RoleAdmin {
+	if m, err := identities(t, e).GetMemberByIdentity(ctx, octo.Provider, octo.Subject); err != nil || m.ID != e.member.ID || m.Role != domain.RoleSuperAdmin {
 		t.Fatalf("claimed account is %+v, %v; want the admin %s", m, err, e.member.ID)
 	}
 	if deviceStatus(t, e, laptop) != domain.DeviceApproved {

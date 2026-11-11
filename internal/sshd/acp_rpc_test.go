@@ -140,7 +140,7 @@ func TestACPExpiredItemRevalidatesPermissionBeforeHistory(t *testing.T) {
 	e.runs.mu.Lock()
 	calls := len(e.runs.calls)
 	e.runs.mu.Unlock()
-	if err := e.store.DeleteMember(context.Background(), viewer.ID); err != nil {
+	if err := e.store.DeleteMember(context.Background(), viewer.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	_, perr = callJSON(t, e, viewer.ID, protocol.MethodRunACPItem, params)

@@ -23,7 +23,7 @@ import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
 import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { useCapability, useDeviceNeeds, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
+import { useCapability, useDeviceNeeds, useIsWorkspaceAdmin, useSelf, useStateContext } from '@/store/hooks'
 import type { BoardView } from '@/store/ui'
 
 /** Three 200px columns, their two 8px gaps and the 16px page gutters. */
@@ -232,9 +232,9 @@ function FinishedFooter({
 function FinishedMenu() {
   const ctx = useStateContext()
   const caps = useCapability()
-  const self = useSelf()
-  const admin = useIsAdmin()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const self = useSelf(activeWorkspace)
+  const admin = useIsWorkspaceAdmin(activeWorkspace)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const canArchive = clearDonePlan(finishedRuns(activeWorkspace, ctx), caps, self).eligible.length > 0 ||
     idleArchivePlan(workspaceRuns(activeWorkspace, ctx), ctx, caps, self).done.length > 0

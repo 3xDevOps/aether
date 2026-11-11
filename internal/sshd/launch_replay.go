@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -65,8 +66,8 @@ func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, k
 	case err == nil && !same(recorded):
 		return nil, false, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("%s: idempotency_key %q was used for a launch with other params; use a new key for a new launch", method, key)}
 	case err == nil && prior != "":
-		run, getErr := s.cfg.Store.GetRun(ctx, prior)
-		if errors.Is(getErr, store.ErrNotFound) {
+		run, getErr := s.reachableRun(ctx, member, prior)
+		if errors.Is(getErr, store.ErrNotFound) || errors.Is(getErr, permissions.ErrNoAccess) {
 			return nil, false, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: session %s launched under idempotency_key %q was deleted", method, prior, key)}
 		}
 		if getErr != nil {

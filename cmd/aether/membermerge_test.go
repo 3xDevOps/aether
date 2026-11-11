@@ -103,3 +103,25 @@ func TestAcceptNamesTheProposal(t *testing.T) {
 		t.Fatalf("accept --yes = %+v, %v; want the printed plan's digest", got, err)
 	}
 }
+
+// In an admin and super admin merge each side is asked about its own role:
+// the admin proposer keeping admin does not skip the super admin's question,
+// and the printed role follows both answers.
+func TestAcceptDecisionAsksEachSideAboutItsOwnRole(t *testing.T) {
+	plan := testMergePlan
+	plan.Minted.Role, plan.Proposer.Role = "super_admin", "admin"
+	plan.Role, plan.RoleWithKeepAdmin, plan.KeepAdminRequired = "admin", "super_admin", false
+	for _, tc := range []struct{ input, wantRole string }{{"y\ny\n", "super_admin"}, {"n\ny\n", "admin"}} {
+		p := protocol.MemberMergeProposal{ID: "mrp-1", MintedID: "m-admin", ProposerID: "m-gh", ProposerKeepAdmin: true, KeepSettingsOf: "m-admin", PlanDigest: "d", Plan: &plan}
+		var out strings.Builder
+		got, err := acceptDecision(p, false, false, true, bufio.NewReader(strings.NewReader(tc.input)), &out)
+		if err != nil || got.KeepAdmin != (tc.wantRole == "super_admin") {
+			t.Fatalf("input %q: accept = %+v, %v", tc.input, got, err)
+		}
+		for _, w := range []string{"keep it super_admin?", "the merged member will be " + tc.wantRole + "\n"} {
+			if !strings.Contains(out.String(), w) {
+				t.Errorf("input %q: output lacks %q:\n%s", tc.input, w, out.String())
+			}
+		}
+	}
+}

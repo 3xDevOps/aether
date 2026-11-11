@@ -13,7 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memory"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // TestMemoryMembersCurateAndViewersRead drives team memory the way members
@@ -142,7 +142,7 @@ func TestMemoryMembersCurateAndViewersRead(t *testing.T) {
 		want = append(want, change{events.MemoryActionAdd, id, e.member.ID, e.run.ID})
 	}
 	for _, id := range byID {
-		want = append(want, change{events.MemoryActionRm, id, dana.ID, ""})
+		want = append(want, change{events.MemoryActionRm, id, dana.ID, e.run.ID})
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("memory.change events = %+v, want %+v", got, want)
@@ -167,11 +167,11 @@ func newMemoryEnv(t *testing.T) (*testEnv, *memory.Service, *events.SQLiteLog) {
 	var svc *memory.Service
 	e := newTestEnv(t, func(c *Config) {
 		c.Bus = bus
-		db, ok := c.Store.(*store.DB)
+		db, ok := testDBOK(c.Store)
 		if !ok {
 			t.Fatalf("store is %T, want *store.DB", c.Store)
 		}
-		if svc, err = memory.New(memory.Config{Store: db, Bus: bus, Log: log}); err != nil {
+		if svc, err = memory.New(memory.Config{Store: storetest.Unscoped{DB: db}, Bus: bus, Log: log}); err != nil {
 			t.Fatalf("memory: %v", err)
 		}
 		c.Services.Memory = svc
@@ -209,7 +209,7 @@ func TestMemoryMemberNotesStayTheirOwners(t *testing.T) {
 	note := mine.Item.ID
 	line := "- " + note + " preference (yours): Prefer table output.\n"
 
-	const briefDenied = "memory.brief: another member's brief: permission denied: workspace administration requires the admin role"
+	const briefDenied = "memory.brief: another member's brief: permission denied: workspace administration requires the workspace's owner or a super admin"
 	others := protocol.MemoryBriefParams{WorkspaceID: ws, MemberID: string(alice.ID)}
 	denied("bob memory.brief --member alice", bobC.Call(protocol.MethodMemoryBrief, others, nil), briefDenied)
 	denied("viewer memory.brief --member alice", vicC.Call(protocol.MethodMemoryBrief, others, nil), briefDenied)

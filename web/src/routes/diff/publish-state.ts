@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { useEffect, useRef, useState } from 'react'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -31,7 +32,8 @@ const noPush: RunGitPushTarget = { remote: '', repository: '', head_branch: '' }
  * own and follows every refresh until the member edits that field. */
 export function usePublish(run: ScopedRun, client: Api, open: boolean) {
   const caps = useCapability()
-  const self = useSelf()
+  const self = useSelf(repoWorkspaceID(run))
+  const runRole = useSelf(run.workspace_id).role
   const workspace = useStore((s) => s.workspaces[repoWorkspaceID(run)])
   const [status, setStatus] = useState<RunGitStatusResult | null>(null)
   const [statusReady, setStatusReady] = useState(false)
@@ -60,7 +62,8 @@ export function usePublish(run: ScopedRun, client: Api, open: boolean) {
   const mounted = useRef(true)
   const operation = useRef(false)
   const requested = useRef(false)
-  const canWrite = self.role === 'admin' || self.role === 'collaborator'
+  // The server needs push in the run's workspace and in the repository's.
+  const canWrite = [self.role, runRole].every((role) => isAdminRole(role) || role === 'collaborator')
   const expected = statusReady && status && !status.error ? { branch: status.branch, head: status.head } : null
   const pushTarget = { ...(status ? defaultPushTarget(status, workspace?.origin) : noPush), ...pushEdit }
   const target = unsettled ?? { ...defaultPRTarget(pushTarget, run.base_branch || workspace?.base_branch || '', source), ...targetEdit }

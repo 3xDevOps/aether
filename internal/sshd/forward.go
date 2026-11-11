@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -58,7 +59,7 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		runID = domain.RunID(strings.TrimPrefix(payload.DestHost, "run:"))
 		if err := checkSteer(ctx, s.cfg.Store, member, runID); err != nil {
 			reason := err.Error()
-			if errors.Is(err, store.ErrNotFound) {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, permissions.ErrNoAccess) {
 				reason = "session not found"
 			}
 			rejectDirectTCPIP(nc, ssh.Prohibited, reason)

@@ -7,7 +7,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/watch"
 )
 
@@ -18,7 +17,7 @@ func TestWatchesBelongToTheirCreator(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) {
 		svc, err := watch.New(watch.Config{
-			Store: c.Store.(*store.DB), Bus: c.Bus, Runs: c.Runs,
+			Store: c.Store.(watch.Store), Bus: c.Bus, Runs: c.Runs,
 		})
 		if err != nil {
 			t.Fatalf("watch.New: %v", err)

@@ -180,7 +180,7 @@ func backoff(failures int) time.Duration {
 }
 
 // allowed checks that w's owner still exists, is approved and can view
-// its workspace.
+// its workspace and every workspace of its session.
 func (s *Service) allowed(ctx context.Context, w *store.Watch) error {
 	m, err := s.store.GetMember(ctx, w.MemberID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -196,12 +196,22 @@ func (s *Service) allowed(ctx context.Context, w *store.Watch) error {
 		return nil
 	}
 	if _, err := s.store.GetWorkspace(ctx, w.WorkspaceID); errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("%w: the workspace no longer exists", errRevoked)
+		// Worded as lost access: only super admins learn of a deletion.
+		return fmt.Errorf("%w: %w", errRevoked, permissions.ErrNoAccess)
 	} else if err != nil {
 		return err
 	}
-	actor := permissions.Actor{ID: m.ID, Role: m.Role}
-	if err := permissions.Check(permissions.View, actor, permissions.Target{Workspace: w.WorkspaceID}); err != nil {
+	target := permissions.Target{Workspace: w.WorkspaceID}
+	if w.RunID != "" {
+		run, err := s.store.GetRun(ctx, w.RunID)
+		switch {
+		case err == nil:
+			target.Extra = run.ExtraWorkspaces()
+		case !errors.Is(err, store.ErrNotFound):
+			return err
+		}
+	}
+	if err := permissions.Check(permissions.View, permissions.ActorOf(m), target); err != nil {
 		return fmt.Errorf("%w: %w", errRevoked, err)
 	}
 	return nil
@@ -213,7 +223,16 @@ func (s *Service) read(ctx context.Context, w *store.Watch, prev protocol.WatchO
 	}
 	switch w.TargetKind {
 	case protocol.WatchTargetRun:
-		return s.readRun(ctx, w, prev)
+		r, err := s.readRun(ctx, w, prev)
+		if err != nil {
+			return r, err
+		}
+		// Access may have ended while the session was read; what was read
+		// then is not the member's to keep.
+		if err := s.allowed(ctx, w); err != nil {
+			return reading{}, err
+		}
+		return r, nil
 	case protocol.WatchTargetPR:
 		if s.pr == nil {
 			return reading{}, errors.New("pull request watches are not supported yet")

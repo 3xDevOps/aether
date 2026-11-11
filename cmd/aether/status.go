@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -223,7 +224,7 @@ func gatherStatus() (statusReport, error) {
 // login is named as the human's step.
 func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []protocol.AgentInfo, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
 	if len(workspaces) == 0 {
-		if m.Role != string(domain.RoleAdmin) {
+		if !domain.Role(m.Role).Admin() {
 			return "an admin runs: aether workspace import <path|url>"
 		}
 		return "aether workspace import <path|url>"
@@ -233,7 +234,7 @@ func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []proto
 		return "aether agent add <name>"
 	}
 	if slices.ContainsFunc(installed, func(a protocol.AgentInfo) bool { return a.LoginFound == nil || *a.LoginFound }) {
-		return mirrorStep(m.Role == string(domain.RoleAdmin), workspaces, mirrors, unseeded)
+		return mirrorStep(m, workspaces, mirrors, unseeded)
 	}
 	agent := installed[0]
 	switch {
@@ -248,12 +249,16 @@ func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []proto
 // A mirrored workspace cannot launch a run until a human adopts a fetched
 // commit as its accepted base. A local one cannot until its base branch
 // has a commit; unseeded maps such a workspace to its linked clone, or "".
-func mirrorStep(admin bool, workspaces []protocol.Workspace, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
-	who := "an admin runs: "
-	if admin {
-		who = ""
-	}
+// A step is the caller's own only where their role in that workspace is
+// admin. A server older than workspace access reports no workspace role,
+// so there the caller's server role applies.
+func mirrorStep(self protocol.Member, workspaces []protocol.Workspace, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
 	for _, ws := range workspaces {
+		admin := cmp.Or(ws.Role, self.Role) == string(domain.RoleAdmin)
+		who := "an admin runs: "
+		if admin {
+			who = ""
+		}
 		m := mirrors[ws.ID]
 		clone, isUnseeded := unseeded[ws.ID]
 		switch {

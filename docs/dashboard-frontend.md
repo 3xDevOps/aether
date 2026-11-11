@@ -6227,10 +6227,29 @@ sidebar's **Members** row stays current on both.
 
 **Members** is a roster table, each row filling on hover: name, role, whether you and that member share
 an agent account, and last seen (**Online**, a relative time, or
-**Offline**). An admin changes a role or removes a member from the row's
-menu; giving up your own admin role, and removing anyone, ask first. Members
+**Offline**). Roles are Viewer, Collaborator, Admin and Super admin. Only a
+super admin changes a role or removes a member from the row's menu; giving up
+your own super admin role, and removing anyone, ask first. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
-admins see **Open invitations** with **Revoke**.
+admins see **Open invitations** with **Revoke** and the workspaces each
+invitation grants.
+
+**Invite…** carries a workspace multi-select of the workspaces the inviter
+administers, for an account invitation and for an invite code. An admin who is
+not a super admin must pick at least one and may invite only a viewer or a
+collaborator; a super admin may pick any role and no workspace.
+
+**Manage workspaces** shows each workspace's owner. Where the caller's `role`
+in `workspace.list` is `admin`, the row menu offers **Settings…**, **Access…**
+and **Delete…**; **Access…** lists the owner and granted members, adds members
+(an admin sees only collaborators and viewers) and removes them, showing the
+server's error verbatim. Super admins also get **Change owner…**. A grant,
+revoke, `workspace.access` event or `member.access` event reloads the workspace
+list. `member.access` (workspace id `server`) goes only to the member whose
+access changed, so a member who just lost a workspace still gets it. Server-wide
+controls (server update, session limits, Docker inside sessions, remote access)
+show to super admins; the dashboard hides what the caller cannot use and the
+server refuses it regardless.
 
 A role change, **Approve**, and a confirmed **Revoke** follow
 [Actions](#actions): the radio moves, the member joins the roster, or the
@@ -6308,7 +6327,9 @@ from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
 **Approve** sends `member.device.approve` with the device id and the code.
-It revokes a device too, and shows every server refusal verbatim. The
+**Revoke** shows on the member's own devices, on a device still waiting,
+and, for a super admin, on every device; it shows every server refusal
+verbatim. The
 list is an `InsetList`; until it arrives, three row skeletons stand in after
 ~200ms ("Loading devices").
 

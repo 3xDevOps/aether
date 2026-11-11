@@ -149,7 +149,7 @@ func TestRunArchiveCompletedHoldsOpenWork(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
-	db := e.store.(*store.DB)
+	db := e.db
 	admin := controlClient(t, e)
 
 	open := createRunWithStatus(t, e, domain.RunCompleted)

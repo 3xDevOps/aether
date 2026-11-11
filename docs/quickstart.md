@@ -102,7 +102,7 @@ next:
 On a tailnet, item 3 names this host instead, and the dashboard address when
 setup turned it on. With the edge on too, the claim follows as the
 alternative for a computer off the tailnet; do one or the other, because the
-first link makes its account the admin:
+first link makes its account the super admin:
 
 ```
   3. on your computer, on the same tailnet: in the Aether app's Connect step choose
@@ -112,7 +112,7 @@ first link makes its account the admin:
 ```
 
 > [!WARNING]
-> Whoever uses the claim link first becomes the server's administrator. It is
+> Whoever uses the claim link first becomes the server's super admin. It is
 > valid for 30 minutes and 5 attempts. `sudo aether-server edge claim-code`
 > prints a new one until someone has joined.
 
@@ -150,7 +150,7 @@ claim code goes to step 3: `aether login`, then `aether link --claim <code>`.
 
 Do this on your computer, with what step 2 printed: a tailnet host name or a
 claim link. Linking saves the server in your client config. The first person to
-link a fresh server becomes its **administrator** (admin); there is no
+link a fresh server becomes its **super admin**; there is no
 password. In the desktop app, which opens at **Onboarding → Connect** until it
 is linked, answer **How does this computer reach your server?**:
 
@@ -173,7 +173,7 @@ Or in a terminal:
 
 It worked if the step shows **Connected**, or `aether link` ends with `linked
 to <server>` and your role, such as `linked to server <server id> through
-edge.onaether.dev as <your name> (admin)`.
+edge.onaether.dev as <your name> (super_admin)`.
 
 `aether status` shows where you are:
 
@@ -202,7 +202,7 @@ aether member git --name "Ada Lovelace" --email ada@example.com
 ## 4. Create a workspace
 
 A **workspace** is one repository, its **base branch** (the branch new sessions
-start from), and the sessions started from it. Only an admin can create one.
+start from), and the sessions started from it. Only an admin or super admin can create one, and the creator owns it ([workspace access](teams.md#workspace-access)).
 
 Open the **dashboard**, the web app where you work with Aether. The desktop
 app shows it, and so does `aether gui`, which serves it in a browser tab from

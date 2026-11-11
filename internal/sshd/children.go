@@ -22,7 +22,7 @@ type ChildService interface {
 func init() {
 	registerMethod(protocol.MethodChildSettings, (*Server).childSettings)
 	registerGuarded(protocol.MethodRunChildren, permissions.View, runTarget, (*Server).runChildren)
-	registerMethod(protocol.MethodRunChildrenAllow, (*Server).runChildrenAllow)
+	registerGuarded(protocol.MethodRunChildrenAllow, permissions.View, runTarget, (*Server).runChildrenAllow)
 	registerMethod(protocol.MethodWorkspaceChildLimits, (*Server).workspaceChildLimits)
 }
 
@@ -84,8 +84,8 @@ func (s *Server) runChildrenAllow(ctx context.Context, member domain.MemberID, r
 	return childResult(out, err)
 }
 
-// workspaceChildLimits reads limits for any member and changes them for an
-// admin.
+// workspaceChildLimits reads limits for a member who reaches the workspace
+// and changes them for its admin.
 func (s *Server) workspaceChildLimits(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.children()
 	if perr != nil {
@@ -98,16 +98,16 @@ func (s *Server) workspaceChildLimits(ctx context.Context, member domain.MemberI
 	if p.WorkspaceID == "" {
 		return nil, invalidParams("workspace_id is required")
 	}
+	cap := permissions.WorkspaceAdmin
+	if p.MaxLive == nil {
+		cap = permissions.View
+	}
+	if cerr := checkIn(ctx, s.cfg.Store, member, cap, domain.WorkspaceID(p.WorkspaceID)); cerr != nil {
+		return nil, checkError(protocol.MethodWorkspaceChildLimits, cerr)
+	}
 	if p.MaxLive == nil {
 		out, err := svc.Limits(ctx, domain.WorkspaceID(p.WorkspaceID))
 		return childResult(out, err)
-	}
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: domain.WorkspaceID(p.WorkspaceID)}); cerr != nil {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodWorkspaceChildLimits + ": " + cerr.Error()}
 	}
 	out, err := svc.SetLimits(ctx, p)
 	return childResult(out, err)

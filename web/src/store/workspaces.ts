@@ -41,7 +41,15 @@ export const createWorkspacesSlice: SliceCreator<WorkspacesSlice> = (set, get) =
   workspaces: {},
   deletedWorkspaceIDs: new Set(),
   memoryChanges: {},
-  setWorkspaces: (workspaces) => set((s) => workspaceSnapshot(s, workspaces)),
+  setWorkspaces: (workspaces) => {
+    const before = Object.keys(get().workspaces)
+    set((s) => workspaceSnapshot(s, workspaces))
+    const s = get()
+    const lost = new Set(before.filter((id) => !s.workspaces[id]))
+    for (const run of Object.values(s.runs)) {
+      if (lost.has(run.workspace_id)) s.removeRun(run.id)
+    }
+  },
   upsertWorkspace: (workspace) =>
     set((s) => s.deletedWorkspaceIDs.has(workspace.id)
       ? s

@@ -22,7 +22,7 @@ credentials out of the report.
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
 | [Session container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Sessions and environments cannot connect to each other. Agents run unprivileged. | It is not a VM. A session can read and change everything mounted into it: your home, the checkout and the workspace secrets. |
-| [Permission tiers](#permission-tiers) | A Default session's `sudo` waits for its owner or an admin. Isolated keeps every change outside the checkout inside the session. | Root access runs sudo without asking. Docker inside a Default session gives root in the container without asking. |
+| [Permission tiers](#permission-tiers) | A Default session's `sudo` waits for its owner or an admin of its workspace. Isolated keeps every change outside the checkout inside the session. | Root access runs sudo without asking. Docker inside a Default session gives root in the container without asking. |
 | [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's sessions reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Sessions still reach the server host. |
 | [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own sessions. | Every session you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
 | [Who can act on a session](#who-can-see-and-act-on-a-session) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your sessions, which hold your home. |
@@ -44,7 +44,7 @@ credentials out of the report.
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
 | [Sysbox](#the-agent-container) | Docker inside a session without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
 | [Release signing](#release-signing) | Updaters install only binaries listed in a signed manifest for that exact tag. | `aether gui build --zip` checks only the app layout of a local zip. |
-| [Self-update](#server-and-client-updates) | Only signed `v*` releases of `3xDevOps/Aether`. A failed download replaces nothing. | An admin chooses which release the server runs. |
+| [Self-update](#server-and-client-updates) | Only signed `v*` releases of `3xDevOps/Aether`. A failed download replaces nothing. | A super admin chooses which release the server runs. |
 | [Vulnerability scanning](#vulnerability-scanning) | `govulncheck` runs on every pull request that changes code. | It is advisory: a finding does not fail the build. |
 
 ## The agent container
@@ -193,7 +193,7 @@ session's **Needs you** panel, the Needs you list, push and Slack notifications,
 `aether answer` and the connectors' `aether_decide_approval`. The command text
 is the agent's: read it before you allow it.
 
-- Only the session's owner or a server admin may allow it, because root in the
+- Only the session's owner or an admin of its workspace may allow it, because root in the
   container acts on the owner's home and credentials. Anyone who can steer the
   session may deny it. Anyone else gets `run.input.respond: permission denied:
   allowing a command to run as root requires the session's owner or an admin`.
@@ -221,9 +221,15 @@ is the agent's: read it before you allow it.
 
 ## Who can see and act on a session
 
-The default role, collaborator, can view, steer (type into the terminal,
-message, approve, pause) and kill every other member's session. A viewer can only
-watch ([roles](teams.md#roles)). A session's container mounts its launcher's home,
+A member acts only in workspaces they own or were granted
+([workspace access](teams.md#workspace-access)). A workspace a member cannot
+reach does not exist for them: it is absent from lists, counts, events and
+search, and a request naming it gets the same `not found` as one that never
+existed. Enforcement is on the server; the dashboard only mirrors it.
+
+In a workspace they reach, the default role, collaborator, can view, steer (type
+into the terminal, message, approve, pause) and kill every other member's
+session. A viewer can only watch ([roles](teams.md#roles)). A session's container mounts its launcher's home,
 so steering someone's session acts with their home, gh login and signing key. A
 handoff (`aether handoff`) changes the owner but not the home.
 
@@ -335,6 +341,7 @@ instead of your login.
 - A launch checks every account it names, fallback included, when it is
   created, so a member cannot queue a session on an account nobody shared with them:
   `permission denied: member <member-id> has not shared their account with you`.
+  An id that names no member gets the same answer.
 - Sharing and revoking are recorded in the
   [audit history](connectors.md#audit-history), readable by the sharing member
   and admins.
@@ -761,10 +768,10 @@ is a member.
 
 - A server uses an edge only when its config names one. `aether-server setup`
   turns on the project's edge on a host without tailscaled, and says so.
-- Until it has a member, a server with an edge takes its first admin by SSH
+- Until it has a member, a server with an edge takes its first super admin by SSH
   key only from a loopback address: the server itself or an SSH tunnel.
   Everyone else claims it with `sudo aether-server edge claim-code`, so a scan
-  that finds port 2222 open cannot take admin first. A forwarder on the host
+  that finds port 2222 open cannot take super admin first. A forwarder on the host
   that connects outside clients to `127.0.0.1:2222`, such as `socat`, defeats
   this. Without an edge, a server with tailnet sign-in takes that first key
   only over the tailnet or from loopback, and one with neither takes it from
@@ -779,7 +786,8 @@ is a member.
   ([what an attacker can do](edge.md#what-an-attacker-can-do)).
 - Approve only a code read from a device you are holding. `aether device
   approve` first shows the device, the GitHub account, and the member and role
-  it would join as. Refuse a code that would admit someone as you or an admin.
+  it would join as. Refuse a code that would admit someone as you, an admin or
+  a super admin.
   An approved device key also works on the direct SSH port, without the edge.
 - Device tokens do not expire. After you recover a taken-over GitHub account,
   revoke the devices it signed in
@@ -788,7 +796,7 @@ is a member.
   proof from both sign-ins and a person's approval. A merged member keeps the
   lower role. Do not enter a merge code you did not ask for.
 - `sudo aether-server edge claim-code --admin <member-id>` recovers access for
-  an existing admin and nothing else.
+  an existing admin or super admin and nothing else; it raises no role.
 - The first link pins the server's identity. A server id from `aether servers`
   comes from the edge: before you confirm, compare the id and fingerprint the
   CLI shows with `sudo aether-server edge status` on the server.
@@ -1009,8 +1017,8 @@ has not installed a release past a leaked key still trusts that key.
 
 ### Server and client updates
 
-`aether server update` lets an admin replace the server's binaries without a
-shell on the host. That adds no power, since an admin can already run any code
+`aether server update` lets a super admin replace the server's binaries without a
+shell on the host. That adds no power, since a super admin can already run any code
 on the server's Docker daemon. The version must be a `v` semver tag from the
 `3xDevOps/Aether` releases; a client never supplies a URL. Both binaries are
 verified before either is replaced.

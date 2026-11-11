@@ -102,7 +102,7 @@ func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 	// the loop ever tried to catch up.
 	weekAgo := time.Date(2026, 8, 6, 3, 0, 0, 0, time.UTC)
 	sc := &store.Schedule{TemplateID: tpl.ID, Cron: "0 * * * *", MemberID: m.ID, CreatedAt: weekAgo}
-	if err = db.SaveSchedule(ctx, sc); err != nil {
+	if err = db.SaveSchedule(ctx, sc, true); err != nil {
 		t.Fatalf("save schedule: %v", err)
 	}
 	if err = db.MarkScheduleFired(ctx, sc.ID, weekAgo); err != nil {
@@ -113,7 +113,7 @@ func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 	clock := &fakeClock{t: now}
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
-		Store: db, Bus: bus, Runs: runs,
+		Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: runs,
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
@@ -179,20 +179,20 @@ func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 	clock := &fakeClock{t: now}
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
-		Store: db, Bus: bus, Runs: runs,
+		Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: runs,
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, saveErr := svc.SaveSchedule(ctx, ws.ID, tpl.Name, "0 0 31 4 *", m.ID); !errors.Is(saveErr, ErrInvalidDefinition) {
+	if _, saveErr := svc.SaveSchedule(ctx, ws.ID, tpl.Name, "0 0 31 4 *", m.ID, false); !errors.Is(saveErr, ErrInvalidDefinition) {
 		t.Fatalf("SaveSchedule error = %v, want ErrInvalidDefinition", saveErr)
 	}
 
 	// A row written straight to the store stands in for one saved before
 	// the check existed, or by any other writer.
-	if err = db.SaveSchedule(ctx, &store.Schedule{TemplateID: tpl.ID, Cron: "0 0 31 4 *", MemberID: m.ID}); err != nil {
+	if err = db.SaveSchedule(ctx, &store.Schedule{TemplateID: tpl.ID, Cron: "0 0 31 4 *", MemberID: m.ID}, true); err != nil {
 		t.Fatalf("save schedule: %v", err)
 	}
 	if err := svc.Start(ctx); err != nil {
@@ -241,7 +241,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	clock := &fakeClock{t: now}
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
-		Store: db, Bus: bus, Runs: runs,
+		Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: runs,
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
@@ -255,7 +255,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	if err = svc.Save(ctx, open); err != nil {
 		t.Fatalf("save open template: %v", err)
 	}
-	_, err = svc.SaveSchedule(ctx, ws.ID, "triage", "0 * * * *", m.ID)
+	_, err = svc.SaveSchedule(ctx, ws.ID, "triage", "0 * * * *", m.ID, false)
 	if !errors.Is(err, ErrInvalidDefinition) {
 		t.Fatalf("SaveSchedule error = %v, want ErrInvalidDefinition", err)
 	}
@@ -277,7 +277,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	if err = svc.Save(ctx, ready); err != nil {
 		t.Fatalf("save defaulted template: %v", err)
 	}
-	if _, err = svc.SaveSchedule(ctx, ws.ID, "sweep", "0 * * * *", m.ID); err != nil {
+	if _, err = svc.SaveSchedule(ctx, ws.ID, "sweep", "0 * * * *", m.ID, false); err != nil {
 		t.Fatalf("SaveSchedule for a fully defaulted template: %v", err)
 	}
 	if err = svc.Start(ctx); err != nil {
@@ -437,7 +437,7 @@ func TestScheduleSavedDuringAScanKeepsItsSeededSlot(t *testing.T) {
 	e := newGateEnv(t, clock)
 
 	e.startScan(t)
-	saved, err := e.svc.SaveSchedule(context.Background(), e.ws, e.tpl, "* * * * *", e.owner)
+	saved, err := e.svc.SaveSchedule(context.Background(), e.ws, e.tpl, "* * * * *", e.owner, false)
 	if err != nil {
 		t.Fatalf("SaveSchedule: %v", err)
 	}
@@ -462,12 +462,12 @@ func TestScheduleRuleChangedDuringAScanKeepsItsSeededSlot(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
 	e := newGateEnv(t, clock)
 
-	first, err := e.svc.SaveSchedule(ctx, e.ws, e.tpl, "0 4 * * *", e.owner)
+	first, err := e.svc.SaveSchedule(ctx, e.ws, e.tpl, "0 4 * * *", e.owner, false)
 	if err != nil {
 		t.Fatalf("SaveSchedule: %v", err)
 	}
 	e.startScan(t)
-	resaved, err := e.svc.SaveSchedule(ctx, e.ws, e.tpl, "0 5 * * *", e.owner)
+	resaved, err := e.svc.SaveSchedule(ctx, e.ws, e.tpl, "0 5 * * *", e.owner, false)
 	if err != nil {
 		t.Fatalf("re-save SaveSchedule: %v", err)
 	}

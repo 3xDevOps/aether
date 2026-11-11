@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -58,6 +59,20 @@ func workspaceTarget(s *Server, ctx context.Context, params json.RawMessage) (pe
 	return permissions.Target{Workspace: id}, nil
 }
 
+// launchTarget names run.launch's primary workspace, so Launch is checked
+// there before anything reads it. AuthorizeLaunch checks the extra ones.
+func launchTarget(_ *Server, _ context.Context, params json.RawMessage) (permissions.Target, *protocol.Error) {
+	var p struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if len(params) != 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return permissions.Target{}, invalidParams("invalid params: " + err.Error())
+		}
+	}
+	return permissions.Target{Workspace: domain.WorkspaceID(p.WorkspaceID)}, nil
+}
+
 func (s *Server) workspaceLock(id domain.WorkspaceID) *sync.RWMutex {
 	s.workspaceLocksMu.Lock()
 	defer s.workspaceLocksMu.Unlock()
@@ -91,7 +106,11 @@ func registerGuarded(name string, cap permissions.Capability, resolve targetReso
 				return nil, perr
 			}
 		}
+		noteWorkspace(ctx, target.Workspace)
 		if cerr := permissions.Check(cap, actor, target); cerr != nil {
+			if errors.Is(cerr, permissions.ErrNoAccess) {
+				return nil, rpcError(cerr)
+			}
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: name + ": " + cerr.Error()}
 		}
 		if target.Workspace != "" {
@@ -110,7 +129,7 @@ func registerGuarded(name string, cap permissions.Capability, resolve targetReso
 // The Wave 1 run mutators, re-registered behind capability checks. Reads
 // (run.list, run.get, run.pull) stay unguarded: View is universal.
 func init() {
-	registerGuarded(protocol.MethodRunLaunch, permissions.Launch, nil, (*Server).runLaunch)
+	registerGuarded(protocol.MethodRunLaunch, permissions.Launch, launchTarget, (*Server).runLaunch)
 	registerGuarded(protocol.MethodRunKill, permissions.Kill, runTarget, (*Server).runKill)
 	registerGuarded(protocol.MethodRunRelease, permissions.Kill, runTarget, (*Server).runRelease)
 	registerGuarded(protocol.MethodRunDelete, permissions.Kill, runTarget, (*Server).runDelete)

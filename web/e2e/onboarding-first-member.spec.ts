@@ -19,7 +19,7 @@ test('the first member links, creates a workspace and seeds it', async ({
   // The first identity to authenticate on a fresh server becomes the admin,
   // and the gateway had no SSH key until this step made one.
   await expect(wizard.connect.section).toContainText('Linked to')
-  await expect(wizard.connect.section).toContainText('(admin)')
+  await expect(wizard.connect.section).toContainText('(super_admin)')
   await expect(wizard.connect.section).toContainText(
     `Created SSH key ${alice.home}/.ssh/id_ed25519`,
   )

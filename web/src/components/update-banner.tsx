@@ -42,7 +42,7 @@ import { memberName } from '@/lib/member-name'
 import { cn, focusRing } from '@/lib/utils'
 import { compareVersions } from '@/lib/version'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsSuperAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { UpdateKind } from '@/store/ui'
 import { checkForUpdates, clientTarget, serverTarget, type UpdateTarget } from '@/store/updates'
@@ -163,7 +163,7 @@ function ClientRow({ client, target, serverBehind }: { client: Api; target: Upda
 /** A server update already moving is named even when dismissed: it is about to restart the server. */
 export function useUpdateNotice(includeDismissed = false): { text: string; action: boolean } | null {
   const caps = useCapability()
-  const isAdmin = useIsAdmin()
+  const superAdmin = useIsSuperAdmin()
   const update = useStore((s) => s.update)
   const stored = useStore((s) => s.dismissedUpdates)
   const dismissed = includeDismissed ? noneDismissed : stored
@@ -171,17 +171,17 @@ export function useUpdateNotice(includeDismissed = false): { text: string; actio
   const { server, client } = useUpdateTargets()
   const serves = caps.hasLocal('update.check')
   if (server.state === 'scheduled' || server.state === 'applying' || server.state === 'restarting') {
-    return { text: 'Server update in progress, terminals reconnect briefly', action: isAdmin }
+    return { text: 'Server update in progress, terminals reconnect briefly', action: superAdmin }
   }
-  if (isAdmin && server.state === 'failed') {
+  if (superAdmin && server.state === 'failed') {
     return { text: `Server update to ${bareVersion(server.latest)} failed`, action: true }
   }
-  if (isAdmin && server.state === 'rolled_back') {
+  if (superAdmin && server.state === 'rolled_back') {
     return { text: 'The server update was rolled back', action: true }
   }
   if (server.state === 'available' && dismissed.server !== server.latest) {
     const text = `Server ${bareVersion(server.latest)} is available`
-    return { text: isAdmin ? text : `${text}, ask an admin`, action: true }
+    return { text: superAdmin ? text : `${text}, ask an admin`, action: true }
   }
   // A packaged CLI's notice is its app's own, outside the dashboard.
   if (serves && !update?.cli.packaged && client.state === 'failed') {
@@ -319,7 +319,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const runs = useStore((s) => s.runs)
   const pausedRuns = useStore((s) => s.pausedRuns)
   const dismissed = useStore((s) => s.dismissedUpdates.server)
-  const isAdmin = useIsAdmin()
+  const superAdmin = useIsSuperAdmin()
   const canUpdate = useCapability().hasMethod('server.update')
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -358,7 +358,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const failedError = target.state === 'failed' || target.state === 'rolled_back' ? target.error : ''
   const NoticeIcon = failedError || error ? CircleAlert : ServerCog
 
-  if (!isAdmin) {
+  if (!superAdmin) {
     return (
       <div role="status" className={banner}>
         <div aria-hidden className={bannerIcon}>

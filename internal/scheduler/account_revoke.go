@@ -18,6 +18,10 @@ import (
 // of the account it ran on was revoked.
 const revokedReason = "account share revoked: "
 
+// workspaceRevokedReason starts the reason of a run that stopped because its
+// launcher or the member whose home it mounts lost one of its workspaces.
+const workspaceRevokedReason = "workspace access revoked: "
+
 // revokedSegment is the reason an account segment records for a move off a
 // revoked account.
 const revokedSegment = "share revoked"
@@ -126,14 +130,56 @@ func (s *Scheduler) accountRevoked(ctx context.Context, run *domain.Run) (bool, 
 }
 
 // resolveRunAccount refuses the run's account as a launch by its launcher
-// would be refused now.
+// would be refused now, including when the launcher, the member whose home
+// it mounts, or the account's owner no longer reaches one of the run's
+// workspaces.
 func (s *Scheduler) resolveRunAccount(ctx context.Context, run *domain.Run) error {
-	launcher := run.HomeMemberID
-	if launcher == "" {
-		launcher = run.MemberID
+	if err := s.checkRunReach(ctx, run); err != nil {
+		return err
 	}
-	_, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, launcher, string(run.AccountMember()))
+	_, err := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, runLauncher(run), string(run.AccountMember()), runWorkspaces(run))
 	return err
+}
+
+// checkRunReach refuses the run when its launcher or the member whose home
+// it mounts no longer reaches one of its workspaces, which no move to
+// another account can fix. A handoff keeps the home and the launcher, so
+// the current owner's access does not stand in.
+func (s *Scheduler) checkRunReach(ctx context.Context, run *domain.Run) error {
+	members := []domain.MemberID{runLauncher(run)}
+	if home := run.HomeMember(); home != members[0] {
+		members = append(members, home)
+	}
+	for _, id := range members {
+		m, err := s.cfg.Store.GetMember(ctx, id)
+		if err != nil {
+			return err
+		}
+		reach := permissions.ActorOf(m)
+		for _, ws := range runWorkspaces(run) {
+			if !reach.Reaches(ws) {
+				return fmt.Errorf("%w: member %s has no access to workspace %s", permissions.ErrDenied, id, ws)
+			}
+		}
+	}
+	return nil
+}
+
+// runLauncher is who launched the run. A row from before shares were
+// narrowed records no launcher; its owner stands in.
+func runLauncher(run *domain.Run) domain.MemberID {
+	if run.HomeMemberID != "" {
+		return run.HomeMemberID
+	}
+	return run.MemberID
+}
+
+func runWorkspaces(run *domain.Run) []domain.WorkspaceID {
+	out := []domain.WorkspaceID{run.WorkspaceID}
+	for _, repo := range run.Extras {
+		out = append(out, repo.WorkspaceID)
+	}
+	return out
 }
 
 // leaveRevokedAccount claims a run on a revoked account and moves it to
@@ -172,6 +218,10 @@ func (s *Scheduler) leaveRevokedAccount(entry *supervised) {
 			slog.Warn("scheduler: recheck the session's account share", "run", entry.runID, "error", err)
 		}
 		s.releaseMoveClaim(entry)
+		return
+	}
+	if reachErr := s.checkRunReach(ctx, run); errors.Is(reachErr, permissions.ErrDenied) || errors.Is(reachErr, store.ErrNotFound) {
+		s.stopRevoked(ctx, entry, workspaceRevokedReason+reachErr.Error())
 		return
 	}
 	if !movable {

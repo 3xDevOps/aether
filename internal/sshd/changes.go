@@ -50,11 +50,17 @@ func init() {
 
 // changesTarget checks the workspace a changes.list request is scoped to,
 // so a per-workspace boundary applies to it; a member-wide request targets
-// no workspace.
+// no workspace. A named run is checked in its own workspace first, so a
+// run the caller cannot reach reads as missing whatever workspace_id says.
 func changesTarget(s *Server, ctx context.Context, raw json.RawMessage) (permissions.Target, *protocol.Error) {
 	p, perr := decodeParams[protocol.ChangesListParams](raw)
 	if perr != nil {
 		return permissions.Target{}, perr
+	}
+	if p.RunID != "" {
+		if target, err := resolveRunTarget(ctx, s.cfg.Store, domain.RunID(p.RunID)); err == nil {
+			return target, nil
+		}
 	}
 	ws, live, perr := s.changesScope(ctx, p)
 	if perr != nil || !live {
@@ -115,7 +121,7 @@ func (s *Server) workspaceDeleted(ctx context.Context, id domain.WorkspaceID) (b
 	return len(page.Events) > 0, nil
 }
 
-func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+func (s *Server) changesList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	reader := s.cfg.Services.Timeline
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "changes.list: workspace history is not available"}
@@ -124,14 +130,24 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 	if perr != nil {
 		return nil, perr
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	ws, live, perr := s.changesScope(ctx, p)
 	if perr != nil {
 		return nil, perr
+	}
+	// A deleted workspace has no owner or grants left: only a super admin
+	// still reaches it.
+	if ws != "" && !live && !actor.Reaches(ws) {
+		return nil, rpcError(permissions.ErrNoAccess)
 	}
 	filter := timeline.Filter{
 		Workspace: ws,
 		Run:       domain.RunID(p.RunID),
 		NoRereads: true,
+		Scope:     s.eventScope(ctx, actor),
 	}
 	if ws != "" && !live {
 		// A deleted workspace's log holds only its workspace.deleted, which

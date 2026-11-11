@@ -23,4 +23,16 @@ type OverlapPayload struct {
 
 func (OverlapPayload) EventType() Type { return TypeRunOverlap }
 
+// ScopedTo leaves out the peers a reader cannot fully reach, so they still
+// get the set's other changes, an emptied set included.
+func (p OverlapPayload) ScopedTo(reaches func(domain.RunID) bool) Payload {
+	kept := OverlapPayload{}
+	for _, peer := range p.With {
+		if reaches(peer.RunID) {
+			kept.With = append(kept.With, peer)
+		}
+	}
+	return kept
+}
+
 func init() { registerPayload[OverlapPayload](TypeRunOverlap) }

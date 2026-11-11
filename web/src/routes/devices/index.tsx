@@ -19,7 +19,7 @@ import { message, providerName } from '@/lib/format'
 import { memberName } from '@/lib/member-name'
 import type { Device, DeviceLookup } from '@/lib/types'
 import { useStore } from '@/store'
-import { useIsAdmin } from '@/store/hooks'
+import { useIsAdmin, useIsSuperAdmin } from '@/store/hooks'
 
 export const deviceStatus: Record<Device['status'], { tone: Tone; label: string }> = {
   registered: { tone: 'needs-you', label: 'Registered' },
@@ -34,6 +34,8 @@ export function DevicesPanel({ client }: { client: Api }) {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const isAdmin = useIsAdmin()
+  const isSuperAdmin = useIsSuperAdmin()
+  const selfID = useStore((s) => s.info?.member.id)
   const [devices, setDevices] = useState<Device[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [code, setCode] = useState('')
@@ -67,6 +69,10 @@ export function DevicesPanel({ client }: { client: Api }) {
       setLooking(false)
     }
   }
+
+  // Denying a device that waits is an approval; revoking an approved one is the member's own or a super admin's.
+  const mayRevoke = (device: Device) =>
+    device.status !== 'revoked' && (isSuperAdmin || device.member_id === selfID || device.status !== 'approved')
 
   const owner = (device: Device) =>
     device.invitation_id ? `invitation ${device.invitation_id}` : memberName({ members, mergedInto }, device.member_id)
@@ -161,7 +167,7 @@ export function DevicesPanel({ client }: { client: Api }) {
                   </span>
                   <span className="truncate font-code text-ui-sm text-muted" title={device.fingerprint}>{device.fingerprint}</span>
                 </span>
-                {device.status !== 'revoked' && (
+                {mayRevoke(device) && (
                   <Button size="sm" variant="ghost" aria-label={`Revoke ${device.label}`} onClick={() => setRevoking(device)}>Revoke</Button>
                 )}
               </InsetListItem>

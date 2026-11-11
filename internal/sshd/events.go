@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -35,6 +37,13 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch sub
 	}
 	if merr := s.checkMember(ctx, member); merr != nil {
 		e := rpcError(merr)
+		_ = writeJSONLine(ch, protocol.SubscribeResponse{OK: false, Code: e.Code, Error: e.Message})
+		return
+	}
+	access := &streamAccess{s: s, member: member, runs: newRunScopes(s.cfg.Store)}
+	access.load(ctx)
+	if ws := domain.WorkspaceID(req.WorkspaceID); ws != "" && ws != events.ServerScope && !access.actor.Reaches(ws) {
+		e := rpcError(permissions.ErrNoAccess)
 		_ = writeJSONLine(ch, protocol.SubscribeResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
@@ -77,5 +86,72 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch sub
 
 	// A drop, a write failure, and a closed subscription all end the
 	// channel the same way: the client re-subscribes from its cursor.
-	_ = events.StreamWire(sub, member, func(ev protocol.Event) error { return writeJSONLine(ch, ev) })
+	scope := events.Scope{
+		Workspace: func(ws domain.WorkspaceID) bool { return access.current(streamCtx).Reaches(ws) },
+		Run:       func(id domain.RunID) bool { return access.runs.reaches(streamCtx, access.current(streamCtx), id) },
+		Sees:      func(id domain.MemberID) bool { return access.seesMember(streamCtx, id) },
+	}
+	_ = events.StreamWire(sub, member, scope, func(ev protocol.Event) error { return writeJSONLine(ch, ev) })
+}
+
+// accessChanged makes every live event stream reload its member's
+// workspace access before its next event. Call it after any write that
+// changes who reaches a workspace: a grant, a revoke, an owner or a role.
+func (s *Server) accessChanged() {
+	s.accessGen.Add(1)
+	s.accessWakeMu.Lock()
+	defer s.accessWakeMu.Unlock()
+	if s.accessWake != nil {
+		close(s.accessWake)
+		s.accessWake = nil
+	}
+}
+
+// accessChange returns a channel the next accessChanged closes.
+func (s *Server) accessChange() <-chan struct{} {
+	s.accessWakeMu.Lock()
+	defer s.accessWakeMu.Unlock()
+	if s.accessWake == nil {
+		s.accessWake = make(chan struct{})
+	}
+	return s.accessWake
+}
+
+// streamAccess is one event stream's view of its member's workspace
+// access and of the members they see. It reloads when accessChanged was
+// called since the last load, and at least every revalidateInterval for
+// writes made outside this process, such as aether-server member role. A
+// failed load reaches nothing.
+type streamAccess struct {
+	s      *Server
+	member domain.MemberID
+	gen    uint64
+	at     time.Time
+	actor  permissions.Actor
+	runs   *runScopes
+	sees   func(domain.MemberID) bool
+}
+
+func (a *streamAccess) load(ctx context.Context) {
+	a.gen, a.at, a.sees = a.s.accessGen.Load(), time.Now(), nil
+	actor, err := resolveActor(ctx, a.s.cfg.Store, a.member)
+	if err != nil {
+		actor = permissions.Actor{}
+	}
+	a.actor = actor
+}
+
+func (a *streamAccess) current(ctx context.Context) permissions.Actor {
+	if a.s.accessGen.Load() != a.gen || time.Since(a.at) >= a.s.cfg.revalidateInterval {
+		a.load(ctx)
+	}
+	return a.actor
+}
+
+func (a *streamAccess) seesMember(ctx context.Context, id domain.MemberID) bool {
+	actor := a.current(ctx)
+	if a.sees == nil {
+		a.sees = a.s.memberSight(ctx, actor)
+	}
+	return a.sees(id)
 }

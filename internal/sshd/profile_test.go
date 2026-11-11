@@ -20,7 +20,7 @@ import (
 func withProfiles(t *testing.T) func(*Config) {
 	t.Helper()
 	return func(c *Config) {
-		db, ok := c.Store.(*store.DB)
+		db, ok := testDBOK(c.Store)
 		if !ok {
 			t.Fatal("store is not *store.DB")
 		}

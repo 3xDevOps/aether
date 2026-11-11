@@ -66,7 +66,7 @@ func (s *Server) systemStats(ctx context.Context, member domain.MemberID, params
 	if !snap.ContainersAt.IsZero() {
 		result.ContainersAtMS = snap.ContainersAt.UnixMilli()
 	}
-	admin := s.requireAdmin(ctx, member, protocol.MethodSystemStats) == nil
+	admin := s.superAdmin(ctx, member)
 	var others protocol.SystemOtherContainers
 	for _, c := range snap.Containers {
 		if c.Owner.Kind == "" || (!admin && c.Owner.MemberID != string(member)) {

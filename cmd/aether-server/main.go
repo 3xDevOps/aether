@@ -95,6 +95,8 @@ func main() {
 		exitOn(edgeCmd(args))
 	case "device":
 		exitOn(deviceCmd(args))
+	case "member":
+		exitOn(memberCmd(args))
 	case "slack":
 		exitOn(slackCmd(args))
 	case "dictation":
@@ -152,6 +154,14 @@ when connected, 3 when not connected yet, and 1 on an error
 example:
   sudo aether-server edge status
 `,
+	"member": `usage: aether-server member role <member-id> <viewer|collaborator|admin|super_admin> [--config <file>]
+
+set a member's role in the store; the last super admin is never demoted, and
+a member who owns workspaces stays an admin
+
+example:
+  sudo aether-server member role <member-id> super_admin
+`,
 	"slack": `usage: aether-server slack setup [--config <file>]
        aether-server slack remove [--config <file>]
 
@@ -197,6 +207,7 @@ commands:
   update   [--version <tag>]: replace the server and aether binaries and restart the service
   edge     status | claim-code | trust | leave
   device   approve <code> | review: approve or revoke members' edge devices
+  member   role <member-id> <role>: set a member's role
   slack    setup | remove: store or remove the Slack bot's tokens (docs/slack.md)
   dictation install [--gpu] | status | remove: speech-to-text for the dashboard (docs/dictation.md)
   version  print the version (also --version)

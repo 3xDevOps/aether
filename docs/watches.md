@@ -464,7 +464,9 @@ evaluation and keyed by the condition and its outcome, so a retry, a
 restart or a late event never wakes the session twice for one report. A paused session gets the message, and resuming it wakes it. A
 session that ended gets nothing. Web Push is never sent for session waits.
 `coord.messages.list` shows a member who is not the session's owner or an
-admin only the wake's first line, the condition and how it ended.
+admin only the wake's first line, the condition and how it ended. A wake, or a
+relayed notice, whose wait or watch is gone is shown only to the owner of the
+session it woke and to super admins.
 
 | `state` | Meaning |
 | --- | --- |

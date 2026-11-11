@@ -16,9 +16,9 @@ import (
 // authorize lets sender open a conversation with target: its owner may
 // message, and unless the runs are parent and child or overlap
 // on a file, the target's protection and its workspace's steer-others
-// setting allow it. Any
-// live run on the server qualifies, in any workspace and tree. Callers have
-// checked that target is live.
+// setting allow it. Any live run in a workspace sender's owner reaches
+// qualifies, in any tree. Callers have checked that target is live and
+// reachable.
 func (s *Service) authorize(ctx context.Context, method string, sender, target *domain.Run) *protocol.Error {
 	owner, reason, err := s.messagingOwner(ctx, sender)
 	if err != nil {
@@ -47,8 +47,49 @@ func (s *Service) authorize(ctx context.Context, method string, sender, target *
 	if err != nil {
 		return internalError(method, err)
 	}
-	if err := checkMessage(owner, ws, target.MemberID, target.Protected); err != nil {
+	if err := checkMessage(owner, ws, target.MemberID, target.Protected, target.ExtraWorkspaces()); err != nil {
 		return deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, err))
+	}
+	return nil
+}
+
+// reachable answers a target with a workspace sender's owner cannot reach
+// exactly as a session that does not exist, so the family and overlap
+// exceptions in authorize never waive access: target's agent can read
+// every repo it holds. An owner who is gone is left to authorize, which
+// names why.
+func (s *Service) reachable(ctx context.Context, method string, sender, target *domain.Run) *protocol.Error {
+	owner, err := s.cfg.Store.GetMember(ctx, sender.MemberID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return internalError(method, err)
+	}
+	actor := permissions.ActorOf(owner)
+	for _, ws := range append([]domain.WorkspaceID{target.WorkspaceID}, target.ExtraWorkspaces()...) {
+		if !actor.Reaches(ws) {
+			return unknownRun(method, target.ID)
+		}
+	}
+	return nil
+}
+
+// ownerReaches refuses a run socket call from a run whose owner no longer
+// reaches every workspace of the run, its extra repositories' included.
+func (s *Service) ownerReaches(ctx context.Context, method string, run *domain.Run) *protocol.Error {
+	owner, err := s.cfg.Store.GetMember(ctx, run.MemberID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: the session's owner %s is no longer a member", method, run.MemberID)}
+	case err != nil:
+		return internalError(method, err)
+	}
+	actor := permissions.ActorOf(owner)
+	for _, ws := range append([]domain.WorkspaceID{run.WorkspaceID}, run.ExtraWorkspaces()...) {
+		if !actor.Reaches(ws) {
+			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: the session's owner %s no longer has access to its workspace", method, run.MemberID)}
+		}
 	}
 	return nil
 }
@@ -64,7 +105,7 @@ func (s *Service) messagingOwner(ctx context.Context, run *domain.Run) (*domain.
 	if err != nil {
 		return nil, "", err
 	}
-	if err := checkMessage(owner, &domain.Workspace{ID: run.WorkspaceID}, "", false); err != nil {
+	if err := checkMessage(owner, &domain.Workspace{ID: run.WorkspaceID}, "", false, run.ExtraWorkspaces()); err != nil {
 		return nil, ownerDenial(owner, err), nil
 	}
 	return owner, "", nil
@@ -107,10 +148,16 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []d
 		overlaps[p.run] = p
 	}
 	seen := make(map[domain.RunID]bool)
+	actor := permissions.ActorOf(owner)
 	var addErr error
 	add := func(r *store.RunSummary, state string, overlap authorizedPeer) {
 		if r == nil || r.ID == self.ID || seen[r.ID] {
 			return
+		}
+		for _, extra := range r.Extras {
+			if !actor.Reaches(extra) {
+				return
+			}
 		}
 		seen[r.ID] = true
 		if len(peers) == protocol.CoordMaxStatusPeers {
@@ -161,7 +208,7 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []d
 		add(byID[p.run], p.state, p)
 	}
 	for _, r := range live {
-		if checkMessage(owner, ws, r.MemberID, r.Protected) == nil {
+		if checkMessage(owner, ws, r.MemberID, r.Protected, nil) == nil {
 			add(r, protocol.CoordPeerWorkspace, authorizedPeer{})
 		}
 	}
@@ -171,10 +218,10 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []d
 	return peers, len(seen), nil
 }
 
-func checkMessage(owner *domain.Member, ws *domain.Workspace, targetOwner domain.MemberID, protected bool) error {
+func checkMessage(owner *domain.Member, ws *domain.Workspace, targetOwner domain.MemberID, protected bool, extra []domain.WorkspaceID) error {
 	return permissions.Check(permissions.Message,
-		permissions.Actor{ID: owner.ID, Role: owner.Role},
-		permissions.Target{Workspace: ws.ID, Owner: targetOwner, Protected: protected, SteerOthers: ws.SteerOthers})
+		permissions.ActorOf(owner),
+		permissions.Target{Workspace: ws.ID, Extra: extra, Owner: targetOwner, Protected: protected, SteerOthers: ws.SteerOthers})
 }
 
 func ownerDenial(owner *domain.Member, err error) string {

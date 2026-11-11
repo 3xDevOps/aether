@@ -15,16 +15,24 @@ import type { AccountAccess, Member } from '@/lib/types'
 import { useFailure } from '@/components/failure'
 import { useStore } from '@/store'
 import { nextMemberOrder, type MemberPatch } from '@/store/members'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsAdmin, useIsSuperAdmin, useWorkspaceAccessServer } from '@/store/hooks'
 import { optimistic } from '@/store/optimistic'
 import { onlineMembers } from '@/store/presence'
 
-export const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
+export const roles: Member['role'][] = ['viewer', 'collaborator', 'admin', 'super_admin']
 
 export const roleLabel: Record<Member['role'], string> = {
   viewer: 'Viewer',
   collaborator: 'Collaborator',
   admin: 'Admin',
+  super_admin: 'Super admin',
+}
+
+export const roleDescription: Record<Member['role'], string> = {
+  viewer: 'Reads the workspaces they are granted',
+  collaborator: 'Works in the workspaces they are granted',
+  admin: 'Owns and runs their own workspaces',
+  super_admin: 'Every workspace, members and server settings',
 }
 
 function accountWords(id: string, access: AccountAccess | null): string {
@@ -44,6 +52,8 @@ export function Roster({ client }: { client: Api }) {
   const self = useStore((s) => s.info?.member)
   const caps = useCapability()
   const isAdmin = useIsAdmin()
+  const superAdmin = useIsSuperAdmin()
+  const scoped = useWorkspaceAccessServer()
   const [access, setAccess] = useState<AccountAccess | null>(null)
   const [removing, setRemoving] = useState<Member | null>(null)
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
@@ -82,8 +92,8 @@ export function Roster({ client }: { client: Api }) {
 
   const changeRole = (member: Member, role: Member['role']) => {
     if (role === member.role) return
-    // Losing your own admin role locks you out at once; the server guards the rest.
-    if (member.id === self?.id && role !== 'admin') {
+    // Losing your own super admin role locks you out at once; the server guards the rest.
+    if (member.id === self?.id && role !== 'super_admin') {
       setDemoting(role)
       return
     }
@@ -95,8 +105,8 @@ export function Roster({ client }: { client: Api }) {
   const all = Object.values(members)
   const roster = all.filter((m) => !m.pending)
   const pending = all.filter((m) => m.pending)
-  const canRole = isAdmin && caps.hasMethod('member.role')
-  const canRemove = isAdmin && caps.hasMethod('member.remove')
+  const canRole = superAdmin && caps.hasMethod('member.role')
+  const canRemove = superAdmin && caps.hasMethod('member.remove')
   const canApprove = isAdmin && caps.hasMethod('member.approve')
 
   return (
@@ -120,6 +130,7 @@ export function Roster({ client }: { client: Api }) {
       )}
       <section aria-label="Roster" className="flex min-w-0 flex-col gap-2">
         <SectionLabel as="h2">{roster.length === 1 ? '1 member' : `${roster.length} members`}</SectionLabel>
+        {!superAdmin && <p className="text-ui-sm text-muted">You see super admins and the members of workspaces you can use.</p>}
         <div className="overflow-hidden rounded-panel border border-seam">
           <table className="w-full table-fixed text-ui">
             <thead className="border-b border-seam bg-chrome text-left text-ui-sm text-muted">
@@ -162,7 +173,7 @@ export function Roster({ client }: { client: Api }) {
                           <MenuContent align="end">
                             <MenuLabel>Role</MenuLabel>
                             <MenuRadioGroup value={member.role} onValueChange={(role) => changeRole(member, role as Member['role'])}>
-                              {roles.map((role) => <MenuRadioItem key={role} value={role}>{roleLabel[role]}</MenuRadioItem>)}
+                              {roles.filter((role) => scoped || role !== 'super_admin').map((role) => <MenuRadioItem key={role} value={role} description={roleDescription[role]}>{roleLabel[role]}</MenuRadioItem>)}
                             </MenuRadioGroup>
                             {canRemove && !you && (
                               <>
@@ -197,8 +208,8 @@ export function Roster({ client }: { client: Api }) {
       )}
       {demoting && self && (
         <Confirm
-          title="Give up your admin role?"
-          description={`You become ${roleLabel[demoting].toLowerCase()} and lose admin access at once. Another admin has to hand it back.`}
+          title="Give up your super admin role?"
+          description={`You become ${roleLabel[demoting].toLowerCase()} and lose server-wide admin access at once. Another super admin has to hand it back.`}
           action={`Become ${roleLabel[demoting].toLowerCase()}`}
           pending={`Becoming ${roleLabel[demoting].toLowerCase()}…`}
           onConfirm={() => client.memberRole(self.id, demoting)}

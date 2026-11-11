@@ -32,7 +32,8 @@ func TestStatusNotLinkedShowsWhatThisComputerHoldsAndTheFirstStep(t *testing.T) 
 
 func TestStatusNextStep(t *testing.T) {
 	admin := protocol.Member{ID: "mem-1", Role: "admin"}
-	ws := []protocol.Workspace{{ID: "ws-1", Name: "app"}}
+	ws := []protocol.Workspace{{ID: "ws-1", Name: "app", Role: "admin"}}
+	memberWS := []protocol.Workspace{{ID: "ws-1", Name: "app", Role: "collaborator"}}
 	found, missing := true, false
 	ready := []protocol.AgentInfo{{Name: "mine", Installed: true}}
 	sha := strings.Repeat("a", 40)
@@ -45,6 +46,7 @@ func TestStatusNextStep(t *testing.T) {
 		want       string
 	}{
 		{"no workspace", admin, nil, nil, nil, "aether workspace import <path|url>"},
+		{"no workspace, super admin", protocol.Member{Role: "super_admin"}, nil, nil, nil, "aether workspace import <path|url>"},
 		{"no workspace, not an admin", protocol.Member{Role: "member"}, nil, nil, nil, "an admin runs: aether workspace import <path|url>"},
 		{"no agent installed", admin, ws, []protocol.AgentInfo{{Name: "claude"}}, nil, "aether agent add <name>"},
 		{"no login file, device login", admin, ws, []protocol.AgentInfo{{Name: "claude"}, {Name: "codex", Installed: true, LoginFound: &missing, LoginCommand: "codex login --device-auth", LoginKind: "device"}}, nil, "aether agent login codex"},
@@ -55,8 +57,9 @@ func TestStatusNextStep(t *testing.T) {
 		{"mirror fetched, not adopted", admin, ws, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "ready", Generation: 3, ObservedCommit: sha}}, "a human runs: aether workspace mirror adopt --workspace ws-1 --generation 3 --commit " + sha + " --yes"},
 		{"mirror never fetched", admin, ws, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "auth-failed", LastError: "denied"}}, "aether workspace mirror refresh --workspace ws-1"},
 		{"mirror adopted", admin, ws, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "ready", ObservedCommit: sha, AcceptedCommit: sha}}, ""},
-		{"mirror fetched, not an admin", protocol.Member{Role: "member"}, ws, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "ready", Generation: 3, ObservedCommit: sha}}, "an admin runs: aether workspace mirror adopt --workspace ws-1 --generation 3 --commit " + sha + " --yes"},
-		{"mirror never fetched, not an admin", protocol.Member{Role: "member"}, ws, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "auth-failed"}}, "an admin runs: aether workspace mirror refresh --workspace ws-1"},
+		{"mirror fetched, not an admin", protocol.Member{Role: "member"}, memberWS, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "ready", Generation: 3, ObservedCommit: sha}}, "an admin runs: aether workspace mirror adopt --workspace ws-1 --generation 3 --commit " + sha + " --yes"},
+		{"mirror never fetched, not an admin", protocol.Member{Role: "member"}, memberWS, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "auth-failed"}}, "an admin runs: aether workspace mirror refresh --workspace ws-1"},
+		{"mirror never fetched, older server's admin", admin, []protocol.Workspace{{ID: "ws-1", Name: "app"}}, ready, map[string]protocol.WorkspaceMirrorResult{"ws-1": {Enabled: true, Status: "auth-failed"}}, "aether workspace mirror refresh --workspace ws-1"},
 	} {
 		if got := nextStep(tc.member, tc.workspaces, tc.agents, tc.mirrors, nil); got != tc.want {
 			t.Errorf("%s: next = %q, want %q", tc.name, got, tc.want)
@@ -65,7 +68,7 @@ func TestStatusNextStep(t *testing.T) {
 }
 
 func TestStatusNextStepSeedsAnUnpushedBase(t *testing.T) {
-	ws := []protocol.Workspace{{ID: "ws-1", Name: "app", BaseBranch: "main"}}
+	ws := []protocol.Workspace{{ID: "ws-1", Name: "app", BaseBranch: "main", Role: "admin"}}
 	ready := []protocol.AgentInfo{{Name: "mine", Installed: true}}
 	for _, tc := range []struct {
 		name   string
@@ -77,6 +80,10 @@ func TestStatusNextStepSeedsAnUnpushedBase(t *testing.T) {
 		{"no clone", protocol.Member{Role: "admin"}, "", "aether workspace import <path>"},
 		{"no clone, not an admin", protocol.Member{Role: "member"}, "", "an admin runs: aether workspace import <path>"},
 	} {
+		ws := ws
+		if tc.member.Role == "member" {
+			ws = []protocol.Workspace{{ID: "ws-1", Name: "app", BaseBranch: "main", Role: "collaborator"}}
+		}
 		got := nextStep(tc.member, ws, ready, nil, map[string]string{"ws-1": tc.clone})
 		if got != tc.want {
 			t.Errorf("%s: next = %q, want %q", tc.name, got, tc.want)

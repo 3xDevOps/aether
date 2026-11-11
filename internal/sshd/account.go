@@ -73,7 +73,7 @@ func (s *Server) accountShare(ctx context.Context, member domain.MemberID, raw j
 	if grantee == member {
 		return nil, invalidParams("cannot share an account with yourself")
 	}
-	target, err := s.cfg.Store.GetMember(ctx, grantee)
+	target, err := s.visibleMember(ctx, member, grantee)
 	if err != nil {
 		return nil, rpcError(err)
 	}

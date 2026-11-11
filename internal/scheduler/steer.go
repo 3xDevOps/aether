@@ -283,13 +283,24 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 // durable run record and its dependent data. The published branch remains.
 // Terminal runs are deleted directly; deleting never leaves a live container.
 func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	var extras []domain.WorkspaceID
 	workspace, err := s.teardownRun(ctx, run, actor, func(ctx context.Context) error {
+		current, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
+			return fmt.Errorf("scheduler: read session %s before deleting it: %w", run, err)
+		}
+		extras = current.ExtraWorkspaces()
 		return s.cfg.Store.DeleteRun(ctx, run)
 	})
 	if err != nil {
 		return err
 	}
-	s.publishRunDeleted(ctx, workspace, run, actor)
+	s.publish(ctx, events.Event{
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.RunDeletedPayload{ExtraWorkspaceIDs: extras},
+	})
 	return nil
 }
 
@@ -298,15 +309,6 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 func (s *Scheduler) TeardownRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
 	_, err := s.teardownRun(ctx, run, actor, nil)
 	return err
-}
-
-func (s *Scheduler) publishRunDeleted(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, actor domain.MemberID) {
-	s.publish(ctx, events.Event{
-		WorkspaceID: workspace,
-		RunID:       run,
-		ActorID:     actor,
-		Payload:     events.RunDeletedPayload{},
-	})
 }
 
 func (s *Scheduler) teardownRun(ctx context.Context, run domain.RunID, actor domain.MemberID, deleteRows func(context.Context) error) (domain.WorkspaceID, error) {

@@ -24,7 +24,7 @@ type EdgeOwner interface {
 	// TransferOwner records owner as the server's owner and reports it to
 	// the edge. It refuses when the server has no owner: only a claim
 	// code from the machine's console, or one server.edge.claimcode issued
-	// to an admin, gives it one.
+	// to a super admin, gives it one.
 	TransferOwner(owner edgeproto.Account) error
 	// Owner returns the server's owner at its edge, nil when it has none.
 	Owner() (*edgeproto.Account, error)
@@ -62,12 +62,12 @@ func (s *Server) currentEdgeOwner() EdgeOwner {
 	return s.edgeOwner
 }
 
-// serverOwnerTransfer makes another admin, through one of their edge
-// identities, the server's owner at its edge. It never creates an admin
-// and never changes a role: the new owner must already be an admin.
+// serverOwnerTransfer lets a super admin make an admin or super admin,
+// through one of their edge identities, the server's owner at its edge.
+// It never creates an admin and never changes a role.
 func (s *Server) serverOwnerTransfer(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	const method = protocol.MethodServerOwnerTransfer
-	if perr := s.requireAdmin(ctx, member, method); perr != nil {
+	if perr := s.requireSuperAdmin(ctx, member, method); perr != nil {
 		return nil, perr
 	}
 	if perr := s.requireApprovedCaller(ctx, method, false); perr != nil {
@@ -96,9 +96,9 @@ func (s *Server) serverOwnerTransfer(ctx context.Context, member domain.MemberID
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if target.Role != domain.RoleAdmin {
+	if !target.Role.Admin() {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-			"%s: ownership goes to an admin, and %s is %s; an admin changes their role first with member.role", method, target.ID, target.Role)}
+			"%s: ownership goes to an admin or a super admin, and %s is %s; a super admin changes their role first with member.role", method, target.ID, target.Role)}
 	}
 	all, err := ids.ListIdentities(ctx)
 	if err != nil {

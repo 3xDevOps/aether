@@ -577,7 +577,7 @@ func TestRunLimitsPrecedence(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.RunCPULimit, c.RunMemoryBytes, c.RunPidsLimit = 8, 8<<30, 4096 })
 	ctx := context.Background()
-	if _, err := e.sched.cfg.Store.UpdateServerRunLimits(ctx, ptr(4.0), ptr(int64(2<<30)), nil); err != nil {
+	if _, err := e.sched.cfg.Store.UpdateServerRunLimits(ctx, "", ptr(4.0), ptr(int64(2<<30)), nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := e.sched.runLimits(ctx, domain.RunLimits{MemoryBytes: 1 << 30})

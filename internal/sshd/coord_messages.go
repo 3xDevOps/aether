@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -37,13 +38,73 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 	if perr := validateCollaborationPage(p.Before, p.Limit); perr != nil {
 		return nil, perr
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	runs := newRunScopes(s.cfg.Store)
+	var (
+		visible func(protocol.WaitCondition, domain.MemberID) bool
+		hideErr error
+	)
 	page, err := s.cfg.Store.ListRunMessages(ctx, store.RunMessageFilter{
 		WorkspaceID:   domain.WorkspaceID(p.WorkspaceID),
 		RunID:         domain.RunID(p.RunID),
 		CorrelationID: p.CorrelationID,
 		Before:        p.Before,
 		Limit:         p.Limit,
+		Shows: func(m *store.ListedRunMessage) bool {
+			if hideErr != nil || !runs.reaches(ctx, actor, m.FromRun) || !runs.reaches(ctx, actor, m.ToRun) {
+				return false
+			}
+			if !waitWake(m) {
+				return true
+			}
+			var (
+				wait   protocol.WaitCondition
+				waiter domain.MemberID
+				ok     bool
+			)
+			wait, _, waiter, ok, hideErr = s.storedWait(ctx, m.CorrelationID)
+			if watches, has := s.cfg.Store.(store.WatchStore); hideErr == nil && !ok && has {
+				// A relay's wake is correlated with its watch, not a wait.
+				var w *store.Watch
+				switch w, hideErr = watches.GetWatch(ctx, m.CorrelationID); {
+				case errors.Is(hideErr, store.ErrNotFound):
+					hideErr = nil
+				case hideErr == nil:
+					wait, waiter, ok = protocol.WaitCondition{ID: w.ID, Repo: w.Repo, RunID: string(w.RunID)}, w.MemberID, true
+				}
+			}
+			if hideErr != nil {
+				return false
+			}
+			if !ok {
+				// With its wait or watch gone, what the wake was about
+				// is unknown: only its session's owner reads it.
+				if actor.Role == domain.RoleSuperAdmin {
+					return true
+				}
+				run, runErr := s.cfg.Store.GetRun(ctx, m.ToRun)
+				if runErr != nil && !errors.Is(runErr, store.ErrNotFound) {
+					hideErr = runErr
+				}
+				return runErr == nil && run.MemberID == actor.ID
+			}
+			if wait.RunID != "" && !runs.reaches(ctx, actor, domain.RunID(wait.RunID)) {
+				return false
+			}
+			if visible == nil {
+				if visible, hideErr = s.waitVisibility(ctx, actor, true); hideErr != nil {
+					return false
+				}
+			}
+			return visible(wait, waiter)
+		},
 	})
+	if err == nil {
+		err = hideErr
+	}
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -53,13 +114,19 @@ func (s *Server) coordMessagesList(ctx context.Context, member domain.MemberID, 
 	return protocol.CoordMessagesPageFromStore(page), nil
 }
 
+// waitWake reports whether m is a wait's wake: a session's message to
+// itself, correlated with the wait.
+func waitWake(m *store.ListedRunMessage) bool {
+	return m.FromRun == m.ToRun && strings.HasPrefix(m.CorrelationID, "wat-")
+}
+
 // redactWaitWakes cuts a wait's wake, a session's message to itself, to
 // its first line for members who do not read that session's wait details:
 // the rest holds what the owner's GitHub login or another agent returned.
 func (s *Server) redactWaitWakes(ctx context.Context, member domain.MemberID, items []*store.ListedRunMessage) error {
 	sees := map[domain.RunID]bool{}
 	for _, m := range items {
-		if m.FromRun != m.ToRun || !strings.HasPrefix(m.CorrelationID, "wat-") {
+		if !waitWake(m) {
 			continue
 		}
 		full, ok := sees[m.ToRun]

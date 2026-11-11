@@ -18,10 +18,10 @@ import (
 func init() {
 	registerMethod(protocol.MethodGitHubConnect, (*Server).githubConnect)
 	registerMethod(protocol.MethodGitHubProbe, (*Server).githubProbe)
-	registerGuarded(protocol.MethodGitHubOAuthStart, permissions.WorkspaceAdmin, nil, (*Server).githubOAuthStart)
-	registerGuarded(protocol.MethodGitHubOAuthStatus, permissions.WorkspaceAdmin, nil, (*Server).githubOAuthStatus)
-	registerGuarded(protocol.MethodGitHubOAuthCancel, permissions.WorkspaceAdmin, nil, (*Server).githubOAuthCancel)
-	registerGuarded(protocol.MethodGitHubRepositoriesList, permissions.WorkspaceAdmin, nil, (*Server).githubRepositoriesList)
+	registerGuarded(protocol.MethodGitHubOAuthStart, permissions.CreateWorkspace, nil, (*Server).githubOAuthStart)
+	registerGuarded(protocol.MethodGitHubOAuthStatus, permissions.CreateWorkspace, nil, (*Server).githubOAuthStatus)
+	registerGuarded(protocol.MethodGitHubOAuthCancel, permissions.CreateWorkspace, nil, (*Server).githubOAuthCancel)
+	registerGuarded(protocol.MethodGitHubRepositoriesList, permissions.CreateWorkspace, nil, (*Server).githubRepositoriesList)
 }
 
 // githubConnect finishes the caller's own GitHub connection. It is member

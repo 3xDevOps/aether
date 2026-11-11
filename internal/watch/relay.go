@@ -41,7 +41,7 @@ func (s *Service) relayTargets(ctx context.Context, member *domain.Member, ws do
 	// Sorted, so the same sessions in another order find the same watch.
 	slices.Sort(out)
 	for _, id := range out {
-		run, err := s.store.GetRun(ctx, id)
+		run, err := s.reachableRun(ctx, member, id)
 		if err != nil {
 			return nil, fmt.Errorf("relay_to session %s: %w", id, err)
 		}
@@ -80,8 +80,8 @@ func (s *Service) mayRelay(ctx context.Context, member *domain.Member, ws domain
 	if err != nil {
 		return err
 	}
-	actor := permissions.Actor{ID: member.ID, Role: member.Role}
-	target := permissions.Target{Workspace: ws, Owner: run.MemberID, Protected: run.Protected, SteerOthers: workspace.SteerOthers}
+	actor := permissions.ActorOf(member)
+	target := permissions.Target{Workspace: ws, Extra: run.ExtraWorkspaces(), Owner: run.MemberID, Protected: run.Protected, SteerOthers: workspace.SteerOthers}
 	if err := permissions.Check(permissions.Steer, actor, target); err != nil {
 		return relayRefused{fmt.Errorf("you may not write to session %s: %w", run.ID, err)}
 	}
@@ -129,6 +129,11 @@ func (s *Service) relay(ctx context.Context, r *store.WatchRelay) error {
 	}
 	if s.notifier == nil {
 		return settle(protocol.WatchStatusFailed, "This server has no session inboxes", nil)
+	}
+	if aerr := s.allowed(ctx, w); errors.Is(aerr, errRevoked) {
+		return settle(protocol.WatchStatusFailed, "Not relayed: "+aerr.Error(), nil)
+	} else if aerr != nil {
+		return aerr
 	}
 	if !slices.Contains(w.RelayTo, r.RunID) {
 		return settle(protocol.WatchStatusCleared, "Not delivered: the session was removed from relay_to", nil)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -21,6 +22,9 @@ type RunMessageFilter struct {
 	CorrelationID string
 	Before        string
 	Limit         int
+	// Shows, when set, keeps a page to the messages it accepts: the page is
+	// filled with them, and its cursor points at the last one.
+	Shows func(*ListedRunMessage) bool
 }
 
 // ListedRunMessage.Report is set when the message forwards the sender's
@@ -60,35 +64,50 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 		query += ` AND m.correlation_id = ?`
 		args = append(args, f.CorrelationID)
 	}
+	const after = ` AND (m.created_at, m.rowid) < (?, ?)`
+	var before string
+	var beforeArgs []any
 	if beforeAt, beforeRowid, ok := decodeMessageCursor(f.Before); ok {
-		query += ` AND (m.created_at, m.rowid) < (?, ?)`
-		args = append(args, beforeAt, beforeRowid)
+		before, beforeArgs = after, []any{beforeAt, beforeRowid}
 	} else if f.Before != "" {
 		// A cursor issued before cursors carried the rowid holds the message ID.
 		beforeAt, beforeID, ok := decodeEvidenceCursor(f.Before)
 		if !ok {
 			return nil, fmt.Errorf("store: list session messages: %w %q", ErrInvalidCursor, f.Before)
 		}
-		query += ` AND (m.created_at, m.rowid) < (?, (SELECT rowid FROM run_messages WHERE id = ?))`
-		args = append(args, beforeAt.UnixNano(), beforeID)
+		before = ` AND (m.created_at, m.rowid) < (?, (SELECT rowid FROM run_messages WHERE id = ?))`
+		beforeArgs = []any{beforeAt.UnixNano(), beforeID}
 	}
-	query += ` ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?`
-	args = append(args, limit+1)
-	rows, err := d.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("store: list session messages: %w", err)
+	page := &RunMessagePage{}
+	var lastRowid int64
+	for {
+		rows, err := d.db.QueryContext(ctx, query+before+` ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?`,
+			slices.Concat(args, beforeArgs, []any{limit + 1})...)
+		if err != nil {
+			return nil, fmt.Errorf("store: list session messages: %w", err)
+		}
+		var rowids []int64
+		items, err := collect(rows, scanWithRowid(scanListedRunMessage, &rowids))
+		if err != nil {
+			return nil, fmt.Errorf("store: list session messages: %w", err)
+		}
+		for i, item := range items {
+			if f.Shows != nil && !f.Shows(item) {
+				continue
+			}
+			if len(page.Items) == limit {
+				page.NextBefore = encodeMessageCursor(page.Items[limit-1].CreatedAt, lastRowid)
+				return page, nil
+			}
+			page.Items = append(page.Items, item)
+			lastRowid = rowids[i]
+		}
+		if len(items) <= limit {
+			return page, nil
+		}
+		last := len(items) - 1
+		before, beforeArgs = after, []any{items[last].CreatedAt.UnixNano(), rowids[last]}
 	}
-	var rowids []int64
-	items, err := collect(rows, scanWithRowid(scanListedRunMessage, &rowids))
-	if err != nil {
-		return nil, fmt.Errorf("store: list session messages: %w", err)
-	}
-	page := &RunMessagePage{Items: items}
-	if len(items) > limit {
-		page.Items = items[:limit]
-		page.NextBefore = encodeMessageCursor(page.Items[limit-1].CreatedAt, rowids[limit-1])
-	}
-	return page, nil
 }
 
 func (d *DB) LastSentRunMessages(ctx context.Context, from domain.RunID) (map[domain.RunID]*RunMessage, error) {

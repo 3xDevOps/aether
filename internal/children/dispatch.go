@@ -111,26 +111,23 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		refuse("the parent session ended or changed owner before this subsession started")
 		return
 	}
-	requested, err := s.cfg.Authorize(ctx, s.cfg.Store, c.OwnerID, string(c.AccountID))
+	workspaces := p.workspaces()
+	requested, err := s.cfg.Authorize(ctx, s.cfg.Store, c.OwnerID, string(c.AccountID), workspaces)
 	if err != nil {
 		unlock()
 		refuse(err.Error())
 		return
 	}
-	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, c.OwnerID, requested, c.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, c.OwnerID, requested, workspaces, c.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
 		return s.cfg.Runs.FallbackLaunchable(ctx, c.OwnerID, requested, account, c.Harness, c.Mode)
 	})
 	if excluded != nil {
 		slog.Warn("subsessions: fallback accounts left out of a subsession launch", "child", c.RunID, "error", excluded)
 	}
 	created := false
-	extras := make([]domain.WorkspaceID, len(p.parent.Extras))
-	for i, repo := range p.parent.Extras {
-		extras[i] = repo.WorkspaceID
-	}
 	_, err = s.cfg.Runs.LaunchWithOptions(ctx, c.WorkspaceID, c.OwnerID, account, c.Task, c.Harness, c.Mode, domain.LaunchOptions{
 		Model: c.Model, Permission: parent.Permission, RequestedAccount: requested, Fallback: c.Fallback, ReservedRunID: c.RunID,
-		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, ExtraWorkspaces: extras, Admitted: unlock,
+		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, ExtraWorkspaces: workspaces[1:], Admitted: unlock,
 		Created: func(domain.RunID) {
 			created = true
 			if stateErr := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildLaunching); stateErr != nil {

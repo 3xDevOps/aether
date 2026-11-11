@@ -33,7 +33,7 @@ type RoomService interface {
 // EvidenceService is the transport seam for retained evidence metadata and
 // bounded supporting objects. It deliberately exposes no artifact paths.
 type EvidenceService interface {
-	List(context.Context, domain.WorkspaceID, domain.RunID, string, int) (protocol.EvidencePacketListResult, error)
+	List(context.Context, domain.WorkspaceID, domain.RunID, string, int, func(domain.RunID) bool) (protocol.EvidencePacketListResult, error)
 	Get(context.Context, domain.WorkspaceID, string) (protocol.EvidencePacket, error)
 	RenderPatch(context.Context, domain.WorkspaceID, string, int) (gitengine.Patch, error)
 	ReadTranscript(context.Context, domain.WorkspaceID, string, int) ([]byte, bool, error)
@@ -97,7 +97,7 @@ func roomTarget(s *Server, ctx context.Context, raw json.RawMessage) (permission
 		return permissions.Target{}, rpcError(err)
 	}
 	if target.Workspace != domain.WorkspaceID(p.WorkspaceID) {
-		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "session is not in workspace"}
+		return permissions.Target{}, rpcError(store.ErrNotFound)
 	}
 	return target, nil
 }
@@ -135,7 +135,7 @@ func evidencePacketTarget(s *Server, ctx context.Context, raw json.RawMessage) (
 		return permissions.Target{}, rpcError(err)
 	}
 	if packet.WorkspaceID != domain.WorkspaceID(p.WorkspaceID) {
-		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "evidence packet not found"}
+		return permissions.Target{}, rpcError(store.ErrNotFound)
 	}
 	target, err := resolveRunTarget(ctx, s.cfg.Store, packet.RunID)
 	if err != nil {
@@ -257,11 +257,15 @@ func (s *Server) runRoomPost(ctx context.Context, member domain.MemberID, raw js
 	if perr != nil {
 		return nil, perr
 	}
-	if p.Kind == protocol.RoomMessageSteerRequest {
+	role, reached := actor.RoleIn(target.Workspace)
+	switch {
+	case !reached:
+		return nil, rpcError(permissions.ErrNoAccess)
+	case p.Kind == protocol.RoomMessageSteerRequest:
 		if checkErr := permissions.Check(permissions.Steer, actor, target); checkErr != nil {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunRoomPost + ": " + checkErr.Error()}
+			return nil, checkError(protocol.MethodRunRoomPost, checkErr)
 		}
-	} else if actor.Role != domain.RoleAdmin && actor.Role != domain.RoleCollaborator {
+	case role != domain.RoleAdmin && role != domain.RoleCollaborator:
 		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunRoomPost + ": posting requires the collaborator role"}
 	}
 	input := collab.MessageInput{
@@ -347,7 +351,7 @@ func roomMutationResult(result collab.Result) protocol.RunRoomPostResult {
 	return out
 }
 
-func (s *Server) runEvidenceList(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runEvidenceList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	ev, perr := s.evidence()
 	if perr != nil {
 		return nil, perr
@@ -362,7 +366,14 @@ func (s *Server) runEvidenceList(ctx context.Context, _ domain.MemberID, raw jso
 	if err := validateCollaborationPage(p.Before, p.Limit); err != nil {
 		return nil, err
 	}
-	result, err := ev.List(ctx, domain.WorkspaceID(p.WorkspaceID), domain.RunID(p.RunID), p.Before, p.Limit)
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	runs := newRunScopes(s.cfg.Store)
+	result, err := ev.List(ctx, domain.WorkspaceID(p.WorkspaceID), domain.RunID(p.RunID), p.Before, p.Limit, func(run domain.RunID) bool {
+		return runs.reaches(ctx, actor, run)
+	})
 	if err != nil {
 		return nil, collaborationRPCError(err)
 	}

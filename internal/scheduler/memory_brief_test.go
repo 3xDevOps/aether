@@ -180,7 +180,7 @@ func TestEnhancedSystemPromptCarriesTheTeamMemoryBrief(t *testing.T) {
 
 type failingMemory struct{}
 
-func (failingMemory) Brief(context.Context, domain.WorkspaceID, domain.MemberID, domain.RunID) (string, error) {
+func (failingMemory) Brief(context.Context, domain.WorkspaceID, domain.MemberID, domain.MemberID, domain.RunID) (string, error) {
 	return "", errors.New("memory.brief: database is locked")
 }
 

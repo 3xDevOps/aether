@@ -12,7 +12,7 @@ import type { RunRecord } from '@/store/runs'
 
 /** The Session composer's rules for a message another surface sends to the run's agent. */
 export function useAgentSend(run: RunRecord, agent: AgentTerminal) {
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const control = useImplicitControl(run, agent)

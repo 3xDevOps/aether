@@ -82,7 +82,7 @@ func TestTheSchedulerReadsTheRunsWaitConditions(t *testing.T) {
 	}
 	var offset atomic.Int64
 	now := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
-	svc, err := watch.New(watch.Config{Store: db, Bus: bus, Runs: quietRuns{}, Tick: 20 * time.Millisecond, Now: now})
+	svc, err := watch.New(watch.Config{Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: quietRuns{}, Tick: 20 * time.Millisecond, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

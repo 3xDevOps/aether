@@ -163,7 +163,7 @@ func TestIntegrationAssistantAutoApprove(t *testing.T) {
 	})
 
 	_, graceSigner := writeClientKey(t)
-	grace := &domain.Member{DisplayName: "Grace", PublicKey: string(ssh.MarshalAuthorizedKey(graceSigner.PublicKey())), Color: "#911eb4", Role: domain.RoleAdmin}
+	grace := &domain.Member{DisplayName: "Grace", PublicKey: string(ssh.MarshalAuthorizedKey(graceSigner.PublicKey())), Color: "#911eb4", Role: domain.RoleSuperAdmin}
 	if err = env.srv.Store().CreateMember(ctx, grace); err != nil {
 		t.Fatal(err)
 	}

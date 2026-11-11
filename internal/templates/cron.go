@@ -31,8 +31,9 @@ func (s *Service) Schedules(ctx context.Context, workspace domain.WorkspaceID) (
 // SaveSchedule creates or replaces the cron rule firing a template. member
 // is recorded as the schedule's owner: fires are attributed to them and
 // re-checked against their role, so this is not a way to launch runs as
-// somebody else.
-func (s *Service) SaveSchedule(ctx context.Context, workspace domain.WorkspaceID, template, spec string, member domain.MemberID) (*ScheduleInfo, error) {
+// somebody else. Unless replaceAny, it replaces only a schedule member
+// created and returns store.ErrScheduleOwner for another member's.
+func (s *Service) SaveSchedule(ctx context.Context, workspace domain.WorkspaceID, template, spec string, member domain.MemberID, replaceAny bool) (*ScheduleInfo, error) {
 	rule, err := cron.ParseStandard(spec)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cron %q: %s", ErrInvalidDefinition, spec, err)
@@ -53,20 +54,22 @@ func (s *Service) SaveSchedule(ctx context.Context, workspace domain.WorkspaceID
 		return nil, fmt.Errorf("%w: template %q cannot fire unattended: %s", ErrInvalidDefinition, template, err)
 	}
 	sc := &store.Schedule{TemplateID: t.ID, Cron: spec, MemberID: member}
-	if err := s.store.SaveSchedule(ctx, sc); err != nil {
+	if err := s.store.SaveSchedule(ctx, sc, replaceAny); err != nil {
 		return nil, fmt.Errorf("templates: schedule %s: %w", template, err)
 	}
 	sc.WorkspaceID, sc.Template = t.WorkspaceID, t.Name
 	return &ScheduleInfo{Schedule: sc, Next: s.seed(sc.ID, spec, rule)}, nil
 }
 
-// DeleteSchedule removes a template's cron rule, leaving the template.
-func (s *Service) DeleteSchedule(ctx context.Context, workspace domain.WorkspaceID, template string) error {
+// DeleteSchedule removes a template's cron rule, leaving the template. A
+// non-empty owner removes only a schedule owner created, and another
+// member's returns store.ErrScheduleOwner.
+func (s *Service) DeleteSchedule(ctx context.Context, workspace domain.WorkspaceID, template string, owner domain.MemberID) error {
 	t, err := s.store.GetTemplate(ctx, workspace, template)
 	if err != nil {
 		return fmt.Errorf("templates: unschedule %s: %w", template, err)
 	}
-	if err := s.store.DeleteSchedule(ctx, t.ID); err != nil {
+	if err := s.store.DeleteSchedule(ctx, t.ID, owner); err != nil {
 		return fmt.Errorf("templates: unschedule %s: %w", template, err)
 	}
 	return nil
@@ -171,7 +174,7 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 		slog.Warn("templates: schedule template unavailable", "schedule", sc.ID, "error", err)
 		return
 	}
-	if err = s.allowed(ctx, sc.MemberID); err != nil {
+	if err = s.allowed(ctx, sc.MemberID, t.WorkspaceID); err != nil {
 		slog.Warn("templates: schedule skipped", "schedule", sc.ID, "template", t.Name, "error", err)
 		s.publish(ctx, t.WorkspaceID, "", sc.MemberID,
 			fmt.Sprintf("schedule for template %q skipped: %s", t.Name, err))
@@ -196,8 +199,8 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 }
 
 // allowed re-reads the schedule's member and checks the launch capability
-// against their current role.
-func (s *Service) allowed(ctx context.Context, member domain.MemberID) error {
+// against their current role and access in workspace.
+func (s *Service) allowed(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) error {
 	m, err := s.store.GetMember(ctx, member)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -208,7 +211,7 @@ func (s *Service) allowed(ctx context.Context, member domain.MemberID) error {
 	if m.Pending {
 		return fmt.Errorf("member %s is awaiting admin approval", member)
 	}
-	if err := permissions.Check(permissions.Launch, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{}); err != nil {
+	if err := permissions.Check(permissions.Launch, permissions.ActorOf(m), permissions.Target{Workspace: workspace}); err != nil {
 		return fmt.Errorf("member %s may no longer launch sessions: %w", member, err)
 	}
 	return nil

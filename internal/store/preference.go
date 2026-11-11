@@ -56,8 +56,8 @@ type PreferenceStore interface {
 	// DeleteMemberWithPreferences deletes the member, and with it their
 	// preferences; commit runs with the preferences' ids once the member's
 	// row is deleted and before the transaction commits, and its error
-	// aborts it.
-	DeleteMemberWithPreferences(ctx context.Context, member domain.MemberID, commit func(ids []string) error) error
+	// aborts it. It is refused as DeleteMember refuses.
+	DeleteMemberWithPreferences(ctx context.Context, member, by domain.MemberID, commit func(ids []string) error) error
 	// PreferenceTimes returns when each of the preferences ids that exist
 	// was last updated, whoever owns it.
 	PreferenceTimes(ctx context.Context, ids []string) (map[string]time.Time, error)
@@ -236,12 +236,18 @@ func (d *DB) DeletePreference(ctx context.Context, member domain.MemberID, id st
 	return p, nil
 }
 
-func (d *DB) DeleteMemberWithPreferences(ctx context.Context, member domain.MemberID, commit func(ids []string) error) error {
+func (d *DB) DeleteMemberWithPreferences(ctx context.Context, member, by domain.MemberID, commit func(ids []string) error) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: delete member: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if err = refuseRemoval(ctx, tx, member, by); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("store: delete member: %w", err)
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM member_preferences WHERE member_id = ?`, member)
 	if err != nil {
 		return fmt.Errorf("store: delete member: %w", err)

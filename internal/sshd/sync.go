@@ -160,7 +160,11 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	if cerr := permissions.Check(permissions.Steer, actor, target); cerr != nil {
+	if cerr := permissions.Check(permissions.Steer, actor, target); errors.Is(cerr, permissions.ErrNoAccess) {
+		e := rpcError(cerr)
+		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: e.Code, Error: e.Message})
+		return
+	} else if cerr != nil {
 		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: protocol.CodeDenied, Error: cerr.Error()})
 		return
 	}

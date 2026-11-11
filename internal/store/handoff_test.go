@@ -105,7 +105,7 @@ func TestCompletedHandoffDoesNotRetainMemberForeignKeys(t *testing.T) {
 	if err := db.MarkHandoffPublished(ctx, h.ID, h.CreatedAt); err != nil {
 		t.Fatalf("MarkHandoffPublished: %v", err)
 	}
-	if err := db.DeleteMember(ctx, from.ID); err != nil {
+	if err := db.DeleteMember(ctx, from.ID, ""); err != nil {
 		t.Fatalf("DeleteMember former handoff member: %v", err)
 	}
 	got, err := db.GetHandoffOutbox(ctx, h.ID)

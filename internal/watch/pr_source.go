@@ -462,8 +462,12 @@ func (p *PRs) refreshRun(ctx context.Context, t prTarget, snap github.Snapshot) 
 	if p.bus == nil {
 		return nil
 	}
+	var repo domain.WorkspaceID
+	if t.prior != nil {
+		repo = t.prior.RepoWorkspace
+	}
 	if _, err := p.bus.Publish(ctx, events.Event{WorkspaceID: run.WorkspaceID, RunID: run.ID, Payload: events.RunPRPayload{
-		RunID: run.ID, Number: t.number, URL: snap.URL, State: snap.State, MergedAt: snap.MergedAt,
+		RunID: run.ID, Repo: repo, Number: t.number, URL: snap.URL, State: snap.State, MergedAt: snap.MergedAt,
 	}}); err != nil {
 		slog.Warn("watch: publish run pull request", "run", t.run, "error", err)
 	}

@@ -1918,6 +1918,95 @@ describe('applyEvent', () => {
     })
   })
 
+  it('re-reads the workspaces when the viewer loses one', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const workspaceListFull = vi.fn(async () => [otherWorkspace])
+    const applied = await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.access',
+      payload: { workspace_id: workspace.id, member_id: alice.id, action: 'revoked' },
+    }), fakeApi({ workspaceListFull }))
+
+    expect(applied).toBe(true)
+    expect(workspaceListFull).toHaveBeenCalledTimes(1)
+    expect(store.getState().workspaces[workspace.id]).toBeUndefined()
+  })
+
+  it('reloads the viewer role and members when a member.access notice arrives', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const info = { ...serverInfoFixture, member: { ...serverInfoFixture.member, role: 'admin' as const } }
+    const memberList = vi.fn(async () => ({ members: [{ ...alice, role: 'admin' as const }] }))
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.access',
+      payload: { workspace_id: '', member_id: serverInfoFixture.member.id, action: 'granted' },
+    }), fakeApi({ serverInfo: vi.fn(async () => info), workspaceListFull: vi.fn(async () => [{ ...workspace, role: 'admin' as const }]), memberList }))
+
+    expect(store.getState().info?.member.role).toBe('admin')
+    expect(store.getState().workspaces[workspace.id]?.role).toBe('admin')
+    expect(memberList).toHaveBeenCalled()
+  })
+
+  it('writes nothing from member.access reads that finish after the identity changed or the connection aborted', async () => {
+    for (const stop of ['identity', 'abort']) {
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+      const before = store.getState().info
+      const controller = new AbortController()
+      let release: (v: unknown) => void = () => {}
+      const runList = vi.fn(() => new Promise<never[]>((resolve) => { release = resolve as (v: unknown) => void }))
+      const applied = applyEvent(store, statusEvent({
+        run_id: '', workspace_id: 'server', type: 'member.access',
+        payload: { workspace_id: '', member_id: serverInfoFixture.member.id, action: 'granted' },
+      }), fakeApi({ runList, serverInfo: vi.fn(async () => ({ ...serverInfoFixture, tailnet_hostname: 'late' })) }), controller.signal)
+      await vi.waitFor(() => expect(runList).toHaveBeenCalled())
+      if (stop === 'identity') store.setState({ identityKey: 'someone-else' })
+      else controller.abort()
+      release([])
+      expect(await applied).toBe(false)
+      expect(store.getState().info).toBe(before)
+    }
+  })
+
+  it('re-reads the members on a workspace access change', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const memberList = vi.fn(async () => ({ members: [alice, bob] }))
+    await applyEvent(store, statusEvent({
+      run_id: '', type: 'workspace.access',
+      payload: { workspace_id: workspace.id, member_id: bob.id, action: 'granted' },
+    }), fakeApi({ memberList }))
+
+    expect(memberList).toHaveBeenCalledTimes(1)
+  })
+
+  it('records a failed members re-read on an access change instead of ignoring it', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const memberList = vi.fn(async () => Promise.reject(new ApiError(503, 'member.list: server unreachable: dial tcp 10.0.0.5:22: connect: connection refused')))
+    const applied = await applyEvent(store, statusEvent({
+      run_id: '', type: 'workspace.access',
+      payload: { workspace_id: workspace.id, member_id: bob.id, action: 'granted' },
+    }), fakeApi({ memberList }))
+
+    expect(applied).toBe(false)
+    expect(store.getState().unreachable).toBe('server')
+  })
+
+  it('brings back the sessions of a workspace the viewer regains', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]), runList: vi.fn(async () => []) }))
+    const regained = run({ id: 'run_back', workspace_id: workspace.id })
+    const runList = vi.fn(async () => [regained])
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.access',
+      payload: { workspace_id: workspace.id, member_id: alice.id, action: 'granted' },
+    }), fakeApi({ workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]), runList }))
+
+    expect(runList).toHaveBeenCalledTimes(1)
+    expect(store.getState().runs[regained.id]).toBeTruthy()
+  })
+
   it('re-reads the devices on a device event', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

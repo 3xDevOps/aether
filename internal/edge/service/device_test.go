@@ -268,7 +268,7 @@ func TestServersList(t *testing.T) {
 	h.link.servers = map[string]string{id: "workstation"}
 	var servers edgeproto.ServersResponse
 	h.apiCall(t, http.MethodGet, edgeproto.PathServers, tok.Token, nil, &servers)
-	want := edgeproto.ServerInfo{ID: id, Name: "workstation", Online: true, Role: "admin",
+	want := edgeproto.ServerInfo{ID: id, Name: "workstation", Online: true, Role: "super_admin",
 		AccessPolicy: edgeproto.PolicyAccount, Kind: edgeproto.ServerSelfHosted}
 	if len(servers.Servers) != 1 || servers.Servers[0] != want {
 		t.Errorf("servers = %+v, want [%+v]", servers.Servers, want)

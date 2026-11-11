@@ -262,7 +262,7 @@ function SendActions({ pill, label, hint, description, disabled, onClick, onCanc
 }
 
 function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange, onEscape }: ComposerProps) {
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const coarse = useMediaQuery(coarsePointer)
@@ -373,7 +373,7 @@ function useQueueHeld(active: boolean): boolean {
 
 function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock, onEscape }: ComposerProps) {
   const mobile = useIsMobile()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const session = useStore((s) => s.acpSessions[run.id])
@@ -649,7 +649,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 
 export function Composer(props: ComposerProps) {
   const { run, dock } = props
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })

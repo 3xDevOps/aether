@@ -63,7 +63,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 	}
 
 	sched := &Schedule{TemplateID: tpl.ID, Cron: "0 3 * * *", MemberID: m.ID}
-	if err = db.SaveSchedule(ctx, sched); err != nil {
+	if err = db.SaveSchedule(ctx, sched, true); err != nil {
 		t.Fatalf("SaveSchedule: %v", err)
 	}
 	fired := time.Now().UTC().Truncate(time.Second)
@@ -80,7 +80,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 
 	// Replacing the rule keeps one schedule and resets its firing state.
 	again := &Schedule{TemplateID: tpl.ID, Cron: "30 2 * * *", MemberID: m.ID}
-	if err = db.SaveSchedule(ctx, again); err != nil {
+	if err = db.SaveSchedule(ctx, again, true); err != nil {
 		t.Fatalf("SaveSchedule (replace): %v", err)
 	}
 	if schedules, err = db.ListSchedules(ctx, ""); err != nil || len(schedules) != 1 {
@@ -90,7 +90,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 		t.Fatalf("replaced schedule = %+v, want the new cron and no fired stamp", schedules[0])
 	}
 
-	if err = db.SaveSchedule(ctx, &Schedule{TemplateID: "tpl_missing", Cron: "* * * * *", MemberID: m.ID}); !errors.Is(err, ErrNotFound) {
+	if err = db.SaveSchedule(ctx, &Schedule{TemplateID: "tpl_missing", Cron: "* * * * *", MemberID: m.ID}, true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("schedule for missing template = %v, want ErrNotFound", err)
 	}
 
@@ -105,6 +105,65 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 	}
 	if err := db.DeleteTemplate(ctx, w.ID, "nightly-deps"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second DeleteTemplate = %v, want ErrNotFound", err)
+	}
+}
+
+// A guarded save or delete leaves another member's schedule as it is, and
+// an unguarded one, an admin's, takes it over or removes it.
+func TestScheduleOwnerGuard(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	ada := mustCreateMember(t, db)
+	lin := &domain.Member{DisplayName: "Lin", PublicKey: testKey(t, "lin@laptop"), Color: "#3cb44b", Role: domain.RoleCollaborator}
+	if err := db.CreateMember(ctx, lin); err != nil {
+		t.Fatal(err)
+	}
+	tpl := &Template{WorkspaceID: w.ID, Name: "nightly", Task: "run", Harness: "claude", Mode: domain.LaunchHeadless}
+	if err := db.SaveTemplate(ctx, tpl); err != nil {
+		t.Fatal(err)
+	}
+	schedule := func() *Schedule {
+		t.Helper()
+		list, err := db.ListSchedules(ctx, w.ID)
+		if err != nil || len(list) != 1 {
+			t.Fatalf("ListSchedules = %+v, %v; want one", list, err)
+		}
+		return list[0]
+	}
+
+	if err := db.DeleteSchedule(ctx, tpl.ID, ada.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("guarded delete of no schedule = %v, want ErrNotFound", err)
+	}
+	if err := db.SaveSchedule(ctx, &Schedule{TemplateID: tpl.ID, Cron: "0 3 * * *", MemberID: ada.ID}, false); err != nil {
+		t.Fatalf("guarded create: %v", err)
+	}
+	if err := db.SaveSchedule(ctx, &Schedule{TemplateID: tpl.ID, Cron: "0 4 * * *", MemberID: ada.ID}, false); err != nil {
+		t.Fatalf("guarded replace of her own: %v", err)
+	}
+
+	if err := db.SaveSchedule(ctx, &Schedule{TemplateID: tpl.ID, Cron: "0 5 * * *", MemberID: lin.ID}, false); !errors.Is(err, ErrScheduleOwner) {
+		t.Fatalf("guarded replace of Ada's = %v, want ErrScheduleOwner", err)
+	}
+	if err := db.DeleteSchedule(ctx, tpl.ID, lin.ID); !errors.Is(err, ErrScheduleOwner) {
+		t.Fatalf("guarded delete of Ada's = %v, want ErrScheduleOwner", err)
+	}
+	if got := schedule(); got.MemberID != ada.ID || got.Cron != "0 4 * * *" {
+		t.Fatalf("schedule after refused writes = %+v, want Ada's 0 4 * * *", got)
+	}
+
+	if err := db.SaveSchedule(ctx, &Schedule{TemplateID: tpl.ID, Cron: "0 6 * * *", MemberID: lin.ID}, true); err != nil {
+		t.Fatalf("unguarded replace: %v", err)
+	}
+	if got := schedule(); got.MemberID != lin.ID || got.Cron != "0 6 * * *" {
+		t.Fatalf("schedule after unguarded replace = %+v, want Lin's 0 6 * * *", got)
+	}
+	if err := db.DeleteSchedule(ctx, tpl.ID, ""); err != nil {
+		t.Fatalf("unguarded delete: %v", err)
+	}
+	if list, err := db.ListSchedules(ctx, w.ID); err != nil || len(list) != 0 {
+		t.Fatalf("schedules after delete = %+v, %v; want none", list, err)
 	}
 }
 
@@ -142,7 +201,7 @@ func TestTemplatesMigrationUpgradesPreviousVersion(t *testing.T) {
 	if err := db.SaveTemplate(ctx, tpl); err != nil {
 		t.Fatalf("SaveTemplate after migration: %v", err)
 	}
-	if err := db.SaveSchedule(ctx, &Schedule{TemplateID: tpl.ID, Cron: "0 3 * * *", MemberID: "m1"}); err != nil {
+	if err := db.SaveSchedule(ctx, &Schedule{TemplateID: tpl.ID, Cron: "0 3 * * *", MemberID: "m1"}, true); err != nil {
 		t.Fatalf("SaveSchedule after migration: %v", err)
 	}
 }

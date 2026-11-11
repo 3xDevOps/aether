@@ -65,12 +65,17 @@ type TemplateStore interface {
 
 	// SaveSchedule creates or replaces the schedule of s.TemplateID,
 	// filling in s.ID and s.CreatedAt. Replacing clears the last-fired
-	// stamp: a redefined rule starts fresh.
-	SaveSchedule(ctx context.Context, s *Schedule) error
+	// stamp: a redefined rule starts fresh. Unless replaceAny, it replaces
+	// only a schedule s.MemberID created, in the same statement, and
+	// returns ErrScheduleOwner for another member's.
+	SaveSchedule(ctx context.Context, s *Schedule, replaceAny bool) error
 	// ListSchedules returns a workspace's schedules, or every schedule when
 	// workspace is empty.
 	ListSchedules(ctx context.Context, workspace domain.WorkspaceID) ([]*Schedule, error)
-	DeleteSchedule(ctx context.Context, templateID string) error
+	// DeleteSchedule removes the schedule of templateID. A non-empty owner
+	// limits it, in the same statement, to a schedule owner created;
+	// another member's returns ErrScheduleOwner.
+	DeleteSchedule(ctx context.Context, templateID string, owner domain.MemberID) error
 	// MarkScheduleFired records the instant a fire was attempted.
 	MarkScheduleFired(ctx context.Context, id string, at time.Time) error
 }
@@ -153,7 +158,11 @@ func (d *DB) DeleteTemplate(ctx context.Context, workspace domain.WorkspaceID, n
 // workspace and template name come from.
 const scheduleCols = `s.id, s.template_id, t.workspace_id, t.name, s.cron, s.member_id, s.created_at, s.last_fired_at`
 
-func (d *DB) SaveSchedule(ctx context.Context, s *Schedule) error {
+// ErrScheduleOwner refuses a guarded save or delete of a schedule another
+// member created.
+var ErrScheduleOwner = errors.New("store: schedule belongs to another member")
+
+func (d *DB) SaveSchedule(ctx context.Context, s *Schedule, replaceAny bool) error {
 	if s.TemplateID == "" || s.Cron == "" || s.MemberID == "" {
 		return errors.New("store: save schedule: template_id, cron, and member_id are required")
 	}
@@ -174,9 +183,13 @@ func (d *DB) SaveSchedule(ctx context.Context, s *Schedule) error {
 		 VALUES (?, ?, ?, ?, ?, NULL)
 		 ON CONFLICT (template_id) DO UPDATE SET
 		   cron = excluded.cron, member_id = excluded.member_id, last_fired_at = NULL
+		 WHERE ? OR schedules.member_id = excluded.member_id
 		 RETURNING id, created_at`,
-		id, s.TemplateID, s.Cron, s.MemberID, createdAt,
+		id, s.TemplateID, s.Cron, s.MemberID, createdAt, replaceAny,
 	).Scan(&gotID, &gotCreated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrScheduleOwner
+	}
 	if err != nil {
 		return fmt.Errorf("store: save schedule: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -198,9 +211,23 @@ func (d *DB) ListSchedules(ctx context.Context, workspace domain.WorkspaceID) ([
 	return collect(rows, scanSchedule)
 }
 
-func (d *DB) DeleteSchedule(ctx context.Context, templateID string) error {
-	return d.execDelete(ctx, "delete schedule",
-		`DELETE FROM schedules WHERE template_id = ?`, templateID)
+func (d *DB) DeleteSchedule(ctx context.Context, templateID string, owner domain.MemberID) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`DELETE FROM schedules WHERE template_id = ? AND (? = '' OR member_id = ?)`, templateID, owner, owner))
+	if owner != "" && errors.Is(err, ErrNotFound) {
+		var exists bool
+		if qerr := d.db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM schedules WHERE template_id = ?)`, templateID).Scan(&exists); qerr != nil {
+			return fmt.Errorf("store: delete schedule: %w", qerr)
+		}
+		if exists {
+			return ErrScheduleOwner
+		}
+	}
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("store: delete schedule: %w", mapConstraint(err, ErrInUse))
+	}
+	return err
 }
 
 func (d *DB) MarkScheduleFired(ctx context.Context, id string, at time.Time) error {

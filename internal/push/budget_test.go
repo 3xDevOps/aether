@@ -12,9 +12,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-// The cost service publishes budget states; admins hear a rise once each, on
-// their devices and the sink, as the budget stands when it is sent, and
-// nothing more until a fall re-arms it, a restart of both services included.
+// The cost service publishes budget states; the workspace's admins, its
+// owner and the super admins, hear a rise once each, on their devices and
+// the sink, as the budget stands when it is sent, and nothing more until a
+// fall re-arms it, a restart of both services included. An admin who does
+// not own the workspace hears nothing.
 func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -24,14 +26,17 @@ func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 	heard := &sink{heard: make(chan string, 64)}
 	h.sink = heard
 	h.start()
-	carol := h.member("Carol")
-	for _, m := range []*domain.Member{h.ada, carol} {
-		m.Role = domain.RoleAdmin
+	carol, dan := h.member("Carol"), h.member("Dan")
+	for m, role := range map[*domain.Member]domain.Role{h.ada: domain.RoleAdmin, carol: domain.RoleSuperAdmin, dan: domain.RoleAdmin} {
+		m.Role = role
 		if err := h.db.UpdateMember(h.ctx, m); err != nil {
 			t.Fatalf("UpdateMember: %v", err)
 		}
 	}
-	adas, carols, bobs := h.subscribe(h.ada), h.subscribe(carol), h.subscribe(h.bob)
+	if _, err := h.db.SetWorkspaceOwner(h.ctx, h.ws.ID, h.ada.ID, ""); err != nil {
+		t.Fatalf("SetWorkspaceOwner: %v", err)
+	}
+	adas, carols, bobs, dans := h.subscribe(h.ada), h.subscribe(carol), h.subscribe(h.bob), h.subscribe(dan)
 	run := h.run(h.bob, "Index the monorepo", domain.LaunchACP)
 	spend := func(usd float64) {
 		h.publish(run, events.RunCostPayload{CostUSD: usd, Metered: true})
@@ -57,6 +62,7 @@ func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 	budget(10, 8)
 	spend(8.5)
 	expect("Budget warning: $8.50 of $10.00 spent", urgencyNormal)
+	dans.expectNone(t, testQuiet)
 
 	// More spend and an admin's edit in the same state.
 	spend(9)

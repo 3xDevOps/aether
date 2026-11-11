@@ -181,7 +181,12 @@ type Workspace struct {
 	BaseBranch  string `json:"base_branch"`
 	SteerOthers string `json:"steer_others,omitempty"`
 	// Origin is the upstream git URL run checkouts push to.
-	Origin    string `json:"origin,omitempty"`
+	Origin string `json:"origin,omitempty"`
+	// OwnerMemberID is the admin who owns and administers the workspace.
+	OwnerMemberID string `json:"owner_member_id,omitempty"`
+	// Role is the role the caller acts with in this workspace: admin,
+	// collaborator or viewer.
+	Role      string `json:"role,omitempty"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -294,12 +299,13 @@ func FallbackIDs(policy domain.AccountFallback) []string {
 
 func WorkspaceFromDomain(w *domain.Workspace) Workspace {
 	return Workspace{
-		ID:          string(w.ID),
-		Name:        w.Name,
-		BaseBranch:  w.BaseBranch,
-		SteerOthers: w.SteerOthers,
-		Origin:      w.Origin,
-		CreatedAt:   rfc3339(w.CreatedAt),
+		ID:            string(w.ID),
+		Name:          w.Name,
+		BaseBranch:    w.BaseBranch,
+		SteerOthers:   w.SteerOthers,
+		Origin:        w.Origin,
+		OwnerMemberID: string(w.OwnerID),
+		CreatedAt:     rfc3339(w.CreatedAt),
 	}
 }
 
@@ -342,6 +348,11 @@ const FeatureMultiRepo = "multi-repo"
 // FeaturePermission marks a server whose run.launch takes permission; an
 // older one drops it and runs the agent as root.
 const FeaturePermission = "permission"
+
+// FeatureWorkspaceAccess marks a server with workspace-scoped access: it
+// reports its administrator as super_admin and serves workspace.access.*. An
+// older server reports admin for the same role.
+const FeatureWorkspaceAccess = "workspace-access"
 
 // CapabilityRunRepos is listed in a gateway's capability methods but is not an RPC method.
 const CapabilityRunRepos = "run.repos"

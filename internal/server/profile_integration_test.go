@@ -71,7 +71,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 		DisplayName: "Prof Tester",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
 		Color:       "#4363d8",
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	ws := &domain.Workspace{
 		Name:        "prof",

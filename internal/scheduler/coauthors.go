@@ -61,7 +61,7 @@ func (s *Scheduler) briefedInstructions(ctx context.Context, g coordhooks.Guide,
 	if text == "" || s.cfg.Memory == nil {
 		return text, nil
 	}
-	brief, err := s.cfg.Memory.Brief(ctx, workspace, owner, domain.RunID(g.RunID))
+	brief, err := s.cfg.Memory.Brief(ctx, workspace, owner, owner, domain.RunID(g.RunID))
 	if err != nil {
 		return "", fmt.Errorf("build the team memory brief: %w", err)
 	}

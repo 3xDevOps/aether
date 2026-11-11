@@ -287,6 +287,7 @@ func TestTimedTakeoverPermissionAndRunInvalidation(t *testing.T) {
 	for _, reason := range []string{"viewer", "permission-loss", "run-finished"} {
 		t.Run(reason, func(t *testing.T) {
 			e := controlAttachEnv(t)
+			asSuperAdmin(t, e)
 			clock := takeoverClock(e)
 			e.srv.cfg.PTY = &interactiveTestPTY{fakePTY: e.pty}
 			holder, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "holder"})

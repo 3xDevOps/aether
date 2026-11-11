@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import type {
   EvidencePacket,
   RoomMessage,
@@ -416,7 +417,7 @@ export const isDoneNote = (message: RoomMessage) => message.kind === 'comment' &
 
 /** Admin, the run's owner, or the note's own author may complete or delete it. */
 export function canResolveNote(self: { id?: string; role?: string | null }, note: RoomMessage, ownerID: string): boolean {
-  if (self.role === 'admin') return true
+  if (isAdminRole(self.role)) return true
   return !!self.id && (self.id === note.actor_id || self.id === ownerID)
 }
 
