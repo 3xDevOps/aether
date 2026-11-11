@@ -527,11 +527,12 @@ func (q *qualify) edgeFingerprint() string {
 	return info.Fingerprint
 }
 
-// claim makes c the owner of the server id with its claim code.
+// claim makes c the owner of the server id with its claim code: an admin
+// on the previous release's server, a super admin on this tree's.
 func (q *qualify) claim(c *client, id, code string) {
 	q.t.Helper()
 	res, err := q.h.claim(c, code)
-	if err != nil || res.Config.ServerID != id || res.Info.Member.Role != string(domain.RoleAdmin) {
+	if err != nil || res.Config.ServerID != id || !domain.Role(res.Info.Member.Role).Admin() {
 		q.t.Fatalf("%s claims %s: %+v %v", c.user.Login, id, res.Info.Member, err)
 	}
 }
@@ -565,7 +566,7 @@ func (q *qualify) requireData(img edgeImage, clients []*client, servers []*serve
 			ctl, err := q.h.tryControl(c, servers[i])
 			if err == nil {
 				var info protocol.ServerInfoResult
-				if err = ctl.Call(protocol.MethodServerInfo, struct{}{}, &info); err == nil && info.Member.Role != string(domain.RoleAdmin) {
+				if err = ctl.Call(protocol.MethodServerInfo, struct{}{}, &info); err == nil && !domain.Role(info.Member.Role).Admin() {
 					err = fmt.Errorf("member %+v", info.Member)
 				}
 			}
