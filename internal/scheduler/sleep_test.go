@@ -457,11 +457,16 @@ func TestACommandInATerminalsForegroundKeepsTheSessionAwake(t *testing.T) {
 	e.sleepRun(t, run.ID)
 }
 
+// Claude Code's task frames name the dev server; only the claude harness
+// reads them.
 func TestAnAgentShellTaskKeepsTheSessionAwake(t *testing.T) {
 	t.Parallel()
 	e, _ := newSleepEnv(t)
-	run := e.launchACP(t, acpmock.PromptDevServer)
+	run := e.launchClaudeACP(t, acpmock.PromptDevServer)
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if tasks := e.sched.acp.session(run.ID).State().Tasks; len(tasks) != 1 || tasks[0].ID != acpmock.DevServerTaskID {
+		t.Fatalf("live tasks after the turn = %+v, want the dev server", tasks)
+	}
 	e.stayAwake(t, run.ID, "the agent's dev server ran")
 }
 
@@ -771,5 +776,49 @@ func TestResumeDuringTheSleepWakesTheSession(t *testing.T) {
 	}
 	if e.sched.Sleep(run.ID).AsleepSince != nil || containerState(e.container(t, run.ID)) != "running" {
 		t.Fatal("Resume during the sleep left the session asleep")
+	}
+}
+
+// Cancel during a sleep that the agent's own turn undoes waits for the
+// sleep to settle and cancels that turn.
+func TestCancelDuringAnUndoneSleepCancelsTheTurn(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	probed, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	e.onForegroundProbe(func() (string, error) {
+		first := false
+		once.Do(func() { first = true })
+		if !first {
+			return "", nil
+		}
+		if _, err := e.sched.acp.session(run.ID).PromptIdle(context.Background(), []acp.ContentBlock{acp.TextBlock(acpmock.PromptWait)}, nil); err != nil {
+			return "", err
+		}
+		close(probed)
+		<-release
+		return "", nil
+	})
+	waitFor(t, "the sleep's probe", func() bool {
+		e.sched.sleepIdle(t.Context())
+		select {
+		case <-probed:
+			return true
+		default:
+			return false
+		}
+	})
+	cancelled := make(chan error, 1)
+	go func() { cancelled <- e.sched.ACPCancel(context.Background(), run.ID) }()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	if err := <-cancelled; err != nil {
+		t.Fatalf("Cancel during the sleep: %v", err)
+	}
+	waitItems(t, e.sched, run.ID, "the cancelled turn", turnEnded("cancelled", 1))
+	if e.sched.Sleep(run.ID).AsleepSince != nil {
+		t.Fatal("the session fell asleep")
 	}
 }
