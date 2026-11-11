@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { enhancedSupported, label, loginFor, ready, setupMode } from '@/components/agents/agent-copy'
+import { enhancedSupported, label, loginFor, ready, setupMode, signedOutState } from '@/components/agents/agent-copy'
 import { ModeComparison, type SetupMode } from '@/components/agents/mode-comparison'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
@@ -191,11 +191,13 @@ export function AgentSetup({
           <ul aria-label={`${name} status`} className="flex flex-col gap-1">
             <Fact ok={agent.installed === true}>{agent.installed === true ? 'Installed' : 'Not installed'}</Fact>
             {enhanced && <Fact ok={agent.enhanced_installed === true}>{agent.enhanced_installed ? 'Enhanced installed' : 'Enhanced not installed'}</Fact>}
-            {agent.login_found !== undefined && <Fact ok={agent.login_found}>{agent.login_found ? 'Login found' : 'No login found'}</Fact>}
+            {agent.login_problem
+              ? <Fact ok={false}>{signedOutState(agent)}: <span className="min-w-0 font-code text-ui-sm break-words">{agent.login_problem}</span></Fact>
+              : agent.login_found !== undefined && <Fact ok={agent.login_found}>{agent.login_found ? 'Login found' : 'No login found'}</Fact>}
           </ul>
         )}
-        {checked && agent.login_found === false && agent.installed === true && (
-          <p className="text-ui-sm text-muted">Aether looks for the agent's login file in your environment; log in above, then check again.</p>
+        {checked && agent.installed === true && (agent.login_found === false || agent.login_problem) && (
+          <p className="text-ui-sm text-muted">{agent.login_problem ? 'This login cannot sign the agent in' : "Aether looks for the agent's login file in your environment"}; log in above, then check again.</p>
         )}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <div className="flex flex-wrap items-center gap-2">

@@ -1,3 +1,4 @@
+import { signedOutTitle } from '@/components/agents/agent-copy'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -158,6 +159,9 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
   nav: RunNavigation
 }) {
   const [retrying, setRetrying] = useState(false)
+  const own = useStore((s) => (run.account_member_id || run.member_id) === s.info?.member.id)
+  const agent = useStore((s) => (s.agentList?.identity === s.identityKey ? s.agentList.agents.find((item) => item.name === run.harness) : undefined))
+  const signedOut = own && agent?.login_problem ? agent : undefined
   const failure = sessionFailure(session)
   if (!failure || isTerminal(run.status)) return null
   const target = { kind: 'failure' as const, workspace_id: run.workspace_id, run_id: run.id, failure: failure.kind, seq: failure.seq, label: failure.kind === 'auth' ? 'Agent not signed in' : failure.title }
@@ -167,15 +171,25 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
     return (
       <Callout
         tone="needs-you"
-        title="The agent is not signed in"
+        title={signedOut ? signedOutTitle(signedOut) : 'The agent is not signed in'}
         actions={
           <>
+            {own && <Button size="sm" variant="secondary" onClick={() => useStore.getState().navigate('agents')}>Sign in on Agents</Button>}
             <LoginActions run={run} command={session?.state?.agent_command} methods={methods} shells={shells} nav={nav} />
             <AskAssistantButton size="sm" variant="secondary" ask={{ draft: 'Help me sign the agent in', attachments: [target] }}>Ask the assistant</AskAssistantButton>
           </>
         }
       >
-        <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this session, then send your message again.</p>
+        {signedOut ? (
+          <>
+            <p>Sign in again on the Agents page, or from a terminal in this session, then send your message again.</p>
+            {signedOut.login_blocks_launch && <p className="mt-1 font-code text-ui-sm break-words">{signedOut.login_problem}</p>}
+          </>
+        ) : own ? (
+          <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this session, then send your message again.</p>
+        ) : (
+          <p>{label ? `${label}. ` : ''}This session signs in with another member's account. They sign in again on their Agents page or with <code className="font-code">aether agent login {run.harness}</code>; then send your message again.</p>
+        )}
         {methods.length > 0 && (
           <ul className="mt-1 list-disc pl-5 text-ui-sm">
             {methods.map((method) => <li key={method.id}>{method.name}{method.description ? `: ${method.description}` : ''}</li>)}

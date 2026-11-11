@@ -2628,7 +2628,19 @@ task, an agent, an account when one is shared with the caller, a mode and a
 model. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Ready" or "Sign in after launch"
 for a shipped agent (`login_found` checks the launch home for login files, not
-for a working session; a server that does not report it shows nothing). While
+for a working session; a server that does not report it shows nothing), or
+"Signed out" in the needs-you colour, with `login_problem` as its tooltip,
+for any agent whose login file cannot sign it in (`login_blocks_launch`), or
+"Sign-in refused" when `login_problem` is only an agent's own refusal. Such
+an agent stays selectable: the server refuses the launch itself when
+`login_blocks_launch` is set, unless a workspace variable signs the agent in.
+For the chosen agent a needs-you callout under the refusal notes says
+"Claude Code is signed out" or "Claude Code's sign-in was refused" (on a
+shared account "<owner>'s Claude Code login is signed out" or "<owner>'s
+Claude Code sign-in was refused") with `login_problem` verbatim; on the member's own
+account it has **Sign in on Agents**, which closes the dialog and opens
+Agents, and on a shared one it says "<owner> signs in again on their Agents
+page or with `aether agent login <agent>`". While
 the list is read again for another account the last one stays, dimmed and
 disabled, and Launch stays off until it answers. An agent
 that is not installed is not listed. **Install more agents...** below the
@@ -2794,7 +2806,8 @@ installed", "Needs <owner>'s login", "Your account only" or "Unavailable"
 agent's fullest current usage window as "<n>% used" (amber from 80%, red at
 100%, as on Settings > **Usage**; "· stale" with the provider's error as the
 tooltip when its last read failed), else "Sign in after launch" when
-`login_found` is false, else "Ready". A failed `agent.list` reads "Not
+`login_found` is false, else "Ready". "Signed out" or "Sign-in refused"
+(needs-you, `login_problem` as the tooltip) comes before the usage window. A failed `agent.list` reads "Not
 checked" with the error as the tooltip; a failed `account.usage` puts its
 error on the status's tooltip. Expired windows drop on the half-minute
 clock. A status takes at most 60% of its row, here and in the agent list,
@@ -3670,7 +3683,13 @@ The header's **Answer** focuses the docked card on every screen. While Session s
 you** shows one link, "1 request, shown below the timeline", that closes a
 Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
-agent's auth methods.
+agent's auth methods. On a run on the viewer's own account it adds **Sign in
+on Agents**, and when that agent's `agent.list` row has `login_problem` its
+title is the alert's ("Claude Code is signed out" or "Claude Code's sign-in
+was refused"); a login-file problem shows verbatim, while a refusal is
+already the failure quoted below. On a run on another member's account it
+says that member signs in again on their Agents page or with
+`aether agent login <agent>`.
 
 ### Dictation
 
@@ -5978,9 +5997,12 @@ both. The page header has **Add agent…** where the gateway serves
 maps each shipped name to an icon and its `--agent-*` colour token), its
 display name,
 "Not installed", "Installed", "Installed · Login found" or "Installed · No
-login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
+login found" (from `login_found`), or "Signed out" or "Sign-in refused" with
+a needs-you dot and `login_problem` verbatim on a line of its own when the
+server reports one,
+"Standard · Enhanced" or "Standard", and
 one button by state: **Set up** while not installed, **Log in** while
-installed with no login found, and **Run** once ready, with **Set up again**
+installed with no login found or signed out, and **Run** once ready, with **Set up again**
 in the row's **More** menu; closing a setup returns focus to that row's
 button. On the Agents page only, where the gateway serves `agent.remove`, the
 **More** menu of a member agent or an installed agent also has **Remove…**.
@@ -6003,6 +6025,21 @@ sent through `agent.register`. The Background default follows the Standard
 command's first word, which is also the executable. A session that is not
 signed in offers its terminal login method, typed as the ACP server command
 (`agent_command` in the session state) with the method's args.
+
+**Signed-out logins.** `SignedOutAlert` (`components/shell/signed-out-alert.tsx`),
+mounted by `AppShell` under `StaleBanner`, shows while any installed agent in
+the member's own `agent.list` has `login_problem`: a needs-you band with one
+line per agent, "Claude Code is signed out" when the login file cannot sign
+it in (`login_blocks_launch`) or "Claude Code's sign-in was refused" when an
+agent refused, then the problem verbatim, and one **Sign in on Agents**. It
+is one row at `md` and wider and stacks below. It leaves out what already
+sits beside its own sign-in action: everything on the Agents page, and, in
+the Chat view of a session on the member's own account whose reason is a
+refused turn or open, that session's agent. It cannot be dismissed; it goes
+when a read no longer reports the problem. `agent.list`
+has no event, so it reads again every 60 seconds while the page is visible,
+on window focus, and when one of the member's runs gets a new
+`enhanced turn failed: ` or `enhanced session failed: ` reason.
 
 Below the list, `AgentExtras` holds collapsed disclosures: **Git identity**
 (Agents page only), which says agents commit as the name and email in the
@@ -6039,7 +6076,9 @@ login command typed. A gateway without `agent.install` types the
 install command there instead, and one without a terminal socket prints the
 `aether terminal` commands. **Check** re-reads `agent.list` and lists
 **Installed**, **Enhanced installed** and **Login found** or **No login
-found**; the copy never says "signed in", because the probe checks for a
+found**, or **Signed out:** or **Sign-in refused:** with `login_problem` when
+the server reports one;
+the copy never says "signed in", because the probe checks for a
 file. **Done** appears once the agent is installed with no missing login and
 calls `rememberLaunch` with the chosen mode, which seeds **New session** and
 First session. Setup does not save the Environment image: the install lands in

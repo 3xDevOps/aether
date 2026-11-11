@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef } from 'react'
-import { enhancedSupported, label, ready, supportWords } from '@/components/agents/agent-copy'
+import { enhancedSupported, label, ready, signedOutState, supportWords } from '@/components/agents/agent-copy'
 import { Ellipsis } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import type { AgentInfo } from '@/lib/types'
 
 function facts(agent: AgentInfo): string {
   if (agent.installed !== true) return 'Not installed'
+  if (agent.login_problem) return signedOutState(agent)
   if (agent.login_found === undefined) return 'Installed'
   return agent.login_found ? 'Installed · Login found' : 'Installed · No login found'
 }
@@ -55,11 +56,12 @@ export function AgentList({
             <span className="flex min-w-[60%] flex-1 flex-col">
               <span className="truncate text-ui font-medium text-text">{name}</span>
               <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-ui-sm text-muted">
-                <StatusDot tone={ready(agent) ? 'done' : 'neutral'} />
+                <StatusDot tone={ready(agent) ? 'done' : agent.installed === true && agent.login_problem ? 'needs-you' : 'neutral'} />
                 <span>{facts(agent)}</span>
                 <span aria-hidden>·</span>
                 <span aria-label={enhancedSupported(agent) ? 'Supports Standard and Enhanced' : 'Supports Standard only'}>{supportWords(agent)}</span>
               </span>
+              {agent.installed === true && agent.login_problem && <span className="font-code text-ui-sm break-words text-muted">{agent.login_problem}</span>}
             </span>
             <span className="ml-auto flex items-center gap-2">
               {extra?.(agent)}

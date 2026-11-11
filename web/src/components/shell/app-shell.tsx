@@ -7,6 +7,7 @@ import { ConnectionAnnouncer } from '@/components/shell/connection'
 import { useNavShortcuts } from '@/components/shell/nav-shortcuts'
 import { PhoneTabBar } from '@/components/shell/phone-tab-bar'
 import { Sidebar } from '@/components/shell/sidebar'
+import { SignedOutAlert } from '@/components/shell/signed-out-alert'
 import { StaleBanner } from '@/components/shell/stale-banner'
 import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
@@ -42,6 +43,7 @@ export function AppShell() {
       </a>
       {!stacked && <TopBar />}
       <StaleBanner />
+      <SignedOutAlert />
       <div className="relative flex min-h-0 flex-1 overflow-clip">
         <Sidebar />
         <main

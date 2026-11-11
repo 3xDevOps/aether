@@ -313,6 +313,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			return nil, getErr
 		}
 	}
+	if err = s.checkLogin(ctx, workspace, account, harness, profile, mode); err != nil {
+		return nil, err
+	}
 	release, err := s.reserveCapacity(ctx)
 	if err != nil {
 		return nil, err

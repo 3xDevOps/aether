@@ -12,6 +12,7 @@ import (
 type claudeCredentialFileShape struct {
 	ClaudeAIOAuth *struct {
 		AccessToken      string   `json:"accessToken"`
+		RefreshToken     string   `json:"refreshToken"`
 		ExpiresAt        int64    `json:"expiresAt"`
 		Scopes           []string `json:"scopes"`
 		SubscriptionType string   `json:"subscriptionType"`
@@ -50,10 +51,10 @@ func parseClaudeCredential(data []byte, readErr error, now time.Time) credential
 	oauth := shape.ClaudeAIOAuth
 	token, validToken := cleanHeaderValue(oauth.AccessToken)
 	if !validToken {
-		return credential{status: "unauthenticated", err: "Claude OAuth access token is missing or invalid", fingerprint: fingerprint("claude-no-token", string(data))}
+		return credential{status: "unauthenticated", err: "Claude OAuth access token is missing or invalid", signedOut: true, fingerprint: fingerprint("claude-no-token", string(data))}
 	}
 	if oauth.ExpiresAt > 0 && now.UnixMilli() >= oauth.ExpiresAt {
-		return credential{status: "unauthenticated", err: "Claude OAuth credential is expired", expired: true, fingerprint: fingerprint("claude-expired", token, string(data))}
+		return credential{status: "unauthenticated", err: "Claude OAuth credential is expired", expired: true, signedOut: strings.TrimSpace(oauth.RefreshToken) == "", fingerprint: fingerprint("claude-expired", token, string(data))}
 	}
 	if len(oauth.Scopes) > 0 && !hasScope(oauth.Scopes, "user:inference") {
 		return credential{status: "unauthenticated", err: "Claude OAuth credential lacks user:inference scope", fingerprint: fingerprint("claude-wrong-scope", token, sortedScopes(oauth.Scopes))}
@@ -79,6 +80,40 @@ func ClaudeAccessToken(data []byte, now time.Time) (token string, expired bool, 
 	return "", false, errors.New(cred.err)
 }
 
+// LoginFile is the home-relative file LoginProblem reads for agent; empty
+// for an agent whose login it cannot read.
+func LoginFile(agent string) string {
+	switch agent {
+	case "claude":
+		return claudeCredentialFile
+	case "codex":
+		return codexCredentialFile
+	}
+	return ""
+}
+
+// LoginProblem is why the OAuth login in agent's login file cannot sign the
+// agent in; empty when it can, when the file holds no OAuth login, or when
+// only the vendor could tell. An expired access token is a problem only
+// without a refresh token: the agent renews one that has it. A login with
+// other scopes is not judged: only the usage read needs user:inference.
+func LoginProblem(agent string, data []byte, now time.Time) string {
+	var cred credential
+	switch agent {
+	case "claude":
+		cred = parseClaudeCredential(data, nil, now)
+	case "codex":
+		cred = parseCodexCredential(data, nil, now)
+	}
+	switch {
+	case !cred.signedOut:
+		return ""
+	case cred.expired:
+		return cred.err + " and holds no refresh token"
+	}
+	return cred.err
+}
+
 func parseCodexCredential(data []byte, readErr error, _ time.Time) credential {
 	if readErr != nil {
 		return credential{status: "unavailable", err: "credential file unavailable", fingerprint: fingerprint("codex-read-error")}
@@ -99,7 +134,7 @@ func parseCodexCredential(data []byte, readErr error, _ time.Time) credential {
 	token, validToken := cleanHeaderValue(shape.Tokens.AccessToken)
 	accountID, validAccount := cleanHeaderValue(shape.Tokens.AccountID)
 	if !validToken {
-		return credential{status: "unauthenticated", err: "Codex OAuth access token is missing or invalid", fingerprint: fingerprint("codex-no-token", string(data))}
+		return credential{status: "unauthenticated", err: "Codex OAuth access token is missing or invalid", signedOut: strings.TrimSpace(shape.APIKey) == "" && strings.TrimSpace(shape.APIKeyAlt) == "", fingerprint: fingerprint("codex-no-token", string(data))}
 	}
 	if !validAccount {
 		return credential{status: "unauthenticated", err: "Codex OAuth account id is missing or invalid", fingerprint: fingerprint("codex-no-account", token)}

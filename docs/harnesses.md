@@ -149,7 +149,8 @@ You do this once per agent, per person.
    ```
 
    `LOGIN FILE` only looks for the login file in your home; `-` means the agent
-   declares none. `--json` prints the agents as `agent.list` returns them
+   declares none, and `signed out` that the server knows the login cannot
+   sign the agent in ([When a login is signed out](#when-a-login-is-signed-out)). `--json` prints the agents as `agent.list` returns them
    ([local-gateway.md](local-gateway.md)). The **Agents** page shows the same
    checks as **Installed** and **Login found**. The agent itself verifies the
    login when it starts. For Claude Code and Codex, ask the vendor whether it
@@ -199,6 +200,69 @@ line and stores a plain variable that `aether workspace env list` shows.
 > [!WARNING]
 > On a team server, anyone who can launch a session in the workspace or message one
 > can read the key ([environments.md](environments.md#secrets)).
+
+### When a login is signed out
+
+A login stops working when its token is revoked or expires without a refresh
+token, when the vendor rejects it, or when the login file is overwritten. The
+server learns of it in two ways, for the account a session runs on:
+
+- **The login file.** For Claude Code (`~/.claude/.credentials.json`) and
+  Codex (`~/.codex/auth.json`) the server reads the file: an OAuth login with
+  no access token is signed out, and so is a Claude Code login whose token
+  expired with no refresh token. An expired token with a refresh token is
+  not: the agent renews it. Codex's file records no expiry. A file with an
+  API key, or with no OAuth login at all, is not judged.
+- **A refusal.** An agent that answers a turn, or the opening of its
+  conversation, with `Authentication required` is remembered for that
+  account and agent, for any agent that runs over ACP (Enhanced, and
+  Background where it uses the Enhanced adapter). Only the agent's own
+  message is kept. It is forgotten when the login file changes or a turn on
+  the account ends normally, unless a workspace variable signed that turn
+  in. A server restart forgets it too.
+
+The other agents' files are only checked for presence, and a Standard session
+reports no refusal, so there a signed-out agent only shows in its own terminal
+output.
+
+While the server knows a login is signed out:
+
+| Where | What you see |
+| --- | --- |
+| Dashboard, for your own account | **\<Agent\> is signed out** (the login file) or **\<Agent\>'s sign-in was refused** (a refusal) with the problem and **Sign in on Agents**, on every page but Agents and the refused session, which show it themselves |
+| **Agents** page, **Settings → Agents** | **Signed out** or **Sign-in refused** with the problem, and **Log in** |
+| Launch dialog | **Signed out** or **Sign-in refused** on the account or agent, with the problem and the way to sign in |
+| `aether agent list` | `signed out` under `LOGIN FILE`, then `claude is signed out: <problem>` and `sign in again: ...` |
+| `aether status` | `agent: claude: installed, signed out: <problem>` and `next:` naming `aether agent login claude` |
+| `aether agent list --json`, `agent.list` | `login_problem`, and `login_blocks_launch` |
+| Connector `aether_launch_options`, `aether_list_workspaces` | `signed_in: false` and `signed_out` with the problem, the way to sign in, and whether a launch is refused until then |
+| A refused turn or open | The session's reason ends with whose login it is and where to sign in ([enhanced-sessions.md](enhanced-sessions.md)) |
+
+The problem is the server's own finding, verbatim:
+`~/.claude/.credentials.json: Claude OAuth access token is missing or invalid`,
+or `the agent refused: Authentication required`.
+
+A new launch, including a sub-session, is refused before anything is created
+when the login file is signed out:
+
+```text
+Ada's Claude Code login is signed out: ~/.claude/.credentials.json: Claude OAuth access token is missing or invalid. Sign in, then launch again: dashboard Agents page, or aether agent login claude
+```
+
+A refusal only warns: the refusing agent can hold a stale copy of a sound
+login, which a restart or a new session cures. Relaunching or resuming an
+existing session is not checked. A workspace variable that signs the agent in
+(`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+`CLAUDE_CODE_USE_BEDROCK` or `CLAUDE_CODE_USE_VERTEX` for Claude Code;
+`CODEX_API_KEY` for a Background Codex session) lets the launch through. A
+usage fallback skips an account whose login file is signed out. A sign-in
+the server cannot see, such as an `apiKeyHelper` or `env` in
+`~/.claude/settings.json`, does not lift the refusal: remove the dead OAuth
+login with the agent's own sign-out, or sign in again.
+
+The account's owner signs in again on the **Agents** page (**Log in**) or with
+`aether agent login <name>`. Nothing needs dismissing: every surface reads the
+login again and clears by itself.
 
 ### Enhanced adapters
 

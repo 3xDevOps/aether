@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+const signedOut = '~/.claude/.credentials.json: Claude OAuth access token is missing or invalid'
 const launchButton = () => screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement
 const agentRow = (name: RegExp | string) => screen.getByRole('radio', { name }) as HTMLButtonElement
 const modeSegment = (name: string) => within(screen.getByRole('radiogroup', { name: 'Mode' })).getByRole('radio', { name }) as HTMLButtonElement
@@ -140,6 +141,21 @@ describe('new run', () => {
     expect(agentRow(/^custom/).disabled).toBe(false)
 
     fireEvent.click(screen.getByRole('button', { name: 'Install more agents...' }))
+    expect(useStore.getState().route.name).toBe('agents')
+    expect(useStore.getState().paletteDialog).toBeNull()
+  })
+
+  it('says a signed-out agent is signed out, shows the problem and sends the member to Agents, without refusing the launch', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude({ login_problem: signedOut, login_blocks_launch: true })])
+    await open()
+
+    expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeSigned out')
+    expect(screen.queryByRole('radiogroup', { name: 'Account' })).toBeNull()
+    const note = screen.getByText('Claude Code is signed out').closest('[data-slot="callout"]')!
+    expect(note.textContent).toContain(signedOut)
+    expect(note.textContent).toContain('Until then a launch here is refused, unless a workspace variable signs the agent in.')
+    expect(launchButton().disabled).toBe(false)
+    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: 'Sign in on Agents' }))
     expect(useStore.getState().route.name).toBe('agents')
     expect(useStore.getState().paletteDialog).toBeNull()
   })
@@ -552,6 +568,20 @@ describe('new run', () => {
       await waitFor(() => expect(launchButton().disabled).toBe(false))
       fireEvent.click(launchButton())
       await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ account_member_id: bob.id, fallback_account_member_ids: [vera.id, alice.id] })))
+    })
+
+    it("says the shared account's login is signed out and that its owner signs in again", async () => {
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id ? [claude({ login_problem: signedOut, login_blocks_launch: true })] : [claude()])
+      await open()
+      const accountRow = () => within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ })
+      await waitFor(() => expect(accountRow().textContent).toBe('BobSharedSigned out'))
+      await userEvent.click(accountRow())
+
+      const note = (await screen.findByText("Bob's Claude Code login is signed out")).closest('[data-slot="callout"]') as HTMLElement
+      expect(note.textContent).toContain(signedOut)
+      expect(note.textContent).toContain('Bob signs in again on their Agents page or with aether agent login claude.')
+      expect(within(note).queryByRole('button')).toBeNull()
+      expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeSigned out')
     })
 
     it('gives the server\'s reasons an installed agent cannot launch there', async () => {

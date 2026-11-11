@@ -1253,6 +1253,10 @@ export interface AgentInfo {
   executable?: string
   /** Whether a login file exists in the home the launch signs in with. Absent when the agent declares none. */
   login_found?: boolean
+  /** Why the account's login cannot sign the agent in: its login file, or the agent's refusal of a turn. Shown verbatim. */
+  login_problem?: string
+  /** Whether the server refuses a launch over login_problem, unless a workspace variable signs the agent in. */
+  login_blocks_launch?: boolean
   /** The launch mode the agent starts in unless asked otherwise. */
   default_mode?: 'tui' | 'acp'
   /** Whether the agent prefers Enhanced, installed yet or not. */

@@ -152,8 +152,10 @@ type Fixture struct {
 	} `json:"load"`
 	// List holds successive session/list results; the last one repeats.
 	List []json.RawMessage `json:"list"`
-	// RefusePrompts makes the agent refuse every prompt with authRequired.
-	RefusePrompts bool `json:"-"`
+	// RefusePrompts makes the agent refuse every prompt with authRequired,
+	// and RefuseSessions every session/new.
+	RefusePrompts  bool `json:"-"`
+	RefuseSessions bool `json:"-"`
 	// RefuseNext, shared by every agent given the fixture, makes them
 	// refuse that many prompts with authRequired, then accept.
 	RefuseNext *atomic.Int32 `json:"-"`
@@ -313,6 +315,9 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 	case acp.AgentMethodInitialize:
 		return a.fix.Initialize, nil
 	case acp.AgentMethodSessionNew:
+		if a.fix.RefuseSessions {
+			return nil, acp.NewAuthRequired(nil)
+		}
 		a.mu.Lock()
 		a.session, a.cwd, a.frames = a.fix.SessionID(), p.Cwd, frames
 		a.mu.Unlock()

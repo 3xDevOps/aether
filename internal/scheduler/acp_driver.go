@@ -30,6 +30,8 @@ const (
 	// acpConnectTimeout bounds starting the adapter and opening its session:
 	// a cold npm adapter takes seconds, a hung one must not hold a launch.
 	acpConnectTimeout = time.Minute
+	// acpLoginTimeout bounds the store and home reads behind a turn's end.
+	acpLoginTimeout = 10 * time.Second
 	// acpRecoveryWait bounds how long a call waits for recovery.
 	acpRecoveryWait = 30 * time.Second
 	acpStopGrace    = 3 * time.Second
@@ -411,6 +413,15 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), acpConnectTimeout)
 	defer cancel()
 	if err := d.open(ctx, entry, how); err != nil {
+		if acphost.AuthRequired(err) {
+			err = fmt.Errorf("%w; %s", err, d.s.loginRefusedAdvice(d.s.runLogin(ctx, entry.runID), err, refusedUnrestarted))
+			// A Background run's exit detail keeps only its start.
+			d.s.mu.Lock()
+			if entry.launchMode == domain.LaunchHeadless {
+				entry.failReason = acpFailedReason + err.Error()
+			}
+			d.s.mu.Unlock()
+		}
 		d.fail(entry, err)
 	}
 }
@@ -584,14 +595,31 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				d.s.goMove(func() { d.usageLimit(entry, oneShot, st, message) })
 				return
 			}
-			if !oneShot && acphost.AuthRequired(st.Failed) {
-				due, tried := d.reauthDue(entry)
+			if acphost.AuthRequired(st.Failed) {
+				loginCtx, cancel := context.WithTimeout(context.Background(), acpLoginTimeout)
+				login := d.s.runLogin(loginCtx, entry.runID)
+				cancel()
+				due, tried := false, false
+				if !oneShot {
+					due, tried = d.reauthDue(entry, login.stamp)
+				}
+				how := refusedUnrestarted
+				switch {
+				case due:
+					how = refusedRestarting
+				case tried:
+					how = refusedAfterRestart
+				}
+				signIn := d.s.loginRefusedAdvice(login, st.Failed, how)
 				if due {
-					d.s.goMove(func() { d.reauth(entry, r, st) })
+					d.s.goMove(func() { d.reauth(entry, r, st, signIn, login.fileProblem) })
 					return
 				}
-				if tried {
-					st.Failed = fmt.Errorf("%w; restarting the agent did not restore its sign-in, so this container's copy of the login is stale or unreadable: start a new session", st.Failed)
+				st.Failed = fmt.Errorf("%w; %s", st.Failed, signIn)
+				if oneShot {
+					d.s.mu.Lock()
+					entry.failReason = acpTurnFailedReason + st.Failed.Error()
+					d.s.mu.Unlock()
 				}
 			}
 			if !oneShot && acphost.SessionLost(st.Failed) {

@@ -233,10 +233,18 @@ func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []proto
 	if len(installed) == 0 {
 		return "aether agent add <name>"
 	}
+	if i := slices.IndexFunc(installed, func(a protocol.AgentInfo) bool { return a.LoginProblem != "" }); i >= 0 {
+		return signInStep(installed[i])
+	}
 	if slices.ContainsFunc(installed, func(a protocol.AgentInfo) bool { return a.LoginFound == nil || *a.LoginFound }) {
 		return mirrorStep(m, workspaces, mirrors, unseeded)
 	}
-	agent := installed[0]
+	return signInStep(installed[0])
+}
+
+// signInStep is the command that signs agent in. Only a device login runs
+// without a terminal, so any other login is named as the human's step.
+func signInStep(agent protocol.AgentInfo) string {
 	switch {
 	case agent.LoginCommand == "":
 		return "a human runs in a terminal: aether terminal, then " + agent.Name + "'s own sign-in"
@@ -338,6 +346,8 @@ func printStatus(w io.Writer, r statusReport) {
 		switch {
 		case !a.Installed:
 			line("agent", "%s: not installed", a.Name)
+		case a.LoginProblem != "":
+			line("agent", "%s: installed, signed out: %s", a.Name, a.LoginProblem)
 		case a.LoginFound == nil:
 			line("agent", "%s: installed, declares no login file", a.Name)
 		case *a.LoginFound:

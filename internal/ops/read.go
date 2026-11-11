@@ -142,6 +142,7 @@ func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, erro
 		Name        string `json:"name"`
 		Installed   bool   `json:"installed"`
 		SignedIn    *bool  `json:"signed_in,omitempty"`
+		SignedOut   string `json:"signed_out,omitempty"`
 		Enhanced    bool   `json:"enhanced"`
 		DefaultMode string `json:"default_mode"`
 	}
@@ -151,7 +152,8 @@ func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, erro
 	}
 	rows := make([]agent, 0, len(agents.Agents))
 	for _, a := range agents.Agents {
-		rows = append(rows, agent{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound,
+		in, out := signedIn(a)
+		rows = append(rows, agent{Name: a.Name, Installed: a.Installed, SignedIn: in, SignedOut: out,
 			Enhanced: a.Enhanced != "none" && a.EnhancedInstalled, DefaultMode: a.DefaultMode})
 	}
 	out := map[string]any{"workspaces": workspaces, "agents": rows}

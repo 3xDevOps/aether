@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -770,5 +771,27 @@ func TestAgentRemove(t *testing.T) {
 	s.cfg.Homes = nil
 	if _, perr = remove(grantee.ID, "claude"); perr == nil || perr.Code != protocol.CodeUnavailable {
 		t.Errorf("remove without homes = %v, want unavailable", perr)
+	}
+}
+
+// agent.list carries the scheduler's verdict on the login beside the file's
+// presence, and a launch the scheduler refuses over it is an invalid state,
+// not an internal error.
+func TestAgentListCarriesASignedOutLogin(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	s.cfg.Runs.(*fakeRuns).loginProblem = "~/.claude/.credentials.json: Claude OAuth access token is missing or invalid"
+	result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+	if rpcErr != nil {
+		t.Fatalf("agentList: %+v", rpcErr)
+	}
+	agents := result.(protocol.AgentListResult).Agents
+	i := slices.IndexFunc(agents, func(a protocol.AgentInfo) bool { return a.Name == "claude" })
+	if i < 0 || agents[i].LoginProblem != "~/.claude/.credentials.json: Claude OAuth access token is missing or invalid" || !agents[i].LoginBlocksLaunch {
+		t.Errorf("agents = %+v, want claude with the login problem blocking a launch", agents)
+	}
+	refused := fmt.Errorf("scheduler: Ada's Claude Code %w: no token", scheduler.ErrSignedOut)
+	if got := rpcError(refused); got.Code != protocol.CodeInvalidState || got.Message != refused.Error() {
+		t.Errorf("rpcError(%v) = %+v, want an invalid state with the whole message", refused, got)
 	}
 }

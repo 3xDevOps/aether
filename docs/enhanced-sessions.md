@@ -364,14 +364,33 @@ adapter and the session parks with
 `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`.
 
 If the agent refuses a turn with `Authentication required`, Aether shows
-**Agent signed out**, restarts the adapter in the same container so it reads the
-account's login again, and restores the conversation. Send the refused message
-again; agent mail is offered again by itself. A session whose agent reported an
-outcome that is still waiting for its turn to end is not restarted. If the
-restarted agent refuses again within 5 minutes, the session parks with
-`enhanced turn failed: ... Authentication required ...; restarting the agent did not restore its sign-in, ...: start a new session`.
-That container's copy of the login is stale or unreadable; a new session's
-container mounts the current one.
+**Sign-in refused**, or **Agent signed out** when the login file cannot sign
+the agent in, restarts the adapter in the same container so it reads the
+account's login again, and restores the conversation. Agent mail is offered
+again by itself. A session whose agent reported an outcome that is still
+waiting for its turn to end is not restarted. The session parks with the
+agent's error followed by what to do, one of:
+
+```text
+enhanced turn failed: ... Authentication required ...; Ada's Claude Code login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login claude
+enhanced turn failed: ... Authentication required ...; Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: dashboard Agents page, or aether agent login claude
+enhanced turn failed: ... Authentication required ...; a restart did not help. Start a new session, or if Ada's Claude Code login is signed out, sign in: dashboard Agents page, or aether agent login claude
+```
+
+The first is a login file that cannot sign the agent in; the notice quotes
+what it lacks. The second is a refusal the file does not explain, which a
+restart fixes when only the agent's copy of the login was stale. The third is
+a second refusal within 5 minutes: either this container's copy of the login
+is stale, which a new session's container does not share, or the login is
+signed out. The owner named is the owner of the account the session runs on.
+A refusal after the login file changed restarts the agent once more inside
+those 5 minutes, so a message sent after signing in reaches an agent that has
+read the new login. A session Aether does not restart the agent of (a
+Background one, or one whose agent reported an outcome) ends its reason with
+`<owner>'s <agent> login may be signed out. Sign in: ...`, and so does a
+session whose agent refuses to open its conversation. See
+[harnesses.md](harnesses.md#when-a-login-is-signed-out) for where else a
+signed-out login shows.
 
 Each time it starts or restarts an adapter, Aether checks that your home still
 belongs to the session's user with owner `rwx`. A root command in any of your
