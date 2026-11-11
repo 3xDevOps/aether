@@ -261,3 +261,22 @@ func TestKeylessLaunchKeepsKeyAfterUncertainFailure(t *testing.T) {
 		t.Fatalf("a retry after a refused launch used keys %v, want a new one", k)
 	}
 }
+
+func TestMessageKeyRotatesOnceForOverlappingRefusals(t *testing.T) {
+	p := protocol.RunInjectParams{RunID: "run-1", Message: "refused twice"}
+	now := time.Now()
+	first, _, firstDone := messageKey("mem-refused", p, now)
+	_, _, secondDone := messageKey("mem-refused", p, now)
+	firstDone(false, true)
+	resent, _, resentDone := messageKey("mem-refused", p, now)
+	if resent == first {
+		t.Fatalf("a resend after a refusal kept key %q, want a new key", resent)
+	}
+	secondDone(false, true)
+	resentDone(true, false)
+	if again, dup, d := messageKey("mem-refused", p, now); again != resent || !dup {
+		t.Fatalf("a repeat of the sent resend got key %q (dup %t), want %q again", again, dup, resent)
+	} else {
+		d(false, false)
+	}
+}

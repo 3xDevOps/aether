@@ -439,14 +439,15 @@ func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key s
 	}
 	dup = k.inflight > 0 || k.sent
 	k.inflight++
-	return k.key, dup, func(sent, refused bool) {
+	used := k.key
+	return used, dup, func(sent, refused bool) {
 		sentKeys.Lock()
 		defer sentKeys.Unlock()
 		k.inflight--
 		k.at = time.Now()
 		k.sent = k.sent || sent
-		if refused {
-			k.key = uuid.NewString()
+		if refused && k.key == used {
+			k.key, k.sent = uuid.NewString(), false
 		}
 	}
 }
