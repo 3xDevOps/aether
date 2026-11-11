@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/browser"
 	"github.com/3xDevOps/Aether/internal/control"
@@ -275,17 +276,26 @@ func (s *Scheduler) CallDevelopment(ctx context.Context, id domain.RunID, p cont
 	if err := auth(); err != nil {
 		return nil, err
 	}
-	if wakesRun(method) {
+	// A call that starts work in the container wakes the run: a terminal, a
+	// browser operation, or taking control for one. The reads an open
+	// Browser tab polls, status, pages, console and network, neither wake a
+	// run nor keep it awake.
+	switch method {
+	case protocol.MethodDevTerminalStart, protocol.MethodDevControlAcquire, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserNavigate,
+		protocol.MethodDevBrowserAction, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserReset,
+		protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserInspect, protocol.MethodDevBrowserScreenshot,
+		protocol.MethodDevBrowserWait:
 		awake, err := s.holdAwake(ctx, id)
 		if err != nil {
 			return nil, err
 		}
 		defer awake()
-		s.noteBrowsed(id, method)
-	}
-	if strings.HasPrefix(method, "dev.browser.") || strings.HasPrefix(method, "dev.control.") {
-		if err := s.resumeSleptBrowser(ctx, id); err != nil {
-			return nil, err
+		if strings.HasPrefix(method, "dev.browser.") {
+			s.mu.Lock()
+			if entry := s.runs[id]; entry != nil {
+				entry.browsedAt = time.Now().UTC()
+			}
+			s.mu.Unlock()
 		}
 	}
 	var result any

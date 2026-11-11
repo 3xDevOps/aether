@@ -168,6 +168,14 @@ func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string, valu
 }
 
 func (s *Scheduler) ACPCancel(ctx context.Context, run domain.RunID) error {
+	if s.Sleep(run).AsleepSince != nil {
+		return nil
+	}
+	awake, err := s.holdAwake(ctx, run)
+	if err != nil {
+		return err
+	}
+	defer awake()
 	sess, err := s.acp.live(ctx, run)
 	if err != nil {
 		return err
@@ -176,6 +184,11 @@ func (s *Scheduler) ACPCancel(ctx context.Context, run domain.RunID) error {
 }
 
 func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error {
+	awake, err := s.holdAwake(ctx, run)
+	if err != nil {
+		return err
+	}
+	defer awake()
 	sess, err := s.acp.live(ctx, run)
 	if err != nil {
 		return err
@@ -298,7 +311,9 @@ func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt s
 	if !s.IdleEnhanced(run) {
 		return errACPBusy
 	}
-	awake, err := s.holdAwake(ctx, run)
+	// A wake outlasts a delivery's deadline; mail the deadline cut off is
+	// delivered on the coordination service's retry to the woken session.
+	awake, err := s.holdAwake(context.WithoutCancel(ctx), run)
 	if err != nil {
 		return err
 	}

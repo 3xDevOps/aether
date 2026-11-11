@@ -9,7 +9,6 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, 
 import { Spinner } from '@/components/ui/spinner'
 import { api, ApiError } from '@/lib/api'
 import { message } from '@/lib/format'
-import { allowed } from '@/lib/permissions'
 import { coarsePointer, useDelayed, useElementSize, useMediaQuery } from '@/lib/hooks'
 import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { keyboardBusy, onTabListKeyDown } from '@/lib/keys'
@@ -19,7 +18,7 @@ import { cn } from '@/lib/utils'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { codeConflict } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
-import { useCapability, useSelf } from '@/store/hooks'
+import { useCapability } from '@/store/hooks'
 import { isTerminal } from '@/store/runs'
 import { normalizeAddress } from './address'
 import { AddressBar } from './address-bar'
@@ -265,17 +264,6 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
 
   const ended = run ? isTerminal(run.status) : false
   const ports = usePorts(runID, !ended)
-  // Opening the Browser tab is a use that wakes a sleeping session; its
-  // polling afterwards is not, so a later sleep is left alone.
-  const member = useSelf()
-  const steerOthers = useStore((state) => (run ? state.workspaces[run.workspace_id]?.steer_others : undefined))
-  const maySteer = run !== undefined && allowed('steer', member, { owner: run.member_id, protected: run.protected, steerOthers })
-  const openedAsleep = useRef(Boolean(run?.asleep_since) && !ended && maySteer)
-  useEffect(() => {
-    if (!openedAsleep.current) return
-    openedAsleep.current = false
-    api.runWake(runID).catch((cause: unknown) => { if (alive.current) setReadError(message(cause)) })
-  }, [runID])
   useEffect(() => {
     alive.current = true
     void refresh()

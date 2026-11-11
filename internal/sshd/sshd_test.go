@@ -700,6 +700,8 @@ func (f *fakeRuns) Sleep(domain.RunID) scheduler.SleepState { return scheduler.S
 
 func (f *fakeRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
 
+func (f *fakeRuns) HoldRunAwake(context.Context, domain.RunID) (func(), error) { return func() {}, nil }
+
 func (f *fakeRuns) NoteTyping(domain.RunID) {}
 
 func (f *fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }

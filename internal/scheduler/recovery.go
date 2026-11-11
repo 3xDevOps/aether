@@ -106,19 +106,31 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("%w: session %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new session",
 			ErrInvalidTransition, run)
 	}
-	s.mu.Lock()
-	reserved := !entry.asleepSince.IsZero()
-	s.mu.Unlock()
-	if reserved {
-		// Outside lifecycleMu: the disk reclaim a reservation may run can
-		// pick this closed run and take its lock.
-		release, capErr := s.reserveCapacity(ctx)
-		if capErr != nil {
-			return nil, capErr
+	// Outside lifecycleMu: the disk reclaim a reservation may run can pick
+	// this closed run and take its lock. A sleep that finishes before the
+	// lock is taken makes the run reserve and take it again.
+	reserved := false
+	for {
+		s.mu.Lock()
+		asleep := entry.sleeping || !entry.asleepSince.IsZero()
+		s.mu.Unlock()
+		if asleep && !reserved {
+			release, capErr := s.reserveCapacity(ctx)
+			if capErr != nil {
+				return nil, capErr
+			}
+			defer release()
+			reserved = true
 		}
-		defer release()
+		entry.lifecycleMu.Lock()
+		s.mu.Lock()
+		asleep = !entry.asleepSince.IsZero()
+		s.mu.Unlock()
+		if !asleep || reserved {
+			break
+		}
+		entry.lifecycleMu.Unlock()
 	}
-	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	fresh, ferr := s.cfg.Store.GetRun(ctx, run)
@@ -374,7 +386,11 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			s.mu.Unlock()
 		}()
 		if startErr := s.startAsleep(ctx, entry); startErr != nil {
-			return nil, rollback(startErr)
+			rolledBack := rollback(startErr)
+			if errors.Is(startErr, runtime.ErrNotFound) {
+				rolledBack = errors.Join(rolledBack, s.expireRetainedLocked(ctx, entry, ""))
+			}
+			return nil, rolledBack
 		}
 		resumed = true
 	} else if paused {
@@ -1943,7 +1959,6 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		usageLimit:          sc.UsageLimit,
 		asleepSince:         asleepSince,
 		wakeErr:             wakeErr,
-		browserSlept:        sc.BrowserSlept,
 		done:                make(chan struct{}),
 	}
 }

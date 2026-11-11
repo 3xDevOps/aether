@@ -204,7 +204,7 @@ func (s *Scheduler) runWaitLocked(ctx context.Context, entry *supervised) (domai
 func (s *Scheduler) Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if entry := s.runs[run]; entry != nil && !entry.paused && entry.activity == activity && entry.wait != nil {
+	if entry := s.runs[run]; entry != nil && (!entry.paused || !entry.asleepSince.IsZero()) && entry.activity == activity && entry.wait != nil {
 		wait := *entry.wait
 		return &wait
 	}

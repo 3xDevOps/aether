@@ -14,7 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -74,6 +73,23 @@ func (s *Scheduler) WakeRun(ctx context.Context, run domain.RunID, _ domain.Memb
 	}
 	release()
 	return nil
+}
+
+// HoldRunAwake is holdAwake for a connection forwarded to run's container:
+// its end counts as the run's last activity.
+func (s *Scheduler) HoldRunAwake(ctx context.Context, run domain.RunID) (func(), error) {
+	release, err := s.holdAwake(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	return sync.OnceFunc(func() {
+		release()
+		s.mu.Lock()
+		if entry := s.runs[run]; entry != nil {
+			entry.execAt = time.Now().UTC()
+		}
+		s.mu.Unlock()
+	}), nil
 }
 
 // holdAwake wakes run if it is asleep and keeps it from falling asleep
@@ -158,7 +174,7 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 		s.mu.Lock()
 		entry.waking = nil
 		entry.wakeErr = err
-		if err != nil && s.runs[entry.runID] == entry {
+		if err != nil && s.runs[entry.runID] == entry && !entry.finalizing {
 			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 				err = errors.Join(err, fmt.Errorf("record the failed wake: %w", werr))
 			}
@@ -170,7 +186,15 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 			slog.Warn("scheduler: wake a sleeping session", "run", entry.runID, "error", err)
 			return err
 		}
-		s.wokeNotice(context.WithoutCancel(ctx), entry)
+		const text = "Aether had stopped this idle session's container. Processes and terminals that were running were stopped; the conversation, files and checkout are kept."
+		if err := s.cfg.PTY.Annotate(context.WithoutCancel(ctx), ptyhost.RunSession(entry.runID), "Aether", "", text); err != nil {
+			slog.Warn("scheduler: note the wake in the terminal", "run", entry.runID, "error", err)
+		}
+		if sess := s.acp.session(entry.runID); sess != nil {
+			if err := sess.Notice("info", "Woke from sleep", text); err != nil {
+				slog.Warn("scheduler: note the wake in the session", "run", entry.runID, "error", err)
+			}
+		}
 		return nil
 	}
 }
@@ -195,6 +219,11 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) error {
 	}
 	defer release()
 	if err = s.startAsleep(ctx, entry); err != nil {
+		if errors.Is(err, runtime.ErrNotFound) {
+			// As for any container that disappears under a session.
+			s.finalizeAsleep(entry, -1)
+			return fmt.Errorf("the session's container was removed while it slept, so the session ends; its checkout and branch are kept: %w", err)
+		}
 		return err
 	}
 	stop := func(cause error) error {
@@ -208,7 +237,7 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) error {
 	}
 	if err = s.entryDriver(entry).Resume(ctx, entry, att); err != nil {
 		_ = att.Close()
-		return stop(err)
+		return stop(fmt.Errorf("restore the agent's conversation (if this keeps failing, launch a new session on this session's branch, which is kept with its checkout): %w", err))
 	}
 	if err = s.cfg.Git.StartDiffWatch(ctx, workspace, run); err != nil {
 		return stop(err)
@@ -228,48 +257,6 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) error {
 		return stop(fmt.Errorf("record the wake: %w", err))
 	}
 	return nil
-}
-
-// resumeSleptBrowser thaws the browser companion a sleep paused, on the
-// first browser or development-control call after the run woke. It runs
-// there rather than in the wake, which may hold the run's control
-// admission that the companion's input release also takes. Concurrent
-// calls share one resume, which revokes browser control, so none drops a
-// lease another took after it.
-func (s *Scheduler) resumeSleptBrowser(ctx context.Context, run domain.RunID) error {
-	for {
-		s.mu.Lock()
-		entry := s.runs[run]
-		if entry == nil || !entry.browserSlept || !entry.asleepSince.IsZero() || entry.sleeping || entry.paused {
-			s.mu.Unlock()
-			return nil
-		}
-		if pending := entry.browserResume; pending != nil {
-			s.mu.Unlock()
-			select {
-			case <-pending:
-			case <-ctx.Done():
-				return fmt.Errorf("wait for the browser companion to resume: %w", ctx.Err())
-			}
-			continue
-		}
-		done := make(chan struct{})
-		entry.browserResume = done
-		cid := entry.containerID
-		s.mu.Unlock()
-		err := s.resumeDevelopmentBrowser(ctx, run, cid)
-		s.mu.Lock()
-		entry.browserResume = nil
-		if err == nil {
-			entry.browserSlept = false
-		}
-		close(done)
-		s.mu.Unlock()
-		if err != nil {
-			return fmt.Errorf("resume the browser companion paused while the session slept: %w", err)
-		}
-		return nil
-	}
 }
 
 // startAsleep starts entry's stopped container under a fresh wait. Caller
@@ -302,18 +289,6 @@ func (s *Scheduler) stopAsleep(ctx context.Context, entry *supervised) error {
 	entry.agentExec, entry.agentKeeper = nil, nil
 	s.mu.Unlock()
 	return s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace)
-}
-
-func (s *Scheduler) wokeNotice(ctx context.Context, entry *supervised) {
-	const text = "Aether had stopped this idle session's container. Processes and terminals that were running were stopped; the conversation, files and checkout are kept."
-	if err := s.cfg.PTY.Annotate(ctx, ptyhost.RunSession(entry.runID), "Aether", "", text); err != nil {
-		slog.Warn("scheduler: note the wake in the terminal", "run", entry.runID, "error", err)
-	}
-	if sess := s.acp.session(entry.runID); sess != nil {
-		if err := sess.Notice("info", "Woke from sleep", text); err != nil {
-			slog.Warn("scheduler: note the wake in the session", "run", entry.runID, "error", err)
-		}
-	}
 }
 
 func (s *Scheduler) publishSleep(entry *supervised) {
@@ -394,7 +369,7 @@ func (s *Scheduler) sessionFacts(run domain.RunID, f idleFacts) idleFacts {
 		return f
 	}
 	st := sess.State()
-	if st.TurnInFlight || st.Background || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting {
+	if st.TurnInFlight || st.Background || len(st.Tasks) > 0 || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting {
 		f.busy = "the agent is working"
 		return f
 	}
@@ -482,6 +457,36 @@ func (s *Scheduler) launchedEnhanced(ctx context.Context, e *supervised) bool {
 	return err == nil && slices.Contains(info.Env, coordtransport.EnhancedEnv+"=1")
 }
 
+// foregroundJobScript prints the command of a process that holds a
+// terminal's foreground, such as a dev server, an editor or a REPL started
+// in a shell tab. A shell waiting at its prompt holds its own terminal and
+// is not one. Fields after the command in /proc/<pid>/stat: state, ppid,
+// pgrp, session, tty_nr, tpgid.
+const foregroundJobScript = `for stat in /proc/[0-9]*/stat; do
+	read -r line 2>/dev/null <"$stat" || continue
+	comm=${line#*(}
+	comm=${comm%)*}
+	set -- ${line##*) }
+	[ "$6" -gt 0 ] 2>/dev/null && [ "$3" = "$6" ] || continue
+	case $comm in
+	bash | sh | dash | zsh | fish | ash | ksh | mksh) ;;
+	*) printf '%s\n' "$comm"; exit 0 ;;
+	esac
+done`
+
+// foregroundJob names a command running in the foreground of one of the
+// container's terminals, which keeps the session awake.
+func (s *Scheduler) foregroundJob(ctx context.Context, cid runtime.ID) (string, error) {
+	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", foregroundJobScript}, "")
+	if err == nil && code != 0 {
+		err = fmt.Errorf("exit %d: %s", code, strings.TrimSpace(stderr))
+	}
+	if err != nil {
+		return "", fmt.Errorf("look for a terminal's foreground command: %w", err)
+	}
+	return strings.TrimSpace(stdout), nil
+}
+
 func (s *Scheduler) goSleep(entry *supervised, sleep func(context.Context, *supervised) error) {
 	s.wg.Add(1)
 	go func() {
@@ -511,6 +516,7 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 	}
 	entry.sleeping = true
 	entry.sleepDone = make(chan struct{})
+	cid := entry.containerID
 	s.mu.Unlock()
 	// Activity since the sweep read the run, an autonomous turn included,
 	// keeps it awake.
@@ -518,16 +524,33 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 		s.endSleep(entry, false)
 		return errStayAwake
 	}
-	if err := s.markAsleep(entry, true); err != nil {
+	if job, err := s.foregroundJob(ctx, cid); err != nil || job != "" {
+		s.endSleep(entry, false)
+		return errors.Join(errStayAwake, err)
+	}
+	if err := s.markAsleep(entry); err != nil {
 		s.endSleep(entry, false)
 		return err
 	}
+	undo := func(cause error) error {
+		undoCtx := context.WithoutCancel(ctx)
+		return errors.Join(cause, s.reopenDevelopment(undoCtx, run), s.resumeDevelopmentBrowser(undoCtx, run, cid), s.unmarkAsleep(entry))
+	}
 	if err := s.prepareDevelopmentClose(ctx, run); err != nil {
-		undo := context.WithoutCancel(ctx)
-		s.mu.Lock()
-		cid := entry.containerID
-		s.mu.Unlock()
-		return errors.Join(err, s.reopenDevelopment(undo, run), s.resumeDevelopmentBrowser(undo, run, cid), s.unmarkAsleep(entry))
+		return undo(err)
+	}
+	// The agent may have started a turn of its own while the terminals
+	// stopped; the container stop below would end it.
+	s.mu.Lock()
+	facts = s.liveFactsLocked(entry)
+	s.mu.Unlock()
+	if s.sessionFacts(run, facts).busy != "" {
+		return undo(errStayAwake)
+	}
+	// A companion left paused would come back in the network namespace of
+	// the stopped container, where nothing answers.
+	if err := s.removeDevelopmentBrowser(ctx, run); err != nil {
+		return undo(fmt.Errorf("remove the browser companion: %w", err))
 	}
 	s.cfg.Git.StopDiffWatch(run)
 	// The container stop below ends an agent this could not stop.
@@ -551,25 +574,26 @@ func (s *Scheduler) sleepClosed(ctx context.Context, entry *supervised) error {
 	entry.sleeping = true
 	entry.sleepDone = make(chan struct{})
 	s.mu.Unlock()
-	if err := s.markAsleep(entry, false); err != nil {
+	if err := s.markAsleep(entry); err != nil {
 		s.endSleep(entry, false)
 		return err
+	}
+	if err := s.removeDevelopmentBrowser(ctx, entry.runID); err != nil {
+		return errors.Join(fmt.Errorf("remove the browser companion: %w", err), s.unmarkAsleep(entry))
 	}
 	return s.stopSleeping(ctx, entry)
 }
 
 // markAsleep records the sleep durably before anything stops, so a server
 // that restarts from here on recovers the run asleep rather than finishing
-// it on the container's exit. browser marks the companion the sleep pauses.
-func (s *Scheduler) markAsleep(entry *supervised, browser bool) error {
+// it on the container's exit.
+func (s *Scheduler) markAsleep(entry *supervised) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry.asleepSince = time.Now().UTC()
 	entry.wakeErr = nil
-	slept := entry.browserSlept
-	entry.browserSlept = browser
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		entry.asleepSince, entry.browserSlept = time.Time{}, slept
+		entry.asleepSince = time.Time{}
 		return fmt.Errorf("record the sleep: %w", err)
 	}
 	return nil
@@ -578,7 +602,7 @@ func (s *Scheduler) markAsleep(entry *supervised, browser bool) error {
 // unmarkAsleep takes back a sleep that stopped nothing.
 func (s *Scheduler) unmarkAsleep(entry *supervised) error {
 	s.mu.Lock()
-	entry.asleepSince, entry.browserSlept = time.Time{}, false
+	entry.asleepSince = time.Time{}
 	err := s.writeSidecar(entry.sidecar())
 	s.mu.Unlock()
 	s.endSleep(entry, false)
@@ -618,21 +642,11 @@ func (s *Scheduler) endSleep(entry *supervised, asleep bool) {
 	s.mu.Unlock()
 	if asleep {
 		s.publishSleep(entry)
+		return
 	}
-}
-
-// adoptAsleepLocked installs the owner of a run whose container a sleep stopped
-// before the server restarted, without waiting on or attaching to it.
-// Caller holds s.mu.
-func (s *Scheduler) adoptAsleepLocked(r *domain.Run, sc sidecar) *supervised {
-	if s.runs[r.ID] != nil || s.pending[r.ID] != nil {
-		return nil
-	}
-	entry := s.entryFromSidecar(r, sc)
-	entry.paused = true
-	s.runs[r.ID] = entry
-	s.syncRunUserReservationsLocked()
-	return entry
+	// A container that really exited while the sleep was under way ended
+	// the wait, which left the exit to the sleep.
+	s.startSupervision(entry)
 }
 
 // recoverAsleep adopts an open run whose sidecar says it is asleep, and
@@ -643,8 +657,15 @@ func (s *Scheduler) recoverAsleep(ctx context.Context, r *domain.Run, sc sidecar
 	if errors.Is(err, runtime.ErrNotFound) {
 		return false
 	}
+	// Installed without waiting on or attaching to the container.
+	var entry *supervised
 	s.mu.Lock()
-	entry := s.adoptAsleepLocked(r, sc)
+	if s.runs[r.ID] == nil && s.pending[r.ID] == nil {
+		entry = s.entryFromSidecar(r, sc)
+		entry.paused = true
+		s.runs[r.ID] = entry
+		s.syncRunUserReservationsLocked()
+	}
 	s.mu.Unlock()
 	if entry != nil && err == nil && !info.Exited {
 		// Started by hand while the server was down: the agent is not in it.
@@ -666,15 +687,18 @@ func (s *Scheduler) stopRecoveredAsleep(ctx context.Context, entry *supervised) 
 	if !asleep {
 		return
 	}
+	if err := s.removeDevelopmentBrowser(ctx, entry.runID); err != nil {
+		slog.Warn("scheduler: remove a sleeping session's browser companion", "run", entry.runID, "error", err)
+	}
 	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
 		slog.Warn("scheduler: stop a sleeping session's container", "run", entry.runID, "error", err)
 	}
 }
 
-// finalizeAsleep finishes a killed run whose container a sleep had already
-// stopped, which no Wait is left to see exit. Caller holds
+// finalizeAsleep finishes, with exit code, a run whose container a sleep had
+// already stopped, which no Wait is left to see exit. Caller holds
 // entry.lifecycleMu, so the finish runs after it returns.
-func (s *Scheduler) finalizeAsleep(entry *supervised) {
+func (s *Scheduler) finalizeAsleep(entry *supervised, code int) {
 	s.mu.Lock()
 	claimed := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && !entry.finalizing
 	if claimed {
@@ -686,10 +710,11 @@ func (s *Scheduler) finalizeAsleep(entry *supervised) {
 	if !claimed {
 		return
 	}
+	s.publishSleep(entry)
 	go func() {
 		defer s.wg.Done()
-		s.recordExitObserved(entry, 137)
-		s.finalize(entry, 137)
+		s.recordExitObserved(entry, code)
+		s.finalize(entry, code)
 	}()
 }
 
@@ -736,30 +761,4 @@ func (e *awakeExec) Stop(ctx context.Context, grace time.Duration) (runtime.Exit
 func (e *awakeExec) Detach() error {
 	e.done()
 	return e.ManagedExec.Detach()
-}
-
-// wakesRun reports a development call that starts work in the container: a
-// terminal, a browser operation, or taking control for one. The reads an
-// open Browser tab polls, status, pages, console and network, neither wake a
-// run nor keep it awake.
-func wakesRun(method string) bool {
-	switch method {
-	case protocol.MethodDevTerminalStart, protocol.MethodDevControlAcquire, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserNavigate,
-		protocol.MethodDevBrowserAction, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserReset,
-		protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserInspect, protocol.MethodDevBrowserScreenshot,
-		protocol.MethodDevBrowserWait:
-		return true
-	}
-	return false
-}
-
-func (s *Scheduler) noteBrowsed(run domain.RunID, method string) {
-	if !strings.HasPrefix(method, "dev.browser.") {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if entry := s.runs[run]; entry != nil {
-		entry.browsedAt = time.Now().UTC()
-	}
 }

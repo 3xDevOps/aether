@@ -79,7 +79,7 @@ func (s *Scheduler) kill(ctx context.Context, run domain.RunID, actor domain.Mem
 			return err
 		}
 	}
-	s.finalizeAsleep(entry)
+	s.finalizeAsleep(entry, 137)
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineKill, "")
 	return nil
 }
@@ -503,6 +503,10 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 		entry.status.Terminal() || entry.retained || entry.destroyPending || entry.finalizing {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: session cannot be paused in its current state", ErrInvalidTransition)
+	}
+	if !entry.asleepSince.IsZero() {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: session is asleep and its container is already stopped", ErrInvalidTransition)
 	}
 	if entry.paused {
 		s.mu.Unlock()

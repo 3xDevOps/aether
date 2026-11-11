@@ -64,7 +64,12 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 			rejectDirectTCPIP(nc, ssh.Prohibited, reason)
 			return
 		}
-		var err error
+		release, err := s.cfg.Runs.HoldRunAwake(ctx, runID)
+		if err != nil {
+			rejectDirectTCPIP(nc, ssh.ConnectionFailed, rpcError(err).Message)
+			return
+		}
+		defer release()
 		addr, err = s.cfg.Runs.ContainerAddr(ctx, runID)
 		if err != nil || addr == "" {
 			rejectDirectTCPIP(nc, ssh.Prohibited, "session has no live container")

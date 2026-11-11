@@ -481,8 +481,6 @@ type sidecar struct {
 	// last wake's failure.
 	AsleepSince *time.Time `json:"asleep_since,omitempty"`
 	WakeError   string     `json:"wake_error,omitempty"`
-	// BrowserSlept marks a browser companion the sleep paused.
-	BrowserSlept bool `json:"browser_slept,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
@@ -571,7 +569,6 @@ func (e *supervised) sidecar() sidecar {
 		UsageLimit:          e.usageLimit,
 		AsleepSince:         asleepSince,
 		WakeError:           wakeError,
-		BrowserSlept:        e.browserSlept,
 	}
 }
 

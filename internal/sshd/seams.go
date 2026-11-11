@@ -100,6 +100,9 @@ type RunController interface {
 	// WakeRun starts a sleeping run's container and restores its agent,
 	// returning once it can take input or with the wake's error.
 	WakeRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error
+	// HoldRunAwake wakes a sleeping run and keeps it awake until release,
+	// which counts as the run's last activity.
+	HoldRunAwake(ctx context.Context, run domain.RunID) (release func(), err error)
 	// NoteTyping records a member typing in the run's composer.
 	NoteTyping(run domain.RunID)
 	// Cause is what chose activity for the live run; empty when unknown or

@@ -216,7 +216,11 @@ func printRunView(w io.Writer, v runView, items []protocol.AttentionItem) error 
 		_, _ = fmt.Fprintf(tw, "wait\t%s\n", printable(v.WaitText))
 	}
 	if v.AsleepSince != nil {
-		_, _ = fmt.Fprintf(tw, "asleep\tsince %s; its container is stopped until a prompt, a typed terminal or aether ssh wakes it\n", *v.AsleepSince)
+		wakes := "a message, a typed terminal, aether ssh or aether resume wakes it"
+		if domain.RunStatus(v.State).Terminal() {
+			wakes = "aether reopen " + v.ID + " wakes it"
+		}
+		_, _ = fmt.Fprintf(tw, "asleep\tsince %s; its container is stopped until %s\n", *v.AsleepSince, wakes)
 	}
 	if v.WakeError != "" {
 		_, _ = fmt.Fprintf(tw, "wake failed\t%s\n", printable(v.WakeError))

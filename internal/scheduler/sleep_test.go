@@ -1,9 +1,9 @@
 package scheduler
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -13,8 +13,11 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 func TestIdleSince(t *testing.T) {
@@ -315,7 +318,7 @@ func TestARestartFinishesAnInterruptedSleep(t *testing.T) {
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
-	if err := e.sched.markAsleep(entry, true); err != nil {
+	if err := e.sched.markAsleep(entry); err != nil {
 		t.Fatal(err)
 	}
 	s2 := e.restartACP(t)
@@ -366,7 +369,7 @@ func TestARestartFinishesAnInterruptedClosedSleep(t *testing.T) {
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
-	if err := e.sched.markAsleep(entry, false); err != nil {
+	if err := e.sched.markAsleep(entry); err != nil {
 		t.Fatal(err)
 	}
 	s2 := e.restartACP(t)
@@ -395,35 +398,6 @@ func TestASwitchedRunStaysAwake(t *testing.T) {
 	}
 }
 
-// A sleep whose record fails leaves a companion an earlier sleep paused
-// marked for resume.
-func TestAFailedSleepRecordKeepsTheEarlierBrowserResume(t *testing.T) {
-	t.Parallel()
-	e, _ := newSleepEnv(t)
-	run := e.launchACP(t, "say pong")
-	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
-	e.sched.mu.Lock()
-	entry := e.sched.runs[run.ID]
-	entry.browserSlept = true
-	e.sched.mu.Unlock()
-	path := e.sched.sidecarPath(run.ID)
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(path, "block"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.sched.markAsleep(entry, false); err == nil {
-		t.Fatal("markAsleep succeeded over an unwritable sidecar")
-	}
-	e.sched.mu.Lock()
-	slept, asleep := entry.browserSlept, !entry.asleepSince.IsZero()
-	e.sched.mu.Unlock()
-	if !slept || asleep {
-		t.Fatalf("after a failed sleep record browserSlept=%v asleep=%v, want true false", slept, asleep)
-	}
-}
-
 // Recovery that adopted a sleeping closed run does not stop the container
 // a Relaunch started first.
 func TestRecoveryKeepsAReopenedContainerRunning(t *testing.T) {
@@ -446,4 +420,194 @@ func TestRecoveryKeepsAReopenedContainerRunning(t *testing.T) {
 	if state := containerState(e.container(t, run.ID)); state != "running" {
 		t.Fatalf("reopened container is %s after recovery's stop, want running", state)
 	}
+}
+
+// stayAwake runs the sleep sweep and fails if run falls asleep.
+func (e *testEnv) stayAwake(t *testing.T, run domain.RunID, why string) {
+	t.Helper()
+	for range 3 {
+		e.sched.sleepIdle(t.Context())
+		time.Sleep(30 * time.Millisecond)
+	}
+	if e.sched.Sleep(run).AsleepSince != nil {
+		t.Fatalf("a session fell asleep while %s", why)
+	}
+}
+
+func (e *testEnv) onForegroundProbe(answer func() (string, error)) {
+	e.rt.mu.Lock()
+	defer e.rt.mu.Unlock()
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if !slices.Contains(argv, foregroundJobScript) {
+			return 0, "", nil
+		}
+		stdout, err := answer()
+		return 0, stdout, err
+	}
+}
+
+func TestACommandInATerminalsForegroundKeepsTheSessionAwake(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.onForegroundProbe(func() (string, error) { return "vim", nil })
+	e.stayAwake(t, run.ID, "vim ran in a shell tab")
+	e.onForegroundProbe(func() (string, error) { return "", nil })
+	e.sleepRun(t, run.ID)
+}
+
+func TestAnAgentShellTaskKeepsTheSessionAwake(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, acpmock.PromptDevServer)
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.stayAwake(t, run.ID, "the agent's dev server ran")
+}
+
+// A turn the agent starts on its own while the sleep stops the terminals
+// keeps the session awake instead of dying with the container.
+func TestATurnStartedDuringTheSleepKeepsTheSessionAwake(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.onForegroundProbe(func() (string, error) {
+		sess := e.sched.acp.session(run.ID)
+		if _, err := sess.PromptIdle(context.Background(), []acp.ContentBlock{acp.TextBlock(acpmock.PromptWait)}, nil); err != nil {
+			return "", err
+		}
+		return "", nil
+	})
+	waitFor(t, "the started turn", func() bool {
+		e.sched.sleepIdle(t.Context())
+		return e.sched.acp.session(run.ID).State().TurnInFlight
+	})
+	time.Sleep(100 * time.Millisecond)
+	if e.sched.Sleep(run.ID).AsleepSince != nil || containerState(e.container(t, run.ID)) != "running" {
+		t.Fatal("the sleep stopped a session whose agent had started a turn")
+	}
+	if !e.sched.acp.session(run.ID).State().TurnInFlight {
+		t.Fatal("the agent's turn did not survive the abandoned sleep")
+	}
+}
+
+// A prompt that arrives while the session is falling asleep waits for the
+// sleep, wakes the session and is answered.
+func TestAPromptDuringTheSleepWakesTheSession(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	probed, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	e.onForegroundProbe(func() (string, error) {
+		once.Do(func() { close(probed) })
+		<-release
+		return "", nil
+	})
+	waitFor(t, "the sleep's probe", func() bool {
+		e.sched.sleepIdle(t.Context())
+		select {
+		case <-probed:
+			return true
+		default:
+			return false
+		}
+	})
+	injected := make(chan error, 1)
+	go func() {
+		_, err := e.sched.Inject(context.Background(), run.ID, e.member.ID, domain.AgentPrompt{Text: "during the sleep"}, false, nil)
+		injected <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	if err := <-injected; err != nil {
+		t.Fatalf("a prompt during the sleep: %v", err)
+	}
+	waitItems(t, e.sched, run.ID, "the prompt's turn", turnEnded("end_turn", 2))
+}
+
+func TestWakeTriggers(t *testing.T) {
+	t.Parallel()
+	member := func(e *testEnv) control.Principal {
+		return control.Principal{Kind: control.PrincipalMember, MemberID: e.member.ID}
+	}
+	for name, trigger := range map[string]func(*testEnv, domain.RunID){
+		"an answer": func(e *testEnv, run domain.RunID) { _ = e.sched.ACPAnswer(run, "gone", "allow", nil) },
+		"an exec": func(e *testEnv, run domain.RunID) {
+			if exec, err := e.sched.StartRunExec(t.Context(), run, member(e), RunExec{Argv: []string{"true"}}, func() error { return nil }); err == nil {
+				_ = exec.Detach()
+			}
+		},
+		"a browser operation": func(e *testEnv, run domain.RunID) {
+			raw, _ := json.Marshal(protocol.DevBrowserOpenParams{DevRunParams: protocol.DevRunParams{RunID: string(run)}})
+			_, _ = e.sched.CallDevelopment(t.Context(), run, member(e), protocol.MethodDevBrowserOpen, raw, func() error { return nil })
+		},
+		"a model choice": func(e *testEnv, run domain.RunID) { _ = e.sched.ACPSetOption(t.Context(), run, "model", "other") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e, _ := newACPEnv(t, func(cfg *Config) {
+				cfg.RunSleepAfter = time.Nanosecond
+				cfg.sleepAnyAgent = true
+				cfg.Control = control.New(control.Config{})
+			})
+			run := e.launchACP(t, "say pong")
+			waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+			e.sleepRun(t, run.ID)
+			trigger(e, run.ID)
+			if e.sched.Sleep(run.ID).AsleepSince != nil || containerState(e.container(t, run.ID)) != "running" {
+				t.Fatalf("%s did not wake the session", name)
+			}
+		})
+	}
+}
+
+// Coordination mail whose delivery deadline passes during the wake still
+// wakes the session, and the coordination service's retry delivers it.
+func TestMailPastItsDeadlineStillWakesTheSession(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sleepRun(t, run.ID)
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	if !e.sched.Wakeable(run.ID) {
+		t.Fatal("a sleeping session is not wakeable for mail")
+	}
+	_ = e.sched.Wake(expired, run.ID, "you have mail")
+	if e.sched.Sleep(run.ID).AsleepSince != nil {
+		t.Fatal("mail past its deadline left the session asleep")
+	}
+	// The cut-off prompt may still have reached the agent; else the retry
+	// delivers it.
+	waitFor(t, "the mail delivered", func() bool {
+		page, err := e.sched.ACPHistory(run.ID, 0, 0)
+		return err == nil && turnEnded("end_turn", 2)(page.Items) || e.sched.Wake(t.Context(), run.ID, "you have mail") == nil
+	})
+	waitItems(t, e.sched, run.ID, "the mail's turn", turnEnded("end_turn", 2))
+}
+
+// A sleeping session whose container was deleted, as docker container prune
+// does, ends on its next use instead of staying asleep.
+func TestAWakeOfARemovedContainerEndsTheSession(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sleepRun(t, run.ID)
+	c := e.container(t, run.ID)
+	e.rt.mu.Lock()
+	delete(e.rt.containers, c.id)
+	e.rt.mu.Unlock()
+	_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after the prune"}, false, nil)
+	if err == nil || !strings.Contains(err.Error(), "removed while it slept") {
+		t.Fatalf("a prompt to a pruned session = %v, want the removal named", err)
+	}
+	waitFor(t, "the session ended", func() bool {
+		got, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && got.Status.Terminal()
+	})
 }
