@@ -240,6 +240,7 @@ type serveOptions struct {
 	pollInterval         *time.Duration
 	checkoutTTL          *time.Duration
 	runContainerTTL      *time.Duration
+	runSleepAfter        *time.Duration
 	minFreeDisk          *int64
 	runCPUs              *runCPUValue
 	runMemory            *runCountValue
@@ -293,6 +294,8 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"how long a finished session's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
 		"how long explicitly closed Standard and Enhanced session containers are retained (0 = 168h, negative = no retention)")
+	o.runSleepAfter = fs.Duration("run-sleep-after", scheduler.DefaultRunSleepAfter,
+		"how long an idle Enhanced session of an agent that can resume its conversation, open or closed, keeps its container running before it is stopped until its next use (0 = never)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"free-byte reserve on data/runtime filesystems (0 = automatic 5-20GiB, negative = disable disk admission)")
 	o.runCPUs = new(runCPUValue)
@@ -378,6 +381,7 @@ func serve(args []string) error {
 		PollInterval:     *o.pollInterval,
 		CheckoutTTL:      *o.checkoutTTL,
 		RunContainerTTL:  *o.runContainerTTL,
+		RunSleepAfter:    *o.runSleepAfter,
 		MinFreeDiskBytes: *o.minFreeDisk,
 		RunCPULimit:      float64(*o.runCPUs),
 		RunMemoryBytes:   int64(*o.runMemory),

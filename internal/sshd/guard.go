@@ -139,6 +139,7 @@ func init() {
 	registerGuarded(protocol.MethodRunReview, permissions.Kill, runTarget, (*Server).runReview)
 	registerGuarded(protocol.MethodRunPause, permissions.Steer, runTarget, (*Server).runPause)
 	registerGuarded(protocol.MethodRunResume, permissions.Steer, runTarget, (*Server).runResume)
+	registerGuarded(protocol.MethodRunWake, permissions.Steer, runTarget, (*Server).runWake)
 	registerGuarded(protocol.MethodRunInject, permissions.Steer, runTarget, (*Server).runInject)
 	registerGuarded(protocol.MethodRunRelaunch, permissions.Steer, runTarget, (*Server).runRelaunch)
 	registerGuarded(protocol.MethodRunHandoff, permissions.Handoff, runTarget, (*Server).runHandoff)

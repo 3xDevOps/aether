@@ -29,17 +29,17 @@ agent once without input, commits the result and exits.
 
 What each agent can do:
 
-| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Set up suggests |
-| --- | --- | --- | --- | --- | --- | --- |
-| `antigravity` | none | none | none | no | no | Standard |
-| `claude` | turn start and end | hooks and idle wake | adapter | yes | yes | Standard |
-| `codex` | turn start and end | idle wake and mid-turn steer | adapter | no | no | Enhanced |
-| `copilot` | none | hooks | built in | no | no | Enhanced |
-| `cursor` | none | hooks you install | built in | no | no | Enhanced |
-| `gemini` | none | hooks you install | built in | no | no | Enhanced |
-| `omp` | turn start and end | hooks and idle wake | built in | yes | no | Enhanced |
-| `opencode` | turn start and end | hooks and idle wake | built in | no | no | Enhanced |
-| `pi` | turn start and end | hooks and idle wake | adapter | no | no | Standard |
+| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Idle sleep | Set up suggests |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `antigravity` | none | none | none | no | no | no | Standard |
+| `claude` | turn start and end | hooks and idle wake | adapter | yes | yes | yes | Standard |
+| `codex` | turn start and end | idle wake and mid-turn steer | adapter | no | no | no | Enhanced |
+| `copilot` | none | hooks | built in | no | no | no | Enhanced |
+| `cursor` | none | hooks you install | built in | no | no | no | Enhanced |
+| `gemini` | none | hooks you install | built in | no | no | no | Enhanced |
+| `omp` | turn start and end | hooks and idle wake | built in | yes | no | no | Enhanced |
+| `opencode` | turn start and end | hooks and idle wake | built in | no | no | no | Enhanced |
+| `pi` | turn start and end | hooks and idle wake | adapter | no | no | no | Standard |
 
 - **Standard status** is what a Standard session reports of its turns
   ([Status reporting](#status-reporting)). With none, a session that goes quiet for
@@ -60,6 +60,10 @@ What each agent can do:
 - **Background tasks**: an Enhanced session stays working while the agent's
   background subagents and commands run
   ([Background work](enhanced-sessions.md#background-work)).
+- **Idle sleep**: an idle Enhanced session's container is stopped and started
+  again on its next use, and the agent continues the same conversation
+  ([Idle sleep](failure-handling.md#idle-sleep)). Sessions of the other agents
+  stay awake.
 - **Set up suggests** is the mode **Set up** picks first. The dashboard then
   remembers your choice per agent
   ([Choose Enhanced](enhanced-sessions.md#choose-enhanced)), and `aether session`

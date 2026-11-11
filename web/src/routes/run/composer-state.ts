@@ -136,7 +136,8 @@ export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, s
   if (base) return { reason: base }
   if (stream === 'refused') return { reason: streamError ?? 'The agent stream was refused.' }
   if (stream !== 'live') return { reason: 'Connecting to the agent…' }
-  if (!sessionLive) return { reason: 'The agent is not running.' }
+  // A message to a sleeping session wakes it.
+  if (!sessionLive && !run.asleep_since) return { reason: 'The agent is not running.' }
   if (pending > 0 && hasLease) return { reason: 'Answer the request above to continue.', interrupt: true }
   return null
 }

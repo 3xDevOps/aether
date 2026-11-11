@@ -62,6 +62,7 @@ const (
 	MethodRunDelete             = "run.delete"
 	MethodRunPause              = "run.pause"
 	MethodRunResume             = "run.resume"
+	MethodRunWake               = "run.wake"
 	MethodRunInject             = "run.inject"
 	MethodRunClose              = "run.close"
 	MethodRunRelaunch           = "run.relaunch"

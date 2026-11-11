@@ -634,6 +634,7 @@ export const api = {
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
+  runWake: (runID: string) => call<unknown>('run.wake', { run_id: runID }),
   /** steer asks an enhanced run's agent to add the message to its running
    * turn; the lease makes delivery immediate instead of moderated. */
   runInject: (

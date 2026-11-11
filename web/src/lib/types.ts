@@ -268,6 +268,12 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
+  /** When idleness stopped the live session's container; absent while it is awake. */
+  asleep_since?: string
+  /** A wake is starting the sleeping container. */
+  waking?: boolean
+  /** The last wake's failure while the session stays asleep. */
+  wake_error?: string
   /** Exact runtime grace deadline; files and results have separate lifetimes. */
   container_retained_until?: string
   cleanup_pending?: boolean
@@ -981,6 +987,11 @@ export interface RunModelPayload {
 }
 export interface RunEffortPayload {
   effort: string
+}
+export interface RunSleepPayload {
+  asleep_since?: string
+  waking?: boolean
+  wake_error?: string
 }
 export interface RunProtectedPayload {
   protected: boolean

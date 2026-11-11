@@ -162,7 +162,8 @@ type Config struct {
 	// with no tool running. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
 	// RunContainerTTL retains exact containers after TUI Close, or an agent-finished
-	// TUI run (negative disables retention).
+	// TUI run (negative disables retention). RunSleepAfter stops an idle
+	// Enhanced session's container after that long (zero never does).
 	// MinFreeDiskBytes overrides the automatic data/runtime filesystem
 	// reserve. Negative disables disk admission, not host memory checks.
 	StallThreshold   time.Duration
@@ -171,6 +172,7 @@ type Config struct {
 	PollInterval     time.Duration
 	CheckoutTTL      time.Duration
 	RunContainerTTL  time.Duration
+	RunSleepAfter    time.Duration
 	MinFreeDiskBytes int64
 	// Run budgets apply to runs and member environments. Zero selects
 	// automatic up-to-8 CPUs, 8 GiB memory, and 4096 processes.
@@ -426,6 +428,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		PollInterval:         cfg.PollInterval,
 		CheckoutTTL:          cfg.CheckoutTTL,
 		RunContainerTTL:      cfg.RunContainerTTL,
+		RunSleepAfter:        cfg.RunSleepAfter,
 		MinFreeBytes:         cfg.MinFreeDiskBytes,
 		RunCPULimit:          cfg.RunCPULimit,
 		RunMemoryBytes:       cfg.RunMemoryBytes,

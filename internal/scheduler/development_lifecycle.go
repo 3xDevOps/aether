@@ -181,6 +181,33 @@ func (s *Scheduler) StopDevelopmentRun(ctx context.Context, id domain.RunID) err
 	return s.removeDevelopmentBrowser(ctx, id)
 }
 
+// removeLeftBrowser removes the companion a sleep could not remove. The
+// mark is read and cleared under the browser lock, so a companion opened
+// after the removal is never taken for the old one.
+func (s *Scheduler) removeLeftBrowser(ctx context.Context, id domain.RunID) error {
+	d := s.developmentState()
+	lock := d.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	entry := s.runs[id]
+	left := entry != nil && entry.browserLeft
+	s.mu.Unlock()
+	if !left {
+		return nil
+	}
+	if d.manager != nil {
+		if err := d.manager.Remove(ctx, string(id)); err != nil {
+			return err
+		}
+	}
+	d.releaseBrowser(id)
+	s.mu.Lock()
+	entry.browserLeft = false
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *Scheduler) removeDevelopmentBrowser(ctx context.Context, id domain.RunID) error {
 	d := s.developmentState()
 	lock := d.lock(id)

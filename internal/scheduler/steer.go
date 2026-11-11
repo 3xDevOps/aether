@@ -79,6 +79,7 @@ func (s *Scheduler) kill(ctx context.Context, run domain.RunID, actor domain.Mem
 			return err
 		}
 	}
+	s.finalizeAsleep(entry, 137)
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineKill, "")
 	return nil
 }
@@ -505,6 +506,10 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 		s.mu.Unlock()
 		return fmt.Errorf("%w: session cannot be paused in its current state", ErrInvalidTransition)
 	}
+	if !entry.asleepSince.IsZero() {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: session is asleep and its container is already stopped", ErrInvalidTransition)
+	}
 	if entry.paused {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: session is already paused", ErrInvalidTransition)
@@ -536,13 +541,23 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
+	asleep := entry != nil && !entry.asleepSince.IsZero() && !entry.retained
 	s.mu.Unlock()
 	if entry == nil {
 		return fmt.Errorf("%w: session has no live container", ErrInvalidTransition)
 	}
+	if asleep {
+		return s.WakeRun(ctx, run, actor)
+	}
 	entry.lifecycleMu.Lock()
-	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
+	// A sleep that held the lifecycle lock may have finished meanwhile.
+	if !entry.asleepSince.IsZero() && !entry.retained {
+		s.mu.Unlock()
+		entry.lifecycleMu.Unlock()
+		return s.WakeRun(ctx, run, actor)
+	}
+	defer entry.lifecycleMu.Unlock()
 	if s.runs[run] != entry || entry.containerID == "" ||
 		entry.status.Terminal() || entry.retained || entry.destroyPending || entry.finalizing {
 		s.mu.Unlock()
@@ -597,11 +612,12 @@ func (s *Scheduler) setPaused(entry *supervised, paused bool) {
 	}
 }
 
+// Paused reports a frozen container; a sleeping one is asleep instead.
 func (s *Scheduler) Paused(run domain.RunID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.runs[run]
-	return entry != nil && entry.paused
+	return entry != nil && entry.paused && entry.asleepSince.IsZero()
 }
 
 // Cause is what chose activity for the live run, empty for an unknown or
@@ -643,6 +659,11 @@ const steerRecordTimeout = 10 * time.Second
 
 func (s *Scheduler) injectLive(ctx context.Context, entry *supervised, workspace domain.WorkspaceID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
 	run := entry.runID
+	awake, err := s.holdAwake(ctx, run)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", domain.ErrPromptNotSent, err)
+	}
+	defer awake()
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
 		return "", err

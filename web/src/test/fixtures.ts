@@ -571,6 +571,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runDelete: vi.fn(async () => ({})),
     runPause: vi.fn(async () => ({})),
     runResume: vi.fn(async () => ({})),
+    runWake: vi.fn(async () => ({})),
     runInject: vi.fn(async () => ({ message: roomMessage({ kind: 'steer_request', state: 'queued' }) })),
     roomImage: vi.fn(async () => needsOverride('roomImage')),
     assistantStatus: vi.fn(async () => needsOverride('assistantStatus')),

@@ -351,6 +351,14 @@ Code run against a model that accepts every request and never answers. It
 requires the session to park as a possible stall awaiting its first event, and
 never to read disconnected.
 
+`TestIntegrationClaudeEnhancedSleepsAndWakes`
+(`internal/server/sleep_integration_test.go`) runs a server with
+`--run-sleep-after 5s`. An Enhanced Claude Code session answers one turn and
+falls asleep; the test requires its container to be stopped, not removed, and
+the session still live. A prompt then wakes it, and the model's next request
+must carry the turn from before the sleep. An agent gets
+`Capabilities.Sleep` only with a test like this one.
+
 Sessions reach the mock the way they reach a [model
 gateway](harnesses.md#per-agent-setup): `ANTHROPIC_BASE_URL` for Claude Code,
 `openai_base_url` in `~/.codex/config.toml` for Codex. The test seeds the

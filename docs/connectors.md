@@ -221,7 +221,7 @@ The server also checks the scope of every call a connector makes, whatever the
 member's role. Reads such as `run.get`, `run.close_check`, `workspace.timeline`, `member.list`,
 `memory.show`, `template.list`, `changes.list` and
 `launch.defaults.get` need `read`; `run.launch`, `template.launch`,
-`run.inject`, `run.room.post`, `run.pause`, `run.resume`,
+`run.inject`, `run.room.post`, `run.pause`, `run.resume`, `run.wake`,
 `run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
 `memory.pin`, `memory.unpin` and `assistant.ask` need `write`; `run.kill`, `run.close`,
 `run.mode.switch` (it discards a turn in progress), `run.handoff`,

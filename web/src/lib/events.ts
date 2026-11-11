@@ -21,6 +21,7 @@ export const eventLabel = {
   'run.usage_limit': 'Usage limit reached',
   'run.model': 'Session model',
   'run.effort': 'Session effort',
+  'run.sleep': 'Sleep',
   'run.archived': 'Archive',
   'run.outcome_seen': 'Result opened',
   'run.finish_opened': 'Result opened',

@@ -1007,7 +1007,10 @@ func (f *fakeRuns) launches() []string {
 	return slices.Clone(f.launched)
 }
 
-func (*fakeRuns) Paused(domain.RunID) bool { return false }
+func (*fakeRuns) Paused(domain.RunID) bool                                     { return false }
+func (*fakeRuns) Sleep(domain.RunID) scheduler.SleepState                      { return scheduler.SleepState{} }
+func (*fakeRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (*fakeRuns) SettleSleep(context.Context, domain.RunID) error              { return nil }
 func (*fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
 }

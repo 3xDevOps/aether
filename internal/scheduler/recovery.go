@@ -106,7 +106,31 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("%w: session %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new session",
 			ErrInvalidTransition, run)
 	}
-	entry.lifecycleMu.Lock()
+	// Outside lifecycleMu: the disk reclaim a reservation may run can pick
+	// this closed run and take its lock. A sleep that finishes before the
+	// lock is taken makes the run reserve and take it again.
+	reserved := false
+	for {
+		s.mu.Lock()
+		asleep := entry.sleeping || !entry.asleepSince.IsZero()
+		s.mu.Unlock()
+		if asleep && !reserved {
+			release, capErr := s.reserveCapacity(ctx)
+			if capErr != nil {
+				return nil, capErr
+			}
+			defer release()
+			reserved = true
+		}
+		entry.lifecycleMu.Lock()
+		s.mu.Lock()
+		asleep = !entry.asleepSince.IsZero()
+		s.mu.Unlock()
+		if !asleep || reserved {
+			break
+		}
+		entry.lifecycleMu.Unlock()
+	}
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	fresh, ferr := s.cfg.Store.GetRun(ctx, run)
@@ -118,7 +142,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending && !entry.evidencePending &&
 		fresh.Mode.Interactive() && retainedReason(fresh.Status, fresh.Reason) &&
 		deadline != nil && time.Now().UTC().Before(*deadline)
-	paused, cid := entry.paused, entry.containerID
+	paused, cid, asleep := entry.paused, entry.containerID, !entry.asleepSince.IsZero()
 	s.mu.Unlock()
 	if !valid {
 		if entry.destroyPending || deadline == nil || !time.Now().UTC().Before(*deadline) {
@@ -138,6 +162,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	// This reopens existing compute, not a provisioning operation: Resume
 	// only thaws the retained processes. Do not reserve startup capacity or
 	// fall back to Start if the runtime can no longer resume this container.
+	// A container a sleep stopped starts again instead, as a launch does.
 
 	// Re-read so a stale snapshot cannot clobber metadata. The sidecar's
 	// closing report and turn end are cleared on disk before the row reopens,
@@ -236,7 +261,12 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		_ = s.entryDriver(entry).Stop(context.WithoutCancel(ctx), run)
 		mustPause := resumed || !paused
 		var pauseErr error
-		if mustPause {
+		switch {
+		case mustPause && asleep:
+			if perr := s.stopAsleep(context.WithoutCancel(ctx), entry); perr != nil && !errors.Is(perr, runtime.ErrNotFound) {
+				pauseErr = fmt.Errorf("scheduler: relaunch rollback stop: %w", perr)
+			}
+		case mustPause:
 			if perr := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid); perr != nil &&
 				!errors.Is(perr, runtime.ErrNotFound) {
 				pauseErr = fmt.Errorf("scheduler: relaunch rollback pause: %w", perr)
@@ -341,7 +371,29 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return joinRollback(unseenErr, unopenedErr)
 	}
 
-	if paused {
+	if paused && asleep {
+		if !reserved {
+			return nil, rollback(retainedTransitionError())
+		}
+		waking := make(chan struct{})
+		s.mu.Lock()
+		entry.waking = waking
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			entry.waking = nil
+			close(waking)
+			s.mu.Unlock()
+		}()
+		if startErr := s.startAsleep(ctx, entry); startErr != nil {
+			rolledBack := rollback(startErr)
+			if errors.Is(startErr, runtime.ErrNotFound) {
+				rolledBack = errors.Join(rolledBack, s.expireRetainedLocked(ctx, entry, ""))
+			}
+			return nil, rolledBack
+		}
+		resumed = true
+	} else if paused {
 		if resumeErr := s.cfg.Runtime.Resume(ctx, cid); resumeErr != nil {
 			return nil, rollback(errors.Join(retainedTransitionError(), resumeErr))
 		}
@@ -386,6 +438,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	entry.retained = false
 	entry.retainedUntil = nil
 	entry.paused = false
+	entry.asleepSince, entry.wakeErr = time.Time{}, nil
 	entry.destroyPending = false
 	entry.cleanupError = ""
 	s.publish(ctx, events.Event{
@@ -399,8 +452,10 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	}
 	s.publishRetentionLocked(run)
 	s.mu.Unlock()
+	if asleep {
+		s.publishSleep(entry)
+	}
 	return &runningRow, nil
-
 }
 
 // installRetainedDestroyOwner makes an uncertain boot-time destroy visible to
@@ -760,6 +815,25 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		if !time.Now().UTC().Before(*sc.RetainedUntil) {
 			expireRetained("retain expired sidecar after destroy failure")
 			continue
+		}
+		// A sleep's stopped container has exited: only its absence counts.
+		if sc.AsleepSince != nil {
+			info, ierr := s.cfg.Runtime.Inspect(ctx, runtime.ID(sc.ContainerID))
+			if !errors.Is(ierr, runtime.ErrNotFound) {
+				// An owner a Relaunch installed meanwhile counts: one that
+				// failed leaves the container frozen.
+				s.mu.Lock()
+				owner := s.runs[run]
+				if owner == nil {
+					owner = s.adoptRetainedOwnerLocked(r, sc)
+				}
+				s.mu.Unlock()
+				// A server that stopped mid-sleep left the container frozen.
+				if owner != nil && ierr == nil && !info.Exited {
+					s.stopRecoveredAsleep(ctx, owner)
+				}
+				continue
+			}
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		_, waitErr := s.cfg.Runtime.Wait(probeCtx, runtime.ID(sc.ContainerID))
@@ -1327,6 +1401,10 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		s.finishRecoveredExit(ctx, r, sc)
 		return
 	}
+	// A kill recorded while asleep finishes below, on the stopped container's exit.
+	if sc.AsleepSince != nil && !sc.KillRequested && s.recoverAsleep(ctx, r, sc) {
+		return
+	}
 	// The exit watcher started by supervision waits for the container to stop
 	// running, so an exit after this inspect is still seen.
 	info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
@@ -1814,6 +1892,14 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if sc.IdleShown && (r.Status != domain.RunNeedsAttention || r.Reason != publicRunStatusReason(sc.IdleReason)) {
 		sc.IdleShown = false
 	}
+	var asleepSince time.Time
+	if sc.AsleepSince != nil {
+		asleepSince = *sc.AsleepSince
+	}
+	var wakeErr error
+	if sc.WakeError != "" {
+		wakeErr = errors.New(sc.WakeError)
+	}
 	return &supervised{
 		runID: r.ID,
 		// Older sidecars have no workspace scope; the row is the source of truth.
@@ -1873,6 +1959,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		switchIntent:        sc.Switch,
 		accountSwap:         sc.AccountSwap,
 		usageLimit:          sc.UsageLimit,
+		asleepSince:         asleepSince,
+		wakeErr:             wakeErr,
 		done:                make(chan struct{}),
 	}
 }

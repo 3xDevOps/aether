@@ -22,6 +22,7 @@ import { Composer } from '@/routes/run/composer'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
+import { SleepCallout } from '@/routes/run/sleep-callout'
 import { StallCallout } from '@/routes/run/stall-recovery'
 import { RequestDock } from '@/routes/run/request-dock'
 import { requestAnnouncement } from '@/routes/run/session-requests'
@@ -504,6 +505,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
           <StallCallout run={run} agent={agent} rows={rows} nav={nav} />
+          <SleepCallout run={run} />
         </div>
       )}
       {!notesWide && <NotesStrip run={run} room={room} className={cn(sessionColumn, 'pb-2')} />}

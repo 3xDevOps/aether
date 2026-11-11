@@ -65,7 +65,7 @@ const finalizeTimeout = time.Minute
 func (s *Scheduler) superviseWait(entry *supervised) {
 	defer s.wg.Done()
 	s.mu.Lock()
-	cid := entry.containerID
+	cid, gen := entry.containerID, entry.sleepGen
 	s.mu.Unlock()
 	st, err := waitForExit(s.superCtx, func(ctx context.Context) (runtime.ExitStatus, error) {
 		return s.cfg.Runtime.Wait(ctx, cid)
@@ -92,6 +92,16 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 	// publish is in flight.
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
+	// A sleep stopped the container, or stopped and started it since this
+	// wait began: the exit is the sleep's, and a wake waits anew.
+	if entry.sleepGen != gen || entry.sleeping || !entry.asleepSince.IsZero() {
+		if entry.sleepGen == gen {
+			entry.waitStarted = false
+		}
+		s.mu.Unlock()
+		entry.lifecycleMu.Unlock()
+		return
+	}
 	// A move to another account replaced the container this waited on. A
 	// wait that started before the run had a container waited on none.
 	live, retained := s.runs[entry.runID] == entry && (cid == "" || entry.containerID == cid), entry.retained
@@ -564,7 +574,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	now := time.Now().UTC()
 	for _, e := range entries {
 		s.mu.Lock()
-		live := s.runs[e.runID] == e && !e.finalizing
+		live := s.runs[e.runID] == e && !e.finalizing && !e.sleeping && e.asleepSince.IsZero()
 		paused, status, started, acp := e.paused, e.status, e.startedAt, e.acp
 		if e.quietFrom.After(started) {
 			started = e.quietFrom

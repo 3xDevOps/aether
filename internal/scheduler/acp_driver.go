@@ -186,6 +186,12 @@ func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.A
 	if err := d.s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
 		return err
 	}
+	d.s.mu.Lock()
+	waking := entry.waking != nil
+	d.s.mu.Unlock()
+	if waking {
+		return d.openRestored(ctx, entry, openWake)
+	}
 	if !d.continuationOwed(entry) {
 		d.connect(ctx, entry, openRestore)
 		return nil
@@ -406,6 +412,9 @@ const (
 	// openContinue restores the session in a container that replaced the
 	// run's, on another account; the move sends it its continuation.
 	openContinue
+	// openWake restores the session in a container a sleep stopped, and
+	// fails rather than start a conversation the member did not have.
+	openWake
 )
 
 func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen) {
@@ -426,8 +435,8 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen)
 	}
 }
 
-// openRestored restores the run's stored session, how being openSwitch or
-// openContinue, and returns the failure instead of recording it.
+// openRestored restores the run's stored session, how being openSwitch,
+// openContinue or openWake, and returns the failure instead of recording it.
 func (d *acpDriver) openRestored(ctx context.Context, entry *supervised, how acpOpen) error {
 	defer d.lockOp(entry.runID)()
 	ctx, cancel := context.WithTimeout(ctx, acpConnectTimeout)
@@ -571,7 +580,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		Cwd:            d.s.cfg.WorktreeMount,
 		MCPServers:     mcp,
 		SessionID:      sessionID,
-		RequireRestore: how == openSwitch || how == openContinue,
+		RequireRestore: how == openSwitch || how == openContinue || how == openWake,
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
 		SystemPrompt:   systemPrompt,

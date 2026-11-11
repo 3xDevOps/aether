@@ -39,6 +39,8 @@ type fakeRuntime struct {
 	startErr    error
 	waitErr     error
 	inspectWait time.Duration
+	// inspectHook runs at the start of every Inspect.
+	inspectHook func(id runtime.ID)
 	startHook   func(c *fakeContainer)
 	stopHook    func()
 	commitErr   error
@@ -432,8 +434,11 @@ func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStat
 
 func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
 	r.mu.Lock()
-	waitErr, delay := r.waitErr, r.inspectWait
+	waitErr, delay, hook := r.waitErr, r.inspectWait, r.inspectHook
 	r.mu.Unlock()
+	if hook != nil {
+		hook(id)
+	}
 	if waitErr != nil {
 		return runtime.ContainerInfo{}, waitErr
 	}
@@ -889,6 +894,7 @@ type fakePTYSession struct {
 	mu    sync.Mutex
 	out   bytes.Buffer
 	last  time.Time
+	typed time.Time
 	ended bool
 }
 
@@ -1012,6 +1018,18 @@ func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	return sess.last, true
+}
+
+func (p *fakePTY) LastInput(key ptyhost.SessionKey) (time.Time, bool) {
+	p.mu.Lock()
+	sess, ok := p.sessions[key]
+	p.mu.Unlock()
+	if !ok {
+		return time.Time{}, false
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	return sess.typed, true
 }
 
 func (p *fakePTY) LastLine(ctx context.Context, run domain.RunID, wait time.Duration) (string, error) {

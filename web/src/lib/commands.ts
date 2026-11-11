@@ -347,7 +347,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         perform: (d) => d.api.runResume(id),
       })
     }
-    if (paused === false) {
+    if (paused === false && !run.asleep_since) {
       list.push({
         id: 'pause',
         label: 'Pause session',

@@ -409,7 +409,8 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const moderated = !control.canAct
   const turnRunning = state?.turn_in_flight ?? false
   const waiting = backgroundWait(run, session) !== null
-  const supportsImages = state?.prompt_images === true
+  // A sleeping session's agent reports its prompt types once a wake starts it.
+  const supportsImages = state?.prompt_images === true || Boolean(run.asleep_since)
   const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.file'))
   const attachOff = busy || !cap.hasMethod('terminal.file')
   const refusedImages = !supportsImages && hasImages(images.previews)

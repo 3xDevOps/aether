@@ -20,6 +20,7 @@ import type {
   RunControllerPayload,
   RunDiffPayload,
   RunEffortPayload,
+  RunSleepPayload,
   RunInputPayload,
   RunPRPayload,
   RunModelPayload,
@@ -578,6 +579,12 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunEffort(ev.run_id, p.effort)
+      break
+    }
+    case 'run.sleep': {
+      // A run this client has not loaded arrives with its sleep in its snapshot.
+      const p = ev.payload as RunSleepPayload
+      store.getState().patchRun(ev.run_id, { asleep_since: p.asleep_since, waking: p.waking, wake_error: p.wake_error })
       break
     }
     case 'run.protected': {

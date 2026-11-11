@@ -477,6 +477,10 @@ type sidecar struct {
 	Switch      *switchIntent `json:"switch,omitempty"`
 	AccountSwap *accountSwap  `json:"account_swap,omitempty"`
 	UsageLimit  string        `json:"usage_limit,omitempty"`
+	// AsleepSince is when idleness stopped the container; WakeError is the
+	// last wake's failure.
+	AsleepSince *time.Time `json:"asleep_since,omitempty"`
+	WakeError   string     `json:"wake_error,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
@@ -496,7 +500,14 @@ func (e *supervised) sidecar() sidecar {
 		copied := *e.accountSwap
 		swap = &copied
 	}
-	var relaunchedAt, idleReportAt, turnStartedAt *time.Time
+	var relaunchedAt, idleReportAt, turnStartedAt, asleepSince *time.Time
+	if t := e.asleepSince; !t.IsZero() {
+		asleepSince = &t
+	}
+	var wakeError string
+	if e.wakeErr != nil {
+		wakeError = e.wakeErr.Error()
+	}
 	if t := e.relaunchedAt; !t.IsZero() {
 		relaunchedAt = &t
 	}
@@ -556,6 +567,8 @@ func (e *supervised) sidecar() sidecar {
 		Switch:              e.switchIntent,
 		AccountSwap:         swap,
 		UsageLimit:          e.usageLimit,
+		AsleepSince:         asleepSince,
+		WakeError:           wakeError,
 	}
 }
 
