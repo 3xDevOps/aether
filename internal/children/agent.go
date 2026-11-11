@@ -395,7 +395,7 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 			return protocol.Child{}, err
 		}
 		out.State, out.Branch, out.AccountMemberID, out.Model = childState(r), r.Branch, string(r.AccountMember()), r.Model
-		if r.Activity.Stopped(r.Reason) {
+		if stopped(r.Activity, r.Reason) {
 			out.Error = r.Reason
 		}
 	}

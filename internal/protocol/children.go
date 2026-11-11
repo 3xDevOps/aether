@@ -125,8 +125,8 @@ type Child struct {
 	Branch          string       `json:"branch,omitempty"`
 	BaseCommit      string       `json:"base_commit,omitempty"`
 	Report          *ChildReport `json:"report,omitempty"`
-	// Error is why the child was refused, or why a started child stopped
-	// (domain.RunActivity.Stopped).
+	// Error is why the child was refused, or why a started child stopped on
+	// an error.
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
 	// CostUSD is nil when the run reported no cost.

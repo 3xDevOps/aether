@@ -806,6 +806,9 @@ func TestParentIsToldOncePerIdleSpell(t *testing.T) {
 
 func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	h := newHarness(t)
+	if err := h.db.SetWorkspaceChildLimits(h.ctx, h.ws.ID, domain.ChildLimits{MaxLive: 16}); err != nil {
+		t.Fatal(err)
+	}
 	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
 	crashed := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "review", Task: "c"})
 	refused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "fix", Task: "r"})
@@ -813,6 +816,7 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	asked := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "q"})
 	paused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "p"})
 	interrupted := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "port", Task: "i"})
+	limited := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", Mode: "standard", Purpose: "docs", Task: "l"})
 	prompted := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "a permission prompt"})
 	delivered := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "d"})
 	h.settle()
@@ -826,7 +830,7 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stopped := func(id string) (bodies []string) {
+	notices := func(id string) (bodies []string) {
 		for _, m := range h.mail.sent {
 			if m.from == domain.RunID(id) && strings.Contains(m.body, "stopped") {
 				bodies = append(bodies, m.body)
@@ -843,6 +847,8 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	park(paused.RunID, exited, domain.ActivityDisconnected)
 	h.runs.paused[domain.RunID(paused.RunID)] = true
 	park(interrupted.RunID, domain.InterruptedReason, domain.ActivityNeedsYou)
+	vendorLimit := "You've hit your usage limit · resets 3pm"
+	park(limited.RunID, vendorLimit, domain.ActivityNeedsYou)
 	park(prompted.RunID, "", domain.ActivityNeedsYou)
 	park(delivered.RunID, exited, domain.ActivityDisconnected)
 
@@ -853,15 +859,16 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	h.now = h.now.Add(2 * time.Minute)
 	h.settle()
 	h.settle()
-	if len(h.mail.sent) != 3 || len(stopped(crashed.RunID)) != 1 || len(stopped(refused.RunID)) != 1 || len(stopped(interrupted.RunID)) != 1 {
-		t.Fatalf("notices = %+v, want one each for the crashed, refused and interrupted subsessions only", h.mail.sent)
+	if len(h.mail.sent) != 4 || len(notices(crashed.RunID)) != 1 || len(notices(refused.RunID)) != 1 || len(notices(interrupted.RunID)) != 1 || len(notices(limited.RunID)) != 1 {
+		t.Fatalf("notices = %+v, want one each for the crashed, refused, interrupted and usage-limited subsessions only", h.mail.sent)
 	}
 	for id, want := range map[string][]string{
 		crashed.RunID:     {"review", "disconnected", exited, "Retry Enhanced", "subsession cancel --run-id " + crashed.RunID},
 		refused.RunID:     {"fix", "failed", "Authentication required", "aether-internal send --to " + refused.RunID, "subsession cancel --run-id " + refused.RunID},
 		interrupted.RunID: {"port", "needs-you", domain.InterruptedReason, "aether-internal send --to " + interrupted.RunID},
+		limited.RunID:     {"docs", vendorLimit},
 	} {
-		body := stopped(id)[0]
+		body := notices(id)[0]
 		for _, w := range append(want, id) {
 			if !strings.Contains(body, w) {
 				t.Fatalf("notice %q lacks %q", body, w)
@@ -887,7 +894,7 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	park(crashed.RunID, signedOut, domain.ActivityFailed)
 	h.now = h.now.Add(5 * time.Minute)
 	h.settle()
-	if len(stopped(crashed.RunID)) != 1 || len(h.mail.errs) != 0 {
+	if len(notices(crashed.RunID)) != 1 || len(h.mail.errs) != 0 {
 		t.Fatalf("later passes in the spell sent %+v, errors %v; want the one notice", h.mail.sent, h.mail.errs)
 	}
 
@@ -897,7 +904,7 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	park(crashed.RunID, exited, domain.ActivityDisconnected)
 	h.now = time.Now().Add(2 * time.Minute)
 	h.settle()
-	if len(stopped(crashed.RunID)) != 2 || len(h.mail.errs) != 0 {
+	if len(notices(crashed.RunID)) != 2 || len(h.mail.errs) != 0 {
 		t.Fatalf("notices after a second stop = %+v, errors %v; want 2", h.mail.sent, h.mail.errs)
 	}
 }

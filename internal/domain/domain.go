@@ -159,21 +159,6 @@ const (
 	UsageLimitReasonPrefix   = "Usage limit reached on "
 )
 
-// Stopped reports whether a live run in this activity and reason stopped on
-// an error with nothing it reported saying so: its agent is not running, a
-// turn failed, or a turn was cut short.
-func (a RunActivity) Stopped(reason string) bool {
-	switch a {
-	case ActivityDisconnected:
-		return true
-	case ActivityFailed:
-		return !strings.HasPrefix(reason, ReportedFailureReason)
-	case ActivityNeedsYou:
-		return reason == InterruptedReason || strings.HasPrefix(reason, StoppedShortReasonPrefix) || strings.HasPrefix(reason, UsageLimitReasonPrefix)
-	}
-	return false
-}
-
 // RunReview is whether the run's owner has dealt with the success its agent
 // reported: empty when no success awaits them.
 type RunReview string

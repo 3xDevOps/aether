@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -283,11 +284,27 @@ func (s *Service) noticeIdle(ctx context.Context) error {
 	})
 }
 
+// stopped reports whether a live run in this activity and reason stopped on
+// an error with nothing it reported saying so: its agent is not running, a
+// turn failed, or a turn was cut short, a Standard agent's usage limit
+// Aether did not act on included.
+func stopped(activity domain.RunActivity, reason string) bool {
+	switch activity {
+	case domain.ActivityDisconnected:
+		return true
+	case domain.ActivityFailed:
+		return !strings.HasPrefix(reason, domain.ReportedFailureReason)
+	case domain.ActivityNeedsYou:
+		return reason == domain.InterruptedReason || strings.HasPrefix(reason, domain.StoppedShortReasonPrefix) ||
+			strings.HasPrefix(reason, domain.UsageLimitReasonPrefix) || agentstatus.IsUsageLimitMessage(reason)
+	}
+	return false
+}
+
 // noticeStopped tells each parent once per stopped spell about an attached
-// child that stopped for over stoppedNoticeAfter with no report of its own
-// saying so (domain.RunActivity.Stopped).
+// child that stopped for over stoppedNoticeAfter.
 func (s *Service) noticeStopped(ctx context.Context) error {
-	return s.noticeSpells(ctx, "child-stopped:", stoppedNoticeAfter, domain.RunActivity.Stopped, func(c store.ChildSpell, _ time.Time) string {
+	return s.noticeSpells(ctx, "child-stopped:", stoppedNoticeAfter, stopped, func(c store.ChildSpell, _ time.Time) string {
 		id := string(c.Child.RunID)
 		msg := fmt.Sprintf("Subsession %s (%s) stopped (%s) and does not continue on its own.", id, c.Child.Purpose, c.Run.Activity)
 		if c.Run.Activity == domain.ActivityDisconnected {
