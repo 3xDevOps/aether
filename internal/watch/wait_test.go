@@ -600,8 +600,8 @@ func TestAPullRequestClosedUnmergedResolvesAsAFailure(t *testing.T) {
 }
 
 // A merge queue that removes the pull request without merging it wakes a
-// merged wait with why; a removal before the wait began, or one that
-// merged it, does not.
+// merged wait with why, even in the second the wait began; a removal
+// before the wait began, or one that merged it, does not.
 func TestAMergeQueueRemovalWakesAMergedWait(t *testing.T) {
 	h, gh := newWaitPRHarness(t)
 	removed := func(at time.Time, reason string) map[string]any {
@@ -612,10 +612,12 @@ func TestAMergeQueueRemovalWakesAMergedWait(t *testing.T) {
 	if resolved := h.mustReport(owner, "pr:acme/app#7:merged"); len(resolved) != 0 {
 		t.Fatalf("resolved = %+v on a removal before the wait, want pending", resolved)
 	}
-	gh.set(func(f *fakeGitHub) { f.queued = map[string]any{"__typename": "AddedToMergeQueueEvent"} })
-	h.clock.advance(2 * PRPollIdle)
-	h.settle()
-	gh.set(func(f *fakeGitHub) { f.queued = removed(h.clock.now(), "failed_checks") })
+	began, err := time.Parse(time.RFC3339Nano, h.only(owner.ID).CreatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// GitHub stamps events to the second, so one in the wait's own second counts.
+	gh.set(func(f *fakeGitHub) { f.queued = removed(began.Truncate(time.Second), "failed_checks") })
 	h.clock.advance(2 * PRPollIdle)
 	h.awaitWake(owner.ID)
 	w := h.only(owner.ID)

@@ -46,6 +46,10 @@ func (p *pullRequest) Snapshot(_ context.Context, _ domain.MemberID, repo string
 		URL: "https://github.com/acme/app/pull/7", CheckRuns: []github.CheckRun{run}}, nil
 }
 
+func (*pullRequest) QueueRemoval(context.Context, domain.MemberID, string, int) (*github.QueueRemoval, error) {
+	return nil, nil
+}
+
 type fullInbox struct{}
 
 func (fullInbox) NotifyRun(context.Context, domain.RunID, domain.RunID, string, string, string) (bool, error) {

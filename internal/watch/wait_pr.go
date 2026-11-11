@@ -88,7 +88,7 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 				return r, readErr(err)
 			}
 			// A removal before the wait began is the state it waits from.
-			if removal != nil && removal.At.After(w.CreatedAt) {
+			if removal != nil && after(removal.At, w.CreatedAt) {
 				r.done, r.outcome, r.observation = true, "removed-from-queue", "removed-from-queue@"+removal.At.UTC().Format(time.RFC3339)
 				r.summary = ref + " was removed from the merge queue without merging, " + counts
 				r.detail = "reason: " + removal.Reason

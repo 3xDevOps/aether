@@ -272,11 +272,18 @@ func (p *PRs) QueueRemoval(ctx context.Context, member domain.MemberID, repo str
 	if m.limitErr != nil && p.now().Before(m.limitErr.retryAt) {
 		return nil, m.limitErr
 	}
+	cached := m.token != ""
 	token, err := p.token(ctx, member, m, false)
 	if err != nil {
 		return nil, err
 	}
 	removal, err := p.github.MergeQueueRemoval(ctx, token, repo, number)
+	if errors.Is(err, github.ErrUnauthorized) && cached {
+		if token, err = p.token(ctx, member, m, true); err != nil {
+			return nil, err
+		}
+		removal, err = p.github.MergeQueueRemoval(ctx, token, repo, number)
+	}
 	var limited *github.RateLimitError
 	switch {
 	case err == nil:
