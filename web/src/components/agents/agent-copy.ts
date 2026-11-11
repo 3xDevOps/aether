@@ -82,7 +82,7 @@ export function loginFor(agent: AgentInfo): { command: string; hint: string } | 
 }
 
 export function ready(agent: AgentInfo): boolean {
-  return agent.installed === true && agent.login_found !== false
+  return agent.installed === true && agent.login_found !== false && !agent.login_problem
 }
 
 export function modeLines(agent: AgentInfo): { term: string; text: string }[] {

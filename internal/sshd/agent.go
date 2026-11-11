@@ -237,6 +237,10 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		}
 		info.LoginFound = &found
 	}
+	var problemErr error
+	if info.LoginProblem, info.LoginBlocksLaunch, problemErr = s.cfg.Runs.LoginProblem(account, profile.Name, profile); problemErr != nil {
+		slog.Warn("sshd: agent.list cannot check the login", "agent", profile.Name, "account", account, "error", problemErr)
+	}
 	return info, nil
 }
 

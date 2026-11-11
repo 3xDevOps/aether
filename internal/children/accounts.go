@@ -65,6 +65,9 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 		case a.LoginMissing || (a.LoginFound != nil && !*a.LoginFound):
 			c.Status = choiceNotSignedIn
 			c.Detail = fmt.Sprintf("%s is not signed in to %s; they sign in with aether agent login %s", name, a.Name, a.Name)
+		case a.LoginBlocksLaunch:
+			c.Status = choiceNotSignedIn
+			c.Detail = fmt.Sprintf("%s's %s login is signed out: %s; they sign in again on the dashboard's Agents page or with aether agent login %s", name, a.Name, a.LoginProblem, a.Name)
 		default:
 			if used, ok := s.usedPercent(ctx, p.owner, account, a.Name); ok && used >= fallback.ExhaustedPercent {
 				c.Status = choiceExhausted

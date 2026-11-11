@@ -214,6 +214,8 @@ type Scheduler struct {
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
+	// loginRefusals are the sign-in refusals agents gave on an account.
+	loginRefusals map[loginKey]loginRefusal
 	// retentionPublished tracks only nonempty runtime metadata under mu.
 	retentionPublished map[domain.RunID]events.RunRetentionPayload
 	// archiveMu serializes SetArchived against Relaunch restoring an archived run.
@@ -489,8 +491,10 @@ type supervised struct {
 	// sessionLostAt is when the agent last lost the run's Enhanced session.
 	sessionLostAt time.Time
 	// authLostAt is when the agent last refused a turn for want of a sign-in,
-	// and authRefused that refusal until the restarted session shows it.
+	// authStamp the account's login files then, and authRefused that refusal
+	// until the restarted session shows it.
 	authLostAt  time.Time
+	authStamp   string
 	authRefused error
 	// usageLimit is the agent's usage-limit message its headless output
 	// carried, and accountSwap the move to another account in progress.

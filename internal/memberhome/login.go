@@ -237,6 +237,31 @@ func (m *Manager) LoginFound(member domain.MemberID, rels []string) (bool, error
 	return false, nil
 }
 
+// LoginStamp changes when any of the home-relative login paths rels in
+// member's home is written, replaced, added or removed.
+func (m *Manager) LoginStamp(member domain.MemberID, rels []string) (string, error) {
+	home, err := m.openExistingHome(member)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = home.Close() }()
+	var stamp strings.Builder
+	for _, rel := range rels {
+		info, err := home.Stat(rel)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("memberhome: login path %s in %q: %w", rel, member, err)
+		}
+		fmt.Fprintf(&stamp, "%s %d %d\n", rel, info.Size(), info.ModTime().UnixNano())
+	}
+	return stamp.String(), nil
+}
+
 func dirHasEntry(home *os.Root, rel string) (bool, error) {
 	dir, err := home.Open(rel)
 	if err != nil {

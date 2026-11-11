@@ -47,8 +47,12 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	refused := entry.authRefused
 	entry.authRefused = nil
 	d.s.mu.Unlock()
-	if refused != nil && !st.Working && st.Failed == nil {
+	switch {
+	case st.Working || st.Failed != nil:
+	case refused != nil:
 		st.Reason, st.Failed = "error", refused
+	case acp.StopReason(st.Reason) == acp.StopReasonEndTurn:
+		d.s.turnWorked(context.Background(), entry.runID)
 	}
 	// A child run's ended turn hands its last message to its parent.
 	forward, message := false, ""

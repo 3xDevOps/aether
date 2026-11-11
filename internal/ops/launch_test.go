@@ -156,6 +156,38 @@ func TestConnectorLaunchOptions(t *testing.T) {
 	}
 }
 
+// A login the server knows cannot sign the agent in reads signed_in false
+// with the reason and the way back in, whatever the login file's presence.
+func TestConnectorLaunchOptionsNamesASignedOutLogin(t *testing.T) {
+	found := true
+	const problem = "~/.claude/.credentials.json: Claude OAuth access token is missing or invalid"
+	const way = "; the account's owner signs in again on the dashboard's Agents page or with: aether agent login claude"
+	f := newFake(t)
+	f.answers[protocol.MethodAgentList] = returns(protocol.AgentListResult{Agents: []protocol.AgentInfo{
+		{Name: "claude", Installed: true, LoginFound: &found, LoginProblem: problem, LoginBlocksLaunch: true},
+		{Name: "codex", Installed: true, LoginFound: &found, LoginProblem: "the agent refused: Authentication required"},
+		{Name: "gemini", Installed: true, LoginFound: &found},
+	}})
+	f.answers[protocol.MethodAccountUsage] = returns(protocol.AccountUsageResult{})
+	f.answers[protocol.MethodTemplateList] = returns(protocol.TemplateListResult{})
+	_, out := run(t, connectorSession(t, f), "aether_launch_options", map[string]any{"workspace_id": "ws-1"})
+	agents := out["accounts"].([]any)[0].(map[string]any)["agents"].([]any)
+	claude, codex, gemini := agents[0].(map[string]any), agents[1].(map[string]any), agents[2].(map[string]any)
+	if claude["signed_in"] != false || claude["signed_out"] != problem+way || claude["refused"] != "signed out: "+problem+way {
+		t.Errorf("claude = %s, want signed out and refused with the problem and the way back in", jsonOf(t, claude))
+	}
+	if codex["signed_in"] != false || codex["signed_out"] != "the agent refused: Authentication required; the account's owner signs in again on the dashboard's Agents page or with: aether agent login codex" || codex["refused"] != nil {
+		t.Errorf("codex = %s, want signed out without refusing a launch", jsonOf(t, codex))
+	}
+	if gemini["signed_in"] != true || gemini["signed_out"] != nil {
+		t.Errorf("gemini = %s, want signed in", jsonOf(t, gemini))
+	}
+	_, out = run(t, connectorSession(t, f), "aether_list_workspaces", nil)
+	if listed := jsonOf(t, out["agents"]); !strings.Contains(listed, `"name":"claude","signed_in":false,"signed_out":"`+problem) {
+		t.Errorf("aether_list_workspaces agents = %s, want claude signed out", listed)
+	}
+}
+
 // A cursor past the server's log head tells the model to start over, and
 // report summaries and mail correlation IDs stay under untrusted.
 func TestConnectorChanges(t *testing.T) {

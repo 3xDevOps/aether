@@ -185,3 +185,37 @@ func TestLoginFound(t *testing.T) {
 		t.Errorf("LoginFound of an empty .omp/agent = %v, %v; want false", got, err)
 	}
 }
+
+func TestLoginStampChangesWhenALoginIsWrittenOrRemoved(t *testing.T) {
+	manager, owner, _ := newLoginHomes(t)
+	rels := []string{".claude/.credentials.json", ".codex/auth.json"}
+	stamp := func() string {
+		t.Helper()
+		got, err := manager.LoginStamp("owner", rels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	first := stamp()
+	if again := stamp(); again != first || first == "" {
+		t.Fatalf("stamp of an untouched login = %q then %q, want the same non-empty stamp", first, again)
+	}
+	file := filepath.Join(owner, ".claude", ".credentials.json")
+	if err := os.WriteFile(file, []byte(`{"signed":"in"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	written := stamp()
+	if written == first {
+		t.Fatal("stamp did not change when the login file was rewritten")
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if removed := stamp(); removed == written || removed != "" {
+		t.Fatalf("stamp with no login left = %q, want empty", removed)
+	}
+	if got, err := manager.LoginStamp("nobody", rels); err != nil || got != "" {
+		t.Fatalf("stamp of a member without a home = %q, %v, want empty", got, err)
+	}
+}

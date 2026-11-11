@@ -65,7 +65,7 @@ func TestEnhancedAuthRefusalAfterARestartShowsTheFailure(t *testing.T) {
 		row, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && row.Status == domain.RunNeedsAttention &&
 			strings.HasPrefix(row.Reason, acpTurnFailedReason) && strings.Contains(row.Reason, "Authentication required") &&
-			strings.Contains(row.Reason, "start a new session")
+			strings.Contains(row.Reason, "a restart did not help. Start a new session, or if Ada's fake login is signed out, sign in: aether terminal, then fake's own sign-in")
 	})
 	time.Sleep(200 * time.Millisecond)
 	if n := len(rt.all()); n != before+1 {

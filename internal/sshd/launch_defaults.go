@@ -255,7 +255,9 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 			continue
 		}
 		i := slices.IndexFunc(agents, func(info protocol.AgentInfo) bool { return info.Name == name })
-		if login := agents[i].LoginFound; login != nil && !*login {
+		if problem := agents[i].LoginProblem; problem != "" {
+			unknown("agents."+name, name, name+"'s login on this account is signed out: "+problem+"; sign in with: aether agent login "+name)
+		} else if login := agents[i].LoginFound; login != nil && !*login {
 			unknown("agents."+name, name, "no "+name+" login file was found on this account; it launches only if an API key in the environment signs it in")
 		}
 		if a.Mode == domain.LaunchACP && !agents[i].EnhancedInstalled {

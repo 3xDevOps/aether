@@ -158,6 +158,8 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
   nav: RunNavigation
 }) {
   const [retrying, setRetrying] = useState(false)
+  const own = useStore((s) => (run.account_member_id || run.member_id) === s.info?.member.id)
+  const signedOut = useStore((s) => s.agentList?.agents.find((agent) => agent.name === run.harness)?.login_problem)
   const failure = sessionFailure(session)
   if (!failure || isTerminal(run.status)) return null
   const target = { kind: 'failure' as const, workspace_id: run.workspace_id, run_id: run.id, failure: failure.kind, seq: failure.seq, label: failure.kind === 'auth' ? 'Agent not signed in' : failure.title }
@@ -170,12 +172,20 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
         title="The agent is not signed in"
         actions={
           <>
+            {own && <Button size="sm" variant="secondary" onClick={() => useStore.getState().navigate('agents')}>Sign in on Agents</Button>}
             <LoginActions run={run} command={session?.state?.agent_command} methods={methods} shells={shells} nav={nav} />
             <AskAssistantButton size="sm" variant="secondary" ask={{ draft: 'Help me sign the agent in', attachments: [target] }}>Ask the assistant</AskAssistantButton>
           </>
         }
       >
-        <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this session, then send your message again.</p>
+        {own && signedOut ? (
+          <>
+            <p>Your account's login for this agent is signed out. Sign in again on the Agents page, or from a terminal in this session, then send your message again.</p>
+            <p className="mt-1 font-code text-ui-sm break-words">{signedOut}</p>
+          </>
+        ) : (
+          <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this session, then send your message again.</p>
+        )}
         {methods.length > 0 && (
           <ul className="mt-1 list-disc pl-5 text-ui-sm">
             {methods.map((method) => <li key={method.id}>{method.name}{method.description ? `: ${method.description}` : ''}</li>)}

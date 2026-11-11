@@ -3,7 +3,7 @@ import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } fr
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 import { useDictating } from '@/components/dictation/state'
-import { RefusalNotes } from '@/components/launch/agent-picker'
+import { RefusalNotes, SignedOutNote } from '@/components/launch/agent-picker'
 import { AccountPicker, readiness, useAccountStatus } from '@/components/launch/account-picker'
 import { agentLabel } from '@/components/launch/modes'
 import { automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, FallbackOptions, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
@@ -220,6 +220,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         </Callout>
       )}
       {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} accountPlace={phone ? 'More options → Account' : 'Account'} />}
+      {agents && agentError === null && <SignedOutNote agent={choice.agent} owner={sharedAccount ? accountName : undefined} onSignIn={setUp} />}
       {savedRead.error && (
         <Callout
           tone="failed"

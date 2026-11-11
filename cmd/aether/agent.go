@@ -96,7 +96,9 @@ func agentList(args []string) error {
 }
 
 // printAgents labels the login column for what agent.list checks: a login
-// file in the home, not whether the vendor accepts it.
+// file in the home, not whether the vendor accepts it. A login the server
+// knows cannot sign the agent in is listed under the table with the way
+// back in.
 func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 	if len(agents) == 0 {
 		_, err := fmt.Fprintln(w, "no agents")
@@ -121,9 +123,22 @@ func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 				login = "found"
 			}
 		}
+		if a.LoginProblem != "" {
+			login = "signed out"
+		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.Name, a.Source, installed, enhanced, login)
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	for _, a := range agents {
+		if a.LoginProblem != "" {
+			if _, err := fmt.Fprintf(w, "%s is signed out: %s\n  sign in again: %s\n", a.Name, a.LoginProblem, signInStep(a)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func agentModels(args []string) error {

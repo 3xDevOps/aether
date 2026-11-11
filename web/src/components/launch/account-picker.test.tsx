@@ -8,6 +8,7 @@ const usage = (used_percent: number, status: UsageProvider['status'] = 'ok'): Us
 ]
 const claude = (over: Parameters<typeof agentInfo>[0] = {}) => agentInfo({ name: 'claude', login_found: true, ...over })
 const hardLink = 'login file has another hard link'
+const signedOut = '~/.claude/.credentials.json: Claude OAuth access token is missing or invalid'
 
 describe('readiness', () => {
   it.each([
@@ -17,6 +18,7 @@ describe('readiness', () => {
     ['Your account only', { agents: [claude({ own_account_only: true })] }, { className: 'text-muted', refused: true }],
     ['Unavailable', { agents: [claude({ unavailable: hardLink })] }, { className: 'text-state-failed', title: hardLink, refused: true }],
     ['Sign in after launch', { agents: [claude({ login_found: false })] }, { className: 'text-muted', signIn: true }],
+    ['Signed out', { agents: [claude({ login_problem: signedOut, login_blocks_launch: true })], usage: usage(10) }, { className: 'text-state-needs-you', title: signedOut }],
     ['Ready', { agents: [claude()] }, { className: 'text-text' }],
     ['Ready', { agents: [claude()], usageError: 'account.usage: usage providers unavailable' }, { className: 'text-text', title: 'Usage not read: account.usage: usage providers unavailable' }],
     ['Not checked', { agentsError: 'agent.list: connection refused' }, { className: 'text-state-failed', title: 'agent.list: connection refused' }],

@@ -911,6 +911,12 @@ type AgentInfo struct {
 	// LoginFound checks the launch home for login paths, not for a working
 	// session. Nil when the agent declares no login path.
 	LoginFound *bool `json:"login_found,omitempty"`
+	// LoginProblem is why the login cannot sign the agent in: what its file
+	// holds, or the agent's own refusal of a turn. Empty when the server
+	// knows of none. LoginBlocksLaunch: a launch on the account is refused
+	// over it unless a workspace variable signs the agent in.
+	LoginProblem      string `json:"login_problem,omitempty"`
+	LoginBlocksLaunch bool   `json:"login_blocks_launch,omitempty"`
 	// "acp" when enhanced mode is installed, else "tui": the mode a launch
 	// that names none starts in.
 	DefaultMode string `json:"default_mode"`

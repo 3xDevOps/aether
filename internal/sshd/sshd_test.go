@@ -346,6 +346,7 @@ func (p *fakePTY) setErr(err error) {
 
 type fakeRuns struct {
 	mu              sync.Mutex
+	loginProblem    string
 	err             error
 	addr            string
 	addrErr         error
@@ -484,6 +485,10 @@ func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.M
 
 func (f *fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
+}
+
+func (f *fakeRuns) LoginProblem(domain.MemberID, string, harness.Profile) (string, bool, error) {
+	return f.loginProblem, f.loginProblem != "", nil
 }
 
 func (f *fakeRuns) WakeRefusal(agent string, mode domain.LaunchMode) error {

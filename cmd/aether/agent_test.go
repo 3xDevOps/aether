@@ -31,6 +31,27 @@ func TestPrintAgents(t *testing.T) {
 	}
 }
 
+func TestPrintAgentsNamesASignedOutLoginAndTheWayBackIn(t *testing.T) {
+	found := true
+	var b strings.Builder
+	err := printAgents(&b, []protocol.AgentInfo{
+		{Name: "claude", Source: "shipped", Installed: true, Enhanced: "adapter", EnhancedInstalled: true, LoginFound: &found,
+			LoginProblem: "~/.claude/.credentials.json: Claude OAuth access token is missing or invalid", LoginCommand: "claude auth login", LoginKind: "interactive"},
+		{Name: "codex", Source: "shipped", Installed: true, Enhanced: "adapter", LoginFound: &found},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "AGENT   SOURCE   INSTALLED  ENHANCED       LOGIN FILE\n" +
+		"claude  shipped  yes        installed      signed out\n" +
+		"codex   shipped  yes        not installed  found\n" +
+		"claude is signed out: ~/.claude/.credentials.json: Claude OAuth access token is missing or invalid\n" +
+		"  sign in again: a human runs in a terminal: aether agent login claude\n"
+	if b.String() != want {
+		t.Fatalf("output =\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
 // loginTab stands in for a terminal tab: it records what is typed and
 // answers with what a PTY sends back.
 type loginTab struct {

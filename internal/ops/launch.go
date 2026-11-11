@@ -169,24 +169,39 @@ var launchOps = []Op{
 
 // agentRow is an agent on one account. Refused is why a launch on the
 // account would be refused; Modes are the modes a run may start in.
+// SignedOut is why the account's login cannot sign the agent in and how its
+// owner signs in again.
 type agentRow struct {
 	Name        string   `json:"name"`
 	Installed   bool     `json:"installed"`
 	SignedIn    *bool    `json:"signed_in,omitempty"`
+	SignedOut   string   `json:"signed_out,omitempty"`
 	DefaultMode string   `json:"default_mode"`
 	Modes       []string `json:"modes"`
 	Refused     string   `json:"refused,omitempty"`
 }
 
+// signedIn is whether a login is there and the server knows no reason it
+// cannot sign the agent in; signedOut is that reason with the way back in.
+func signedIn(a protocol.AgentInfo) (in *bool, signedOut string) {
+	if a.LoginProblem == "" {
+		return a.LoginFound, ""
+	}
+	return new(bool), a.LoginProblem + "; the account's owner signs in again on the dashboard's Agents page or with: aether agent login " + a.Name
+}
+
 // rowOfAgent follows the dashboard's launch dialog: Enhanced needs it
 // installed.
 func rowOfAgent(a protocol.AgentInfo) agentRow {
-	row := agentRow{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}}
+	row := agentRow{Name: a.Name, Installed: a.Installed, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}}
+	row.SignedIn, row.SignedOut = signedIn(a)
 	switch {
 	case !a.Installed:
 		row.Refused = "not installed"
 	case a.LoginMissing:
 		row.Refused = "the account's owner is not signed in to it"
+	case a.LoginBlocksLaunch:
+		row.Refused = "signed out: " + row.SignedOut
 	case a.OwnAccountOnly:
 		row.Refused = "a member's own agent runs only on their own account"
 	case a.Unavailable != "":

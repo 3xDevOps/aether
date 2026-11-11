@@ -411,6 +411,9 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), acpConnectTimeout)
 	defer cancel()
 	if err := d.open(ctx, entry, how); err != nil {
+		if acphost.AuthRequired(err) {
+			err = fmt.Errorf("%w; %s", err, d.s.loginRefusedAdvice(d.s.runLogin(ctx, entry.runID), err, refusedOpening))
+		}
 		d.fail(entry, err)
 	}
 }
@@ -584,14 +587,23 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				d.s.goMove(func() { d.usageLimit(entry, oneShot, st, message) })
 				return
 			}
-			if !oneShot && acphost.AuthRequired(st.Failed) {
-				due, tried := d.reauthDue(entry)
+			if acphost.AuthRequired(st.Failed) {
+				login := d.s.runLogin(context.Background(), entry.runID)
+				due, tried := false, false
+				if !oneShot {
+					due, tried = d.reauthDue(entry, login.stamp)
+				}
+				how := refusedAfterRestart
 				if due {
-					d.s.goMove(func() { d.reauth(entry, r, st) })
+					how = refusedRestarting
+				}
+				signIn := d.s.loginRefusedAdvice(login, st.Failed, how)
+				if due {
+					d.s.goMove(func() { d.reauth(entry, r, st, signIn, login.fileProblem) })
 					return
 				}
 				if tried {
-					st.Failed = fmt.Errorf("%w; restarting the agent did not restore its sign-in, so this container's copy of the login is stale or unreadable: start a new session", st.Failed)
+					st.Failed = fmt.Errorf("%w; %s", st.Failed, signIn)
 				}
 			}
 			if !oneShot && acphost.SessionLost(st.Failed) {

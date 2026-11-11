@@ -826,6 +826,9 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 	if err != nil {
 		return false, err
 	}
+	if _, blocks, loginErr := s.LoginProblem(account, harnessName, profile); loginErr == nil && blocks {
+		return false, nil
+	}
 	if mode == domain.LaunchACP {
 		installed, adapterErr := s.adapterInstalled(member, account, profile, argvs)
 		if adapterErr != nil || !installed {
