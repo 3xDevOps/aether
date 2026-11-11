@@ -601,6 +601,8 @@ func TestAWakeOfARemovedContainerEndsTheSession(t *testing.T) {
 	c := e.container(t, run.ID)
 	e.rt.mu.Lock()
 	delete(e.rt.containers, c.id)
+	// Docker's start names no missing container; its inspect does.
+	e.rt.startErr = errors.New("docker: no such container")
 	e.rt.mu.Unlock()
 	_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after the prune"}, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "removed while it slept") {
@@ -700,4 +702,39 @@ func TestRelaunchFinishesAnInterruptedClosedSleep(t *testing.T) {
 	if methods := rt.all()[before].agent.Methods(); !slices.Contains(methods, acp.AgentMethodSessionResume) {
 		t.Fatalf("reopened with %v, want session/resume", methods)
 	}
+}
+
+// A shell tab still running when a crash interrupted the sleep counts as
+// ended once the container is stopped, so it does not block the wake.
+func TestAWakeAfterAnInterruptedSleepEndsItsOldTerminals(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	c := e.container(t, run.ID)
+	lock := e.sched.lockForShell(run.ID)
+	lock.Lock()
+	set, err := e.sched.loadRunTerminalsLocked(t.Context(), run.ID)
+	if err == nil {
+		set.ContainerID = c.id
+		set.Terminals["web"] = &runTerminal{ID: "web", Incarnation: "before-sleep", State: runtime.ExecState{Running: true},
+			Identity: runtime.ExecIdentity{ContainerID: c.id, ExecID: "gone", CreationKey: "terminal-before-sleep", ClaimToken: "claim"}}
+		err = e.sched.persistRunTerminalsLocked(run.ID, set)
+	}
+	lock.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(entry); err != nil {
+		t.Fatal(err)
+	}
+	s2 := e.restartACP(t)
+	waitFor(t, "the container stopped", func() bool { return containerState(c) == "stopped" })
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after the crash"}, false, nil); err != nil {
+		t.Fatalf("a prompt after an interrupted sleep: %v", err)
+	}
+	waitItems(t, s2, run.ID, "a turn after the crash", turnEnded("end_turn", 2))
 }

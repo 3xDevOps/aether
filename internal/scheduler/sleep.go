@@ -265,12 +265,19 @@ func (s *Scheduler) startAsleep(ctx context.Context, entry *supervised) error {
 	s.mu.Lock()
 	cid := entry.containerID
 	s.mu.Unlock()
+	info, err := s.cfg.Runtime.Inspect(ctx, cid)
+	if err != nil {
+		return err
+	}
 	// A sleep a crash interrupted left the container frozen or running,
-	// which docker start refuses.
-	if info, err := s.cfg.Runtime.Inspect(ctx, cid); err == nil && !info.Exited {
+	// which docker start refuses, and its terminals unrecorded.
+	if !info.Exited {
 		if err = s.stopLeftoverAsleep(ctx, entry); err != nil {
 			return err
 		}
+	}
+	if err = s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
+		return fmt.Errorf("record the terminals the sleep ended: %w", err)
 	}
 	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
 		return err
