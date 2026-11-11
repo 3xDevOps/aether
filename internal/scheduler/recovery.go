@@ -820,9 +820,11 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		if sc.AsleepSince != nil {
 			info, ierr := s.cfg.Runtime.Inspect(ctx, runtime.ID(sc.ContainerID))
 			if !errors.Is(ierr, runtime.ErrNotFound) {
-				var owner *supervised
+				// An owner a Relaunch installed meanwhile counts: one that
+				// failed leaves the container frozen.
 				s.mu.Lock()
-				if s.runs[run] == nil {
+				owner := s.runs[run]
+				if owner == nil {
 					owner = s.adoptRetainedOwnerLocked(r, sc)
 				}
 				s.mu.Unlock()

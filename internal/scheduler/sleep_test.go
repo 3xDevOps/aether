@@ -611,3 +611,59 @@ func TestAWakeOfARemovedContainerEndsTheSession(t *testing.T) {
 		return err == nil && got.Status.Terminal()
 	})
 }
+
+// A Relaunch that adopts a closed session recovery found asleep, and then
+// fails, leaves recovery to stop the container a crash left frozen.
+func TestRecoveryStopsAFrozenSleeperAFailedRelaunchAdopted(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	c := e.container(t, run.ID)
+	if state := containerState(c); state != "paused" {
+		t.Fatalf("the closed session's container is %s, want paused", state)
+	}
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	r, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := s2.readSidecar(run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.rt.mu.Lock()
+	e.rt.inspectWait = 300 * time.Millisecond
+	e.rt.mu.Unlock()
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		s2.cleanupTerminalSidecars(context.Background())
+	}()
+	time.Sleep(100 * time.Millisecond)
+	s2.mu.Lock()
+	s2.runs[run.ID] = s2.entryFromSidecar(r, sc)
+	s2.mu.Unlock()
+	<-swept
+	if state := containerState(c); state != "stopped" {
+		t.Fatalf("the frozen sleeper's container is %s after recovery, want stopped", state)
+	}
+}
