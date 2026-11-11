@@ -55,7 +55,7 @@ describe('SignedOutAlert', () => {
       agentList: null,
       route: { name: 'run', params: { runId: 'run_1' } },
       shownRunView: { runId: 'run_1', view: 'session' },
-      runs: runRecords(run({ id: 'run_1', harness: 'claude', member_id: alice.id, reason }), run({ id: 'run_2', harness: 'claude', member_id: alice.id, reason: 'turn ended' })),
+      runs: runRecords(run({ id: 'run_1', harness: 'claude', status: 'needs-attention', member_id: alice.id, reason }), run({ id: 'run_2', harness: 'claude', status: 'failed', member_id: alice.id, reason })),
     })
     render(<SignedOutAlert />)
     const alert = await screen.findByRole('alert')
@@ -63,6 +63,7 @@ describe('SignedOutAlert', () => {
     expect(alert.textContent).not.toContain('Claude Code')
     act(() => { useStore.setState({ shownRunView: { runId: 'run_1', view: 'terminal' } }) })
     expect(alert.textContent).toContain("Claude Code's sign-in was refused")
+    // A finished run's Chat shows no sign-in callout.
     act(() => { useStore.setState({ route: { name: 'run', params: { runId: 'run_2' } }, shownRunView: { runId: 'run_2', view: 'session' } }) })
     expect(alert.textContent).toContain("Claude Code's sign-in was refused")
   })

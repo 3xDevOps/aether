@@ -5,6 +5,7 @@ import { toneClasses } from '@/components/ui/status-dot'
 import { cn } from '@/lib/utils'
 import { useAgentList } from '@/routes/agents/use-agents'
 import { useStore } from '@/store'
+import { isTerminal } from '@/store/runs'
 
 // Mirrors acpTurnFailedReason and acpFailedReason in internal/scheduler/acp_turn.go.
 const refusable = /^enhanced (turn|session) failed: /
@@ -36,12 +37,13 @@ export function SignedOutAlert() {
   const { agents, reload } = useAgentList()
   useLoginWatch(reload)
   const navigate = useStore((s) => s.navigate)
-  // The Agents page shows every finding beside its Log in, and a session's
-  // Chat shows its own agent's beside Sign in on Agents after a refusal.
+  // The Agents page shows every finding beside its Log in, and a live
+  // session's Chat shows its own agent's beside Sign in on Agents after a
+  // refusal.
   const onAgents = useStore((s) => s.route.name === 'agents')
   const inChat = useStore((s) => {
     const run = s.route.name === 'run' ? s.runs[s.route.params.runId ?? ''] : undefined
-    const refused = run?.reason !== undefined && refusable.test(run.reason) && run.reason.includes('Authentication required')
+    const refused = run?.reason !== undefined && !isTerminal(run.status) && refusable.test(run.reason) && run.reason.includes('Authentication required')
     const own = (run?.account_member_id || run?.member_id) === s.info?.member.id
     return refused && own && s.shownRunView?.runId === run?.id && s.shownRunView?.view === 'session' ? run?.harness : undefined
   })
