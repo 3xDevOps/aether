@@ -157,9 +157,9 @@ public static class FileHolders {
 }
 '@
 
-# On the arm64 runner another process can hold aether.exe open without
-# FileShare.Delete for a moment after a refused start, which fails the move.
-# Restart Manager names that holder; the move waits up to 30 s for it.
+# The arm64 update leg once failed this move with a sharing violation from
+# a holder nobody identified. Restart Manager names the holders, the move
+# waits up to 30 s for them to let go, and the log says who they were.
 function Move-Released([string]$From, [string]$To, [switch]$Force) {
     try {
         Move-Item -LiteralPath $From -Destination $To -Force:$Force
@@ -173,13 +173,19 @@ function Move-Released([string]$From, [string]$To, [switch]$Force) {
     }
     Write-Host "Move-Item $From failed while held open by: $($holders -join '; '): $failure"
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
-    while (@([FileHolders]::Of($From)).Count -gt 0) {
-        if ([DateTime]::UtcNow -gt $deadline) {
-            throw "$From is still held open after 30 s by: $(@([FileHolders]::Of($From)) -join '; '); Move-Item failed with: $failure"
-        }
+    $left = $holders
+    while ($left.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 100
+        $left = @([FileHolders]::Of($From))
     }
-    Move-Item -LiteralPath $From -Destination $To -Force:$Force
+    try {
+        Move-Item -LiteralPath $From -Destination $To -Force:$Force
+    } catch [IO.IOException] {
+        throw "Move-Item $From failed again after waiting for $($holders -join '; '); still held by: $($left -join '; '): $_; first failure: $failure"
+    }
+    if ($left.Count -gt 0) {
+        Write-Host "Move-Item $From succeeded after 30 s although Restart Manager still names: $($left -join '; ')"
+    }
 }
 
 function Get-FreePort {
@@ -593,6 +599,25 @@ exit 1
     Assert (@(Get-ChildItem -LiteralPath $cliDir -Force -Filter 'aether.exe.old*').Count -eq 0) 'the next start removed every aether.exe.old'
     Assert ((Get-Hash $installed) -ne $oldHash) 'aether.exe is still the new build after the cleanup'
 
+    $heldFile = Join-Path $root 'held.txt'
+    $heldReady = Join-Path $root 'held-ready.txt'
+    $heldRelease = Join-Path $root 'held-release.txt'
+    Set-Content -LiteralPath $heldFile -Value 'held'
+    $hold = "`$s = [IO.File]::Open('$heldFile', 'Open', 'Read', 'Read'); Set-Content -LiteralPath '$heldReady' -Value ok; " +
+        "while (-not (Test-Path -LiteralPath '$heldRelease')) { Start-Sleep -Milliseconds 100 }; Start-Sleep -Seconds 5; `$s.Dispose()"
+    $holdProcess = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -PassThru -WindowStyle Hidden `
+        -ArgumentList '-NoProfile', '-EncodedCommand', ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($hold)))
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not (Test-Path -LiteralPath $heldReady)) {
+        if ([DateTime]::UtcNow -gt $deadline) { throw 'the process holding held.txt never opened it' }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert ((@([FileHolders]::Of($heldFile)) -join '; ') -match "\(pid $($holdProcess.Id)\)") 'Restart Manager names the process holding a file open'
+    New-Item -ItemType File -Path $heldRelease | Out-Null
+    Move-Released $heldFile "$heldFile.moved"
+    Assert ((Test-Path -LiteralPath "$heldFile.moved") -and -not (Test-Path -LiteralPath $heldFile)) 'Move-Released moves a held file once its holder closes it'
+    $null = $holdProcess.WaitForExit(30000)
+
     # A release whose binary Windows will not start (here: not a PE file;
     # on a user's machine Smart App Control, AppLocker or antivirus) must
     # not replace the working CLI.
@@ -606,25 +631,6 @@ exit 1
     Assert (@(Get-ChildItem -LiteralPath $cliDir -Force | Where-Object { $_.Name -like 'aether.exe.*' -or $_.Name -like '.aether.exe.update-*' }).Count -eq 0) 'the blocked update left no aether.exe.old or staged file'
     $version = Invoke-Native $installed @('version')
     Assert ($version.Code -eq 0) 'aether still runs after the blocked update'
-
-    $heldFile = Join-Path $root 'held.txt'
-    $heldReady = Join-Path $root 'held-ready.txt'
-    $heldRelease = Join-Path $root 'held-release.txt'
-    Set-Content -LiteralPath $heldFile -Value 'held'
-    $hold = "`$s = [IO.File]::Open('$heldFile', 'Open', 'Read', 'Read'); Set-Content -LiteralPath '$heldReady' -Value ok; " +
-        "while (-not (Test-Path -LiteralPath '$heldRelease')) { Start-Sleep -Milliseconds 100 }; Start-Sleep -Seconds 2; `$s.Dispose()"
-    $holdProcess = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -PassThru -WindowStyle Hidden `
-        -ArgumentList '-NoProfile', '-EncodedCommand', ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($hold)))
-    $deadline = [DateTime]::UtcNow.AddSeconds(30)
-    while (-not (Test-Path -LiteralPath $heldReady)) {
-        if ([DateTime]::UtcNow -gt $deadline) { throw 'the process holding held.txt never opened it' }
-        Start-Sleep -Milliseconds 100
-    }
-    Assert ((@([FileHolders]::Of($heldFile)) -join '; ') -match "\(pid $($holdProcess.Id)\)") 'Restart Manager names the process holding a file open'
-    New-Item -ItemType File -Path $heldRelease | Out-Null
-    Move-Released $heldFile "$heldFile.moved"
-    Assert ((Test-Path -LiteralPath "$heldFile.moved") -and -not (Test-Path -LiteralPath $heldFile)) 'Move-Released moves a held file once its holder closes it'
-    $null = $holdProcess.WaitForExit(30000)
 
     # A process killed between swapAside's two renames leaves no aether.exe
     # and the running build as aether.exe.old: the state is made here, the
