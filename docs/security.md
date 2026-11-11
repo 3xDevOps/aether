@@ -250,10 +250,10 @@ or with `aether account share <member-id>`; revoke with **Revoke access** or
 `aether account revoke <member-id>`. The other member picks your account in
 the launch dialog's **Account** picker, or with `aether session --account
 <your-member-id>`. They stay the session's owner; usage and cost count against your
-account. Their agents can use it too: a subsession of a session they launched on
-your account starts on it, up to the workspace's subsession limit (8 busy at
-once by default), and their agents may pick it for any subsession with
-`--account` ([teams.md](teams.md#subsessions)).
+account. Their agents can use it too: a subsession running the same agent as a
+session they launched on your account starts on it, up to the workspace's
+subsession limit (8 busy at once by default), and their agents may pick it for
+any subsession with `--account` ([teams.md](teams.md#subsessions)).
 
 Their session uses their own image and home plus your agent login file, mounted
 read-write because a token refresh rewrites it. The server checks the mounted
