@@ -57,7 +57,7 @@ func parseClaudeCredential(data []byte, readErr error, now time.Time) credential
 		return credential{status: "unauthenticated", err: "Claude OAuth credential is expired", expired: true, signedOut: strings.TrimSpace(oauth.RefreshToken) == "", fingerprint: fingerprint("claude-expired", token, string(data))}
 	}
 	if len(oauth.Scopes) > 0 && !hasScope(oauth.Scopes, "user:inference") {
-		return credential{status: "unauthenticated", err: "Claude OAuth credential lacks user:inference scope", signedOut: true, fingerprint: fingerprint("claude-wrong-scope", token, sortedScopes(oauth.Scopes))}
+		return credential{status: "unauthenticated", err: "Claude OAuth credential lacks user:inference scope", fingerprint: fingerprint("claude-wrong-scope", token, sortedScopes(oauth.Scopes))}
 	}
 	return credential{
 		status:      "ok",
@@ -95,7 +95,8 @@ func LoginFile(agent string) string {
 // LoginProblem is why the OAuth login in agent's login file cannot sign the
 // agent in; empty when it can, when the file holds no OAuth login, or when
 // only the vendor could tell. An expired access token is a problem only
-// without a refresh token: the agent renews one that has it.
+// without a refresh token: the agent renews one that has it. A login with
+// other scopes is not judged: only the usage read needs user:inference.
 func LoginProblem(agent string, data []byte, now time.Time) string {
 	var cred credential
 	switch agent {

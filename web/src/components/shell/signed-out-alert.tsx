@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
-import { label } from '@/components/agents/agent-copy'
-import { verbatim } from '@/components/update-banner-shared'
+import { signedOutTitle } from '@/components/agents/agent-copy'
 import { Button } from '@/components/ui/button'
-import { Callout } from '@/components/ui/callout'
+import { toneClasses } from '@/components/ui/status-dot'
 import { cn } from '@/lib/utils'
 import { useAgentList } from '@/routes/agents/use-agents'
 import { useStore } from '@/store'
@@ -37,26 +36,26 @@ export function SignedOutAlert() {
   const { agents, reload } = useAgentList()
   useLoginWatch(reload)
   const navigate = useStore((s) => s.navigate)
+  // The Agents page and a session whose turn was refused show the finding beside their own sign-in action.
+  const shownInPlace = useStore((s) => {
+    if (s.route.name === 'agents') return true
+    const reason = s.route.name === 'run' ? s.runs[s.route.params.runId ?? '']?.reason : undefined
+    return reason !== undefined && refusable.test(reason) && reason.includes('Authentication required')
+  })
   const signedOut = agents?.filter((agent) => agent.installed && agent.login_problem) ?? []
-  if (!signedOut.length) return null
-  const names = signedOut.map(label)
-  const title = names.length === 1 ? `${names[0]} is signed out` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are signed out`
+  if (!signedOut.length || shownInPlace) return null
+  const { text, soft } = toneClasses('needs-you')
   return (
-    <div className="border-b border-seam bg-chrome px-3 py-2">
-      <Callout
-        tone="needs-you"
-        role="alert"
-        title={title}
-        actions={<Button size="sm" onClick={() => navigate('agents')}>Sign in on Agents</Button>}
-      >
-        <ul className="flex flex-col gap-1">
-          {signedOut.map((agent) => (
-            <li key={agent.name} className={cn(verbatim, 'border-state-needs-you/30 bg-transparent')}>
-              {signedOut.length > 1 && `${label(agent)}: `}{agent.login_problem}
-            </li>
-          ))}
-        </ul>
-      </Callout>
+    <div role="alert" data-tone="needs-you" className={cn('flex flex-col gap-x-3 gap-y-1 border-b border-seam px-3 py-1.5 text-ui text-text md:flex-row md:items-center', soft)}>
+      <ul className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {signedOut.map((agent) => (
+          <li key={agent.name} className="flex min-w-0 flex-col gap-x-3 md:flex-row md:items-baseline">
+            <span className={cn('shrink-0 font-medium', text)}>{signedOutTitle(agent)}</span>
+            <span className="min-w-0 font-code text-ui-sm break-words">{agent.login_problem}</span>
+          </li>
+        ))}
+      </ul>
+      <Button size="sm" variant="secondary" className="self-start md:self-center" onClick={() => navigate('agents')}>Sign in on Agents</Button>
     </div>
   )
 }

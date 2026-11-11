@@ -8,6 +8,8 @@ import (
 	"slices"
 	"time"
 
+	acp "github.com/coder/acp-go-sdk"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/quota"
@@ -22,22 +24,20 @@ type loginKey struct {
 	agent   string
 }
 
-// loginRefusal is an agent's refusal of a turn for want of a sign-in. stamp
-// is the account's login files then: the refusal stands until they change or
-// a turn on the account ends well. A refusal in another run on the same
-// files confirms it: one run's container can hold a stale copy of a sound
-// login, two do not.
+// loginRefusal is an agent's refusal for want of a sign-in. stamp is the
+// account's login files then: the refusal stands until they change or a turn
+// on the account ends well.
 type loginRefusal struct {
-	problem   string
-	stamp     string
-	run       domain.RunID
-	confirmed bool
+	problem string
+	stamp   string
 }
 
 // LoginProblem is why the login of agent, which profile describes, in
-// account's home cannot sign the agent in: what its file holds, or the agent's own refusal of a turn. It is
-// empty when the server knows of none, which a missing login is not. blocks
-// is whether a launch is refused over it.
+// account's home cannot sign the agent in: what its file holds, or the
+// agent's own refusal. It is empty when the server knows of none, which a
+// missing login is not. blocks is whether a launch is refused over it: only
+// the file proves a login unusable, since a refusing agent may hold a stale
+// copy of a sound one.
 func (s *Scheduler) LoginProblem(account domain.MemberID, agent string, profile harness.Profile) (problem string, blocks bool, err error) {
 	problem, err = s.loginFileProblem(account, agent, profile)
 	if err != nil || problem != "" {
@@ -52,14 +52,11 @@ func (s *Scheduler) LoginProblem(account domain.MemberID, agent string, profile 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	refusal, refused := s.loginRefusals[key]
-	if !refused {
-		return "", false, nil
-	}
-	if refusal.stamp != stamp {
+	if refused && refusal.stamp != stamp {
 		delete(s.loginRefusals, key)
 		return "", false, nil
 	}
-	return refusal.problem, refusal.confirmed, nil
+	return refusal.problem, false, nil
 }
 
 // loginFileProblem is LoginProblem from the login file alone.
@@ -68,6 +65,10 @@ func (s *Scheduler) loginFileProblem(account domain.MemberID, agent string, prof
 	paths, err := profile.LoginPaths()
 	if s.cfg.Homes == nil || err != nil || !slices.Contains(paths, file) {
 		return "", nil
+	}
+	// ReadCredential creates a home that does not exist; LoginFound does not.
+	if found, foundErr := s.cfg.Homes.LoginFound(account, []string{file}); foundErr != nil || !found {
+		return "", foundErr
 	}
 	data, err := s.cfg.Homes.ReadCredential(account, file, maxSignInBytes)
 	if err != nil {
@@ -86,23 +87,21 @@ func (s *Scheduler) loginStamp(account domain.MemberID, paths []string) (string,
 	return s.cfg.Homes.LoginStamp(account, paths)
 }
 
-// loginRefused records that agent refused a turn of run on account for want
-// of a sign-in, while the account's login files read stamp.
-func (s *Scheduler) loginRefused(run domain.RunID, account domain.MemberID, agent, stamp string, cause error) {
-	key := loginKey{account, agent}
+// loginRefused records that agent refused on account for want of a sign-in,
+// while the account's login files read stamp. Only the agent's own message
+// is kept: the error around it can carry the agent's stderr, and everyone
+// the account is shared with reads this.
+func (s *Scheduler) loginRefused(account domain.MemberID, agent, stamp string, cause error) {
+	problem := "the agent refused: Authentication required"
+	if refused := (*acp.RequestError)(nil); errors.As(cause, &refused) && refused.Message != "" {
+		problem = "the agent refused: " + refused.Message
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.loginRefusals == nil {
 		s.loginRefusals = make(map[loginKey]loginRefusal)
 	}
-	earlier, again := s.loginRefusals[key]
-	again = again && earlier.stamp == stamp
-	s.loginRefusals[key] = loginRefusal{
-		problem:   "the agent refused: " + cause.Error(),
-		stamp:     stamp,
-		run:       run,
-		confirmed: again && (earlier.confirmed || earlier.run != run),
-	}
+	s.loginRefusals[loginKey{account, agent}] = loginRefusal{problem: problem, stamp: stamp}
 }
 
 // signInSteps is where the owner of an account signs agent in again. Only a
@@ -161,7 +160,6 @@ func (s *Scheduler) checkLogin(ctx context.Context, workspace domain.WorkspaceID
 // cannot be resolved or a workspace variable signs the agent in instead.
 type runLogin struct {
 	known   bool
-	run     domain.RunID
 	account domain.MemberID
 	owner   string
 	// agent is the name the run launched and label what to call it; a
@@ -180,7 +178,7 @@ func (s *Scheduler) runLogin(ctx context.Context, runID domain.RunID) runLogin {
 	if err != nil {
 		return runLogin{}
 	}
-	login := runLogin{run: runID, account: run.AccountMember(), agent: run.Harness}
+	login := runLogin{account: run.AccountMember(), agent: run.Harness}
 	if login.profile, _, err = s.launchProfile(ctx, run.MemberID, login.account, run.Harness); err != nil {
 		return runLogin{}
 	}
@@ -211,8 +209,9 @@ const (
 	refusedRestarting refusedHow = iota
 	// refusedAfterRestart: the restarted agent refused too.
 	refusedAfterRestart
-	// refusedOpening: a starting agent refused to open its conversation.
-	refusedOpening
+	// refusedUnrestarted: Aether restarts no agent over it: a refused open,
+	// a Background run, or a run waiting for its turn to end.
+	refusedUnrestarted
 )
 
 // loginRefusedAdvice records that an agent refused for want of login's
@@ -226,23 +225,25 @@ func (s *Scheduler) loginRefusedAdvice(login runLogin, cause error, how refusedH
 		case refusedAfterRestart:
 			return "restarting the agent did not restore its sign-in, so this container's copy of the login is stale or unreadable: start a new session"
 		}
-		return "sign the agent in from this session's Terminal tab, then retry"
+		return "sign the agent in from this session's Terminal tab"
 	}
-	s.loginRefused(login.run, login.account, login.agent, login.stamp, cause)
+	s.loginRefused(login.account, login.agent, login.stamp, cause)
 	steps := signInSteps(login.agent, login.profile)
 	switch {
-	case how == refusedOpening:
-		return fmt.Sprintf("%s's %s login is signed out. Sign in, then retry: %s", login.owner, login.label, steps)
-	case login.fileProblem != "":
+	case login.fileProblem != "" && how == refusedRestarting:
 		return fmt.Sprintf("%s's %s login is signed out. Sign in, then send the message again: %s", login.owner, login.label, steps)
+	case login.fileProblem != "":
+		return fmt.Sprintf("%s's %s login is signed out. Sign in: %s", login.owner, login.label, steps)
 	case how == refusedRestarting:
 		return fmt.Sprintf("Aether restarted the agent to reread %s's login: send the message again. Refused again? Sign in: %s", login.owner, steps)
+	case how == refusedAfterRestart:
+		return fmt.Sprintf("a restart did not help. Start a new session, or if %s's %s login is signed out, sign in: %s", login.owner, login.label, steps)
 	}
-	return fmt.Sprintf("a restart did not help. Start a new session, or if %s's %s login is signed out, sign in: %s", login.owner, login.label, steps)
+	return fmt.Sprintf("%s's %s login may be signed out. Sign in: %s", login.owner, login.label, steps)
 }
 
 // turnWorked forgets a refusal on the run's account once a turn there ends
-// well.
+// well, unless a workspace variable signed that turn's agent in.
 func (s *Scheduler) turnWorked(ctx context.Context, runID domain.RunID) {
 	s.mu.Lock()
 	none := len(s.loginRefusals) == 0
@@ -250,11 +251,11 @@ func (s *Scheduler) turnWorked(ctx context.Context, runID domain.RunID) {
 	if none {
 		return
 	}
-	run, err := s.cfg.Store.GetRun(ctx, runID)
-	if err != nil {
+	login := s.runLogin(ctx, runID)
+	if !login.known {
 		return
 	}
 	s.mu.Lock()
-	delete(s.loginRefusals, loginKey{run.AccountMember(), run.Harness})
+	delete(s.loginRefusals, loginKey{login.account, login.agent})
 	s.mu.Unlock()
 }

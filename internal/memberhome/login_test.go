@@ -215,6 +215,21 @@ func TestLoginStampChangesWhenALoginIsWrittenOrRemoved(t *testing.T) {
 	if removed := stamp(); removed == written || removed != "" {
 		t.Fatalf("stamp with no login left = %q, want empty", removed)
 	}
+	db := filepath.Join(owner, ".omp", "agent", "agent.db")
+	dir := []string{".omp/agent"}
+	if err := os.WriteFile(db, []byte("login"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := manager.LoginStamp("owner", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(db, []byte("another login"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if after, stampErr := manager.LoginStamp("owner", dir); stampErr != nil || after == before {
+		t.Fatalf("stamp of a login directory after a file in it was rewritten = %q, %v, want a change from %q", after, stampErr, before)
+	}
 	if got, err := manager.LoginStamp("nobody", rels); err != nil || got != "" {
 		t.Fatalf("stamp of a member without a home = %q, %v, want empty", got, err)
 	}

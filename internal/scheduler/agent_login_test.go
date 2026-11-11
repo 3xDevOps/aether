@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	acp "github.com/coder/acp-go-sdk"
+
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -22,7 +24,7 @@ const (
 	noTokenProblem = "~/.claude/.credentials.json: Claude OAuth access token is missing or invalid"
 	claudeSignIn   = "dashboard Agents page, or aether agent login claude"
 	refused        = acpTurnFailedReason + `acphost: session/prompt: {"code":-32000,"message":"Authentication required"}; `
-	refusedProblem = `the agent refused: acphost: session/prompt: {"code":-32000,"message":"Authentication required"}`
+	refusedProblem = "the agent refused: Authentication required"
 )
 
 // writeClaudeLogin replaces the member's Claude Code login file, at a
@@ -205,16 +207,12 @@ func TestRefusedTurnIsRememberedForTheAccountUntilATurnWorks(t *testing.T) {
 	})
 }
 
-// A second refusal in the same session does not prove the login is rejected:
-// its container may hold a stale copy of a sound one, so a new session may
-// still start. A refusal in another session on the same login file does, and
-// launches are refused until the login file changes.
-func TestRefusedInTwoSessionsBlocksLaunchesUntilTheMemberSignsInAgain(t *testing.T) {
+// A refusal never refuses a launch: the refusing agent may hold a stale copy
+// of a sound login, which a new session's container does not share. The
+// account shows it until the login file changes.
+func TestRefusalsWarnWithoutBlockingLaunchesUntilTheMemberSignsInAgain(t *testing.T) {
 	t.Parallel()
 	e, rt, run := newClaudeACPEnv(t)
-	launch := func() (*domain.Run, error) {
-		return e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
-	}
 	before := len(rt.all())
 	rt.fixture.RefuseNext.Store(1)
 	refuse(t, e, run.ID)
@@ -223,33 +221,71 @@ func TestRefusedInTwoSessionsBlocksLaunchesUntilTheMemberSignsInAgain(t *testing
 	refuse(t, e, run.ID)
 	waitReason(t, e, run.ID, refused+"a restart did not help. Start a new session, or if Ada's Claude Code login is signed out, sign in: "+claudeSignIn)
 	if problem, blocks := loginProblem(t, e); problem != refusedProblem || blocks {
-		t.Fatalf("after two refusals in one session = %q, %v, want %q without blocking a launch", problem, blocks, refusedProblem)
+		t.Fatalf("after two refusals = %q, %v, want %q without blocking a launch", problem, blocks, refusedProblem)
 	}
-
-	second, err := launch()
-	if err != nil {
+	if _, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP); err != nil {
 		t.Fatalf("Launch of a second session = %v", err)
-	}
-	waitFor(t, "the second session", func() bool { return e.sched.acp.session(second.ID) != nil })
-	e.waitStoreStatus(t, second.ID, domain.RunRunning)
-	rt.fixture.RefuseNext.Store(1)
-	refuse(t, e, second.ID)
-	waitFor(t, "the refusal confirmed", func() bool {
-		_, blocks := loginProblem(t, e)
-		return blocks
-	})
-	_, err = launch()
-	want := "scheduler: Ada's Claude Code login is signed out: " + refusedProblem + ". Sign in, then launch again: " + claudeSignIn
-	if !errors.Is(err, ErrSignedOut) || err.Error() != want {
-		t.Fatalf("Launch on the rejected login = %v, want %q", err, want)
 	}
 
 	writeClaudeLogin(t, e, signedIn())
 	if problem, blocks := loginProblem(t, e); problem != "" || blocks {
 		t.Fatalf("after signing in again = %q, %v, want no problem", problem, blocks)
 	}
-	if _, err = launch(); err != nil {
-		t.Fatalf("Launch after signing in again = %v", err)
+}
+
+// A turn that a workspace variable signed in says nothing about the
+// account's login, so it does not clear a refusal.
+func TestATurnSignedInByTheWorkspaceKeepsTheRefusal(t *testing.T) {
+	t.Parallel()
+	e, rt, run := newClaudeACPEnv(t)
+	before := len(rt.all())
+	rt.fixture.RefuseNext.Store(1)
+	refuse(t, e, run.ID)
+	waitFor(t, "the restarted agent", func() bool { return len(rt.all()) == before+1 && e.sched.acp.session(run.ID) != nil })
+	waitReason(t, e, run.ID, refused+"Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: "+claudeSignIn)
+	e.ws.Environment.Variables["ANTHROPIC_API_KEY"] = "fixture-key"
+	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
+		t.Fatalf("message after the restart: %v", err)
+	}
+	waitItems(t, e.sched, run.ID, "the answered turn", assistantSaid("pong"))
+	waitFor(t, "the refusal no longer the run's reason", func() bool {
+		row, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && !strings.HasPrefix(row.Reason, acpTurnFailedReason)
+	})
+	if problem, _ := loginProblem(t, e); problem != refusedProblem {
+		t.Fatalf("LoginProblem after a turn the workspace signed in = %q, want %q", problem, refusedProblem)
+	}
+}
+
+// What is remembered for the account is the agent's own message, never the
+// error around it, which can carry the agent's stderr.
+func TestRememberedRefusalKeepsOnlyTheAgentsMessage(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	cause := fmt.Errorf("open the agent conversation: %w; stderr: fixture stderr tail", acp.NewAuthRequired(map[string]string{"detail": "fixture data"}))
+	e.sched.loginRefused(e.member.ID, "claude", "", cause)
+	if problem, blocks := loginProblem(t, e); problem != refusedProblem || blocks {
+		t.Fatalf("LoginProblem = %q, %v, want %q", problem, blocks, refusedProblem)
+	}
+}
+
+// A Background session's refused turn fails the run with whose login it is
+// and where to sign in.
+func TestBackgroundRefusalSaysHowToSignIn(t *testing.T) {
+	t.Parallel()
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	rt.fixture.RefusePrompts = true
+	run := e.launchBackground(t, enhancedAgent, "say pong")
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if want := refused + "Ada's OpenCode login may be signed out. Sign in: dashboard Agents page, or aether agent login opencode"; got.Reason != want {
+		t.Fatalf("reason %q, want %q", got.Reason, want)
+	}
+	profile, _ := harness.Lookup(enhancedAgent)
+	if problem, _, err := e.sched.LoginProblem(e.member.ID, enhancedAgent, profile); err != nil || problem != refusedProblem {
+		t.Fatalf("LoginProblem = %q, %v, want %q", problem, err, refusedProblem)
 	}
 }
 
@@ -269,10 +305,15 @@ func TestRefusalAfterSigningInAgainRestartsTheAgent(t *testing.T) {
 	rt.fixture.RefuseNext.Store(1)
 	refuse(t, e, run.ID)
 	waitFor(t, "the agent restarted for the new login", func() bool { return len(rt.all()) == before+2 && e.sched.acp.session(run.ID) != nil })
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
-		t.Fatalf("message after the second restart: %v", err)
+
+	// An agent that rewrites its login on every start earns no third restart.
+	writeClaudeLogin(t, e, signedIn())
+	rt.fixture.RefuseNext.Store(1)
+	refuse(t, e, run.ID)
+	waitReason(t, e, run.ID, refused+"a restart did not help. Start a new session, or if Ada's Claude Code login is signed out, sign in: "+claudeSignIn)
+	if n := len(rt.all()); n != before+2 {
+		t.Fatalf("agent processes = %d, want %d: no restart for a third refusal in the window", n, before+2)
 	}
-	waitItems(t, e.sched, run.ID, "the answered turn", assistantSaid("pong"))
 }
 
 // An agent that refuses to open its conversation parks the new session with
@@ -289,8 +330,8 @@ func TestRefusedSessionOpenSaysHowToSignIn(t *testing.T) {
 		t.Fatalf("Launch: %v", err)
 	}
 	waitReason(t, e, run.ID, acpFailedReason+`open the agent conversation: acphost: session/new: {"code":-32000,"message":"Authentication required"}; `+
-		"Ada's Claude Code login is signed out. Sign in, then retry: "+claudeSignIn)
-	if problem, _ := loginProblem(t, e); !strings.HasPrefix(problem, "the agent refused: ") {
-		t.Fatalf("LoginProblem = %q, want the agent's refusal", problem)
+		"Ada's Claude Code login may be signed out. Sign in: "+claudeSignIn)
+	if problem, blocks := loginProblem(t, e); problem != refusedProblem || blocks {
+		t.Fatalf("LoginProblem = %q, %v, want %q", problem, blocks, refusedProblem)
 	}
 }

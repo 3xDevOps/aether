@@ -15,7 +15,7 @@ func TestLoginProblemNamesWhatTheLoginFileLacks(t *testing.T) {
 		{"claude token with a control character", "claude", `{"claudeAiOauth":{"accessToken":"fixture\naccess"}}`, "Claude OAuth access token is missing or invalid"},
 		{"claude expired, refreshable", "claude", `{"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"fixture-refresh","expiresAt":1000000}}`, ""},
 		{"claude expired, no refresh token", "claude", `{"claudeAiOauth":{"accessToken":"fixture-access","expiresAt":1000000}}`, "Claude OAuth credential is expired and holds no refresh token"},
-		{"claude wrong scope", "claude", `{"claudeAiOauth":{"accessToken":"fixture-access","expiresAt":3000000,"scopes":["user:profile"]}}`, "Claude OAuth credential lacks user:inference scope"},
+		{"claude other scopes", "claude", `{"claudeAiOauth":{"accessToken":"fixture-access","expiresAt":3000000,"scopes":["user:profile"]}}`, ""},
 		{"claude API key", "claude", `{"apiKey":"fixture-key"}`, ""},
 		{"claude file without a login", "claude", `{}`, ""},
 		{"claude no file", "claude", ``, ""},

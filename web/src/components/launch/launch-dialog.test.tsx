@@ -571,7 +571,7 @@ describe('new run', () => {
     })
 
     it("says the shared account's login is signed out and that its owner signs in again", async () => {
-      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id ? [claude({ login_problem: signedOut })] : [claude()])
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id ? [claude({ login_problem: signedOut, login_blocks_launch: true })] : [claude()])
       await open()
       const accountRow = () => within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ })
       await waitFor(() => expect(accountRow().textContent).toBe('BobSharedSigned out'))

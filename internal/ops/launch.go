@@ -201,7 +201,7 @@ func rowOfAgent(a protocol.AgentInfo) agentRow {
 	case a.LoginMissing:
 		row.Refused = "the account's owner is not signed in to it"
 	case a.LoginBlocksLaunch:
-		row.Refused = "signed out: " + row.SignedOut
+		row.Refused = "signed out, unless a workspace variable signs the agent in: " + row.SignedOut
 	case a.OwnAccountOnly:
 		row.Refused = "a member's own agent runs only on their own account"
 	case a.Unavailable != "":

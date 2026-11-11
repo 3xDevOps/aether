@@ -64,20 +64,26 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 }
 
 // reauthDue reports whether an auth refusal should restart the agent, and
-// whether a restart within acpLostAgain already failed to fix it on the
-// login files stamp names: a login written since is one the agent has not
-// read. A run whose agent reported an outcome waits for a turn end, which
-// the restored session's idle state would fake, so it is not restarted.
+// whether a restart within acpLostAgain already failed to fix it. A login
+// written since that restart is one the agent has not read, so it earns one
+// more restart in the window; an agent that rewrites its login on every
+// start gets no more than that. A run whose agent reported an outcome waits
+// for a turn end, which the restored session's idle state would fake, so it
+// is not restarted.
 func (d *acpDriver) reauthDue(entry *supervised, stamp string) (due, tried bool) {
 	d.s.mu.Lock()
 	defer d.s.mu.Unlock()
-	if time.Since(entry.authLostAt) < acpLostAgain && entry.authStamp == stamp {
+	again := time.Since(entry.authLostAt) < acpLostAgain
+	if again && (entry.authStamp == stamp || entry.authReread) {
 		return false, true
 	}
 	if entry.reported != "" || (entry.idleReason != "" && !entry.idleShown) {
 		return false, false
 	}
-	entry.authLostAt, entry.authStamp = time.Now(), stamp
+	if !again {
+		entry.authLostAt = time.Now()
+	}
+	entry.authStamp, entry.authReread = stamp, again
 	return true, false
 }
 
@@ -107,11 +113,11 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 		d.s.mu.Unlock()
 		return
 	}
-	detail := "The agent refused a turn with \"Authentication required\"; " + signIn + "."
+	title, detail := "Sign-in refused", "The agent refused a turn with \"Authentication required\"; "+signIn+"."
 	if fileProblem != "" {
-		detail += " The login file reads: " + fileProblem + "."
+		title, detail = "Agent signed out", detail+" The login file reads: "+fileProblem+"."
 	}
-	if err := sess.Notice("warning", "Agent signed out", detail); err != nil {
+	if err := sess.Notice("warning", title, detail); err != nil {
 		slog.Warn("scheduler: record the sign-in notice", "run", entry.runID, "error", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)

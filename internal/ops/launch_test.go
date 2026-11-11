@@ -173,7 +173,7 @@ func TestConnectorLaunchOptionsNamesASignedOutLogin(t *testing.T) {
 	_, out := run(t, connectorSession(t, f), "aether_launch_options", map[string]any{"workspace_id": "ws-1"})
 	agents := out["accounts"].([]any)[0].(map[string]any)["agents"].([]any)
 	claude, codex, gemini := agents[0].(map[string]any), agents[1].(map[string]any), agents[2].(map[string]any)
-	if claude["signed_in"] != false || claude["signed_out"] != problem+way || claude["refused"] != "signed out: "+problem+way {
+	if claude["signed_in"] != false || claude["signed_out"] != problem+way || claude["refused"] != "signed out, unless a workspace variable signs the agent in: "+problem+way {
 		t.Errorf("claude = %s, want signed out and refused with the problem and the way back in", jsonOf(t, claude))
 	}
 	if codex["signed_in"] != false || codex["signed_out"] != "the agent refused: Authentication required; the account's owner signs in again on the dashboard's Agents page or with: aether agent login codex" || codex["refused"] != nil {

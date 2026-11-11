@@ -364,7 +364,8 @@ adapter and the session parks with
 `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`.
 
 If the agent refuses a turn with `Authentication required`, Aether shows
-**Agent signed out**, restarts the adapter in the same container so it reads the
+**Sign-in refused**, or **Agent signed out** when the login file cannot sign
+the agent in, restarts the adapter in the same container so it reads the
 account's login again, and restores the conversation. Agent mail is offered
 again by itself. A session whose agent reported an outcome that is still
 waiting for its turn to end is not restarted. The session parks with the
@@ -379,12 +380,15 @@ enhanced turn failed: ... Authentication required ...; a restart did not help. S
 The first is a login file that cannot sign the agent in; the notice quotes
 what it lacks. The second is a refusal the file does not explain, which a
 restart fixes when only the agent's copy of the login was stale. The third is
-a second refusal within 5 minutes on the same login file: either this
-container's copy of the login is stale, which a new session's container does
-not share, or the login is signed out. The owner named is the owner of the
-account the session runs on. A refusal after the login file
-changed restarts the agent again, so a message sent after signing in reaches
-an agent that has read the new login. See
+a second refusal within 5 minutes: either this container's copy of the login
+is stale, which a new session's container does not share, or the login is
+signed out. The owner named is the owner of the account the session runs on.
+A refusal after the login file changed restarts the agent once more inside
+those 5 minutes, so a message sent after signing in reaches an agent that has
+read the new login. A session Aether does not restart the agent of (a
+Background one, or one whose agent reported an outcome) ends its reason with
+`<owner>'s <agent> login may be signed out. Sign in: ...`, and so does a
+session whose agent refuses to open its conversation. See
 [harnesses.md](harnesses.md#when-a-login-is-signed-out) for where else a
 signed-out login shows.
 

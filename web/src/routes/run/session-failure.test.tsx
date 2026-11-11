@@ -55,9 +55,10 @@ describe('signed-out login', () => {
   const problem = '~/.claude/.credentials.json: Claude OAuth access token is missing or invalid'
 
   it("says the account's login is signed out, shows the problem and sends the member to Agents", () => {
-    useStore.setState({ info: serverInfo, agentList: { identity: null, agents: [agentInfo({ login_problem: problem })] }, route: { name: 'run', params: { runId: 'run_1' } } })
+    useStore.setState({ info: serverInfo, agentList: { identity: null, agents: [agentInfo({ display_name: 'Claude Code', login_problem: problem, login_blocks_launch: true })] }, route: { name: 'run', params: { runId: 'run_1' } } })
     renderCallout(signedOutSession())
-    expect(screen.getByText(/Your account's login for this agent is signed out/)).toBeDefined()
+    expect(screen.getByText('Claude Code is signed out')).toBeDefined()
+    expect(screen.getByText(/Sign in again on the Agents page, or from a terminal in this session/)).toBeDefined()
     expect(screen.getByText(problem)).toBeDefined()
     expect(screen.getByRole('button', { name: 'Log in' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in on Agents' }))
@@ -71,7 +72,18 @@ describe('signed-out login', () => {
     const shells = { canAdd: true, open: vi.fn() } as unknown as RunShells
     render(<SessionFailureCallout run={record} session={signedOutSession()} switchable={false} shells={shells} nav={{ go: vi.fn(), reveal: vi.fn(), focusComposer: vi.fn(), focusRequest: vi.fn() }} />)
     expect(screen.queryByRole('button', { name: 'Sign in on Agents' })).toBeNull()
-    expect(screen.getByText(/Log the agent in from a terminal in this session/)).toBeDefined()
+    expect(screen.getByText('The agent is not signed in')).toBeDefined()
+    expect(screen.getByText(/This session signs in with another member's account\. They sign in again on their Agents page or with/).textContent).toContain('aether agent login claude')
+  })
+})
+
+describe('refused sign-in', () => {
+  it("does not repeat the agent's refusal, which the failure already quotes", () => {
+    const refusal = 'the agent refused: Authentication required'
+    useStore.setState({ info: serverInfo, agentList: { identity: null, agents: [agentInfo({ display_name: 'Claude Code', login_problem: refusal })] } })
+    renderCallout(signedOutSession())
+    expect(screen.getByText("Claude Code's sign-in was refused")).toBeDefined()
+    expect(screen.queryByText(refusal)).toBeNull()
   })
 })
 

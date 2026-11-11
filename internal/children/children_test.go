@@ -115,19 +115,14 @@ func (g *fakeGit) FetchRunBranch(context.Context, domain.WorkspaceID, string, do
 	return g.head, nil
 }
 
-// fakeAgents signs every member in to every agent except those in missing,
-// and reports signedOut as the login problem of those it names.
-type fakeAgents struct {
-	missing   map[domain.MemberID]bool
-	signedOut map[domain.MemberID]string
-}
+// fakeAgents signs every member in to every agent except those in missing.
+type fakeAgents struct{ missing map[domain.MemberID]bool }
 
 func (a fakeAgents) ListAgents(_ context.Context, _, account domain.MemberID) ([]protocol.AgentInfo, error) {
 	found := !a.missing[account]
 	var out []protocol.AgentInfo
 	for _, name := range []string{"claude", "codex"} {
-		out = append(out, protocol.AgentInfo{Name: name, Installed: true, EnhancedInstalled: true, LoginFound: &found,
-			LoginProblem: a.signedOut[account], LoginBlocksLaunch: a.signedOut[account] != ""})
+		out = append(out, protocol.AgentInfo{Name: name, Installed: true, EnhancedInstalled: true, LoginFound: &found})
 	}
 	return out, nil
 }
@@ -313,19 +308,6 @@ func code(err error) int {
 		return pe.Code
 	}
 	return 0
-}
-
-func TestASignedOutLoginRefusesTheSubsessionAndSaysHowToSignIn(t *testing.T) {
-	h := newHarness(t)
-	parent := h.run(h.ada.ID, domain.LaunchACP, "fix login")
-	h.agents.signedOut = map[domain.MemberID]string{h.ada.ID: "~/.claude/.credentials.json: Claude OAuth access token is missing or invalid"}
-	_, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "claude", Task: "review"})
-	want := "'s claude login is signed out: ~/.claude/.credentials.json: Claude OAuth access token is missing or invalid; they sign in again on the dashboard's Agents page or with aether agent login claude"
-	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), want) {
-		t.Fatalf("start on a signed-out login = %v, want a denial ending %q", err, want)
-	}
-	h.agents.signedOut = nil
-	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", Task: "review"})
 }
 
 func TestOnByDefaultAndOffRefuses(t *testing.T) {

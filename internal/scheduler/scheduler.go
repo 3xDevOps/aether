@@ -491,10 +491,13 @@ type supervised struct {
 	// sessionLostAt is when the agent last lost the run's Enhanced session.
 	sessionLostAt time.Time
 	// authLostAt is when the agent last refused a turn for want of a sign-in,
-	// authStamp the account's login files then, and authRefused that refusal
-	// until the restarted session shows it.
+	// authStamp the account's login files at its last restart for one,
+	// authReread whether a changed login already earned a second restart
+	// since, and authRefused that refusal until the restarted session shows
+	// it.
 	authLostAt  time.Time
 	authStamp   string
+	authReread  bool
 	authRefused error
 	// usageLimit is the agent's usage-limit message its headless output
 	// carried, and accountSwap the move to another account in progress.

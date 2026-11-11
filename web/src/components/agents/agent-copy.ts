@@ -81,6 +81,17 @@ export function loginFor(agent: AgentInfo): { command: string; hint: string } | 
   return agent.source === 'shipped' ? logins[agent.name] ?? null : null
 }
 
+/** A login file that cannot sign the agent in is signed out; an agent's refusal alone may be a stale copy of a sound login. */
+export function signedOutState(agent: AgentInfo): string {
+  return agent.login_blocks_launch ? 'Signed out' : 'Sign-in refused'
+}
+
+export function signedOutTitle(agent: AgentInfo, owner?: string): string {
+  const whose = owner ? `${owner}'s ${label(agent)}` : label(agent)
+  if (agent.login_blocks_launch) return owner ? `${whose} login is signed out` : `${whose} is signed out`
+  return owner ? `${whose} sign-in was refused` : `${whose}'s sign-in was refused`
+}
+
 export function ready(agent: AgentInfo): boolean {
   return agent.installed === true && agent.login_found !== false && !agent.login_problem
 }
