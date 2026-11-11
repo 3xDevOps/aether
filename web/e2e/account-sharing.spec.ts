@@ -26,7 +26,7 @@ test.skip(!dockerReachable(), 'the environment terminal and the session need a r
  * the login at the harness's login path. */
 const agentShim = `sh /workspace/agent.sh
 printf 'login-seen:%s\\n' "$(cat "$HOME/.claude/.credentials.json")"`
-const ownerLogin = '{"claudeAiOauth":{"owner":"alice-e2e"}}'
+const ownerLogin = '{"claudeAiOauth":{"accessToken":"fixture-access","owner":"alice-e2e"}}'
 const task = 'a session on a shared account'
 
 test('a member shares their agent account and a teammate launches on it', async ({
