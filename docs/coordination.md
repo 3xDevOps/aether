@@ -1291,7 +1291,7 @@ until a person presses **Retry Enhanced**), a turn `failed` (such as `enhanced
 turn failed: ... Authentication required`) other than by its own failure
 report, or a turn was cut short (`turn interrupted`, `turn ended: <reason>`,
 `Usage limit reached on ...`, or the agent's own usage-limit message when
-Aether did not move the session). A permission prompt or question waiting for a
+Aether did not move the session), or its wait broke (`wait broken: ...`). A permission prompt or question waiting for a
 person sends nothing, nor does a subsession whose result already reached its
 parent. New work starts a new spell. A subsession a person paused sends none. A subsession's
 `needs-input` question goes to its owner, and the parent is told in its inbox

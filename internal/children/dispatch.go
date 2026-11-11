@@ -286,8 +286,8 @@ func (s *Service) noticeIdle(ctx context.Context) error {
 
 // stopped reports whether a live run in this activity and reason stopped on
 // an error with nothing it reported saying so: its agent is not running, a
-// turn failed, or a turn was cut short, a Standard agent's usage limit
-// Aether did not act on included.
+// turn failed or was cut short, a Standard agent's usage limit Aether did not
+// act on included, or its wait's wake was never delivered.
 func stopped(activity domain.RunActivity, reason string) bool {
 	switch activity {
 	case domain.ActivityDisconnected:
@@ -296,7 +296,8 @@ func stopped(activity domain.RunActivity, reason string) bool {
 		return !strings.HasPrefix(reason, domain.ReportedFailureReason)
 	case domain.ActivityNeedsYou:
 		return reason == domain.InterruptedReason || strings.HasPrefix(reason, domain.StoppedShortReasonPrefix) ||
-			strings.HasPrefix(reason, domain.UsageLimitReasonPrefix) || agentstatus.IsUsageLimitMessage(reason)
+			strings.HasPrefix(reason, domain.UsageLimitReasonPrefix) || strings.HasPrefix(reason, domain.WaitBrokenReasonPrefix) ||
+			agentstatus.IsUsageLimitMessage(reason)
 	}
 	return false
 }

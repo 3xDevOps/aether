@@ -150,13 +150,14 @@ func (a RunActivity) Quiet(reason string) bool {
 	return false
 }
 
-// These start the reasons of a needs-you run whose turn an error cut short:
-// an Enhanced turn interrupted or ended early, or a usage limit Aether does
-// not resume from.
+// These start the reasons of a needs-you run an error stopped: an Enhanced
+// turn interrupted or ended early, a usage limit Aether does not resume
+// from, or a wait whose wake was never delivered.
 const (
 	InterruptedReason        = "turn interrupted"
 	StoppedShortReasonPrefix = "turn ended: "
 	UsageLimitReasonPrefix   = "Usage limit reached on "
+	WaitBrokenReasonPrefix   = "wait broken: "
 )
 
 // RunReview is whether the run's owner has dealt with the success its agent

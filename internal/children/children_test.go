@@ -817,6 +817,7 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	paused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "p"})
 	interrupted := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "port", Task: "i"})
 	limited := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", Mode: "standard", Purpose: "docs", Task: "l"})
+	broken := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "ci", Task: "b"})
 	prompted := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "a permission prompt"})
 	delivered := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "d"})
 	h.settle()
@@ -849,6 +850,8 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	park(interrupted.RunID, domain.InterruptedReason, domain.ActivityNeedsYou)
 	vendorLimit := "You've hit your usage limit · resets 3pm"
 	park(limited.RunID, vendorLimit, domain.ActivityNeedsYou)
+	waitBroken := domain.WaitBrokenReasonPrefix + "pr:acme/app#7:checks resolved, wake undelivered"
+	park(broken.RunID, waitBroken, domain.ActivityNeedsYou)
 	park(prompted.RunID, "", domain.ActivityNeedsYou)
 	park(delivered.RunID, exited, domain.ActivityDisconnected)
 
@@ -859,14 +862,20 @@ func TestParentIsToldWhenASubsessionStops(t *testing.T) {
 	h.now = h.now.Add(2 * time.Minute)
 	h.settle()
 	h.settle()
-	if len(h.mail.sent) != 4 || len(notices(crashed.RunID)) != 1 || len(notices(refused.RunID)) != 1 || len(notices(interrupted.RunID)) != 1 || len(notices(limited.RunID)) != 1 {
-		t.Fatalf("notices = %+v, want one each for the crashed, refused, interrupted and usage-limited subsessions only", h.mail.sent)
+	for _, c := range []protocol.ChildReceipt{crashed, refused, interrupted, limited, broken} {
+		if len(notices(c.RunID)) != 1 {
+			t.Fatalf("notices = %+v, want one for %s (%s)", h.mail.sent, c.RunID, c.Purpose)
+		}
+	}
+	if len(h.mail.sent) != 5 {
+		t.Fatalf("notices = %+v, want none for a reported failure, a question, a paused, a prompted or a delivered subsession", h.mail.sent)
 	}
 	for id, want := range map[string][]string{
 		crashed.RunID:     {"review", "disconnected", exited, "Retry Enhanced", "subsession cancel --run-id " + crashed.RunID},
 		refused.RunID:     {"fix", "failed", "Authentication required", "aether-internal send --to " + refused.RunID, "subsession cancel --run-id " + refused.RunID},
 		interrupted.RunID: {"port", "needs-you", domain.InterruptedReason, "aether-internal send --to " + interrupted.RunID},
 		limited.RunID:     {"docs", vendorLimit},
+		broken.RunID:      {"ci", waitBroken, "aether-internal send --to " + broken.RunID},
 	} {
 		body := notices(id)[0]
 		for _, w := range append(want, id) {
