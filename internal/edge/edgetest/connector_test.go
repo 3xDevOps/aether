@@ -102,7 +102,9 @@ func (l launcher) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, 
 	return run, l.db.CreateRun(ctx, run)
 }
 
-func (launcher) Paused(domain.RunID) bool { return false }
+func (launcher) Paused(domain.RunID) bool                                     { return false }
+func (launcher) Sleep(domain.RunID) scheduler.SleepState                      { return scheduler.SleepState{} }
+func (launcher) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
 func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
 }
