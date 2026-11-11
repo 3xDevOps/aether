@@ -32,6 +32,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
   const [natural, setNatural] = useState<{ width: number; height: number }>()
   const [shortImage, setShortImage] = useState(false)
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 })
+  const viewer = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
   const img = useRef<HTMLImageElement>(null)
   // The picture point (0 to 1) to keep under a frame point (pixels) after the scale changes.
@@ -87,24 +88,29 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
     el.scrollTop += drawn.top + y * drawn.height - (box.top + (top < 0 ? el.clientHeight / 2 : top))
   }, [scale, zoomed])
 
-  // A trackpad pinch arrives as a ctrl wheel (Safari: gesture events); React's wheel listener is passive and cannot
-  // keep the browser from zooming the whole page.
+  // Safari gesture events do not consistently bubble, so observe them during capture.
   useEffect(() => {
-    const el = frame.current
+    const el = viewer.current
     if (!el) return
     let gesture = 1
+    const isZoomSurface = (event: Event) => {
+      const target = event.target
+      return target instanceof Element && (frame.current?.contains(target) || target.closest('[data-image-gallery-control]'))
+    }
     const wheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) return
+      if (!event.ctrlKey || !isZoomSurface(event)) return
       event.preventDefault()
       // A mouse wheel notch reports about 100; a trackpad pinch many small deltas.
       zoomRef.current(Math.exp(-Math.max(-25, Math.min(25, event.deltaY)) * 0.01), event.clientX, event.clientY)
     }
     type Gesture = UIEvent & { scale: number; clientX: number; clientY: number }
     const start = (event: Event) => {
+      if (!isZoomSurface(event)) return
       event.preventDefault()
       gesture = 1
     }
     const change = (event: Event) => {
+      if (!isZoomSurface(event)) return
       const { scale: next, clientX, clientY } = event as Gesture
       event.preventDefault()
       // iOS Safari reports a touch pinch as touches and gestures both; the touch handlers zoom it.
@@ -113,12 +119,12 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
       gesture = next
     }
     el.addEventListener('wheel', wheel, { passive: false })
-    el.addEventListener('gesturestart', start)
-    el.addEventListener('gesturechange', change)
+    el.addEventListener('gesturestart', start, true)
+    el.addEventListener('gesturechange', change, true)
     return () => {
       el.removeEventListener('wheel', wheel)
-      el.removeEventListener('gesturestart', start)
-      el.removeEventListener('gesturechange', change)
+      el.removeEventListener('gesturestart', start, true)
+      el.removeEventListener('gesturechange', change, true)
     }
   }, [])
 
@@ -183,6 +189,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
 
   return (
     <div
+      ref={viewer}
       className="contents group/viewer"
       onTouchStart={(event) => {
         const [a, b] = [event.touches[0], event.touches[1]]
@@ -238,12 +245,12 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
       {gallery && (
         <div className={cn('pointer-events-none relative z-10 col-start-1 row-start-2 mx-auto mb-4', viewerBounds)}>
           {canStepBack && (
-            <Button variant="secondary" size="icon" label="Previous image" className={cn('pointer-events-auto absolute left-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(-1)}>
+            <Button variant="secondary" size="icon" label="Previous image" data-image-gallery-control className={cn('pointer-events-auto absolute left-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(-1)}>
               <ChevronLeft className="size-5" />
             </Button>
           )}
           {canStepForward && (
-            <Button variant="secondary" size="icon" label="Next image" className={cn('pointer-events-auto absolute right-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(1)}>
+            <Button variant="secondary" size="icon" label="Next image" data-image-gallery-control className={cn('pointer-events-auto absolute right-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(1)}>
               <ChevronRight className="size-5" />
             </Button>
           )}

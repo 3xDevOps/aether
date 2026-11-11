@@ -3569,12 +3569,12 @@ runs from fitted to 400% of the larger of the image's native size or fitted
 size, in a frame that scrolls and takes keyboard focus; the focus outline
 follows the image. A trackpad pinch (a ctrl wheel, or Safari's gesture events,
 both kept from zooming the page) or a two-finger touch pinch zooms about the
-fingers or pointer. `Mod+=`/`Mod+-` step
+fingers or pointer, including over gallery controls. `Mod+=`/`Mod+-` step
 by 1.25 about the frame's centre while
 `Mod+0` fits again. A click on a fitted image zooms downscaled images to 100%
-or enlarged images to 125% of fit, preserving the clicked point. A click beside
-a fitted image closes the dialog. In a multi-image gallery, Previous image and
-Next image buttons appear on hover or keyboard focus; touch keeps them visible.
+or enlarged images to 125% of fit, preserving the clicked point. In a
+multi-image gallery, Previous image and Next image buttons appear on hover or
+keyboard focus; touch keeps them visible.
 They step through loaded images. `ArrowLeft` and `ArrowRight`, or a horizontal
 swipe, do the same while the image is fitted, stopping at either end;
 zoomed in, or with a modifier key held or the page pinch-zoomed, they do not

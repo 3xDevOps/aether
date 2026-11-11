@@ -143,6 +143,18 @@ test('a trackpad pinch, a ctrl wheel, zooms the image and keeps the page from zo
   expect(scroll.defaultPrevented).toBe(false)
 })
 
+test('a trackpad pinch over gallery controls zooms the image and keeps the page from zooming', async () => {
+  const dialog = await open('Image 2 of 3', three)
+  load(dialog, [2400, 1400])
+  for (const name of ['Previous image', 'Next image']) {
+    const control = within(dialog).getByRole('button', { name })
+    const pinch = new WheelEvent('wheel', { deltaY: -50, ctrlKey: true, bubbles: true, cancelable: true })
+    control.dispatchEvent(pinch)
+    expect(pinch.defaultPrevented).toBe(true)
+  }
+  await waitFor(() => expect(zoomOf(dialog)).toBeGreaterThan(1))
+})
+
 test('spreading two fingers zooms the image', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [2400, 1400])
@@ -303,10 +315,10 @@ test('a Safari gesture during a two-finger touch pinch does not zoom a second ti
 test('a Safari trackpad gesture zooms by its scale', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [2400, 1400])
-  const frame = frameOf(dialog)
-  frame.dispatchEvent(Object.assign(new Event('gesturestart', { cancelable: true }), { scale: 1 }))
+  const next = within(dialog).getByRole('button', { name: 'Next image' })
+  next.dispatchEvent(Object.assign(new Event('gesturestart', { cancelable: true }), { scale: 1 }))
   const change = Object.assign(new Event('gesturechange', { cancelable: true }), { scale: 1.5, clientX: 400, clientY: 300 })
-  frame.dispatchEvent(change)
+  next.dispatchEvent(change)
   expect(change.defaultPrevented).toBe(true)
   await waitFor(() => expect(zoomOf(dialog)).toBeCloseTo(1.5))
 })
