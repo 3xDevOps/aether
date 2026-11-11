@@ -381,4 +381,11 @@ func TestConnectorRunChangesPages(t *testing.T) {
 		got != "[diff --git a/x b/x\n+x diff --cc a\n++<<<<<<< ours diff --combined b\n++b]" {
 		t.Fatalf("conflict diff = %v files %s", out["diff_files"], got)
 	}
+
+	// A session that committed everything has no uncommitted diff: the page is an empty list with a note, never null.
+	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{})
+	_, out = run(t, cs, "aether_session_changes", map[string]any{"run_id": "run-1", "include_diff": true})
+	if page, ok := out["untrusted"].(map[string]any)["diff"].([]any); !ok || len(page) != 0 || out["diff_files"] != float64(0) || !strings.Contains(fmt.Sprint(out["diff_note"]), "uncommitted") {
+		t.Fatalf("empty diff = %#v note %v", out["untrusted"].(map[string]any)["diff"], out["diff_note"])
+	}
 }

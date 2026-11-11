@@ -801,6 +801,10 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 			if next := in.DiffFile + len(page); next < len(files) {
 				out["next_diff_file"] = next
 			}
+			if page == nil {
+				page = []string{}
+				out["diff_note"] = "run.git.diff covers only uncommitted, unstaged changes of tracked files; this session has none. Its committed changes are in untrusted.commits"
+			}
 			untrusted["diff"] = page
 		}
 	}
