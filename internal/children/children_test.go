@@ -557,6 +557,75 @@ func TestSubsessionsRunOnTheParentsOrASharedAccount(t *testing.T) {
 	}
 }
 
+func TestOwnersTurnSubsessionAgentsOff(t *testing.T) {
+	h := newHarness(t)
+	carol := h.member("Carol", domain.RoleCollaborator)
+	if _, err := h.db.ShareAccount(h.ctx, h.bob.ID, h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.GrantWorkspace(h.ctx, h.ws.ID, h.bob.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	turn := func(harness string, account domain.MemberID, on bool) (protocol.ChildSettings, error) {
+		return h.svc.SetSettings(h.ctx, h.ada.ID, protocol.ChildSettingsParams{Choice: &protocol.ChildChoiceSetting{Harness: harness, AccountMemberID: string(account), On: on}})
+	}
+	if _, err := turn("claude", h.ada.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := turn("codex", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.Off) != 2 || len(settings.Choices) != 4 || !settings.Enabled {
+		t.Fatalf("settings = %+v, want claude on Ada's account and codex everywhere off, with claude and codex on Ada's and Bob's accounts listed", settings)
+	}
+	if _, unshared := turn("claude", carol.ID, false); !errors.Is(unshared, permissions.ErrDenied) {
+		t.Fatalf("turning off an account not shared with Ada = %v, want denied", unshared)
+	}
+	if _, bad := turn("bad name!", "", false); code(bad) != protocol.CodeInvalidParams {
+		t.Fatalf("turning off an invalid agent name = %v, want invalid params", bad)
+	}
+
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	raw, _ := json.Marshal(protocol.ChildOptionsParams{})
+	out, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildOptions, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, c := range out.(protocol.ChildOptionsResult).Choices {
+		states[c.AccountMemberID+"/"+c.Harness] = c.Status
+	}
+	if states[string(h.ada.ID)+"/claude"] != choiceOff || states[string(h.bob.ID)+"/codex"] != choiceOff || states[string(h.bob.ID)+"/claude"] != choiceReady {
+		t.Fatalf("options = %v, want Ada's claude and every codex off, Bob's claude ready", states)
+	}
+	if _, own := h.start(parent.ID, protocol.ChildStartParams{Harness: "claude", Task: "own"}); code(own) != protocol.CodeDenied || !strings.Contains(own.Error(), "off for subsessions") {
+		t.Fatalf("claude on Ada's own account = %v, want denied as off", own)
+	}
+	if _, codex := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", AccountMemberID: string(h.bob.ID), Task: "codex"}); code(codex) != protocol.CodeDenied {
+		t.Fatalf("codex on Bob's account = %v, want denied: codex is off on every account", codex)
+	}
+	onBob := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "claude", AccountMemberID: string(h.bob.ID), Task: "bob"})
+	queued, err := h.db.GetChild(h.ctx, domain.RunID(onBob.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Fallback.Disabled || !slices.Equal(queued.Fallback.Order, []domain.MemberID{h.bob.ID}) {
+		t.Fatalf("subsession fallback = %+v, want only Bob's account: Ada turned claude off on her own", queued.Fallback)
+	}
+
+	if _, err = turn("claude", h.bob.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	if queued, err = h.db.GetChild(h.ctx, domain.RunID(onBob.RunID)); err != nil || queued.State != domain.ChildRefused || !strings.Contains(queued.Error, "turned off for subsessions after this one was queued") {
+		t.Fatalf("queued subsession after its account was turned off = %+v, %v; want refused", queued, err)
+	}
+	if settings, err = turn("codex", "", true); err != nil || len(settings.Off) != 2 {
+		t.Fatalf("turning codex back on = %+v, %v; want only the two claude entries left", settings, err)
+	}
+}
+
 func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 	h := newHarness(t)
 	h.enable(h.bob.ID, protocol.ChildSettingsParams{Enabled: on()})

@@ -87,6 +87,9 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	case p.owner != c.OwnerID:
 		refuse(fmt.Sprintf("the parent session now belongs to %s, not %s, who asked for it", p.owner, c.OwnerID))
 		return
+	case p.settings.Off.Covers(c.Harness, c.AccountID):
+		refuse(fmt.Sprintf("%s on account %s was turned off for subsessions after this one was queued", c.Harness, c.AccountID))
+		return
 	}
 	if s.cfg.Cost != nil {
 		if cost := s.cfg.Cost(); cost != nil {
@@ -120,6 +123,9 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		return
 	}
 	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, c.OwnerID, requested, workspaces, c.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
+		if p.settings.Off.Covers(c.Harness, account) {
+			return false, nil
+		}
 		return s.cfg.Runs.FallbackLaunchable(ctx, c.OwnerID, requested, account, c.Harness, c.Mode)
 	})
 	if excluded != nil {

@@ -38,6 +38,8 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"subsessions", `UPDATE run_children SET account_member_id = ?2 WHERE account_member_id = ?1`},
 		{"subsession fallback order", `UPDATE run_children SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
 			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
+		{"subsession accounts off", `UPDATE child_settings SET off = replace(off, '"' || ?1 || '"', '"' || ?2 || '"')
+			WHERE instr(off, '"' || ?1 || '"') > 0`},
 		{"schedules", `UPDATE schedules SET member_id = ?2 WHERE member_id = ?1`},
 		{"push subscriptions", `UPDATE push_subscriptions SET member_id = ?2 WHERE member_id = ?1`},
 		{"watches", `UPDATE watches SET member_id = ?2, idempotency_key = NULL, version = version + 1 WHERE member_id = ?1`},

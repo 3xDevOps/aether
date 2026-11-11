@@ -12,9 +12,10 @@ import (
 )
 
 // ChildSettings is a member's child-run setting. Child runs are on until
-// the member turns them off.
+// the member turns them off, on every agent and account but those in Off.
 type ChildSettings struct {
 	Enabled bool
+	Off     domain.ChildChoicesOff
 }
 
 // ChildCounts are one parent's reservations: busy children hold a slot,
@@ -356,21 +357,35 @@ func (d *DB) UnfinishedChildren(ctx context.Context, parent domain.RunID, since 
 
 func (d *DB) ChildSettings(ctx context.Context, member domain.MemberID) (ChildSettings, error) {
 	s := ChildSettings{Enabled: true}
-	err := d.db.QueryRowContext(ctx, `SELECT enabled FROM child_settings WHERE member_id = ?`, member).Scan(&s.Enabled)
+	var off string
+	err := d.db.QueryRowContext(ctx, `SELECT enabled, off FROM child_settings WHERE member_id = ?`, member).Scan(&s.Enabled, &off)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s, nil
 	}
 	if err != nil {
 		return ChildSettings{}, fmt.Errorf("store: subsession settings: %w", err)
 	}
+	if err := json.Unmarshal([]byte(off), &s.Off); err != nil {
+		return ChildSettings{}, fmt.Errorf("store: subsession settings: decode off: %w", err)
+	}
+	if len(s.Off) == 0 {
+		s.Off = nil
+	}
 	return s, nil
 }
 
 func (d *DB) PutChildSettings(ctx context.Context, member domain.MemberID, s ChildSettings) error {
+	off := []byte("[]")
+	if len(s.Off) > 0 {
+		var err error
+		if off, err = json.Marshal(s.Off); err != nil {
+			return fmt.Errorf("store: put subsession settings: encode off: %w", err)
+		}
+	}
 	_, err := d.db.ExecContext(ctx,
-		`INSERT INTO child_settings (member_id, enabled, updated_at) VALUES (?, ?, unixepoch())
-		 ON CONFLICT(member_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
-		member, s.Enabled)
+		`INSERT INTO child_settings (member_id, enabled, off, updated_at) VALUES (?, ?, ?, unixepoch())
+		 ON CONFLICT(member_id) DO UPDATE SET enabled = excluded.enabled, off = excluded.off, updated_at = excluded.updated_at`,
+		member, s.Enabled, string(off))
 	if err != nil {
 		return fmt.Errorf("store: put subsession settings: %w", mapConstraint(err, ErrNotFound))
 	}

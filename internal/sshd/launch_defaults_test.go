@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 		t.Fatalf("unknown = %+v, want the unlisted codex model ID and the opencode model, whose list was never read", got.Unknown)
 	}
 	saved := got
-	if after, err := children.ChildSettings(ctx, e.member.ID); err != nil || after != childSettings {
+	if after, err := children.ChildSettings(ctx, e.member.ID); err != nil || !reflect.DeepEqual(after, childSettings) {
 		t.Fatalf("child settings after launch.defaults.set = %+v, %v; want them untouched, %+v", after, err, childSettings)
 	}
 

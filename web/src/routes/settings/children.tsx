@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode, useEffect, useState } from 'react'
+import { SubsessionAgents } from '@/components/launch/subsession-agents'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { Api } from '@/lib/api'
@@ -103,6 +104,14 @@ export function ChildRunsSection({ client }: { client: Api }) {
           <TryAgain onClick={() => { useChildSettings.setState({ error: null }); setAttempt((n) => n + 1) }} />
         )}
       </SettingRow>
+      {settings && (settings.choices?.some((c) => c.status !== 'not-installed') ?? false) && (
+        <SettingRow
+          label="Subsession agents"
+          labelFor="settings-child-agents"
+          help="The agents and accounts subsessions may use. Turn off an agent you do not want, or an account whose subscription no longer works."
+          control={<SubsessionAgents id="settings-child-agents" settings={settings} disabled={busy} client={client} />}
+        />
+      )}
       {workspace && cap.hasMethod('workspace.child_limits') && <WorkspaceLimits client={client} />}
     </SettingsSection>
   )

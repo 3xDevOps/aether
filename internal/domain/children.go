@@ -30,6 +30,26 @@ type ChildLimits struct {
 // MaxChildLimits are the largest values an admin may set.
 var MaxChildLimits = ChildLimits{MaxLive: 64}
 
+// ChildChoice names an agent subsessions run, on one account, or on every
+// account when Account is empty.
+type ChildChoice struct {
+	Harness string   `json:"harness"`
+	Account MemberID `json:"account_member_id,omitempty"`
+}
+
+// ChildChoicesOff are the agents and accounts a member's subsessions may not
+// use.
+type ChildChoicesOff []ChildChoice
+
+func (off ChildChoicesOff) Covers(harness string, account MemberID) bool {
+	for _, c := range off {
+		if c.Harness == harness && (c.Account == "" || c.Account == account) {
+			return true
+		}
+	}
+	return false
+}
+
 // ChildReservation is one child run a run asked for. RunID is minted at
 // reservation, before the run row exists. TreeKey is the root run's ID.
 type ChildReservation struct {

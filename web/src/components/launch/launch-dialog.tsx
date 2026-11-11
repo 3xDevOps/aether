@@ -292,7 +292,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
             {accountChoice}
             <AgentOptions choice={choice} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} />
             {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-            {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
+            {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} settings={childSettings} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
             {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
           </>
         }
@@ -328,7 +328,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
           <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus shared={shared !== '' && task === shared} account={accountChoice} owner={sharedAccount ? accountName : undefined} />
           {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-          {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
+          {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} settings={childSettings} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
           {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
           {notes}
           {failure}

@@ -17,7 +17,7 @@ import (
 func TestWorkspaceAccessMigrationKeepsTodaysAccess(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw := openLegacy(t, path, len(migrations)-1)
+	raw := openLegacy(t, path, 110)
 	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, color, role, pending, created_at)
 			VALUES ('creator', 'Ada', ?, '#e6194b', 'admin', 0, 1),
@@ -91,7 +91,7 @@ func TestWorkspaceAccessMigrationKeepsTodaysAccess(t *testing.T) {
 func TestWorkspaceAccessMigrationRescopesOldEvents(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw := openLegacy(t, path, len(migrations)-1)
+	raw := openLegacy(t, path, 110)
 	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, color, role, created_at)
 			VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);

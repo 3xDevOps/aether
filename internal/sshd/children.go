@@ -43,7 +43,7 @@ func (s *Server) childSettings(ctx context.Context, member domain.MemberID, raw 
 	if perr != nil {
 		return nil, perr
 	}
-	if p.Enabled == nil {
+	if p.Enabled == nil && p.Choice == nil {
 		out, err := svc.Settings(ctx, member)
 		return childResult(out, err)
 	}
