@@ -521,8 +521,9 @@ clicking (an open Browser tab's own polling does not count); a member typing in
 the composer while another member watches the session, the only time the
 dashboard reports typing. A session that waits for you after its turn ended,
 or waits for CI or another session, is idle. A session that waits for a
-process, a session you paused and a session switching modes or accounts never
-sleep.
+process, a session you paused, a session switching modes or accounts, and a
+session started in Standard and switched to Enhanced never sleep: starting
+that container again would rerun its launch command.
 
 The session wakes when you send a message or answer, mail reaches it, you type
 in its terminal, open a shell tab, use its Browser tab, start `aether ssh`, or

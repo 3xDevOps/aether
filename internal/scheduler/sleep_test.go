@@ -11,6 +11,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
@@ -371,5 +372,23 @@ func TestARestartFinishesAnInterruptedClosedSleep(t *testing.T) {
 	waitFor(t, "the container stopped", func() bool { return containerState(c) == "stopped" })
 	if s2.Sleep(run.ID).AsleepSince == nil {
 		t.Fatal("the restart lost the closed session's sleep")
+	}
+}
+
+// An Enhanced run whose container was created for Standard, and switched
+// since, would rerun its launch command on start, so it stays awake.
+func TestASwitchedRunStaysAwake(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	c := e.container(t, run.ID)
+	c.mu.Lock()
+	delete(c.spec.Env, coordtransport.EnhancedEnv)
+	c.mu.Unlock()
+	e.sched.sleepIdle(t.Context())
+	time.Sleep(50 * time.Millisecond)
+	if e.sched.Sleep(run.ID).AsleepSince != nil || containerState(c) != "running" {
+		t.Fatal("a run whose container was created for Standard fell asleep")
 	}
 }

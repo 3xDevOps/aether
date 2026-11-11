@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -231,26 +233,43 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) error {
 // resumeSleptBrowser thaws the browser companion a sleep paused, on the
 // first browser or development-control call after the run woke. It runs
 // there rather than in the wake, which may hold the run's control
-// admission that the companion's input release also takes.
+// admission that the companion's input release also takes. Concurrent
+// calls share one resume, which revokes browser control, so none drops a
+// lease another took after it.
 func (s *Scheduler) resumeSleptBrowser(ctx context.Context, run domain.RunID) error {
-	s.mu.Lock()
-	entry := s.runs[run]
-	due := entry != nil && entry.browserSlept && entry.asleepSince.IsZero() && !entry.sleeping && !entry.paused
-	var cid runtime.ID
-	if due {
-		cid = entry.containerID
-	}
-	s.mu.Unlock()
-	if !due {
+	for {
+		s.mu.Lock()
+		entry := s.runs[run]
+		if entry == nil || !entry.browserSlept || !entry.asleepSince.IsZero() || entry.sleeping || entry.paused {
+			s.mu.Unlock()
+			return nil
+		}
+		if pending := entry.browserResume; pending != nil {
+			s.mu.Unlock()
+			select {
+			case <-pending:
+			case <-ctx.Done():
+				return fmt.Errorf("wait for the browser companion to resume: %w", ctx.Err())
+			}
+			continue
+		}
+		done := make(chan struct{})
+		entry.browserResume = done
+		cid := entry.containerID
+		s.mu.Unlock()
+		err := s.resumeDevelopmentBrowser(ctx, run, cid)
+		s.mu.Lock()
+		entry.browserResume = nil
+		if err == nil {
+			entry.browserSlept = false
+		}
+		close(done)
+		s.mu.Unlock()
+		if err != nil {
+			return fmt.Errorf("resume the browser companion paused while the session slept: %w", err)
+		}
 		return nil
 	}
-	if err := s.resumeDevelopmentBrowser(ctx, run, cid); err != nil {
-		return fmt.Errorf("resume the browser companion paused while the session slept: %w", err)
-	}
-	s.mu.Lock()
-	entry.browserSlept = false
-	s.mu.Unlock()
-	return nil
 }
 
 // startAsleep starts entry's stopped container under a fresh wait. Caller
@@ -421,7 +440,7 @@ func (s *Scheduler) sleepIdle(ctx context.Context) {
 	}
 	s.mu.Unlock()
 	for _, e := range live {
-		if !s.mayRunSleep(ctx, e.runID, now, after, false) {
+		if !s.mayRunSleep(ctx, e.runID, now, after, false) || !s.launchedEnhanced(ctx, e) {
 			continue
 		}
 		s.mu.Lock()
@@ -433,7 +452,7 @@ func (s *Scheduler) sleepIdle(ctx context.Context) {
 		s.goSleep(e, s.sleepLive)
 	}
 	for _, e := range closed {
-		if s.mayRunSleep(ctx, e.runID, now, after, true) {
+		if s.mayRunSleep(ctx, e.runID, now, after, true) && s.launchedEnhanced(ctx, e) {
 			s.goSleep(e, s.sleepClosed)
 		}
 	}
@@ -450,6 +469,17 @@ func (s *Scheduler) mayRunSleep(ctx context.Context, id domain.RunID, now time.T
 		return false
 	}
 	return !closed || (run.FinishedAt != nil && now.Sub(*run.FinishedAt) >= after)
+}
+
+// launchedEnhanced reports a container created for an Enhanced launch, whose
+// main process is a bare shell. One created for Standard and switched to
+// Enhanced since would run its launch command, with the task, again on start.
+func (s *Scheduler) launchedEnhanced(ctx context.Context, e *supervised) bool {
+	s.mu.Lock()
+	cid := e.containerID
+	s.mu.Unlock()
+	info, err := s.cfg.Runtime.Inspect(ctx, cid)
+	return err == nil && slices.Contains(info.Env, coordtransport.EnhancedEnv+"=1")
 }
 
 func (s *Scheduler) goSleep(entry *supervised, sleep func(context.Context, *supervised) error) {
