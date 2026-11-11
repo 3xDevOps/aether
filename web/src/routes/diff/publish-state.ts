@@ -32,7 +32,7 @@ const noPush: RunGitPushTarget = { remote: '', repository: '', head_branch: '' }
  * own and follows every refresh until the member edits that field. */
 export function usePublish(run: ScopedRun, client: Api, open: boolean) {
   const caps = useCapability()
-  const self = useSelf()
+  const self = useSelf(repoWorkspaceID(run))
   const workspace = useStore((s) => s.workspaces[repoWorkspaceID(run)])
   const [status, setStatus] = useState<RunGitStatusResult | null>(null)
   const [statusReady, setStatusReady] = useState(false)

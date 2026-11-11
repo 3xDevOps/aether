@@ -42,7 +42,7 @@ export const NoteRow = memo(function NoteRow({
   onRemove: (item: MemoryItem) => void
 }) {
   const [pinning, setPinning] = useState(false)
-  const self = useSelf()
+  const self = useSelf(useStore((s) => s.activeWorkspace))
   const mergedInto = useStore((s) => s.mergedInto)
   const writable = canWrite && mayChange(item, self, mergedInto)
   const replaced = superseded(item)

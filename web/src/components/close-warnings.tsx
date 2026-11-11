@@ -178,7 +178,7 @@ function WithTimes({ text }: { text: string }) {
 }
 
 function Explain({ warning, run, onLeave }: { warning: CloseWarning; run: Run | undefined; onLeave: () => void }) {
-  const self = useSelf()
+  const self = useSelf(run?.workspace_id)
   switch (warning.kind) {
     case 'pull_request':
       return (

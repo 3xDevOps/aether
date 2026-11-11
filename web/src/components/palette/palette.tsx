@@ -54,7 +54,8 @@ export function PaletteBody({
   onTemplates: () => void
   onConfirm: (run: RunRecord, command: Command & { confirm: NonNullable<Command['confirm']> }) => void
 }) {
-  const runs = useListedRuns(useStore((s) => s.activeWorkspace))
+  const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const runs = useListedRuns(activeWorkspace)
   const runMap = useStore((s) => s.runs)
   const workspaces = useStore((s) => s.workspaces)
   const members = useStore((s) => s.members)
@@ -64,7 +65,7 @@ export function PaletteBody({
   const predicting = useStore((s) => s.predicting)
   const stale = useStale()
   const cap = useCapability()
-  const self = useSelf()
+  const self = useSelf(activeWorkspace)
   const [search, setSearch] = useState('')
   const selected = useRef<Command | null>(null)
   const complete = () => {

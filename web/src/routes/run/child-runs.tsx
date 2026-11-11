@@ -164,7 +164,7 @@ export function RunLineage({ run }: { run: RunRecord }) {
 /** More → Allow child runs and Turn off child runs: only the owner allows; the owner or an admin turns them off, whether the run allowed them itself or inherits it. */
 export function useChildRunsItems(run: RunRecord, client: Api = api): ExtraItem[] {
   const cap = useCapability()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   if (!cap.hasMethod('run.children.allow') || isTerminal(run.status)) return []
   const owner = self.id === run.member_id
   const item = (next: 'on' | 'off'): ExtraItem => ({
