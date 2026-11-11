@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	agentModelsTTL     = time.Hour
-	agentModelsFailTTL = time.Minute
-	agentModelsTimeout = 30 * time.Second
-	codexModelsCache   = ".codex/models_cache.json"
+	agentModelsTTL          = time.Hour
+	agentModelsFailTTL      = time.Minute
+	agentModelsTimeout      = 30 * time.Second
+	agentModelsStartTimeout = 2 * time.Minute
+	codexModelsCache        = ".codex/models_cache.json"
 
 	claudeModelsRequest = `{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}`
 	claudeModelsScript  = `exe=$1; req=$2; shift 2
@@ -79,7 +80,8 @@ var errNoModelsAnswer = errors.New("no answer")
 // AgentModels lists the models agent name offers on account, probing the
 // agent in account's environment terminal and caching the answer for an hour.
 // A failed probe still answers, with its error and the last good list, cached
-// for a minute. Another member's account is probed only while its owner's
+// for a minute. A caller whose context ends first gets an empty list with
+// that error while the probe finishes in the background. Another member's account is probed only while its owner's
 // terminal is running.
 func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error) {
 	none := protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Models: []protocol.AgentModel{}}
@@ -112,10 +114,19 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 		}
 	}
 	start := account == member
-	result, _, _ := s.modelProbes.Do(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
+	probe := s.modelProbes.DoChan(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
 		return s.probeAgentModels(context.WithoutCancel(ctx), key, cli[0], profile.EnvPassthrough, start), nil
 	})
-	return result.(protocol.AgentModelsResult), nil
+	select {
+	case got := <-probe:
+		return got.Val.(protocol.AgentModelsResult), nil
+	case <-ctx.Done():
+		return protocol.AgentModelsResult{
+			Models: []protocol.AgentModel{},
+			Source: protocol.ModelSourceNone,
+			Error:  fmt.Sprintf("%s models: still being listed (%v); the probe keeps running, so ask again shortly", name, ctx.Err()),
+		}, nil
+	}
 }
 
 // CachedAgentModels is the model list AgentModels last answered for agent
@@ -150,8 +161,6 @@ func (s *Scheduler) expireAgentModels(account domain.MemberID, name string) {
 }
 
 func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, executable string, passthrough []string, start bool) protocol.AgentModelsResult {
-	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
-	defer cancel()
 	now := s.cfg.Now().UTC()
 	s.agentModelsMu.Lock()
 	updates := s.agentModels[key].updates
@@ -172,7 +181,7 @@ func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, ex
 	if s.agentModels == nil {
 		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
 	}
-	probed, current := now, s.agentModels[key].updates
+	probed, current := s.cfg.Now(), s.agentModels[key].updates
 	if current != updates {
 		probed = time.Time{}
 	}
@@ -239,7 +248,10 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 		args = []string{fmt.Sprintf(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"aether","version":%q}}}`, version.Version), codexModelsList}
 	}
 	if start {
-		if _, err := s.EnsureTerminal(ctx, key.account); err != nil {
+		startCtx, cancelStart := context.WithTimeout(ctx, agentModelsStartTimeout)
+		_, err := s.EnsureTerminal(startCtx, key.account)
+		cancelStart()
+		if err != nil {
 			return modelList{}, fmt.Errorf("%s models: %w", key.name, err)
 		}
 	}
@@ -251,6 +263,8 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 		return modelList{}, fmt.Errorf("%s models: %w", key.name, ErrTerminalNotRunning)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
+	defer cancel()
 	argv := append([]string{"/bin/sh", "-c", script, "sh", executable}, args...)
 	for _, name := range passthrough {
 		if value, ok := os.LookupEnv(name); ok && value != "" {
