@@ -388,4 +388,11 @@ func TestConnectorRunChangesPages(t *testing.T) {
 	if page, ok := out["untrusted"].(map[string]any)["diff"].([]any); !ok || len(page) != 0 || out["diff_files"] != float64(0) || !strings.Contains(fmt.Sprint(out["diff_note"]), "origin/main") {
 		t.Fatalf("empty diff = %#v note %v", out["untrusted"].(map[string]any)["diff"], out["diff_note"])
 	}
+
+	// Output cut before any file is not an empty diff.
+	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{BaseRef: "origin/main", Output: protocol.RunRepoCommandOutput{Truncated: true}})
+	_, out = run(t, cs, "aether_session_changes", map[string]any{"run_id": "run-1", "include_diff": true})
+	if out["diff_truncated"] != true || !strings.Contains(fmt.Sprint(out["diff_note"]), "not known to be empty") {
+		t.Fatalf("cut empty diff = %v", out)
+	}
 }

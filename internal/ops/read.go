@@ -804,6 +804,9 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 			if page == nil {
 				page = []string{}
 				out["diff_note"] = "tracked files in the worktree match the merge base with " + cmp.Or(diff.BaseRef, "the session's base") + "; untracked files are not in a diff"
+				if diff.Output.Truncated {
+					out["diff_note"] = "the server cut the diff output before any file; the diff is not known to be empty"
+				}
 			}
 			untrusted["diff"] = page
 		}

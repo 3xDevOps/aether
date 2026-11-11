@@ -318,7 +318,11 @@ expires after 10 minutes, then the rest oldest first. `aether_session_changes` l
 files of 6000 bytes, 12000 in all, per page, and returns `next_commits_offset`
 and `next_diff_file` for the next page, `diff_clipped_files` with the numbers of
 files cut at 6000 bytes, and `diff_truncated: true` when the server cut the diff
-before paging, so files past the cut are missing; the diff is the worktree against the merge base with the session's base (committed, staged and unstaged tracked changes, not untracked files), `diff: []` with a `diff_note` when there is none, never null, and an unresolvable base is `diff_error`; its `repos` names a multi-repo
+before paging, so files past the cut are missing. The diff is the worktree
+against the merge base with the session's base: committed, staged and unstaged
+tracked changes, not untracked files. With no diff it is `diff: []` with a
+`diff_note`, never null; an unresolvable base is `diff_error`. `repos` names a
+multi-repo
 session's extra repos, which `repo` selects. Tools that take a `run_id` also accept the `run:` ids `search` returns. When the
 server no longer keeps the start of a session's conversation or terminal,
 `aether_session_history` returns `truncated_before: true` and a `note` saying so.
