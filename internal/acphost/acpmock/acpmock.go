@@ -156,6 +156,9 @@ type Fixture struct {
 	// and RefuseSessions every session/new.
 	RefusePrompts  bool `json:"-"`
 	RefuseSessions bool `json:"-"`
+	// RefuseModes makes the agent refuse every session/set_mode, as
+	// Claude Code's adapter refuses bypassPermissions when bypass is off.
+	RefuseModes bool `json:"-"`
 	// RefuseNext, shared by every agent given the fixture, makes them
 	// refuse that many prompts with authRequired, then accept.
 	RefuseNext *atomic.Int32 `json:"-"`
@@ -365,6 +368,13 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		a.listed++
 		return result, nil
 	case acp.AgentMethodSessionSetMode:
+		if a.fix.RefuseModes {
+			var p struct {
+				ModeID string `json:"modeId"`
+			}
+			_ = json.Unmarshal(params, &p)
+			return nil, acp.NewInternalError(map[string]any{"details": "Mode " + p.ModeID + " is not available in this session"})
+		}
 		return map[string]any{}, nil
 	case "session/set_model":
 		var p struct {
