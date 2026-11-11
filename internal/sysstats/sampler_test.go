@@ -282,15 +282,18 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-func TestMemoryPressureReadsAvg60(t *testing.T) {
-	f := newFixture(t)
-	got, err := MemoryPressure(f.proc)
+func TestCgroupMemoryPressureReadsAvg60(t *testing.T) {
+	dir := t.TempDir()
+	got, err := CgroupMemoryPressure(dir)
 	if err != nil || got != nil {
-		t.Fatalf("missing pressure file = %v, %v, want nil, nil", got, err)
+		t.Fatalf("missing memory.pressure = %v, %v, want nil, nil", got, err)
 	}
-	f.write(t, "pressure/memory", "some avg10=90.00 avg60=12.50 avg300=1.00 total=1\nfull avg10=9.00 avg60=0 avg300=0 total=0\n")
-	got, err = MemoryPressure(f.proc)
+	body := "some avg10=90.00 avg60=12.50 avg300=1.00 total=1\nfull avg10=9.00 avg60=0 avg300=0 total=0\n"
+	if err = os.WriteFile(filepath.Join(dir, "memory.pressure"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = CgroupMemoryPressure(dir)
 	if err != nil || got == nil || *got != 12.5 {
-		t.Fatalf("MemoryPressure = %v, %v, want 12.5", got, err)
+		t.Fatalf("CgroupMemoryPressure = %v, %v, want 12.5", got, err)
 	}
 }

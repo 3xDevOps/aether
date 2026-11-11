@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -592,50 +593,71 @@ func TestRunLimitsPrecedence(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 func TestCapacityMemoryPressureAdmission(t *testing.T) {
-	write := func(root, body string) {
+	writeFile := func(path, body string) {
 		t.Helper()
-		if err := os.MkdirAll(filepath.Join(root, "pressure"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "pressure", "memory"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	root := t.TempDir()
-	procRoot = root
-	t.Cleanup(func() { procRoot = isolatedProcRoot })
+	proc, cgroups := t.TempDir(), t.TempDir()
+	procRoot, cgroupRoot = proc, cgroups
+	t.Cleanup(func() { procRoot, cgroupRoot = isolatedProcRoot, isolatedProcRoot })
+	writeFile(filepath.Join(proc, strconv.Itoa(os.Getpid()), "cgroup"), "0::/system.slice/aether-server.service\n")
+	serverPressure := filepath.Join(cgroups, "system.slice", "aether-server.service", "memory.pressure")
+	psi := func(avg10, avg60 string) string {
+		return "some avg10=" + avg10 + " avg60=" + avg60 + " avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=0\n"
+	}
 	s := &Scheduler{cfg: Config{Runtime: &admissionRuntime{host: healthyAdmissionHost()}, MinFreeBytes: -1}, capacityGate: make(chan struct{}, 1)}
 
-	write(root, "some avg10=99.00 avg60=20.00 avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=0\n")
+	writeFile(serverPressure, psi("99.00", "10.00"))
 	_, err := s.tryReserveCapacity(t.Context())
-	if !errors.Is(err, ErrMemoryPressure) || !strings.Contains(err.Error(), "20.0% of the last 60s") || s.capacityReservations != 0 {
+	if !errors.Is(err, ErrMemoryPressure) || !strings.Contains(err.Error(), "10.0% of the last 60s") || s.capacityReservations != 0 {
 		t.Fatalf("high pressure: %v (reservations %d)", err, s.capacityReservations)
 	}
 
-	write(root, "some avg10=99.00 avg60=19.99 avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=0\n")
+	writeFile(serverPressure, psi("99.00", "9.99"))
 	release, err := s.tryReserveCapacity(t.Context())
 	if err != nil {
 		t.Fatalf("a short burst with low avg60 refused: %v", err)
 	}
 	release()
 
-	procRoot = t.TempDir()
+	// A session thrashing inside its own limit stalls the host-wide file, not the server's cgroup.
+	writeFile(serverPressure, psi("0.00", "0.00"))
+	writeFile(filepath.Join(proc, "pressure", "memory"), psi("100.00", "100.00"))
 	release, err = s.tryReserveCapacity(t.Context())
 	if err != nil {
-		t.Fatalf("host without /proc/pressure refused: %v", err)
+		t.Fatalf("host-wide pressure refused with the server's cgroup idle: %v", err)
 	}
 	release()
+
+	if err = os.Remove(serverPressure); err != nil {
+		t.Fatal(err)
+	}
+	release, err = s.tryReserveCapacity(t.Context())
+	if err != nil {
+		t.Fatalf("cgroup without memory.pressure refused: %v", err)
+	}
+	release()
+
+	writeFile(serverPressure, "garbage\n")
+	if _, err = s.tryReserveCapacity(t.Context()); !errors.Is(err, ErrCapacityUnknown) {
+		t.Fatalf("malformed memory.pressure: %v, want ErrCapacityUnknown", err)
+	}
 }
 
 var isolatedProcRoot string
 
-// TestMain keeps the admission tests off the host's real /proc/pressure.
+// TestMain keeps the admission tests off the host's real procfs and cgroups.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "procfs")
 	if err != nil {
 		panic(err)
 	}
-	isolatedProcRoot, procRoot = dir, dir
+	isolatedProcRoot, procRoot, cgroupRoot = dir, dir, dir
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

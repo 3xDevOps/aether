@@ -135,7 +135,7 @@ func cgroupPath(procRoot string, pid int) (string, error) {
 	if err := sc.Err(); err != nil {
 		return "", fmt.Errorf("read cgroup of pid %d: %w", pid, err)
 	}
-	return "", fmt.Errorf("pid %d has no cgroup v2 entry", pid)
+	return "", fmt.Errorf("pid %d has no cgroup v2 entry: %w", pid, fs.ErrNotExist)
 }
 
 // readMemoryStats reads memory.events, and memory.peak and memory.max when

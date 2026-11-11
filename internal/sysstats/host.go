@@ -278,11 +278,12 @@ func (r *hostReading) readDisk(procRoot, sysRoot string) error {
 	return nil
 }
 
-// MemoryPressure is the percentage of the last 60 seconds in which at least one
-// task stalled on memory (/proc/pressure/memory, "some avg60"). It is nil when
-// the kernel does not expose pressure.
-func MemoryPressure(procRoot string) (*float64, error) {
-	return readPressure(filepath.Join(procRoot, "pressure", "memory"), "avg60")
+// CgroupMemoryPressure is the percentage of the last 60 seconds in which at
+// least one task of the cgroup v2 directory dir stalled on memory
+// (memory.pressure, "some avg60"). It is nil when the kernel does not expose
+// pressure for that cgroup.
+func CgroupMemoryPressure(dir string) (*float64, error) {
+	return readPressure(filepath.Join(dir, "memory.pressure"), "avg60")
 }
 
 // readPressure returns the "some" line's avg field (avg10, avg60), or nil when
