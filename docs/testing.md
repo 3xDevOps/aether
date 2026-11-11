@@ -733,7 +733,10 @@ and launch the real app under Defender. They change Defender settings, the
 Start Menu and the registry, so they refuse to run unless
 `GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted`. When one
 fails, `scripts/defender-diagnostics.ps1` prints Defender's detections in the
-job log. The screenshots are uploaded as `windows-desktop-*` artifacts.
+job log. When `update-smoke.ps1` cannot move `aether.exe` because another
+process holds it open, it prints the processes Windows Restart Manager names,
+waits up to 30 s for them to close it, and fails naming them if they do not.
+The screenshots are uploaded as `windows-desktop-*` artifacts.
 
 Before they run, `scripts/windows-defender.ps1 -Mode Prepare` removes the
 runner image's Defender exclusions and adds one for GitHub's own agent,
