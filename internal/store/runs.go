@@ -302,15 +302,20 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return nil, err
 	}
+	if len(summaries) == 0 {
+		return summaries, nil
+	}
 	byID := make(map[domain.RunID]*RunSummary, len(summaries))
+	ids := make([]any, 0, len(summaries))
 	for _, r := range summaries {
 		byID[r.ID] = r
+		ids = append(ids, r.ID)
 	}
-	// No status filter here: a session that finished after the read above
+	// By ID, not status: a session that finished after the read above
 	// keeps its extra workspaces, so it is never listed without them.
 	extras, err := d.db.QueryContext(ctx,
-		`SELECT rr.run_id, rr.workspace_id FROM run_repos rr JOIN runs r ON r.id = rr.run_id
-		 WHERE r.workspace_id = ? ORDER BY rr.run_id, rr.position`, workspace)
+		`SELECT run_id, workspace_id FROM run_repos
+		 WHERE run_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`) ORDER BY run_id, position`, ids...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list live session extra repos: %w", err)
 	}
