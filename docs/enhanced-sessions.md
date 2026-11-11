@@ -202,6 +202,13 @@ composer, one at a time (`1 of N`). The composer stays shut until you answer.
   may approve, and neither needs control
   ([Sudo in a Default session](security.md#sudo-in-a-default-session)).
 
+Claude Code in `bypassPermissions` still asks for what it treats as
+bypass-immune: an explicit `ask` rule in its settings, a tool that needs a
+person, and its own safety checks. The adapter forwards those requests
+unchanged, at every [permission tier](security.md#permission-tiers): Root
+access decides what `sudo` may do, not whether the agent asks. Answer them
+here, with `aether answer`, or with a connector's `aether_decide_approval`.
+
 A message sent during a turn waits for it to end (**Queued**), or joins it with
 **Steer**. If the agent refuses it, the message reads `not_sent` with the agent's
 error. If the connection closes first, the transcript shows `Message not
