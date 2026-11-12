@@ -291,7 +291,9 @@ read within 10 seconds. Update a CLI in your home in `aether terminal`, with
 installed in the image by rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` or
 `CODEX_PATH` set as a workspace variable wins, so a session can go back to the
 adapter's own Codex with `CODEX_PATH` set to
-`/root/.local/lib/node_modules/@agentclientprotocol/codex-acp/node_modules/.bin/codex`.
+`<home>/.local/lib/node_modules/@agentclientprotocol/codex-acp/node_modules/.bin/codex`,
+where `<home>` is what `echo "$HOME"` prints in `aether terminal`: `/root`, or
+`/home/aether` in an image whose user is not root.
 
 ### Per-agent setup
 
