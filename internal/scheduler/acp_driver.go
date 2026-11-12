@@ -667,8 +667,19 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		mode = ""
 	}
 	if mode != "" && sess.State().Mode != mode {
-		if err := sess.SetMode(ctx, mode); err != nil {
-			slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", err)
+		if modeErr := sess.SetMode(ctx, mode); !acphost.Refused(modeErr) {
+			if modeErr != nil {
+				slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", modeErr)
+			}
+		} else {
+			on := "the agent's default mode"
+			if running := sess.State().Mode; running != "" {
+				on = strconv.Quote(running)
+			}
+			reason := fmt.Sprintf("The agent refused mode %q, so the session runs in %s: %v", mode, on, modeErr)
+			if err := sess.Notice("error", "Mode not set", reason); err != nil {
+				slog.Warn("scheduler: record the mode notice", "run", runID, "error", err)
+			}
 		}
 	}
 	var modelErr error

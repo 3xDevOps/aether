@@ -182,6 +182,13 @@ answer`, or with a connector's `aether_decide_approval`. Each request marks the 
 composer, one at a time (`1 of N`). The composer stays shut until you answer.
 **Interrupt** stops the turn and cancels the request instead.
 
+If the agent refuses its no-prompt mode, the Chat view shows a **Mode not
+set** error notice, such as `The agent refused mode "bypassPermissions", so
+the session runs in "default": ... Mode bypassPermissions is not available in
+this session`, and the agent asks as that mode does. Claude Code's adapter
+refuses `bypassPermissions` when its settings or managed policy set
+`permissions.disableBypassPermissionsMode` to `"disable"`.
+
 - The card names what the agent wants ("Claude Code wants to run a command")
   and shows the command, or the files it changes with their diffs.
 - When the agent offers allow once and allow always, **How long** chooses
