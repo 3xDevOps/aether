@@ -277,18 +277,23 @@ installs that. Claude Code, Codex and pi need a separate npm adapter package:
 --enhanced` installs the agent and its adapter, pinned to the version Aether
 tests against. The dashboard's **Set up** does the same when you pick Enhanced.
 
-`claude-agent-acp` bundles its own copy of Claude Code (2.1.287 with the
-current pin), which moves only with the pin. An Enhanced Claude Code session
-runs the `claude` on the session's `PATH` instead, the one Standard sessions
-run, by setting `CLAUDE_CODE_EXECUTABLE` to it. A `claude` in `~/.local/bin` is
-the one Aether [updates before launch](#updates-before-launch), so a new model
-reaches Enhanced sessions with the next Claude Code update, without an Aether
-release. The adapter runs its bundled copy instead when `claude` is not on
-`PATH`, or `claude --version` is older than the bundled one or prints no
-version Aether can read within 10 seconds. Update a `claude` in your home with
-`claude update` in `aether terminal`, and one installed in the image by
-rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` set as a
-workspace variable wins.
+`claude-agent-acp` and `codex-acp` each install their own copy of the agent's
+CLI, which moves only with the adapter's pin. An Enhanced Claude Code or Codex
+session runs the `claude` or `codex` on the session's `PATH` instead, the one
+Standard sessions run, by setting `CLAUDE_CODE_EXECUTABLE` or `CODEX_PATH` to
+it. A CLI in `~/.local/bin` is the one Aether
+[updates before launch](#updates-before-launch), so a new model reaches
+Enhanced sessions with the next CLI update, without an Aether release. The
+adapter runs its own copy instead when the CLI is not on `PATH`, or its
+`--version` is older than the adapter's copy or prints no version Aether can
+read within 10 seconds. Update a CLI in your home in `aether terminal`, with
+`claude update` or the `npm install` line under [Codex](#codex), and one
+installed in the image by rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` or
+`CODEX_PATH` set as a workspace variable wins, so a session can go back to the
+adapter's own Codex with `CODEX_PATH` set to
+`<home>/.local/lib/node_modules/@agentclientprotocol/codex-acp/node_modules/.bin/codex`,
+where `<home>` is what `echo "$HOME"` prints in `aether terminal`: `/root`, or
+`/home/aether` in an image whose user is not root.
 
 ### Per-agent setup
 

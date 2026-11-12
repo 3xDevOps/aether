@@ -417,7 +417,7 @@ func TestAssistantInstallsOnlyWhenMissing(t *testing.T) {
 		t.Fatalf("installing called %d times, execs %+v; want one install for codex and one for claude", calls, runs)
 	}
 	manifest, err := os.ReadFile(filepath.Join(install, "package.json"))
-	if want := `{"dependencies":{"@agentclientprotocol/codex-acp":"` + codex.ACPInstall.Version + `","@openai/codex":"0.159.3"},"private":true}`; err != nil || string(manifest) != want {
+	if want := `{"dependencies":{"@agentclientprotocol/codex-acp":"` + codex.ACPInstall.Version + `","@openai/codex":"` + codex.ACPInstall.CLIVersion + `"},"private":true}`; err != nil || string(manifest) != want {
 		t.Fatalf("codex package.json = %s, %v; want %s", manifest, err, want)
 	}
 	if want := []runtime.Mount{{HostPath: AssistantInstallDir(assistantDir, e.member.ID, "claude"), ContainerPath: AssistantInstallPath + "/claude"}}; !slices.Equal(installer.Mounts, want) {

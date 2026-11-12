@@ -389,10 +389,10 @@ release; this one is pinned so a vendor release cannot fail an unrelated pull
 request. To bump, change the version, run the two commands above, and fix
 what the new release broke in the same pull request.
 
-The assistant installs the adapters at the versions in `acpregistry.json` and
-`assistantPins` (`internal/scheduler/assistant_container.go`), and refreshes
-its sign-ins with the endpoints and client ids next to `assistantPins`. After
-moving either, run:
+The assistant installs the adapters at the versions in `acpregistry.json`, and
+Codex at the `CLIVersion` next to its pin (`internal/harness/acp.go`). It
+refreshes its sign-ins with the endpoints and client ids in
+`internal/scheduler/assistant_container.go`. After moving any of them, run:
 
 ```sh
 AETHER_ACP_IMAGE=aether-standard:local \

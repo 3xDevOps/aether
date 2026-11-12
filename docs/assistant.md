@@ -67,9 +67,9 @@ On the first start, and after a server upgrade that pins a newer adapter, the
 panel shows **Installing** while a short-lived container,
 `aether-assistant-install-<member>`, runs `npm install` of the pinned adapter
 into that directory. It needs network access to the npm registry. The adapter
-carries the agent itself: the Claude Code binary of its Agent SDK, or Codex,
-which the install pins to 0.159.3. Neither updates on its own; both move when a
-server upgrade pins a newer version.
+carries the agent itself: the Claude Code binary of its Agent SDK, or the Codex
+version Aether pins with the adapter. Neither updates on its own; both move when
+a server upgrade pins a newer version.
 
 ## Open it
 

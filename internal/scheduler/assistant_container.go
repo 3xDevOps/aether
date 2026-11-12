@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -89,14 +88,8 @@ const assistantPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/
 // directory in the assistant container's PATH.
 var assistantAgents = []string{"claude", "codex"}
 
-// assistantPins holds the dependencies an adapter declares by range to the
-// version the assistant runs: codex-acp 2.1.1 accepts any @openai/codex
-// ^0.159.1.
-var assistantPins = map[string]map[string]string{"codex": {"@openai/codex": "0.159.3"}}
-
-// The sign-in endpoints and client ids the pinned CLIs refresh with: Claude
-// Code 2.1.287, bundled by claude-agent-acp's Agent SDK, and Codex 0.159.3.
-// They move with the pins above;
+// The sign-in endpoints and client ids the assistant's pinned CLIs, each
+// adapter's CLIVersion, refresh with. They move with those pins;
 // TestIntegrationAssistantIssuerMatchesTheBundledCLIs holds them equal.
 const (
 	claudeTokenURL   = "https://platform.claude.com/v1/oauth/token"
@@ -276,15 +269,13 @@ func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID)
 	return nil
 }
 
-// installAssistant installs profile's pinned adapter, with the dependencies
-// assistantPins holds, into the member's AssistantInstallDir unless that
-// package.json is installed there, calling installing first. The install runs
-// in a container of its own, the only one that mounts the directory
-// writable, and starts from an empty directory. Callers hold assistantLock.
+// installAssistant installs profile's pinned adapter, with assistantDeps, into
+// the member's AssistantInstallDir unless that package.json is installed
+// there, calling installing first. The install runs in a container of its
+// own, the only one that mounts the directory writable, and starts from an
+// empty directory. Callers hold assistantLock.
 func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID, profile harness.Profile, installing func()) error {
-	deps := map[string]string{profile.ACPInstall.Package: profile.ACPInstall.Version}
-	maps.Copy(deps, assistantPins[profile.Name])
-	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": deps})
+	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": assistantDeps(profile.ACPInstall)})
 	if err != nil {
 		return fmt.Errorf("scheduler: encode the assistant's package.json: %w", err)
 	}
@@ -365,4 +356,15 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 		return fmt.Errorf("scheduler: record the assistant's install: %w", err)
 	}
 	return nil
+}
+
+// assistantDeps is the assistant install's package.json dependencies: the
+// pinned adapter and, for an adapter that depends on its CLI by range, that
+// CLI at CLIVersion.
+func assistantDeps(i *harness.ACPInstall) map[string]string {
+	deps := map[string]string{i.Package: i.Version}
+	if i.CLIPackage != "" {
+		deps[i.CLIPackage] = i.CLIVersion
+	}
+	return deps
 }

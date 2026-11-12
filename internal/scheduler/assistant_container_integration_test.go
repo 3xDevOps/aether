@@ -7,9 +7,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"maps"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,9 +62,7 @@ func seedAssistantInstall(t *testing.T, assistantDir string, member domain.Membe
 	if err := os.Chmod(filepath.Join(dir, "node_modules", ".bin", profile.ACPInstall.Binary), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	deps := map[string]string{profile.ACPInstall.Package: profile.ACPInstall.Version}
-	maps.Copy(deps, assistantPins[agent])
-	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": deps})
+	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": assistantDeps(profile.ACPInstall)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,10 +500,17 @@ func TestIntegrationAssistantIssuerMatchesTheBundledCLIs(t *testing.T) {
 				t.Errorf("%s's bundled CLI %s does not contain %q; update the issuer next to the pins", agent, matches[0], s)
 			}
 		}
+		dir := AssistantInstallDir(e.sched.cfg.AssistantDir, e.member.ID, agent)
+		if i := profile.ACPInstall; i.CLIPackage != "" {
+			if _, err := os.Stat(filepath.Join(dir, "node_modules", i.Package, "node_modules", i.CLIPackage)); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("%s installed its own %s (stat: %v): its dependency range does not accept CLIVersion %q; set CLIVersion to a version it accepts", i.Package, i.CLIPackage, err, i.CLIVersion)
+			}
+			continue
+		}
 		if profile.ACPInstall.CLIVersion == "" {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(AssistantInstallDir(e.sched.cfg.AssistantDir, e.member.ID, agent), "node_modules/@anthropic-ai/claude-agent-sdk/package.json"))
+		raw, err := os.ReadFile(filepath.Join(dir, "node_modules/@anthropic-ai/claude-agent-sdk/package.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
