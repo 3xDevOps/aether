@@ -8,9 +8,13 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/dustin/go-humanize"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
@@ -57,6 +61,9 @@ func updateCmd(args []string) error {
 	if os.Geteuid() != 0 {
 		return errors.New("run it as root: sudo aether-server update")
 	}
+	// Progress goes to stdout between stopping and starting the unit: a
+	// reader that goes away, as `| head` does, must not end the update there.
+	signal.Ignore(syscall.SIGPIPE)
 	// Before Lock, so a refused host gets nothing created under its data
 	// directory with root's ownership.
 	out, err := exec.Command("systemctl", "cat", updateUnit).CombinedOutput()
@@ -101,16 +108,19 @@ func updateCmd(args []string) error {
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
 
-	staged, err := serverupdate.Stage(ctx, serverupdate.Plan{
-		BaseURL:  baseURL,
-		Self:     self,
-		StateDir: stateDir,
-		Database: database,
-		// Read without opening the store, so without migrating it.
-		Schema: func(context.Context) (int, error) { return store.ReadSchemaVersion(database) },
-		Now:    time.Now,
-	}, target)
-	if err != nil {
+	var staged *serverupdate.Staged
+	if err := step("checking and downloading the release", func() (err error) {
+		staged, err = serverupdate.Stage(ctx, serverupdate.Plan{
+			BaseURL:  baseURL,
+			Self:     self,
+			StateDir: stateDir,
+			Database: database,
+			// Read without opening the store, so without migrating it.
+			Schema: func(context.Context) (int, error) { return store.ReadSchemaVersion(database) },
+			Now:    time.Now,
+		}, target)
+		return err
+	}); err != nil {
 		return err
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -118,11 +128,22 @@ func updateCmd(args []string) error {
 	if out, err := exec.CommandContext(probeCtx, self, "version").CombinedOutput(); err != nil {
 		return errors.Join(fmt.Errorf("the new aether-server does not run: %w: %s", err, strings.TrimSpace(string(out))), staged.Undo())
 	}
-	before := unitPID()
-	if err := restartOnto(staged); err != nil {
+	before, began := unitPID(), time.Now()
+	if err := restartOnto(staged, database); err != nil {
 		return err
 	}
-	return awaitUpdate(stateDir, database, target, staged, before)
+	return awaitUpdate(stateDir, database, target, staged, before, began)
+}
+
+func step(what string, do func() error) error {
+	fmt.Printf("%s ... ", what)
+	start := time.Now()
+	if err := do(); err != nil {
+		fmt.Println("failed")
+		return err
+	}
+	fmt.Printf("done in %s\n", time.Since(start).Round(10*time.Millisecond))
+	return nil
 }
 
 // updateTarget is the tag to install: the one asked for, or the latest
@@ -149,15 +170,34 @@ func updateTarget(ctx context.Context, baseURL, tag string) (string, error) {
 // to it, and starts the unit. A snapshot that fails starts the previous
 // binary again instead. So does a start systemd refuses, which leaves no
 // process to count the trial and roll it back.
-func restartOnto(staged *serverupdate.Staged) error {
-	if out, err := exec.Command("systemctl", "stop", updateUnit).CombinedOutput(); err != nil {
-		return errors.Join(fmt.Errorf("systemctl stop %s: %w: %s", updateUnit, err, out), staged.Undo())
+func restartOnto(staged *serverupdate.Staged, database string) error {
+	if err := step("stopping aether-server; sessions keep running", func() error {
+		if out, err := exec.Command("systemctl", "stop", updateUnit).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl stop %s: %w: %s", updateUnit, err, out)
+		}
+		return nil
+	}); err != nil {
+		return errors.Join(err, staged.Undo())
 	}
-	snapErr := staged.Snapshot()
+	var snapErr error
+	if snapshot := staged.SnapshotFile(); snapshot != "" {
+		var size uint64
+		if info, err := os.Stat(database); err == nil {
+			size = uint64(info.Size())
+		}
+		if snapErr = step(fmt.Sprintf("copying the %s database to %s so a failed start can roll back", humanize.Bytes(size), snapshot), staged.Snapshot); snapErr != nil {
+			snapErr = errors.Join(snapErr, staged.Undo())
+		}
+	}
+	starting := "starting aether-server"
 	if snapErr != nil {
-		snapErr = errors.Join(snapErr, staged.Undo())
+		starting = "starting the previous aether-server " + version.Version + " again"
 	}
-	out, err := exec.Command("systemctl", "start", updateUnit).CombinedOutput()
+	var out []byte
+	err := step(starting, func() (err error) {
+		out, err = exec.Command("systemctl", "start", updateUnit).CombinedOutput()
+		return err
+	})
 	if err == nil {
 		return snapErr
 	}
@@ -179,9 +219,10 @@ func restartOnto(staged *serverupdate.Staged) error {
 	return fmt.Errorf("%w; restored %s and started it\n%s", startErr, version.Version, updateJournal)
 }
 
-// awaitUpdate waits for the new binary to commit or be rolled back and
-// prints one line per component.
-func awaitUpdate(stateDir, database, target string, staged *serverupdate.Staged, pidBefore string) error {
+// awaitUpdate says what it waits for, waits for the new binary to commit
+// or be rolled back, and prints one line per component.
+func awaitUpdate(stateDir, database, target string, staged *serverupdate.Staged, pidBefore string, began time.Time) error {
+	fmt.Printf("waiting for aether-server %s to reconnect its sessions and finish starting; sudo journalctl -u aether-server -f shows each session\n", target)
 	deadline := time.Now().Add(updateTimeout)
 	var out serverupdate.Outcome
 	seen := -1
@@ -205,7 +246,7 @@ func awaitUpdate(stateDir, database, target string, staged *serverupdate.Staged,
 	if out.RolledBack {
 		return fmt.Errorf("the update to %s was rolled back: %s\n%s", target, out.Error, updateJournal)
 	}
-	fmt.Printf("aether-server  %s -> %s  restarted (pid %s -> %s)\n", version.Version, target, pidBefore, unitPID())
+	fmt.Printf("aether-server  %s -> %s  restarted in %s (pid %s -> %s)\n", version.Version, target, time.Since(began).Round(time.Second), pidBefore, unitPID())
 	for _, path := range staged.Binaries[1:] {
 		fmt.Printf("%-14s %s  %s\n", filepath.Base(path), path, target)
 	}
