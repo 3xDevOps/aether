@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
@@ -26,6 +28,7 @@ const (
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
 	recoveryPTYRetryMax       = 250 * time.Millisecond
 	defaultExitProbeTimeout   = 2 * time.Second
+	runRecoveryConcurrency    = 4
 )
 
 func retainedTransitionError() error {
@@ -651,25 +654,50 @@ func (s *Scheduler) clampRetainedDeadlineLocked(r *domain.Run, sc *sidecar) erro
 
 // recoverRuns resumes supervision where the container still runs and
 // otherwise marks the run interrupted. Terminal rows never regain
-// supervision.
+// supervision. Runs recover concurrently, so one slow reconnect does not
+// hold up the others.
 func (s *Scheduler) recoverRuns(ctx context.Context) error {
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err != nil {
 		return fmt.Errorf("scheduler: recovery: %w", err)
 	}
+	if len(active) > 0 {
+		slog.Info("scheduler: recovery: reconnecting sessions", "sessions", len(active), "at_once", runRecoveryConcurrency)
+	}
+	began := time.Now()
+	var (
+		wg        sync.WaitGroup
+		recovered atomic.Int64
+	)
+	slots := make(chan struct{}, runRecoveryConcurrency)
 	for _, r := range active {
-		s.mu.Lock()
-		_, alreadySupervised := s.runs[r.ID]
-		s.mu.Unlock()
-		if alreadySupervised {
-			continue
-		}
-		switch r.Status {
-		case domain.RunQueued, domain.RunProvisioning:
-			s.recoverUnstarted(ctx, r)
-		case domain.RunRunning, domain.RunNeedsAttention:
-			s.recoverSupervised(ctx, r)
-		}
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			if ctx.Err() != nil {
+				return
+			}
+			s.mu.Lock()
+			_, alreadySupervised := s.runs[r.ID]
+			s.mu.Unlock()
+			if alreadySupervised {
+				return
+			}
+			slog.Info("scheduler: recovery: session started", "run", r.ID)
+			start := time.Now()
+			switch r.Status {
+			case domain.RunQueued, domain.RunProvisioning:
+				s.recoverUnstarted(ctx, r)
+			case domain.RunRunning, domain.RunNeedsAttention:
+				s.recoverSupervised(ctx, r)
+			}
+			slog.Info("scheduler: recovery: session done", "run", r.ID, "took", time.Since(start).Round(time.Millisecond))
+			recovered.Add(1)
+		})
+	}
+	wg.Wait()
+	if len(active) > 0 {
+		slog.Info("scheduler: recovery: sessions done", "sessions", recovered.Load(), "took", time.Since(began).Round(time.Millisecond))
 	}
 	s.refreshActivities(ctx)
 	s.cleanupTerminalSidecars(ctx)
