@@ -498,7 +498,7 @@ func TestIntegrationAssistantIssuerMatchesTheBundledCLIs(t *testing.T) {
 				t.Errorf("%s's bundled CLI %s does not contain %q; update the issuer next to the pins", agent, matches[0], s)
 			}
 		}
-		if profile.ACPInstall.CLIVersion == "" {
+		if profile.ACPInstall.CLIVersion == "" || profile.ACPInstall.CLIPackage != "" {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(AssistantInstallDir(e.sched.cfg.AssistantDir, e.member.ID, agent), "node_modules/@anthropic-ai/claude-agent-sdk/package.json"))
