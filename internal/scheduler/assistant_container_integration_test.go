@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,9 +60,7 @@ func seedAssistantInstall(t *testing.T, assistantDir string, member domain.Membe
 	if err := os.Chmod(filepath.Join(dir, "node_modules", ".bin", profile.ACPInstall.Binary), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	deps := map[string]string{profile.ACPInstall.Package: profile.ACPInstall.Version}
-	maps.Copy(deps, assistantPins[agent])
-	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": deps})
+	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": assistantDeps(profile.ACPInstall)})
 	if err != nil {
 		t.Fatal(err)
 	}
