@@ -1,0 +1,88 @@
+name: Agent pins
+
+# Opens or updates one pull request, from bot/agent-pins, that moves the agent
+# pins to the newest releases with scripts/bump-agent-pins.sh. It pushes as a
+# GitHub App: a pull request the workflow token opens starts no CI.
+# docs/testing.md, "Agent pins".
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: agent-pins
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BRANCH: bot/agent-pins
+      TITLE: 'build(harness): move the agent pins to the newest releases'
+    steps:
+      - name: Check the app is configured
+        env:
+          APP_ID: ${{ vars.AGENT_PINS_APP_ID }}
+          KEY_SET: ${{ secrets.AGENT_PINS_APP_KEY != '' }}
+        run: |
+          if [ -z "$APP_ID" ] || [ "$KEY_SET" != true ]; then
+            echo '::error::set the AGENT_PINS_APP_ID variable and the AGENT_PINS_APP_KEY secret (docs/testing.md, "Agent pins")'
+            exit 1
+          fi
+      - id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENT_PINS_APP_ID }}
+          private-key: ${{ secrets.AGENT_PINS_APP_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ steps.app.outputs.token }}
+      - name: Move the pins
+        run: |
+          sh scripts/bump-agent-pins.sh >"$RUNNER_TEMP/moved"
+          cat "$RUNNER_TEMP/moved"
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+        run: |
+          if git diff --quiet; then
+            echo "The pins are current."
+            exit 0
+          fi
+          email="$(gh api "/users/$BOT" --jq .id)+$BOT@users.noreply.github.com"
+          pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          lease=$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)
+          if [ -n "$pr" ]; then
+            head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits?per_page=100" --jq "(last | .sha) + \" \" + ([.[].commit | .author.email, .committer.email | select(. != \"$email\")] | length | tostring)")
+            lease=${head% *} others=${head#* }
+            if [ "$others" != 0 ]; then
+              echo "::notice::#$pr carries commits by others; leaving $BRANCH alone until it merges"
+              exit 0
+            fi
+            git fetch --quiet --depth=1 origin "$lease"
+            if git diff --quiet FETCH_HEAD -- internal/harness/acpregistry.json internal/harness/acp.go images/agents/Dockerfile; then
+              echo "#$pr already proposes these pins."
+              exit 0
+            fi
+          fi
+          git config user.name "$BOT"
+          git config user.email "$email"
+          git switch --quiet -c "$BRANCH"
+          git commit --quiet -a -m "$TITLE" -m "$(cat "$RUNNER_TEMP/moved")"
+          git push --quiet --force-with-lease="$BRANCH:$lease" origin "$BRANCH"
+          {
+            echo "Moves the agent pins to the newest releases, as \`scripts/bump-agent-pins.sh\` found them:"
+            echo
+            sed 's/^/- /' "$RUNNER_TEMP/moved"
+            echo
+            echo 'Pull request CI runs the unit tests; the merge queue runs the real-agent suite on these versions. Push a fix for a failing check to this branch: the workflow never replaces a pull request that carries a commit anyone else authored or committed.'
+          } >"$RUNNER_TEMP/body"
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --body-file "$RUNNER_TEMP/body"
+          else
+            gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/body"
+          fi

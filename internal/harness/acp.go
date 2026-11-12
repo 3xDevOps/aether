@@ -45,6 +45,7 @@ type ACPInstall struct {
 // acpregistry.json; TestACPRegistryPins holds them equal. CLIVersion moves with
 // the CLI the pinned adapter installs: the Claude Code claude-agent-acp's Agent
 // SDK bundles, and the newest @openai/codex in codex-acp's dependency range.
+// scripts/bump-agent-pins.sh moves all of them, editing these lines as text.
 var (
 	claudeACP = &ACPInstall{RegistryID: "claude-acp", Package: "@agentclientprotocol/claude-agent-acp", Version: "0.86.0", Binary: "claude-agent-acp", CLIEnv: "CLAUDE_CODE_EXECUTABLE", CLIVersion: "2.1.287"}
 	codexACP  = &ACPInstall{RegistryID: "codex-acp", Package: "@agentclientprotocol/codex-acp", Version: "2.1.1", Binary: "codex-acp", CLIEnv: "CODEX_PATH", CLIVersion: "0.159.3", CLIPackage: "@openai/codex"}

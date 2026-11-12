@@ -1,9 +1,9 @@
 # Test fixture, not a shipped image. It carries the agent CLIs the
 # real-agent suite (internal/server/realagents_integration_test.go) runs,
-# pinned, so a vendor release reaches CI only when the versions here are
-# bumped. The ACP adapters are the versions Aether installs for members, read
-# from internal/harness/acpregistry.json. docs/testing.md, "Real agents
-# against a mock model".
+# pinned, so a vendor release reaches CI only when scripts/bump-agent-pins.sh
+# moves the versions here. The ACP adapters are the versions Aether installs
+# for members, read from internal/harness/acpregistry.json. docs/testing.md,
+# "Real agents against a mock model".
 ARG BASE=ghcr.io/3xdevops/aether-standard:latest
 FROM ${BASE}
 ARG CLAUDE_CODE_VERSION=2.1.308

@@ -129,6 +129,12 @@ jobs:
           sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
             make test-integration INTEGRATION_SKIP="./internal/harness ./internal/server" \
               INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
+      - name: Assistant sign-in endpoints in the pinned CLIs (real Docker, npm)
+        if: ${{ !cancelled() }}
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" AETHER_ACP_IMAGE=aether-standard:ci \
+            make test-integration INTEGRATION_PKGS=./internal/scheduler \
+              INTEGRATION_RUN='^TestIntegrationAssistantIssuerMatchesTheBundledCLIs$'
       - name: Prove standard environment tools and native Git
         if: ${{ !cancelled() }}
         run: sh scripts/standard-image-smoke.sh aether-standard:ci

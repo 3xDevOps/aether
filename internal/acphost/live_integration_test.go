@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // TestLiveAdapters runs the pinned adapters for initialize and session/new
@@ -21,10 +23,9 @@ func TestLiveAdapters(t *testing.T) {
 	if _, err := exec.LookPath("npx"); err != nil {
 		t.Skip("npx not on PATH")
 	}
-	for _, pkg := range []string{
-		"@agentclientprotocol/claude-agent-acp@0.86.0",
-		"@agentclientprotocol/codex-acp@2.1.1",
-	} {
+	for _, agent := range []string{"claude", "codex"} {
+		profile, _ := harness.Lookup(agent)
+		pkg := profile.ACPInstall.Package + "@" + profile.ACPInstall.Version
 		t.Run(pkg, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 			defer cancel()
