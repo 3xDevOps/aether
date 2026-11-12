@@ -152,7 +152,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                     <span className="flex shrink-0 items-center gap-2 max-sm:pl-7">
                       {scoped && administers(workspace) && caps.hasMethod('workspace.access.list') && (
                         <Button size="sm" variant="secondary" aria-label={`Access to ${workspace.name}`} onClick={() => setAccessing(workspace)}>
-                          Access
+                          Access…
                         </Button>
                       )}
                       <Button size="sm" variant="secondary" aria-label={`Settings for ${workspace.name}`} onClick={() => navigate('workspace', { workspaceId: workspace.id })}>

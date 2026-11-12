@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Confirm } from '@/components/confirm'
 import { FolderGit2 } from '@/components/icons'
@@ -43,6 +43,16 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
     return !id ? '' : id === selfID ? 'you' : s.members[id]?.display_name ?? id
   })
   const [dialog, setDialog] = useState<'budget' | 'settings' | 'delete' | 'access' | 'owner' | null>(null)
+  const canAccess = scoped && isAdmin && caps.hasMethod('workspace.access.list')
+  const [granted, setGranted] = useState<number | null>(null)
+  useEffect(() => {
+    if (!canAccess || dialog === 'access' || dialog === 'owner') return
+    let live = true
+    client.workspaceAccessList(workspaceID).then((access) => live && setGranted(access.grants.length), () => live && setGranted(null))
+    return () => {
+      live = false
+    }
+  }, [canAccess, client, dialog, workspaceID])
   const [settingsClosed, setSettingsClosed] = useState(0)
 
   if (!workspace) {
@@ -92,8 +102,10 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
             {scoped && ownerName && (
               <SettingRow
                 label="Access"
-                help={`Owner: ${ownerName}. The owner, super admins and the members granted access can use this workspace.`}
-                control={isAdmin && caps.hasMethod('workspace.access.list') && (
+                help={granted === null
+                  ? `Owner: ${ownerName}. The owner, super admins and the members granted access can use this workspace.`
+                  : `Owner: ${ownerName}. Granted to ${granted} ${granted === 1 ? 'member' : 'members'}; super admins always have access.`}
+                control={canAccess && (
                   <Button size="sm" variant="secondary" onClick={() => setDialog('access')}>Access…</Button>
                 )}
               />

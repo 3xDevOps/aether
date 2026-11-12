@@ -146,7 +146,7 @@ export function Roster({ client }: { client: Api }) {
                   ? <span className="flex items-center gap-1.5 text-text"><StatusDot tone="done" />Online</span>
                   : seen ? <RelativeTime at={seen} /> : 'Offline'
                 const account = !you && (
-                  <span className="flex min-w-0 flex-col items-start gap-1">
+                  <span className="flex min-w-0 flex-col items-start gap-0.5">
                     {canShare && (
                       <span className="flex min-h-7 items-center gap-2 coarse:min-h-11">
                         <Switch
@@ -159,13 +159,13 @@ export function Roster({ client }: { client: Api }) {
                         <label htmlFor={`share-${member.id}`} className="text-ui-sm text-text">Share my account</label>
                       </span>
                     )}
-                    {sharing.sharesWithMe(member.id) && <span className="text-ui-sm text-muted">Shares their account with you</span>}
+                    {sharing.sharesWithMe(member.id) && <span className="text-ui-sm text-balance text-muted">Shares their account with you</span>}
                   </span>
                 )
                 return (
                   <tr key={member.id} className="transition-colors hover:bg-hover motion-reduce:transition-none">
                     <td className="px-3 py-2 align-top">
-                      <span className="flex min-w-0 items-center gap-2">
+                      <span className="flex min-h-7 min-w-0 items-center gap-2 coarse:min-h-11">
                         <Avatar name={member.display_name} color={member.color} size="header" />
                         <span className="flex min-w-0 flex-col">
                           <span className="flex min-w-0 items-baseline gap-1">
@@ -192,7 +192,7 @@ export function Roster({ client }: { client: Api }) {
                       ) : <span className="text-text">{roleLabel[member.role]}</span>}
                     </td>
                     {wide && <td className="px-3 py-2 align-top">{account}</td>}
-                    <td className="hidden px-3 py-2 align-top text-muted md:table-cell">{presence}</td>
+                    <td className="hidden px-3 py-2 align-top text-muted md:table-cell"><span className="flex min-h-7 items-center coarse:min-h-11">{presence}</span></td>
                     {canRemove && (
                       <td className="px-1 py-1 text-right align-top">
                         {!you && (
