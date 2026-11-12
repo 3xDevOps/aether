@@ -402,7 +402,6 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 
 	var (
 		msg              *store.RoomMessage
-		deliveryProof    *control.Snapshot
 		immediate        *Result
 		immediateFailure *store.RoomMessageFailure
 	)
@@ -429,22 +428,15 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		session := in.ControllerSessionID
 		generation := in.ControllerGeneration
 		switch {
-		case hasController && current.Connected && current.MemberID == actor.ID && session == "":
-			// A client that holds no lease (the assistant, aether message,
-			// connectors) speaks for the member in control, who has no one
-			// to wait for.
-			proof := current
-			deliveryProof = &proof
-		case hasController && current.MemberID == actor.ID && session != "" &&
-			current.SessionID == session && current.Generation == generation,
+		case hasController && current.MemberID == actor.ID &&
+			(session == "" || current.SessionID == session && current.Generation == generation),
 			!hasController && actor.ID == run.MemberID:
-			// The lease's holder sends at once, also in its reconnect window,
-			// as when waking a sleeping session ends the holder's stream; a
-			// stale session waits. The owner of a run nobody controls could
-			// take the lease, as the dashboard does before sending, so clients
-			// that hold no lease (aether message, connectors) send at once
-			// too. Delivery stays inside this admission so the lease cannot
-			// change first.
+			// The member in control sends at once, also while its lease waits
+			// to reconnect, as after a wake ends its stream; a stale session
+			// waits. A client that holds no lease (the assistant, aether
+			// message, connectors) speaks for that member, or for the owner
+			// of a run nobody controls. Delivery stays inside this admission
+			// so the lease cannot change first.
 			if err := s.cfg.Store.CreateRoomMessage(ctx, msg); err != nil {
 				return err
 			}
@@ -479,7 +471,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 	if msg.DeliverAfter != nil {
 		return Result{Message: msg}, nil
 	}
-	return s.deliverResult(ctx, msg, actor, run, false, "", deliveryProof, nil, in.Steer)
+	return s.deliverResult(ctx, msg, actor, run, false, "", nil, in.Steer)
 }
 
 func (s *Service) observeExisting(ctx context.Context, msg *store.RoomMessage) (Result, error) {

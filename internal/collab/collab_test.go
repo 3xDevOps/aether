@@ -853,6 +853,13 @@ func TestReconnectingControllerSendsAtOnce(t *testing.T) {
 		t.Fatalf("reconnecting controller: deliver_after=%v state=%s inject calls=%d, want sent at once", result.Message.DeliverAfter, result.Message.State, pty.Calls())
 	}
 
+	leaseless, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "from a connector", IdempotencyKey: "leaseless"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaseless.Message.DeliverAfter != nil || leaseless.Message.State != store.RoomMessageSent || pty.Calls() != 2 {
+		t.Fatalf("reconnecting controller's lease-less client: deliver_after=%v state=%s inject calls=%d, want sent at once", leaseless.Message.DeliverAfter, leaseless.Message.State, pty.Calls())
+	}
 	// The agent has the message, so a caller that gives up does not lose its receipt.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -876,7 +883,7 @@ func TestReconnectingControllerSendsAtOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expired.Message.DeliverAfter == nil || pty.Calls() != 1 {
+	if expired.Message.DeliverAfter == nil || pty.Calls() != 2 {
 		t.Fatalf("holder past its reconnect window: deliver_after=%v inject calls=%d, want queued", expired.Message.DeliverAfter, pty.Calls())
 	}
 }
@@ -892,7 +899,7 @@ func (b *disconnectingCollabBus) Publish(_ context.Context, e events.Event) (eve
 }
 
 // The holder's stream can also end after the room reads its lease and
-// before the agent takes the message.
+// publishes the message, before the agent takes it.
 func TestControllerSendSurvivesADisconnectBeforeDelivery(t *testing.T) {
 	st, clock, ws, _, other, run := setupCollab(t)
 	pty := &collabPTY{}
