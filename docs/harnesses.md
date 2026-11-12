@@ -289,7 +289,9 @@ adapter runs its own copy instead when the CLI is not on `PATH`, or its
 read within 10 seconds. Update a CLI in your home in `aether terminal`, with
 `claude update` or the `npm install` line under [Codex](#codex), and one
 installed in the image by rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` or
-`CODEX_PATH` set as a workspace variable wins.
+`CODEX_PATH` set as a workspace variable wins, so a session can go back to the
+adapter's own Codex with `CODEX_PATH` set to
+`/root/.local/lib/node_modules/@agentclientprotocol/codex-acp/node_modules/.bin/codex`.
 
 ### Per-agent setup
 
