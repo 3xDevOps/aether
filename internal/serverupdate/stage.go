@@ -59,6 +59,10 @@ func Stage(ctx context.Context, p Plan, tag string) (*Staged, error) {
 	return &Staged{Binaries: rec.Binaries, Schema: m.StoreSchema, dir: p.StateDir, rec: rec}, nil
 }
 
+// SnapshotFile is where Snapshot copies the database, empty when the
+// release keeps the schema and nothing is copied.
+func (s *Staged) SnapshotFile() string { return s.rec.Snapshot }
+
 // Snapshot copies the database when the release migrates it. Call it once
 // the server has stopped and before it starts again.
 func (s *Staged) Snapshot() error { return takeSnapshot(s.rec) }

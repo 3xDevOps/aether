@@ -605,6 +605,23 @@ it, and restart the service. The old binaries stay as `aether-server.prev` and
 the new server does not finish starting, it restores both and records why.
 Sessions keep going; `aether attach` and `aether sync --live` reconnect.
 
+`sudo aether-server update` prints each step as it runs, with how long it
+took. The database copy appears only when the release changes the schema, and
+the wait at the end lasts until the new server has reconnected every open
+session:
+
+```
+aether-server v0.8.7-beta.12 -> v0.8.7-beta.13
+https://github.com/3xDevOps/Aether/releases/tag/v0.8.7-beta.13
+checking and downloading the release ... done in 4.12s
+stopping aether-server; sessions keep running ... done in 2.31s
+copying the 9.1 GB database to /var/lib/aether/server-update/aether.db.pre-update so a failed start can roll back ... done in 21.43s
+starting aether-server ... done in 120ms
+waiting for aether-server v0.8.7-beta.13 to reconnect its sessions and finish starting; sudo journalctl -u aether-server -f shows each session
+aether-server  v0.8.7-beta.12 -> v0.8.7-beta.13  restarted in 1m12s (pid 1234 -> 5678)
+aether         /usr/local/bin/aether  v0.8.7-beta.13
+```
+
 `aether server update --when idle` waits until no session is working, no terminal
 is attached and no SSH connection into a session is open; `--cancel` clears that
 pending update. `--allow-downgrade` allows an older release, `--yes` skips the
