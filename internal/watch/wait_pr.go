@@ -18,6 +18,7 @@ import (
 // prSnapshots reads one pull request as it stands. Satisfied by *PRs.
 type prSnapshots interface {
 	Snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, fresh bool) (github.Snapshot, error)
+	QueueRemoval(ctx context.Context, member domain.MemberID, repo string, number int) (*github.QueueRemoval, error)
 }
 
 // Snapshot reads repo#number with member's GitHub credentials, as
@@ -46,13 +47,16 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 	if !ok {
 		return r, fmt.Errorf("%w: this server does not read pull requests", errWaitUnreadable)
 	}
-	snap, err := src.Snapshot(ctx, home, w.Repo, w.Number, w.Kind == protocol.WaitKindPRChecks, fresh)
-	if err != nil {
+	readErr := func(err error) error {
 		var pe *prError
 		if errors.As(err, &pe) && (!pe.transient || pe.noLogin) {
-			return r, fmt.Errorf("%w: %s", errWaitUnreadable, pe.msg)
+			return fmt.Errorf("%w: %s", errWaitUnreadable, pe.msg)
 		}
-		return r, err
+		return err
+	}
+	snap, err := src.Snapshot(ctx, home, w.Repo, w.Number, w.Kind == protocol.WaitKindPRChecks, fresh)
+	if err != nil {
+		return r, readErr(err)
 	}
 	checks := countedChecks(snap, w.CreatedAt, now)
 	r.observed = protocol.WaitObserved{
@@ -80,6 +84,24 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 			r.done, r.outcome, r.summary, r.observation = true, "closed", ref+" closed without merging", "closed"
 		default:
 			r.summary = ref + " is open, " + counts
+			removal, err := src.QueueRemoval(ctx, home, w.Repo, w.Number)
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return r, err
+			case err != nil:
+				// The pull request read decides merged and closed; a queue
+				// GitHub will not show only goes unread.
+				r.summary += "; can't read its merge queue (" + err.Error() + ")"
+			case removal == nil || !after(removal.At, w.CreatedAt):
+				// A removal before the wait began is the state it waits from.
+			case now.Sub(removal.At) < queueSettle:
+				r.summary += "; removed from the merge queue at " + removal.At.UTC().Format(time.RFC3339) + ", read again in case it is queued again"
+				r.next = minTime(r.next, removal.At.Add(queueSettle))
+			default:
+				r.done, r.outcome, r.observation = true, "removed-from-queue", "removed-from-queue@"+removal.At.UTC().Format(time.RFC3339)
+				r.summary = ref + " was removed from the merge queue without merging, " + counts
+				r.detail = "reason: " + removal.Reason
+			}
 		}
 	case protocol.WaitKindPRChecks:
 		named := strings.Contains(w.Spec, "@")
@@ -162,6 +184,11 @@ const (
 	namedHeadGrace = 5 * time.Minute
 )
 
+// queueSettle is how long a merge queue removal must stand before it
+// resolves a merged wait: people dequeue and requeue within seconds to
+// reorder the queue.
+const queueSettle = time.Minute
+
 // maxUntrusted bounds the third-party text a wake quotes.
 const maxUntrusted = 300
 
@@ -218,6 +245,8 @@ func nextStep(w *store.RunWait) string {
 		return "the pull request merged; continue with the work that waited on it"
 	case "closed":
 		return "the pull request was closed without merging; decide whether to reopen it or report the change of plan"
+	case "removed-from-queue":
+		return "the merge queue removed the pull request without merging it; open the link to read why, fix it, queue it again and wait again"
 	case "passed":
 		return "the checks passed; continue"
 	case "failed":

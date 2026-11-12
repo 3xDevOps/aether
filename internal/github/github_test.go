@@ -40,7 +40,7 @@ func newTestService(t *testing.T, credentials string, handler transportFunc) (*S
 	}
 	s := New(homes)
 	s.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodGet || r.URL.Scheme != "https" || r.URL.Host != "api.github.com" || r.URL.User != nil {
+		if r.Method != http.MethodGet && (r.Method != http.MethodPost || r.URL.Path != "/graphql") || r.URL.Scheme != "https" || r.URL.Host != "api.github.com" || r.URL.User != nil {
 			t.Fatalf("unsafe request: %s %s", r.Method, r.URL.Redacted())
 		}
 		if _, ok := r.Context().Deadline(); !ok {

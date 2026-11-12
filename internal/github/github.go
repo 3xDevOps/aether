@@ -255,11 +255,18 @@ func (s *Service) get(ctx context.Context, token, path string, dst any) (http.He
 // fetch sends If-None-Match when etag is set; on 304 it reports notModified
 // and leaves dst untouched.
 func (s *Service) fetch(ctx context.Context, token, path, etag string, dst any) (header http.Header, notModified bool, err error) {
+	return s.request(ctx, token, http.MethodGet, path, nil, etag, dst)
+}
+
+func (s *Service) request(ctx context.Context, token, method, path string, payload []byte, etag string, dst any) (header http.Header, notModified bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com"+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, "https://api.github.com"+path, bytes.NewReader(payload))
 	if err != nil || req.URL.Scheme != "https" || req.URL.Host != "api.github.com" || req.URL.User != nil {
 		return nil, false, errors.New("github: invalid API request")
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
