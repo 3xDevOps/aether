@@ -107,7 +107,7 @@ func TestInstallCommand(t *testing.T) {
 	if got := claude.InstallCommand(false); got != claude.InstallScript {
 		t.Fatalf("InstallCommand(false) = %q", got)
 	}
-	want := claude.InstallScript + ` && npm install -g --prefix "$HOME/.local" @agentclientprotocol/claude-agent-acp@0.86.0`
+	want := claude.InstallScript + ` && npm install -g --prefix "$HOME/.local" ` + claude.ACPInstall.Package + "@" + claude.ACPInstall.Version
 	if got := claude.InstallCommand(true); got != want {
 		t.Fatalf("InstallCommand(true) = %q, want %q", got, want)
 	}

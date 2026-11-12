@@ -14,7 +14,7 @@ pull request sessions are in
 | Server code that touches containers, git, SSH or storage | `make test-integration` | Docker, git; root to match CI |
 | Dashboard components in `web/src` | `cd web && bun run typecheck && bun run test` | Bun, Node 22+ |
 | Something a person clicks through in the dashboard | `make test-e2e` | Docker, git, Bun, Node 22+, Playwright's Chromium |
-| `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3 |
+| `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3, jq |
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
 | How an agent CLI is launched (`internal/harness`) | [Real-agent smoke tests](#real-agent-smoke-tests) | Docker |
 | How a session drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
@@ -386,13 +386,44 @@ mock received.
 `CODEX_VERSION`; the ACP adapters follow `internal/harness/acpregistry.json`,
 the versions members install. The smoke image takes each vendor's latest
 release; this one is pinned so a vendor release cannot fail an unrelated pull
-request. To bump, change the version, run the two commands above, and fix
-what the new release broke in the same pull request.
+request.
+
+`scripts/bump-agent-pins.sh` moves every pin to the newest release and prints
+each one it moved: the adapters in `acpregistry.json` and
+`internal/harness/acp.go` to the versions the
+[ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)
+lists, each adapter's `CLIVersion` to the CLI that release installs, and the
+two CLIs above to npm's latest. It needs curl, jq and npm. Run the two commands
+above on the result, and fix what the new releases broke in the same pull
+request.
+
+The **Agent pins** workflow (`.github/workflows/agent-pins.yml`) runs the
+script every Monday at 06:00 UTC and on `gh workflow run agent-pins.yml`, and
+opens or updates one pull request from `bot/agent-pins`. Pull request CI runs
+the unit tests; the merge queue runs the real-agent suite on the new versions.
+The workflow never replaces a pull request that carries a commit anyone else
+authored or committed, so push a fix for a failing bump to that branch.
+
+The workflow pushes as a GitHub App, because a pull request opened with the
+workflow's own token starts no CI. To set it up once, an organization owner:
+
+1. Creates a GitHub App with no webhook and the repository permissions
+   **Contents**, **Pull requests** and **Workflows** set to **Read and write**.
+   GitHub refuses an App's push that changes a workflow file without
+   Workflows, and the branch rebuilt on a newer `main` changes every workflow
+   `main` changed since the last run.
+2. Installs it on this repository only.
+3. Saves its App ID as the repository variable `AGENT_PINS_APP_ID` and a
+   private key as the repository secret `AGENT_PINS_APP_KEY`.
+
+Without them, each run fails with `set the AGENT_PINS_APP_ID variable and the
+AGENT_PINS_APP_KEY secret`.
 
 The assistant installs the adapters at the versions in `acpregistry.json`, and
 Codex at the `CLIVersion` next to its pin (`internal/harness/acp.go`). It
 refreshes its sign-ins with the endpoints and client ids in
-`internal/scheduler/assistant_container.go`. After moving any of them, run:
+`internal/scheduler/assistant_container.go`. CI's integration job checks them
+with the test below; after moving any of them, run it yourself:
 
 ```sh
 AETHER_ACP_IMAGE=aether-standard:local \
