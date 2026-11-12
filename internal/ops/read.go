@@ -747,7 +747,7 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 	}
 	if in.IncludeDiff {
 		var diff protocol.RunGitDiffResult
-		switch err := c.read(ctx, protocol.MethodRunGitDiff, protocol.RunGitDiffParams{RunID: r.ID, Repo: in.Repo}, &diff); {
+		switch err := c.read(ctx, protocol.MethodRunGitDiff, protocol.RunGitDiffParams{RunID: r.ID, Repo: in.Repo, Base: true}, &diff); {
 		case err != nil:
 			out["diff_error"] = err.Error()
 		case diff.Error != "":
@@ -800,6 +800,13 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 			}
 			if next := in.DiffFile + len(page); next < len(files) {
 				out["next_diff_file"] = next
+			}
+			if page == nil {
+				page = []string{}
+				out["diff_note"] = "tracked files in the worktree match the merge base with " + cmp.Or(diff.BaseRef, "the session's base") + "; untracked files are not in a diff"
+				if diff.Output.Truncated {
+					out["diff_note"] = "the server cut the diff output before any file; the diff is not known to be empty"
+				}
 			}
 			untrusted["diff"] = page
 		}
