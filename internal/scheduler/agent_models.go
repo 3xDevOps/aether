@@ -115,7 +115,15 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 	}
 	start := account == member
 	probe := s.modelProbes.DoChan(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
-		return s.probeAgentModels(context.WithoutCancel(ctx), key, cli[0], profile.EnvPassthrough, start), nil
+		s.mu.Lock()
+		if s.superCtx.Err() != nil {
+			s.mu.Unlock()
+			return protocol.AgentModelsResult{Models: []protocol.AgentModel{}, Source: protocol.ModelSourceNone, Error: name + " models: the server is shutting down"}, nil
+		}
+		s.wg.Add(1)
+		s.mu.Unlock()
+		defer s.wg.Done()
+		return s.probeAgentModels(s.superCtx, key, cli[0], profile.EnvPassthrough, start), nil
 	})
 	select {
 	case got := <-probe:
