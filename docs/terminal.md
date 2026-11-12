@@ -134,10 +134,11 @@ Talk to the agent in the **Chat** view's composer. Press **Enter** or
 eight files per message.
 
 - A message from the current controller reaches the agent's terminal at once
-  (**Sends to the agent's terminal.**). The owner of an uncontrolled session takes
-  the lease first, then sends. A message you send without the lease, from the
-  assistant, `aether message` or a connector, also arrives at once while you
-  are the controller.
+  (**Sends to the agent's terminal.**), also while the controller's dashboard
+  reconnects, as it does when the message wakes a sleeping session. The owner
+  of an uncontrolled session takes the lease first, then sends. A message you
+  send without the lease, from the assistant, `aether message` or a connector,
+  also arrives at once while you are the controller.
 - A message from anyone else waits 45 seconds (**Delivers in 45 s unless the
   controller decides sooner.**). It shows in the chat with a border in the
   sender's color that empties clockwise as the 45 seconds run out. Under it the
