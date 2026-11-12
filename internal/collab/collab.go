@@ -402,7 +402,6 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 
 	var (
 		msg              *store.RoomMessage
-		deliveryProof    *control.Snapshot
 		immediate        *Result
 		immediateFailure *store.RoomMessageFailure
 	)
@@ -429,18 +428,15 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		session := in.ControllerSessionID
 		generation := in.ControllerGeneration
 		switch {
-		case hasController && current.Connected && current.MemberID == actor.ID &&
-			(session == "" || current.SessionID == session && current.Generation == generation):
-			// A client that holds no lease (the assistant, aether message,
-			// connectors) speaks for the member in control, who has no one
-			// to wait for; a stale lease-holding session still waits.
-			proof := current
-			deliveryProof = &proof
-		case !hasController && actor.ID == run.MemberID:
-			// The owner of a run nobody controls could take the lease, as
-			// the dashboard does before sending, so clients that hold no
-			// lease (aether message, connectors) send at once too. Delivery
-			// stays inside this admission so no controller can appear first.
+		case hasController && current.MemberID == actor.ID &&
+			(session == "" || current.SessionID == session && current.Generation == generation),
+			!hasController && actor.ID == run.MemberID:
+			// The member in control sends at once, also while its lease waits
+			// to reconnect, as after a wake ends its stream; a stale session
+			// waits. A client that holds no lease (the assistant, aether
+			// message, connectors) speaks for that member, or for the owner
+			// of a run nobody controls. Delivery stays inside this admission
+			// so the lease cannot change first.
 			if err := s.cfg.Store.CreateRoomMessage(ctx, msg); err != nil {
 				return err
 			}
@@ -465,7 +461,9 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		return Result{}, err
 	}
 	if immediate != nil {
-		return s.settleResult(ctx, msg, immediate.Receipt, immediate.Outcome, immediateFailure)
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentDeliveryTimeout)
+		defer cancel()
+		return s.settleResult(settleCtx, msg, immediate.Receipt, immediate.Outcome, immediateFailure)
 	}
 	if err := s.publishMessage(ctx, msg); err != nil {
 		return Result{}, err
@@ -473,7 +471,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 	if msg.DeliverAfter != nil {
 		return Result{Message: msg}, nil
 	}
-	return s.deliverResult(ctx, msg, actor, run, false, "", deliveryProof, nil, in.Steer)
+	return s.deliverResult(ctx, msg, actor, run, false, "", nil, in.Steer)
 }
 
 func (s *Service) observeExisting(ctx context.Context, msg *store.RoomMessage) (Result, error) {

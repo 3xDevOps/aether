@@ -20,7 +20,7 @@ import (
 
 const agentDeliveryTimeout = 10 * time.Second
 
-func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, force bool, approver domain.MemberID, deliveryProof *control.Snapshot, claimAdmission func(func() error) error, steer bool) (Result, error) {
+func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, force bool, approver domain.MemberID, claimAdmission func(func() error) error, steer bool) (Result, error) {
 	var (
 		claimed bool
 		stored  *store.RoomMessage
@@ -54,7 +54,7 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	// Do not publish the uncertain claim before attempting PTY delivery. A
 	// publication outage must never turn an otherwise unattempted steer into
 	// a durable "uncertain" result.
-	receipt, outcome, failure, deliveryErr := s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, deliveryProof), steer)
+	receipt, outcome, failure, deliveryErr := s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID), steer)
 	if deliveryErr != nil {
 		return Result{}, deliveryErr
 	}
@@ -84,19 +84,12 @@ func (s *Service) settleResult(ctx context.Context, msg *store.RoomMessage, rece
 }
 
 // deliveryAdmission holds the same run admission lock used by controller
-// takeover and fencing. An immediate delivery also proves the exact member,
-// session, and generation that made it eligible.
-func (s *Service) deliveryAdmission(run domain.RunID, deliveryProof *control.Snapshot) func(func() error) error {
-	switch {
-	case s.cfg.Control == nil:
+// takeover and fencing.
+func (s *Service) deliveryAdmission(run domain.RunID) func(func() error) error {
+	if s.cfg.Control == nil {
 		return func(fn func() error) error { return fn() }
-	case deliveryProof != nil:
-		return func(fn func() error) error {
-			return s.cfg.Control.AdmitMember(string(run), deliveryProof.MemberID, deliveryProof.SessionID, deliveryProof.Generation, fn)
-		}
-	default:
-		return func(fn func() error) error { return s.cfg.Control.Admit(string(run), fn) }
 	}
+	return func(fn func() error) error { return s.cfg.Control.Admit(string(run), fn) }
 }
 
 // deliver rechecks mutable membership and workspace policy inside admit. The
@@ -290,7 +283,7 @@ func (s *Service) redeliver(ctx context.Context, msg *store.RoomMessage) (bool, 
 	var outcome string
 	var failure *store.RoomMessageFailure
 	if err == nil {
-		receipt, outcome, failure, err = s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, nil), false)
+		receipt, outcome, failure, err = s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID), false)
 	}
 	switch {
 	case err != nil:
@@ -337,7 +330,7 @@ func (s *Service) DeliverDue(ctx context.Context, limit int) (int, error) {
 					sweepErrs = append(sweepErrs, fmt.Errorf("load overdue session %q for message %q: %w", msg.RunID, msg.ID, err))
 					continue
 				}
-				if _, err := s.deliverResult(ctx, msg, nil, run, false, "", nil, nil, false); err != nil {
+				if _, err := s.deliverResult(ctx, msg, nil, run, false, "", nil, false); err != nil {
 					sweepErrs = append(sweepErrs, fmt.Errorf("deliver overdue message %q: %w", msg.ID, err))
 					continue
 				}
