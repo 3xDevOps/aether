@@ -72,7 +72,7 @@ function grantedRole(member: Member) {
 function MemberLine({ member, id, detail, selfID }: { member?: Member; id: string; detail: string; selfID: string | undefined }) {
   return (
     <>
-      <Avatar name={member?.display_name ?? id} color={member?.color} size="header" />
+      <span aria-hidden className="contents"><Avatar name={member?.display_name ?? id} color={member?.color} size="header" /></span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-ui font-medium text-text">{member ? <PickerName member={member} selfID={selfID} /> : id}</span>
         <span className="truncate text-ui-sm text-muted">{detail}</span>
@@ -81,7 +81,7 @@ function MemberLine({ member, id, detail, selfID }: { member?: Member; id: strin
   )
 }
 
-export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOwner }: { workspaceID: string; client: Api; onClose: () => void; onChangeOwner?: () => void }) {
+export function WorkspaceAccessDialog({ workspaceID, client, onClose, canChangeOwner = false }: { workspaceID: string; client: Api; onClose: () => void; canChangeOwner?: boolean }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const superAdmin = useIsSuperAdmin()
   const [members, membersError] = useMembers(client)
@@ -91,16 +91,21 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [query, setQuery] = useState('')
   const selfID = useSelfID()
+  const names = useStore((s) => s.members)
   const returnFocus = useReturnFocus()
+  const [changingOwner, setChangingOwner] = useState(false)
   useCloseOnIdentityChange(onClose)
+  // Ticks run side by side, so only the newest list read may land.
+  const reads = useRef(0)
 
   const load = useCallback(async () => {
     const same = sameIdentity()
+    const read = ++reads.current
     try {
       const list = await client.workspaceAccessList(workspaceID)
-      if (same()) setAccess(list)
+      if (same() && read === reads.current) setAccess(list)
     } catch (err) {
-      if (same()) setError(message(err))
+      if (same() && read === reads.current) setError(message(err))
     }
   }, [client, workspaceID])
 
@@ -123,7 +128,12 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
 
   const owner = access ? byID.get(access.owner_member_id) : undefined
   const granted = new Set(access?.grants.map((g) => g.member_id))
-  const people = members.filter((m) => m.id !== access?.owner_member_id)
+  // A grant for a member the list lacks, such as one still pending, is listed too, so it can be revoked.
+  const unlisted: Member[] = (access?.grants ?? [])
+    .filter((g) => !byID.has(g.member_id))
+    .map((g) => names[g.member_id] ?? { id: g.member_id, display_name: g.member_id, color: '', role: 'collaborator' })
+  const unknown = new Set(unlisted.filter((m) => !names[m.id]).map((m) => m.id))
+  const people = [...members.filter((m) => m.id !== access?.owner_member_id), ...unlisted]
   const grantable = people.filter((m) => m.role !== 'super_admin')
   const needle = query.trim().toLowerCase()
   const shown = people.filter((m) => m.display_name.toLowerCase().includes(needle))
@@ -131,7 +141,15 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg" {...returnFocus}>
+      <DialogContent
+        className="sm:max-w-lg"
+        {...returnFocus}
+        onEscapeKeyDown={(event) => {
+          if (query === '') return
+          event.preventDefault()
+          setQuery('')
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Access to {workspace?.name ?? 'this workspace'}</DialogTitle>
           <DialogDescription>
@@ -151,7 +169,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
               <InsetList aria-label="Owner">
                 <InsetListItem>
                   <MemberLine member={owner} id={access.owner_member_id} detail={owner ? `Owner · ${roleLabel[owner.role]}` : 'Owner'} selfID={selfID} />
-                  {onChangeOwner && <Button size="sm" variant="secondary" onClick={onChangeOwner}>Change owner…</Button>}
+                  {canChangeOwner && <Button size="sm" variant="secondary" onClick={() => setChangingOwner(true)}>Change owner…</Button>}
                 </InsetListItem>
               </InsetList>
               <div className="relative flex items-center">
@@ -177,9 +195,11 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
                     const everywhere = member.role === 'super_admin'
                     // An admin grants and revokes only members below admin; the server holds the same rule.
                     const locked = everywhere || (!superAdmin && isAdminRole(member.role))
-                    const detail = everywhere
-                      ? 'Super admin · reaches every workspace'
-                      : locked ? `${roleLabel[member.role]} · only a super admin changes an admin's access` : grantedRole(member)
+                    const detail = unknown.has(member.id)
+                      ? 'Granted'
+                      : everywhere
+                        ? 'Super admin · reaches every workspace'
+                        : locked ? `${roleLabel[member.role]} · only a super admin changes an admin's access` : grantedRole(member)
                     return (
                       <InsetListItem key={member.id}>
                         <Checkbox
@@ -206,6 +226,16 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Done</Button>
         </DialogFooter>
+        {changingOwner && (
+          <WorkspaceOwnerDialog
+            workspaceID={workspaceID}
+            client={client}
+            onClose={() => {
+              setChangingOwner(false)
+              void load()
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

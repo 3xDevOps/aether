@@ -13,7 +13,7 @@ import { api, type Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
 import { message } from '@/lib/format'
 import type { Workspace } from '@/lib/types'
-import { WorkspaceAccessDialog, WorkspaceOwnerDialog } from '@/routes/workspaces/access-dialog'
+import { WorkspaceAccessDialog } from '@/routes/workspaces/access-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { isAdminRole } from '@/lib/permissions'
 import { sameIdentity, useStore } from '@/store'
@@ -34,7 +34,6 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   const [loaded, setLoaded] = useState(useStore.getState().hydrated)
   const [adding, setAdding] = useState(false)
   const [accessing, setAccessing] = useState<Workspace | null>(null)
-  const [chowning, setChowning] = useState<Workspace | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [membersError, setMembersError] = useState<string | null>(null)
   const loading = useDelayed(!loaded && error === null)
@@ -171,13 +170,9 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           workspaceID={accessing.id}
           client={client}
           onClose={() => setAccessing(null)}
-          onChangeOwner={superAdmin && caps.hasMethod('workspace.owner.set') ? () => {
-            setAccessing(null)
-            setChowning(accessing)
-          } : undefined}
+          canChangeOwner={superAdmin && caps.hasMethod('workspace.owner.set')}
         />
       )}
-      {chowning && <WorkspaceOwnerDialog workspaceID={chowning.id} client={client} onClose={() => setChowning(null)} />}
     </div>
   )
 }

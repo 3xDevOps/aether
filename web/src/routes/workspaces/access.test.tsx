@@ -93,6 +93,42 @@ describe('workspace access', () => {
     expect(dialog.getByText('No member matches “zed”.')).toBeTruthy()
   })
 
+  it('lists a grant for a member the member list lacks, so it can be revoked', async () => {
+    seed(admin, { owned: true })
+    const api = client({ memberList: vi.fn(async () => ({ members: [admin, vera, root] })) })
+    render(<WorkspacesRoute params={{}} client={api} />)
+    const dialog = await openAccess('main-repo')
+    await waitFor(() => expect(box(dialog, bob.id).getAttribute('aria-checked')).toBe('true'))
+    expect(dialog.getByText('Granted')).toBeTruthy()
+    fireEvent.click(box(dialog, bob.id))
+    await waitFor(() => expect(api.workspaceAccessRevoke).toHaveBeenCalledWith(workspace.id, bob.id))
+  })
+
+  it('clears the search on Escape before closing the dialog', async () => {
+    seed(admin, { owned: true })
+    render(<WorkspacesRoute params={{}} client={client()} />)
+    const dialog = await openAccess('main-repo')
+    const search = dialog.getByRole('searchbox', { name: 'Search members' })
+    fireEvent.change(search, { target: { value: 've' } })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect((search as HTMLInputElement).value).toBe('')
+    expect(screen.getByRole('dialog', { name: 'Access to main-repo' })).toBeTruthy()
+  })
+
+  it('opens Change owner over Access and comes back to it', async () => {
+    seed(root, { owned: true, other: true })
+    render(<WorkspacesRoute params={{}} client={client()} />)
+    const dialog = await openAccess('main-repo')
+    const change = await dialog.findByRole('button', { name: 'Change owner…' })
+    change.focus()
+    fireEvent.click(change)
+    await screen.findByRole('dialog', { name: 'Change owner of main-repo' })
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Change owner of main-repo' })).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'Access to main-repo' })).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(change))
+  })
+
   it('locks admins for a caller who is not a super admin', async () => {
     seed(admin, { owned: true })
     const other: Member = { ...bob, id: 'mem_ida', display_name: 'Ida', role: 'admin' }

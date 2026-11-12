@@ -6285,8 +6285,9 @@ button and the palette's **Devices** entry land on the right tab, and the
 sidebar's **Members** row stays current on both.
 
 **Members** is a roster table, each row filling on hover: name, role, agent
-account and last seen (**Online**, a relative time, or **Offline**; below the
-name under 48rem, where the table also scrolls inside its panel). Roles are
+account and last seen (**Online**, a relative time, or **Offline**). Under
+48rem the agent account and last seen sit below the name, so the table never
+scrolls sideways. Roles are
 Viewer, Collaborator, Admin and Super admin. A super admin changes a role with
 the select in the **Role** column and removes a member with the row's trash
 button; giving up your own super admin role, and removing anyone, ask first.
@@ -6646,7 +6647,7 @@ the script printed (`components/launch/setup-output.tsx`, from the error's
 When the refusal is a pending source mirror with a revision to adopt (error
 data `adopt_command`), the New session dialog shows the server's reason with
 its closing `aether workspace mirror adopt` command moved into a code block
-with a copy button. An admin also gets **Open Repository**, which leads to
+with a copy button. An admin also gets **Open workspace settings**, which leads to
 **Review source mirror → Adopt candidate**; other members read where an admin
 adopts it.
 

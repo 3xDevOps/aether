@@ -108,6 +108,17 @@ describe('repository page', () => {
     expect(client.workspaceDelete).toHaveBeenNthCalledWith(2, workspace.id)
   })
 
+  it('closes a dialog opened for one workspace when the route moves to another', async () => {
+    const other = { ...workspace, id: 'wsp_other', name: 'other-repo' }
+    seed({ workspaces: { [workspace.id]: workspace, [other.id]: other } })
+    const { rerender } = render(<WorkspaceView params={{ workspaceId: workspace.id }} client={fakeApi()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete…' }))
+    expect(await screen.findByRole('alertdialog', { name: `Delete ${workspace.name}?` })).toBeDefined()
+
+    rerender(<WorkspaceView params={{ workspaceId: other.id }} client={fakeApi()} />)
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
   it('says when the workspace no longer exists', () => {
     seed()
     render(<WorkspaceView params={{ workspaceId: 'wsp_gone' }} client={fakeApi()} />)

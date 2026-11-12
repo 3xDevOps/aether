@@ -7,7 +7,7 @@ import type { Api } from '@/lib/api'
 import type { Member } from '@/lib/types'
 import { StopEnvironmentDialog } from '@/routes/environment/stop-environment-dialog'
 import { useFailure } from '@/components/failure'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { optimistic } from '@/store/optimistic'
 
@@ -39,20 +39,36 @@ export function useAccountSharing(client: Api): AccountSharing {
   const terminalRead = useRef(0)
   const terminalRunning = useStore((s) => s.envTerminal.status?.running === true)
   const setTerminalStatus = useStore((s) => s.setEnvTerminalStatus)
+  // Members stays mounted across a sign-in or server switch; what it showed belongs to the previous identity.
+  const identity = useStore((s) => s.identityKey)
+  const [shownFor, setShownFor] = useState(identity)
+  if (shownFor !== identity) {
+    setShownFor(identity)
+    setSharedWith([])
+    setOwners([])
+    setPending(new Set())
+    setFirstShare(null)
+  }
 
   // Teammates shared or revoked since the list read was sent keep what is shown: the read may predate the change.
   const changed = useRef(new Set<string>())
   // Teammates the server holds a grant for, as far as the list read and answers since tell.
   const saved = useRef(new Set<string>())
+  const savedFor = useRef(identity)
 
   useEffect(() => {
     if (!caps.hasMethod('account.list')) return
     let live = true
+    const same = sameIdentity()
     const since = new Set<string>()
     changed.current = since
+    if (savedFor.current !== identity) {
+      savedFor.current = identity
+      saved.current = new Set()
+    }
     client.accountList().then(
       (access) => {
-        if (!live) return
+        if (!live || !same()) return
         const read = access.shared_with.filter((m) => !since.has(m.id))
         saved.current = new Set([...read.map((m) => m.id), ...[...saved.current].filter((id) => since.has(id))])
         setSharedWith((list) => [...read, ...list.filter((m) => since.has(m.id))])
@@ -63,7 +79,7 @@ export function useAccountSharing(client: Api): AccountSharing {
     return () => {
       live = false
     }
-  }, [caps, client])
+  }, [caps, client, identity])
 
   const toggle = (member: Member) => {
     const shared = sharedWith.some((entry) => entry.id === member.id)
