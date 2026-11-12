@@ -99,6 +99,10 @@ type MergeMember struct {
 	Runs                 int             `json:"runs"`
 	Schedules            int             `json:"schedules"`
 	Settings             MergeSettings   `json:"settings"`
+	// OwnedWorkspaces and GrantedWorkspaces are the workspaces the member
+	// owns and was granted; the survivor takes both.
+	OwnedWorkspaces   []string `json:"owned_workspaces"`
+	GrantedWorkspaces []string `json:"granted_workspaces"`
 }
 
 // MergeChoice is the outcome of keeping one member's settings: that member

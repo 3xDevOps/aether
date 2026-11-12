@@ -329,9 +329,8 @@ top to bottom:
    (`workspace-switcher.tsx`) shows the active workspace's name and base
    branch, and the total Needs you count across every workspace. Its menu
    lists each workspace with its own count, **All workspaces** (the
-   `overview` route), **Manage workspaces**, **Repository** (the
-   workspace page) and **Environment** (the same page, scrolled to that
-   section). With one workspace and no `workspace.list` method it is a
+   `overview` route), **Manage workspaces** and **Workspace settings** (the
+   workspace page). With one workspace and no `workspace.list` method it is a
    plain label. The search button opens the command palette.
 2. **New session**, the only filled button in the shell, for a member who may
    launch. A slanted cut splits it in two. The left half, **New session** (`n`),
@@ -346,12 +345,20 @@ top to bottom:
    it does when the saved choices name an agent or model the account cannot
    use. The panel's **Subsessions** switch follows your Settings choice and
    sends `children` only when flipped, for that session alone; it is off and
-   disabled for a Background session.
+   disabled for a Background session. While it is on, **Subsession agents**
+   (`subsession-agents.tsx`) opens a menu of checkboxes, one per installed
+   agent with its accounts under it when it has several, each with its login
+   state; a change saves the member setting at once with `child.settings`
+   `choice`, one save after another, and **Settings → Subsessions** shows the
+   same menu. An account whose agents could not be listed is named, with the
+   server's error, below the row (`choices_error`).
 3. **Sessions** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a
    quarter and the count in a `CountBadge`; the count stays in the button's
-   name. Every group starts expanded and lists all of its sessions; a group
+   name. **Mine** matches the count badge's height on fine pointers and keeps a
+   44px touch target on coarse pointers. Every group starts expanded and lists all
+   of its sessions; a group
    closes only when its header is pressed, and the list fades back in when
    the viewer reopens it (rows never glide their height, and a group that
    mounts with hydration does not fade). Until the first sessions arrive, six
@@ -363,12 +370,13 @@ top to bottom:
    scrolls on its own, and while more rows sit below the fold its bottom edge
    fades out. The sidebar never collapses on its own at narrow widths; the
    splitter and `⌘B` stay the reader's call.
-4. **Members** (admins only) and **Settings**. Board through Templates live
-   in the header instead, leaving the sidebar's height for sessions. The current
-   destination carries `aria-current="page"`. Gates come from
-   `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
-   `palette` entries (Members › Devices, Manage workspaces, and Members for a
-   non-admin) are reached from the palette only, and its `link` entries
+4. **Manage workspaces**, **Members** and **Settings**, for every member.
+   Board through Templates live in the header instead, leaving the sidebar's
+   height for sessions. The current destination carries
+   `aria-current="page"`; a workspace's own page keeps **Manage workspaces**
+   current. Gates come from `src/lib/surfaces.ts`, which also feeds the
+   palette's Navigate group; its `palette` entry (Members › Devices) is
+   reached from the palette only, and its `link` entries
    (the board's Needs you; Onboarding, opened from **Settings › General ›
    Setup guide**) only from a link.
 5. **One update notice row** when a server, CLI or desktop update exists, for
@@ -616,11 +624,10 @@ while it shows. The views stay reachable while a command runs. Close, Stop
 and Delete are the same commands, with the same confirmations, as on
 desktop.
 
-Without a `view` in the address a phone lands on `defaultView`, never on the
-view the member last chose: Chat for an Enhanced session, Terminal for a
-Standard one. A link that names a view still opens it. A tab switch replaces
-the history entry instead of pushing one. Each history entry records its
-depth, and an entry of a session records the depth at which that session
+Without a `view` in the address a phone opens the session's last chosen view,
+or its default when none was chosen. A link that names a view still opens it.
+A tab switch replaces the history entry instead of pushing one. Each history
+entry records its depth, and an entry of a session records the depth at which that session
 was opened, carried across the session's own entries, a subagent's included
 (`pushedEntry` and `sessionEntry` in `src/lib/url-state.ts`; a
 notification's entry records them too). **Back** steps back to the entry
@@ -1010,6 +1017,17 @@ native menu - **Check for Updates…**, Minimize, Maximize or Restore, Close -
 from the window's `system-context-menu` event on a drag region and from
 `controls.showMenu(x, y)` elsewhere on the row.
 
+No platform has a View menu, so the shell zooms the window: Cmd on macOS
+and Ctrl on Windows and Linux, with `=` or `+` to zoom in, `-` to zoom out
+and `0` to return to 100%, matched on the character typed.
+`desktop/preload.js` acts only on a key the page has not claimed with
+`preventDefault`, so inside a terminal the same keys zoom the terminal
+instead. `desktop/zoom.js` scales the window's 960×600 minimum size with
+the zoom, so the layout never narrows into the phone toolbar, which has no
+window controls or drag region. It refuses a zoom whose minimum would not fit
+the display, and on macOS moves the traffic lights to stay centred in the
+row, stopping at 91% where the logo would reach them.
+
 On macOS, the shell keeps the native traffic lights, centers them in the
 44px navigation row and reserves 80px before the logo. The row uses
 `-webkit-app-region: drag`; navigation buttons and window controls use
@@ -1106,10 +1124,11 @@ desktop window bar or the phone top bar, and nothing in its own chrome
 scrolls sideways. A control pushed past an edge is unreachable, not merely off
 screen, so every row states what gives way first.
 
-`desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
-the desktop rules are designed against; a browser tab has no such floor, so
-the same rules degrade below it rather than break. A phone is the far end of
-that: `src/app/layout.tsx` exports the viewport the shell needs there.
+`desktop/zoom.js` sets `MIN_WIDTH = 960` and `MIN_HEIGHT = 600`, the
+window's minimum size at 100%. That is the size the desktop rules are
+designed against; a browser tab has no such floor, so the same rules degrade
+below it rather than break. A phone is the far end of that:
+`src/app/layout.tsx` exports the viewport the shell needs there.
 
 - `width=device-width, initial-scale=1` - the page is laid out at the device's
   own width rather than a desktop-sized canvas scaled down.
@@ -1657,9 +1676,12 @@ both show:
 | Unreviewed finish | **Review** |
 
 Every action but Approve and the card's Reply goes where the condition's
-`target` points: the session (requests and questions), its Terminal view
-(blocked, held, Enhanced failure), or its Changes view for an unreviewed
-finish.
+`target` points: an agent's request or question opens the session's
+`defaultView` (Terminal for Standard, Session for Enhanced), a blocked, held
+or failed Enhanced session its Terminal view, an unreviewed finish its Changes
+view, and a teammate's question or a usage limit the session's last chosen
+view. Until the session's record loads, an agent's request also opens the
+last chosen view.
 
 While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
@@ -1905,10 +1927,11 @@ review-tone **Finished: review** chip instead of the Needs you chip. Finished
 bars add "took 18m" after their end when there is room.
 
 **Messages and overlaps.** Agent mail (`coord.message`, bundled per lane
-pair within 24px) draws as marks, not links: a dot on the sender's bar and a
-ring on the recipient's, at the send time, on the bar edge facing the other
-lane. Marks within 8px on one edge merge and show their message count. Mail
-into a folded family or Finished marks its header. Mail with a session that
+pair within 24px) draws as marks joined by a hairline: a dot on the
+sender's bar and a ring on the recipient's, at the send time, on the bar
+edge facing the other lane, and a thin line between them under the bars.
+The hairlines are fainter below 768px. Marks within 8px on one edge merge
+and show their message count. Mail into a folded family or Finished marks its header. Mail with a session that
 has no lane in this view (another workspace, hidden by **Mine**) keeps its
 drawn end, marked on the top edge. A mark's or link's tooltip names sender,
 recipient, time and how many messages are not yet acknowledged; a session
@@ -1940,20 +1963,29 @@ messages: ...", listing at most three pairs).
 
 Hovering, focusing or selecting a lane draws its mail as solid links (a dot
 at the sender, an arrowhead at the recipient, hollow until every bundled
-message is acknowledged) and greys every other mark. Chips on the lanes'
+message is acknowledged) and greys every other mark and hairline. Chips on the lanes'
 labels count that mail from the focused lane's side: `↔ 3` on the focused
 lane (sessions it talks with), `→2 ←1` on each of them. Sessions past the
 scrolled rows get a pinned **↑**/**↓** button that moves to them, and mail with
 sessions outside the view gets a dashed note. File overlaps draw for the
 focused lane only, at the now line. Moving the pointer onto a link, mark or
-pinned button keeps the lane that drew it. Clicking a mark or link opens its
+pinned button keeps the lane that drew it. While the pointer heads for one of
+the lane's pinned buttons and keeps closing in, the lanes it crosses wait:
+one it rests on for 150ms, or crosses after a second and a half, takes the
+hover. An
+open popover keeps the lane it opened from in focus: lanes the pointer
+crosses, or that lie under the popover, show only the hover band until it
+closes. Clicking a mark or link opens its
 facts, every bundle a merged mark holds;
 a mail link reads the bodies through `coord.messages.list` (the thread, else
 each sender's newest page, since a mark on a folded lane can bundle several
 senders) and shows them with `MessageRow`. [Styles: Lanes](styles.md#lanes)
 has the colour coding.
 
-**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover:
+**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover
+(with one open, one click on another lane, mark or link moves it there,
+clicking its own lane again closes it, and dragging the track or a pinned
+button closes it):
 "agent · state · elapsed", the title, the reason, next step, branch and diff,
 unread mail, pending inputs, overlaps and the state span under the pointer,
 then the card's primary action (Reply opens the same composer as a card),
@@ -1991,7 +2023,11 @@ read. Lane geometry comes from the model
 measurement; above 60 lanes only those near the viewport render. Live bars
 move on a timer of window width per pixel, between 1s and 30s. Lanes move with
 a glide only when they change section, and lanes added after the first render
-fade in; reduced motion turns both off.
+fade in; reduced motion turns both off. A live update that moves lanes keeps
+the view steady: the lane at the top of the scrolled view stays where it was,
+an open popover follows its lane, a resting pointer hovers the lane now under
+it, and keyboard focus on a lane that leaves moves to the lane that now draws
+its session, else to its neighbour.
 
 `aether.ui` stores the window choice, the grouping and hidden link kinds.
 Below 768px the label column shrinks to the state dot and agent glyph, and
@@ -2598,7 +2634,19 @@ task, an agent, an account when one is shared with the caller, a mode and a
 model. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Ready" or "Sign in after launch"
 for a shipped agent (`login_found` checks the launch home for login files, not
-for a working session; a server that does not report it shows nothing). While
+for a working session; a server that does not report it shows nothing), or
+"Signed out" in the needs-you colour, with `login_problem` as its tooltip,
+for any agent whose login file cannot sign it in (`login_blocks_launch`), or
+"Sign-in refused" when `login_problem` is only an agent's own refusal. Such
+an agent stays selectable: the server refuses the launch itself when
+`login_blocks_launch` is set, unless a workspace variable signs the agent in.
+For the chosen agent a needs-you callout under the refusal notes says
+"Claude Code is signed out" or "Claude Code's sign-in was refused" (on a
+shared account "<owner>'s Claude Code login is signed out" or "<owner>'s
+Claude Code sign-in was refused") with `login_problem` verbatim; on the member's own
+account it has **Sign in on Agents**, which closes the dialog and opens
+Agents, and on a shared one it says "<owner> signs in again on their Agents
+page or with `aether agent login <agent>`". While
 the list is read again for another account the last one stays, dimmed and
 disabled, and Launch stays off until it answers. An agent
 that is not installed is not listed. **Install more agents...** below the
@@ -2681,8 +2729,9 @@ default**, sends no `model` and shows what that default resolves to when the
 agent reports it. The rest come from `agent.models` for the chosen agent and
 account, fetched when the field first shows and kept for the page session;
 the refresh button asks again with `refresh: true`. The list says when it is
-the agent's cache or a fallback list, and shows a failed discovery's error
-verbatim without blocking a choice. Search matches id, name and description;
+the agent's cache, and shows a failed discovery's error verbatim without
+blocking a choice, after **List from <age>** when it keeps the last list that
+worked. Search matches id, name and description;
 text that matches no id is offered as **Use “<text>”**, so any id works,
 including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is
@@ -2763,7 +2812,8 @@ installed", "Needs <owner>'s login", "Your account only" or "Unavailable"
 agent's fullest current usage window as "<n>% used" (amber from 80%, red at
 100%, as on Settings > **Usage**; "· stale" with the provider's error as the
 tooltip when its last read failed), else "Sign in after launch" when
-`login_found` is false, else "Ready". A failed `agent.list` reads "Not
+`login_found` is false, else "Ready". "Signed out" or "Sign-in refused"
+(needs-you, `login_problem` as the tooltip) comes before the usage window. A failed `agent.list` reads "Not
 checked" with the error as the tooltip; a failed `account.usage` puts its
 error on the status's tooltip. Expired windows drop on the half-minute
 clock. A status takes at most 60% of its row, here and in the agent list,
@@ -2846,16 +2896,16 @@ palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one the member last
 chose for the session, else `defaultView`. Choosing a view means picking a tab
 (click, `[` or `]`) or following a link or command that names a
-view, such as Review changes or a file path; an opened `?view=` address shows its view without choosing it, since a reload reopens one too. Reply is not a choice. A Needs you target does not
-count: a sidebar or board row, the Needs you list, `u`, the header's primary
-action and a request's Open terminal show Terminal or Changes for a session
-that waits there, and the session reopens on its chosen view once it stops
-waiting. Back and forward show the view their entry names without choosing
-it. `runViewMemory` holds the choices, the newest 200 sessions per signed-in
+view, such as Review changes or a file path; an opened `?view=` address shows
+its view without choosing it, since a reload reopens one too. Reply is not a
+choice. Session rows, card titles and `u` open the last chosen view even when
+the session needs attention. Explicit actions, such as Open terminal or Review,
+open the view needed for that action without changing the choice. Back and
+forward show the view their entry names without choosing it. `runViewMemory`
+holds the choices, the newest 200 sessions per signed-in
 member, saved under `aether.ui` in `savedRunViews` by identity key, so they last as long as the browser origin's storage (the desktop app's origin changes each launch); deleting a
 session drops its entry. A chosen view the session no longer has, such as
-Files without a checkout, gives way to `defaultView`. A phone skips the
-memory, see [Phone session](#phone-session).
+Files without a checkout, gives way to `defaultView`.
 `defaultView` is
 Session for an Enhanced session or any session that streams a session (`acp: true`),
 Terminal otherwise. Trace follows Chat for a session with `acp: true` only.
@@ -3354,12 +3404,17 @@ Workflow call, or an Agent call with `run_in_background`, completes as soon
 as its work starts. When the call carries `tool_call.task`
 ([`internal/acphost/items.go`](../internal/acphost/items.go)), the card follows
 the task: running, then done, failed or stopped, with elapsed time to the
-snapshot that settled it. Without it, the card reads "Launched in the
+snapshot that settled it, and a settled subagent card's report is the first
+line of the subagent's last message. Without it, the card reads "Launched in the
 background", and running once a child item is logged after the call
 completed. The launch acknowledgement is never shown as a report. A workflow card lists the subagents whose items name it as parent.
 A subagent whose launch call is not loaded, or was trimmed, shows its card at
 its first held item until a history page brings the launch; without the
-call its state is unknown. A launch id seen again after
+call its state is unknown. When the session state lists a live subagent or
+workflow task that no held call started, the Chat and Trace views page
+`run.acp.history`, up to five pages, until one does or history ends: a reload
+replays only the newest 200 items, and leaving a session trims it, either of
+which can drop a launch that still runs. A launch id seen again after
 its call settled names a new subagent, keyed `<id>@<seq>`. While the main
 agent only waits on its subagents, the live steps header reads "Waiting on 2
 subagents". A fallback launch shows a card with no nested items;
@@ -3566,24 +3621,34 @@ ACP row whose `resource_link` URIs name attached files matches the room
 message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
 URLs when identity, session or row changes, and shows each other file as a chip
-named by its basename with the path as its title. Each image is named by its place
-in the row ("Image 2 of 3", or "Attached image" when it is alone), and its
-thumbnail is a button that opens the same blob in a `Dialog` filling the window
-(the whole screen on a phone), fitted to it. Zoom runs from fitted to 400% of
-the image's pixels, in a frame that scrolls and takes keyboard focus: a
-trackpad pinch (a ctrl wheel, or Safari's gesture events, both kept from
-zooming the page) or a two-finger touch pinch zooms about the fingers or
-pointer, and `Mod+=`/`Mod+-` step by 1.25 about the frame's centre while
-`Mod+0` fits again. When the image is larger than the frame, **Actual size**
-in the header, or a click on the image, switches between fitted and 100% about
-the clicked point; the header shows the zoom level while zoomed. One dialog serves the
-row: while the image is fitted, `ArrowLeft` and `ArrowRight`, or a horizontal
-swipe, step to the previous or next image that loaded, stopping at either end;
+named by its basename with the path as its title. Thumbnails keep each image's
+aspect ratio within 320×192px; their composer radius shrinks on short images so
+the corners do not meet. Each image is named by its place in the row
+("Image 2 of 3", or "Attached image" when it is alone), and its thumbnail is a
+button that opens the same blob in a `Dialog` filling the window
+(the whole screen on a phone). The dialog shows only the image on a near-black
+backdrop, with the composer's thin border and corner radius, at up to 80% of
+the viewport width and height. A top-bar row keeps the image clear of macOS
+window controls and holds a 44px Close button; the image name stays for screen
+readers. Each image fits the frame, enlarging small images when needed. Zoom
+runs from fitted to 400% of the larger of the image's native size or fitted
+size, in a frame that scrolls and takes keyboard focus; the focus outline
+follows the image. A trackpad pinch (a ctrl wheel, or Safari's gesture events,
+both kept from zooming the page) or a two-finger touch pinch zooms about the
+fingers or pointer, including over gallery controls. `Mod+=`/`Mod+-` step
+by 1.25 about the frame's centre while
+`Mod+0` fits again. A click on a fitted image zooms downscaled images to 100%
+or enlarged images to 125% of fit, preserving the clicked point. In a
+multi-image gallery, Previous image and Next image buttons appear on hover or
+keyboard focus; touch keeps them visible.
+They step through loaded images. `ArrowLeft` and `ArrowRight`, or a horizontal
+swipe, do the same while the image is fitted, stopping at either end;
 zoomed in, or with a modifier key held or the page pinch-zoomed, they do not
-switch. Losing an image's blob, as on reconnect, closes the dialog if it was
-showing that image. Each image opens fitted, and
-closing returns focus to the thumbnail of the image last shown. Attachments sit outside the
-text-collapse area and remain available through history and reconnect.
+switch. With the image fitted, clicking beside it closes the dialog; while
+zoomed, the outer gutters close it and the frame remains scrollable. Losing an
+image's blob, as on reconnect, closes the dialog if it was showing that image.
+Closing returns focus to the thumbnail of the image last shown. Attachments sit
+outside the text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider
 group with search by name, ID and description. Selections use
@@ -3635,7 +3700,13 @@ The header's **Answer** focuses the docked card on every screen. While Session s
 you** shows one link, "1 request, shown below the timeline", that closes a
 Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
-agent's auth methods.
+agent's auth methods. On a run on the viewer's own account it adds **Sign in
+on Agents**, and when that agent's `agent.list` row has `login_problem` its
+title is the alert's ("Claude Code is signed out" or "Claude Code's sign-in
+was refused"); a login-file problem shows verbatim, while a refusal is
+already the failure quoted below. On a run on another member's account it
+says that member signs in again on their Agents page or with
+`aether agent login <agent>`.
 
 ### Dictation
 
@@ -4012,6 +4083,8 @@ measurement from FitAddon without resizing the renderer; `setGeometry()` queues
 the server resize and optional attach reset between xterm writes. A font or
 pane resize reports the local measurement, never the smaller rendered grid,
 so a viewer cannot accidentally pin the shared minimum after it grows.
+Terminal padding belongs to the xterm element, not its host: FitAddon subtracts
+the element's padding when calculating the rows and columns that fit.
 Queued geometry work is discarded when its terminal is disposed.
 The server queues geometry with terminal output. SSH and in-process dashboard
 attachments request ordered framing, and the gateway emits the geometry frame
@@ -5941,9 +6014,12 @@ both. The page header has **Add agent…** where the gateway serves
 maps each shipped name to an icon and its `--agent-*` colour token), its
 display name,
 "Not installed", "Installed", "Installed · Login found" or "Installed · No
-login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
+login found" (from `login_found`), or "Signed out" or "Sign-in refused" with
+a needs-you dot and `login_problem` verbatim on a line of its own when the
+server reports one,
+"Standard · Enhanced" or "Standard", and
 one button by state: **Set up** while not installed, **Log in** while
-installed with no login found, and **Run** once ready, with **Set up again**
+installed with no login found or signed out, and **Run** once ready, with **Set up again**
 in the row's **More** menu; closing a setup returns focus to that row's
 button. On the Agents page only, where the gateway serves `agent.remove`, the
 **More** menu of a member agent or an installed agent also has **Remove…**.
@@ -5966,6 +6042,21 @@ sent through `agent.register`. The Background default follows the Standard
 command's first word, which is also the executable. A session that is not
 signed in offers its terminal login method, typed as the ACP server command
 (`agent_command` in the session state) with the method's args.
+
+**Signed-out logins.** `SignedOutAlert` (`components/shell/signed-out-alert.tsx`),
+mounted by `AppShell` under `StaleBanner`, shows while any installed agent in
+the member's own `agent.list` has `login_problem`: a needs-you band with one
+line per agent, "Claude Code is signed out" when the login file cannot sign
+it in (`login_blocks_launch`) or "Claude Code's sign-in was refused" when an
+agent refused, then the problem verbatim, and one **Sign in on Agents**. It
+is one row at `md` and wider and stacks below. It leaves out what already
+sits beside its own sign-in action: everything on the Agents page, and, in
+the Chat view of a session on the member's own account whose reason is a
+refused turn or open, that session's agent. It cannot be dismissed; it goes
+when a read no longer reports the problem. `agent.list`
+has no event, so it reads again every 60 seconds while the page is visible,
+on window focus, and when one of the member's runs gets a new
+`enhanced turn failed: ` or `enhanced session failed: ` reason.
 
 Below the list, `AgentExtras` holds collapsed disclosures: **Git identity**
 (Agents page only), which says agents commit as the name and email in the
@@ -6002,7 +6093,9 @@ login command typed. A gateway without `agent.install` types the
 install command there instead, and one without a terminal socket prints the
 `aether terminal` commands. **Check** re-reads `agent.list` and lists
 **Installed**, **Enhanced installed** and **Login found** or **No login
-found**; the copy never says "signed in", because the probe checks for a
+found**, or **Signed out:** or **Sign-in refused:** with `login_problem` when
+the server reports one;
+the copy never says "signed in", because the probe checks for a
 file. **Done** appears once the agent is installed with no missing login and
 calls `rememberLaunch` with the chosen mode, which seeds **New session** and
 First session. Setup does not save the Environment image: the install lands in
@@ -6184,13 +6277,13 @@ subscriptions are removed on cleanup, while closing a tab or an exited shell
 unregisters its socket, so route changes and tab remounts cannot deliver late
 output, resizes, or image actions to a disposed host.
 
-The same stop confirmation (`StopEnvironmentDialog`) backs the Profile
-dialog's notice after a member's first account share: containers started
+The same stop confirmation (`StopEnvironmentDialog`) backs the Members
+page's notice after a member's first account share: containers started
 before that share lack the in-place mount of Claude Code's login file
 ([security.md](security.md#account-sharing)), so when the store's
 `envTerminal.status`, re-read with `terminal.status` at the share, says the
-container is running, or that re-read fails, **Agent account sharing** says
-so and offers **Stop environment**. The advice follows the first share the
+container is running, or that re-read fails, the roster says so and offers
+**Stop environment**. The advice follows the first share the
 server answered while no other grant was saved; a later share shows
 nothing, because the page cannot tell whether the container predates the
 first one.
@@ -6202,12 +6295,40 @@ Each tab has its own route name (`members`, `devices`), so the address, back
 button and the palette's **Devices** entry land on the right tab, and the
 sidebar's **Members** row stays current on both.
 
-**Members** is a roster table, each row filling on hover: name, role, whether you and that member share
-an agent account, and last seen (**Online**, a relative time, or
-**Offline**). An admin changes a role or removes a member from the row's
-menu; giving up your own admin role, and removing anyone, ask first. Members
+**Members** is a roster table, each row filling on hover: name, role, agent
+account and last seen (**Online**, a relative time, or **Offline**). Below
+64rem, where the sidebar leaves the table too little room, the agent account
+and last seen sit below the name, so the table never scrolls sideways. Roles are
+Viewer, Collaborator, Admin and Super admin. A super admin changes a role with
+the select in the **Role** column and removes a member with the row's trash
+button; giving up your own super admin role, and removing anyone, ask first.
+The **Agent account** column holds a **Share my account** switch for every
+other member (`account.share`, `account.revoke`) and says when that member
+shares their account with you; the omp warning sits behind **What a teammate
+can do with your account** above the table. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
-admins see **Open invitations** with **Revoke**.
+admins see **Open invitations** with **Revoke** and the workspaces each
+invitation grants.
+
+**Invite…** carries a workspace multi-select of the workspaces the inviter
+administers, for an account invitation and for an invite code. An admin who is
+not a super admin must pick at least one and may invite only a viewer or a
+collaborator; a super admin may pick any role and no workspace.
+
+**Manage workspaces** shows each workspace's owner. Where the caller's `role`
+in `workspace.list` is `admin`, a row's **Access** button, or **Access…** under
+**Team** on the workspace's settings page, opens the owner, a search field and
+a scrolling list of every other member, each with a checkbox; ticking grants
+and unticking revokes at once, showing the server's error verbatim. Super
+admins are ticked and locked, since they reach every workspace, and an admin
+who is not a super admin cannot tick or untick another admin. Super admins
+also get **Change owner…** on the owner's line. A grant,
+revoke, `workspace.access` event or `member.access` event reloads the workspace
+list. `member.access` (workspace id `server`) goes only to the member whose
+access changed, so a member who just lost a workspace still gets it. Server-wide
+controls (server update, session limits, Docker inside sessions, remote access)
+show to super admins; the dashboard hides what the caller cannot use and the
+server refuses it regardless.
 
 A role change, **Approve**, and a confirmed **Revoke** follow
 [Actions](#actions): the radio moves, the member joins the roster, or the
@@ -6285,18 +6406,19 @@ from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
 **Approve** sends `member.device.approve` with the device id and the code.
-It revokes a device too, and shows every server refusal verbatim. The
+**Revoke** shows on the member's own devices, on a device still waiting,
+and, for a super admin, on every device; it shows every server refusal
+verbatim. The
 list is an `InsetList`; until it arrives, three row skeletons stand in after
 ~200ms ("Loading devices").
 
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
 the member's name and role, **Display name** (an input with **Save**, sent
-as `member.rename`), **Colour**, **Git identity** (the name and email
+as `member.rename`), **Colour** and **Git identity** (the name and email
 the member's agents commit as, saved with `member.git`; the same form
-onboarding shows) and **Agent account sharing** (**Share account** or
-**Revoke access** per teammate, with the omp warning behind **Learn more**).
-Profile is the one place that edits the git identity; Agents links to it.
+onboarding shows). Agent account sharing lives on **Members**. Profile is the
+one place that edits the git identity; Agents links to it.
 
 Display name, colour, and share or revoke follow [Actions](#actions): the
 header, roster and avatars take the new name or colour, and the teammate's
@@ -6380,14 +6502,15 @@ without a reload.
 ## Manage workspaces
 
 `src/routes/workspaces/` lists workspaces as rows, with three row skeletons
-while the list loads. Selecting a row opens the
-workspace: it becomes the active one and the board shows. Each row's menu
-holds **Repository** (the repository page), **Environment** (its Environment
-section), **Settings…** (who may message others' sessions) and **Delete…**, each
-gated by its permission. **Add
+while the list loads. A row's name opens the
+workspace: it becomes the active one and the board shows. Below the name sit
+its base branch and its owner, and beside
+it two buttons, never a menu: **Access** (for the workspace's admin) and
+**Settings** (the workspace page, for every member). **Current** marks the
+active workspace beside its name. **Add
 workspace** in the header shows the creation choices above the list; with no
-workspace yet they show without it. Open the page from the workspace
-switcher or the command palette.
+workspace yet they show without it. Open the page from the sidebar, the
+workspace switcher or the command palette.
 
 The creation choices are the shared `src/components/workspace-create.tsx`,
 the same ones onboarding's Repository step shows:
@@ -6467,28 +6590,31 @@ After deletion, the list and workspace switcher update together.
 `workspace.deleted` events reconcile other connected dashboards, including
 their selection and any open deleted workspace or run.
 
-### Repository page
+### Workspace settings page
 
-The workspace switcher's **Repository** item and the **Repository** item of
-a row's menu in Manage workspaces open `routes/workspace.tsx`. It is one
+The workspace switcher's **Workspace settings** item and a row's **Settings**
+button in Manage workspaces open `routes/workspace.tsx`. It is one
 workspace in sections: **Base branch**, read-only because sessions have already
 forked from it; **Source and clone**, the shared
 `components/workspace-repository.tsx` (link a local clone, the
 server-fetched source with its mirror status and deploy key, the checkout
-Origin) with its Advanced part open; **Environment**, below; and **Team**,
-the budget with **Set budget…** (`budget.set`) and who may message others'
+Origin) with its Advanced part open; **Environment**, below; and **Team**:
+**Access**, naming the owner, with **Access…** for the workspace's admin; the
+budget with **Set budget…** (`budget.set`) and who may message others'
 sessions with **Change…** (`workspace.settings`), and, where the server offers
 `workspace.child_limits`, the subsession limit ("8 subsessions busy at once per parent session"). The
 admin's **Change…** dialog edits it as **Busy at once**, saving with
-`workspace.child_limits`. Each button is gated by its
+`workspace.child_limits`. Last, for the workspace's admin, **Danger zone**
+holds **Delete…** (`workspace.delete`), which confirms, then lands on Manage
+workspaces. Each button is gated by its
 server-side permission; a member without it reads the same facts. The page
 lists no sessions: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
 setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
-read with `workspace.environment.get` when the page opens. Opening the page
-through an **Environment** menu item passes `section: 'environment'`, and the
-section scrolls into view once it has loaded.
+read with `workspace.environment.get` when the page opens. A link that opens
+the page with `section: 'environment'` scrolls that section into view once it
+has loaded.
 
 - An admin edits the **Setup script** in a monospace field and each variable
   as a row: name, value, a **Secret** checkbox and **Remove**. A saved secret
@@ -6532,7 +6658,7 @@ the script printed (`components/launch/setup-output.tsx`, from the error's
 When the refusal is a pending source mirror with a revision to adopt (error
 data `adopt_command`), the New session dialog shows the server's reason with
 its closing `aether workspace mirror adopt` command moved into a code block
-with a copy button. An admin also gets **Open Repository**, which leads to
+with a copy button. An admin also gets **Open workspace settings**, which leads to
 **Review source mirror → Adopt candidate**; other members read where an admin
 adopts it.
 
@@ -6594,7 +6720,7 @@ the query is non-empty the nav lists the results with their category, and a
 polite status reads `N settings` or `No settings match “q”`. Enter opens the
 first result; ArrowDown moves to the results; Escape clears the query, then
 leaves the field. Two results leave the page: **Workspace settings and
-budget** opens the active workspace's Repository page, and **Members and
+budget** opens the active workspace's settings page, and **Members and
 devices** opens Members.
 
 **Phone.** Below 768px the category list is the page. A category shows on its
@@ -6702,6 +6828,12 @@ Categories:
   rule (the store's `ruleSaves`) or another member signs in. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
+- **Agents**, where the server offers `agent.list`: each agent's install and
+  login state (`useAgentList`, read again each time the section opens,
+  rendered by the Agents page's `AgentList` without its actions) and **Open
+  Agents**, which leads to the Agents page; that page still owns install,
+  sign-in, update and removal. Search finds it by "sign in", "login", "Claude",
+  "install" or "agents".
 - **Launch**, where the server offers `launch.defaults.get`: **Saved
   defaults** says who saved them (you or the assistant) and when, or
   "Nothing saved yet". It lists each agent's saved mode and model with
@@ -6720,8 +6852,10 @@ Categories:
   start subsessions** (`enabled`, on by default), with a **What subsessions
   cover** list (what it allows, that budgets and limits apply, how to override it for one session). The switch saves
   on change; a refused change rereads the setting and keeps the error under
-  the row. Where the server offers `workspace.child_limits`, a read-only row
-  gives the active workspace's limit.
+  the row. **Subsession agents**, once the server lists `choices`, is the
+  launch panel's agents menu; a refused change there shows the server's error
+  in a toast and rereads the setting. Where the server offers
+  `workspace.child_limits`, a read-only row gives the active workspace's limit.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you. A provider that reports `unauthenticated` keeps the
   server's error and adds **Sign in on Agents**.
@@ -6799,7 +6933,7 @@ Categories:
   copy ([edge.md](edge.md#server-id-and-claiming)).
 
 Repository settings, base freshness and the source mirror live on the
-[Repository page](#repository-page) on either gateway.
+[Workspace settings page](#workspace-settings-page) on either gateway.
 
 ### Watches
 
@@ -7909,7 +8043,13 @@ device cards an admin and a member see.
 history, section order and folding, axis ticks and link
 bundling; the board test's `lanes view` cases cover the tree keyboard, the
 session popover and its links, a popover whose lane folds away, an empty
-window, bundled mail bodies and failed history reads.
+window, bundled mail bodies and failed history reads. `e2e/lanes.spec.ts`
+moves a real pointer over Lanes, with sessions and mail answered in the
+browser: from a lane to its popover and off it, one click from one lane's
+popover to another's, a drag and a pinned button closing it, and from a lane
+to its pinned button, on a held clock. Its live cases send `run.status`
+through the events socket: a session leaving above the view, one arriving
+above an open popover, and the focused lane folding into Finished.
 
 `src/a11y.test.tsx` exercises the session tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,

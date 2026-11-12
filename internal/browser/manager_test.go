@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	containerruntime "github.com/3xDevOps/Aether/internal/runtime"
@@ -121,11 +122,40 @@ func TestManagerRefusesRemovingAnotherRunCompanion(t *testing.T) {
 	if err := saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, ContainerID: "companion", CreationKey: "creation"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Remove(t.Context(), run); err == nil {
+	if err := manager.Remove(t.Context(), run.ID); err == nil {
 		t.Fatal("removed a companion owned by another run")
 	}
 	if runtime.destroyed {
 		t.Fatal("ownership failure reached destruction")
+	}
+}
+
+func TestManagerRemoveObservedKeepsAReplacementCompanion(t *testing.T) {
+	runtime := &recoveryRuntime{info: containerruntime.BrowserInfo{RunContainer: "new-container", CreationKey: "new", State: "running"}}
+	manager, err := NewManager(t.TempDir(), runtime, Config{Image: "aether/browser:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := manager.journalDir("run")
+	if err = os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = saveStatus(dir, Status{RunID: "run", RunContainer: "new-container", ContainerID: "companion", CreationKey: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	observed := Status{RunID: "run", RunContainer: "old-container", ContainerID: "old-companion", CreationKey: "old"}
+	if err = manager.RemoveObserved(t.Context(), observed); !errors.Is(err, ErrReplaced) {
+		t.Fatalf("remove of a replaced observation: %v, want ErrReplaced", err)
+	}
+	if runtime.destroyed {
+		t.Fatal("removing a stale observation destroyed the replacement companion")
+	}
+	current, err := loadStatus(dir)
+	if err != nil {
+		t.Fatalf("replacement journal: %v", err)
+	}
+	if err = manager.RemoveObserved(t.Context(), current); err != nil || !runtime.destroyed {
+		t.Fatalf("remove of the current observation: %v, destroyed %v", err, runtime.destroyed)
 	}
 }
 
@@ -155,5 +185,38 @@ func TestInputSessionGoneRequiresPhysicalProof(t *testing.T) {
 				t.Fatalf("physical input state gone = %v, want %v", got, tc.gone)
 			}
 		})
+	}
+}
+
+func TestMarkUnavailableKeepsThePausedCompanionsErrorReadable(t *testing.T) {
+	runtime := &recoveryRuntime{info: containerruntime.BrowserInfo{ContainerID: "companion", RunContainer: "run-container", CreationKey: "creation", State: "paused"}}
+	manager, err := NewManager(t.TempDir(), runtime, Config{Image: "aether/browser:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := Run{ID: "run", ContainerID: "run-container"}
+	_, dir, err := manager.entry(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, ContainerID: "companion", CreationKey: "creation", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	reason := "startup recovery failed: " + strings.Repeat("x", 16384)
+	if err = manager.MarkUnavailable(run, reason); err != nil {
+		t.Fatal(err)
+	}
+	status, _, err := manager.Reconcile(t.Context(), run)
+	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "startup recovery failed: xxx") {
+		t.Fatalf("Reconcile = %v, want the recorded startup error", err)
+	}
+	if status.State != "paused" || status.Reason != status.Unavailable {
+		t.Fatalf("status = %+v, want paused with the recorded error", status)
+	}
+	if err = manager.Remove(t.Context(), run.ID); err != nil || !runtime.destroyed {
+		t.Fatalf("Remove = %v, destroyed %v: the marked journal must stay readable", err, runtime.destroyed)
 	}
 }

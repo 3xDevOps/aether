@@ -10,6 +10,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 // The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
@@ -22,8 +23,8 @@ const (
 // Idle reasons of an interactive enhanced turn that did not end normally.
 const (
 	acpCancelledReason   = "turn cancelled"
-	acpInterruptedReason = "turn interrupted"
-	acpStoppedReason     = "turn ended: "
+	acpInterruptedReason = domain.InterruptedReason
+	acpStoppedReason     = domain.StoppedShortReasonPrefix
 )
 
 func backgroundWork(report agentstatus.Report) bool {
@@ -47,8 +48,14 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	refused := entry.authRefused
 	entry.authRefused = nil
 	d.s.mu.Unlock()
-	if refused != nil && !st.Working && st.Failed == nil {
+	switch {
+	case st.Working || st.Failed != nil:
+	case refused != nil:
 		st.Reason, st.Failed = "error", refused
+	case acp.StopReason(st.Reason) == acp.StopReasonEndTurn:
+		ctx, cancel := context.WithTimeout(context.Background(), acpLoginTimeout)
+		d.s.turnWorked(ctx, entry.runID)
+		cancel()
 	}
 	// A child run's ended turn hands its last message to its parent.
 	forward, message := false, ""
@@ -144,7 +151,8 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 			return
 		}
 	}
-	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil && !usageLimited(err) {
+	// The turn's own end reports a usage limit and a refused sign-in.
+	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil && !usageLimited(err) && !acphost.AuthRequired(err) {
 		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }

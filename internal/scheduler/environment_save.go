@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	cerrdefs "github.com/containerd/errdefs"
 
@@ -22,13 +23,20 @@ func memberImageRepo(member domain.MemberID) string {
 	return "aether/member-" + string(member)
 }
 
+// pendingImageRepo holds a save until its check passes, so a rejected image
+// whose removal failed never sits among the member's images.
+func pendingImageRepo(member domain.MemberID) string {
+	return "aether/pending-member-" + string(member)
+}
+
 func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error) {
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	unlockCaches := func() {}
 	if s.cfg.Homes != nil {
-		unlock := s.cfg.Homes.LockCaches(member)
-		defer unlock()
+		unlockCaches = sync.OnceFunc(s.cfg.Homes.LockCaches(member))
+		defer func() { unlockCaches() }()
 		if err := s.cfg.Homes.EnsureCacheMetadata(member, "terminal"); err != nil {
 			return "", fmt.Errorf("scheduler: preserve saved image cleanup owner: %w", err)
 		}
@@ -38,11 +46,55 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if sup == nil {
 		return "", fmt.Errorf("%w: open it with `aether terminal` (or the dashboard), check your changes are there, then save", ErrTerminalNotRunning)
 	}
-	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
-	tag := memberImageRepo(member) + ":" + strings.ToLower(rand.Text())
-	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, tag); err != nil {
+	starting, _, err := s.sessionImage(ctx, m)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: save environment: %w", err)
+	}
+	// A terminal created from one of the member's images, such as one that
+	// fell back, proves that image starts: it is the new image's previous
+	// one even after a restart forgot the fallback. A terminal on the
+	// standard image proves nothing about the member's images.
+	info, err := s.cfg.Runtime.Inspect(ctx, sup.containerID)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: save environment: inspect the terminal: %w", err)
+	}
+	previous := starting
+	if isMemberImage(member, info.Image) {
+		previous = info.Image
+	}
+	name := strings.ToLower(rand.Text())
+	pending, tag := pendingImageRepo(member)+":"+name, memberImageRepo(member)+":"+name
+	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, pending, map[string]string{previousImageLabel: previous}); err != nil {
+		return "", fmt.Errorf("scheduler: save environment: %w", err)
+	}
+	// Launches by this member, or on their account, need the cache lock;
+	// the check can take minutes. The terminal lock keeps other saves,
+	// resets and sweeps of this member out.
+	unlockCaches()
+	checkErr := s.checkSavedImage(ctx, pending)
+	if s.cfg.Homes != nil {
+		unlockCaches = sync.OnceFunc(s.cfg.Homes.LockCaches(member))
+	}
+	if checkErr != nil {
+		current := "the standard image"
+		if starting != "" {
+			current = "your saved image " + starting
+		}
+		problem := "could not be checked"
+		if _, ok := errors.AsType[*errImageOwners](checkErr); ok {
+			problem = "would not start"
+		}
+		err := fmt.Errorf("scheduler: save environment: nothing was saved, because the committed image %s: %w. Your environment and its unsaved changes are kept, and new sessions still start from %s. Run aether env save again; if it fails the same way, see \"Saved image checks\" in docs/environments.md", problem, checkErr, current)
+		if removeErr := s.cfg.Runtime.RemoveImage(context.WithoutCancel(ctx), pending); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("scheduler: remove the unusable image: %w", removeErr))
+		}
+		return "", err
+	}
+	if err := s.cfg.Runtime.TagImage(ctx, pending, tag); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
 	}
 	if err := s.cfg.Store.UpdateMemberImage(ctx, member, tag); err != nil {
@@ -109,7 +161,7 @@ func (s *Scheduler) sweepMemberImages(ctx context.Context, member domain.MemberI
 }
 
 func (s *Scheduler) currentImageReferences(ctx context.Context) (map[string]bool, error) {
-	refs := map[string]bool{s.cfg.StandardImage: true, s.cfg.DefaultStandardImage: true, s.cfg.BrowserImage: true}
+	refs := map[string]bool{s.cfg.StandardImage: true, s.cfg.DefaultStandardImage: true, s.cfg.BrowserImage: true, s.cfg.DefaultBrowserImage: true}
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return nil, err
@@ -149,9 +201,28 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	if err != nil {
 		return err
 	}
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	switch {
+	case err == nil:
+		previous, previousErr := s.previousImage(ctx, m.Image)
+		if previousErr != nil {
+			return previousErr
+		}
+		refs[previous] = true
+	case !errors.Is(err, store.ErrNotFound):
+		return err
+	}
+	// Sweeps hold the terminal lock, so no save is checking an image now.
+	if err = s.cfg.Runtime.Destroy(ctx, runtime.ExportContainer(pendingImageRepo(member))); err != nil {
+		return err
+	}
+	pending, err := s.cfg.Runtime.ListImageTags(ctx, pendingImageRepo(member))
+	if err != nil {
+		return err
+	}
 	var failures []error
-	for _, tag := range tags {
-		if refs[tag] || !strings.HasPrefix(tag, repo+":") {
+	for _, tag := range append(tags, pending...) {
+		if refs[tag] || !strings.HasPrefix(tag, repo+":") && !strings.HasPrefix(tag, pendingImageRepo(member)+":") {
 			continue
 		}
 		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil {
@@ -161,32 +232,43 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 	return errors.Join(failures...)
 }
 
-// sweepStandardImages untags every tag of Aether's standard image repository
-// that nothing references, so the images a server upgrade replaced do not stay
-// on disk. Only the default repository is swept: a custom --standard-image may
-// share its repository with images Aether does not own. Docker refuses to
-// remove an image a container uses; that tag is kept until a later sweep.
-func (s *Scheduler) sweepStandardImages(ctx context.Context) {
-	repo := imageRepo(s.cfg.DefaultStandardImage)
-	if repo == "" {
-		return
+// sweepUnusedImages untags every tag of Aether's standard and browser image
+// repositories that nothing references, so the images a server upgrade replaced
+// do not stay on disk. Only the default repositories are swept: a custom
+// --standard-image may share its repository with images Aether does not own;
+// a browser image pinned by --browser-image (a tag, digest or image ID) is never
+// swept, since removing the last tag of a pinned ID deletes the image; and a
+// source build's browser image is built locally, not pulled. Docker refuses to remove an image a container uses; that tag is kept
+// until a later sweep.
+func (s *Scheduler) sweepUnusedImages(ctx context.Context) {
+	repos := []string{imageRepo(s.cfg.DefaultStandardImage)}
+	if s.cfg.BrowserImage == s.cfg.DefaultBrowserImage && releaseTagged(s.cfg.DefaultBrowserImage) {
+		repos = append(repos, imageRepo(s.cfg.DefaultBrowserImage))
 	}
-	refs, err := s.currentImageReferences(ctx)
-	if err != nil {
-		slog.Warn("scheduler: list standard image references", "error", err)
-		return
-	}
-	tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
-	if err != nil {
-		slog.Warn("scheduler: list standard image tags", "repo", repo, "error", err)
-		return
-	}
-	for _, tag := range tags {
-		if refs[tag] {
+	var refs map[string]bool
+	for _, repo := range repos {
+		if repo == "" {
 			continue
 		}
-		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil && !cerrdefs.IsConflict(err) {
-			slog.Warn("scheduler: remove unused standard image", "tag", tag, "error", err)
+		if refs == nil {
+			var err error
+			if refs, err = s.currentImageReferences(ctx); err != nil {
+				slog.Warn("scheduler: list image references", "error", err)
+				return
+			}
+		}
+		tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
+		if err != nil {
+			slog.Warn("scheduler: list image tags", "repo", repo, "error", err)
+			continue
+		}
+		for _, tag := range tags {
+			if refs[tag] {
+				continue
+			}
+			if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil && !cerrdefs.IsConflict(err) {
+				slog.Warn("scheduler: remove unused image", "tag", tag, "error", err)
+			}
 		}
 	}
 }

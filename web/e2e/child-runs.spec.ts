@@ -52,8 +52,8 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   await page.goto(settings.toString())
   const toggle = page.getByRole('checkbox', { name: 'Let my sessions start subsessions' })
   await expect(toggle).toBeChecked({ timeout: 30_000 })
-  const saved = await alice.api.rpc<{ enabled: boolean }>('child.settings', {})
-  expect(saved).toEqual({ enabled: true })
+  const saved = await alice.api.rpc<{ enabled: boolean; off: unknown[] }>('child.settings', {})
+  expect(saved).toMatchObject({ enabled: true, off: [] })
   if (shots) await page.screenshot({ path: `${shots}/settings.png` })
 
   const { run: parent } = await alice.api.rpc<{ run: Run }>('run.launch', {

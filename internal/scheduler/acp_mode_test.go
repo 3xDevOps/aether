@@ -37,6 +37,25 @@ func TestEnhancedRunStartsInTheAgentsNoPromptMode(t *testing.T) {
 	}
 }
 
+// Claude Code's adapter refuses bypassPermissions when its settings or
+// managed policy turn bypass off; the session then asks before every tool.
+func TestEnhancedRunReportsAModeTheAgentRefused(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withMockClaude)
+	rt.fixture.RefuseModes = true
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the mode notice", func(items []acphost.Item) bool {
+		return slices.ContainsFunc(items, func(it acphost.Item) bool {
+			return it.Kind == acphost.KindNotice && it.Notice.Severity == "error" && it.Notice.Title == "Mode not set" &&
+				strings.HasPrefix(it.Notice.Description, `The agent refused mode "bypassPermissions", so the session runs in `) &&
+				strings.Contains(it.Notice.Description, "Mode bypassPermissions is not available in this session")
+		})
+	})
+}
+
 func TestRestoredEnhancedRunKeepsItsRecordedMode(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t, withMockClaude)
@@ -159,6 +178,34 @@ func TestEnhancedRunReportsAModelTheAgentRefused(t *testing.T) {
 	})
 	if !slices.Contains(rt.all()[0].agent.Methods(), "session/set_model") {
 		t.Fatal("the agent was never sent session/set_model")
+	}
+	waitFor(t, "the refused model recorded", func() bool {
+		stored, err := e.cfg.Store.GetRun(t.Context(), run.ID)
+		return err == nil && stored.Model == "" && stored.RefusedModel == "opus" && strings.HasPrefix(stored.ModelError, "The agent refused \"opus\", so the session runs on the agent's default model: ")
+	})
+}
+
+// A session the agent keeps on another model reports that model, not the
+// agent's default.
+func TestEnhancedRunReportsTheModelItKeepsAfterARefusal(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withMockClaude)
+	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy","models":{"currentModelId":"sonnet","availableModels":[{"modelId":"sonnet","name":"Sonnet"}]}}`)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP, domain.LaunchOptions{Model: "opus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the refused model recorded", func() bool {
+		stored, getErr := e.cfg.Store.GetRun(t.Context(), run.ID)
+		return getErr == nil && stored.Model == "sonnet" && stored.RefusedModel == "opus" &&
+			strings.HasPrefix(stored.ModelError, `The agent refused "opus", so the session runs on "sonnet": `)
+	})
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err = e.sched.ACPSetOption(t.Context(), run.ID, e.sched.acp.session(run.ID).ModelOptionID(), "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := e.cfg.Store.GetRun(t.Context(), run.ID); err != nil || stored.Model != "sonnet" || stored.RefusedModel != "" || stored.ModelError != "" {
+		t.Fatalf("after choosing the model it runs on = %+v, %v, want the refusal cleared", stored, err)
 	}
 }
 

@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import type { Member, MemoryItem, MemoryKind, MemorySearchParams, MemorySource } from '@/lib/types'
 
 /** protocol.MemoryBriefMaxBytes */
@@ -39,7 +40,7 @@ function author(item: MemoryItem, mergedInto: Record<string, string>): string | 
 
 /** Mirrors the server: a member note is its pinner's, or unpinned its author's; only they or an admin change it. */
 export function mayChange(item: MemoryItem, self: Self, mergedInto: Record<string, string>): boolean {
-  if (item.scope !== 'member' || self.role === null || self.role === 'admin') return true
+  if (item.scope !== 'member' || self.role === null || isAdminRole(self.role)) return true
   return (item.pinned_at ? item.pinned_by : author(item, mergedInto)) === self.id
 }
 
@@ -47,7 +48,7 @@ export function mayChange(item: MemoryItem, self: Self, mergedInto: Record<strin
 export function mayPinForSelf(item: MemoryItem, self: Self, mergedInto: Record<string, string>): boolean {
   if (self.role === null) return true
   if (item.scope === 'member') return (item.pinned_at ? item.pinned_by : author(item, mergedInto)) === self.id
-  return self.role === 'admin' || author(item, mergedInto) === self.id
+  return isAdminRole(self.role) || author(item, mergedInto) === self.id
 }
 
 export const writableKinds = ['decision', 'convention', 'gotcha', 'preference'] as const

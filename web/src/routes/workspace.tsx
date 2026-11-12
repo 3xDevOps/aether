@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { Confirm } from '@/components/confirm'
 import { FolderGit2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
@@ -12,11 +14,12 @@ import { api, type Api } from '@/lib/api'
 import { budgetStateLabel, money } from '@/lib/format'
 import type { BudgetReport } from '@/lib/types'
 import { BudgetDialog, WorkspaceSettingsDialog } from '@/routes/admin-dialogs'
+import { WorkspaceAccessDialog } from '@/routes/workspaces/access-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { ChildLimitsRow } from '@/routes/settings/children'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsSuperAdmin, useIsWorkspaceAdmin, useWorkspaceAccessServer } from '@/store/hooks'
 
 function budgetWords(report: BudgetReport | undefined): string {
   if (!report?.budget) return 'No budget set. A budget warns and reports; it never stops a session.'
@@ -30,14 +33,46 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const budget = useStore((s) => s.budgets[workspaceID])
   const caps = useCapability()
-  const isAdmin = useIsAdmin()
-  const [dialog, setDialog] = useState<'budget' | 'settings' | null>(null)
+  const isAdmin = useIsWorkspaceAdmin(workspaceID)
+  const navigate = useStore((s) => s.navigate)
+  const scoped = useWorkspaceAccessServer()
+  const superAdmin = useIsSuperAdmin()
+  const selfID = useStore((s) => s.info?.member.id)
+  const ownerName = useStore((s) => {
+    const id = s.workspaces[workspaceID]?.owner_member_id
+    return !id ? '' : id === selfID ? 'you' : s.members[id]?.display_name ?? id
+  })
+  const [dialog, setDialog] = useState<'budget' | 'settings' | 'delete' | 'access' | null>(null)
+  const [granted, setGranted] = useState<number | null>(null)
+  // A route that moves to another workspace, as a deletion elsewhere does, closes any dialog opened for this one.
+  const [dialogFor, setDialogFor] = useState(workspaceID)
+  const shown = useRef(workspaceID)
+  shown.current = workspaceID
+  // A late answer for the workspace a dialog was opened on never closes one opened since on another.
+  const closeFor = (target: string) => () => {
+    if (shown.current === target) setDialog(null)
+  }
+  if (dialogFor !== workspaceID) {
+    setDialogFor(workspaceID)
+    setDialog(null)
+    setGranted(null)
+  }
+  const canAccess = scoped && isAdmin && caps.hasMethod('workspace.access.list')
+  // Re-read whenever the workspace record changes, as a grant elsewhere reloads it.
+  useEffect(() => {
+    if (!canAccess || dialog === 'access') return
+    let live = true
+    client.workspaceAccessList(workspaceID).then((access) => live && setGranted(access.grants.length), () => live && setGranted(null))
+    return () => {
+      live = false
+    }
+  }, [canAccess, client, dialog, workspaceID, workspace])
   const [settingsClosed, setSettingsClosed] = useState(0)
 
   if (!workspace) {
     return (
       <div className="flex h-full min-w-0 flex-col">
-        <ViewHeader title="Repository" />
+        <ViewHeader title="Workspace settings" />
         <EmptyState icon={<FolderGit2 />} title="Unknown workspace">It may have been deleted, or this link names another server&apos;s workspace.</EmptyState>
       </div>
     )
@@ -46,7 +81,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <ViewHeader title={workspace.name} subtitle="Repository" />
+      <ViewHeader title={workspace.name} subtitle="Workspace settings" />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <PageBody>
           <SettingsSection title="Base branch" heading="h2">
@@ -78,6 +113,17 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
             />
           )}
           <SettingsSection title="Team" heading="h2">
+            {scoped && ownerName && (
+              <SettingRow
+                label="Access"
+                help={granted === null || !canAccess
+                  ? `Owner: ${ownerName}. The owner, super admins and the members granted access can use this workspace.`
+                  : `Owner: ${ownerName}. Granted to ${granted} ${granted === 1 ? 'member' : 'members'}; super admins always have access.`}
+                control={canAccess && (
+                  <Button size="sm" variant="secondary" onClick={() => setDialog('access')}>Access…</Button>
+                )}
+              />
+            )}
             <SettingRow
               label="Budget"
               help={budgetWords(budget)}
@@ -105,10 +151,46 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
               />
             )}
           </SettingsSection>
+          {isAdmin && caps.hasMethod('workspace.delete') && (
+            <SettingsSection title="Danger zone" heading="h2" tone="danger">
+              <SettingRow
+                label="Delete this workspace"
+                help="Deletes its finished sessions, retained containers, files, history and server repository. Members and their environments stay."
+                control={<Button size="sm" variant="danger" onClick={() => setDialog('delete')}>Delete…</Button>}
+              />
+            </SettingsSection>
+          )}
         </PageBody>
       </div>
-      {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
-      {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => { setDialog(null); setSettingsClosed((n) => n + 1) }} />}
+      {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={closeFor(workspaceID)} />}
+      {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => { closeFor(workspaceID)(); setSettingsClosed((n) => n + 1) }} />}
+      {dialog === 'access' && (
+        <WorkspaceAccessDialog
+          workspaceID={workspaceID}
+          client={client}
+          onClose={closeFor(workspaceID)}
+          canChangeOwner={superAdmin && caps.hasMethod('workspace.owner.set')}
+        />
+      )}
+      {dialog === 'delete' && (
+        <Confirm
+          title={`Delete ${workspace.name}?`}
+          description="This permanently deletes the workspace, its finished sessions, retained containers, files, history and server repository. Members, their environments and external repositories stay."
+          action="Delete workspace"
+          onConfirm={() => client.workspaceDelete(workspaceID)}
+          onDone={() => {
+            toast.success(`${workspace.name} deleted`)
+            const { route } = useStore.getState()
+            if (route.name === 'workspace' && route.params.workspaceId === workspaceID) navigate('workspaces')
+            useStore.getState().removeWorkspace(workspaceID)
+          }}
+          onClose={closeFor(workspaceID)}
+        >
+          <p className="text-ui-sm text-muted">
+            The server refuses while a session is unfinished, review work or cleanup is pending, or a schedule remains.
+          </p>
+        </Confirm>
+      )}
     </div>
   )
 }

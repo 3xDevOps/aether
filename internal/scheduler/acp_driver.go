@@ -30,6 +30,8 @@ const (
 	// acpConnectTimeout bounds starting the adapter and opening its session:
 	// a cold npm adapter takes seconds, a hung one must not hold a launch.
 	acpConnectTimeout = time.Minute
+	// acpLoginTimeout bounds the store and home reads behind a turn's end.
+	acpLoginTimeout = 10 * time.Second
 	// acpRecoveryWait bounds how long a call waits for recovery.
 	acpRecoveryWait = 30 * time.Second
 	acpStopGrace    = 3 * time.Second
@@ -183,6 +185,12 @@ func usageLimited(err error) bool {
 func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.Attachment) error {
 	if err := d.s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
 		return err
+	}
+	d.s.mu.Lock()
+	waking := entry.waking != nil
+	d.s.mu.Unlock()
+	if waking {
+		return d.openRestored(ctx, entry, openWake)
 	}
 	if !d.continuationOwed(entry) {
 		d.connect(ctx, entry, openRestore)
@@ -404,6 +412,9 @@ const (
 	// openContinue restores the session in a container that replaced the
 	// run's, on another account; the move sends it its continuation.
 	openContinue
+	// openWake restores the session in a container a sleep stopped, and
+	// fails rather than start a conversation the member did not have.
+	openWake
 )
 
 func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen) {
@@ -411,12 +422,21 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), acpConnectTimeout)
 	defer cancel()
 	if err := d.open(ctx, entry, how); err != nil {
+		if acphost.AuthRequired(err) {
+			err = fmt.Errorf("%w; %s", err, d.s.loginRefusedAdvice(d.s.runLogin(ctx, entry.runID), err, refusedUnrestarted))
+			// A Background run's exit detail keeps only its start.
+			d.s.mu.Lock()
+			if entry.launchMode == domain.LaunchHeadless {
+				entry.failReason = acpFailedReason + err.Error()
+			}
+			d.s.mu.Unlock()
+		}
 		d.fail(entry, err)
 	}
 }
 
-// openRestored restores the run's stored session, how being openSwitch or
-// openContinue, and returns the failure instead of recording it.
+// openRestored restores the run's stored session, how being openSwitch,
+// openContinue or openWake, and returns the failure instead of recording it.
 func (d *acpDriver) openRestored(ctx context.Context, entry *supervised, how acpOpen) error {
 	defer d.lockOp(entry.runID)()
 	ctx, cancel := context.WithTimeout(ctx, acpConnectTimeout)
@@ -459,6 +479,11 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if profile.ACPEffortArgs {
 		adapter = append(slices.Clone(adapter), profile.EffortLaunchArgs(run.Effort)...)
 	}
+	var cli string
+	if tui := argv[domain.LaunchTUI]; len(tui) > 0 {
+		cli = tui[0]
+	}
+	command := profile.ACPCommand(adapter, cli)
 	managed, ok := d.s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
 		return fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
@@ -507,7 +532,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			return err
 		}
 		d.stopStaleExec(ctx, entry)
-		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter)
+		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter[0], command)
 		if err == nil {
 			break
 		}
@@ -517,7 +542,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		// A container staged before keepers existed has a binary without
 		// one: its adapter runs as before and ends with this process.
 		slog.Warn("scheduler: run the agent's ACP server under a keeper", "run", entry.runID, "error", err)
-		if exec, err = d.startDirect(ctx, entry, managed, cid, adapter, stderr); err != nil {
+		if exec, err = d.startDirect(ctx, entry, managed, cid, adapter[0], command, stderr); err != nil {
 			return err
 		}
 		stdout, stdin = exec.Attachment().Stdout(), exec.Attachment().Stdin()
@@ -555,7 +580,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		Cwd:            d.s.cfg.WorktreeMount,
 		MCPServers:     mcp,
 		SessionID:      sessionID,
-		RequireRestore: how == openSwitch || how == openContinue,
+		RequireRestore: how == openSwitch || how == openContinue || how == openWake,
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
 		SystemPrompt:   systemPrompt,
@@ -579,14 +604,31 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				d.s.goMove(func() { d.usageLimit(entry, oneShot, st, message) })
 				return
 			}
-			if !oneShot && acphost.AuthRequired(st.Failed) {
-				due, tried := d.reauthDue(entry)
+			if acphost.AuthRequired(st.Failed) {
+				loginCtx, cancel := context.WithTimeout(context.Background(), acpLoginTimeout)
+				login := d.s.runLogin(loginCtx, entry.runID)
+				cancel()
+				due, tried := false, false
+				if !oneShot {
+					due, tried = d.reauthDue(entry, login.stamp)
+				}
+				how := refusedUnrestarted
+				switch {
+				case due:
+					how = refusedRestarting
+				case tried:
+					how = refusedAfterRestart
+				}
+				signIn := d.s.loginRefusedAdvice(login, st.Failed, how)
 				if due {
-					d.s.goMove(func() { d.reauth(entry, r, st) })
+					d.s.goMove(func() { d.reauth(entry, r, st, signIn, login.fileProblem) })
 					return
 				}
-				if tried {
-					st.Failed = fmt.Errorf("%w; restarting the agent did not restore its sign-in, so this container's copy of the login is stale or unreadable: start a new session", st.Failed)
+				st.Failed = fmt.Errorf("%w; %s", st.Failed, signIn)
+				if oneShot {
+					d.s.mu.Lock()
+					entry.failReason = acpTurnFailedReason + st.Failed.Error()
+					d.s.mu.Unlock()
 				}
 			}
 			if !oneShot && acphost.SessionLost(st.Failed) {
@@ -625,15 +667,49 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		mode = ""
 	}
 	if mode != "" && sess.State().Mode != mode {
-		if err := sess.SetMode(ctx, mode); err != nil {
-			slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", err)
+		if modeErr := sess.SetMode(ctx, mode); !acphost.Refused(modeErr) {
+			if modeErr != nil {
+				slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", modeErr)
+			}
+		} else {
+			on := "the agent's default mode"
+			if running := sess.State().Mode; running != "" {
+				on = strconv.Quote(running)
+			}
+			reason := fmt.Sprintf("The agent refused mode %q, so the session runs in %s: %v", mode, on, modeErr)
+			if err := sess.Notice("error", "Mode not set", reason); err != nil {
+				slog.Warn("scheduler: record the mode notice", "run", runID, "error", err)
+			}
 		}
 	}
 	var modelErr error
 	if run.Model != "" && adopt == nil {
 		if modelErr = sess.SetModel(ctx, run.Model); modelErr != nil {
-			if err := sess.Notice("error", "Model not set", modelErr.Error()); err != nil {
+			reason := modelErr.Error()
+			// A one-shot run ends on the error below; a refused live
+			// session keeps the model it reports.
+			refused := !oneShot && acphost.Refused(modelErr)
+			running := sess.Model()
+			// Claude Code's adapter reports its default as "default".
+			if running == "default" || running == run.Model || domain.ValidModel(running) != nil {
+				running = ""
+			}
+			if refused {
+				on := "the agent's default model"
+				if running != "" {
+					on = strconv.Quote(running)
+				}
+				reason = fmt.Sprintf("The agent refused %q, so the session runs on %s: %v", run.Model, on, modelErr)
+			}
+			if err := sess.Notice("error", "Model not set", reason); err != nil {
 				slog.Warn("scheduler: record the model notice", "run", runID, "error", err)
+			}
+			if refused {
+				if changed, err := d.s.cfg.Store.RefuseRunModel(ctx, runID, run.Model, running, reason); err != nil {
+					slog.Warn("scheduler: record the refused model", "run", runID, "error", err)
+				} else if changed {
+					d.s.publish(ctx, events.Event{WorkspaceID: run.WorkspaceID, RunID: runID, Payload: events.RunModelPayload{Model: running}})
+				}
 			}
 		}
 	}

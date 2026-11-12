@@ -19,6 +19,7 @@ import (
 func TestApproveDeviceByID(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	approveAsAdmin(t, e, e.refusedForApproval(t, octo, newSigner(t), "phone"))
@@ -77,8 +78,8 @@ func TestApproveDeviceByID(t *testing.T) {
 	}
 
 	for _, want := range []events.MemberDevicePayload{
-		{DeviceID: waiting.ID, Status: domain.DevicePending},
-		{DeviceID: waiting.ID, Status: domain.DeviceApproved},
+		{DeviceID: waiting.ID, Status: domain.DevicePending, MemberID: e.member.ID},
+		{DeviceID: waiting.ID, Status: domain.DeviceApproved, MemberID: m.ID},
 	} {
 		select {
 		case ev := <-sub.Events():

@@ -22,6 +22,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
+	agentharness "github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -102,9 +103,15 @@ func (l launcher) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, 
 	return run, l.db.CreateRun(ctx, run)
 }
 
-func (launcher) Paused(domain.RunID) bool { return false }
+func (launcher) Paused(domain.RunID) bool                                     { return false }
+func (launcher) Sleep(domain.RunID) scheduler.SleepState                      { return scheduler.SleepState{} }
+func (launcher) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (launcher) SettleSleep(context.Context, domain.RunID) error              { return nil }
 func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
+}
+func (launcher) LoginProblem(domain.MemberID, string, agentharness.Profile) (string, bool, error) {
+	return "", false, nil
 }
 func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
 func (launcher) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
@@ -230,6 +237,7 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 			if err := s.db.CreateWorkspace(t.Context(), ws); err != nil {
 				t.Fatal(err)
 			}
+			grantEveryone(t, s.db, ws.ID)
 			base := h.relayURL + edgeproto.MCPPath(s.id)
 			bearer := func(token string) (*http.Response, string) {
 				header := http.Header{"Content-Type": {"application/json"}, "Accept": {"application/json, text/event-stream"}}

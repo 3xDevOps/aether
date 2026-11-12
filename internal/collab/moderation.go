@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -28,7 +29,7 @@ func (s *Service) ApproveNow(ctx context.Context, id string, by domain.MemberID,
 	claimAdmission := func(fn func() error) error {
 		return s.cfg.Control.AdmitMember(string(run.ID), by, session, generation, fn)
 	}
-	return s.deliverResult(ctx, msg, actor, run, true, by, nil, claimAdmission, false)
+	return s.deliverResult(ctx, msg, actor, run, true, by, claimAdmission, false)
 }
 
 // Deny atomically settles a queued steer request as denied. The caller must
@@ -92,7 +93,7 @@ func (s *Service) Resolve(ctx context.Context, id string, by domain.MemberID, ou
 	if err != nil {
 		return nil, err
 	}
-	if by != run.MemberID && by != msg.ActorID && actor.Role != domain.RoleAdmin {
+	if by != run.MemberID && by != msg.ActorID && permissions.Check(permissions.WorkspaceAdmin, permissions.ActorOf(actor), permissions.Target{Workspace: run.WorkspaceID}) != nil {
 		return nil, ErrUnauthorizedDecision
 	}
 	resolved, err := s.cfg.Store.ResolveRoomMessage(ctx, id, outcome, by, s.now())

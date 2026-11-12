@@ -115,6 +115,7 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	if err := s.db.CreateWorkspace(t.Context(), ws); err != nil {
 		t.Fatal(err)
 	}
+	grantEveryone(t, s.db, ws.ID)
 	now := time.Now()
 	alicesRun := &domain.Run{WorkspaceID: ws.ID, MemberID: s.memberOf(t, alice).ID, AccountMemberID: s.memberOf(t, alice).ID, Task: "migrate the schema",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning, StartedAt: &now}

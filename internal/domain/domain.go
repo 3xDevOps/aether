@@ -150,6 +150,16 @@ func (a RunActivity) Quiet(reason string) bool {
 	return false
 }
 
+// These start the reasons of a needs-you run an error stopped: an Enhanced
+// turn interrupted or ended early, a usage limit Aether does not resume
+// from, or a wait whose wake was never delivered.
+const (
+	InterruptedReason        = "turn interrupted"
+	StoppedShortReasonPrefix = "turn ended: "
+	UsageLimitReasonPrefix   = "Usage limit reached on "
+	WaitBrokenReasonPrefix   = "wait broken: "
+)
+
 // RunReview is whether the run's owner has dealt with the success its agent
 // reported: empty when no success awaits them.
 type RunReview string
@@ -168,6 +178,10 @@ const BlockedReasonPrefix = "blocked: "
 // completed, before any retention suffix. A live run in that standing has
 // ActivityFinished instead.
 const ReportedSuccessReason = "agent reported success"
+
+// ReportedFailureReason is the reason of a run its agent's failure report
+// parked or ended, before any retention suffix.
+const ReportedFailureReason = "agent reported failure"
 
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether sessions --needs-you and
@@ -341,18 +355,23 @@ type AccountFallback struct {
 	Order []MemberID
 }
 
-// Role is a member's role within the deployment.
+// Role is a member's role on the server. A super admin reaches every
+// workspace; everyone else reaches the workspaces they own or were granted.
 type Role string
 
 const (
 	RoleViewer       Role = "viewer"
 	RoleCollaborator Role = "collaborator"
 	RoleAdmin        Role = "admin"
+	RoleSuperAdmin   Role = "super_admin"
 )
 
 func (r Role) Valid() bool {
-	return r == RoleViewer || r == RoleCollaborator || r == RoleAdmin
+	return r == RoleViewer || r == RoleCollaborator || r == RoleAdmin || r == RoleSuperAdmin
 }
+
+// Admin reports whether r may own and administer workspaces.
+func (r Role) Admin() bool { return r == RoleAdmin || r == RoleSuperAdmin }
 
 // Workspace is a repo checkout, its server-owned environment definition,
 // and the shared context every run against it inherits: runs, costs,
@@ -368,7 +387,26 @@ type Workspace struct {
 	// Origin is the upstream git URL run checkouts push to; "" when the
 	// workspace has none, in which case a checkout keeps the origin its
 	// clone made.
-	Origin    string
+	Origin string
+	// OwnerID is the admin or super admin who owns the workspace and
+	// administers it.
+	OwnerID   MemberID
+	CreatedAt time.Time
+}
+
+// WorkspaceAccess is the workspaces a member owns and was granted.
+type WorkspaceAccess struct {
+	Owned   map[WorkspaceID]bool
+	Granted map[WorkspaceID]bool
+}
+
+// WorkspaceGrant lets a member into a workspace they do not own.
+type WorkspaceGrant struct {
+	WorkspaceID WorkspaceID
+	MemberID    MemberID
+	// GrantedBy is the member who granted it; empty for grants the
+	// upgrade to workspace-scoped access created.
+	GrantedBy MemberID
 	CreatedAt time.Time
 }
 
@@ -627,6 +665,9 @@ type Member struct {
 	// colorblind-safe palette; overridable.
 	Color string
 	Role  Role
+	// Access is the workspaces the member owns and was granted. GetMember
+	// loads it with the role, so a check sees both as they are now.
+	Access WorkspaceAccess `json:"-"`
 	// GitName and GitEmail are the identity commits made for this member
 	// are authored as. Empty falls back to GitIdentity's defaults.
 	GitName   string
@@ -795,10 +836,13 @@ type Run struct {
 	Harness string
 	Mode    LaunchMode
 	// Model is the agent's model for this run and Effort its effort or
-	// thinking level; empty keeps the agent's default.
-	Model      string
-	Effort     string
-	Permission Permission
+	// thinking level; empty keeps the agent's default. RefusedModel is the
+	// model the run asked for and the agent refused, and ModelError why.
+	Model        string
+	RefusedModel string
+	ModelError   string
+	Effort       string
+	Permission   Permission
 	// ACP is true when the server drives the agent over the Agent Client
 	// Protocol: every LaunchACP run, and a LaunchHeadless run whose agent
 	// serves ACP. Such a run has a session item log.
@@ -998,6 +1042,15 @@ func RepoDirName(name string) string {
 		return "repo"
 	}
 	return dir
+}
+
+// ExtraWorkspaces are the workspaces of the run's extra repos.
+func (r *Run) ExtraWorkspaces() []WorkspaceID {
+	out := make([]WorkspaceID, 0, len(r.Extras))
+	for _, repo := range r.Extras {
+		out = append(out, repo.WorkspaceID)
+	}
+	return out
 }
 
 func (r *Run) ExtraRepo(workspace WorkspaceID) (RunRepo, bool) {

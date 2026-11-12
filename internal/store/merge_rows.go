@@ -38,6 +38,8 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"subsessions", `UPDATE run_children SET account_member_id = ?2 WHERE account_member_id = ?1`},
 		{"subsession fallback order", `UPDATE run_children SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
 			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
+		{"subsession accounts off", `UPDATE child_settings SET off = replace(off, '"' || ?1 || '"', '"' || ?2 || '"')
+			WHERE instr(off, '"' || ?1 || '"') > 0`},
 		{"schedules", `UPDATE schedules SET member_id = ?2 WHERE member_id = ?1`},
 		{"push subscriptions", `UPDATE push_subscriptions SET member_id = ?2 WHERE member_id = ?1`},
 		{"watches", `UPDATE watches SET member_id = ?2, idempotency_key = NULL, version = version + 1 WHERE member_id = ?1`},
@@ -57,6 +59,9 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 				l.source, l.updated_at
 			FROM launch_defaults l WHERE l.account_member_id = ?1 OR instr(l.fallback_order, '"' || ?1 || '"') > 0`},
 		{"memory pins", `UPDATE memory SET pinned_by = ?2 WHERE pinned_by = ?1`},
+		{"workspace grants", `UPDATE OR IGNORE workspace_grants SET member_id = ?2 WHERE member_id = ?1`},
+		{"workspace grants", `DELETE FROM workspace_grants WHERE member_id = ?1`},
+		{"workspace owners", `UPDATE workspaces SET owner_member_id = ?2 WHERE owner_member_id = ?1`},
 		{"connectors", `UPDATE connectors SET member_id = ?2 WHERE member_id = ?1`},
 		{"slack links", `UPDATE OR IGNORE slack_links SET member_id = ?2 WHERE member_id = ?1`},
 		{"slack links", `DELETE FROM slack_links WHERE member_id = ?1`},

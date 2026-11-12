@@ -611,3 +611,24 @@ func TestCommitSignsSelectedFilesInLinkedWorktree(t *testing.T) {
 		t.Fatalf("unrelated worktree changed: %q err=%v", worktree, err)
 	}
 }
+
+func TestDiffBaseShowsCommittedAndUncommittedChanges(t *testing.T) {
+	s, run, initial := newRepo(t)
+	writeFile(t, run.WorkDir, "selected", "committed\n")
+	gitCmd(t, run.WorkDir, "commit", "-q", "-am", "change")
+	plain, err := s.Diff(t.Context(), run, DiffRequest{})
+	if err != nil || plain.Output.Stdout != "" {
+		t.Fatalf("plain diff of a committed session = %q, %v", plain.Output.Stdout, err)
+	}
+	writeFile(t, run.WorkDir, "selected", "committed\nuncommitted\n")
+	got, err := s.Diff(t.Context(), run, DiffRequest{Base: true, ForkPoint: initial.Head})
+	if err != nil || got.BaseRef != initial.Head || !strings.Contains(got.Output.Stdout, "+committed") || !strings.Contains(got.Output.Stdout, "+uncommitted") {
+		t.Fatalf("base diff = %+v, %v", got, err)
+	}
+	if _, err = s.Diff(t.Context(), run, DiffRequest{Base: true, Staged: true}); err == nil {
+		t.Fatal("base and staged accepted together")
+	}
+	if _, err = s.Diff(t.Context(), run, DiffRequest{Base: true, BaseBranch: "develop"}); err == nil || !strings.Contains(err.Error(), "origin/develop is missing") {
+		t.Fatalf("unresolvable base error = %v", err)
+	}
+}

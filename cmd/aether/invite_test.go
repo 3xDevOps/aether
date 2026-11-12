@@ -13,6 +13,7 @@ func TestParseInviteArgs(t *testing.T) {
 		args    []string
 		want    *protocol.MemberInvitationCreateParams
 		ttl     int
+		ws      []string
 		wantErr string
 	}{
 		{args: nil, ttl: 86400},
@@ -29,19 +30,25 @@ func TestParseInviteArgs(t *testing.T) {
 			args: []string{"--email", "dana@example.com", "--role", "admin"},
 			want: &protocol.MemberInvitationCreateParams{Email: "dana@example.com", Role: "admin"},
 		},
+		{args: []string{"--workspace", "web"}, ttl: 86400, ws: []string{"web"}},
+		{
+			args: []string{"--github", "octocat", "--workspace", "web", "--workspace", "api"},
+			want: &protocol.MemberInvitationCreateParams{Login: "octocat", Role: "collaborator"},
+			ws:   []string{"web", "api"},
+		},
 		{args: []string{"--github", "octocat", "--ttl", "60"}, wantErr: "--ttl applies to a one-time invite code"},
 		{args: []string{"--role", "admin"}, wantErr: "--role applies to --github and --email"},
 		{args: []string{"--github", "octocat", "extra"}, wantErr: "usage: aether invite"},
 	} {
-		got, ttl, err := parseInviteArgs(tc.args)
+		got, ttl, ws, err := parseInviteArgs(tc.args)
 		if tc.wantErr != "" {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("%q: err = %v, want %q", tc.args, err, tc.wantErr)
 			}
 			continue
 		}
-		if err != nil || !reflect.DeepEqual(got, tc.want) || ttl != tc.ttl {
-			t.Errorf("%q = %+v, %d, %v; want %+v, %d", tc.args, got, ttl, err, tc.want, tc.ttl)
+		if err != nil || !reflect.DeepEqual(got, tc.want) || ttl != tc.ttl || !reflect.DeepEqual(ws, tc.ws) {
+			t.Errorf("%q = %+v, %d, %v, %v; want %+v, %d, %v", tc.args, got, ttl, ws, err, tc.want, tc.ttl, tc.ws)
 		}
 	}
 }

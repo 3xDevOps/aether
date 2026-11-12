@@ -25,6 +25,7 @@ func TestSysboxMethodsRequireAdmin(t *testing.T) {
 	t.Parallel()
 	svc := &stubSysbox{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Sysbox = svc })
+	asSuperAdmin(t, e)
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 
 	for _, method := range []string{protocol.MethodServerSysboxStatus, protocol.MethodServerSysboxInstall} {

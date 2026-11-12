@@ -271,6 +271,9 @@ CLI is moved or deleted, the app's error names the path; restore it, set
 `aether update` rebuilds the app ([Upgrading](#upgrading)). On Windows, close
 Aether before rebuilding by hand.
 
+On Windows the app runs its dashboard server without opening a console window.
+To diagnose startup failures, run `aether gui` in a terminal.
+
 ## Android app
 
 The Android app shows the dashboard full screen on a phone. It is not on
@@ -360,7 +363,7 @@ sudo journalctl -u aether-server -f
 
 On first start the server creates its database, repositories and SSH host
 key. Do not delete the key: clients pin it, and the edge knows the server by
-it. The first identity to link becomes the admin: the SSH key or tailnet login
+it. The first identity to link becomes the super admin: the SSH key or tailnet login
 of whoever runs `aether link` first, or the account that uses the claim code.
 With the edge on, a first SSH key must come from the server itself or an SSH
 tunnel ([networking.md](networking.md#the-first-admin)).
@@ -369,7 +372,7 @@ For automation, `aether-server install` writes the same files from flags,
 such as `--edge-url https://edge.onaether.dev --edge-access approved-devices`.
 It installs Sysbox unless you pass `--sysbox=false`, turns the edge on only
 with `--edge-url`, and issues no claim code. With Tailscale on the host, the
-first tailnet login becomes the admin unless you pass `--tailnet-require-key`.
+first tailnet login becomes the super admin unless you pass `--tailnet-require-key`.
 With the edge on, install also prints the edge, policy and server id. It
 prints one `warning:` line naming what the host lacks (git, ssh-keygen, a
 running systemd, or the memory and disk above), without failing, and ends on
@@ -408,6 +411,7 @@ after the key and value of `config set`.
 | `min-free-disk` | `0` (5% of the filesystem, 5 to 20 GiB) | Free-space reserve below which new sessions are refused. Negative turns the check off. |
 | `checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps it forever. |
 | `run-container-ttl` | `168h` | How long a closed session's container is kept so the session can be relaunched. A relaunched session's clock restarts at its next close. |
+| `run-sleep-after` | `30m` | How long an idle Enhanced Claude Code session keeps its container running before Aether stops it until its next use ([Idle sleep](failure-handling.md#idle-sleep)). `0` keeps every session awake. |
 | `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a session's **Browser** tab starts from. Set it and updates stop moving it. |
 | `conflict-coordination` | on | Let overlapping sessions message each other ([coordination.md](coordination.md)). |
 
@@ -416,6 +420,126 @@ unit loads; subscription logins live in each member's home
 ([harnesses.md](harnesses.md)). The unit runs the server as root, since Docker
 access is root-equivalent anyway. Its header comment explains how to run
 unprivileged; then every image needs a root user and self-update is off.
+
+### Keep the server reachable under load
+
+The server creates every container it starts, for sessions, terminals, the
+assistant, harness updates, browser companions, the dictation engine and
+cleanup helpers, under one cgroup parent: `aether.slice` with Docker's systemd
+cgroup driver, the default on current Ubuntu and Debian, and `/aether` with the
+`cgroupfs` driver. `docker info --format '{{.CgroupDriver}}'` prints the
+driver. This parent overrides `cgroup-parent` in `/etc/docker/daemon.json`.
+The server reads the driver once, so after changing Docker's cgroup driver,
+restart it: `sudo systemctl restart aether-server`. All sessions together
+then compete as one group with `system.slice`, which holds `aether-server`,
+`docker`, `containerd`, `ssh` and `tailscaled`, and with `user.slice`, which
+holds login shells.
+
+`aether-server install` and `setup` write `/etc/systemd/system/aether.slice`
+beside the unit, with `CPUWeight=50` and `IOWeight=50`. `system.slice` and
+`user.slice` keep the default 100, so while all three want more than the host
+has, sessions get a fifth of CPU and disk and `system.slice` two fifths;
+against `system.slice` alone, sessions get a third. Weights only divide CPU
+and disk while they are contended; they cap nothing, so sessions use every
+core of an otherwise idle host. Image builds, pulls and other services on the
+host, such as a CI runner, stay in `system.slice` at twice the session group's
+weight. The slice sets no memory limit and never throttles, stops or kills a
+session. Its name has no dash because systemd nests `a-b.slice` inside
+`a.slice`, whose default weight would decide instead. `install` rewrites the
+file, so change the weights in a drop-in: `sudo systemctl edit aether.slice`,
+under `[Slice]`.
+
+A container created before the slice existed stays a `docker-<id>.scope` in
+`system.slice` at weight 100 until the session's container is recreated. With
+N of those busy, a service at the default weight gets about 1/(N + 1) of
+contended CPU. The unit's `CPUWeight=10000` and `IOWeight=10000`, the systemd
+maximum, put the server ahead of them and of the other services in
+`system.slice`: 10000/(10000 + 100N) of contended CPU. The server is idle most
+of the time, and a weight only counts while the unit has work, so the maximum
+costs others only the CPU and disk the server actually uses. The git commands
+the server runs on the host, such as diff snapshots and evidence, run in its
+unit and get the same weight.
+
+To add the slice to an existing install, without restarting the server or any
+session:
+
+```sh
+sudo aether-server install --sysbox=false
+sudo systemctl daemon-reload
+```
+
+`install` rewrites the unit and the slice and keeps `/etc/aether/server.conf`.
+Running containers stay where they are; containers the server creates from now
+on land in the slice. Check it:
+
+```sh
+systemctl status aether.slice
+systemd-cgls --unit aether.slice
+cat /sys/fs/cgroup/aether.slice/cpu.weight
+sudo docker ps --filter label=aether.managed=true --format '{{.Names}}'
+sudo docker inspect --format '{{.HostConfig.CgroupParent}} {{.HostConfig.Runtime}}' <container>
+cat /proc/"$(sudo docker inspect --format '{{.State.Pid}}' <container>)"/cgroup
+```
+
+`systemctl status` shows the slice inactive until its first container starts.
+`cpu.weight` prints `50`; `daemon-reload` applies the file to a slice that is
+already running. While the slice is inactive the file does not exist, and `100`
+without a drop-in of your own means the file is not loaded. With the systemd
+driver, a container created after the update prints `aether.slice` and its
+runtime: with the default `container-runtime auto`, `sysbox-runc` for terminals
+and sessions that are not isolated when Sysbox is installed and usable,
+otherwise Docker's default runtime, usually `runc`. A container created before
+the slice prints an empty parent and sits under Docker's default parent:
+`system.slice`, unless `cgroup-parent` in `/etc/docker/daemon.json` names
+another. On cgroup v2, a new container's `/proc/<pid>/cgroup` reads
+`0::/aether.slice/docker-<id>.scope`, with the full container ID and, under
+`sysbox-runc`, `/init.scope` appended. Read it on the host: inside a Sysbox
+container the cgroup namespace shows only `0::/init.scope`. With the `cgroupfs`
+driver the parent is `/aether` and the path `0::/aether/<id>`. On cgroup v1 the
+file has one line per controller, each ending in the same path.
+
+If new sessions fail to start with `cgroup-parent for systemd cgroup should be
+a valid slice named as "xxx.slice"`, Docker's cgroup driver changed after the
+server started: `sudo systemctl restart aether-server`. To give the session
+group the default weight again, remove any `systemctl edit` drop-in and run
+`sudo systemctl set-property aether.slice CPUWeight=100 IOWeight=100`.
+
+`MemoryLow=1G` makes the kernel reclaim the server's first gigabyte only after
+unprotected memory. Memory protection passes down the cgroup tree, so it
+protects the server only once `system.slice` holds at least as much; the
+commands below set that, and the unit cannot.
+
+An existing install keeps its old unit until you run the command the journal's
+unit warning prints ([What an update does not change](#what-an-update-does-not-change)).
+To apply the settings now, without a restart, to the server and to the
+services it and you depend on:
+
+```sh
+sudo systemctl set-property system.slice MemoryLow=1G
+sudo systemctl set-property aether-server CPUWeight=10000 IOWeight=10000 MemoryLow=1G
+for unit in docker containerd sysbox-fs sysbox-mgr ssh tailscaled; do
+  sudo systemctl set-property "$unit" CPUWeight=10000 IOWeight=10000
+done
+```
+
+`set-property` changes the running unit and keeps the change in
+`/etc/systemd/system.control/<unit>.d/`. `sysbox-fs` serves `/proc` inside
+every Sysbox container, so the server's commands in sessions wait on it; skip
+both `sysbox-*` units without Sysbox. Work docker, containerd and sysbox-fs
+do for a container, such as the `/proc` reads sysbox-fs serves, runs at their
+raised weight, not the container's. The SSH unit is `sshd` on Fedora and
+Arch; skip `tailscaled` without Tailscale. To keep the setting with your other
+overrides instead, put the same lines in a drop-in, such as
+`sudo systemctl edit docker`, which reloads systemd when you save: under
+`[Service]` for a service, under `[Slice]` for `system.slice`.
+
+With `cgroupfs`, systemd does not manage `/aether`, so the slice file does not
+apply and the group keeps weight 100 beside `system.slice`; the service weights
+order only the services inside `system.slice`. `IOWeight` takes effect only on
+a disk whose IO scheduler honors weights, such as `bfq`; NVMe disks often use
+`none` (`cat /sys/block/<disk>/queue/scheduler`). `MemoryLow` needs cgroup v2.
+systemd 232 and newer know all three directives; an older one logs
+`Unknown key name` and ignores them.
 
 ## Client files and variables
 
@@ -466,12 +590,12 @@ than itself, and a client newer than its server gains nothing.
 
 ### Update the server
 
-A server admin can update from any client or from the dashboard's
+A super admin can update from any client or from the dashboard's
 **Updates** dialog ([dashboard-frontend.md](dashboard-frontend.md#update-prompts)),
 and root can update on the server host:
 
 ```sh
-aether server update [--version <tag>]        # from any client, as an admin
+aether server update [--version <tag>]        # from any client, as a super admin
 sudo aether-server update [--version <tag>]   # on the server host
 ```
 
@@ -521,7 +645,7 @@ signature, then rebuilds the desktop app if one is installed (`--no-app` skips
 that). `--version <tag>` picks a release, and `--check`, with `--json` for a
 script, only reports whether a newer one exists. When this CLI is behind its
 server, it installs the server's release instead. When the server is behind
-and you are its admin, it refuses unless you pass `--force`:
+and you are a super admin, it refuses unless you pass `--force`:
 
 ```
 aether: update the server first: aether server update (the server runs v0.8.0 and this installs v0.9.0; --force skips this check)
@@ -548,10 +672,14 @@ One from `v0.7.0-alpha.12` or older needs one restart by hand:
 
 ### What an update does not change
 
-- `/etc/aether/`, and a browser image pinned with `browser-image`.
+- `/etc/aether/`, and a browser image pinned with `browser-image`. Without a
+  pin, the server removes `aether-browser` tags from earlier releases that no
+  container uses.
 - The systemd unit. When the release ships a different one, the journal warns
   with the command that applies it:
   `sudo aether-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart aether-server`.
+  When only `aether.slice` is missing or differs, and a local Docker uses the
+  systemd cgroup driver, the warning leaves out the restart ([Keep the server reachable under load](#keep-the-server-reachable-under-load)).
   Keep your own changes in a drop-in (`sudo systemctl edit aether-server`).
 - Sysbox's settings: rerun `sudo aether-server sysbox install`. With
   containers running, it prints `sudo systemctl restart sysbox` for later.
@@ -650,7 +778,7 @@ and git history. Follow the steps in order.
 sudo aether-server edge leave
 # 1. Stop the service.
 sudo systemctl disable --now aether-server
-sudo rm -f /etc/systemd/system/aether-server.service
+sudo rm -f /etc/systemd/system/aether-server.service /etc/systemd/system/aether.slice
 sudo systemctl daemon-reload
 # 2. Containers. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)

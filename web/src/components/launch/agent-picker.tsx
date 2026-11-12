@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
+import { signedOutState, signedOutTitle } from '@/components/agents/agent-copy'
 import { agentLabel } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ function status(agent: AgentInfo, owner: string | undefined): string {
   if (agent.login_missing) return needsLogin(owner)
   if (agent.own_account_only) return 'Your account only'
   if (agent.unavailable) return 'Unavailable'
+  if (agent.login_problem) return signedOutState(agent)
   if (agent.source !== 'shipped' || agent.login_found === undefined) return ''
   return agent.login_found ? 'Ready' : 'Sign in after launch'
 }
@@ -54,8 +56,8 @@ export function AgentPicker({
   const [browsing, setBrowsing] = useState(false)
   const sorted = agents.filter((agent) => agent.installed).sort((a, b) => rank(a) - rank(b))
   const rows = [
-    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent, owner), title: agent.login_missing ? needsLogin(owner, false) : status(agent, owner), enabled: launchable(agent) })),
-    { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', title: 'Server-defined', enabled: true },
+    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent, owner), title: agent.login_missing ? needsLogin(owner, false) : agent.login_problem || status(agent, owner), warns: Boolean(agent.login_problem), enabled: launchable(agent) })),
+    { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', title: 'Server-defined', warns: false, enabled: true },
   ]
   const chosen = rows.find((row) => row.name === value)
   const collapsed = phone && !browsing && chosen !== undefined
@@ -95,7 +97,7 @@ export function AgentPicker({
               >
                 <AgentGlyph agent={row.glyph} colored={row.enabled} className="size-4" />
                 <span className={cn('min-w-0 truncate text-ui', row.enabled ? 'text-text' : 'text-muted')}>{row.label}</span>
-                <span title={row.title} className={cn('ml-auto max-w-[60%] shrink-0 truncate text-ui-sm', selected ? 'text-text' : 'text-muted')}>{row.status}</span>
+                <span title={row.title} className={cn('ml-auto max-w-[60%] shrink-0 truncate text-ui-sm', selected ? 'text-text' : row.warns ? 'text-state-needs-you' : 'text-muted')}>{row.status}</span>
               </RadioGroupPrimitive.Item>
             </div>
           )
@@ -133,6 +135,25 @@ export function RefusalNotes({ agents, accountName, accountPlace }: { agents: Ag
           {agentLabel(agent, agent.name)} cannot launch on this account: {agent.unavailable}
         </p>
       ))}
+    </Callout>
+  )
+}
+
+/** `owner` is the shared account's owner; without it the account is the member's own. */
+export function SignedOutNote({ agent, owner, onSignIn }: { agent: AgentInfo | undefined; owner?: string; onSignIn: () => void }) {
+  if (!agent?.installed || !agent.login_problem) return null
+  return (
+    <Callout
+      tone="needs-you"
+      role="status"
+      title={signedOutTitle(agent, owner)}
+      actions={!owner && <Button type="button" size="sm" variant="secondary" onClick={onSignIn}>Sign in on Agents</Button>}
+    >
+      <p className="font-code text-ui-sm">{agent.login_problem}</p>
+      <p className="mt-1">
+        {owner ? <>{owner} signs in again on their Agents page or with <code className="font-code">aether agent login {agent.name}</code>.</> : 'Sign in again on the Agents page.'}
+        {agent.login_blocks_launch && ' Until then a launch here is refused, unless a workspace variable signs the agent in.'}
+      </p>
     </Callout>
   )
 }

@@ -396,6 +396,15 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("newest session first, cut to the limit = %q %v", text, out)
 	}
 
+	refused := testRun
+	refused.Mode, refused.RefusedModel, refused.ModelError = "acp", "claude-fable-5-2", "The agent refused \"claude-fable-5-2\", so the session runs on the agent's default model: "+injection
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: refused})
+	_, out = run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1"})
+	if launch := out["launch"].(map[string]any); launch["refused_model"] != "claude-fable-5-2" || launch["model"] != nil ||
+		!strings.HasPrefix(out["untrusted"].(map[string]any)["model_error"].(string), "The agent refused \"claude-fable-5-2\"") || strings.Contains(trusted(t, out), injection) {
+		t.Fatalf("aether_get_session of a refused model = %v", out)
+	}
+
 	waiter := testRun
 	waiter.WaitConditions = []protocol.WaitCondition{
 		{ID: "wait-1", Spec: "pr:o/r#7:checks", Kind: protocol.WaitKindPRChecks, Repo: "o/r", Number: 7, State: protocol.WaitPending,
@@ -460,6 +469,18 @@ func TestConnectorReadTools(t *testing.T) {
 		out["truncated_before"] != true || out["note"] != historyExpired {
 		t.Fatalf("aether_session_history of an expired terminal = %q %v", text, out)
 	}
+	answers := f.answers[protocol.MethodWorkspaceTimeline]
+	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-1", "waiting", "first"), reportEvent("run-1", "waiting", "second"),
+		reportEvent("run-1", "waiting", "third"))
+	_, out = run(t, cs, "aether_session_history", map[string]any{"run_id": "run-1", "limit": 2})
+	var summaries []string
+	for _, rep := range out["untrusted"].(map[string]any)["reports"].([]any) {
+		summaries = append(summaries, rep.(map[string]any)["summary"].(string))
+	}
+	if want := []string{"third", "second"}; !slices.Equal(summaries, want) {
+		t.Fatalf("aether_session_history limit 2 reports = %v, want %v", summaries, want)
+	}
+	f.answers[protocol.MethodWorkspaceTimeline] = answers
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: testRun})
 
 	text, out = run(t, cs, "aether_needs_attention", nil)
@@ -665,6 +686,19 @@ func TestConnectorLaunch(t *testing.T) {
 		t.Fatalf("the same launch with an empty mode = %v, want the agent's default mode", out)
 	}
 	delete(args, "mode")
+	refused := recent
+	refused.RefusedModel = "claude-fable-5-2"
+	f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{refused}})
+	args["model"] = "claude-fable-5-2"
+	if _, out = run(t, cs, "aether_launch_session", args); out["duplicate"] != true {
+		t.Fatalf("the same launch after the agent refused its model = %v, want the first session", out)
+	}
+	args["model"] = "fable"
+	if _, out = run(t, cs, "aether_launch_session", args); out["run_id"] != "run-9" {
+		t.Fatalf("a retry with another model after a refusal = %v, want a new session", out)
+	}
+	delete(args, "model")
+	f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{recent}})
 	for _, stopped := range []string{"failed", "interrupted", "abandoned"} {
 		recent.Status = stopped
 		f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{recent}})
@@ -847,6 +881,35 @@ func TestConnectorMessage(t *testing.T) {
 	if text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "again", "idempotency_key": "m2"}); !failed ||
 		len(called(f, protocol.MethodRunInject)) != 0 {
 		t.Fatalf("a message whose lookup fails = %q, sent %v; want it refused before sending", text, called(f, protocol.MethodRunInject))
+	}
+}
+
+func TestConnectorMessageNotSentFailsWithTheReason(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-bo"}})
+	cs := connectorSession(t, f, ScopeWrite)
+	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-1", State: protocol.RoomMessageNotSent,
+		Failure: &protocol.RoomMessageFailure{Code: "session_protected", Message: "the session was protected before delivery"}}})
+	text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "use postgres", "idempotency_key": "m1"})
+	if !failed || !strings.Contains(text, "message to session run-1 was not sent (session_protected; the error is under untrusted.failure); unprotect it with aether_session_lifecycle") ||
+		!strings.Contains(text, "new idempotency_key, since m1 returns this refusal") ||
+		!strings.Contains(text, `"untrusted":{"failure":{"code":"session_protected","message":"the session was protected before delivery"}}`) {
+		t.Fatalf("a message the session refused = %q (failed %v), want a failed call with the reason", text, failed)
+	}
+
+	f.calls = nil
+	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-2", State: protocol.RoomMessageNotSent,
+		Failure: &protocol.RoomMessageFailure{Code: "unsupported_image", Message: "acphost: agent does not support image prompts"}}})
+	text, _, failed = try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "see the screenshot"})
+	if !failed || !strings.Contains(text, "(unsupported_image; the error is under untrusted.failure); drop the images; send it again") || strings.Contains(text, "idempotency_key") {
+		t.Fatalf("a keyless message the session refused = %q, want the hint without a key the caller never passed", text)
+	}
+	refusedKey := f.acted().params
+	f.calls = nil
+	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-3", State: protocol.RoomMessageSent}})
+	if text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "see the screenshot"}); failed || strings.Contains(text, "within the last 60s") ||
+		f.acted().params == refusedKey {
+		t.Fatalf("resending a refused keyless message = %q (failed %v) with params %s, want a new send under a new key", text, failed, f.acted().params)
 	}
 }
 

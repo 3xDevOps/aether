@@ -182,7 +182,7 @@ change (Go, dashboard, scripts, desktop, Android, edge) to its suite.
 
 CI on a pull request runs only the fast jobs, and one that changes only
 `docs/` or root-level `*.md` files runs the public audit and nothing else. The
-merge queue and `main` run the full suite
+merge queue runs the full suite on every change before it reaches `main`
 ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
 Aether run, unset the session's `AETHER_*` variables before testing, or some
 tests fail
@@ -203,7 +203,8 @@ make deploy                         # this machine
 2. It installs it as `/usr/local/bin/aether-server`, with one SSH
    connection and at most one `sudo` password prompt.
 3. It installs and enables `packaging/systemd/aether-server.service` only if
-   the target has no `aether-server` unit.
+   the target has no `aether-server` unit, and installs
+   `packaging/systemd/aether.slice` every time.
 4. It restarts the service and checks the new version is running, or fails
    with `deploy: aether-server is not running after restart; check
    journalctl -u aether-server`.
@@ -278,12 +279,13 @@ git switch --detach origin/main
 make build                          # or: DEPLOY_HOST=user@host make deploy
 ```
 
-CI also keeps the binaries of each push to `main` for seven days, as
-`binaries-go` (Linux and macOS) and `binaries-go-windows`. They are unsigned,
-come with no checksums, and nothing installs them for you:
+CI also keeps the binaries of each merge queue run for seven days, as
+`binaries-go` (Linux and macOS) and `binaries-go-windows`; the run that
+tested the commit `main` points at has them. They are unsigned, come with no
+checksums, and nothing installs them for you:
 
 ```sh
-gh run list --workflow ci.yml --branch main --event push --status success --limit 1
+gh run list --workflow ci.yml --event merge_group --commit "$(git rev-parse origin/main)" --status success --limit 1
 gh run download <session-id> --name binaries-go --dir aether-main
 ```
 
@@ -460,7 +462,13 @@ never put live credentials in a report.
 Maintainers release by pushing a tag: `vMAJOR.MINOR.PATCH` with an optional
 `-alpha.N`, `-beta.N` or `-rc.N`. The tag's exact commit needs a successful
 `CI` run from a push to `main`; a pull request run, a merge queue run or
-another commit's session does not count. From a `main` checkout with `gh` and
+another commit's session does not count on its own. That push session runs
+the full suite, except that it may run only `changes` and `CI gate`, linking
+the queue session, when the newest merge queue session of the same commit
+succeeded ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)).
+If you re-run that queue session after the push, re-run the whole push
+session too (`gh run rerun <session-id>`, not `--failed`): the check reads
+only the push session. From a `main` checkout with `gh` and
 `jq`:
 
 ```sh

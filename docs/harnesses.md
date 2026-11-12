@@ -29,17 +29,17 @@ agent once without input, commits the result and exits.
 
 What each agent can do:
 
-| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Set up suggests |
-| --- | --- | --- | --- | --- | --- | --- |
-| `antigravity` | none | none | none | no | no | Standard |
-| `claude` | turn start and end | hooks and idle wake | adapter | yes | yes | Standard |
-| `codex` | turn start and end | idle wake and mid-turn steer | adapter | no | no | Enhanced |
-| `copilot` | none | hooks | built in | no | no | Enhanced |
-| `cursor` | none | hooks you install | built in | no | no | Enhanced |
-| `gemini` | none | hooks you install | built in | no | no | Enhanced |
-| `omp` | turn start and end | hooks and idle wake | built in | yes | no | Enhanced |
-| `opencode` | turn start and end | hooks and idle wake | built in | no | no | Enhanced |
-| `pi` | turn start and end | hooks and idle wake | adapter | no | no | Standard |
+| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Idle sleep | Set up suggests |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `antigravity` | none | none | none | no | no | no | Standard |
+| `claude` | turn start and end | hooks and idle wake | adapter | yes | yes | yes | Standard |
+| `codex` | turn start and end | idle wake and mid-turn steer | adapter | no | no | no | Enhanced |
+| `copilot` | none | hooks | built in | no | no | no | Enhanced |
+| `cursor` | none | hooks you install | built in | no | no | no | Enhanced |
+| `gemini` | none | hooks you install | built in | no | no | no | Enhanced |
+| `omp` | turn start and end | hooks and idle wake | built in | yes | no | no | Enhanced |
+| `opencode` | turn start and end | hooks and idle wake | built in | no | no | no | Enhanced |
+| `pi` | turn start and end | hooks and idle wake | adapter | no | no | no | Standard |
 
 - **Standard status** is what a Standard session reports of its turns
   ([Status reporting](#status-reporting)). With none, a session that goes quiet for
@@ -60,6 +60,10 @@ What each agent can do:
 - **Background tasks**: an Enhanced session stays working while the agent's
   background subagents and commands run
   ([Background work](enhanced-sessions.md#background-work)).
+- **Idle sleep**: an idle Enhanced session's container is stopped and started
+  again on its next use, and the agent continues the same conversation
+  ([Idle sleep](failure-handling.md#idle-sleep)). Sessions of the other agents
+  stay awake.
 - **Set up suggests** is the mode **Set up** picks first. The dashboard then
   remembers your choice per agent
   ([Choose Enhanced](enhanced-sessions.md#choose-enhanced)), and `aether session`
@@ -149,7 +153,8 @@ You do this once per agent, per person.
    ```
 
    `LOGIN FILE` only looks for the login file in your home; `-` means the agent
-   declares none. `--json` prints the agents as `agent.list` returns them
+   declares none, and `signed out` that the server knows the login cannot
+   sign the agent in ([When a login is signed out](#when-a-login-is-signed-out)). `--json` prints the agents as `agent.list` returns them
    ([local-gateway.md](local-gateway.md)). The **Agents** page shows the same
    checks as **Installed** and **Login found**. The agent itself verifies the
    login when it starts. For Claude Code and Codex, ask the vendor whether it
@@ -200,6 +205,69 @@ line and stores a plain variable that `aether workspace env list` shows.
 > On a team server, anyone who can launch a session in the workspace or message one
 > can read the key ([environments.md](environments.md#secrets)).
 
+### When a login is signed out
+
+A login stops working when its token is revoked or expires without a refresh
+token, when the vendor rejects it, or when the login file is overwritten. The
+server learns of it in two ways, for the account a session runs on:
+
+- **The login file.** For Claude Code (`~/.claude/.credentials.json`) and
+  Codex (`~/.codex/auth.json`) the server reads the file: an OAuth login with
+  no access token is signed out, and so is a Claude Code login whose token
+  expired with no refresh token. An expired token with a refresh token is
+  not: the agent renews it. Codex's file records no expiry. A file with an
+  API key, or with no OAuth login at all, is not judged.
+- **A refusal.** An agent that answers a turn, or the opening of its
+  conversation, with `Authentication required` is remembered for that
+  account and agent, for any agent that runs over ACP (Enhanced, and
+  Background where it uses the Enhanced adapter). Only the agent's own
+  message is kept. It is forgotten when the login file changes or a turn on
+  the account ends normally, unless a workspace variable signed that turn
+  in. A server restart forgets it too.
+
+The other agents' files are only checked for presence, and a Standard session
+reports no refusal, so there a signed-out agent only shows in its own terminal
+output.
+
+While the server knows a login is signed out:
+
+| Where | What you see |
+| --- | --- |
+| Dashboard, for your own account | **\<Agent\> is signed out** (the login file) or **\<Agent\>'s sign-in was refused** (a refusal) with the problem and **Sign in on Agents**, on every page but Agents and the refused session, which show it themselves |
+| **Agents** page, **Settings → Agents** | **Signed out** or **Sign-in refused** with the problem, and **Log in** |
+| Launch dialog | **Signed out** or **Sign-in refused** on the account or agent, with the problem and the way to sign in |
+| `aether agent list` | `signed out` under `LOGIN FILE`, then `claude is signed out: <problem>` and `sign in again: ...` |
+| `aether status` | `agent: claude: installed, signed out: <problem>` and `next:` naming `aether agent login claude` |
+| `aether agent list --json`, `agent.list` | `login_problem`, and `login_blocks_launch` |
+| Connector `aether_launch_options`, `aether_list_workspaces` | `signed_in: false` and `signed_out` with the problem, the way to sign in, and whether a launch is refused until then |
+| A refused turn or open | The session's reason ends with whose login it is and where to sign in ([enhanced-sessions.md](enhanced-sessions.md)) |
+
+The problem is the server's own finding, verbatim:
+`~/.claude/.credentials.json: Claude OAuth access token is missing or invalid`,
+or `the agent refused: Authentication required`.
+
+A new launch, including a sub-session, is refused before anything is created
+when the login file is signed out:
+
+```text
+Ada's Claude Code login is signed out: ~/.claude/.credentials.json: Claude OAuth access token is missing or invalid. Sign in, then launch again: dashboard Agents page, or aether agent login claude
+```
+
+A refusal only warns: the refusing agent can hold a stale copy of a sound
+login, which a restart or a new session cures. Relaunching or resuming an
+existing session is not checked. A workspace variable that signs the agent in
+(`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+`CLAUDE_CODE_USE_BEDROCK` or `CLAUDE_CODE_USE_VERTEX` for Claude Code;
+`CODEX_API_KEY` for a Background Codex session) lets the launch through. A
+usage fallback skips an account whose login file is signed out. A sign-in
+the server cannot see, such as an `apiKeyHelper` or `env` in
+`~/.claude/settings.json`, does not lift the refusal: remove the dead OAuth
+login with the agent's own sign-out, or sign in again.
+
+The account's owner signs in again on the **Agents** page (**Log in**) or with
+`aether agent login <name>`. Nothing needs dismissing: every surface reads the
+login again and clears by itself.
+
 ### Enhanced adapters
 
 Some agents serve ACP from their own CLI (`omp acp`, `opencode acp`,
@@ -208,6 +276,19 @@ installs that. Claude Code, Codex and pi need a separate npm adapter package:
 `claude-agent-acp`, `codex-acp` and `pi-acp`. `aether agent add <name>
 --enhanced` installs the agent and its adapter, pinned to the version Aether
 tests against. The dashboard's **Set up** does the same when you pick Enhanced.
+
+`claude-agent-acp` bundles its own copy of Claude Code (2.1.287 with the
+current pin), which moves only with the pin. An Enhanced Claude Code session
+runs the `claude` on the session's `PATH` instead, the one Standard sessions
+run, by setting `CLAUDE_CODE_EXECUTABLE` to it. A `claude` in `~/.local/bin` is
+the one Aether [updates before launch](#updates-before-launch), so a new model
+reaches Enhanced sessions with the next Claude Code update, without an Aether
+release. The adapter runs its bundled copy instead when `claude` is not on
+`PATH`, or `claude --version` is older than the bundled one or prints no
+version Aether can read within 10 seconds. Update a `claude` in your home with
+`claude update` in `aether terminal`, and one installed in the image by
+rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` set as a
+workspace variable wins.
 
 ### Per-agent setup
 
@@ -561,14 +642,24 @@ A model that is not a single argument is refused before launch:
 model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes
 ```
 
-The dashboard offers a model list for Claude Code and Codex, read from the
-installed CLI on your login. Falling back, Claude Code lists `opus`, `sonnet`
-and `haiku`; Codex lists models from `~/.codex/models_cache.json`. For other
-agents, type the model name. The list is cached for an hour. On a shared
-account, discovery runs in the account owner's environment and never starts it.
-If the owner's terminal is not running, the result is the fallback with an error
-saying so. A failed discovery shows the CLI's error, for example
-`codex exited 127: sh: 3: codex: not found`.
+The dashboard, `aether agent models <name>` and the connector's
+`aether_launch_options` list the models of Claude Code and Codex, read from the
+installed CLI on your login: what `claude` or `codex app-server` reports, with
+each model's id and name. Claude Code's aliases resolve to its newest models,
+so check the name: `fable` is `Fable 5.2` once Claude Code knows Fable 5.2. For
+other agents, type the model name. Any id is accepted; Claude Code also takes a
+full model id such as `claude-fable-5-2` that its list shows only as an alias.
+
+The list is cached for an hour and discovered again after Aether updates the
+agent; `aether agent models <name> --refresh` or the dashboard's refresh button
+discovers it now. A failed discovery shows the CLI's real error, for example
+`codex exited 127: sh: 3: codex: not found` or
+`claude models: run in the environment terminal: context deadline exceeded`,
+next to the last list that worked, and is retried after a minute. With no
+earlier list since the server started, Claude Code lists nothing and Codex
+lists `~/.codex/models_cache.json`; type the id. On a shared account,
+discovery runs in the account owner's environment and never starts it; if the
+owner's terminal is not running, the error says so.
 
 ### Choose an effort
 

@@ -268,6 +268,12 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
+  /** When idleness stopped the live session's container; absent while it is awake. */
+  asleep_since?: string
+  /** A wake is starting the sleeping container. */
+  waking?: boolean
+  /** The last wake's failure while the session stays asleep. */
+  wake_error?: string
   /** Exact runtime grace deadline; files and results have separate lifetimes. */
   container_retained_until?: string
   cleanup_pending?: boolean
@@ -307,6 +313,23 @@ export interface Workspace {
   /** The upstream git URL a run checkout's `origin` remote points at;
    * absent until a clone with an origin is linked. */
   origin?: string
+  /** The admin who owns the workspace; absent from a server older than workspace access. */
+  owner_member_id?: string
+  /** The caller's role in this workspace; absent from a server older than workspace access. */
+  role?: Member['role']
+}
+
+/** workspace.access.list: the owner and every member granted the workspace. */
+export interface WorkspaceAccess {
+  workspace_id: string
+  owner_member_id: string
+  grants: WorkspaceGrant[]
+}
+
+export interface WorkspaceGrant {
+  member_id: string
+  granted_by?: string
+  created_at: string
 }
 
 /** `value` is absent for a secret: the server never returns one. */
@@ -331,7 +354,7 @@ export interface Member {
   id: string
   display_name: string
   color: string
-  role: 'viewer' | 'collaborator' | 'admin'
+  role: 'viewer' | 'collaborator' | 'admin' | 'super_admin'
   pending?: boolean
   /** The name commits made in this member's runs are authored as; absent
    * until the member sets one, when the server falls back. */
@@ -965,6 +988,11 @@ export interface RunModelPayload {
 export interface RunEffortPayload {
   effort: string
 }
+export interface RunSleepPayload {
+  asleep_since?: string
+  waking?: boolean
+  wake_error?: string
+}
 export interface RunProtectedPayload {
   protected: boolean
 }
@@ -1236,6 +1264,10 @@ export interface AgentInfo {
   executable?: string
   /** Whether a login file exists in the home the launch signs in with. Absent when the agent declares none. */
   login_found?: boolean
+  /** Why the account's login cannot sign the agent in: its login file, or the agent's refusal of a turn. Shown verbatim. */
+  login_problem?: string
+  /** Whether the server refuses a launch over login_problem, unless a workspace variable signs the agent in. */
+  login_blocks_launch?: boolean
   /** The launch mode the agent starts in unless asked otherwise. */
   default_mode?: 'tui' | 'acp'
   /** Whether the agent prefers Enhanced, installed yet or not. */
@@ -1264,11 +1296,11 @@ export interface AgentModel {
   description?: string
 }
 
-/** agent.models: `error` is the last failed discovery, even when `models` holds an older or fallback list. */
+/** agent.models: `error` is the last failed discovery, even when `models` holds an older list. */
 export interface AgentModelsResult {
   models: AgentModel[]
   default_label?: string
-  source: 'agent' | 'cache' | 'fallback' | 'none'
+  source: 'agent' | 'cache' | 'none'
   fetched_at?: string
   error?: string
 }
@@ -1513,6 +1545,8 @@ export interface Invitation {
   login?: string
   email?: string
   role?: Member['role']
+  /** Workspaces the invitation grants on joining. */
+  workspace_ids?: string[]
   member_id?: string
   created_by: string
   created_at: string

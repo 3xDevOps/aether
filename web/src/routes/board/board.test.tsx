@@ -5,6 +5,7 @@ import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api, ApiError } from '@/lib/api'
 import type { Event, GatewayCapabilities, Run, TimelinePage } from '@/lib/types'
 import { Board } from '@/routes/board'
+import { useReply } from '@/routes/board/card-action'
 import { virtualizeAbove } from '@/routes/board/card-list'
 import { EdgePopover } from '@/routes/board/lanes/lane-popover'
 import { liveMailMs } from '@/routes/board/lanes/live-mail'
@@ -315,7 +316,7 @@ describe('Needs you actions', () => {
     renderBoard()
 
     fireEvent.click(cardOf('still going').getByRole('button', { name: 'Open terminal' }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: working.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: working.id, view: 'terminal' } })
   })
 
   it('opens the changes of an unreviewed failure', () => {
@@ -772,7 +773,7 @@ describe('lanes view', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
   })
 
-  it('marks agent mail on both lanes and draws its link only for the focused lane, with words for screen readers', async () => {
+  it('marks agent mail on both lanes, joins its marks with a quiet line, and draws its link for the focused lane, with words for screen readers', async () => {
     seed([stopped, working])
     const sent: Event = {
       id: 'evt_mail', seq: 1, time: new Date(Date.now() - 10 * 60_000).toISOString(), workspace_id: workspace.id, run_id: working.id, actor_id: '',
@@ -782,11 +783,15 @@ describe('lanes view', () => {
     const tree = await openLanes()
     await waitFor(() => expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(2))
     expect(document.querySelector('[data-lane-mail] [data-mail="sent"] title')?.textContent).toMatch(/^Message from still going to waiting on you · .* · 1 not acknowledged$/)
+    expect(document.querySelectorAll('[data-lane-hairlines] [data-hairline]')).toHaveLength(1)
+    expect(document.querySelector('[data-lane-hairlines]')?.getAttribute('class')).toContain('text-series-5/45')
     expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(0)
+    expect(document.querySelectorAll('path[data-mail-control]')).toHaveLength(0)
     const lane = within(tree).getByRole('treeitem', { name: /^still going/ })
     expect(lane.getAttribute('aria-label')).toMatch(/messages: sent 1 to waiting on you, 1 not acknowledged$/)
     act(() => lane.focus())
     await waitFor(() => expect(document.querySelectorAll('[data-lane-edges] [data-edge="message"]')).toHaveLength(1))
+    expect(document.querySelector('[data-lane-hairlines]')?.getAttribute('class')).toContain('text-seam')
     expect(document.querySelectorAll('[data-lane-mail] [data-mail]')).toHaveLength(0)
     const link = document.querySelector('path[data-mail-control]')!
     expect(link.querySelector('title')?.textContent).toMatch(/^Message from still going to waiting on you/)
@@ -858,7 +863,28 @@ describe('lanes view', () => {
     const composer = await screen.findByRole('dialog', { name: /^Reply to / })
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
     expect(composer.isConnected).toBe(true)
-    expect(document.activeElement).toBe(within(composer).getByRole('textbox', { name: 'Message to the agent' }))
+    const box = within(composer).getByRole('textbox', { name: 'Message to the agent' })
+    expect(document.activeElement).toBe(box)
+    await userEvent.type(box, 'use the staging IdP')
+    expect((box as HTMLTextAreaElement).value).toBe('use the staging IdP')
+    expect(within(composer).getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
+    await userEvent.click(within(composer).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Reply to / })).toBeNull())
+    expect(useReply.getState().reply).toBeNull()
+  })
+
+  it("never shows or sends another session's draft in a lane's reply composer", async () => {
+    seed([stopped, working])
+    act(() => useReply.setState({ reply: { runId: working.id, text: 'draft for still going' } }))
+    const tree = await openLanes()
+    act(() => within(tree).getAllByRole('treeitem')[1].focus())
+    await userEvent.keyboard('r')
+    const composer = await screen.findByRole('dialog', { name: /^Reply to / })
+    const box = within(composer).getByRole('textbox', { name: 'Message to the agent' }) as HTMLTextAreaElement
+    expect(box.value).toBe('')
+    await userEvent.type(box, 'use the mock')
+    await userEvent.click(within(composer).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith(stopped.id, 'use the mock', expect.any(String)))
   })
 
   it('groups a run with its child runs under one lane', async () => {

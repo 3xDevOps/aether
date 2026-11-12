@@ -67,7 +67,7 @@ func TestInsightsGet(t *testing.T) {
 		Reviews:  []githubservice.Review{{ID: 5, State: "CHANGES_REQUESTED", User: "grace", Body: "rename it…", Clipped: true}},
 	}
 	e := newTestEnv(t, func(c *Config) {
-		c.Store = db
+		c.Store = storetest.Unscoped{DB: db}
 		c.Services.RunRepo = goneRunRepo{}
 		c.Services.GitHub = gh
 	})

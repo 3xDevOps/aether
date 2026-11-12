@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -15,6 +16,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunRetentionPayload{ContainerRetainedUntil: "2026-10-08T12:34:56Z", CleanupPending: true, CleanupError: "Execution cleanup failed; cleanup will retry"},
 		RunRetentionPayload{},
 		RunDeletedPayload{},
+		RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{}},
+		RunDeletedPayload{ExtraWorkspaceIDs: []domain.WorkspaceID{"ws_2"}},
 		WorkspaceDeletedPayload{},
 		RunTitlePayload{Title: "Fixing the login bug"},
 		RunProtectedPayload{Protected: true},
@@ -23,6 +26,7 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunModePayload{Mode: domain.LaunchACP, Previous: domain.LaunchTUI, Switching: domain.LaunchACP, Reason: "Switching to Enhanced…"},
 		RunModelPayload{Model: "claude-opus-4-1"},
 		RunEffortPayload{Effort: "high"},
+		RunSleepPayload{AsleepSince: timePtr(time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)), WakeError: "start container: no space left"},
 		RunArchivedPayload{ArchivedAt: strPtr("2024-01-02T03:04:05Z")},
 		RunArchivedPayload{},
 		RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, Reason: "agent reported success", OutcomeUnseen: true, FinishUnopened: true},
@@ -64,6 +68,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func timePtr(t time.Time) *time.Time { return &t }
 
 func TestDecodePayloadUnknownType(t *testing.T) {
 	_, err := DecodePayload("nope", []byte("{}"))

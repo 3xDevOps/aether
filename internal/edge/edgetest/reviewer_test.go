@@ -143,8 +143,8 @@ func TestReviewerSignIn(t *testing.T) {
 		as, member domain.MemberID
 		want       string
 	}{
-		{"bob binding himself", bobID, bobID, "admins only"},
-		{"alice binding herself, an admin", aliceID, aliceID, "is an admin"},
+		{"bob binding himself", bobID, bobID, "requires the super_admin role"},
+		{"alice binding herself, a super admin", aliceID, aliceID, "is super_admin; bind the reviewer account to a viewer or collaborator"},
 	} {
 		if err := link(tt.as, tt.member); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Fatalf("%s: %v, want %q", tt.what, err, tt.want)

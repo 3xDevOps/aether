@@ -8,6 +8,7 @@ export type ChildState =
   | 'working'
   | 'waiting'
   | 'needs-you'
+  | 'disconnected'
   | 'finished'
   | 'failed'
   | 'ended'
@@ -70,11 +71,33 @@ export interface RunChildrenResult {
   usage: ChildUsage
 }
 
+/** One agent turned on or off for subsessions, on one account or, with no account, on every account. */
+export interface ChildChoiceSetting {
+  harness: string
+  account_member_id?: string
+  on?: boolean
+}
+
+/** An agent on one account, as a subsession could run it. */
+export interface ChildChoice {
+  account_member_id: string
+  account_name: string
+  harness: string
+  display_name?: string
+  status: 'ready' | 'exhausted' | 'not-installed' | 'not-signed-in' | 'off'
+  detail?: string
+}
+
+/** Servers before subsession agent choices send only `enabled`. */
 export interface ChildSettings {
   enabled: boolean
+  off?: ChildChoiceSetting[]
+  choices?: ChildChoice[]
+  choices_error?: string
 }
 
 /** An absent field keeps its value. */
 export interface ChildSettingsParams {
   enabled?: boolean
+  choice?: ChildChoiceSetting
 }

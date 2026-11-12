@@ -429,10 +429,11 @@ describe('run rows', () => {
     expect(rows[1].tabIndex).toBe(-1)
   })
 
-  it('opens what a Needs you row waits on, not always its terminal', () => {
+  it('opens a Needs you row on the last chosen view', () => {
+    useStore.setState({ runViewMemory: { run_3: 'session' } })
     render(<AppShell />)
     fireEvent.click(runList().getByRole('button', { name: /^Failed · docs-site · ship the invoice export/ }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_3', view: 'session' })
   })
 
   it('replies without making Session the view the session reopens on', () => {
@@ -444,12 +445,12 @@ describe('run rows', () => {
     useStore.setState({ runViewMemory: {} })
   })
 
-  it('opens a disconnected session on Terminal and reopens it later on the view the member chose', () => {
+  it('reopens a disconnected session on the view the member chose', () => {
     useStore.getState().upsertRun(run({ id: 'run_5', task: 'lost its agent', status: 'needs-attention', state: 'disconnected' }))
     act(() => useStore.getState().navigate('run', { runId: 'run_5', view: 'changes' }))
     render(<AppShell />)
     fireEvent.click(runList().getByRole('button', { name: /lost its agent/ }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_5', view: 'terminal' } })
+    expect(useStore.getState().shownRunView).toEqual({ runId: 'run_5', view: 'changes' })
     expect(useStore.getState().runViewMemory.run_5).toBe('changes')
     useStore.setState({ runViewMemory: {} })
   })
@@ -487,7 +488,7 @@ describe('run rows', () => {
 })
 
 describe('navigation rows', () => {
-  it('marks the open page and lists Members for an admin only', () => {
+  it('marks the open page and keeps Manage workspaces, Members and Settings at the foot for every role', () => {
     useStore.setState((s) => ({ info: s.info && { ...s.info, member: { ...s.info.member, role: 'collaborator' } } }))
     render(<AppShell />)
 
@@ -496,10 +497,11 @@ describe('navigation rows', () => {
     expect(useStore.getState().route.name).toBe('environment')
     expect(navigation.getByRole('button', { name: 'Environment' }).getAttribute('aria-current')).toBe('page')
     expect(navigation.getByRole('button', { name: 'Board' }).getAttribute('aria-current')).toBeNull()
-    expect(nav().queryByRole('button', { name: 'Members' })).toBeNull()
+    const foot = ['Manage workspaces', 'Members', 'Settings']
+    expect(foot.map((name) => nav().getByRole('button', { name }).textContent)).toEqual(foot)
 
-    act(() => useStore.setState((s) => ({ info: s.info && { ...s.info, member: { ...s.info.member, role: 'admin' } } })))
-    expect(nav().getByRole('button', { name: 'Members' })).toBeDefined()
+    act(() => useStore.getState().navigate('workspace', { workspaceId: useStore.getState().activeWorkspace }))
+    expect(nav().getByRole('button', { name: 'Manage workspaces' }).getAttribute('aria-current')).toBe('page')
   })
 
   it('draws the selection beside the list, so the overflow measuring still counts only items', () => {
@@ -532,14 +534,11 @@ describe('workspace switcher', () => {
     expect(useStore.getState().route.name).toBe('overview')
   })
 
-  it('opens the active workspace at its Environment section', async () => {
+  it('opens the active workspace settings', async () => {
     render(<AppShell />)
     fireEvent.keyDown(nav().getByRole('button', { name: /^Workspace:/ }), { key: 'Enter' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Environment' }))
-    expect(useStore.getState().route).toEqual({
-      name: 'workspace',
-      params: { workspaceId: useStore.getState().activeWorkspace, section: 'environment' },
-    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Workspace settings' }))
+    expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: useStore.getState().activeWorkspace } })
   })
 })
 

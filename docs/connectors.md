@@ -221,7 +221,7 @@ The server also checks the scope of every call a connector makes, whatever the
 member's role. Reads such as `run.get`, `run.close_check`, `workspace.timeline`, `member.list`,
 `memory.show`, `template.list`, `changes.list` and
 `launch.defaults.get` need `read`; `run.launch`, `template.launch`,
-`run.inject`, `run.room.post`, `run.pause`, `run.resume`,
+`run.inject`, `run.room.post`, `run.pause`, `run.resume`, `run.wake`,
 `run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
 `memory.pin`, `memory.unpin` and `assistant.ask` need `write`; `run.kill`, `run.close`,
 `run.mode.switch` (it discards a turn in progress), `run.handoff`,
@@ -252,7 +252,7 @@ The connector has these tools and no others:
 | `aether_list_workspaces` | Workspaces, and agents (installed, signed in, Enhanced) | `read` |
 | `aether_launch_options` | What you can launch and on which account: workspaces, your accounts with their usage, each account's agents and modes, fallback, a workspace's templates, and an agent's models when asked for ([Launch options](#launch-options)) | `read` |
 | `aether_list_sessions`, `aether_get_session` | Your sessions (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one session with what it waits on, its `wait_conditions`, its latest report and its pull request; `evidence: true` adds [progress evidence](#progress-evidence) | `read` |
-| `aether_session_history` | A page of a session's conversation (Enhanced) or terminal, with its reports | `read` |
+| `aether_session_history` | A page of a session's conversation (Enhanced) or terminal, with the session's newest reports, the same on every page; `limit` (default 20, at most 50) caps the page and the reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your sessions did today, yesterday or this week, in your time zone | `read` |
 | `aether_session_changes`, `aether_pr_status` | A session's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
@@ -318,7 +318,11 @@ expires after 10 minutes, then the rest oldest first. `aether_session_changes` l
 files of 6000 bytes, 12000 in all, per page, and returns `next_commits_offset`
 and `next_diff_file` for the next page, `diff_clipped_files` with the numbers of
 files cut at 6000 bytes, and `diff_truncated: true` when the server cut the diff
-before paging, so files past the cut are missing; its `repos` names a multi-repo
+before paging, so files past the cut are missing. The diff is the worktree
+against the merge base with the session's base: committed, staged and unstaged
+tracked changes, not untracked files. With no diff it is `diff: []` with a
+`diff_note`, never null; an unresolvable base is `diff_error`. `repos` names a
+multi-repo
 session's extra repos, which `repo` selects. Tools that take a `run_id` also accept the `run:` ids `search` returns. When the
 server no longer keeps the start of a session's conversation or terminal,
 `aether_session_history` returns `truncated_before: true` and a `note` saying so.
@@ -326,7 +330,13 @@ server no longer keeps the start of a session's conversation or terminal,
 A launch, message or answer takes an optional `idempotency_key`; a
 retry with the same key returns the first result. A write's result has
 `write: "done"`, or `"pending"` while a launch is starting or a message waits
-for approval, and the key it used. A failure that leaves it unknown whether the
+for approval, and the key it used. `write` says only that the call finished;
+a message's `state` says whether it reached the agent. A message the session
+did not take fails the call with the failure code and the way forward, for
+example `message to session run-… was not sent (session_protected; …);
+unprotect it with aether_session_lifecycle`, and the real error under
+`untrusted.failure`, since an agent's refusal is the agent's text. Send it
+again, with a new `idempotency_key` if you passed one. A failure that leaves it unknown whether the
 write happened, such as a timeout, ends with the key to retry with. A
 teammate answer retried with its key after the question stopped
 waiting returns the saved answer; an `answer_id` that is not a teammate
@@ -373,9 +383,11 @@ text again on purpose, pass a new `idempotency_key`.
   defaults and tasks are under `untrusted`); pass `version` to
   `aether_launch_session` as `template_version` to refuse a template changed since.
   With `models` (an agent name) and
-  optionally `account_member_id`, that agent's model ids on that account, which
+  optionally `account_member_id`, that agent's models on that account, each
+  an `id` to launch with and its `name`, such as `fable` and `Fable 5.2`, which
   the server caches. `account_member_id` without `models` is refused. When it
-  lists none, launch without `model` for the agent's default.
+  lists none, launch without `model` for the agent's default, or pass the id
+  the agent takes.
 - `saved`: your [saved launch choices](teams.md#saved-launch-choices) as
   `launch.defaults.get` returns them, with `invalid` and `unknown` listing each
   choice a launch could not use or check, with the reason. `saved_error` holds
@@ -428,7 +440,11 @@ Each launch's result and `aether_get_session` has a
 (`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's own
 session), `requested_account` when usage fallback moved the session, `fallback`
 (`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, the session's
-own `children` setting, its `permission` tier, `via`, and `url`. A new launch's receipt adds
+own `children` setting, its `permission` tier, `via`, and `url`. An Enhanced
+session sets its model after it opens, so a launch's `model` is the one
+asked for; when the agent refuses it, `aether_get_session` names it in
+`refused_model`, `model` is the one the session runs on (absent for the
+agent's default), and `untrusted.model_error` says why. A new launch's receipt adds
 `defaults_applied`, the input fields your saved choices filled,
 `defaults_skipped`, each saved choice it did not use with `field` and `reason`,
 and `defaults_unchecked`, each saved agent, mode or model it used without
@@ -740,13 +756,16 @@ SEQ  TIME                 MEMBER          VIA                                MET
 813  2026-10-26 14:01:40  mem-4f8x2kq9vd  connector ChatGPT con-7k2m9q4xbd    run.launch  run-d6ay38tj8j  ok
 ```
 
-You see your own entries; an admin sees everyone's. The `audit.list` RPC
+You see your own entries; a super admin sees everyone's. An admin also sees the
+entries in the workspaces they own, except another member's entries about a
+session they do not reach in every workspace, or one since deleted, and about a
+note from such a session or one since deleted. The `audit.list` RPC
 returns the same entries, at most 200 a page. The server keeps each member's
 newest 10,000 call entries and, apart from them, their newest 10,000 connector,
 account, member and Slack changes that took effect, so a flood of calls cannot
 push a security change out of the history. A call that changed nothing, such
 as revoking a share that does not exist, is a call entry. After a member merge, the absorbed member's entries
-keep their id, so only admins see them.
+keep their id, so only super admins see them.
 
 ## Revoke a connector
 
@@ -758,7 +777,8 @@ aether mcp revoke con-7k2m9q4xbd
 
 The connector's next call fails, including one in a session the app already has
 open, and so does its refresh token; the app asks you to connect again with a
-new code. You can revoke your own connectors, and an admin can revoke anyone's.
+new code. You can revoke your own connectors, and a super admin can revoke
+anyone's; any other connector id fails as an unknown one.
 Removing the connector in ChatGPT or Claude does not revoke it on the server.
 Revoke it here too.
 

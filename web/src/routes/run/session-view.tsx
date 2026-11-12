@@ -22,12 +22,14 @@ import { Composer } from '@/routes/run/composer'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
+import { SleepCallout } from '@/routes/run/sleep-callout'
 import { StallCallout } from '@/routes/run/stall-recovery'
 import { RequestDock } from '@/routes/run/request-dock'
 import { requestAnnouncement } from '@/routes/run/session-requests'
 import { EnteringRow, rowGap, sessionColumn, TimelineRow, useArrivals, useFlatRows, useRowContext, type FlatRow, type OpenPolicy } from '@/routes/run/session-rows'
 import { NotesRail, NotesStrip } from '@/routes/run/session-notes'
 import type { RunShells } from '@/routes/run/shells'
+import { useLiveLaunches } from '@/routes/run/subagent-cards'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { messageScopeKey, useMessageList } from '@/store/messages'
@@ -260,6 +262,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     return Boolean(page?.initialized && !page.exhausted && s.roomNextBefore[run.id] !== undefined)
   })
   const older = olderRoom || (enhanced && Boolean(session?.more))
+  useLiveLaunches(run.id, enhanced)
   useEffect(() => {
     if (missingRoomImages && olderRoom && !roomLoading && !roomError) void room.loadOlder()
   }, [missingRoomImages, olderRoom, roomLoading, roomError, room.loadOlder])
@@ -502,6 +505,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
           <StallCallout run={run} agent={agent} rows={rows} nav={nav} />
+          <SleepCallout run={run} />
         </div>
       )}
       {!notesWide && <NotesStrip run={run} room={room} className={cn(sessionColumn, 'pb-2')} />}

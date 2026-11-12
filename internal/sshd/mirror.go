@@ -25,7 +25,8 @@ func init() {
 
 // MirrorService is the control-channel and launch view of
 // internal/mirror.Service. Capture is used by the scheduler; control-channel
-// reads require view access and mutations require workspace administration.
+// reads require view access, a refresh workspace administration, and the
+// methods that handle deploy keys server administration.
 type MirrorService interface {
 	Configure(context.Context, domain.WorkspaceID, mirrorservice.ConfigureRequest) (mirrorservice.Result, error)
 	Status(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)
@@ -92,8 +93,14 @@ func (s *Server) workspaceMirrorConfigure(ctx context.Context, member domain.Mem
 	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorConfigure); err != nil {
-		return nil, err
+	// A deploy key is a server-held credential, so only a super admin
+	// installs one; a workspace's admin configures public and GitHub mirrors.
+	need := permissions.WorkspaceAdmin
+	if auth == domain.MirrorAuthDeployKey {
+		need = permissions.ServerAdmin
+	}
+	if err := checkIn(ctx, s.cfg.Store, member, need, domain.WorkspaceID(p.WorkspaceID)); err != nil {
+		return nil, checkError(protocol.MethodWorkspaceMirrorConfigure, err)
 	}
 	request := mirrorservice.ConfigureRequest{
 		SourceURL: p.SourceURL, Branch: p.Branch, Auth: auth, KnownHosts: p.KnownHosts,
@@ -132,8 +139,8 @@ func (s *Server) workspaceMirrorRefresh(ctx context.Context, member domain.Membe
 	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorRefresh); err != nil {
-		return nil, err
+	if err := checkIn(ctx, s.cfg.Store, member, permissions.WorkspaceAdmin, domain.WorkspaceID(p.WorkspaceID)); err != nil {
+		return nil, checkError(protocol.MethodWorkspaceMirrorRefresh, err)
 	}
 	result, err := svc.Refresh(ctx, domain.WorkspaceID(p.WorkspaceID))
 	if err != nil {
@@ -166,8 +173,8 @@ func (s *Server) workspaceMirrorAdopt(ctx context.Context, member domain.MemberI
 	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorAdopt); err != nil {
-		return nil, err
+	if err := checkIn(ctx, s.cfg.Store, member, permissions.WorkspaceAdmin, domain.WorkspaceID(p.WorkspaceID)); err != nil {
+		return nil, checkError(protocol.MethodWorkspaceMirrorAdopt, err)
 	}
 	result, err := svc.Adopt(ctx, domain.WorkspaceID(p.WorkspaceID), p.Generation, p.ExpectedCommit)
 	if err != nil {
@@ -191,8 +198,8 @@ func (s *Server) workspaceMirrorDisable(ctx context.Context, member domain.Membe
 	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorDisable); err != nil {
-		return nil, err
+	if err := checkIn(ctx, s.cfg.Store, member, permissions.WorkspaceAdmin, domain.WorkspaceID(p.WorkspaceID)); err != nil {
+		return nil, checkError(protocol.MethodWorkspaceMirrorDisable, err)
 	}
 	result, err := svc.Disable(ctx, domain.WorkspaceID(p.WorkspaceID))
 	if err != nil {

@@ -313,6 +313,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			return nil, getErr
 		}
 	}
+	if err = s.checkLogin(ctx, workspace, account, harness, profile, mode); err != nil {
+		return nil, err
+	}
 	release, err := s.reserveCapacity(ctx)
 	if err != nil {
 		return nil, err
@@ -492,8 +495,11 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err != nil {
 		return err
 	}
-	// A share revoked since admission is refused here, before any agent
-	// starts with the owner's login; leaveIfRevoked covers a revoke after.
+	// A share or workspace grant revoked since admission is refused here,
+	// before any agent starts; leaveIfRevoked covers a revoke after.
+	if err = s.checkRunReach(ctx, run); err != nil {
+		return fmt.Errorf("check workspace access: %w", err)
+	}
 	if run.AccountMember() != run.HomeMember() {
 		if err = s.resolveRunAccount(ctx, run); err != nil {
 			return fmt.Errorf("check the account share: %w", err)
@@ -510,7 +516,30 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Unlock()
 	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, unlockCaches)
 	if err != nil {
-		return err
+		canRetry := func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return !entry.destroyPending
+		}
+		plan, err = s.startFromOlderImages(ctx, actor, plan, err, canRetry, func(older *domain.Member) (*EnvironmentPlan, error) {
+			s.mu.Lock()
+			if entry.userReservation != nil {
+				delete(s.credentialUsers, entry.userReservation)
+				entry.userReservation = nil
+			}
+			entry.runUser = ""
+			s.mu.Unlock()
+			retry, planErr := s.runPlan(ctx, entry, run, ws, older, profile)
+			if planErr != nil {
+				return nil, planErr
+			}
+			var startErr error
+			driver, startErr = s.startRunContainer(ctx, entry, run, actor, argv, profile, retry, unlockCaches)
+			return retry, startErr
+		})
+		if err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	cid := entry.containerID
@@ -523,7 +552,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if entry.killRequested {
 		err = errKillRequested
 	} else {
-		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor.ID)
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, plan.ImageNotice, actor.ID)
 	}
 	s.mu.Unlock()
 	if err != nil {
@@ -537,15 +566,12 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	return nil
 }
 
-// leaveIfRevoked moves a run that just started on another member's account
-// off it when the share was revoked while the run provisioned or moved: that
-// revoke found no container it could move. A revoke committed after this
-// check finds the run running and moves it itself. The check outlives the
-// request that started the run.
+// leaveIfRevoked moves a run that just started off its account, or stops
+// it, when a share or workspace grant it needs was revoked while the run
+// provisioned or moved: that revoke found no container it could move. A
+// revoke committed after this check finds the run running and moves it
+// itself. The check outlives the request that started the run.
 func (s *Scheduler) leaveIfRevoked(ctx context.Context, entry *supervised, run *domain.Run) {
-	if run.AccountMember() == run.HomeMember() {
-		return
-	}
 	revoked, err := s.accountRevoked(context.WithoutCancel(ctx), run)
 	if err != nil {
 		slog.Warn("scheduler: check the new session's account share", "run", run.ID, "error", err)

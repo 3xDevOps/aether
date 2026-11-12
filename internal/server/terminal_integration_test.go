@@ -50,7 +50,7 @@ func TestIntegrationMasterTerminal(t *testing.T) {
 		DisplayName: "Terminal Owner",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
 		Color:       "#4363d8",
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	if err := srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)

@@ -116,6 +116,37 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
   )
 })
 
+/** Apart from the links, so a hover recolours one group rather than rebuilding every line. */
+export const Hairlines = memo(function Hairlines({ edges, anchors, g, height, receded }: {
+  edges: LaneEdge[]
+  anchors: Map<string, EdgeAnchor>
+  g: LaneGeometry
+  height: number
+  /** Another lane is focused: the hairlines sit back with the gridlines. */
+  receded: boolean
+}) {
+  return (
+    <svg
+      aria-hidden
+      data-lane-hairlines
+      className={cn('pointer-events-none absolute top-0 overflow-visible', receded ? 'text-seam' : g.compact ? 'text-series-5/30' : 'text-series-5/45')}
+      style={{ left: g.labelWidth, width: g.width, height }}
+    >
+      {edges.map((edge) => {
+        const a = anchors.get(edge.from.lane)
+        const b = anchors.get(edge.to.lane)
+        if (edge.kind !== 'message' || !a || !b) return null
+        // At the marks' x, which keep inside the bars' rounded ends.
+        const x = Math.min(g.width - 6, Math.max(6, xOf(edge.from.t, g.window, g.width)))
+        const ya = a.top + a.height / 2
+        const yb = b.top + b.height / 2
+        const dir = Math.sign(yb - ya) || 1
+        return <path key={edge.key} data-hairline d={`M${x} ${ya + dir * a.half}V${yb - dir * b.half}`} fill="none" stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      })}
+    </svg>
+  )
+})
+
 /** Transparent hit paths above the lanes, so a link stays clickable where it crosses a bar. */
 export const EdgeHits = memo(function EdgeHits({ shapes, g, height, title, onPick }: {
   shapes: DrawnEdge[]
@@ -133,7 +164,7 @@ export const EdgeHits = memo(function EdgeHits({ shapes, g, height, title, onPic
           d={shape.d}
           fill="none"
           stroke="transparent"
-          strokeWidth={10}
+          strokeWidth={16}
           pointerEvents="stroke"
           className="cursor-pointer"
           onClick={(event) => {

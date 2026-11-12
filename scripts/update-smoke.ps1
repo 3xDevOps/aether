@@ -97,6 +97,97 @@ function Get-Hash([string]$Path) {
     finally { $stream.Dispose() }
 }
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class FileHolders {
+    [StructLayout(LayoutKind.Sequential)]
+    struct RM_UNIQUE_PROCESS {
+        public int dwProcessId;
+        public System.Runtime.InteropServices.ComTypes.FILETIME ProcessStartTime;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct RM_PROCESS_INFO {
+        public RM_UNIQUE_PROCESS Process;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string strAppName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string strServiceShortName;
+        public int ApplicationType;
+        public uint AppStatus;
+        public uint TSSessionId;
+        [MarshalAs(UnmanagedType.Bool)] public bool bRestartable;
+    }
+
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+    static extern int RmStartSession(out uint handle, int flags, StringBuilder key);
+    [DllImport("rstrtmgr.dll")]
+    static extern int RmEndSession(uint handle);
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+    static extern int RmRegisterResources(uint handle, uint nFiles, string[] files, uint nApps, IntPtr apps, uint nServices, string[] services);
+    [DllImport("rstrtmgr.dll")]
+    static extern int RmGetList(uint handle, out uint needed, ref uint count, [In, Out] RM_PROCESS_INFO[] info, ref uint rebootReasons);
+
+    public static string[] Of(string path) {
+        uint handle;
+        int rc = RmStartSession(out handle, 0, new StringBuilder(33));
+        if (rc != 0) throw new System.ComponentModel.Win32Exception(rc, "RmStartSession");
+        try {
+            rc = RmRegisterResources(handle, 1, new[] { path }, 0, IntPtr.Zero, 0, null);
+            if (rc != 0) throw new System.ComponentModel.Win32Exception(rc, "RmRegisterResources");
+            RM_PROCESS_INFO[] info = new RM_PROCESS_INFO[0];
+            uint needed, count = 0, reasons = 0;
+            while ((rc = RmGetList(handle, out needed, ref count, info, ref reasons)) == 234) {
+                info = new RM_PROCESS_INFO[needed];
+                count = needed;
+            }
+            if (rc != 0) throw new System.ComponentModel.Win32Exception(rc, "RmGetList");
+            List<string> holders = new List<string>();
+            for (int i = 0; i < count; i++) {
+                string service = info[i].strServiceShortName == "" ? "" : ", service " + info[i].strServiceShortName;
+                holders.Add(info[i].strAppName + " (pid " + info[i].Process.dwProcessId + service + ")");
+            }
+            return holders.ToArray();
+        } finally {
+            RmEndSession(handle);
+        }
+    }
+}
+'@
+
+# The arm64 update leg once failed this move with a sharing violation from
+# a holder nobody identified. Restart Manager names the holders, the move
+# waits up to 30 s for them to let go, and the log says who they were.
+function Move-Released([string]$From, [string]$To, [switch]$Force) {
+    try {
+        Move-Item -LiteralPath $From -Destination $To -Force:$Force
+        return
+    } catch [IO.IOException] {
+        $failure = $_
+    }
+    $holders = @([FileHolders]::Of($From))
+    if ($holders.Count -eq 0) {
+        throw "Move-Item $From failed and Restart Manager names no process holding it: $failure"
+    }
+    Write-Host "Move-Item $From failed while held open by: $($holders -join '; '): $failure"
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    $left = $holders
+    while ($left.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+        $left = @([FileHolders]::Of($From))
+    }
+    try {
+        Move-Item -LiteralPath $From -Destination $To -Force:$Force
+    } catch [IO.IOException] {
+        throw "Move-Item $From failed again after waiting for $($holders -join '; '); still held by: $($left -join '; '): $_; first failure: $failure"
+    }
+    if ($left.Count -gt 0) {
+        Write-Host "Move-Item $From succeeded after 30 s although Restart Manager still names: $($left -join '; ')"
+    }
+}
+
 function Get-FreePort {
     $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
     $listener.Start()
@@ -508,6 +599,25 @@ exit 1
     Assert (@(Get-ChildItem -LiteralPath $cliDir -Force -Filter 'aether.exe.old*').Count -eq 0) 'the next start removed every aether.exe.old'
     Assert ((Get-Hash $installed) -ne $oldHash) 'aether.exe is still the new build after the cleanup'
 
+    $heldFile = Join-Path $root 'held.txt'
+    $heldReady = Join-Path $root 'held-ready.txt'
+    $heldRelease = Join-Path $root 'held-release.txt'
+    Set-Content -LiteralPath $heldFile -Value 'held'
+    $hold = "`$s = [IO.File]::Open('$heldFile', 'Open', 'Read', 'Read'); Set-Content -LiteralPath '$heldReady' -Value ok; " +
+        "while (-not (Test-Path -LiteralPath '$heldRelease')) { Start-Sleep -Milliseconds 100 }; Start-Sleep -Seconds 5; `$s.Dispose()"
+    $holdProcess = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -PassThru -WindowStyle Hidden `
+        -ArgumentList '-NoProfile', '-EncodedCommand', ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($hold)))
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not (Test-Path -LiteralPath $heldReady)) {
+        if ([DateTime]::UtcNow -gt $deadline) { throw 'the process holding held.txt never opened it' }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert ((@([FileHolders]::Of($heldFile)) -join '; ') -match "\(pid $($holdProcess.Id)\)") 'Restart Manager names the process holding a file open'
+    New-Item -ItemType File -Path $heldRelease | Out-Null
+    Move-Released $heldFile "$heldFile.moved"
+    Assert ((Test-Path -LiteralPath "$heldFile.moved") -and -not (Test-Path -LiteralPath $heldFile)) 'Move-Released moves a held file once its holder closes it'
+    $null = $holdProcess.WaitForExit(30000)
+
     # A release whose binary Windows will not start (here: not a PE file;
     # on a user's machine Smart App Control, AppLocker or antivirus) must
     # not replace the working CLI.
@@ -525,12 +635,12 @@ exit 1
     # A process killed between swapAside's two renames leaves no aether.exe
     # and the running build as aether.exe.old: the state is made here, the
     # window being too short to hit.
-    Move-Item -LiteralPath $installed -Destination $old
+    Move-Released $installed $old
     Assert (-not (Test-Path -LiteralPath $installed)) 'aether.exe is missing after a swap killed between its renames'
     $threw = $false
     try { & $installed version } catch { $threw = $true; Write-Host "The shell's answer: $($_.Exception.Message)" }
     Assert $threw 'running aether.exe fails until aether.exe.old is moved back'
-    Move-Item -LiteralPath $old -Destination $installed -Force
+    Move-Released $old $installed -Force
     $version = Invoke-Native $installed @('version')
     Assert ($version.Code -eq 0) 'Move-Item of aether.exe.old over aether.exe restores the CLI'
     Assert-NoNewDetections 'after the CLI update'

@@ -90,6 +90,24 @@ func TestRunModelRoundTripsAndCanBeChanged(t *testing.T) {
 	if err := db.SetRunModel(ctx, run.ID, "x y"); err == nil {
 		t.Fatal("set model with whitespace succeeded")
 	}
+	if changed, err := db.RefuseRunModel(ctx, run.ID, "opus", "", "the agent refused opus"); err != nil || changed {
+		t.Fatalf("refuse a model the run no longer has = %v, %v, want no change", changed, err)
+	}
+	if got, err := db.GetRun(ctx, run.ID); err != nil || got.Model != "sonnet" || got.ModelError != "" {
+		t.Fatalf("run model after refusing an older model = %+v, %v, want sonnet kept", got, err)
+	}
+	if changed, err := db.RefuseRunModel(ctx, run.ID, "sonnet", "haiku", "the agent refused sonnet"); err != nil || !changed {
+		t.Fatalf("refuse model = %v, %v, want a change", changed, err)
+	}
+	if got, err := db.GetRun(ctx, run.ID); err != nil || got.Model != "haiku" || got.RefusedModel != "sonnet" || got.ModelError != "the agent refused sonnet" {
+		t.Fatalf("refused run model = %+v, %v, want haiku running, sonnet refused and why", got, err)
+	}
+	if err := db.SetRunModel(ctx, run.ID, "opus"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	if got, err := db.GetRun(ctx, run.ID); err != nil || got.Model != "opus" || got.RefusedModel != "" || got.ModelError != "" {
+		t.Fatalf("run model after a refusal = %+v, %v, want opus and no refusal", got, err)
+	}
 }
 
 func TestRunEffortRoundTripsAndCanBeChanged(t *testing.T) {

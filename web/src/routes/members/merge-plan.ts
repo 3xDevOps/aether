@@ -13,22 +13,34 @@ export interface MergeOutcome {
   absorbed?: MergeMember
   /** The merged member's role as the plan stands with this form. */
   role: Member['role']
-  /** Whether this side may keep the merged member admin. */
+  /** Whether this side may keep its own admin or super admin role for the merged member. */
   keepAdminOffered: boolean
   canSubmit: boolean
 }
 
 const memberOf = (plan: MergePlan, id: string) => (plan.minted.id === id ? plan.minted : plan.proposer.id === id ? plan.proposer : undefined)
 
+const roleRank: Record<Member['role'], number> = { viewer: 0, collaborator: 1, admin: 2, super_admin: 3 }
+const canKeep = (role: Member['role']) => role === 'admin' || role === 'super_admin'
+
 function outcome(plan: MergePlan, keep: string | null, side: MergeMember, keepAdmin: boolean, otherKeepsAdmin: boolean): Omit<MergeOutcome, 'canSubmit'> {
   const choice = keep ? plan.choices.find((c) => c.keep_settings_of === keep) : undefined
-  const keepAdminOffered = Boolean(plan.role_with_keep_admin) && side.role === 'admin'
-  const keepsAdmin = (keepAdminOffered && keepAdmin) || otherKeepsAdmin
+  const keepAdminOffered = Boolean(plan.role_with_keep_admin) && canKeep(side.role)
+  const sideKeeps = keepAdminOffered && keepAdmin
+  const sideIsMinted = side.id === plan.minted.id
+  const { minted, proposer } = plan
+  const mintedKeeps = sideIsMinted ? sideKeeps : otherKeepsAdmin
+  const proposerKeeps = sideIsMinted ? otherKeepsAdmin : sideKeeps
+  // The merged role as merge.go computes it: the lower of the two, raised to the role of each admin or super admin side that keeps it.
+  let role = roleRank[proposer.role] < roleRank[minted.role] ? proposer.role : minted.role
+  for (const [kept, member] of [[mintedKeeps, minted], [proposerKeeps, proposer]] as const) {
+    if (kept && canKeep(member.role) && roleRank[member.role] > roleRank[role]) role = member.role
+  }
   return {
     choice,
     survivor: choice && memberOf(plan, choice.keep_settings_of),
     absorbed: choice && memberOf(plan, choice.absorbed_id),
-    role: keepsAdmin && plan.role_with_keep_admin ? plan.role_with_keep_admin : plan.role,
+    role,
     keepAdminOffered,
   }
 }
@@ -42,7 +54,7 @@ export function proposeOutcome(plan: MergePlan, form: ProposeForm): MergeOutcome
 /** The minter's accept: the proposal fixed the settings; the discard must be acknowledged again. */
 export function acceptOutcome(proposal: MergeProposal & { plan: MergePlan }, discardAck: boolean, keepAdmin: boolean): MergeOutcome {
   const { plan } = proposal
-  const shown = outcome(plan, proposal.keep_settings_of, plan.minted, keepAdmin, Boolean(proposal.proposer_keep_admin) && plan.proposer.role === 'admin')
+  const shown = outcome(plan, proposal.keep_settings_of, plan.minted, keepAdmin, Boolean(proposal.proposer_keep_admin) && canKeep(plan.proposer.role))
   return { ...shown, canSubmit: Boolean(shown.choice) && discardAck && !proposal.refusal }
 }
 

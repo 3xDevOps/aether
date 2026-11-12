@@ -40,7 +40,7 @@ type EvidencePurger interface {
 // TeamMemory builds the team memory brief a run launched in workspace by
 // member carries, leaving run out of it; empty when there is nothing to say.
 type TeamMemory interface {
-	Brief(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, run domain.RunID) (string, error)
+	Brief(ctx context.Context, workspace domain.WorkspaceID, member, reader domain.MemberID, run domain.RunID) (string, error)
 }
 
 type GitEngine interface {
@@ -66,6 +66,7 @@ type PTYHost interface {
 	StopSessionsWithPrefix(ctx context.Context, prefix string)
 	ActiveSessions(prefix string) []ptyhost.SessionKey
 	LastOutput(key ptyhost.SessionKey) (time.Time, bool)
+	LastInput(key ptyhost.SessionKey) (time.Time, bool)
 	LastLine(ctx context.Context, run domain.RunID, wait time.Duration) (string, error)
 	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
 	Annotate(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error

@@ -55,7 +55,7 @@ const wakeGrace = 5 * time.Minute
 
 // waitBrokenReasonPrefix starts the reason of a run whose wait resolved and
 // whose wake was not delivered within wakeGrace.
-const waitBrokenReasonPrefix = "wait broken: "
+const waitBrokenReasonPrefix = domain.WaitBrokenReasonPrefix
 
 // classifyWait judges a reported wait by its conditions at now. stranded
 // names the conditions the agent will not be woken by: one that left
@@ -204,7 +204,7 @@ func (s *Scheduler) runWaitLocked(ctx context.Context, entry *supervised) (domai
 func (s *Scheduler) Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if entry := s.runs[run]; entry != nil && !entry.paused && entry.activity == activity && entry.wait != nil {
+	if entry := s.runs[run]; entry != nil && (!entry.paused || !entry.asleepSince.IsZero()) && entry.activity == activity && entry.wait != nil {
 		wait := *entry.wait
 		return &wait
 	}

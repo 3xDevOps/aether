@@ -2,13 +2,22 @@ package children
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
+	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/fallback"
+	agentharness "github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
+
+const maxChoicesOff = 64
 
 // Settings is member's own child-run setting.
 func (s *Service) Settings(ctx context.Context, member domain.MemberID) (protocol.ChildSettings, error) {
@@ -16,25 +25,86 @@ func (s *Service) Settings(ctx context.Context, member domain.MemberID) (protoco
 	if err != nil {
 		return protocol.ChildSettings{}, err
 	}
-	return protocol.ChildSettings{Enabled: st.Enabled}, nil
+	return s.settingsWire(ctx, member, st)
 }
 
 // SetSettings changes member's own setting.
 func (s *Service) SetSettings(ctx context.Context, member domain.MemberID, p protocol.ChildSettingsParams) (protocol.ChildSettings, error) {
-	s.settingsMu.Lock()
-	defer s.settingsMu.Unlock()
-	st, err := s.cfg.Store.ChildSettings(ctx, member)
+	st, err := func() (store.ChildSettings, error) {
+		s.settingsMu.Lock()
+		defer s.settingsMu.Unlock()
+		st, err := s.cfg.Store.ChildSettings(ctx, member)
+		if err != nil {
+			return st, err
+		}
+		if p.Enabled != nil {
+			st.Enabled = *p.Enabled
+		}
+		if p.Choice != nil {
+			if st.Off, err = s.turnChoice(ctx, member, st.Off, *p.Choice); err != nil {
+				return st, err
+			}
+		}
+		return st, s.cfg.Store.PutChildSettings(ctx, member, st)
+	}()
 	if err != nil {
 		return protocol.ChildSettings{}, err
 	}
-	if p.Enabled != nil {
-		st.Enabled = *p.Enabled
+	s.Kick()
+	return s.settingsWire(ctx, member, st)
+}
+
+// turnChoice turns one agent on or off in off. Only an agent on the
+// member's own account or one shared with them is turned off; any entry
+// turns back on, a share revoked since included.
+func (s *Service) turnChoice(ctx context.Context, member domain.MemberID, off domain.ChildChoicesOff, c protocol.ChildChoiceSetting) (domain.ChildChoicesOff, error) {
+	choice := domain.ChildChoice{Harness: c.Harness, Account: domain.MemberID(c.AccountMemberID)}
+	out := slices.DeleteFunc(slices.Clone(off), func(e domain.ChildChoice) bool { return e == choice })
+	if c.On {
+		return out, nil
 	}
-	if err := s.cfg.Store.PutChildSettings(ctx, member, st); err != nil {
+	if len(choice.Harness) > protocol.LaunchDefaultsMaxAgentName || strings.ContainsFunc(choice.Harness, unicode.IsControl) {
+		return nil, invalid("choice.harness must be an agent name of at most %d bytes", protocol.LaunchDefaultsMaxAgentName)
+	}
+	if err := agentharness.ValidateName(choice.Harness); err != nil {
+		return nil, invalid("choice.harness: %s", err.Error())
+	}
+	if choice.Account != "" {
+		if _, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(choice.Account)); err != nil {
+			return nil, fmt.Errorf("choice.account_member_id: %w", err)
+		}
+	}
+	if len(out) >= maxChoicesOff {
+		return nil, invalid("at most %d agents and accounts can be off", maxChoicesOff)
+	}
+	return append(out, choice), nil
+}
+
+func (s *Service) settingsWire(ctx context.Context, member domain.MemberID, st store.ChildSettings) (protocol.ChildSettings, error) {
+	out := protocol.ChildSettings{Enabled: st.Enabled, Off: []protocol.ChildChoiceSetting{}, Choices: []protocol.ChildChoice{}}
+	for _, c := range st.Off {
+		out.Off = append(out.Off, protocol.ChildChoiceSetting{Harness: c.Harness, AccountMemberID: string(c.Account)})
+	}
+	accounts, err := s.sharedAccounts(ctx, member)
+	if err != nil {
 		return protocol.ChildSettings{}, err
 	}
-	s.Kick()
-	return protocol.ChildSettings{Enabled: st.Enabled}, nil
+	var failed []string
+	for _, account := range accounts {
+		if _, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(account)); errors.Is(err, permissions.ErrDenied) {
+			continue
+		} else if err != nil {
+			return protocol.ChildSettings{}, err
+		}
+		list, err := s.agentChoices(ctx, member, account)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("list the agents on account %s: %v", account, err))
+			continue
+		}
+		out.Choices = append(out.Choices, list...)
+	}
+	out.ChoicesError = strings.Join(failed, "; ")
+	return out, nil
 }
 
 // Allow sets run's own child-run setting. Only its owner turns it on: it
@@ -50,7 +120,7 @@ func (s *Service) Allow(ctx context.Context, actor *domain.Member, run domain.Ru
 			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the session's owner can allow its subsessions, since they spend the owner's accounts", permissions.ErrDenied)
 		}
 	case domain.ChildrenOff, "":
-		if actor.ID != r.MemberID && actor.Role != domain.RoleAdmin {
+		if actor.ID != r.MemberID && permissions.Check(permissions.WorkspaceAdmin, permissions.ActorOf(actor), permissions.Target{Workspace: r.WorkspaceID}) != nil {
 			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the session's owner or an admin can change its subsessions", permissions.ErrDenied)
 		}
 	default:

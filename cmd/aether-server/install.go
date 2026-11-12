@@ -199,13 +199,13 @@ func installValues(fs *flag.FlagSet) map[string]string {
 	return values
 }
 
-// writeAndReport writes the unit and config and says what it wrote.
+// writeAndReport writes the unit, slice and config and says what it wrote.
 func writeAndReport(w io.Writer, unitPath, configPath string, values map[string]string, force bool) error {
 	res, err := serversetup.Install(unitPath, configPath, values, force)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "wrote %s\n", res.UnitPath)
+	_, _ = fmt.Fprintf(w, "wrote %s\nwrote %s\n", res.UnitPath, res.SlicePath)
 	if res.ConfigSkipped {
 		_, _ = fmt.Fprintf(w, "kept %s (already exists; pass --force to overwrite)\n", res.ConfigPath)
 	} else {

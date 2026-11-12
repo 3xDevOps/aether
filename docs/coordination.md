@@ -68,7 +68,7 @@ line. The base coordination method set is:
 | --- | --- | --- |
 | `coord.status` | none | v3 wire version, this session's identity and assignment, authorized peers, unread count, and capabilities |
 | `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id`, `recipient_status` |
-| `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages` and the `ack_token` for that batch |
+| `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages`, the `ack_token` for that batch, and `more`, the unacknowledged messages after it |
 | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
 | `coord.report` | `outcome`, `summary`, optional `waiting_for`, `until` and `evidence_refs`, `idempotency_key` | outcome, summary and next action; for success, failure and blocked also the durable `report_id`, evidence references, and automatic `evidence_ref` |
@@ -204,8 +204,14 @@ also enforces these bounds:
   truncation metadata; task and path strings are capped at 512 bytes;
 - idempotency keys are at most 256 bytes and may not contain control lines;
 - an inbox holds at most 100 unacknowledged messages;
+- an inbox batch holds the oldest messages that fit in 16 KiB as the inbox
+  prints them, and at least one, so a harness that clips long tool output
+  still shows the whole batch; a larger batch an earlier server stamped is
+  cut to that size on its next read, and the rest waits unacknowledged;
 - sends allow a burst of five, then one message per five seconds;
-- inbox reads allow a burst of ten, then one read per second;
+- inbox reads allow a burst of ten, then one read per second; a refused read
+  saves no token, so a loop that drains a deep inbox waits a second and reads
+  again;
 - ordinary requests have a per-session transport budget of 30 requests per burst,
   refilling at one request per second. Malformed envelopes and unknown methods
   consume this budget too;
@@ -235,9 +241,11 @@ RPC command, Git engine, caller-selected session identity or socket override.
 
 ## Delivery, acknowledgement, and retries
 
-Delivery is at least once. An inbox read returns one oldest-first batch and an
-opaque `ack_token`. Omitting `ack_token` on the next read acknowledges nothing,
-so the same batch and token can be delivered again. Supplying the token on the
+Delivery is at least once. An inbox read returns one oldest-first batch, an
+opaque `ack_token`, and `more`, the count of unacknowledged messages that later
+batches hold; read again until a read returns no messages. Omitting
+`ack_token` on the next read acknowledges nothing, so the same batch and token
+can be delivered again. Supplying the token on the
 next read acknowledges exactly that batch while fetching the next batch, and
 the result carries `"acked": true`; a stale or unknown token acknowledges
 nothing and omits `acked`. An empty inbox has no token. Tokens are durable across server restarts while the
@@ -923,6 +931,14 @@ requests.
 Browser status also reports `state`: `not_started`, `creating`, `running`,
 `paused`, `session_lost`, or `unavailable`. An unreachable or failed Chromium
 session reports `available: false`, `running: false`, and its actual error.
+When the server starts and cannot release a companion's held input, the
+server still starts: that session's browser reports `unavailable` with the
+error, naming the session and companion container, until a `browser reset`
+replaces the companion. A paused session resumes with its browser still
+unavailable. A companion operation still running after 60 s fails, with the
+operations queued behind it, and ends the companion: its browser reports
+`available: false` and state `exited` until a `browser reset`, and a paused
+session still resumes.
 Failed initial creation may return an opaque
 `pending:` session ID. It is a recovery fence, not a usable page session.
 Acquire the browser surface with that exact incarnation, then explicitly
@@ -949,7 +965,9 @@ before Chromium renders its replacement, then restarts an active screencast so
 a static page still streams a frame at the new size. On controller release,
 revocation or disconnect, the server clears held browser keys, buttons and
 touches before admitting another controller.
-If cleanup cannot be confirmed, new control remains fenced.
+If cleanup cannot be confirmed, new control remains fenced, unless the
+companion has exited or was recorded unavailable at server start: then control
+can be acquired only to `browser reset` it.
 
 Page inventories and physical-input acknowledgements use cached, best-effort
 titles without waiting for a DOM read. Inventories refresh titles asynchronously;
@@ -1083,8 +1101,8 @@ scope because a peer asked. Messaging grants no control over the peer.
 Handle a batch before reading again: the next `inbox` acknowledges it. To
 acknowledge it without reading on, pass its `ack_token` to `ack`. `ack` refuses
 with exit 3 and names the current batch's token when the token is stale or
-mistyped, and returns `waiting`, the number of messages queued for the next
-read. `inbox --ack <token>` acknowledges that token instead of the saved one.
+mistyped, and returns `waiting`, the number of unacknowledged messages after the
+batch it acknowledged. `inbox --ack <token>` acknowledges that token instead of the saved one.
 `--wait` asks the server to wait once for up to 30 seconds
 when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
@@ -1228,16 +1246,24 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
 
 - `subsession options` says whether this session may start subsessions and, if not,
   the exact reason `subsession start` would give. It lists the limit, how many
-  of this session's subsessions are busy and queued, and each agent
-  and account a subsession may use with its state: `ready`, `exhausted` (95% of
-  its quota used), `not-installed` or `not-signed-in`, with the sentence
-  that says how to fix it. `--harness` adds that agent's models.
+  of this session's subsessions are busy and queued, and each agent on the
+  owner's own account and on every account shared with the owner whose owner
+  reaches the session's workspaces, with its state: `ready`, `exhausted` (95% of
+  its quota used), `not-installed`, `not-signed-in` or `off` (the owner turned it
+  off for subsessions, [teams.md](teams.md#choose-the-agents-subsessions-use)),
+  with the sentence that says how to fix it. A `ready` login the server found signed out says so
+  in its sentence. `--harness` adds that agent's models.
 - `subsession start` takes `--harness`, `--purpose` (3-8 words, shown in the
   dashboard) and `--task` or `--task-file` (at most 24 KiB, so the escaped request fits the socket's 64 KiB; `-` reads
   standard input), plus optional `--model`, `--mode
-  standard|enhanced|background` and `--account <member-id>`. `--account` takes
-  only the parent owner's own account: another member's is refused with
-  `-32001 subsessions use the owner's own <agent> account`. The server
+  standard|enhanced|background` and `--account <member-id>`. Without
+  `--account`, a subsession of the parent's agent starts on the parent's
+  account, and any other agent, or a parent handed over from another member, on
+  the owner's own account. `--account` takes the owner's account or one shared
+  with them whose owner reaches every workspace of the parent; any other is
+  refused with `-32001 child.start: permission denied: member <id> has not
+  shared their account with you` or `... the owner of account <id> has no
+  access to workspace <id>`. The server
   publishes the parent's branch and checks the subsession out from that commit;
   uncommitted changes are not included. The subsession inherits the parent's
   extra repositories (`--repo`) and permission tier. The receipt carries the subsession's
@@ -1246,9 +1272,11 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
   same key with other inputs is refused with `-32003`. The CLI generates a
   key when none is given and prints it to stderr.
 - `subsession list` returns each subsession's `state` (`queued`, `starting`,
-  `working`, `waiting`, `needs-you`, `finished`, `failed`, `ended`,
-  `cancelled` or `refused`), its latest report, branch, the account it runs
-  on and its cost when metered.
+  `working`, `waiting`, `needs-you`, `disconnected`, `finished`, `failed`,
+  `ended`, `cancelled` or `refused`), its latest report, branch, the account it
+  runs on and its cost when metered. `error` is why it was refused, or why a
+  started subsession stopped, such as `enhanced session ended: the agent's ACP
+  server exited with code 137`.
 - `subsession cancel` stops a subsession or drops it from the queue; a subsession still
   starting answers `-32002`, so cancel again a few seconds later. A handoff of
   either session to another member detaches the subsession from its parent: the parent
@@ -1272,7 +1300,16 @@ anything), `answered`, or waiting on a `needs-input` answer for over an hour
 while its parent is live sends the parent one message per quiet spell: its
 state and for how long, its status reason, its latest report, and the commands
 to wake it (`send --to <subsession>`) or stop it (`subsession cancel --run-id <subsession>`).
-New work starts a new spell. A subsession a person paused sends none. A subsession's
+A live attached subsession that has stopped on an error for over a minute
+sends one message per stopped spell the same way, with what can move it on. It
+has stopped when its agent is `disconnected` (not running, so mail waits unread
+until a person presses **Retry Enhanced**), a turn `failed` (such as `enhanced
+turn failed: ... Authentication required`) other than by its own failure
+report, or a turn was cut short (`turn interrupted`, `turn ended: <reason>`,
+`Usage limit reached on ...`, or the agent's own usage-limit message when
+Aether did not move the session), or its wait broke (`wait broken: ...`). A permission prompt or question waiting for a
+person sends nothing, nor does a subsession whose result already reached its
+parent. New work starts a new spell. A subsession a person paused sends none. A subsession's
 `needs-input` question goes to its owner, and the parent is told in its inbox
 so it can answer within the task.
 

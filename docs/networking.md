@@ -75,10 +75,10 @@ The server asks the local Tailscale daemon who is on the other end of each
 connection, as Tailscale SSH does. The tailnet login becomes the member, and the
 part before the `@` becomes the display name.
 
-- The first tailnet identity to link a fresh server becomes its admin. Until
-  then, a first admin SSH key is taken only over the tailnet or from the
+- The first tailnet identity to link a fresh server becomes its super admin. Until
+  then, a first super admin SSH key is taken only over the tailnet or from the
   server itself, so a port 2222 open beyond the tailnet cannot be used to take
-  admin first.
+  super admin first.
 - Everyone after that joins as a pending collaborator. `aether link` prints
   `linked to <server> as <name> (collaborator, pending); an admin runs: aether
   member approve <member-id>`, and every other command fails with `membership
@@ -155,9 +155,9 @@ With no tailnet and no edge, SSH keys and invite codes identify people.
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server becomes the admin. Without an edge or
+The first key to link a fresh server becomes the super admin. Without an edge or
 tailnet sign-in, until that first link any key that reaches port 2222 becomes
-admin, so link right after the server starts and keep the port closed to the
+super admin, so link right after the server starts and keep the port closed to the
 internet. With tailnet sign-in, the first key must arrive over the tailnet or
 from loopback.
 
@@ -168,9 +168,9 @@ The CLI offers `~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
 aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
 ```
 
-When the server has an edge, the first admin's key must come from a loopback
+When the server has an edge, the first super admin's key must come from a loopback
 address: the server itself, or an SSH tunnel to it. Anyone who can reach the
-port could otherwise take admin before the owner claims the server.
+port could otherwise take super admin before the owner claims the server.
 
 ```sh
 ssh -L 2222:127.0.0.1:2222 <user>@<server-host>   # keep it open

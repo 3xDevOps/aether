@@ -6,13 +6,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/browser"
 	"github.com/3xDevOps/Aether/internal/domain"
 	containerruntime "github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func (s *Scheduler) reserveBrowser(id domain.RunID) error {
@@ -138,14 +142,22 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 	if reconcileErr == nil {
 		return s.clearRecoveredBrowserInput(id, status, client)
 	}
+	// A companion recorded unavailable or ended must not hold its session
+	// paused: it can be reset only once the session runs.
 	if status.State != "paused" {
+		if status.Unavailable != "" || status.State == "exited" || status.State == "dead" || status.State == "removed" {
+			return nil
+		}
 		return reconcileErr
 	}
 	if err := s.reserveBrowser(id); err != nil {
 		return err
 	}
 	run := browser.Run{ID: string(id), ContainerID: cid}
-	if _, err := d.manager.Resume(ctx, run); err != nil {
+	if resumed, err := d.manager.Resume(ctx, run); err != nil {
+		if resumed.Unavailable != "" {
+			return nil
+		}
 		return err
 	}
 	status, client, reconcileErr = d.manager.Reconcile(ctx, run)
@@ -158,29 +170,153 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 // StopDevelopmentRun is called only after the terminal report/evidence commit.
 // It never destroys the run's checkout.
 func (s *Scheduler) StopDevelopmentRun(ctx context.Context, id domain.RunID) error {
-	cid := s.developmentContainer(id)
-	if cid == "" {
+	if cid := s.developmentContainer(id); cid != "" {
+		if err := s.closeDevelopmentAdmission(id, cid); err != nil {
+			return err
+		}
+		if err := s.stopDevelopmentProcesses(ctx, id, cid); err != nil {
+			return err
+		}
+	}
+	return s.removeDevelopmentBrowser(ctx, id)
+}
+
+// removeLeftBrowser removes the companion a sleep could not remove. The
+// mark is read and cleared under the browser lock, so a companion opened
+// after the removal is never taken for the old one.
+func (s *Scheduler) removeLeftBrowser(ctx context.Context, id domain.RunID) error {
+	d := s.developmentState()
+	lock := d.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	entry := s.runs[id]
+	left := entry != nil && entry.browserLeft
+	s.mu.Unlock()
+	if !left {
 		return nil
 	}
-	if err := s.closeDevelopmentAdmission(id, cid); err != nil {
-		return err
+	if d.manager != nil {
+		if err := d.manager.Remove(ctx, string(id)); err != nil {
+			return err
+		}
 	}
-	if err := s.stopDevelopmentProcesses(ctx, id, cid); err != nil {
-		return err
-	}
+	d.releaseBrowser(id)
+	s.mu.Lock()
+	entry.browserLeft = false
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Scheduler) removeDevelopmentBrowser(ctx context.Context, id domain.RunID) error {
 	d := s.developmentState()
 	lock := d.lock(id)
 	lock.Lock()
 	defer lock.Unlock()
 	if d.manager != nil {
-		if err := d.manager.Remove(ctx, browser.Run{ID: string(id), ContainerID: cid}); err != nil {
+		if err := d.manager.Remove(ctx, string(id)); err != nil {
 			return err
 		}
 	}
+	d.releaseBrowser(id)
+	return nil
+}
+
+func (d *developmentState) releaseBrowser(id domain.RunID) {
 	d.mu.Lock()
 	delete(d.reserved, id)
 	d.mu.Unlock()
-	return nil
+}
+
+const browserSweepTimeout = 30 * time.Second
+
+// sweepBrowsers removes this server's journaled companions that no open
+// session can reach: their session ended or is unknown to the store, or the
+// session container whose network they share is gone.
+func (s *Scheduler) sweepBrowsers(ctx context.Context) {
+	d := s.developmentState()
+	if d.manager == nil {
+		return
+	}
+	journals, err := d.manager.Journals()
+	d.reportSweep("journals", "scheduler: read browser journals", err)
+	for _, status := range journals {
+		id := domain.RunID(status.RunID)
+		d.reportSweep(status.RunID, "scheduler: remove ended session's browser companion", s.sweepBrowser(ctx, id, status))
+	}
+}
+
+func (s *Scheduler) sweepBrowser(ctx context.Context, id domain.RunID, status browser.Status) error {
+	ctx, cancel := context.WithTimeout(ctx, browserSweepTimeout)
+	defer cancel()
+	d := s.developmentState()
+	lock := d.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	ended, err := s.browserSessionEnded(ctx, id, status.RunContainer)
+	if err != nil || !ended {
+		return err
+	}
+	err = d.manager.RemoveObserved(ctx, status)
+	if errors.Is(err, browser.ErrReplaced) {
+		return nil
+	}
+	if err == nil {
+		d.releaseBrowser(id)
+	}
+	return err
+}
+
+// reportSweep warns once per distinct failure of key; the hourly sweep would
+// otherwise repeat a failure that needs an operator, such as a foreign journal.
+func (d *developmentState) reportSweep(key, msg string, err error) {
+	d.mu.Lock()
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	repeated := d.sweepFailures[key] == text
+	if text == "" {
+		delete(d.sweepFailures, key)
+	} else {
+		d.sweepFailures[key] = text
+	}
+	d.mu.Unlock()
+	switch {
+	case err == nil:
+	case repeated:
+		slog.Debug(msg, "key", key, "error", err)
+	default:
+		slog.Warn(msg, "key", key, "error", err)
+	}
+}
+
+func (s *Scheduler) browserSessionEnded(ctx context.Context, id domain.RunID, runContainer containerruntime.ID) (bool, error) {
+	s.mu.Lock()
+	entry := s.runs[id]
+	open := s.pending[id] != nil || (entry != nil && !entry.status.Terminal())
+	s.mu.Unlock()
+	if !open {
+		r, err := s.cfg.Store.GetRun(ctx, id)
+		if errors.Is(err, store.ErrNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if r.Status.Terminal() {
+			return true, nil
+		}
+	}
+	return s.containerGone(ctx, runContainer), nil
+}
+
+func (s *Scheduler) containerGone(ctx context.Context, id containerruntime.ID) bool {
+	if id == "" {
+		return false
+	}
+	_, err := s.cfg.Runtime.Inspect(ctx, id)
+	return errors.Is(err, containerruntime.ErrNotFound)
 }
 func (s *Scheduler) reopenDevelopment(ctx context.Context, id domain.RunID) error {
 	if err := s.ReopenDevelopmentTerminals(ctx, id); err != nil {
@@ -213,6 +349,12 @@ func (s *Scheduler) deleteDevelopment(ctx context.Context, id domain.RunID) erro
 	}
 	return err
 }
+
+// recoverDevelopment never fails startup for one session: a session whose
+// terminals or browser companion cannot be recovered is logged, and a
+// companion that cannot release held input is kept unavailable until the
+// session's browser is reset. Sessions recover concurrently, so hung
+// companions do not add up past the update trial's deadline.
 func (s *Scheduler) recoverDevelopment(ctx context.Context) error {
 	type recoveredDevelopment struct {
 		runID       domain.RunID
@@ -225,39 +367,68 @@ func (s *Scheduler) recoverDevelopment(ctx context.Context) error {
 		entries = append(entries, recoveredDevelopment{runID: entry.runID, containerID: entry.containerID, freeze: entry.paused || entry.retained || entry.status.Terminal()})
 	}
 	s.mu.Unlock()
-	d := s.developmentState()
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, browserRecoveryConcurrency)
 	for _, entry := range entries {
-		if err := s.RecoverDevelopmentTerminals(ctx, entry.runID); err != nil {
-			return err
-		}
-		if d.manager == nil || entry.containerID == "" {
-			continue
-		}
-		lock := d.lock(entry.runID)
-		lock.Lock()
-		status, client, err := d.manager.Reconcile(ctx, browser.Run{ID: string(entry.runID), ContainerID: entry.containerID})
-		if !errors.Is(err, os.ErrNotExist) {
-			d.mu.Lock()
-			d.reserved[entry.runID] = true
-			d.mu.Unlock()
-		}
-		if err == nil {
-			if clearErr := s.clearRecoveredBrowserInput(entry.runID, status, client); clearErr != nil {
-				lock.Unlock()
-				return clearErr
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			if ctx.Err() != nil {
+				return
 			}
-		}
-		// Unknown/lost sessions stay unavailable; no create/restart on recovery.
-		if entry.freeze && status.State == "running" {
-			_, err = d.manager.Pause(ctx, browser.Run{ID: string(entry.runID), ContainerID: entry.containerID})
-			if err != nil {
-				lock.Unlock()
-				return err
+			if err := s.RecoverDevelopmentTerminals(ctx, entry.runID); err != nil && ctx.Err() == nil {
+				slog.Warn("scheduler: recovery: session terminals unavailable", "run", entry.runID, "error", err)
 			}
-		}
-		lock.Unlock()
+			if err := s.recoverDevelopmentBrowser(ctx, entry.runID, entry.containerID, entry.freeze); err != nil && ctx.Err() == nil {
+				slog.Warn("scheduler: recovery: session browser", "run", entry.runID, "error", err)
+			}
+		})
 	}
-	return nil
+	wg.Wait()
+	return ctx.Err()
+}
+
+const (
+	browserRecoveryTimeout     = 30 * time.Second
+	browserRecoveryConcurrency = 8
+)
+
+func (s *Scheduler) recoverDevelopmentBrowser(parent context.Context, id domain.RunID, cid containerruntime.ID, freeze bool) error {
+	d := s.developmentState()
+	if d.manager == nil || cid == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(parent, browserRecoveryTimeout)
+	defer cancel()
+	lock := d.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	run := browser.Run{ID: string(id), ContainerID: cid}
+	status, client, err := d.manager.Reconcile(ctx, run)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	d.mu.Lock()
+	d.reserved[id] = true
+	d.mu.Unlock()
+	var releaseErr error
+	if err == nil {
+		releaseErr = s.clearRecoveredBrowserInput(id, status, client)
+	}
+	// Unknown/lost sessions stay unavailable; no create/restart on recovery.
+	var pauseErr error
+	if freeze && status.State == "running" {
+		if _, pauseErr = d.manager.Pause(ctx, run); pauseErr != nil {
+			pauseErr = fmt.Errorf("session %s browser companion %s: pause: %w", id, status.ContainerID, pauseErr)
+		}
+	}
+	if releaseErr == nil || parent.Err() != nil {
+		return pauseErr
+	}
+	if markErr := d.manager.MarkUnavailable(run, "startup recovery failed: "+releaseErr.Error()); markErr != nil {
+		releaseErr = errors.Join(releaseErr, fmt.Errorf("record the companion as unavailable: %w", markErr))
+	}
+	return errors.Join(releaseErr, pauseErr)
 }
 
 // RunCoAuthors shares the established run attribution convention with native
@@ -333,17 +504,5 @@ func (s *Scheduler) destroyDevelopmentContainer(ctx context.Context, id domain.R
 	if err := s.MarkDevelopmentContainerEnded(ctx, id); err != nil {
 		return err
 	}
-	d := s.developmentState()
-	lock := d.lock(id)
-	lock.Lock()
-	defer lock.Unlock()
-	if d.manager != nil {
-		if err := d.manager.Remove(ctx, browser.Run{ID: string(id), ContainerID: cid}); err != nil {
-			return err
-		}
-	}
-	d.mu.Lock()
-	delete(d.reserved, id)
-	d.mu.Unlock()
-	return nil
+	return s.removeDevelopmentBrowser(ctx, id)
 }

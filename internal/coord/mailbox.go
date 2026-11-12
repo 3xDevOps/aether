@@ -355,13 +355,17 @@ func (s *Service) Reply(ctx context.Context, from domain.RunID, p protocol.Coord
 	if err != nil {
 		return protocol.CoordReplyResult{}, internalError(method, err)
 	}
-	if _, serr := s.cfg.Store.GetRun(ctx, from); serr != nil {
-		if errors.Is(serr, store.ErrNotFound) {
-			return protocol.CoordReplyResult{}, &protocol.Error{
-				Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown session %s", method, from),
-			}
+	self, serr := s.cfg.Store.GetRun(ctx, from)
+	if errors.Is(serr, store.ErrNotFound) {
+		return protocol.CoordReplyResult{}, &protocol.Error{
+			Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown session %s", method, from),
 		}
+	}
+	if serr != nil {
 		return protocol.CoordReplyResult{}, internalError(method, serr)
+	}
+	if rpcErr := s.ownerReaches(ctx, method, self); rpcErr != nil {
+		return protocol.CoordReplyResult{}, rpcErr
 	}
 	if question.ToRun != from {
 		return protocol.CoordReplyResult{}, &protocol.Error{
@@ -403,7 +407,11 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 				method, inboxBurst, int(inboxRefill.Seconds())),
 		}
 	}
-	if _, rpcErr := s.resolveRun(ctx, method, run); rpcErr != nil {
+	self, rpcErr := s.resolveRun(ctx, method, run)
+	if rpcErr != nil {
+		return protocol.CoordInboxResult{}, rpcErr
+	}
+	if rpcErr := s.ownerReaches(ctx, method, self); rpcErr != nil {
 		return protocol.CoordInboxResult{}, rpcErr
 	}
 	var waiter chan struct{}
@@ -460,22 +468,27 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 			CreatedAt:     m.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return protocol.CoordInboxResult{Messages: out, AckToken: token, Acked: acked}, nil
+	more, err := s.cfg.Mail.CountUndeliveredRunMessages(ctx, run)
+	if err != nil {
+		return protocol.CoordInboxResult{}, internalError(method, err)
+	}
+	return protocol.CoordInboxResult{Messages: out, AckToken: token, Acked: acked, More: more}, nil
 }
 
 // resolveRun loads a run, mapping the unknown case to CodeNotFound.
 func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunID) (*domain.Run, *protocol.Error) {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, &protocol.Error{
-			Code:    protocol.CodeNotFound,
-			Message: fmt.Sprintf("%s: unknown session %s", method, run),
-		}
+		return nil, unknownRun(method, run)
 	}
 	if err != nil {
 		return nil, internalError(method, err)
 	}
 	return r, nil
+}
+
+func unknownRun(method string, run domain.RunID) *protocol.Error {
+	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown session %s", method, run)}
 }
 
 // CoordReport reserves an outcome before evidence capture. Live interactive
@@ -1068,19 +1081,35 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	// Coordination is a run-originated protocol event, not a human action:
 	// the actor stays empty rather than naming the run's mutable owner.
 	ev := events.Event{ID: pub.EventID, Time: pub.CreatedAt, WorkspaceID: pub.WorkspaceID}
+	// The message and its ack are filed under the sender's workspace, which
+	// follows the sender's view of the conversation. A recipient in another
+	// workspace is left out of both, so neither names a run to members who
+	// cannot reach it.
+	var toWorkspace domain.WorkspaceID
+	switch to, err := s.cfg.Store.GetRun(ctx, pub.ToRun); {
+	case err == nil:
+		toWorkspace = to.WorkspaceID
+	case !errors.Is(err, store.ErrNotFound):
+		return fmt.Errorf("coord: read session %s for its message event: %w", pub.ToRun, err)
+	}
 	switch {
 	case pub.EventType == store.CoordAuditMessage && pub.EventID == store.CoordAuditEventID(pub.MessageID):
+		to := pub.ToRun
+		if toWorkspace != pub.WorkspaceID {
+			to = ""
+		}
 		ev.RunID = pub.FromRun
 		ev.Payload = events.CoordMessagePayload{
 			MessageID: pub.MessageID, WorkspaceID: pub.WorkspaceID,
-			FromRunID: pub.FromRun, ToRunID: pub.ToRun, Kind: pub.Kind, CorrelationID: pub.CorrelationID,
+			FromRunID: pub.FromRun, ToRunID: to, Kind: pub.Kind, CorrelationID: pub.CorrelationID,
 		}
 	case pub.EventType == store.CoordAuditAcked && pub.EventID == store.CoordAuditAckedEventID(pub.MessageID) &&
 		pub.AckedAt != nil:
-		ev.RunID = pub.ToRun
-		ev.Payload = events.CoordMessageAckedPayload{
-			MessageID: pub.MessageID, ToRunID: pub.ToRun, AckedAt: pub.AckedAt.UTC().Format(time.RFC3339Nano),
+		acked := events.CoordMessageAckedPayload{MessageID: pub.MessageID, AckedAt: pub.AckedAt.UTC().Format(time.RFC3339Nano)}
+		if toWorkspace == pub.WorkspaceID {
+			ev.RunID, acked.ToRunID = pub.ToRun, pub.ToRun
 		}
+		ev.Payload = acked
 	default:
 		return store.ErrCoordAuditPublicationConflict
 	}
@@ -1143,9 +1172,18 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 				Message: fmt.Sprintf("%s: idempotency_key %q was used with different message inputs", method, idempotency),
 			}
 		}
+		sender, rpcErr := s.resolveRun(ctx, method, from)
+		if rpcErr != nil {
+			return nil, "", rpcErr
+		}
 		target, rpcErr := s.resolveRun(ctx, method, to)
 		if rpcErr != nil {
 			return nil, "", rpcErr
+		}
+		if !correlated {
+			if rpcErr := s.reachable(ctx, method, sender, target); rpcErr != nil {
+				return nil, "", rpcErr
+			}
 		}
 		return prior, target.Status, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -1165,6 +1203,11 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	target, rpcErr := s.resolveRun(ctx, method, to)
 	if rpcErr != nil {
 		return nil, "", rpcErr
+	}
+	if !correlated {
+		if rpcErr := s.reachable(ctx, method, sender, target); rpcErr != nil {
+			return nil, "", rpcErr
+		}
 	}
 	if target.Status.Terminal() {
 		return nil, "", &protocol.Error{

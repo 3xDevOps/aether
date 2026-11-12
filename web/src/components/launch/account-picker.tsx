@@ -1,3 +1,4 @@
+import { signedOutState } from '@/components/agents/agent-copy'
 import { useEffect, useState } from 'react'
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
 import { customAgent, needsLogin } from '@/components/launch/agent-picker'
@@ -52,6 +53,7 @@ export function readiness(status: AccountStatus | undefined, harness: string, ow
   if (agent.login_missing) return { text: needsLogin(owner), title: needsLogin(owner, false), className: 'text-state-needs-you', refused: true }
   if (agent.own_account_only) return { text: 'Your account only', className: 'text-muted', refused: true }
   if (agent.unavailable) return { text: 'Unavailable', className: 'text-state-failed', title: agent.unavailable, refused: true }
+  if (agent.login_problem) return { text: signedOutState(agent), className: 'text-state-needs-you', title: agent.login_problem }
   const provider = status.usage?.find((item) => item.provider === harness)
   const windows = currentWindows(provider, now)
   if (windows.length) {

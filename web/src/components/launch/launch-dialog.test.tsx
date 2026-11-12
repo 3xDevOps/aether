@@ -5,6 +5,7 @@ import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
+import { useChildSettings } from '@/store/children'
 import { useLaunchDefaults } from '@/store/launch-defaults'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { agentInfo, alice, bob, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
@@ -41,6 +42,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+const signedOut = '~/.claude/.credentials.json: Claude OAuth access token is missing or invalid'
 const launchButton = () => screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement
 const agentRow = (name: RegExp | string) => screen.getByRole('radio', { name }) as HTMLButtonElement
 const modeSegment = (name: string) => within(screen.getByRole('radiogroup', { name: 'Mode' })).getByRole('radio', { name }) as HTMLButtonElement
@@ -89,6 +91,18 @@ describe('child runs switch', () => {
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
     expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).toMatchObject({ children: 'off' })
     for (const [params] of vi.mocked(api.launchDefaultsSet).mock.calls) expect(JSON.stringify(params)).not.toContain('children')
+  })
+
+  it('offers the subsession agents while subsessions are on for the launch', async () => {
+    useChildSettings.setState({ settings: null, error: null })
+    vi.mocked(api.childSettings).mockResolvedValue({ enabled: true, off: [{ harness: 'codex' }], choices: [
+      { account_member_id: alice.id, account_name: 'Alice', harness: 'claude', display_name: 'Claude Code', status: 'ready' },
+      { account_member_id: alice.id, account_name: 'Alice', harness: 'codex', display_name: 'Codex', status: 'ready' },
+    ] })
+    await open()
+    expect(await screen.findByRole('button', { name: 'Subsession agents: 1 off' })).toBeDefined()
+    fireEvent.click(childSwitch())
+    expect(screen.queryByRole('button', { name: /^Subsession agents/ })).toBeNull()
   })
 
   it('is off and disabled for a Background run', async () => {
@@ -140,6 +154,21 @@ describe('new run', () => {
     expect(agentRow(/^custom/).disabled).toBe(false)
 
     fireEvent.click(screen.getByRole('button', { name: 'Install more agents...' }))
+    expect(useStore.getState().route.name).toBe('agents')
+    expect(useStore.getState().paletteDialog).toBeNull()
+  })
+
+  it('says a signed-out agent is signed out, shows the problem and sends the member to Agents, without refusing the launch', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude({ login_problem: signedOut, login_blocks_launch: true })])
+    await open()
+
+    expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeSigned out')
+    expect(screen.queryByRole('radiogroup', { name: 'Account' })).toBeNull()
+    const note = screen.getByText('Claude Code is signed out').closest('[data-slot="callout"]')!
+    expect(note.textContent).toContain(signedOut)
+    expect(note.textContent).toContain('Until then a launch here is refused, unless a workspace variable signs the agent in.')
+    expect(launchButton().disabled).toBe(false)
+    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: 'Sign in on Agents' }))
     expect(useStore.getState().route.name).toBe('agents')
     expect(useStore.getState().paletteDialog).toBeNull()
   })
@@ -384,7 +413,7 @@ describe('new run', () => {
     expect(within(alert).getByLabelText('Setup script output').textContent).toBe('npm error code E401\n')
   })
 
-  it('gives an admin the adopt command and the way to the Repository page', async () => {
+  it('gives an admin the adopt command and the way to the workspace settings page', async () => {
     const command = 'aether workspace mirror adopt --workspace ' + workspace.id + ' --generation 3 --commit ' + 'a'.repeat(40) + ' --yes'
     const text = 'gitengine: mirror no-candidate for branch "dev": revision ' + 'a'.repeat(40) + ' is waiting for an admin to adopt it; check that it is the upstream commit you expect, then run: ' + command
     vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error(text), { data: { kind: 'no-candidate', adopt_command: command } }))
@@ -396,7 +425,7 @@ describe('new run', () => {
     expect(alert.textContent?.split(command)).toHaveLength(2)
     expect(within(alert).getByLabelText('Adopt command').textContent).toBe(command)
     fireEvent.click(within(alert).getByRole('button', { name: 'Copy the adopt command' }))
-    fireEvent.click(within(alert).getByRole('button', { name: 'Open Repository' }))
+    fireEvent.click(within(alert).getByRole('button', { name: 'Open workspace settings' }))
     expect(api.runLaunch).toHaveBeenCalledTimes(1)
     expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })
     expect(useStore.getState().paletteDialog).toBeNull()
@@ -409,9 +438,9 @@ describe('new run', () => {
     fireEvent.click(launchButton())
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the Repository page.')
+    expect(alert.textContent).toContain('Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the workspace settings page.')
     expect(within(alert).getByLabelText('Adopt command').textContent).toBe('aether workspace mirror adopt')
-    expect(within(alert).queryByRole('button', { name: 'Open Repository' })).toBeNull()
+    expect(within(alert).queryByRole('button', { name: 'Open workspace settings' })).toBeNull()
   })
 
   it('offers no adopt step when the pending mirror has no candidate yet', async () => {
@@ -552,6 +581,20 @@ describe('new run', () => {
       await waitFor(() => expect(launchButton().disabled).toBe(false))
       fireEvent.click(launchButton())
       await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ account_member_id: bob.id, fallback_account_member_ids: [vera.id, alice.id] })))
+    })
+
+    it("says the shared account's login is signed out and that its owner signs in again", async () => {
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id ? [claude({ login_problem: signedOut, login_blocks_launch: true })] : [claude()])
+      await open()
+      const accountRow = () => within(screen.getByRole('radiogroup', { name: 'Account' })).getByRole('radio', { name: /^Bob/ })
+      await waitFor(() => expect(accountRow().textContent).toBe('BobSharedSigned out'))
+      await userEvent.click(accountRow())
+
+      const note = (await screen.findByText("Bob's Claude Code login is signed out")).closest('[data-slot="callout"]') as HTMLElement
+      expect(note.textContent).toContain(signedOut)
+      expect(note.textContent).toContain('Bob signs in again on their Agents page or with aether agent login claude.')
+      expect(within(note).queryByRole('button')).toBeNull()
+      expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeSigned out')
     })
 
     it('gives the server\'s reasons an installed agent cannot launch there', async () => {

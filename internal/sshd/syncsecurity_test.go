@@ -480,7 +480,7 @@ func TestSyncRevokesStreamWhenMemberIsRemoved(t *testing.T) {
 		t.Fatalf("scan while authorized: %v", serr)
 	}
 
-	if err := e.store.DeleteMember(context.Background(), cm.ID); err != nil {
+	if err := e.store.DeleteMember(context.Background(), cm.ID, ""); err != nil {
 		t.Fatalf("delete member: %v", err)
 	}
 

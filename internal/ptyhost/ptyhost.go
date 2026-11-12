@@ -661,6 +661,16 @@ func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 	return s.lastOutput()
 }
 
+// LastInput reports when an attached client or a development terminal's
+// input call last wrote to the session; false if the key has no session.
+func (h *Host) LastInput(key SessionKey) (time.Time, bool) {
+	s := h.lookup(key)
+	if s == nil {
+		return time.Time{}, false
+	}
+	return s.lastInput()
+}
+
 // Replay opens the retained raw terminal output and its metadata at one
 // immutable boundary. An expired prefix is explicit, not a complete transcript.
 // os.ErrNotExist means the run has never recorded a transcript.

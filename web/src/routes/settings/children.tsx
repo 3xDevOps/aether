@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode, useEffect, useState } from 'react'
+import { AgentsError, offersAgents, SubsessionAgents } from '@/components/launch/subsession-agents'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { Api } from '@/lib/api'
@@ -12,7 +13,7 @@ import { useCapability } from '@/store/hooks'
 export const childRunsLabel = 'Let my sessions start subsessions'
 
 const scope: [string, string][] = [
-  ['Allows', 'An agent in one of your sessions starts another agent as a subsession, on your account, then messages it and receives its result. You own every subsession.'],
+  ['Allows', "An agent in one of your sessions starts another agent as a subsession, on your account or one shared with you, then messages it and receives its result. You own every subsession."],
   ['Limits', "The workspace budget and the workspace's subsession limits apply to every subsession."],
   ['One session', "Options → Subsessions in the launch dialog, or More → Allow subsessions on a session, overrides this for that session."],
 ]
@@ -103,6 +104,16 @@ export function ChildRunsSection({ client }: { client: Api }) {
           <TryAgain onClick={() => { useChildSettings.setState({ error: null }); setAttempt((n) => n + 1) }} />
         )}
       </SettingRow>
+      {settings && offersAgents(settings) && (
+        <SettingRow
+          label="Subsession agents"
+          labelFor="settings-child-agents"
+          help="The agents and accounts subsessions may use. Turn off an agent you do not want, or an account whose subscription no longer works."
+          control={<SubsessionAgents id="settings-child-agents" settings={settings} disabled={busy} client={client} />}
+        >
+          <AgentsError settings={settings} />
+        </SettingRow>
+      )}
       {workspace && cap.hasMethod('workspace.child_limits') && <WorkspaceLimits client={client} />}
     </SettingsSection>
   )

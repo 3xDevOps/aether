@@ -101,6 +101,8 @@ func deviceLogin(out io.Writer, agent protocol.AgentInfo) error {
 		_, err = fmt.Fprintf(out, "%s exited 0\n", agent.LoginCommand)
 	case !*after.LoginFound:
 		return fmt.Errorf("%s exited 0, but %s's login file is not in your home; run aether agent login %s again", agent.LoginCommand, agent.Name, agent.Name)
+	case after.LoginProblem != "":
+		return fmt.Errorf("%s exited 0, but %s is still signed out: %s; run aether agent login %s again", agent.LoginCommand, agent.Name, after.LoginProblem, agent.Name)
 	default:
 		_, err = fmt.Fprintf(out, "%s: login file found; aether account usage checks that the vendor accepts it\n", agent.Name)
 	}

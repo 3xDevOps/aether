@@ -46,6 +46,10 @@ func (p *pullRequest) Snapshot(_ context.Context, _ domain.MemberID, repo string
 		URL: "https://github.com/acme/app/pull/7", CheckRuns: []github.CheckRun{run}}, nil
 }
 
+func (*pullRequest) QueueRemoval(context.Context, domain.MemberID, string, int) (*github.QueueRemoval, error) {
+	return nil, nil
+}
+
 type fullInbox struct{}
 
 func (fullInbox) NotifyRun(context.Context, domain.RunID, domain.RunID, string, string, string) (bool, error) {
@@ -82,7 +86,7 @@ func TestTheSchedulerReadsTheRunsWaitConditions(t *testing.T) {
 	}
 	var offset atomic.Int64
 	now := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
-	svc, err := watch.New(watch.Config{Store: db, Bus: bus, Runs: quietRuns{}, Tick: 20 * time.Millisecond, Now: now})
+	svc, err := watch.New(watch.Config{Store: storetest.Unscoped{DB: db}, Bus: bus, Runs: quietRuns{}, Tick: 20 * time.Millisecond, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

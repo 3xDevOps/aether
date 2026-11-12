@@ -14,6 +14,7 @@ import { useElementSize } from '@/lib/hooks'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { RunNavigation } from '@/routes/run/header'
+import { useLiveLaunches } from '@/routes/run/subagent-cards'
 import { stackedInset, trackGap, TraceAxisHeader, TraceGrid, TraceNowMarker, TraceStatsStrip, treeWidth } from '@/routes/run/trace-chrome'
 import { useTraceData } from '@/routes/run/trace-data'
 import { TraceDetail } from '@/routes/run/trace-detail'
@@ -39,6 +40,7 @@ const modeName = { tui: 'Standard', acp: 'Enhanced' }
 export function TraceView({ run, nav }: { run: RunRecord; nav: RunNavigation }) {
   const data = useTraceData(run)
   const { root, stats, axis, now, nowA, live, session } = data
+  useLiveLaunches(run.id, true)
   const mobile = useIsMobile()
   const ui = useStore((s) => s.traceViews[run.id]) ?? emptyTraceView
   const setView = useCallback((patch: Partial<TraceViewState>) => useStore.getState().setTraceView(run.id, patch), [run.id])

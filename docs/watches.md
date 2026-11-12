@@ -416,15 +416,17 @@ Each `--until` (at most 4) becomes a watch the session owns: `source` `agent`,
 `owner_run_id` the reporting session, and the session member's workspace
 access. Pull requests are read with the GitHub login of the member whose
 home the session runs in, its launcher, even after a handoff. Every read,
-`merged` included, also reads the head commit's checks, so that login needs
-the access a [`pr` watch](#pull-requests-and-ci) needs; a refused read
+`merged` included, also reads the head commit's checks, and a `merged`
+read of an open pull request also asks GitHub's GraphQL API for its last
+merge queue event, so that login needs the access a
+[`pr` watch](#pull-requests-and-ci) needs; a refused read
 retries, and after an hour the wait is broken and the session needs you. A
 session records at most 30 waiting reports with `--until` an hour; the next
 is refused with that error.
 
 | Condition | Resolves | Outcome |
 | --- | --- | --- |
-| `pr:<owner>/<repo>#<n>:merged` | The pull request merged, or closed without merging. | `merged`, or `closed` |
+| `pr:<owner>/<repo>#<n>:merged` | The pull request merged, closed without merging, or a merge queue removed it without merging it after the condition began and it was not queued again within a minute; `detail` quotes GitHub's reason, such as `reason: failed_checks` or `reason: manual`. When GitHub refuses the merge queue read, the summary says `can't read its merge queue (<GitHub's error>)` and merged and closed still resolve it. | `merged`, `closed`, or `removed-from-queue` |
 | `pr:<owner>/<repo>#<n>:checks[@<sha>]` | Every counted check on its head commit finished, or one failed and nothing counted is still running, the named commit was replaced, or the pull request closed unmerged first. When the base branch requires checks only those count and `observed.checks.required_only` is `true`; a required check nothing reported keeps the wait pending, and the summary names it. Otherwise every check counts. Cancelled runs a rerun replaced are not counted, as for [`ci`](#pull-requests-and-ci). | `passed`, `failed`, `cancelled`, `superseded`, or `closed` |
 | `run:<run-id>:finished` | That session, in the same workspace, ended or reported success. | `completed`, `merged`, `failed`, `abandoned`, `interrupted`, or `reported-success` |
 
@@ -464,7 +466,9 @@ evaluation and keyed by the condition and its outcome, so a retry, a
 restart or a late event never wakes the session twice for one report. A paused session gets the message, and resuming it wakes it. A
 session that ended gets nothing. Web Push is never sent for session waits.
 `coord.messages.list` shows a member who is not the session's owner or an
-admin only the wake's first line, the condition and how it ended.
+admin only the wake's first line, the condition and how it ended. A wake, or a
+relayed notice, whose wait or watch is gone is shown only to the owner of the
+session it woke and to super admins.
 
 | `state` | Meaning |
 | --- | --- |

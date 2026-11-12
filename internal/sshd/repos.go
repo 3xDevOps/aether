@@ -7,14 +7,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-func (s *Server) resolveRepo(ctx context.Context, run, workspace, repo string) (domain.RunID, domain.WorkspaceID, *protocol.Error) {
+// resolveRepo names the checkout and workspace a request's repo addresses.
+// A run member cannot reach in every workspace reads as missing.
+func (s *Server) resolveRepo(ctx context.Context, member domain.MemberID, run, workspace, repo string) (domain.RunID, domain.WorkspaceID, *protocol.Error) {
 	if repo == "" {
 		return domain.RunID(run), domain.WorkspaceID(workspace), nil
 	}
 	if run == "" {
 		return "", "", invalidParams("repo requires run_id")
 	}
-	r, err := s.cfg.Store.GetRun(ctx, domain.RunID(run))
+	r, err := s.reachableRun(ctx, member, domain.RunID(run))
 	if err != nil {
 		return "", "", rpcError(err)
 	}

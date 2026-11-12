@@ -11,6 +11,7 @@ import { prefersReducedMotion } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { surfaces } from '@/lib/surfaces'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { AgentsSection } from '@/routes/settings/agents'
 import { AssistantSection } from '@/routes/settings/assistant'
 import { ChildRunsSection } from '@/routes/settings/children'
 import { ConnectorsSection } from '@/routes/settings/connectors'
@@ -27,11 +28,12 @@ import { ThisComputerSections } from '@/routes/settings/this-computer'
 import { UsageSection } from '@/routes/settings/usage'
 import { WatchesSection } from '@/routes/settings/watches'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsAdmin, useIsSuperAdmin } from '@/store/hooks'
 
 const bodies: Record<CategoryID, (client: Api) => ReactNode> = {
   general: () => <GeneralSections />,
   launch: (client) => <LaunchDefaultsSection client={client} />,
+  agents: (client) => <AgentsSection client={client} />,
   connections: (client) => <><ConnectorsSection client={client} /><GitHubSection client={client} /></>,
   notifications: (client) => <NotificationSections client={client} />,
   watches: (client) => <WatchesSection client={client} />,
@@ -58,13 +60,14 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
   const phone = useIsMobile()
   const cap = useCapability()
   const admin = useIsAdmin()
+  const superAdmin = useIsSuperAdmin()
   const assistant = useAssistantAvailable()
   const member = useStore((s) => s.info?.member !== undefined)
   const workspace = useStore((s) => s.activeWorkspace !== '')
   const navigate = useStore((s) => s.navigate)
   const hydrated = useStore((s) => s.hydrated)
   const onboarding = surfaces(cap).some((surface) => surface.name === 'onboarding')
-  const shown = useMemo(() => visibleEntries({ cap, admin, assistant, onboarding, member, workspace }), [cap, admin, assistant, onboarding, member, workspace])
+  const shown = useMemo(() => visibleEntries({ cap, admin, superAdmin, assistant, onboarding, member, workspace }), [cap, admin, superAdmin, assistant, onboarding, member, workspace])
   const visible = visibleCategories(shown)
   const target = params.section
   const linked = target ? categoryOf(target, shown) : undefined

@@ -118,6 +118,14 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 			if capabilityErr := permissions.Check(capability, actor, target); capabilityErr != nil {
 				return capabilityErr
 			}
+			if repo.WorkspaceID != run.WorkspaceID {
+				if !actor.Reaches(repo.WorkspaceID) {
+					return invalidParams("repo " + repoID + " is not one of the session's repos")
+				}
+				if repoErr := permissions.Check(capability, actor, permissions.Target{Workspace: repo.WorkspaceID}); repoErr != nil {
+					return repoErr
+				}
+			}
 			// Editing a protected/other member's checkout is also steering it.
 			if mutate {
 				if steeringErr := permissions.Check(permissions.Steer, actor, target); steeringErr != nil {
@@ -247,8 +255,8 @@ func (s *Server) runGitDiff(ctx context.Context, member domain.MemberID, raw jso
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	diff, err := call.native.Diff(ctx, call.execution, runrepo.DiffRequest{Paths: p.Paths, Staged: p.Staged})
-	return protocol.RunGitDiffResult{Repo: p.Repo, State: diff.State, Output: runrepo.FailureOutput(diff.Output, err), Error: repoError(err)}, nil
+	diff, err := call.native.Diff(ctx, call.execution, runrepo.DiffRequest{Paths: p.Paths, Staged: p.Staged, Base: p.Base, BaseBranch: call.repo.BaseBranch, ForkPoint: call.repo.BaseCommit})
+	return protocol.RunGitDiffResult{Repo: p.Repo, BaseRef: diff.BaseRef, State: diff.State, Output: runrepo.FailureOutput(diff.Output, err), Error: repoError(err)}, nil
 }
 
 func (s *Server) runGitCommit(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -370,7 +378,7 @@ func (s *Server) recordPR(ctx context.Context, call runRepoCall, pr *runrepo.Pul
 		return
 	}
 	if opened && prior == nil || prior != nil && prChanged(prior, pr.State, pr.MergedAt) {
-		s.publishRunPR(ctx, run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+		s.publishRunPR(ctx, run, call.repoOwner(), pr.Number, pr.URL, pr.State, pr.MergedAt)
 	}
 }
 
@@ -382,12 +390,12 @@ func prChanged(recorded *store.RunPullRequest, state string, mergedAt *time.Time
 
 // publishRunPR tells clients to re-read a run's pull request. A failure is
 // only logged, like recordPR's: the GitHub side already happened.
-func (s *Server) publishRunPR(ctx context.Context, run domain.Run, number int, url, state string, mergedAt *time.Time) {
+func (s *Server) publishRunPR(ctx context.Context, run domain.Run, repo domain.WorkspaceID, number int, url, state string, mergedAt *time.Time) {
 	if s.cfg.Bus == nil {
 		return
 	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: run.WorkspaceID, RunID: run.ID, Payload: events.RunPRPayload{
-		RunID: run.ID, Number: number, URL: url, State: state, MergedAt: mergedAt,
+		RunID: run.ID, Repo: repo, Number: number, URL: url, State: state, MergedAt: mergedAt,
 	}}); err != nil {
 		slog.Warn("sshd: publish run pull request", "run", run.ID, "error", err)
 	}
@@ -428,7 +436,7 @@ func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p proto
 			return protocol.RunPRStatusResult{}, rpcError(err)
 		}
 		if changed {
-			s.publishRunPR(ctx, call.run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+			s.publishRunPR(ctx, call.run, pr.RepoWorkspace, pr.Number, pr.URL, pr.State, pr.MergedAt)
 		}
 	}
 	latest := prs[0]

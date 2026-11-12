@@ -64,27 +64,36 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 }
 
 // reauthDue reports whether an auth refusal should restart the agent, and
-// whether a restart within acpLostAgain already failed to fix it. A run whose
-// agent reported an outcome waits for a turn end, which the restored
-// session's idle state would fake, so it is not restarted.
-func (d *acpDriver) reauthDue(entry *supervised) (due, tried bool) {
+// whether a restart within acpLostAgain already failed to fix it. A login
+// written since that restart is one the agent has not read, so it earns one
+// more restart in the window; an agent that rewrites its login on every
+// start gets no more than that. A run whose agent reported an outcome waits
+// for a turn end, which the restored session's idle state would fake, so it
+// is not restarted.
+func (d *acpDriver) reauthDue(entry *supervised, stamp string) (due, tried bool) {
 	d.s.mu.Lock()
 	defer d.s.mu.Unlock()
-	if time.Since(entry.authLostAt) < acpLostAgain {
+	again := time.Since(entry.authLostAt) < acpLostAgain
+	if again && (entry.authStamp == stamp || entry.authReread) {
 		return false, true
 	}
 	if entry.reported != "" || (entry.idleReason != "" && !entry.idleShown) {
 		return false, false
 	}
-	entry.authLostAt = time.Now()
+	if !again {
+		entry.authLostAt = time.Now()
+	}
+	entry.authStamp, entry.authReread = stamp, again
 	return true, false
 }
 
 // reauth restarts an agent that refused a turn for want of a sign-in, so it
 // reads the account's login again, restores its session and shows the
-// refusal. The refused prompt is not sent again: its sender already has the
-// refusal, and mail is offered again on its own.
-func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState) {
+// refusal with signIn, how the account's owner signs in again, and
+// fileProblem, what the login file lacks. The refused prompt is not sent
+// again: its sender already has the refusal, and mail is offered again on
+// its own.
+func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState, signIn, fileProblem string) {
 	defer d.lockOp(entry.runID)()
 	d.mu.Lock()
 	sess := lost.session
@@ -104,7 +113,11 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 		d.s.mu.Unlock()
 		return
 	}
-	if err := sess.Notice("warning", "Agent signed out", "The agent refused a turn with \"Authentication required\". Aether is restarting it so it reads the account's login again."); err != nil {
+	title, detail := "Sign-in refused", "The agent refused a turn with \"Authentication required\"; "+signIn+"."
+	if fileProblem != "" {
+		title, detail = "Agent signed out", detail+" The login file reads: "+fileProblem+"."
+	}
+	if err := sess.Notice("warning", title, detail); err != nil {
 		slog.Warn("scheduler: record the sign-in notice", "run", entry.runID, "error", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)
@@ -113,14 +126,14 @@ func (d *acpDriver) reauth(entry *supervised, lost *acpRun, st acphost.TurnState
 	// sends a refused task again.
 	d.record(entry, func() {
 		entry.agentKeeper = nil
-		entry.authRefused = fmt.Errorf("%w; Aether restarted the agent so it reads the account's login again: send the message again", st.Failed)
+		entry.authRefused = fmt.Errorf("%w; %s", st.Failed, signIn)
 	})
 	if err := d.open(ctx, entry, openRestore); err != nil {
 		d.s.mu.Lock()
 		entry.authRefused = nil
 		d.s.mu.Unlock()
 		if acphost.AuthRequired(err) {
-			err = fmt.Errorf("%w; the restarted agent still finds no sign-in, so this container's copy of the login is stale or unreadable: start a new session", err)
+			err = fmt.Errorf("%w; %s", err, d.s.loginRefusedAdvice(d.s.runLogin(ctx, entry.runID), st.Failed, refusedAfterRestart))
 		}
 		d.fail(entry, err)
 	}

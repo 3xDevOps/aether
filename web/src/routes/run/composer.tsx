@@ -262,7 +262,7 @@ function SendActions({ pill, label, hint, description, disabled, onClick, onCanc
 }
 
 function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange, onEscape }: ComposerProps) {
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const coarse = useMediaQuery(coarsePointer)
@@ -373,7 +373,7 @@ function useQueueHeld(active: boolean): boolean {
 
 function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock, onEscape }: ComposerProps) {
   const mobile = useIsMobile()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const session = useStore((s) => s.acpSessions[run.id])
@@ -409,7 +409,8 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const moderated = !control.canAct
   const turnRunning = state?.turn_in_flight ?? false
   const waiting = backgroundWait(run, session) !== null
-  const supportsImages = state?.prompt_images === true
+  // A sleeping session's agent reports its prompt types once a wake starts it.
+  const supportsImages = state?.prompt_images === true || Boolean(run.asleep_since)
   const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.file'))
   const attachOff = busy || !cap.hasMethod('terminal.file')
   const refusedImages = !supportsImages && hasImages(images.previews)
@@ -649,7 +650,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 
 export function Composer(props: ComposerProps) {
   const { run, dock } = props
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })

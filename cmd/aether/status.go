@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -223,7 +224,7 @@ func gatherStatus() (statusReport, error) {
 // login is named as the human's step.
 func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []protocol.AgentInfo, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
 	if len(workspaces) == 0 {
-		if m.Role != string(domain.RoleAdmin) {
+		if !domain.Role(m.Role).Admin() {
 			return "an admin runs: aether workspace import <path|url>"
 		}
 		return "aether workspace import <path|url>"
@@ -232,10 +233,18 @@ func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []proto
 	if len(installed) == 0 {
 		return "aether agent add <name>"
 	}
-	if slices.ContainsFunc(installed, func(a protocol.AgentInfo) bool { return a.LoginFound == nil || *a.LoginFound }) {
-		return mirrorStep(m.Role == string(domain.RoleAdmin), workspaces, mirrors, unseeded)
+	if i := slices.IndexFunc(installed, func(a protocol.AgentInfo) bool { return a.LoginProblem != "" }); i >= 0 {
+		return signInStep(installed[i])
 	}
-	agent := installed[0]
+	if slices.ContainsFunc(installed, func(a protocol.AgentInfo) bool { return a.LoginFound == nil || *a.LoginFound }) {
+		return mirrorStep(m, workspaces, mirrors, unseeded)
+	}
+	return signInStep(installed[0])
+}
+
+// signInStep is the command that signs agent in. Only a device login runs
+// without a terminal, so any other login is named as the human's step.
+func signInStep(agent protocol.AgentInfo) string {
 	switch {
 	case agent.LoginCommand == "":
 		return "a human runs in a terminal: aether terminal, then " + agent.Name + "'s own sign-in"
@@ -248,12 +257,16 @@ func nextStep(m protocol.Member, workspaces []protocol.Workspace, agents []proto
 // A mirrored workspace cannot launch a run until a human adopts a fetched
 // commit as its accepted base. A local one cannot until its base branch
 // has a commit; unseeded maps such a workspace to its linked clone, or "".
-func mirrorStep(admin bool, workspaces []protocol.Workspace, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
-	who := "an admin runs: "
-	if admin {
-		who = ""
-	}
+// A step is the caller's own only where their role in that workspace is
+// admin. A server older than workspace access reports no workspace role,
+// so there the caller's server role applies.
+func mirrorStep(self protocol.Member, workspaces []protocol.Workspace, mirrors map[string]protocol.WorkspaceMirrorResult, unseeded map[string]string) string {
 	for _, ws := range workspaces {
+		admin := cmp.Or(ws.Role, self.Role) == string(domain.RoleAdmin)
+		who := "an admin runs: "
+		if admin {
+			who = ""
+		}
 		m := mirrors[ws.ID]
 		clone, isUnseeded := unseeded[ws.ID]
 		switch {
@@ -333,6 +346,8 @@ func printStatus(w io.Writer, r statusReport) {
 		switch {
 		case !a.Installed:
 			line("agent", "%s: not installed", a.Name)
+		case a.LoginProblem != "":
+			line("agent", "%s: installed, signed out: %s", a.Name, a.LoginProblem)
 		case a.LoginFound == nil:
 			line("agent", "%s: installed, declares no login file", a.Name)
 		case *a.LoginFound:

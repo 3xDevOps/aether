@@ -8,6 +8,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -72,6 +73,10 @@ type RunController interface {
 	// on account can stand in for one on requested as a usage fallback,
 	// which never borrows the owner's installation.
 	FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harness string, mode domain.LaunchMode) (bool, error)
+	// LoginProblem is why agent's login in account's home cannot sign it
+	// in, empty when the server knows of none, and whether a launch is
+	// refused over it.
+	LoginProblem(account domain.MemberID, agent string, profile harness.Profile) (problem string, blocks bool, err error)
 	// DefaultMode is the mode member's launch of harness on account starts
 	// in when it names none: Enhanced where the agent's ACP server is
 	// installed, else Standard.
@@ -95,6 +100,18 @@ type RunController interface {
 	// Paused reports whether the run's container is currently frozen;
 	// unknown or finished runs report false.
 	Paused(run domain.RunID) bool
+	// Sleep is the live run's idle sleep; a run that is awake has none.
+	Sleep(run domain.RunID) scheduler.SleepState
+	// WakeRun starts a sleeping run's container and restores its agent,
+	// returning once it can take input or with the wake's error.
+	WakeRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error
+	// SettleSleep waits for a sleep of the run that is under way to finish.
+	SettleSleep(ctx context.Context, run domain.RunID) error
+	// HoldRunAwake wakes a sleeping run and keeps it awake until release,
+	// which counts as the run's last activity.
+	HoldRunAwake(ctx context.Context, run domain.RunID) (release func(), err error)
+	// NoteTyping records a member typing in the run's composer.
+	NoteTyping(run domain.RunID)
 	// Cause is what chose activity for the live run; empty when unknown or
 	// when the run's activity has since changed.
 	Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause

@@ -108,7 +108,7 @@ func (s *Server) serveRunSSH(ctx context.Context, member domain.MemberID, ch sub
 		return
 	}
 	run, principal, authority, err := s.developmentAuthority(ctx, member, req.RunID)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, permissions.ErrNoAccess) {
 		err = &protocol.Error{Code: protocol.CodeNotFound, Message: "session not found"}
 	}
 	if err != nil {

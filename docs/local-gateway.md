@@ -218,18 +218,33 @@ handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
 in particular, busy retention admission requires an explicit retry, not
 automatic replay. Streams have a separate guard: a channel that fails to open
-triggers a redial only when a keepalive shows the connection is actually gone,
-because tearing down a healthy connection would kill its other live streams.
+triggers a redial only when a keepalive, given 60 seconds to answer, shows the
+connection is actually gone, because tearing down a healthy connection would
+kill its other live streams.
 
 A network that goes away without a reset, as when a phone sleeps or moves
 between Wi-Fi and mobile data, leaves the connection open and silent. Any
 byte from the server, a keepalive reply or a stream's data, proves the
 connection alive, so a large download on a slow link is never mistaken for
 a dead one. After 30 seconds without one the gateway sends an SSH keepalive,
-and after 90 seconds without one it drops the connection, so an idle phone's
-radio can sleep and a dead connection goes within two minutes. Every call
-and stream waiting on a dropped connection then fails or redials. A call
-already sent on it is replayed under the rule above; one that is not fails
+and after 5 minutes without one it drops the connection, so an idle phone's
+radio can sleep. The window is that long because a server on a saturated
+host can stall for a minute or more under memory pressure and still be alive;
+dropping it would end every stream it carries. On Linux and Android a link
+to an address or tailnet name, not the edge, also sets `TCP_USER_TIMEOUT` to
+90 seconds: the kernel keeps acknowledging for a starved server, so a dead
+network, such as a NAT timeout or a Wi-Fi switch, trips it and that
+connection goes within about two minutes. On Linux 5.11 and newer, and older
+kernels that carry the backport of "tcp: fix TCP_USER_TIMEOUT with zero
+window", it also aborts a large upload (`home.upload`, `files.upload`,
+`terminal.file`) to a server that is alive but reads nothing for 90 seconds
+while the upload fills its receive buffer. Older kernels without that change,
+common on older Android phones, keep such a connection. Elsewhere, and through
+the edge, a dead network takes up to six minutes, and the events stream shows
+nothing new meanwhile. Through the edge the longer window does not help either: the
+edge marks a server offline after 60 seconds without control traffic.
+Every call and stream waiting on a dropped connection then fails or redials.
+A call already sent on it is replayed under the rule above; one that is not fails
 with `-32004` and `the server stopped answering keepalives`. Requests that
 arrive while a dial is in progress wait for that one dial, each only as long
 as its own request lasts, and a dial gives up after 90 seconds. A dial
@@ -600,7 +615,10 @@ whitespace or control characters, a leading `-`, or more than 128 bytes is
 `-32602` with
 `model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes`.
 Session snapshots and templates carry the `model` they launch with, omitted when
-empty.
+empty. When the agent of an Enhanced session refuses its model, the snapshot's
+`refused_model` names it, `model` becomes the one the session reports running,
+empty for the agent's default, `model_error` says why, and a `run.model` event
+with that `model` follows; choosing a model later clears both.
 
 They take an optional `effort` in the same places: one of the agent's
 `effort_levels` from `agent.list`, empty for the agent's default
@@ -748,7 +766,8 @@ error names the blocker. In-flight control or Git operations return `-32003`
 instead of waiting behind them. Cleanup errors leave the workspace available
 for retry but do not restore already removed data. Success publishes
 `workspace.deleted` with the workspace ID in the event envelope and `{}` as
-the payload.
+the payload, and a `member.access` notice with action `revoked` to the owner
+and each granted member, whose streams may no longer carry `workspace.deleted`.
 
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished session from the board
@@ -766,7 +785,7 @@ Archiving does not schedule deletion; the obsolete `deletes_at` field is no
 longer emitted. Both calls publish `run.archived` with `archived_at` (null on
 restore) and a matching timeline note. Explicit Delete remains separate.
 
-`member.rename` accepts `{"display_name":"..."}` (and `member_id`, admin
+`member.rename` accepts `{"display_name":"..."}` (and `member_id`, super admin
 only, to rename someone else) and returns `{"member":Member}`. The name is
 trimmed and must be 1 to 64 characters with no control characters; a bad
 name is `-32602` with the reason. Each rename publishes `member.changed`
@@ -983,6 +1002,13 @@ carries `agent_delivery: "queued"` until the agent takes it
 (`"delivered"`), or turns `not_sent` with `failure.code` `agent_refused` or
 `agent_disconnected`; each change publishes `workspace.room_message`
 ([enhanced-sessions.md](enhanced-sessions.md#permissions-and-input)).
+A message the server could not hand to the agent at all is `not_sent` with
+`failure.message` the real error and `failure.code`: `session_unavailable`
+(no running agent, or a mode switch in flight), `prompt_not_sent` (such as a
+sleeping session that failed to wake), `unsupported_image`,
+`session_protected`, `steer_denied` or `access_revoked` (the sender lost
+**Steer** or membership before delivery), or `control_changed` (the session's
+control lease changed before delivery).
 
 `run.inject` also accepts `attachments`, an ordered array of at most eight
 references returned by `terminal.image` or `terminal.file`. Text may be empty
@@ -1123,8 +1149,8 @@ The dashboard also calls these methods through the same route:
 | `server.sysbox.install` | none; admin only | the same status. Starts the installer in the background, one at a time; a call while one runs returns `installing`. Poll `server.sysbox.status` until `on`, `unsupported` or `failed`. The server then uses Sysbox for new containers at once. Never retried after a transport failure. While it runs, `server.update` answers `-32003` |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
 | `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000,"by_agent":[{"harness":"claude","metered_runs":3,"unmetered_runs":0,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000}]},"pull_requests":{"opened":2,"merged":1},"success":{"runs":{"succeeded":4,"finished":9}},"outcomes":{"runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}],"members":[{"member_id":"...","display_name":"...","color":"#e6194b","runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}]}]},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Outcome` is `{"done","failed","abandoned"}`; `outcomes.members` is filled only for `scope` `everyone`. `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
-| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent sessions, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
-| `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"fallback"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds an older or fallback list. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#choose-a-model) |
+| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"login_problem":"","login_blocks_launch":false,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent sessions, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_problem` is why the login cannot sign the agent in, empty when the server knows of none, and `login_blocks_launch` whether `run.launch` on the account refuses over it ([harnesses.md](harnesses.md#when-a-login-is-signed-out)). `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
+| `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour and until Aether updates the agent; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds the last list that worked (`fetched_at` says when); a failure is retried after a minute. `cache` is Codex's own `~/.codex/models_cache.json`; `none` lists nothing. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#choose-a-model) |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
 | `agent.remove` | `{"name":"claude"}` | `{"removed":["~/.local/bin/claude","~/.local/bin/claude-agent-acp"]}` - removes an agent from the caller's own environment so new sessions cannot start it. A shipped name (it wins over a member's definition of the same name; `custom` is not removable) deletes its `~/.local/bin` links, the Enhanced adapter's too; `removed` lists those that existed, and none existing answers `-32602` `agent "claude" is not installed in your environment: ~/.local/bin/claude does not exist`. Any other name deletes the caller's definition and answers `{}`, or `-32602` `you have no agent "x"; aether agent list shows yours`. `-32004` `persistent homes are not enabled` without member homes. Needs the launch capability; refused with `-32003` while an install or a harness update runs in the home. Package files, logins and settings stay. Not replayed on a transport failure |
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
@@ -1151,8 +1177,8 @@ The dashboard also calls these methods through the same route:
 | `terminal.exec` | `{"command":"claude --version"}` | `{"exit_code":0,"stdout":"...","stderr":"..."}` - runs the command through a login shell in the caller's member environment, starting it if needed; a non-zero exit code is a result, not an error. Any approved member may call it. Answers within 10 minutes: a command still running then is killed and the call answers `-32603`, as it does for output past 1 MiB. See [terminal.md](terminal.md#run-one-command) |
 | `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
 | `terminal.file` | `TerminalFileParams` (`{"run_id":"<run-id>","name":"notes.md","content":"<base64-file-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-files/<random>/notes.md"}`) - absolute path in the target container |
-| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
-| `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
+| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal and, once its file owners pass the [check](environments.md#saved-image-checks), makes it the member's image. Answers within 11 minutes |
+| `env.reset` | none | empty result; stops the environment, forgets and removes the saved and previous images |
 | `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the conversation's `queue` (waiting and running entries, then the latest 50 that ended), the open `confirmations` (each with `state` `pending`, `approved` or `running`, the turn's `origin` `{door, client, connector_id}`, and `other_member` and `other_owner`, the owner's name, when the session belongs to another member, `private` when the card saves, forgets or sends a saved preference, so a notification shows only what kind of action it is, and `rule` when the card may become an [approval rule](assistant.md#approval-rules): `{"key":{...},"wording":"Always approve ...","suggested":true}`, `suggested` after three cards of that kind approved by hand in a row), `auto_approve`, `suggest_auto_approve`, `share_view` and `sign_in_recorded`, true once a sign-in for the assistant began for any agent. `installing` means a start is installing the agent in the assistant's container |
 | `assistant.start` | `{"agent":"claude"}` (optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their agent in the caller's assistant container, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation |
 | `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...},"door":"phone"}` (`view_context` and `door` optional) | `{"entry":AssistantQueueEntry}`; needs the Launch capability. The prompt joins the caller's queue, and a key the conversation already holds returns its entry instead. With nothing running or queued it is sent at once, starting the assistant when needed, and a failure to send is the error; otherwise `entry.state` is `queued` and it runs when the turns before it end. A sixth waiting prompt answers `-32002` `assistant: 5 prompts are already queued; wait or remove one`. `door` is `phone` or `desktop` when the Aether app runs in that shell; anything else is `dashboard`, and it only labels the entry. An entry is `{id, state, text, origin: {door, client, connector_id}, error, message_id, created_at}`, `state` one of `queued`, `running`, `done`, `failed`, `interrupted` (a turn a restart lost, never rerun) and `removed`. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `pr`, `check`, `failure`) and any of `workspace_id`, `run_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
@@ -2064,12 +2090,20 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   to `edge.claim`.
 
 A device recorded pending, approved or revoked is published as the
-`member.device` event, `{"device_id":"...","status":"..."}`, and a merge
-as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`,
+`member.device` event, `{"device_id":"...","status":"...","member_id":"..."}`,
+and a merge as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`,
 under the workspace id `server`, which names no workspace, so a server without
-workspaces still reports it. The shapes are in
+workspaces still reports it. `member_id` is the member the device signs in
+as, or for a device waiting on an invitation the member it links or the
+invitation's creator. Either event reaches only a member who sees every
+member it names (`member.list`), and a device event without `member_id`
+only super admins. The shapes are in
 `internal/protocol/identity.go` and `internal/protocol/edge.go`, and
-[edge.md](edge.md) describes what each does.
+[edge.md](edge.md) describes what each does. A workspace grant, revoke or
+owner change is also published under `server` as `member.access`,
+`{"workspace_id":"...","member_id":"...","action":"granted|revoked|owner"}`,
+to the member it changed alone, so a member who just lost the workspace still
+receives it.
 
 `workspace.selection` stores only the last selected workspace ID in
 `workspace-selection/<hash>.json` beside the CLI's `config.json`. The hash
@@ -2499,10 +2533,13 @@ its PTY are not reopened by either event.
 
 Every live socket - `events`, `attach`, `acp`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
-**10**. A client that changed networks or went to sleep leaves a half-open
-connection that reads as live on both ends; the ping is what releases the PTY
-client it was holding, whose geometry may be clamping every other viewer. The SPA
-reconnects on its normal path.
+**60**. The server's own HTTPS dashboard sends these pings from the server,
+and a starved server reads the pong late; `aether gui` pings from your
+machine. A client that
+changed networks or went to sleep leaves a half-open connection that reads as
+live on both ends; the ping is what releases the PTY client it was holding,
+whose geometry may be clamping every other viewer. The SPA reconnects on its
+normal path.
 
 ### `GET /ws/events`
 

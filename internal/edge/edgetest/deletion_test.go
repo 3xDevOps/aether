@@ -70,7 +70,7 @@ func TestDeleteAccountAfterTransfer(t *testing.T) {
 	identityGone(t, a, alice)
 
 	after := a.snapshot(t)
-	if len(after.members) != len(before.members) || after.members[aliceID] != domain.RoleAdmin || after.members[bobID] != domain.RoleAdmin {
+	if len(after.members) != len(before.members) || after.members[aliceID] != domain.RoleSuperAdmin || after.members[bobID] != domain.RoleAdmin {
 		t.Fatalf("members %v -> %v; want both admins kept", before.members, after.members)
 	}
 	h.waitEdgeOwner(t, a, &bob)
@@ -120,7 +120,7 @@ func TestDeleteAccountLeavesTheServerOwnerless(t *testing.T) {
 				return err
 			})
 			after := a.snapshot(t)
-			if len(after.members) != len(before.members) || len(after.admins()) != len(before.admins()) || after.members[carolID] != domain.RoleAdmin {
+			if len(after.members) != len(before.members) || len(after.admins()) != len(before.admins()) || after.members[carolID] != domain.RoleSuperAdmin {
 				t.Fatalf("members %v -> %v; want every member and role kept", before.members, after.members)
 			}
 			if ws, err := a.db.ListWorkspaces(ctx); err != nil || len(ws) != 1 || ws[0].Name != "kept" {
@@ -150,7 +150,7 @@ func TestDeleteAccountLeavesTheServerOwnerless(t *testing.T) {
 			}
 			ca2 := h.login(carol)[0]
 			res, err := h.claim(ca2, a.recoveryCode(t, carolID))
-			if err != nil || res.Info.Member.ID != string(carolID) || res.Info.Member.Role != "admin" {
+			if err != nil || res.Info.Member.ID != string(carolID) || res.Info.Member.Role != "super_admin" {
 				t.Fatalf("recovery claim: %+v %v", res.Info.Member, err)
 			}
 			h.waitEdgeOwner(t, a, &carol)
@@ -235,7 +235,7 @@ func TestConsoleRecoveryOfAnAdminWithoutAnAccount(t *testing.T) {
 				t.Fatalf("a recovery code naming a collaborator: %v", err)
 			}
 			res, err := h.claim(ca2, a.recoveryCode(t, carolID))
-			if err != nil || res.Info.Member.ID != string(carolID) || res.Info.Member.Role != string(domain.RoleAdmin) {
+			if err != nil || res.Info.Member.ID != string(carolID) || res.Info.Member.Role != string(domain.RoleSuperAdmin) {
 				t.Fatalf("console recovery claim: %+v %v; want carol's admin member", res.Info.Member, err)
 			}
 			h.waitEdgeOwner(t, a, &carol)

@@ -268,7 +268,7 @@ func TestDeletedMemberImageFailureRetainsDiscoverableRetry(t *testing.T) {
 	tag := memberImageRepo(e.member.ID) + ":obsolete"
 	e.rt.images = map[string]string{tag: "image"}
 	e.rt.holdImage(tag, true)
-	if err := e.db.DeleteMember(t.Context(), e.member.ID); err != nil {
+	if err := e.db.DeleteMember(t.Context(), e.member.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.sweepCaches(t.Context(), true)
@@ -614,7 +614,7 @@ func TestMemberDeletionExcludesEnsureAcrossStoppedTerminalCallback(t *testing.T)
 			if err := e.sched.cfg.Homes.SetCacheCleanupError(e.member.ID, "terminal", ""); err != nil {
 				return err
 			}
-			if err := e.db.DeleteMember(t.Context(), e.member.ID); err != nil {
+			if err := e.db.DeleteMember(t.Context(), e.member.ID, ""); err != nil {
 				return err
 			}
 			return e.sched.cfg.Homes.Remove(t.Context(), e.member.ID)
@@ -712,5 +712,45 @@ func TestSweepRemovesUnusedStandardImages(t *testing.T) {
 	}
 	if e.rt.hasImage(old) {
 		t.Fatal("sweep kept an unused standard image tag")
+	}
+}
+
+func TestSweepRemovesUnusedBrowserImages(t *testing.T) {
+	e := newTestEnv(t, nil)
+	repo := "registry.example/aether-browser"
+	current, old, busy := repo+":v0.2.0", repo+":v0.1.0", repo+":v0.0.9"
+	e.sched.cfg.BrowserImage, e.sched.cfg.DefaultBrowserImage = current, current
+	e.rt.images = map[string]string{current: "image", old: "image", busy: "image", "registry.example/other:v1": "image"}
+	e.rt.holdImage(busy, true)
+	e.sched.sweepCaches(t.Context(), false)
+	if !e.rt.hasImage(current) || !e.rt.hasImage(busy) || !e.rt.hasImage("registry.example/other:v1") {
+		t.Fatal("sweep removed a current, in-use or unrelated browser image")
+	}
+	if e.rt.hasImage(old) {
+		t.Fatal("sweep kept an unused browser image tag")
+	}
+}
+
+func TestSweepKeepsCustomAndLocalBrowserImages(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.sched.cfg.BrowserImage, e.sched.cfg.DefaultBrowserImage = "custom.example/browser:v1", "aether/browser:test"
+	e.rt.images = map[string]string{"custom.example/browser:v1": "image", "custom.example/browser:v0": "image", "aether/browser:old": "image"}
+	e.sched.sweepCaches(t.Context(), false)
+	if len(e.rt.images) != 3 {
+		t.Fatalf("sweep removed a custom or locally built browser image: %v", e.rt.images)
+	}
+}
+
+func TestSweepKeepsPinnedBrowserImageRepo(t *testing.T) {
+	e := newTestEnv(t, nil)
+	repo := "registry.example/aether-browser"
+	def, old := repo+":v0.2.0", repo+":v0.1.0"
+	for _, pinned := range []string{"sha256:0123456789abcdef", repo + "@sha256:0123456789abcdef"} {
+		e.sched.cfg.BrowserImage, e.sched.cfg.DefaultBrowserImage = pinned, def
+		e.rt.images = map[string]string{def: "image", old: "image"}
+		e.sched.sweepCaches(t.Context(), false)
+		if !e.rt.hasImage(old) || !e.rt.hasImage(def) {
+			t.Fatalf("sweep removed a browser tag while %s is pinned", pinned)
+		}
 	}
 }

@@ -113,12 +113,14 @@ func New(homes *memberhome.Manager) *Service {
 }
 
 type credential struct {
-	status      string
-	err         string
-	token       string
-	accountID   string
-	plan        string
-	expired     bool
+	status    string
+	err       string
+	token     string
+	accountID string
+	plan      string
+	expired   bool
+	// signedOut: the file holds an OAuth login the agent cannot sign in with.
+	signedOut   bool
 	fingerprint string
 }
 

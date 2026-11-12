@@ -96,7 +96,7 @@ surface.
 | `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, optional `until`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 | `aether_memory_search` | `memory.search`, or `memory.show` with `id` | optional `query`, `id`, `kind`, `file`, `all` | up to 10 `items`, best first; with `id`, that note as the one item and its supersede `chain` |
 | `aether_memory_add` | `memory.add` | `kind`, `text`, optional `files`, `supersedes`, `scope` | the stored `item`, `duplicate`, up to 3 `similar` live notes |
-| `aether_subsession_options` | `child.options` | optional `harness` | `allowed`, the refusal `reason`, `scope`, `limits`, `busy`, `queued`, `total`, each `choice` with its `status` |
+| `aether_subsession_options` | `child.options` | optional `harness` | `allowed`, the refusal `reason`, `scope`, `limits`, `busy`, `queued`, `total`, each `choice` with its `status`; with `harness`, its `models` and a failed discovery's `models_error` |
 | `aether_subsession_start` | `child.start` | `harness`, `purpose`, `task`, `idempotency_key`, optional `model`, `mode`, `account_member_id` | the subsession and `next` |
 | `aether_subsessions` | `child.list` | optional `run_id` | `children` |
 | `aether_subsession_cancel` | `child.cancel` | `run_id` | the subsession |

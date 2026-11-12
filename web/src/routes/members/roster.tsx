@@ -1,40 +1,41 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Ellipsis } from '@/components/icons'
+import { Trash2 } from '@/components/icons'
 import { Confirm } from '@/components/confirm'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { FailureCallout } from '@/components/ui/failure-callout'
 import { InsetList, InsetListItem } from '@/components/ui/inset-list'
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
-import type { AccountAccess, Member } from '@/lib/types'
+import { useMediaQuery } from '@/lib/hooks'
+import type { Member } from '@/lib/types'
+import { AccountSharingNote, useAccountSharing } from '@/routes/members/account-sharing'
 import { useFailure } from '@/components/failure'
 import { useStore } from '@/store'
 import { nextMemberOrder, type MemberPatch } from '@/store/members'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsAdmin, useIsSuperAdmin, useWorkspaceAccessServer } from '@/store/hooks'
 import { optimistic } from '@/store/optimistic'
 import { onlineMembers } from '@/store/presence'
 
-export const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
+export const roles: Member['role'][] = ['viewer', 'collaborator', 'admin', 'super_admin']
 
 export const roleLabel: Record<Member['role'], string> = {
   viewer: 'Viewer',
   collaborator: 'Collaborator',
   admin: 'Admin',
+  super_admin: 'Super admin',
 }
 
-function accountWords(id: string, access: AccountAccess | null): string {
-  if (!access) return ''
-  const theirs = access.accounts.some((m) => m.id === id)
-  const mine = access.shared_with.some((m) => m.id === id)
-  if (theirs && mine) return 'Shared both ways'
-  if (theirs) return 'Shares with you'
-  if (mine) return 'You share yours'
-  return 'Not shared'
+export const roleDescription: Record<Member['role'], string> = {
+  viewer: 'Reads the workspaces they are granted',
+  collaborator: 'Works in the workspaces they are granted',
+  admin: 'Owns and runs their own workspaces',
+  super_admin: 'Every workspace, members and server settings',
 }
 
 export function Roster({ client }: { client: Api }) {
@@ -44,22 +45,26 @@ export function Roster({ client }: { client: Api }) {
   const self = useStore((s) => s.info?.member)
   const caps = useCapability()
   const isAdmin = useIsAdmin()
-  const [access, setAccess] = useState<AccountAccess | null>(null)
+  const superAdmin = useIsSuperAdmin()
+  const scoped = useWorkspaceAccessServer()
   const [removing, setRemoving] = useState<Member | null>(null)
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
   const { failures, run } = useFailure()
-  const canListAccounts = caps.hasMethod('account.list')
+  const sharing = useAccountSharing(client)
+  // Below 64rem, where the sidebar leaves the table too little room, the share
+  // control and last seen sit below the name, so the table never scrolls sideways.
+  const wide = useMediaQuery('(min-width: 64rem)')
+  const canShare = caps.hasMethod('account.share') && caps.hasMethod('account.revoke')
 
   const readMembers = useCallback(() => useStore.getState().readMembers(client.memberList()), [client])
 
   useEffect(() => {
     let live = true
     readMembers().then((list) => live && setMemberList(list), () => {})
-    if (canListAccounts) client.accountList().then((a) => live && setAccess(a), () => {})
     return () => {
       live = false
     }
-  }, [canListAccounts, client, readMembers, setMemberList])
+  }, [readMembers, setMemberList])
 
   const refetch = async () => setMemberList(await readMembers())
 
@@ -82,8 +87,8 @@ export function Roster({ client }: { client: Api }) {
 
   const changeRole = (member: Member, role: Member['role']) => {
     if (role === member.role) return
-    // Losing your own admin role locks you out at once; the server guards the rest.
-    if (member.id === self?.id && role !== 'admin') {
+    // Losing your own super admin role locks you out at once; the server guards the rest.
+    if (member.id === self?.id && role !== 'super_admin') {
       setDemoting(role)
       return
     }
@@ -95,8 +100,8 @@ export function Roster({ client }: { client: Api }) {
   const all = Object.values(members)
   const roster = all.filter((m) => !m.pending)
   const pending = all.filter((m) => m.pending)
-  const canRole = isAdmin && caps.hasMethod('member.role')
-  const canRemove = isAdmin && caps.hasMethod('member.remove')
+  const canRole = superAdmin && caps.hasMethod('member.role')
+  const canRemove = superAdmin && caps.hasMethod('member.remove')
   const canApprove = isAdmin && caps.hasMethod('member.approve')
 
   return (
@@ -120,58 +125,82 @@ export function Roster({ client }: { client: Api }) {
       )}
       <section aria-label="Roster" className="flex min-w-0 flex-col gap-2">
         <SectionLabel as="h2">{roster.length === 1 ? '1 member' : `${roster.length} members`}</SectionLabel>
+        {!superAdmin && <p className="text-ui-sm text-muted">You see super admins and the members of workspaces you can use.</p>}
+        {canShare && <AccountSharingNote />}
+        {sharing.notices}
         <div className="overflow-hidden rounded-panel border border-seam">
           <table className="w-full table-fixed text-ui">
             <thead className="border-b border-seam bg-chrome text-left text-ui-sm text-muted">
               <tr>
                 <th className="px-3 py-1.5 font-medium">Name</th>
-                <th className="w-32 px-3 py-1.5 font-medium">Role</th>
-                <th className="hidden w-40 px-3 py-1.5 font-medium lg:table-cell">Agent account</th>
-                <th className="hidden w-36 px-3 py-1.5 font-medium sm:table-cell">Last seen</th>
-                {canRole && <th className="w-12 px-1 py-1.5"><span className="sr-only">Actions</span></th>}
+                <th className="w-36 px-3 py-1.5 font-medium lg:w-40">Role</th>
+                {wide && <th className="w-48 px-3 py-1.5 font-medium">Agent account</th>}
+                {wide && <th className="w-32 px-3 py-1.5 font-medium">Last seen</th>}
+                {canRemove && <th className="w-11 px-1 py-1.5"><span className="sr-only">Remove</span></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-seam">
               {roster.map((member) => {
                 const you = member.id === self?.id
                 const seen = lastSeen.get(member.id)
+                const presence = online.has(member.id)
+                  ? <span className="flex items-center gap-1.5 text-text"><StatusDot tone="done" />Online</span>
+                  : seen ? <RelativeTime at={seen} /> : 'Offline'
+                const account = !you && (
+                  <span className="flex min-w-0 flex-col items-start gap-0.5">
+                    {canShare && (
+                      <span className="flex min-h-7 items-center gap-2 coarse:min-h-11">
+                        <Switch
+                          id={`share-${member.id}`}
+                          aria-label={`Share my account with ${member.display_name}`}
+                          checked={sharing.shares(member.id)}
+                          disabled={sharing.pending.has(member.id)}
+                          onCheckedChange={() => sharing.toggle(member)}
+                        />
+                        <label htmlFor={`share-${member.id}`} className="text-ui-sm text-text">Share my account</label>
+                      </span>
+                    )}
+                    {sharing.sharesWithMe(member.id) && <span className="text-ui-sm text-balance text-muted">Shares their account with you</span>}
+                  </span>
+                )
                 return (
                   <tr key={member.id} className="transition-colors hover:bg-hover motion-reduce:transition-none">
-                    <td className="px-3 py-2.5">
-                      <span className="flex min-w-0 items-center gap-2">
+                    <td className="px-3 py-2 align-top">
+                      <span className="flex min-h-7 min-w-0 items-center gap-2 coarse:min-h-11">
                         <Avatar name={member.display_name} color={member.color} size="header" />
-                        <span className="min-w-0 truncate font-medium text-text">{member.display_name}</span>
-                        {you && <span className="shrink-0 text-ui-sm text-muted">(you)</span>}
+                        <span className="flex min-w-0 flex-col">
+                          <span className="flex min-w-0 items-baseline gap-1">
+                            <span className="min-w-0 truncate font-medium text-text">{member.display_name}</span>
+                            {you && <span className="shrink-0 text-ui-sm text-muted">(you)</span>}
+                          </span>
+                          {!wide && <span className="text-ui-sm text-muted">{presence}</span>}
+                        </span>
                       </span>
+                      {!wide && account && <div className="pt-2">{account}</div>}
                     </td>
-                    <td className="px-3 py-2.5 text-text">{roleLabel[member.role]}</td>
-                    <td className="hidden px-3 py-2.5 text-muted lg:table-cell">{you ? '' : accountWords(member.id, access)}</td>
-                    <td className="hidden px-3 py-2.5 text-muted sm:table-cell">
-                      {online.has(member.id)
-                        ? <span className="flex items-center gap-1.5 text-text"><StatusDot tone="done" />Online</span>
-                        : seen ? <RelativeTime at={seen} /> : 'Offline'}
+                    <td className="px-3 py-2 align-top">
+                      {canRole ? (
+                        <Select value={member.role} onValueChange={(role) => changeRole(member, role as Member['role'])}>
+                          <SelectTrigger aria-label={`Role of ${member.display_name}`} className="h-7 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {roles.filter((role) => scoped || role !== 'super_admin').map((role) => (
+                              <SelectItem key={role} value={role} description={roleDescription[role]}>{roleLabel[role]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : <span className="text-text">{roleLabel[member.role]}</span>}
                     </td>
-                    {canRole && (
-                      <td className="px-1 py-1 text-right">
-                        <Menu>
-                          <MenuTrigger asChild>
-                            <Button variant="ghost" size="icon" label={`Actions for ${member.display_name}`}>
-                              <Ellipsis />
-                            </Button>
-                          </MenuTrigger>
-                          <MenuContent align="end">
-                            <MenuLabel>Role</MenuLabel>
-                            <MenuRadioGroup value={member.role} onValueChange={(role) => changeRole(member, role as Member['role'])}>
-                              {roles.map((role) => <MenuRadioItem key={role} value={role}>{roleLabel[role]}</MenuRadioItem>)}
-                            </MenuRadioGroup>
-                            {canRemove && !you && (
-                              <>
-                                <MenuSeparator />
-                                <MenuItem onSelect={() => setRemoving(member)}>Remove…</MenuItem>
-                              </>
-                            )}
-                          </MenuContent>
-                        </Menu>
+                    {wide && <td className="px-3 py-2 align-top">{account}</td>}
+                    {wide && <td className="px-3 py-2 align-top text-muted"><span className="flex min-h-7 items-center coarse:min-h-11">{presence}</span></td>}
+                    {canRemove && (
+                      <td className="px-1 py-1 text-right align-top">
+                        {!you && (
+                          <Button variant="ghost" size="icon" label={`Remove ${member.display_name}`} onClick={() => setRemoving(member)}>
+                            <Trash2 />
+                          </Button>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -197,8 +226,8 @@ export function Roster({ client }: { client: Api }) {
       )}
       {demoting && self && (
         <Confirm
-          title="Give up your admin role?"
-          description={`You become ${roleLabel[demoting].toLowerCase()} and lose admin access at once. Another admin has to hand it back.`}
+          title="Give up your super admin role?"
+          description={`You become ${roleLabel[demoting].toLowerCase()} and lose server-wide admin access at once. Another super admin has to hand it back.`}
           action={`Become ${roleLabel[demoting].toLowerCase()}`}
           pending={`Becoming ${roleLabel[demoting].toLowerCase()}…`}
           onConfirm={() => client.memberRole(self.id, demoting)}

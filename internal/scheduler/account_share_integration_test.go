@@ -74,10 +74,32 @@ func launchShareRun(t *testing.T, e *testEnv, docker *runtime.Docker, cli *clien
 	t.Cleanup(func() {
 		cctx, ccancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer ccancel()
-		_ = docker.Destroy(cctx, id)
+		// The scheduler may already be removing the container, which Docker
+		// refuses as a conflict; its volumes stay in use until that ends.
+		if err := docker.Destroy(cctx, id); err != nil && !cerrdefs.IsConflict(err) {
+			t.Errorf("cleanup destroy session container: %v", err)
+		}
+		removed := cli.ContainerWait(cctx, string(id), client.ContainerWaitOptions{Condition: container.WaitConditionRemoved})
+		select {
+		case <-removed.Result:
+		case err := <-removed.Error:
+			if !cerrdefs.IsNotFound(err) {
+				t.Errorf("cleanup wait for the session container's removal: %v", err)
+			}
+		}
 		for _, v := range volumes {
-			if _, err := cli.VolumeRemove(cctx, v, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
-				t.Errorf("cleanup VolumeRemove(%s) error: %v", v, err)
+			_, err := cli.VolumeRemove(cctx, v, client.VolumeRemoveOptions{})
+			if err == nil || cerrdefs.IsNotFound(err) {
+				continue
+			}
+			users, listErr := cli.ContainerList(cctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("volume", v)})
+			t.Errorf("cleanup VolumeRemove(%s) error: %v", v, err)
+			if listErr != nil {
+				t.Errorf("list the containers using %s: %v", v, listErr)
+				continue
+			}
+			for _, c := range users.Items {
+				t.Errorf("%s is used by %.12s %v %v", v, c.ID, c.Names, c.Labels)
 			}
 		}
 	})

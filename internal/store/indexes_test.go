@@ -32,6 +32,9 @@ func TestHotReadsUseTheirIndexes(t *testing.T) {
 			"SEARCH question USING INDEX idx_room_messages_run_kind (run_id=? AND kind=?)",
 			"SEARCH reply USING COVERING INDEX idx_room_messages_run_kind (run_id=? AND kind=? AND correlation_id=?)",
 		},
+		latestRunDiffQuery: {
+			"SEARCH events USING INDEX idx_events_run_type (run_id=? AND type=?)",
+		},
 		dueSteerRequestsQuery + ` AND (created_at, rowid) < (?, ?) ORDER BY created_at DESC, rowid DESC LIMIT ?`: {
 			"SEARCH room_messages USING INDEX idx_room_messages_queued_steer (workspace_id=? AND created_at<?)",
 		},

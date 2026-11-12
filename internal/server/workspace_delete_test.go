@@ -29,11 +29,11 @@ func newWorkspaceDeletionServer(t *testing.T) (*Server, string, *domain.Member, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	member := &domain.Member{DisplayName: "Admin", TailnetLogin: "admin@example.test", Role: domain.RoleAdmin}
+	member := &domain.Member{DisplayName: "Admin", TailnetLogin: "admin@example.test", Role: domain.RoleSuperAdmin}
 	if err := s.db.CreateMember(t.Context(), member); err != nil {
 		t.Fatal(err)
 	}
-	ws := &domain.Workspace{Name: "delete-me", BaseBranch: "main"}
+	ws := &domain.Workspace{Name: "delete-me", BaseBranch: "main", OwnerID: member.ID}
 	if err := s.db.CreateWorkspace(t.Context(), ws); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +153,9 @@ func TestWorkspaceDeleteRefusesPermissionsAndScheduledWork(t *testing.T) {
 	t.Parallel()
 	s, _, member, ws := newWorkspaceDeletionServer(t)
 	ctx := context.Background()
+	if err := s.db.GrantWorkspace(ctx, ws.ID, member.ID, ""); err != nil {
+		t.Fatal(err)
+	}
 	for _, role := range []domain.Role{domain.RoleViewer, domain.RoleCollaborator} {
 		member.Role = role
 		if err := s.db.UpdateMember(ctx, member); err != nil {
@@ -170,7 +173,7 @@ func TestWorkspaceDeleteRefusesPermissionsAndScheduledWork(t *testing.T) {
 	if err := s.db.SaveTemplate(ctx, template); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.SaveSchedule(ctx, &store.Schedule{TemplateID: template.ID, Cron: "0 * * * *", MemberID: member.ID}); err != nil {
+	if err := s.db.SaveSchedule(ctx, &store.Schedule{TemplateID: template.ID, Cron: "0 * * * *", MemberID: member.ID}, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := callWorkspaceDeletion(t, s, member.ID, ws.ID); err == nil || err.Code != protocol.CodeConflict || !strings.Contains(err.Message, "schedules") {
@@ -179,7 +182,7 @@ func TestWorkspaceDeleteRefusesPermissionsAndScheduledWork(t *testing.T) {
 	if _, err := s.db.GetTemplate(ctx, ws.ID, template.Name); err != nil {
 		t.Fatalf("refused deletion changed workspace: %v", err)
 	}
-	if err := s.db.DeleteSchedule(ctx, template.ID); err != nil {
+	if err := s.db.DeleteSchedule(ctx, template.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := callWorkspaceDeletion(t, s, member.ID, ws.ID); err != nil {

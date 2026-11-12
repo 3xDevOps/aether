@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -72,7 +73,7 @@ type Config struct {
 	Bus events.Bus
 	// Authorize is sshd.AuthorizeLaunch; AuthorizationMu the mutex callers
 	// hold across it and the launch's durable boundary.
-	Authorize       func(ctx context.Context, st store.Store, actor domain.MemberID, account string) (domain.MemberID, error)
+	Authorize       func(ctx context.Context, st store.Store, actor domain.MemberID, account string, workspaces []domain.WorkspaceID) (domain.MemberID, error)
 	AuthorizationMu *sync.Mutex
 	// Now is the clock the idle notice measures a quiet spell against;
 	// time.Now when unset.
@@ -235,6 +236,9 @@ func (s *Service) reconcile(ctx context.Context) {
 	if err := s.noticeIdle(ctx); err != nil && ctx.Err() == nil {
 		slog.Warn("children: idle notices failed", "error", err)
 	}
+	if err := s.noticeStopped(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("children: stopped notices failed", "error", err)
+	}
 }
 
 func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, key string) error {
@@ -270,6 +274,8 @@ func rpcErr(method string, err error) *protocol.Error {
 		code = protocol.CodeConflict
 	case errors.Is(err, store.ErrNotFound):
 		code = protocol.CodeNotFound
+	case errors.Is(err, permissions.ErrDenied):
+		code = protocol.CodeDenied
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }

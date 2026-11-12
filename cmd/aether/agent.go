@@ -18,12 +18,14 @@ import (
 func init() {
 	register(command{
 		name:  "agent",
-		short: "manage agents: add, list, login, remove",
+		short: "manage agents: add, list, models, login, remove",
 		usage: "aether agent list [--json]\n" +
+			"aether agent models <name> [--account <member-id>] [--refresh] [--json]\n" +
 			"aether agent login <name>\n" +
 			"aether agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>] [--acp-mode <id>] [--login <path>]\n" +
 			"aether agent remove <name>",
 		example: "aether agent list --json\n" +
+			"aether agent models claude --refresh\n" +
 			"aether agent login claude\n" +
 			"aether agent add codex --enhanced\n" +
 			"aether agent remove codex",
@@ -33,13 +35,15 @@ func init() {
 
 func runAgent(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether agent <add|list|login|remove>")
+		return fmt.Errorf("usage: aether agent <add|list|models|login|remove>")
 	}
 	switch args[0] {
 	case "add":
 		return agentAdd(args[1:])
 	case "list":
 		return agentList(args[1:])
+	case "models":
+		return agentModels(args[1:])
 	case "login":
 		return agentLogin(args[1:])
 	case "remove":
@@ -92,7 +96,9 @@ func agentList(args []string) error {
 }
 
 // printAgents labels the login column for what agent.list checks: a login
-// file in the home, not whether the vendor accepts it.
+// file in the home, not whether the vendor accepts it. A login the server
+// knows cannot sign the agent in is listed under the table with the way
+// back in.
 func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 	if len(agents) == 0 {
 		_, err := fmt.Fprintln(w, "no agents")
@@ -117,7 +123,80 @@ func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 				login = "found"
 			}
 		}
+		if a.LoginProblem != "" {
+			login = "signed out"
+		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.Name, a.Source, installed, enhanced, login)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	for _, a := range agents {
+		if a.LoginProblem != "" {
+			if _, err := fmt.Fprintf(w, "%s is signed out: %s\n  sign in again: %s\n", a.Name, a.LoginProblem, signInStep(a)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func agentModels(args []string) error {
+	const usage = "usage: aether agent models <name> [--account <member-id>] [--refresh] [--json]"
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New(usage)
+	}
+	params := protocol.AgentModelsParams{Name: args[0]}
+	fs := newFlagSet("agent models")
+	fs.StringVar(&params.AccountMemberID, "account", "", "member ID whose shared agent account to list (default: your own)")
+	fs.BoolVar(&params.Refresh, "refresh", false, "ask the agent again instead of the list the server cached")
+	jsonOut := fs.Bool("json", false, "print the server's answer as JSON")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return errors.New(usage)
+	}
+	return withControl(func(c *protocol.Client) error {
+		var result protocol.AgentModelsResult
+		if err := c.Call(protocol.MethodAgentModels, params, &result); err != nil {
+			return err
+		}
+		if *jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(result)
+		}
+		return printModels(os.Stdout, os.Stderr, params.Name, result)
+	})
+}
+
+// printModels prints the ids a launch takes as --model, and the failed
+// discovery's error on errw, also when an older list is shown.
+func printModels(w, errw io.Writer, name string, result protocol.AgentModelsResult) error {
+	if result.Error != "" {
+		if _, err := fmt.Fprintf(errw, "could not list %s's models: %s\n", name, result.Error); err != nil {
+			return err
+		}
+	}
+	if len(result.Models) == 0 {
+		_, err := fmt.Fprintf(w, "%s listed no models; --model passes any id to it as is\n", name)
+		return err
+	}
+	source := result.Source
+	if result.FetchedAt != "" {
+		source += ", listed " + result.FetchedAt
+	}
+	if _, err := fmt.Fprintf(w, "%s models (%s)\n", name, source); err != nil {
+		return err
+	}
+	if result.DefaultLabel != "" {
+		if _, err := fmt.Fprintf(w, "without --model: %s\n", result.DefaultLabel); err != nil {
+			return err
+		}
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "MODEL\tNAME\tDESCRIPTION")
+	for _, m := range result.Models {
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", m.ID, m.Name, m.Description)
 	}
 	return tw.Flush()
 }

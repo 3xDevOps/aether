@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
   # A pull request runs changes, audit, lint, build-and-test and dashboard
-  # only. The merge queue and pushes to main run every job.
+  # only. The merge queue and the nightly run on main run every job. A push to
+  # main runs only changes and CI gate when its commit passed the merge queue
+  # and changed nothing a cache key hashes.
   pull_request:
   merge_group:
+  # Refreshes the per-commit caches, which only a run on main can write, and
+  # tests main against today's agent CLIs, mirrors and published release.
+  schedule:
+    - cron: '0 8 * * *'
 
 permissions:
   contents: read
@@ -25,19 +31,22 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # GitHub-hosted runners are ephemeral, so untrusted pull request code does
-# not need an admin gate before checkout. Caches save only on pushes to
-# main. Go module archives are separate from compiler archives, whose keys
-# also include their native or cross-build lane. Each lane has one writer;
+# not need an admin gate before checkout. Caches save only on runs on main:
+# a merge-queue run's caches are scoped to its own queue branch. Go module
+# archives are separate from compiler archives, whose keys also include their native or cross-build lane. Each lane has one writer;
 # build-and-test owns Linux amd64 native Go and bun, windows owns Windows
 # amd64 native Go, arm64 owns Linux arm64 native Go, and the windows-install
 # arm64 update leg owns Windows arm64 Go. These four Go owners also save
-# modules for their host. desktop-windows owns the Windows npm caches.
+# modules for their host. Each windows-install update leg owns its
+# architecture's Windows npm caches.
 # runner.environment stays in every key so a self-hosted archive is never
 # restored onto a hosted VM.
 
 jobs:
-  # Lists changed files and decides whether the code jobs run. A push to
-  # main and a merge-queue entry always run them. On a pull request
+  # Lists changed files and decides whether the code jobs run. A merge-queue
+  # entry and the nightly run always run them. A push to main runs them
+  # unless scripts/ci-queue-verdict.sh finds the merge-queue run that passed
+  # on this commit and the push changed no cache key input. On a pull request
   # scripts/ci-classify-areas.sh sets go and web: a change confined to
   # docs/ and root-level markdown files skips both, one confined to web/
   # skips the Go jobs, and one that no dashboard input can see skips
@@ -59,6 +68,7 @@ jobs:
     outputs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
+      suite: ${{ steps.classify.outputs.suite }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,6 +76,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-areas.sh
+            scripts/ci-queue-verdict.sh
             scripts/ci-reap-queue-runs.sh
           sparse-checkout-cone-mode: false
       # The merge queue discards a group when an entry ahead of it leaves or
@@ -81,11 +92,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            verdict=$(sh scripts/ci-queue-verdict.sh "$GITHUB_REPOSITORY" "$BEFORE" "$GITHUB_SHA") || verdict=
+            if [ -n "$verdict" ]; then
+              echo "The merge queue passed this commit in $verdict; this push runs no other job." >> "$GITHUB_STEP_SUMMARY"
+              printf '%s\n' go=false web=false suite=false >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            printf '%s\n' go=true web=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' go=true web=true suite=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo suite=false >> "$GITHUB_OUTPUT"
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
@@ -102,6 +123,8 @@ jobs:
   # Runs on every pull request, including a docs-only one. This is the
   # docs-only gate.
   audit:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'pull_request' || needs.changes.outputs.suite == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -151,7 +174,7 @@ jobs:
       - name: Lint
         run: make lint
       - name: Save golangci-lint analysis cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/golangci-lint
@@ -204,273 +227,14 @@ jobs:
       # objects or downloaded modules, and a flaky suite would otherwise leave
       # every following run cold.
       - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
           save-modules: 'true'
       - uses: ./.github/actions/bun-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
-
-  # Three jobs hold every amd64 Docker suite. Each builds only the images it
-  # uses, from the caches pushes to main write, and runs its steps even when
-  # an earlier one failed so one run reports every failure. Tests run as
-  # root, like an installed server. server-flows runs its server tests in two
-  # processes:
-  # TestIntegrationServerUpdateRollsBackAndCommits hangs for 120 s when it
-  # follows the chaos tests in one.
-  # The browser image and the browser, runtime and server-rest suites that use
-  # it.
-  integration-server-rest:
-    name: integration (server-rest, browser)
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/free-disk
-      - uses: ./.github/actions/docker-mirror
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
-      - name: Build the browser companion
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/browser/Dockerfile
-          load: true
-          tags: aether/browser:test
-          cache-from: type=gha,scope=browser-amd64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=browser-amd64-main' || '' }}
-      - name: Prove headless Chromium sandbox and companion behavior
-        run: make browser-smoke
-      # The installed server owns UID-1000 control directories as root.
-      # Match that authority, not a chmod 777 workaround for the test runner.
-      - name: Integration tests (real Docker, real git)
-        if: ${{ !cancelled() }}
-        env:
-          GOFLAGS: -v
-          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
-          AETHER_BROWSER_IMAGE: aether/browser:test
-        run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
-            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
-            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
-            make test-integration INTEGRATION_PKGS=./internal/server \
-              INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|EndToEnd|MultiMember|ServerUpdate)'
-      - name: Exercise the real browser runtime
-        if: ${{ !cancelled() }}
-        run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
-
-  # The server's long flows, and the agent CLIs at today's vendor versions on
-  # the standard image, which is what runs actually execute on. The smoke
-  # image carries no credentials, which is what TestSmokeHeadlessNoLogin
-  # needs. It builds on the "default" builder, the one backed by the Docker
-  # daemon, because only that builder sees the standard image loaded here.
-  integration-server-flows:
-    name: integration (server-flows, smoke)
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/free-disk
-      - uses: ./.github/actions/docker-mirror
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
-      - name: Build the standard environment image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/standard/Dockerfile
-          load: true
-          tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-amd64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-amd64-main' || '' }}
-      - name: Integration tests (real Docker, real git)
-        env:
-          GOFLAGS: -v
-        run: |
-          for run in '^TestIntegration(Chaos|Coordination)' '^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'; do
-            sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
-              make test-integration INTEGRATION_PKGS=./internal/server INTEGRATION_RUN="$run" || status=1
-          done
-          exit "${status:-0}"
-      - name: Prove standard environment tools and native Git
-        if: ${{ !cancelled() }}
-        run: sh scripts/standard-image-smoke.sh aether-standard:ci
-      - name: Build the agent smoke image
-        if: ${{ !cancelled() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          opencode=$(gh release view --repo anomalyco/opencode --json tagName --jq '.tagName | ltrimstr("v")')
-          docker buildx build --builder default --load --no-cache \
-            --build-arg BASE=aether-standard:ci \
-            --build-arg "OPENCODE_VERSION=$opencode" \
-            --tag aether-smoke:ci \
-            --file images/smoke/Dockerfile .
-      - name: Real-harness smoke test (real Docker, real git)
-        if: ${{ !cancelled() }}
-        env:
-          AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
-          AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
-          AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
-        run: make test-integration INTEGRATION_PKGS=./internal/harness
-
-  # The scheduler and every other integration package, then the pinned agent
-  # CLIs in real runs against a mock model.
-  integration:
-    name: integration (scheduler, rest, agents)
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/free-disk
-      - uses: ./.github/actions/docker-mirror
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
-      - name: Build the standard environment image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/standard/Dockerfile
-          load: true
-          tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-amd64-main
-      - name: Integration tests (real Docker, real git)
-        env:
-          GOFLAGS: -v
-        # Preserve the root suite as well as the separate non-root unit suite:
-        # ownership and recovery tests exercise different privilege branches.
-        run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
-            make test-integration INTEGRATION_SKIP="./internal/harness ./internal/server" \
-              INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
-      - name: Build the pinned agents image
-        if: ${{ !cancelled() }}
-        env:
-          BUILDX_BUILDER: default
-        run: make agents-image AGENTS_BASE=aether-standard:ci
-      - name: Real agents against a mock model (real Docker, real git)
-        if: ${{ !cancelled() }}
-        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
-
-  # Native arm64 builds and runs of the standard and browser images. Only a
-  # push to main and a merge-queue entry pay for it: nothing here depends on
-  # the architecture except the images' own base layers and downloads. This
-  # job owns the Linux arm64 Go cache.
-  arm64:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/free-disk
-      - uses: ./.github/actions/docker-mirror
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
-      - name: Build the standard environment image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/standard/Dockerfile
-          load: true
-          tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-arm64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-arm64-main' || '' }}
-      - name: Prove standard environment tools and native Git
-        run: sh scripts/standard-image-smoke.sh aether-standard:ci
-      - name: Build the agent smoke image
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          opencode=$(gh release view --repo anomalyco/opencode --json tagName --jq '.tagName | ltrimstr("v")')
-          docker buildx build --builder default --load --no-cache \
-            --build-arg BASE=aether-standard:ci \
-            --build-arg "OPENCODE_VERSION=$opencode" \
-            --tag aether-smoke:ci \
-            --file images/smoke/Dockerfile .
-      - name: Real-harness smoke test (real Docker, real git)
-        env:
-          AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
-          AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
-          AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
-        run: make test-integration INTEGRATION_PKGS=./internal/harness
-      - name: Build the browser companion
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/browser/Dockerfile
-          load: true
-          tags: aether/browser:test
-          cache-from: type=gha,scope=browser-arm64-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=browser-arm64-main' || '' }}
-      - name: Prove headless Chromium sandbox and companion behavior
-        run: make browser-smoke
-      - name: Exercise the real browser runtime
-        run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        with:
-          mode: save
-          save-modules: 'true'
-
-  # A workflow of its own so it can be started by hand on any branch.
-  edge-image:
-    if: ${{ github.event_name != 'pull_request' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/edge-image.yml
 
   dashboard:
     needs: changes
@@ -501,418 +265,17 @@ jobs:
         run: bun run test
         working-directory: web
 
-  # The dashboard driven the way a person drives it: a real browser against a
-  # real `aether gui` gateway and a real aether-server, with real Docker and
-  # real git. Separate from `dashboard` because that job is the fast jsdom
-  # gate and this one starts containers.
-  dashboard-e2e:
-    name: dashboard-e2e (${{ matrix.shard }}/2)
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/free-disk
-      - uses: ./.github/actions/docker-mirror
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: web/.bun-version
-          no-cache: true
-      - uses: ./.github/actions/bun-cache
-        with:
-          mode: restore
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-        working-directory: web
-      # The browser download is keyed on the pinned Playwright version, so a
-      # run only pays for it when that pin moves. actions/cache stores paths
-      # relative to the workspace, so an archive from another runner
-      # environment unpacks somewhere else on a GitHub-hosted runner; the key
-      # includes runner.environment so a self-hosted archive is never restored
-      # onto a hosted VM. Restored on every run and saved only after a push
-      # to main, same rule as the Go and bun caches: one job may save a given
-      # key, and a pull-request cache can evict the default-branch cache.
-      - name: Resolve the pinned Playwright version
-        id: playwright
-        run: |
-          version=$(jq -r '.devDependencies["@playwright/test"]' web/package.json)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
-      # Runs on a cache hit too: it skips a browser that is already present
-      # and installs the system libraries, which the cache never holds. A
-      # cache that restored nothing usable then costs a download, never the
-      # suite.
-      - name: Install the browser
-        run: |
-          printf 'https://archive.ubuntu.com/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu/\nhttps://mirrors.edge.kernel.org/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
-          bunx playwright install --with-deps chromium
-        working-directory: web
-      # Built from the caches the browser and smoke jobs write on main, never
-      # written here, so this job does not wait for them.
-      - uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
-      - name: Build the browser companion
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/browser/Dockerfile
-          load: true
-          tags: aether/browser:test
-          cache-from: type=gha,scope=browser-amd64-main
-      - name: Build the standard environment image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/standard/Dockerfile
-          load: true
-          tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-amd64-main
-      - name: Dashboard end-to-end suite
-        env:
-          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
-          AETHER_BROWSER_IMAGE: aether/browser:test
-          AETHER_E2E_STANDARD_IMAGE: aether-standard:ci
-        # The server spawned by Playwright needs the installed service's
-        # ownership authority; Chromium itself remains sandboxed in Docker.
-        run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "CI=$CI" \
-            "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
-            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
-            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
-            "AETHER_E2E_STANDARD_IMAGE=$AETHER_E2E_STANDARD_IMAGE" \
-            make test-e2e E2E_ARGS='--shard=${{ matrix.shard }}/2'
-      # Uploaded on a pass too: the mobile project attaches a full-page
-      # screenshot of every phone scenario, and a layout can be wrong with
-      # every assertion green. Not on a cancelled job, which has no report.
-      - uses: actions/upload-artifact@v4
-        if: success() || failure()
-        with:
-          name: playwright-report-${{ matrix.shard }}
-          path: web/playwright-report/
-          retention-days: 7
-      - uses: actions/upload-artifact@v4
-        if: success() || failure()
-        with:
-          name: playwright-results-${{ matrix.shard }}
-          path: web/test-results/
-          retention-days: 7
-      - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && matrix.shard == 1 && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
-
-  # The desktop shell is built the way users build it: `aether gui build`
-  # unpacks the sources embedded in the CLI and runs electron-builder.
-  desktop:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # Both `aether gui build` steps below run npm install, the first with
-      # this system npm and the second with a Node the CLI downloads for
-      # itself; npm's cache directory defaults to ~/.npm regardless of which
-      # npm binary runs, so one cache covers both. Restored on every run and
-      # saved only after a push to main, same rule as the Go cache.
-      - uses: actions/cache/restore@v4
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
-          restore-keys: |
-            npm-${{ runner.os }}-${{ runner.environment }}-
-      - name: Install desktop validation tools
-        run: |
-          printf 'https://archive.ubuntu.com/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu/\nhttps://mirrors.edge.kernel.org/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y desktop-file-utils
-      - name: Build the CLI
-        run: mkdir -p web/dist && go build -o "$HOME/.local/bin/aether" ./cmd/aether
-      - name: aether gui build
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          aether gui build
-          desktop-file-validate ~/.local/share/applications/aether-desktop.desktop
-          test -x ~/.local/share/aether/desktop/aether-desktop
-      # Proves the app builds on a machine with no Node at all: with node,
-      # npm and npx off PATH, the CLI has to download its own copy into the
-      # cache directory and build with that. The directories that carry node
-      # also carry sh and the rest of the toolchain, so they are mirrored
-      # into a shadow of symlinks with those three names left out rather
-      # than dropped.
-      - name: aether gui build without Node on PATH
-        run: |
-          shadow="$RUNNER_TEMP/no-node"
-          mkdir -p "$shadow"
-          clean=""
-          IFS=:
-          for dir in $PATH; do
-            unset IFS
-            [ -d "$dir" ] || continue
-            if [ -x "$dir/node" ] || [ -x "$dir/npm" ] || [ -x "$dir/npx" ]; then
-              for tool in "$dir"/*; do
-                name="${tool##*/}"
-                case "$name" in node | npm | npx | corepack | '*') continue ;; esac
-                # -e is false for a dangling link, and two PATH directories
-                # can carry the same name, so a failed ln is expected and
-                # must not end the step. scripts/install-test.sh does the
-                # same for the same reason.
-                [ -e "$shadow/$name" ] || ln -s "$tool" "$shadow/$name" 2>/dev/null || true
-              done
-            else
-              clean="${clean:+$clean:}$dir"
-            fi
-          done
-          # No empty PATH entry: that would put the checkout's own directory
-          # on PATH when every directory carried node.
-          export PATH="$HOME/.local/bin:$shadow${clean:+:$clean}"
-          if command -v node; then echo "node is still on PATH" >&2; exit 1; fi
-          aether gui build
-          test -d ~/.cache/aether/node ||
-            { echo "no Node was downloaded into ~/.cache/aether/node" >&2; exit 1; }
-          find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
-            { echo "the downloaded Node has no executable node" >&2; exit 1; }
-          test -x ~/.local/share/aether/desktop/aether-desktop
-      - uses: actions/cache/save@v4
-        if: github.event_name == 'push'
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
-
-  # The packaging and launch check release.yml runs for each tag, on both
-  # Windows architectures.
-  desktop-windows:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: windows-latest
-          - arch: arm64
-            runner: windows-11-arm
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/desktop-windows-zip
-        with:
-          version: v0.0.0-ci
-          arch: ${{ matrix.arch }}
-          save-npm-cache: 'true'
-
-  # The client ships for Windows, so it gets a real Windows runner. Only the
-  # client's package closure is built and tested: the server is Linux-only by
-  # design and internal/gitengine does not compile for Windows.
-  windows:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      # windows-latest defaults to PowerShell, where command substitution and
-      # grep are unavailable. Git Bash is preinstalled, which the go-cache
-      # action also relies on to resolve `go env` cache paths.
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - name: Client packages build and vet
-        shell: bash
-        run: |
-          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
-          mapfile -t packages <<< "$pkgs"
-          go build ./cmd/aether
-          go vet ./cmd/aether "${packages[@]}"
-      - name: Client unit tests
-        shell: bash
-        run: |
-          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
-          mapfile -t packages <<< "$pkgs"
-          go test ./cmd/aether "${packages[@]}"
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        with:
-          mode: save
-          save-modules: 'true'
-
-  # Reuse the installer lanes so their verdict is part of CI and therefore
-  # the exact-commit CI success required by release authorization.
-  windows-install:
-    if: ${{ github.event_name != 'pull_request' }}
-    uses: ./.github/workflows/windows-install.yml
-
-  release-build:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0 # full history so git describe can version the build
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-          variant: release
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: web/.bun-version
-          no-cache: true
-      - uses: ./.github/actions/bun-cache
-        with:
-          mode: restore
-      - name: Cross-compile release binaries
-        run: make release-binaries
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        with:
-          mode: save
-          variant: release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries-go-windows
-          path: dist/aether-windows-*.exe
-          if-no-files-found: error
-          retention-days: 7
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries-go
-          path: |
-            dist/
-            !dist/aether-windows-*.exe
-          if-no-files-found: error
-          retention-days: 7
-
-  android:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    # A wedged Gradle daemon must not hold the runner for the six-hour default.
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0 # full history so git describe can version the build
-      # The pinned SDK container carries the Android toolchain. Keep only
-      # Gradle's dependency and distribution caches, inside the workspace so
-      # the archive restores at the same path. Only this main job writes it.
-      - uses: actions/cache/restore@v4
-        with:
-          path: .gradle-cache
-          key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-${{ runner.environment }}-
-      # The wrapper jar is committed, and gradle-wrapper.properties pins the
-      # distribution by sha256; this is what checks the jar itself against
-      # Gradle's published checksums before it runs.
-      #
-      # Pinned by commit, not by the `v4` tag: a retargeted tag would execute
-      # code nobody here has read. `v4` also trails its own line - it still
-      # points at v4.4.3, while v4.4.4 is the current v4 release and carries
-      # the newer known-wrapper checksums this step reads.
-      - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - name: Build and test unsigned Android artifacts
-        env:
-          ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
-        run: make android
-      # The daemon logs and the compiled-script caches are large and
-      # machine-specific; saving them would cost more than it returns.
-      - name: Trim the Gradle cache before it is saved
-        if: ${{ !cancelled() }}
-        run: rm -rf .gradle-cache/daemon .gradle-cache/native
-      - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        with:
-          path: .gradle-cache
-          key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries-android
-          path: |
-            dist/aether-android-unsigned.apk
-            dist/aether-android-unsigned.aab
-          if-no-files-found: error
-          retention-days: 7
-
-  # Scans the Windows binaries release-build just produced with the Defender
-  # build that ships on the runner. A detection here is the same failure a
-  # user hits: the download is blocked, or the client is quarantined on first
-  # run. It is signal, not a flake - the response is to submit the binary at
-  # https://www.microsoft.com/en-us/wdsi/filesubmission as a developer false
-  # positive, and to check what changed in the client's syscalls or embedded
-  # strings. See docs/install.md.
-  windows-defender:
-    needs: release-build
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Arm Defender before downloading binaries
-        shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Prepare
-      - uses: actions/download-artifact@v4
-        with:
-          name: binaries-go-windows
-          path: dist
-      - name: Scan both Windows clients
-        shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe
+  # Everything else, in a workflow of its own so a run that skips it shows
+  # one skipped check.
+  suite:
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
+    uses: ./.github/workflows/ci-suite.yml
 
   # The one required check on main, for pull requests and merge queue
-  # entries. It fails when any job failed or was cancelled; a job its own
-  # rule skipped passes. A job missing from needs does not gate main.
+  # entries. It fails when any job failed or was cancelled; outside the merge
+  # queue, a job its own rule skipped passes. A job missing from needs does
+  # not gate main; the jobs in ci-suite.yml gate it through suite.
   ci-gate:
     name: CI gate
     if: ${{ always() }}
@@ -921,29 +284,20 @@ jobs:
       - audit
       - lint
       - build-and-test
-      - integration-server-rest
-      - integration-server-flows
-      - integration
-      - arm64
-      - edge-image
       - dashboard
-      - dashboard-e2e
-      - desktop
-      - desktop-windows
-      - windows
-      - windows-install
-      - release-build
-      - android
-      - windows-defender
+      - suite
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # No job's rule skips it in the merge queue, so a skip there means a
+      # cancellation kept it from starting.
       - name: Require every job to pass or be skipped by its rule
         env:
           NEEDS: ${{ toJSON(needs) }}
+          SKIP_PASSES: ${{ github.event_name != 'merge_group' }}
         run: |
           printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"'
-          bad=$(printf '%s' "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(" ")')
+          bad=$(printf '%s' "$NEEDS" | jq -r --argjson skip "$SKIP_PASSES" '[to_entries[] | select(.value.result != "success" and (.value.result != "skipped" or ($skip | not))) | .key] | join(" ")')
           if [ -n "$bad" ]; then
             echo "::error::Not passed: $bad"
             exit 1

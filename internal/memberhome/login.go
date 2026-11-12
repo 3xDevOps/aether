@@ -237,6 +237,51 @@ func (m *Manager) LoginFound(member domain.MemberID, rels []string) (bool, error
 	return false, nil
 }
 
+// LoginStamp changes when any of the home-relative login paths rels in
+// member's home is written, replaced, added or removed. A login directory
+// is stamped by the files directly in it: writing one of them leaves the
+// directory's own times alone.
+func (m *Manager) LoginStamp(member domain.MemberID, rels []string) (string, error) {
+	home, err := m.openExistingHome(member)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = home.Close() }()
+	var stamp strings.Builder
+	for _, rel := range rels {
+		info, err := home.Stat(rel)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("memberhome: login path %s in %q: %w", rel, member, err)
+		}
+		fmt.Fprintf(&stamp, "%s %d %d\n", rel, info.Size(), info.ModTime().UnixNano())
+		if !info.IsDir() {
+			continue
+		}
+		dir, err := home.Open(rel)
+		if err != nil {
+			return "", fmt.Errorf("memberhome: open login directory %s: %w", rel, err)
+		}
+		entries, err := dir.ReadDir(-1)
+		_ = dir.Close()
+		if err != nil {
+			return "", fmt.Errorf("memberhome: read login directory %s: %w", rel, err)
+		}
+		for _, entry := range entries {
+			// An entry removed since the listing is one the next stamp omits.
+			if in, infoErr := entry.Info(); infoErr == nil {
+				fmt.Fprintf(&stamp, "%s/%s %d %d\n", rel, entry.Name(), in.Size(), in.ModTime().UnixNano())
+			}
+		}
+	}
+	return stamp.String(), nil
+}
+
 func dirHasEntry(home *os.Root, rel string) (bool, error) {
 	dir, err := home.Open(rel)
 	if err != nil {

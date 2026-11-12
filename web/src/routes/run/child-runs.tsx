@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/permissions'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +26,7 @@ const childState: Record<ChildState, { label: string; tone: Tone }> = {
   working: { label: 'Working', tone: 'working' },
   waiting: { label: 'Waiting', tone: 'waiting' },
   'needs-you': { label: 'Needs you', tone: 'needs-you' },
+  disconnected: { label: 'Disconnected', tone: 'disconnected' },
   finished: { label: 'Finished', tone: 'done' },
   failed: { label: 'Failed', tone: 'failed' },
   ended: { label: 'Ended without a report', tone: 'ended' },
@@ -163,7 +165,7 @@ export function RunLineage({ run }: { run: RunRecord }) {
 /** More → Allow child runs and Turn off child runs: only the owner allows; the owner or an admin turns them off, whether the run allowed them itself or inherits it. */
 export function useChildRunsItems(run: RunRecord, client: Api = api): ExtraItem[] {
   const cap = useCapability()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   if (!cap.hasMethod('run.children.allow') || isTerminal(run.status)) return []
   const owner = self.id === run.member_id
   const item = (next: 'on' | 'off'): ExtraItem => ({
@@ -180,7 +182,7 @@ export function useChildRunsItems(run: RunRecord, client: Api = api): ExtraItem[
   })
   const items: ExtraItem[] = []
   if (owner && run.children !== 'on') items.push(item('on'))
-  if ((owner || self.role === 'admin') && run.children !== 'off') items.push(item('off'))
+  if ((owner || isAdminRole(self.role)) && run.children !== 'off') items.push(item('off'))
   return items
 }
 

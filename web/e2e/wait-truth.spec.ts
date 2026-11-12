@@ -7,6 +7,11 @@ import { launchWaits, missing, showEvidence, spec, tasks, undelivered, unreadabl
 
 test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
+// The unknown wait was last read 14 minutes ago, and a time that is not today
+// shows its date, so the browser runs where it is now about noon.
+const hoursToNoon = 12 - new Date().getUTCHours()
+test.use({ timezoneId: `Etc/GMT${hoursToNoon > 0 ? '-' : '+'}${Math.abs(hoursToNoon)}` })
+
 test('a waiting run says what Aether last read, never a status it could not read', async ({ page, aether }) => {
   const { alice, ids } = await launchWaits(aether)
   await showEvidence(page, ids)

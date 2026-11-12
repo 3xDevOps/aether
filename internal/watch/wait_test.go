@@ -599,6 +599,93 @@ func TestAPullRequestClosedUnmergedResolvesAsAFailure(t *testing.T) {
 	}
 }
 
+// A merge queue that removes the pull request without merging it wakes a
+// merged wait with why, even in the second the wait began; a removal
+// before the wait began, or one that merged it, does not.
+func TestAMergeQueueRemovalWakesAMergedWait(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	removed := func(at time.Time, reason string) map[string]any {
+		return map[string]any{"__typename": "RemovedFromMergeQueueEvent", "createdAt": at.UTC().Format(time.RFC3339), "reason": reason}
+	}
+	gh.set(func(f *fakeGitHub) { f.queued = removed(h.clock.now().Add(-time.Hour), "failed_checks") })
+	owner := h.run(h.ada, "Ship")
+	if resolved := h.mustReport(owner, "pr:acme/app#7:merged"); len(resolved) != 0 {
+		t.Fatalf("resolved = %+v on a removal before the wait, want pending", resolved)
+	}
+	began, err := time.Parse(time.RFC3339Nano, h.only(owner.ID).CreatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// GitHub stamps events to the second, so one in the wait's own second counts.
+	gh.set(func(f *fakeGitHub) { f.queued = removed(began.Truncate(time.Second), "failed_checks") })
+	h.clock.advance(2 * PRPollIdle)
+	h.awaitWake(owner.ID)
+	w := h.only(owner.ID)
+	if w.Outcome != "removed-from-queue" || w.Detail != "reason: failed_checks" || !strings.Contains(w.Summary, "removed from the merge queue without merging") {
+		t.Fatalf("wait = %+v, want removed-from-queue with the reason", w)
+	}
+	if body := h.inbox.messages(owner.ID)[0].body; !strings.Contains(body, "queue it again and wait again") || !strings.Contains(body, `"reason: failed_checks"`) {
+		t.Fatalf("message = %q", body)
+	}
+	other := h.run(h.ada, "Follow up")
+	gh.set(func(f *fakeGitHub) { f.queued = removed(h.clock.now().Add(time.Hour), "merged") })
+	h.mustReport(other, "pr:acme/app#7:merged")
+	h.clock.advance(2 * PRPollIdle)
+	h.settle()
+	if w := h.only(other.ID); w.State != protocol.WaitPending || w.SourceCheckedAt == "" {
+		t.Fatalf("wait = %+v, want pending on the removal that merged it", w)
+	}
+}
+
+// A removal a person may undo within seconds, to reorder the queue, wakes
+// nobody until it stood a minute, and none once it is queued again.
+func TestAFreshMergeQueueRemovalWaitsAMinute(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	owner := h.run(h.ada, "Ship")
+	gh.set(func(f *fakeGitHub) {
+		f.queued = map[string]any{"__typename": "RemovedFromMergeQueueEvent", "createdAt": h.clock.now().Add(time.Minute).UTC().Format(time.RFC3339), "reason": "manual"}
+	})
+	if resolved := h.mustReport(owner, "pr:acme/app#7:merged"); len(resolved) != 0 {
+		t.Fatalf("resolved = %+v on a removal seconds old, want pending", resolved)
+	}
+	if w := h.only(owner.ID); !strings.Contains(w.Summary, "in case it is queued again") {
+		t.Fatalf("wait = %+v, want the removal named as not yet settled", w)
+	}
+	gh.set(func(f *fakeGitHub) { f.queued = map[string]any{"__typename": "AddedToMergeQueueEvent"} })
+	h.clock.advance(2 * PRPollIdle)
+	h.settle()
+	if w := h.only(owner.ID); w.State != protocol.WaitPending || strings.Contains(w.Summary, "merge queue") || len(h.inbox.messages(owner.ID)) != 0 {
+		t.Fatalf("wait = %+v, want pending without a wake once queued again", w)
+	}
+	gh.set(func(f *fakeGitHub) {
+		f.queued = map[string]any{"__typename": "RemovedFromMergeQueueEvent", "createdAt": h.clock.now().UTC().Format(time.RFC3339), "reason": "manual"}
+	})
+	h.clock.advance(2 * PRPollIdle)
+	h.awaitWake(owner.ID)
+	if w := h.only(owner.ID); w.Outcome != "removed-from-queue" || w.Detail != "reason: manual" {
+		t.Fatalf("wait = %+v, want removed-from-queue once the removal stood", w)
+	}
+}
+
+// A merge queue GitHub will not show leaves a merged wait reading the pull
+// request, and the merge still resolves it.
+func TestAnUnreadableMergeQueueStillSeesTheMerge(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	gh.set(func(f *fakeGitHub) { f.queueErr = "Resource not accessible by integration" })
+	owner := h.run(h.ada, "Ship")
+	h.mustReport(owner, "pr:acme/app#7:merged")
+	if w := h.only(owner.ID); w.State != protocol.WaitPending || w.LastError != "" || !strings.Contains(w.Summary, "can't read its merge queue (") ||
+		!strings.Contains(w.Summary, "Resource not accessible by integration") {
+		t.Fatalf("wait = %+v, want pending with the queue's error in the summary", w)
+	}
+	gh.set(func(f *fakeGitHub) { f.state, f.mergedAt = "closed", "2026-10-27T00:00:00Z" })
+	h.clock.advance(2 * PRPollIdle)
+	h.awaitWake(owner.ID)
+	if w := h.only(owner.ID); w.Outcome != "merged" {
+		t.Fatalf("wait = %+v, want merged", w)
+	}
+}
+
 func TestFailedChecksWakeWithTheFailingNames(t *testing.T) {
 	h, gh := newWaitPRHarness(t)
 	gh.set(func(f *fakeGitHub) {
@@ -833,6 +920,10 @@ func (mergedPR) Snapshot(_ context.Context, _ domain.MemberID, repo string, numb
 	return github.Snapshot{Repo: repo, Number: number, State: "closed", MergedAt: &at, HeadSHA: shaOne, URL: "https://github.com/acme/app/pull/7"}, nil
 }
 
+func (mergedPR) QueueRemoval(context.Context, domain.MemberID, string, int) (*github.QueueRemoval, error) {
+	return nil, nil
+}
+
 // A pull request that already merged resolves in the report, however
 // often the agent reports it, and never wakes the run.
 func TestAMergedPullRequestResolvesInTheReport(t *testing.T) {
@@ -1006,5 +1097,28 @@ func TestAHandedOffSessionReadsWithItsHomeLogin(t *testing.T) {
 	h.mustReport(owner, "pr:acme/app#7:merged")
 	if got := <-pr.read; got != h.ada.ID {
 		t.Fatalf("read with %s, want the home member %s", got, h.ada.ID)
+	}
+}
+
+// A wait on a run in another workspace is refused exactly as one on a run
+// that does not exist.
+func TestAWaitOnAnotherWorkspacesRunReadsAsMissing(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	other := &domain.Workspace{Name: "other", BaseBranch: domain.DefaultBaseBranch}
+	if err := h.db.CreateWorkspace(h.ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := &domain.Run{WorkspaceID: other.ID, MemberID: h.bob.ID, Task: "Elsewhere", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	if err := h.db.CreateRun(h.ctx, elsewhere); err != nil {
+		t.Fatal(err)
+	}
+	owner := h.run(h.ada, "Integrate")
+	const missing = "run-doesnotexist"
+	got := h.register(owner, "k-other", finished(elsewhere.ID))
+	want := h.register(owner, "k-missing", finished(missing))
+	if got == nil || want == nil || strings.ReplaceAll(got.Error(), string(elsewhere.ID), missing) != want.Error() {
+		t.Fatalf("wait on another workspace's run = %v, on a missing run = %v; want the same refusal", got, want)
 	}
 }

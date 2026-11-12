@@ -47,7 +47,9 @@ func NewInProc(ctx context.Context, log EventLog) (*InProc, error) {
 // event that live subscribers saw. Sequence assignment, the log write, and
 // fan-out happen under one lock, so concurrent publishes (and Subscribe)
 // serialize on the disk write - a deliberate trade for a gapless, ordered
-// cursor.
+// cursor. A caller-supplied ID is looked up before taking the lock; a
+// duplicate that races past that lookup fails the log's unique ID and is
+// reconciled the same way.
 func (b *InProc) Publish(ctx context.Context, e Event) (Event, error) {
 	if e.Payload == nil {
 		return Event{}, ErrNoPayload
@@ -60,11 +62,16 @@ func (b *InProc) Publish(ctx context.Context, e Event) (Event, error) {
 	} else if e.Type != e.Payload.EventType() {
 		return Event{}, fmt.Errorf("events: type %q does not match payload type %q", e.Type, e.Payload.EventType())
 	}
-	if e.ID == "" {
-		e.ID = newEventID()
-	}
 	if e.Time.IsZero() {
 		e.Time = time.Now().UTC()
+	}
+	_, ephemeral := e.Payload.(Ephemeral)
+	lookupErr := ErrEventNotFound
+	var existing Event
+	if e.ID == "" {
+		e.ID = newEventID()
+	} else if lookup, ok := b.log.(EventLogByID); ok && !ephemeral {
+		existing, lookupErr = lookup.Get(ctx, e.ID)
 	}
 
 	b.mu.Lock()
@@ -72,7 +79,7 @@ func (b *InProc) Publish(ctx context.Context, e Event) (Event, error) {
 	if b.closed {
 		return Event{}, ErrBusClosed
 	}
-	if _, ok := e.Payload.(Ephemeral); ok {
+	if ephemeral {
 		for s := range b.subs {
 			if s.filter.Matches(e) {
 				s.enqueue(e)
@@ -80,19 +87,14 @@ func (b *InProc) Publish(ctx context.Context, e Event) (Event, error) {
 		}
 		return e, nil
 	}
-	if e.ID != "" && b.log != nil {
-		if lookup, ok := b.log.(EventLogByID); ok {
-			existing, err := lookup.Get(ctx, e.ID)
-			switch {
-			case err == nil:
-				if !sameEvent(existing, e) {
-					return Event{}, ErrEventIDConflict
-				}
-				return existing, nil
-			case !errors.Is(err, ErrEventNotFound):
-				return Event{}, fmt.Errorf("events: look up event %s: %w", e.ID, err)
-			}
+	switch {
+	case lookupErr == nil:
+		if !sameEvent(existing, e) {
+			return Event{}, ErrEventIDConflict
 		}
+		return existing, nil
+	case !errors.Is(lookupErr, ErrEventNotFound):
+		return Event{}, fmt.Errorf("events: look up event %s: %w", e.ID, lookupErr)
 	}
 	e.Seq = b.seq + 1
 	if b.log != nil {

@@ -52,17 +52,19 @@ type Interval struct {
 
 // InsightsQuery selects what Insights aggregates: the range [From, To) and
 // the Previous period it is compared with. An empty Member or Workspace
-// selects every member or workspace. Buckets are the series intervals and
-// Days the heatmap days, all computed by the caller in the member's time
-// zone.
+// selects every member or workspace. A non-nil Workspaces limits every
+// figure, and the members listed, to those workspaces; empty selects none.
+// Buckets are the series intervals and Days the heatmap days, all computed
+// by the caller in the member's time zone.
 type InsightsQuery struct {
-	Member    domain.MemberID
-	Workspace domain.WorkspaceID
-	From, To  time.Time
-	Previous  Interval
-	Now       time.Time
-	Buckets   []Interval
-	Days      []Interval
+	Member     domain.MemberID
+	Workspace  domain.WorkspaceID
+	Workspaces []domain.WorkspaceID
+	From, To   time.Time
+	Previous   Interval
+	Now        time.Time
+	Buckets    []Interval
+	Days       []Interval
 }
 
 // Insights is the aggregate of one InsightsQuery. Series has one entry per
@@ -79,7 +81,9 @@ type Insights struct {
 	PullRequests InsightsPullRequests
 	Success      InsightsSuccess
 	Members      []*InsightsMemberOutcomes
-	Recent       []*InsightsRun
+	// Recent leaves out a run with an extra repository outside Workspaces,
+	// which the figures still count.
+	Recent []*InsightsRun
 	// NeedsYou is the runs domain.Run.NeedsAttention selects, before the
 	// caller drops paused ones.
 	NeedsYou          []domain.RunID
@@ -184,6 +188,7 @@ const (
 		COUNT(*) FILTER (WHERE ` + insightsFinished + ` AND r.status IN ('completed', 'merged')),
 		COUNT(*) FILTER (WHERE ` + insightsFinished + ` AND r.status = 'failed')`
 	insightsFinishedIn = insightsFinished + ` AND r.status IN ` + insightsTerminal
+	insightsReachable  = `(SELECT value FROM json_each(:workspaces))`
 )
 
 func (q InsightsQuery) ownerScope() string {
@@ -194,7 +199,19 @@ func (q InsightsQuery) ownerScope() string {
 	if q.Workspace != "" {
 		where += " AND r.workspace_id = :workspace"
 	}
+	if q.Workspaces != nil {
+		where += " AND r.workspace_id IN " + insightsReachable
+	}
 	return where
+}
+
+// prScope keeps the pull requests of p whose repository is in scope: a
+// run's extra repository can be in a workspace the caller does not reach.
+func (q InsightsQuery) prScope() string {
+	if q.Workspaces == nil {
+		return "1"
+	}
+	return "(p.repo_workspace_id = '' OR p.repo_workspace_id IN " + insightsReachable + ")"
 }
 
 func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error {
@@ -338,8 +355,12 @@ func (q InsightsQuery) args(intervals []Interval) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	reachable, err := json.Marshal(q.Workspaces)
+	if err != nil {
+		return nil, err
+	}
 	return []any{
-		sql.Named("member", q.Member), sql.Named("workspace", q.Workspace),
+		sql.Named("member", q.Member), sql.Named("workspace", q.Workspace), sql.Named("workspaces", string(reachable)),
 		sql.Named("from", from), sql.Named("to", to), sql.Named("now", now),
 		sql.Named("buckets", buckets), sql.Named("lo", lo), sql.Named("hi", hi),
 		sql.Named("days", days), sql.Named("day_lo", dayLo), sql.Named("day_hi", dayHi),
@@ -641,13 +662,19 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 }
 
 func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
+	where := q.ownerScope()
+	if q.Workspaces != nil {
+		// A run with an extra repository outside Workspaces does not exist
+		// for the caller.
+		where += " AND NOT EXISTS (SELECT 1 FROM run_repos rr WHERE rr.run_id = r.id AND rr.workspace_id NOT IN " + insightsReachable + ")"
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.title, r.task, r.workspace_id, r.status, r.reason, r.harness, r.model,
 			r.created_at, r.started_at, r.finished_at, COALESCE(p.url, ''), COALESCE(p.state, '')
 		FROM runs r
 		LEFT JOIN run_pull_requests p ON p.rowid = (
-			SELECT rowid FROM run_pull_requests WHERE run_id = r.id ORDER BY created_at DESC, rowid DESC LIMIT 1)
-		WHERE `+q.ownerScope()+` AND `+insightsFinishedIn+`
+			SELECT p.rowid FROM run_pull_requests p WHERE p.run_id = r.id AND `+q.prScope()+` ORDER BY p.created_at DESC, p.rowid DESC LIMIT 1)
+		WHERE `+where+` AND `+insightsFinishedIn+`
 		ORDER BY r.finished_at DESC, r.id DESC LIMIT 50`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: recent: %w", err)
@@ -682,7 +709,7 @@ func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 		SELECT COUNT(DISTINCT p.repo || '#' || p.number) FILTER (WHERE p.created_at >= :from AND p.created_at < :to),
 			COUNT(DISTINCT p.repo || '#' || p.number) FILTER (WHERE p.state = 'merged' AND p.merged_at >= :from AND p.merged_at < :to)
 		FROM run_pull_requests p JOIN runs r ON r.id = p.run_id
-		WHERE `+q.ownerScope(), args...,
+		WHERE `+q.ownerScope()+` AND `+q.prScope(), args...,
 	).Scan(&out.PullRequests.Opened, &out.PullRequests.Merged)
 	if err != nil {
 		return fmt.Errorf("store: insights: pull requests: %w", err)
@@ -695,7 +722,7 @@ func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 func insightsSuccess(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE r.status = 'merged' OR r.review = 'accepted' OR EXISTS (
-			SELECT 1 FROM run_pull_requests p WHERE p.run_id = r.id AND p.state = 'merged'))
+			SELECT 1 FROM run_pull_requests p WHERE p.run_id = r.id AND p.state = 'merged' AND `+q.prScope()+`))
 		FROM runs r WHERE `+q.ownerScope()+` AND `+insightsFinishedIn, args...,
 	).Scan(&out.Success.RunsFinished, &out.Success.RunsSucceeded)
 	if err != nil {
@@ -710,6 +737,11 @@ func insightsMemberOutcomes(ctx context.Context, tx *sql.Tx, q InsightsQuery, ar
 	members := "SELECT id, display_name, color FROM members WHERE merged_into = ''"
 	if q.Member != "" {
 		members += " AND id = :member"
+	}
+	if q.Workspaces != nil {
+		members += ` AND (id IN (SELECT owner_member_id FROM workspaces WHERE id IN ` + insightsReachable + `)
+			OR id IN (SELECT member_id FROM workspace_grants WHERE workspace_id IN ` + insightsReachable + `)
+			OR id IN (SELECT r.member_id FROM runs r WHERE r.workspace_id IN ` + insightsReachable + `))`
 	}
 	rows, err := tx.QueryContext(ctx, members+" ORDER BY created_at, id", args...)
 	if err != nil {

@@ -259,7 +259,7 @@ func (e *coordEnv) seedMember(ctx context.Context, t *testing.T, srv *coordServe
 		DisplayName: name,
 		PublicKey:   string(ssh.MarshalAuthorizedKey(key.PublicKey())),
 		Color:       color,
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	if err := srv.srv.Store().CreateMember(ctx, m); err != nil {
 		t.Fatalf("seed member %s: %v", name, err)

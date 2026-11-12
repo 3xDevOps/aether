@@ -16,8 +16,9 @@ type RunLimitStore interface {
 	ServerRunLimits(ctx context.Context) (domain.RunLimits, error)
 	// UpdateServerRunLimits changes the fields that are not nil in one
 	// statement, so concurrent updates of different fields both stick, and
-	// returns the result.
-	UpdateServerRunLimits(ctx context.Context, cpus *float64, memory, pids *int64) (domain.RunLimits, error)
+	// returns the result. by, unless empty, must still be an approved
+	// super admin (ErrConflict).
+	UpdateServerRunLimits(ctx context.Context, by domain.MemberID, cpus *float64, memory, pids *int64) (domain.RunLimits, error)
 }
 
 func (d *DB) ServerRunLimits(ctx context.Context) (domain.RunLimits, error) {
@@ -30,15 +31,26 @@ func (d *DB) ServerRunLimits(ctx context.Context) (domain.RunLimits, error) {
 	return l, nil
 }
 
-func (d *DB) UpdateServerRunLimits(ctx context.Context, cpus *float64, memory, pids *int64) (domain.RunLimits, error) {
+func (d *DB) UpdateServerRunLimits(ctx context.Context, by domain.MemberID, cpus *float64, memory, pids *int64) (domain.RunLimits, error) {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.RunLimits{}, fmt.Errorf("store: begin update server session limits: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = requireSuperAdmin(ctx, tx, by); err != nil {
+		return domain.RunLimits{}, err
+	}
 	var l domain.RunLimits
-	err := d.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`INSERT INTO server_run_limits (id, cpus, memory_bytes, pids) VALUES (1, COALESCE(?1, 0), COALESCE(?2, 0), COALESCE(?3, 0))
 		 ON CONFLICT(id) DO UPDATE SET cpus = COALESCE(?1, cpus), memory_bytes = COALESCE(?2, memory_bytes), pids = COALESCE(?3, pids)
 		 RETURNING cpus, memory_bytes, pids`,
 		cpus, memory, pids).Scan(&l.CPUs, &l.MemoryBytes, &l.Pids)
 	if err != nil {
 		return domain.RunLimits{}, fmt.Errorf("store: update server session limits: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.RunLimits{}, fmt.Errorf("store: commit server session limits: %w", err)
 	}
 	return l, nil
 }

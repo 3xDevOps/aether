@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -38,8 +39,11 @@ const (
 // EnvironmentPlan is the complete, server-assembled container environment.
 // Host paths in Mounts are derived only from configured server roots.
 type EnvironmentPlan struct {
-	Purpose     EnvironmentPurpose
-	Image       string
+	Purpose EnvironmentPurpose
+	Image   string
+	// ImageNotice says why the container does not start from the member's
+	// saved image; empty when it does.
+	ImageNotice string
 	Env         map[string]string
 	SetupScript string
 	User        string
@@ -101,6 +105,14 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			return nil, fmt.Errorf("scheduler: saved environment image %q is missing from the runtime; run aether env reset to return to the standard image", image)
 		}
 	}
+	var imageNotice string
+	if member.Image != "" {
+		saved, notice, err := s.sessionImage(ctx, member)
+		if err != nil {
+			return nil, err
+		}
+		image, imageNotice = cmp.Or(saved, s.cfg.StandardImage), notice
+	}
 	user, err := s.resolveContainerUser(ctx, image, profile)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: resolve environment user: %w", err)
@@ -140,7 +152,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}
 	env["PATH"] = localBin + ":" + pathValue
 	plan := &EnvironmentPlan{
-		Purpose: purpose, Image: image, Env: env,
+		Purpose: purpose, Image: image, ImageNotice: imageNotice, Env: env,
 		SetupScript: setupScript,
 		SecretEnv:   slices.Sorted(maps.Keys(secrets)),
 		User:        user, Home: home, Path: env["PATH"],
@@ -813,6 +825,9 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
 		return false, err
+	}
+	if _, blocks, loginErr := s.LoginProblem(account, harnessName, profile); loginErr == nil && blocks {
+		return false, nil
 	}
 	if mode == domain.LaunchACP {
 		installed, adapterErr := s.adapterInstalled(member, account, profile, argvs)

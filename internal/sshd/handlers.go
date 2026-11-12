@@ -43,7 +43,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 	s.mu.Lock()
 	dashboardURL, dashboardErr := s.tailnetDashboardURL, s.tailnetDashboardErr
 	s.mu.Unlock()
-	features := []string{protocol.FeatureMultiRepo, protocol.FeaturePermission}
+	features := []string{protocol.FeatureMultiRepo, protocol.FeaturePermission, protocol.FeatureWorkspaceAccess}
 	if s.dictationInstalled() {
 		features = append(features, protocol.FeatureDictation)
 	}
@@ -61,19 +61,23 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 	}, nil
 }
 
-func (s *Server) workspaceList(ctx context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
-	list, err := s.cfg.Store.ListWorkspaces(ctx)
+func (s *Server) workspaceList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	list, err := s.reachableWorkspaces(ctx, actor)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Workspace, 0, len(list))
 	for _, w := range list {
-		out = append(out, protocol.WorkspaceFromDomain(w))
+		out = append(out, workspaceWire(actor, w))
 	}
 	return protocol.WorkspaceListResult{Workspaces: out}, nil
 }
 
-func (s *Server) workspaceGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) workspaceGet(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.WorkspaceGetParams](params)
 	if perr != nil {
 		return nil, perr
@@ -81,21 +85,38 @@ func (s *Server) workspaceGet(ctx context.Context, _ domain.MemberID, params jso
 	if p.WorkspaceID == "" {
 		return nil, invalidParams("workspace_id is required")
 	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if !actor.Reaches(domain.WorkspaceID(p.WorkspaceID)) {
+		return nil, rpcError(permissions.ErrNoAccess)
+	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.WorkspaceGetResult{Workspace: protocol.WorkspaceFromDomain(ws)}, nil
+	return protocol.WorkspaceGetResult{Workspace: workspaceWire(actor, ws)}, nil
 }
 
-func (s *Server) memberList(ctx context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+func (s *Server) memberList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	sees, err := s.visibleMembers(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	list, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := protocol.MemberListResult{Members: make([]protocol.Member, 0, len(list))}
 	for _, m := range list {
-		out.Members = append(out.Members, protocol.MemberFromDomain(m))
+		if sees(m.ID) {
+			out.Members = append(out.Members, protocol.MemberFromDomain(m))
+		}
 	}
 	if ms, ok := s.cfg.Store.(store.MergeStore); ok {
 		merges, err := ms.ListMerges(ctx, "")
@@ -103,6 +124,9 @@ func (s *Server) memberList(ctx context.Context, _ domain.MemberID, _ json.RawMe
 			return nil, rpcError(err)
 		}
 		for _, m := range merges {
+			if !sees(m.AbsorbedID) && !sees(m.SurvivorID) {
+				continue
+			}
 			if out.MergedInto == nil {
 				out.MergedInto = map[string]string{}
 			}
@@ -120,22 +144,21 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 	if p.MemberID == "" {
 		return nil, invalidParams("member_id is required")
 	}
-	caller, err := s.cfg.Store.GetMember(ctx, member)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	if caller.Role != domain.RoleAdmin {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "member.approve requires the admin role"}
+	if perr := s.requireAdmin(ctx, member, protocol.MethodMemberApprove); perr != nil {
+		return nil, perr
 	}
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberApprove, false); perr != nil {
 		return nil, perr
 	}
 	id := domain.MemberID(p.MemberID)
+	if perr := s.actingOn(ctx, member, id, protocol.MethodMemberApprove); perr != nil {
+		return nil, perr
+	}
 	before, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if approveErr := s.cfg.Store.ApproveMember(ctx, id); approveErr != nil {
+	if approveErr := s.cfg.Store.ApproveMember(ctx, id, member); approveErr != nil {
 		return nil, rpcError(approveErr)
 	}
 	if before.Pending {
@@ -247,7 +270,8 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	s.authorizationMu.Lock()
 	unlockAuthorization := sync.OnceFunc(s.authorizationMu.Unlock)
 	defer unlockAuthorization()
-	admission, err := AuthorizeLaunch(ctx, s.cfg.Store, member, p.AccountMemberID)
+	workspaces := append([]domain.WorkspaceID{domain.WorkspaceID(p.WorkspaceID)}, workspaceIDs(p.ExtraWorkspaceIDs)...)
+	admission, err := AuthorizeLaunch(ctx, s.cfg.Store, member, p.AccountMemberID, workspaces)
 	if err != nil {
 		if errors.Is(err, permissions.ErrDenied) {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunLaunch + ": " + err.Error()}
@@ -260,7 +284,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 			return nil, rpcError(err)
 		}
 	}
-	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, member, requested, workspaces, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
 		return s.cfg.Runs.FallbackLaunchable(ctx, member, requested, account, p.Harness, mode)
 	})
 	if excluded != nil {
@@ -292,20 +316,23 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 	if perr != nil {
 		return nil, perr
 	}
-	var (
-		runs []*domain.Run
-		err  error
-	)
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	var runs []*domain.Run
 	switch {
 	case p.WorkspaceID != "":
-		runs, err = s.cfg.Store.ListRunsByWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
+		if actor.Reaches(domain.WorkspaceID(p.WorkspaceID)) {
+			runs, err = s.cfg.Store.ListRunsByWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
+		}
 	case p.MemberID != "":
 		runs, err = s.cfg.Store.ListRunsByMember(ctx, domain.MemberID(p.MemberID))
 	case p.ActiveOnly:
 		runs, err = s.cfg.Store.ListActiveRuns(ctx)
 	default:
 		var workspaces []*domain.Workspace
-		workspaces, err = s.cfg.Store.ListWorkspaces(ctx)
+		workspaces, err = s.reachableWorkspaces(ctx, actor)
 		for _, ws := range workspaces {
 			if err != nil {
 				break
@@ -327,6 +354,9 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 		if p.ActiveOnly && r.Status.Terminal() {
 			continue
 		}
+		if !reachesRun(actor, r) {
+			continue
+		}
 		out = append(out, s.runSnapshot(r))
 		listed = append(listed, r)
 	}
@@ -341,7 +371,7 @@ func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json
 	if perr != nil {
 		return nil, perr
 	}
-	run, err := s.cfg.Store.GetRun(ctx, p)
+	run, err := s.reachableRun(ctx, member, p)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -367,6 +397,10 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 	out := protocol.RunFromDomain(run)
 	if s.cfg.Runs != nil {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
+		if sleep := s.cfg.Runs.Sleep(run.ID); sleep.AsleepSince != nil {
+			since := sleep.AsleepSince.UTC().Format(time.RFC3339Nano)
+			out.AsleepSince, out.Waking, out.WakeError = &since, sleep.Waking, sleep.WakeError
+		}
 		out.Cause = string(s.cfg.Runs.Cause(run.ID, run.Activity))
 		out.Wait = s.cfg.Runs.Wait(run.ID, run.Activity)
 		if l, ok := s.cfg.Runs.Liveness(run.ID); ok {
@@ -467,6 +501,10 @@ func (s *Server) runResume(ctx context.Context, member domain.MemberID, params j
 	return s.runAct(ctx, member, params, s.cfg.Runs.Resume)
 }
 
+func (s *Server) runWake(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	return s.runAct(ctx, member, params, s.cfg.Runs.WakeRun)
+}
+
 func (s *Server) runAct(ctx context.Context, member domain.MemberID, params json.RawMessage, act func(context.Context, domain.RunID, domain.MemberID) error) (any, *protocol.Error) {
 	id, perr := runIDParams(params)
 	if perr != nil {
@@ -498,6 +536,10 @@ func (s *Server) runInject(ctx context.Context, member domain.MemberID, params j
 	}
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
 	if err != nil {
+		return nil, rpcError(err)
+	}
+	// Woken before the room's delivery admission, which a wake must not hold.
+	if err = s.cfg.Runs.WakeRun(ctx, run.ID, member); err != nil {
 		return nil, rpcError(err)
 	}
 	result, err := rooms.Post(ctx, collab.MessageInput{
@@ -596,8 +638,31 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if _, perr := s.launchAccount(ctx, member, string(run.AccountMember())); perr != nil {
-		return nil, perr
+	workspaces := runWorkspaces(run)
+	if cerr := checkLaunchIn(actor, workspaces[1:]); errors.Is(cerr, permissions.ErrDenied) {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunRelaunch + ": " + cerr.Error()}
+	} else if cerr != nil {
+		return nil, rpcError(cerr)
+	}
+	// The retained container mounts its launcher's home, which a handoff
+	// does not change.
+	if home := run.HomeMember(); home != member {
+		owner, herr := s.cfg.Store.GetMember(ctx, home)
+		if errors.Is(herr, store.ErrNotFound) {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: %s, whose home the session uses, is no longer a member", protocol.MethodRunRelaunch, home)}
+		}
+		if herr != nil {
+			return nil, rpcError(herr)
+		}
+		reach := permissions.ActorOf(owner)
+		for _, ws := range workspaces {
+			if !reach.Reaches(ws) {
+				return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: %s, whose home the session uses, has no access to workspace %s", protocol.MethodRunRelaunch, home, ws)}
+			}
+		}
+	}
+	if _, err = fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, member, string(run.AccountMember()), workspaces); err != nil {
+		return nil, rpcError(err)
 	}
 	reopened, err := s.cfg.Runs.Relaunch(ctx, id, member)
 	if err != nil {
@@ -635,16 +700,19 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	// Handing a run to a member without Launch (a viewer or one awaiting
 	// approval) orphans it: only an admin could then steer or kill it.
 	to := domain.MemberID(p.ToMemberID)
-	recipient, err := s.cfg.Store.GetMember(ctx, to)
+	recipient, err := s.visibleMember(ctx, member, to)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	if recipient.Pending {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: membership is pending admin approval", recipient.DisplayName))
 	}
-	recipientActor := permissions.Actor{ID: recipient.ID, Role: recipient.Role}
+	recipientActor := permissions.ActorOf(recipient)
 	if derr := permissions.Check(permissions.Launch, recipientActor, permissions.Target{}); derr != nil {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own sessions", recipient.DisplayName))
+	}
+	if derr := checkLaunchIn(recipientActor, runWorkspaces(run)); derr != nil {
+		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: they have no access to every workspace of this session", recipient.DisplayName))
 	}
 	from := run.MemberID
 	outbox, ok := s.cfg.Store.(store.HandoffOutboxStore)
@@ -861,7 +929,7 @@ func captureHandoffEvidence(ctx context.Context, h *store.HandoffOutbox, capture
 	return store.HandoffEvidenceAvailable, packet.ID, true
 }
 
-func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runPull(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.RunPullParams](params)
 	if perr != nil {
 		return nil, perr
@@ -869,7 +937,7 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	if p.RunID == "" {
 		return nil, invalidParams("run_id is required")
 	}
-	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
+	run, err := s.reachableRun(ctx, member, domain.RunID(p.RunID))
 	if err != nil {
 		return nil, rpcError(err)
 	}

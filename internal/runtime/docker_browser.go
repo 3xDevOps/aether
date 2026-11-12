@@ -104,8 +104,13 @@ func (d *Docker) CreateBrowser(ctx context.Context, spec BrowserSpec) (ID, error
 	if image.ID == "" {
 		return "", errors.New("runtime: browser image has no immutable identity")
 	}
+	cgroupParent, err := d.cgroupParent(ctx)
+	if err != nil {
+		return "", err
+	}
 	cfg, hostCfg := d.browserContainerConfig(spec)
 	cfg.Image = image.ID
+	hostCfg.CgroupParent = cgroupParent
 	name := ""
 	if spec.Name != "" {
 		name = d.namePrefix + spec.Name

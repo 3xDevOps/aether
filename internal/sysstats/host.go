@@ -80,7 +80,7 @@ func readHost(procRoot, sysRoot string, at time.Time) (hostReading, error) {
 		return r, err
 	}
 	for i, name := range [...]string{"cpu", "memory", "io"} {
-		v, err := readPressure(filepath.Join(procRoot, "pressure", name))
+		v, err := readPressure(filepath.Join(procRoot, "pressure", name), "avg10")
 		if err != nil {
 			return r, err
 		}
@@ -278,9 +278,18 @@ func (r *hostReading) readDisk(procRoot, sysRoot string) error {
 	return nil
 }
 
-// readPressure returns nil when the kernel has no pressure file. A kernel
-// booted with psi=0 keeps the files but fails reads with EOPNOTSUPP.
-func readPressure(path string) (*float64, error) {
+// CgroupMemoryPressure is the percentage of the last 60 seconds in which at
+// least one task of the cgroup v2 directory dir stalled on memory
+// (memory.pressure, "some avg60"). It is nil when the kernel does not expose
+// pressure for that cgroup.
+func CgroupMemoryPressure(dir string) (*float64, error) {
+	return readPressure(filepath.Join(dir, "memory.pressure"), "avg60")
+}
+
+// readPressure returns the "some" line's avg field (avg10, avg60), or nil when
+// the kernel has no pressure file. A kernel booted with psi=0 keeps the files
+// but fails reads with EOPNOTSUPP.
+func readPressure(path, avg string) (*float64, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.EOPNOTSUPP) {
 		return nil, nil
@@ -294,7 +303,7 @@ func readPressure(path string) (*float64, error) {
 			continue
 		}
 		for _, field := range f[1:] {
-			if v, ok := strings.CutPrefix(field, "avg10="); ok {
+			if v, ok := strings.CutPrefix(field, avg+"="); ok {
 				p, err := strconv.ParseFloat(v, 64)
 				if err != nil {
 					return nil, fmt.Errorf("parse %s: %w", path, err)
@@ -303,7 +312,7 @@ func readPressure(path string) (*float64, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("parse %s: no \"some avg10=\" line", path)
+	return nil, fmt.Errorf("parse %s: no \"some %s=\" line", path, avg)
 }
 
 // sampleSince turns two readings into one interval. A counter that went backwards

@@ -156,7 +156,7 @@ function WaitRow({ wait, runID, mayCancel, client }: { wait: WaitCondition; runI
 
 export function WaitConditions({ run, inset, client = api }: { run: RunRecord; inset: boolean; client?: Api }) {
   const cap = useCapability()
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const waits = run.wait_conditions
   if (!waits?.length) return null

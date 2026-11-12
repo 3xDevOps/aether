@@ -25,6 +25,7 @@ import (
 func TestInvitationWaitsUntilOneDeviceIsApproved(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	inv := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	forged := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "6666", Login: "octo", IdentityAt: time.Now()}
@@ -79,8 +80,8 @@ func TestRevokedInvitationDropsItsWaitingDevices(t *testing.T) {
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	var pe *protocol.Error
 	err := approveByCode(controlAs(t, e, bob), code, nil)
-	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("a member who is not an admin approving an invitation device = %v, want denied", err)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("a member who is not an admin approving an invitation device = %v, want not found", err)
 	}
 	if err := controlClient(t, e).Call(protocol.MethodMemberInvitationRevoke,
 		protocol.MemberInvitationRevokeParams{InvitationID: string(inv.ID)}, nil); err != nil {
@@ -156,10 +157,14 @@ func TestMemberIdentityListAndRemove(t *testing.T) {
 		}
 	}
 
+	removeParams := protocol.MemberIdentityRemoveParams{MemberID: string(m.ID), Provider: octo.Provider, Subject: octo.Subject}
+	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityRemove, removeParams, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("an admin removing another member's identity = %v, want denied", err)
+	}
+	setRole(t, e, domain.RoleSuperAdmin)
 	var removed protocol.MemberIdentityRemoveResult
-	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityRemove,
-		protocol.MemberIdentityRemoveParams{MemberID: string(m.ID), Provider: octo.Provider, Subject: octo.Subject}, &removed); err != nil {
-		t.Fatalf("admin removes the identity: %v", err)
+	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityRemove, removeParams, &removed); err != nil {
+		t.Fatalf("super admin removes the identity: %v", err)
 	}
 	if len(removed.Revoked) != 3 {
 		t.Fatalf("revoked %+v, want the identity's three devices", removed.Revoked)
@@ -241,6 +246,7 @@ func TestClaimCodeForAnAdminRecoversThatAdmin(t *testing.T) {
 func TestGoogleIdentityFromAnEarlierVersion(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	asSuperAdmin(t, e)
 	ctx := context.Background()
 	ids := identities(t, e)
 	admin := controlClient(t, e)

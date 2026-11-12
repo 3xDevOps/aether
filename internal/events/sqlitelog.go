@@ -27,14 +27,22 @@ CREATE TABLE IF NOT EXISTS events (
 	payload      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_workspace_seq ON events (workspace_id, seq);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
+CREATE INDEX IF NOT EXISTS idx_events_run_type ON events (run_id, type);
+CREATE INDEX IF NOT EXISTS idx_events_workspace_type ON events (workspace_id, type);
 `
 
 // SQLiteLog is the EventLog backed by a SQLite events table
 // (modernc.org/sqlite, pure Go). Rows are append-only; seq is the bus
-// cursor and primary key.
+// cursor and primary key. Appends go through one writer connection;
+// reads take one of readConns read-only connections, which WAL lets run
+// beside the writer and each other.
 type SQLiteLog struct {
-	db *sql.DB
+	db    *sql.DB
+	reads *sql.DB
 }
+
+const readConns = 4
 
 // sqliteURIPath percent-encodes the characters that would otherwise be
 // misparsed in the path component of a SQLite file: URI - '?' starts the
@@ -45,19 +53,26 @@ var sqliteURIPath = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 // OpenSQLiteLog opens (creating if needed) the event log database at path
 // and ensures the events table exists.
 func OpenSQLiteLog(path string) (*SQLiteLog, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)", sqliteURIPath.Replace(path))
-	db, err := sql.Open("sqlite", dsn)
+	file := "file:" + sqliteURIPath.Replace(path)
+	db, err := sql.Open("sqlite", file+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, fmt.Errorf("events: open sqlite log: %w", err)
 	}
 	// SQLite allows one writer; a single connection avoids lock contention
 	// between pooled connections under the race detector and in production.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(eventsSchema); err != nil {
+	if _, err = db.Exec(eventsSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("events: init sqlite log schema: %w", err)
 	}
-	return &SQLiteLog{db: db}, nil
+	reads, err := sql.Open("sqlite", file+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("events: open sqlite log reader: %w", err)
+	}
+	reads.SetMaxOpenConns(readConns)
+	reads.SetMaxIdleConns(readConns)
+	return &SQLiteLog{db: db, reads: reads}, nil
 }
 
 // Append implements EventLog. Repeating an identical event ID is safe and
@@ -103,7 +118,7 @@ func (l *SQLiteLog) Get(ctx context.Context, id string) (Event, error) {
 		typ     string
 		payload []byte
 	)
-	err := l.db.QueryRowContext(ctx,
+	err := l.reads.QueryRowContext(ctx,
 		`SELECT seq, id, ts, workspace_id, run_id, actor_id, type, payload
 		 FROM events WHERE id = ?`, id,
 	).Scan(&e.Seq, &e.ID, &ts, &ws, &run, &actor, &typ, &payload)
@@ -140,7 +155,7 @@ func (l *SQLiteLog) ReadBefore(ctx context.Context, f Filter, afterSeq, beforeSe
 
 func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int, order string) ([]Event, error) {
 	query, args := readQuery(f, afterSeq, uptoSeq, limit, order)
-	rows, err := l.db.QueryContext(ctx, query, args...)
+	rows, err := l.reads.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("events: read log: %w", err)
 	}
@@ -178,12 +193,23 @@ func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 	return out, nil
 }
 
+const maxTypeLookups = 32
+
 // readQuery reads a one-run Runs filter as two indexed lookups, the run's
 // own events and the agent messages other runs addressed to it, because
 // SQLite answers their OR by scanning the workspace's events. The message
 // type is a literal so the partial idx_events_coord_to_run can serve the
 // second lookup. Several runs keep the OR: SQLite would read both lookups off the
 // workspace index and scan it twice.
+//
+// Types are read with one limited lookup per type on the type index that
+// fits the filter: SQLite answers type IN (...) on an index by collecting
+// and sorting every match after the cursor. Each lookup names its index
+// because, without ANALYZE statistics, SQLite reads a Run filter off a
+// less selective one. A Runs filter keeps its run lookups and checks the
+// type as +type, which keeps it off the type indexes. So does a filter
+// with more than maxTypeLookups distinct types, which keeps a client's
+// type list under SQLite's limit on compound terms.
 func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (string, []any) {
 	where := "seq > ?"
 	args := []any{afterSeq}
@@ -211,13 +237,34 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 			args = append(args, string(r))
 		}
 	}
-	if len(f.Types) > 0 {
-		where += " AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")"
-		for _, t := range f.Types {
+	const cols = "seq, id, ts, workspace_id, run_id, actor_id, type, payload"
+	types := slices.Compact(slices.Sorted(slices.Values(f.Types)))
+	var index string
+	switch {
+	case len(types) == 0 || len(types) > maxTypeLookups || len(f.Runs) > 0:
+	case f.Run != "":
+		index = "idx_events_run_type"
+	case f.Workspace != "":
+		index = "idx_events_workspace_type"
+	default:
+		index = "idx_events_type"
+	}
+	if index != "" {
+		arms := make([]string, len(types))
+		var armArgs []any
+		for i, t := range types {
+			arms[i] = "SELECT seq FROM (SELECT seq FROM events INDEXED BY " + index + " WHERE " + where + " AND type = ? ORDER BY seq " + order + " LIMIT ?)"
+			armArgs = slices.Concat(armArgs, args, []any{string(t), limit})
+		}
+		query := "SELECT " + cols + " FROM events WHERE seq IN (" + strings.Join(arms, " UNION ALL ") + ") ORDER BY seq " + order + " LIMIT ?"
+		return query, append(armArgs, limit)
+	}
+	if len(types) > 0 {
+		where += " AND +type IN (?" + strings.Repeat(", ?", len(types)-1) + ")"
+		for _, t := range types {
 			args = append(args, string(t))
 		}
 	}
-	const cols = "seq, id, ts, workspace_id, run_id, actor_id, type, payload"
 	query := "SELECT " + cols + " FROM events WHERE " + where
 	if union {
 		run := string(f.Runs[0])
@@ -233,7 +280,7 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 // mark, so a deleted newest row never has its seq handed out again.
 func (l *SQLiteLog) LastSeq(ctx context.Context) (uint64, error) {
 	var last uint64
-	err := l.db.QueryRowContext(ctx, `SELECT MAX(
+	err := l.reads.QueryRowContext(ctx, `SELECT MAX(
 		COALESCE((SELECT MAX(seq) FROM events), 0),
 		COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'events'), 0))`).Scan(&last)
 	if err != nil {
@@ -243,4 +290,4 @@ func (l *SQLiteLog) LastSeq(ctx context.Context) (uint64, error) {
 }
 
 // Close implements EventLog.
-func (l *SQLiteLog) Close() error { return l.db.Close() }
+func (l *SQLiteLog) Close() error { return errors.Join(l.reads.Close(), l.db.Close()) }

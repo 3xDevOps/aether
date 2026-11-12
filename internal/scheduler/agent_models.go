@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	agentModelsTTL     = time.Hour
-	agentModelsFailTTL = time.Minute
-	agentModelsTimeout = 30 * time.Second
-	codexModelsCache   = ".codex/models_cache.json"
+	agentModelsTTL          = time.Hour
+	agentModelsFailTTL      = time.Minute
+	agentModelsTimeout      = 30 * time.Second
+	agentModelsStartTimeout = 2 * time.Minute
+	codexModelsCache        = ".codex/models_cache.json"
 
 	claudeModelsRequest = `{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}`
 	claudeModelsScript  = `exe=$1; req=$2; shift 2
@@ -46,13 +47,16 @@ type agentModelsKey struct {
 	name    string
 }
 
+// agentModelsEntry.updates counts the agent updates that made it stale, so a
+// probe that started before one stores its answer as stale too.
 type agentModelsEntry struct {
-	result protocol.AgentModelsResult
-	probed time.Time
+	result  protocol.AgentModelsResult
+	probed  time.Time
+	updates uint64
 }
 
 func (e agentModelsEntry) ttl() time.Duration {
-	if e.result.Source == protocol.ModelSourceFallback || e.result.Source == protocol.ModelSourceNone {
+	if e.result.Error != "" || e.result.Source == protocol.ModelSourceNone {
 		return agentModelsFailTTL
 	}
 	return agentModelsTTL
@@ -75,9 +79,11 @@ var errNoModelsAnswer = errors.New("no answer")
 
 // AgentModels lists the models agent name offers on account, probing the
 // agent in account's environment terminal and caching the answer for an hour.
-// A failed probe still answers: with the last good list, else a fallback,
-// which is cached for a minute. Another member's account is probed only while
-// its owner's terminal is running.
+// A failed probe still answers, with its error and the last good list, cached
+// for a minute. A caller whose context ends first gets an empty list with
+// that error while the probe finishes in the background; Close cancels it and
+// waits for it. Another member's account is probed only while its owner's
+// terminal is running.
 func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error) {
 	none := protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Models: []protocol.AgentModel{}}
 	if name != "claude" && name != "codex" {
@@ -109,10 +115,26 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 		}
 	}
 	start := account == member
-	result, _, _ := s.modelProbes.Do(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
-		return s.probeAgentModels(context.WithoutCancel(ctx), key, cli[0], profile.EnvPassthrough, start), nil
+	probe := s.modelProbes.DoChan(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
+		s.mu.Lock()
+		if s.superCtx.Err() != nil {
+			s.mu.Unlock()
+			stopped := none
+			stopped.Error = name + " models: the server is shutting down"
+			return stopped, nil
+		}
+		s.wg.Add(1)
+		s.mu.Unlock()
+		defer s.wg.Done()
+		return s.probeAgentModels(s.superCtx, key, cli[0], profile.EnvPassthrough, start), nil
 	})
-	return result.(protocol.AgentModelsResult), nil
+	select {
+	case got := <-probe:
+		return got.Val.(protocol.AgentModelsResult), nil
+	case <-ctx.Done():
+		none.Error = fmt.Sprintf("%s models: still being listed (%v); the probe keeps running, so ask again shortly", name, ctx.Err())
+		return none, nil
+	}
 }
 
 // CachedAgentModels is the model list AgentModels last answered for agent
@@ -121,16 +143,36 @@ func (s *Scheduler) CachedAgentModels(account domain.MemberID, name string) (pro
 	s.agentModelsMu.Lock()
 	entry, ok := s.agentModels[agentModelsKey{account, name}]
 	s.agentModelsMu.Unlock()
-	if !ok || s.cfg.Now().Sub(entry.probed) >= entry.ttl() {
+	ttl := entry.ttl()
+	if entry.result.Source == protocol.ModelSourceAgent {
+		ttl = agentModelsTTL
+	}
+	if !ok || s.cfg.Now().Sub(entry.probed) >= ttl {
 		return protocol.AgentModelsResult{}, false
 	}
 	return entry.result, true
 }
 
+// expireAgentModels makes the next AgentModels for agent name on account
+// probe again, keeping its list for a probe that fails.
+func (s *Scheduler) expireAgentModels(account domain.MemberID, name string) {
+	key := agentModelsKey{account, name}
+	s.agentModelsMu.Lock()
+	defer s.agentModelsMu.Unlock()
+	if s.agentModels == nil {
+		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
+	}
+	entry := s.agentModels[key]
+	entry.probed = time.Time{}
+	entry.updates++
+	s.agentModels[key] = entry
+}
+
 func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, executable string, passthrough []string, start bool) protocol.AgentModelsResult {
-	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
-	defer cancel()
 	now := s.cfg.Now().UTC()
+	s.agentModelsMu.Lock()
+	updates := s.agentModels[key].updates
+	s.agentModelsMu.Unlock()
 	list, err := s.execAgentModels(ctx, key, executable, passthrough, start)
 	var result protocol.AgentModelsResult
 	if err == nil {
@@ -141,18 +183,22 @@ func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, ex
 			FetchedAt:    now.Format(time.RFC3339),
 		}
 	} else {
-		result = s.agentModelsFallback(key, err)
+		result = s.agentModelsAfterFailure(key, err)
 	}
 	s.agentModelsMu.Lock()
 	if s.agentModels == nil {
 		s.agentModels = make(map[agentModelsKey]agentModelsEntry)
 	}
-	s.agentModels[key] = agentModelsEntry{result: result, probed: now}
+	probed, current := s.cfg.Now(), s.agentModels[key].updates
+	if current != updates {
+		probed = time.Time{}
+	}
+	s.agentModels[key] = agentModelsEntry{result: result, probed: probed, updates: current}
 	s.agentModelsMu.Unlock()
 	return result
 }
 
-func (s *Scheduler) agentModelsFallback(key agentModelsKey, probeErr error) protocol.AgentModelsResult {
+func (s *Scheduler) agentModelsAfterFailure(key agentModelsKey, probeErr error) protocol.AgentModelsResult {
 	s.agentModelsMu.Lock()
 	prev, ok := s.agentModels[key]
 	s.agentModelsMu.Unlock()
@@ -161,11 +207,7 @@ func (s *Scheduler) agentModelsFallback(key agentModelsKey, probeErr error) prot
 		return prev.result
 	}
 	result := protocol.AgentModelsResult{Models: []protocol.AgentModel{}, Source: protocol.ModelSourceNone, Error: probeErr.Error()}
-	switch key.name {
-	case "claude":
-		result.Source = protocol.ModelSourceFallback
-		result.Models = []protocol.AgentModel{{ID: "opus", Name: "Opus"}, {ID: "sonnet", Name: "Sonnet"}, {ID: "haiku", Name: "Haiku"}}
-	case "codex":
+	if key.name == "codex" {
 		cached, fetchedAt, err := s.readCodexModelsCache(key.account)
 		switch {
 		case err != nil:
@@ -214,7 +256,10 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 		args = []string{fmt.Sprintf(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"aether","version":%q}}}`, version.Version), codexModelsList}
 	}
 	if start {
-		if _, err := s.EnsureTerminal(ctx, key.account); err != nil {
+		startCtx, cancelStart := context.WithTimeout(ctx, agentModelsStartTimeout)
+		_, err := s.EnsureTerminal(startCtx, key.account)
+		cancelStart()
+		if err != nil {
 			return modelList{}, fmt.Errorf("%s models: %w", key.name, err)
 		}
 	}
@@ -226,6 +271,8 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 		return modelList{}, fmt.Errorf("%s models: %w", key.name, ErrTerminalNotRunning)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
+	defer cancel()
 	argv := append([]string{"/bin/sh", "-c", script, "sh", executable}, args...)
 	for _, name := range passthrough {
 		if value, ok := os.LookupEnv(name); ok && value != "" {

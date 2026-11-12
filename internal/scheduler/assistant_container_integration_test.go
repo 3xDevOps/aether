@@ -277,9 +277,13 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	if _, err := e.sched.EnsureTerminal(ctx, ada); err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
 	}
+	// The terminal mounts Ada's home volume, which the runs' cleanups remove.
+	// A non-nil afterStop makes WithStoppedTerminal destroy the kept container
+	// under the terminal lock, which the supervisor takes when the stop wakes it.
 	t.Cleanup(func() {
-		_ = e.sched.StopTerminal(context.Background(), ada)
-		_, _ = e.sched.DestroyStoppedTerminal(context.Background(), ada)
+		if err := e.sched.WithStoppedTerminal(context.Background(), ada, func() error { return nil }); err != nil {
+			t.Errorf("stop and destroy the terminal: %v", err)
+		}
 	})
 	sup := e.sched.lookupLiveTerminal(ada)
 	terminal, err := docker.Inspect(ctx, sup.containerID)
@@ -496,6 +500,19 @@ func TestIntegrationAssistantIssuerMatchesTheBundledCLIs(t *testing.T) {
 			if !bytes.Contains(data, []byte(s)) {
 				t.Errorf("%s's bundled CLI %s does not contain %q; update the issuer next to the pins", agent, matches[0], s)
 			}
+		}
+		if profile.ACPInstall.CLIVersion == "" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(AssistantInstallDir(e.sched.cfg.AssistantDir, e.member.ID, agent), "node_modules/@anthropic-ai/claude-agent-sdk/package.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sdk struct {
+			ClaudeCodeVersion string `json:"claudeCodeVersion"`
+		}
+		if err := json.Unmarshal(raw, &sdk); err != nil || sdk.ClaudeCodeVersion != profile.ACPInstall.CLIVersion {
+			t.Errorf("%s's adapter bundles Claude Code %q (%v); set CLIVersion %q next to the pin to it", agent, sdk.ClaudeCodeVersion, err, profile.ACPInstall.CLIVersion)
 		}
 	}
 }

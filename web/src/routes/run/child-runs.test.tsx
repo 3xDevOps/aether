@@ -62,6 +62,24 @@ describe('child run usage', () => {
     expect(screen.getByText('Alice $1.00, Bob $0.42')).toBeDefined()
     expect(screen.getByText('1 of 8 busy, 1 queued, 2 started')).toBeDefined()
   })
+
+  it('shows a disconnected subsession with why it stopped', async () => {
+    const parent = run()
+    setUp([parent, run({ id: 'run_c1', parent_run_id: 'run_1' })])
+    const stopped = "enhanced session ended: the agent's ACP server exited with code 137"
+    const client = fakeApi({
+      runChildren: vi.fn(async () => ({
+        root_run_id: 'run_1',
+        children: [child({ state: 'disconnected', error: stopped })],
+        limits: { max_live: 8 },
+        usage: { runs: 2, metered_runs: 0, unmetered_runs: 2, input_tokens: 0, output_tokens: 0, cost_usd: 0, by_account: [] },
+      })),
+    })
+    render(<ChildRuns run={toRecord(parent)} inset={false} client={client} />)
+    const item = within(await screen.findByRole('list', { name: /Subsessions of/ })).getByRole('listitem')
+    expect(item.textContent).toContain('Disconnected')
+    expect(item.textContent).toContain(stopped)
+  })
 })
 
 describe('kill confirmation', () => {

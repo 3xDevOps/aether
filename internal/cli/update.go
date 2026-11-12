@@ -1,6 +1,10 @@
 package cli
 
 import (
+	"slices"
+
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -23,4 +27,12 @@ func MatchServer(running, serverVersion string) string {
 // every client can install.
 func ServerFirst(serverVersion, target string, admin, capable bool) bool {
 	return admin && capable && selfupdate.Behind(serverVersion, target)
+}
+
+// ServerAdmin reports that the member in info administers the server itself:
+// a super admin, or an admin of a server that predates workspace-scoped
+// access and so reports its administrator as admin.
+func ServerAdmin(info protocol.ServerInfoResult) bool {
+	role := domain.Role(info.Member.Role)
+	return role == domain.RoleSuperAdmin || (role == domain.RoleAdmin && !slices.Contains(info.Features, protocol.FeatureWorkspaceAccess))
 }

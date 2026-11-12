@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -674,4 +676,67 @@ func TestCoordReportPersistenceAndIdempotency(t *testing.T) {
 	}); err == nil {
 		t.Fatal("invalid outcome accepted")
 	}
+}
+
+func TestInboxBatchFitsRunMessageBatchBytes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	inbox := func(t *testing.T, bodies ...string) (*DB, domain.RunID) {
+		db := openTestDB(t)
+		w := mustCreateWorkspace(t, db)
+		m := mustCreateMember(t, db)
+		from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+		to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+		for _, body := range bodies {
+			if err := db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: body}, 100); err != nil {
+				t.Fatalf("AppendRunMessage: %v", err)
+			}
+		}
+		return db, to.ID
+	}
+	read := func(t *testing.T, db *DB, to domain.RunID, token string) ([]*RunMessage, string) {
+		batch, next, _, err := db.DeliverRunMessages(ctx, to, token, 100)
+		if err != nil {
+			t.Fatalf("DeliverRunMessages: %v", err)
+		}
+		return batch, next
+	}
+
+	t.Run("bodies", func(t *testing.T) {
+		full := func(c string) string { return strings.Repeat(c, 4<<10) }
+		db, to := inbox(t, full("a"), full("b"), full("c"), full("d"), strings.Repeat("e", 1<<10))
+		var token string
+		var got []string
+		for i := range 2 {
+			batch, next := read(t, db, to, token)
+			if more, err := db.CountUndeliveredRunMessages(ctx, to); err != nil || more != []int{2, 0}[i] {
+				t.Fatalf("after batch %d: %d messages wait for later batches (err %v)", i, more, err)
+			}
+			bodies := ""
+			for _, msg := range batch {
+				bodies += msg.Body[:1]
+			}
+			got, token = append(got, bodies), next
+		}
+		if want := []string{"abc", "de"}; !slices.Equal(got, want) {
+			t.Fatalf("batches = %q, want %q: each batch within 16 KiB, the oldest first", got, want)
+		}
+	})
+
+	t.Run("earlier oversized batch", func(t *testing.T) {
+		full := strings.Repeat("x", 4<<10)
+		db, to := inbox(t, full, full, full, full, "e")
+		_, token := read(t, db, to, "")
+		if _, err := db.db.ExecContext(ctx, `UPDATE run_messages SET delivery_token = ? WHERE to_run = ?`, token, to); err != nil {
+			t.Fatal(err)
+		}
+		batch, again := read(t, db, to, "")
+		if len(batch) != 3 || again != token {
+			t.Fatalf("an earlier server's batch of 5 read again as %d messages under %q, want the first 3 under %q", len(batch), again, token)
+		}
+		rest, _ := read(t, db, to, token)
+		if len(rest) != 2 || rest[1].Body != "e" {
+			t.Fatalf("after acknowledging the first 3, the next batch = %d messages, want the last 2", len(rest))
+		}
+	})
 }

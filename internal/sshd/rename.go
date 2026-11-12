@@ -30,11 +30,11 @@ func (s *Server) memberRename(ctx context.Context, member domain.MemberID, param
 		return nil, invalidParams(err.Error())
 	}
 	target := member
-	if p.MemberID != "" && p.MemberID != string(member) {
+	if p.MemberID != "" {
 		target = domain.MemberID(p.MemberID)
-		if aerr := s.requireAdmin(ctx, member, protocol.MethodMemberRename); aerr != nil {
-			return nil, aerr
-		}
+	}
+	if aerr := s.editing(ctx, member, target, protocol.MethodMemberRename); aerr != nil {
+		return nil, aerr
 	}
 	m, gerr := s.cfg.Store.GetMember(ctx, target)
 	if gerr != nil {
@@ -43,10 +43,10 @@ func (s *Server) memberRename(ctx context.Context, member domain.MemberID, param
 	if m.DisplayName == name {
 		return protocol.MemberRenameResult{Member: protocol.MemberFromDomain(m)}, nil
 	}
-	m.DisplayName = name
-	if uerr := s.cfg.Store.UpdateMember(ctx, m); uerr != nil {
+	if uerr := s.cfg.Store.UpdateMemberDisplayName(ctx, target, name); uerr != nil {
 		return nil, rpcError(uerr)
 	}
+	m.DisplayName = name
 	// A member without a git name signs commits with the display name.
 	s.cfg.Runs.RefreshMemberCoAuthors(ctx, target)
 	s.publishMemberChanged(ctx, member, m)

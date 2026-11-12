@@ -18,10 +18,10 @@ func TestRunLimitsRoundTrip(t *testing.T) {
 	}
 	want := domain.RunLimits{CPUs: 1.5, MemoryBytes: 2 << 30, Pids: 512}
 	cpus, memory, pids := want.CPUs, want.MemoryBytes, want.Pids
-	if _, err := db.UpdateServerRunLimits(ctx, &cpus, &memory, nil); err != nil {
+	if _, err := db.UpdateServerRunLimits(ctx, "", &cpus, &memory, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := db.UpdateServerRunLimits(ctx, nil, nil, &pids); err != nil || got != want {
+	if got, err := db.UpdateServerRunLimits(ctx, "", nil, nil, &pids); err != nil || got != want {
 		t.Fatalf("UpdateServerRunLimits of one field = %+v, %v; want %+v with the others kept", got, err, want)
 	}
 	if got, err := db.ServerRunLimits(ctx); err != nil || got != want {

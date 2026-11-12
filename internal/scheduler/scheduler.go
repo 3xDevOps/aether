@@ -118,6 +118,13 @@ type Config struct {
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
 	RunContainerTTL      time.Duration // default 1h; negative destroys on close/completion
+	// RunSleepAfter is how long an Enhanced session of an agent with
+	// harness.Capabilities.Sleep stays idle, open or closed, before its
+	// container is stopped; zero keeps every session awake.
+	RunSleepAfter time.Duration
+	// DefaultBrowserImage is this build's browser image; its repository is
+	// swept of unused tags.
+	DefaultBrowserImage string
 	// ExitProbeTimeout bounds the Wait probes that tell a running terminal or
 	// usage-moved container from an exited one.
 	ExitProbeTimeout time.Duration
@@ -150,6 +157,7 @@ type Config struct {
 	// installed in the member home.
 	HarnessUpdateDisabled bool
 	// Test-only overrides of the matching default* constants.
+	sleepAnyAgent        bool
 	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
 	filesystemCapacity   func(string) (disk.Usage, error)
@@ -207,10 +215,13 @@ type Scheduler struct {
 	// capacityGate protects admission probes/accounting, never lifecycle state.
 	capacityGate         chan struct{}
 	reclaimMu            sync.Mutex
+	pressureSkipLog      sync.Once
 	capacityReservations uint64
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
+	// loginRefusals are the sign-in refusals agents gave on an account.
+	loginRefusals map[loginKey]loginRefusal
 	// retentionPublished tracks only nonempty runtime metadata under mu.
 	retentionPublished map[domain.RunID]events.RunRetentionPayload
 	// archiveMu serializes SetArchived against Relaunch restoring an archived run.
@@ -237,11 +248,20 @@ type Scheduler struct {
 	assistantLoginLocks   map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
+	// unstartableImages maps a saved environment image that failed to start
+	// a session container to the cause. Guarded by mu.
+	unstartableImages map[string]string
 	// evidenceUnavailable holds active runs whose capture found the checkout
 	// gone, for the reason they are interrupted with. Guarded by mu.
 	evidenceUnavailable map[domain.RunID]struct{}
-	titleMu             sync.Mutex
-	titleUpdates        map[domain.RunID]*pendingRunTitle
+	// cleanupRetries backs off checkout cleanups that failed. Guarded by mu.
+	cleanupRetries map[domain.RunID]cleanupRetry
+	// checkoutSweepGate lets one checkout sweep run at a time, so no checkout
+	// is retried before its backoff is recorded. A waiter can leave on its
+	// context.
+	checkoutSweepGate chan struct{}
+	titleMu           sync.Mutex
+	titleUpdates      map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
 	// waits is nil when runs register no wait conditions.
@@ -477,8 +497,13 @@ type supervised struct {
 	// sessionLostAt is when the agent last lost the run's Enhanced session.
 	sessionLostAt time.Time
 	// authLostAt is when the agent last refused a turn for want of a sign-in,
-	// and authRefused that refusal until the restarted session shows it.
+	// authStamp the account's login files at its last restart for one,
+	// authReread whether a changed login already earned a second restart
+	// since, and authRefused that refusal until the restarted session shows
+	// it.
 	authLostAt  time.Time
+	authStamp   string
+	authReread  bool
 	authRefused error
 	// usageLimit is the agent's usage-limit message its headless output
 	// carried, and accountSwap the move to another account in progress.
@@ -499,6 +524,28 @@ type supervised struct {
 	// because a move held the claim: nothing waits on the container until
 	// the move finalizes it or restarts supervision.
 	waitYielded bool
+	// asleepSince is when idleness stopped the container, zero while awake,
+	// and sleeping is set while the sleep is stopping it, until sleepDone
+	// closes. sleepGen counts sleeps and wakes: a Wait that began under
+	// another one ignores the exit it sees. waking is closed when the wake
+	// in flight settles, and wakeErr is the last wake's failure.
+	asleepSince time.Time
+	sleeping    bool
+	sleepDone   chan struct{}
+	sleepGen    uint64
+	waking      chan struct{}
+	wakeErr     error
+	// awake counts callers the container must not stop under: a delivery,
+	// an exec or a browser operation in flight.
+	awake int
+	// browserLeft marks a browser companion a sleep could not remove,
+	// which the next Browser call removes before it acts.
+	browserLeft bool
+	// typedAt, browsedAt and execAt are when a member last typed in the
+	// composer, used the development browser, and had an exec running.
+	typedAt   time.Time
+	browsedAt time.Time
+	execAt    time.Time
 }
 
 type pendingRun struct {
@@ -667,6 +714,7 @@ func New(cfg Config) (*Scheduler, error) {
 		cfg:                  cfg,
 		harnesses:            harnesses,
 		capacityGate:         make(chan struct{}, 1),
+		checkoutSweepGate:    make(chan struct{}, 1),
 		superCtx:             ctx,
 		superCancel:          cancel,
 		recoveryReady:        make(chan struct{}),
@@ -677,6 +725,7 @@ func New(cfg Config) (*Scheduler, error) {
 		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
 		terminals:            make(map[domain.MemberID]*terminalSupervision),
 		credentialUsers:      make(map[*credentialUserReservation]struct{}),
+		unstartableImages:    make(map[string]string),
 	}
 	s.acp = newACPDriver(s)
 	s.appServer = newAppServerDriver(s)
@@ -745,9 +794,10 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	sweep := time.NewTicker(interval)
 	defer sweep.Stop()
 	if s.cfg.CheckoutTTL > 0 {
-		s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+		s.trySweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 	}
 	s.sweepCaches(ctx, false)
+	s.sweepBrowsers(ctx)
 	gc := time.NewTicker(time.Hour)
 	defer gc.Stop()
 	for {
@@ -759,6 +809,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-sweep.C:
 			s.checkStalls(ctx)
+			s.sleepIdle(ctx)
 			s.refreshActivities(ctx)
 			s.finishOverdueReports()
 			s.sweepRetained(ctx)
@@ -772,10 +823,11 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			}
 		case <-gc.C:
 			if s.cfg.CheckoutTTL > 0 {
-				s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
+				s.trySweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 			}
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepScratch(ctx)
+			s.sweepBrowsers(ctx)
 			s.sweepCaches(ctx, false)
 		}
 	}

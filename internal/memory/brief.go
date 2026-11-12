@@ -21,15 +21,20 @@ import (
 // framed by coordhooks.MemoryRule. Every line is a pin or built by the
 // server, so no unpinned agent text, report prose or run title reaches it.
 // It fits in protocol.MemoryBriefMaxBytes by dropping older run lines, and
-// is empty when there is nothing to say.
-func (s *Service) Brief(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, self domain.RunID) (string, error) {
+// is empty when there is nothing to say. reader is who reads it: it holds
+// only the sessions both member and reader reach.
+func (s *Service) Brief(ctx context.Context, workspace domain.WorkspaceID, member, reader domain.MemberID, self domain.RunID) (string, error) {
 	const method = protocol.MethodMemoryBrief
 	ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 	if err != nil {
 		return "", fail(method, err)
 	}
+	reach, err := s.reach(ctx, member, reader)
+	if err != nil {
+		return "", fail(method, err)
+	}
 	now := time.Now()
-	in, err := s.cfg.Store.ReadMemoryBrief(ctx, store.MemoryBriefQuery{Workspace: workspace, Member: member, Self: self,
+	in, err := s.cfg.Store.ReadMemoryBrief(ctx, store.MemoryBriefQuery{Workspace: workspace, Workspaces: reach, Member: member, Self: self,
 		Since: now.Add(-protocol.MemoryBriefWindow), Runs: protocol.MemoryBriefMaxRuns + 1})
 	if err != nil {
 		return "", fail(method, err)

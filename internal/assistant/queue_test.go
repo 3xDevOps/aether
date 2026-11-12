@@ -294,8 +294,17 @@ func TestATurnAfterAConnectorTurnIsTheDashboards(t *testing.T) {
 	if got := w.until(e.ID, protocol.AssistantQueueDone); got.Origin.Grant != "grant-1" || got.Reply != "hi\n" {
 		t.Fatalf("connector turn = %+v", got)
 	}
-	if origin, entry := m.turn(); origin.Door != protocol.AssistantDoorDashboard || origin.Grant != "" || entry != "" {
-		t.Fatalf("origin after the connector turn ended = %+v, %q, want the dashboard's", origin, entry)
+	// The entry is stored as done before endEntry clears the member's origin.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		origin, entry := m.turn()
+		if origin.Door == protocol.AssistantDoorDashboard && origin.Grant == "" && entry == "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("origin after the connector turn ended = %+v, %q, want the dashboard's", origin, entry)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

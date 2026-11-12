@@ -107,7 +107,7 @@ func (s *Service) options(ctx context.Context, run domain.RunID, req protocol.Ch
 	}
 	if req.Harness != "" {
 		for i, c := range out.Choices {
-			if c.Harness != req.Harness || c.Model != "" {
+			if c.Harness != req.Harness || c.Model != "" || (c.Status != choiceReady && c.Status != choiceExhausted) {
 				continue
 			}
 			models, err := s.cfg.Runs.AgentModels(ctx, p.owner, domain.MemberID(c.AccountMemberID), c.Harness, false)
@@ -117,6 +117,7 @@ func (s *Service) options(ctx context.Context, run domain.RunID, req protocol.Ch
 			for _, m := range models.Models {
 				out.Choices[i].Models = append(out.Choices[i].Models, m.ID)
 			}
+			out.Choices[i].ModelsError = models.Error
 		}
 	}
 	return out, nil
@@ -150,9 +151,6 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 	spec, perr := s.choose(ctx, p, req)
 	if perr != nil {
 		return protocol.ChildReceipt{}, perr
-	}
-	if err = s.admit(ctx, p, spec.account); err != nil {
-		return protocol.ChildReceipt{}, rpcErr(method, err)
 	}
 	base, err := s.cfg.Git.PublishRunBranch(ctx, p.parent.ID)
 	if err != nil {
@@ -229,7 +227,7 @@ func (s *Service) receipt(ctx context.Context, c *domain.ChildReservation, err e
 // as every launch does.
 func (s *Service) admit(ctx context.Context, p *policy, account domain.MemberID) error {
 	s.cfg.AuthorizationMu.Lock()
-	_, err := s.cfg.Authorize(ctx, s.cfg.Store, p.owner, string(account))
+	_, err := s.cfg.Authorize(ctx, s.cfg.Store, p.owner, string(account), p.workspaces())
 	s.cfg.AuthorizationMu.Unlock()
 	if err != nil {
 		return err
@@ -393,7 +391,10 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 		if err != nil {
 			return protocol.Child{}, err
 		}
-		out.State, out.Branch, out.AccountMemberID = childState(r), r.Branch, string(r.AccountMember())
+		out.State, out.Branch, out.AccountMemberID, out.Model = childState(r), r.Branch, string(r.AccountMember()), r.Model
+		if stopped(r.Activity, r.Reason) {
+			out.Error = r.Reason
+		}
 	}
 	if report, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil && report != nil {
 		out.Report = &protocol.ChildReport{Outcome: string(report.Outcome), Summary: report.Summary, At: report.CreatedAt.UTC().Format(time.RFC3339)}
@@ -401,7 +402,7 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 		if reportedErr != nil {
 			return protocol.Child{}, reportedErr
 		}
-		if reported && (out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting || out.State == protocol.ChildEnded) {
+		if reported && (out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting || out.State == protocol.ChildDisconnected || out.State == protocol.ChildEnded) {
 			switch report.Outcome {
 			case store.CoordOutcomeSuccess:
 				out.State = protocol.ChildFinished
@@ -445,6 +446,8 @@ func childState(r *domain.Run) string {
 		return protocol.ChildFailed
 	case domain.ActivityNeedsYou:
 		return protocol.ChildNeedsYou
+	case domain.ActivityDisconnected:
+		return protocol.ChildDisconnected
 	case domain.ActivityWaiting, domain.ActivityWaitingAgents, domain.ActivityIdle:
 		return protocol.ChildWaiting
 	}

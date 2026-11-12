@@ -7,6 +7,7 @@ import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { alice, bob, fakeApi, serverInfo, vera, workspace } from '@/test/fixtures'
+import { openSelect, pickOption } from '@/test/select'
 
 const pendingCara: Member = {
   id: 'mem_cara',
@@ -31,12 +32,7 @@ function seed(extra: Partial<RootState> = {}) {
   })
 }
 
-async function pickMenu(trigger: string, item: string, role: 'menuitem' | 'menuitemradio' = 'menuitem') {
-  screen.getByRole('button', { name: trigger }).focus()
-  await userEvent.keyboard('{Enter}')
-  const menu = await screen.findByRole('menu')
-  fireEvent.click(within(menu).getByRole(role, { name: item }))
-}
+const pickRole = (member: string, role: string) => pickOption(screen.getByRole('combobox', { name: `Role of ${member}` }), new RegExp(`^${role}`))
 
 const row = (name: string) => within(screen.getByRole('region', { name: 'Roster' })).getByText(name).closest('tr')!
 
@@ -55,13 +51,27 @@ describe('members page', () => {
     })
     render(<MembersRoute params={{}} client={client} />)
 
-    await waitFor(() => expect(within(row('Bob')).getByText('Shares with you')).toBeDefined())
+    await waitFor(() => expect(within(row('Bob')).getByText('Shares their account with you')).toBeDefined())
     expect(within(row('Bob')).getByText('Online')).toBeDefined()
-    expect(within(row('Bob')).getByText('Collaborator')).toBeDefined()
+    expect(within(row('Bob')).getByRole('combobox', { name: 'Role of Bob' }).textContent).toBe('Collaborator')
+    expect(within(row('Bob')).getByRole('switch', { name: 'Share my account with Bob' }).getAttribute('aria-checked')).toBe('false')
     expect(within(row('Vera')).getByText(/ago/)).toBeDefined()
-    expect(within(row('Vera')).getByText('Not shared')).toBeDefined()
+    expect(within(row('Vera')).queryByText('Shares their account with you')).toBeNull()
     expect(within(row('Alice')).getByText('(you)')).toBeDefined()
-    expect(within(row('Alice')).getByText('Offline')).toBeDefined()
+    expect(within(row('Alice')).queryByRole('switch')).toBeNull()
+    expect(within(row('Alice')).queryByRole('button', { name: 'Remove Alice' })).toBeNull()
+  })
+
+  it('tells everyone but a super admin which members the roster leaves out', async () => {
+    const note = 'You see super admins and the members of workspaces you can use.'
+    seed({ info: { ...serverInfo, member: { ...alice, role: 'admin' } } })
+    const view = render(<MembersRoute params={{}} client={fakeApi()} />)
+    expect(await screen.findByText(note)).toBeDefined()
+    view.unmount()
+    seed({ info: { ...serverInfo, member: { ...alice, role: 'super_admin' } } })
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+    await screen.findByRole('region', { name: 'Roster' })
+    expect(screen.queryByText(note)).toBeNull()
   })
 
   it('shows a pending member approved before the server answers, with no second Approve', async () => {
@@ -130,13 +140,13 @@ describe('members page', () => {
     await waitFor(() => expect(document.activeElement).toBe(invite))
   })
 
-  it('moves another member to a new role from the row menu before the server answers', async () => {
+  it('moves another member to a new role from the Role column before the server answers', async () => {
     let answer: (member: Member) => void = () => {}
     const client = fakeApi({ memberRole: vi.fn(() => new Promise<Member>((resolve) => (answer = resolve))) })
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
-    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
+    await pickRole('Bob', 'Admin')
 
     expect(within(row('Bob')).getByText('Admin')).toBeDefined()
     expect(client.memberRole).toHaveBeenCalledWith(bob.id, 'admin')
@@ -153,7 +163,7 @@ describe('members page', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
-    await pickMenu('Actions for Bob', 'Viewer', 'menuitemradio')
+    await pickRole('Bob', 'Viewer')
 
     expect(await screen.findByText('refusing to demote the last admin')).toBeDefined()
     expect(within(row('Bob')).getByText('Collaborator')).toBeDefined()
@@ -163,12 +173,12 @@ describe('members page', () => {
     const client = fakeApi({ memberRole: vi.fn(() => new Promise<Member>(() => {})) })
     seed()
     render(<MembersRoute params={{}} client={client} />)
-    screen.getByRole('button', { name: 'Actions for Bob' }).focus()
-    await userEvent.keyboard('{Enter}')
-    const menu = await screen.findByRole('menu')
+    const list = await openSelect(screen.getByRole('combobox', { name: 'Role of Bob' }))
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Admin' }))
+      const admin = within(list).getByRole('option', { name: /^Admin/ })
+      admin.focus()
+      fireEvent.keyDown(admin, { key: 'Enter' })
       act(() => useStore.getState().setMembers([alice, { ...bob, role: 'admin' }]))
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       await act(async () => {})
@@ -189,9 +199,9 @@ describe('members page', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
-    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-    await pickMenu('Actions for Bob', 'Viewer', 'menuitemradio')
+    await pickRole('Bob', 'Admin')
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+    await pickRole('Bob', 'Viewer')
     await waitFor(() => expect(client.memberRole).toHaveBeenCalledTimes(2))
     await act(async () => answerFirst({ ...bob, role: 'admin' }))
 
@@ -207,7 +217,7 @@ describe('members page', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
-    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
+    await pickRole('Bob', 'Admin')
     await waitFor(() => expect(client.memberRole).toHaveBeenCalled())
     await act(async () => list({ members: [alice, bob] }))
 
@@ -237,9 +247,9 @@ describe('members page', () => {
     render(<MembersRoute params={{}} client={client} />)
     await waitFor(() => expect(client.memberList).toHaveBeenCalledTimes(1))
 
-    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-    await pickMenu('Actions for Vera', 'Remove…')
+    await pickRole('Bob', 'Admin')
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Vera' }))
     fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Remove Vera?' })).getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(screen.queryByText('Vera')).toBeNull())
 
@@ -252,7 +262,7 @@ describe('members page', () => {
     const { rerender } = render(<MembersRoute params={{}} client={client} />)
     await waitFor(() => expect(client.memberList).toHaveBeenCalledTimes(1))
 
-    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
+    await pickRole('Bob', 'Admin')
     await waitFor(() => expect(client.memberRole).toHaveBeenCalled())
     rerender(<MembersRoute params={{}} client={fakeApi({ memberList: vi.fn(async () => ({ members: [alice, { ...bob, role: 'viewer' as const }] })) })} />)
 
@@ -298,7 +308,7 @@ describe('members page', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
-    await pickMenu('Actions for Bob', 'Remove…')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Bob' }))
     const dialog = within(await screen.findByRole('alertdialog', { name: 'Remove Bob?' }))
     fireEvent.click(dialog.getByRole('button', { name: 'Remove' }))
 
@@ -314,7 +324,7 @@ describe('members page', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
-    await pickMenu('Actions for Bob', 'Remove…')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Bob' }))
     const dialog = within(await screen.findByRole('alertdialog', { name: 'Remove Bob?' }))
     fireEvent.click(dialog.getByRole('button', { name: 'Remove' }))
 
@@ -322,16 +332,18 @@ describe('members page', () => {
     expect(client.memberRemove).toHaveBeenCalledWith(bob.id)
   })
 
-  it('returns focus to the row menu trigger when a confirm opened from it closes', async () => {
+  it('returns focus to the Remove button when the confirm it opened closes', async () => {
     seed()
     render(<MembersRoute params={{}} client={fakeApi()} />)
 
-    await pickMenu('Actions for Bob', 'Remove…')
+    const remove = screen.getByRole('button', { name: 'Remove Bob' })
+    remove.focus()
+    fireEvent.click(remove)
     await screen.findByRole('alertdialog', { name: 'Remove Bob?' })
     await userEvent.keyboard('{Escape}')
 
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Actions for Bob' })))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove Bob' })))
   })
 
   it('confirms before an admin gives up their own admin role, and holds the confirm until the server answers', async () => {
@@ -340,7 +352,7 @@ describe('members page', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
-    await pickMenu('Actions for Alice', 'Collaborator', 'menuitemradio')
+    await pickRole('Alice', 'Collaborator')
     expect(client.memberRole).not.toHaveBeenCalled()
     fireEvent.click(await screen.findByRole('button', { name: 'Become collaborator' }))
     expect(client.memberRole).toHaveBeenCalledWith(alice.id, 'collaborator')
@@ -359,7 +371,8 @@ describe('members page', () => {
 
     expect(await within(screen.getByRole('region', { name: 'Roster' })).findByText('Vera')).toBeDefined()
     expect(within(row('Vera')).getByText('Viewer')).toBeDefined()
-    expect(screen.queryByRole('button', { name: /^Actions for/ })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: /^Role of/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Invite…' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
     expect(screen.getByText('Waiting for an admin')).toBeDefined()

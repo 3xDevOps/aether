@@ -42,7 +42,14 @@ func TestMemberColor(t *testing.T) {
 		t.Fatalf("non-admin recolor other = %v, want CodeDenied", err)
 	}
 
-	// Admin recoloring another member: allowed.
+	// An admin may not recolor another member; a super admin may.
+	err = adminC.Call(protocol.MethodMemberColor, protocol.MemberColorParams{
+		MemberID: string(bob.ID), Color: "#911EB4",
+	}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("admin recolor other = %v, want CodeDenied", err)
+	}
+	setRole(t, e, domain.RoleSuperAdmin)
 	if aerr := adminC.Call(protocol.MethodMemberColor, protocol.MemberColorParams{
 		MemberID: string(bob.ID), Color: "#911EB4",
 	}, &res); aerr != nil {
@@ -66,5 +73,25 @@ func TestMemberColor(t *testing.T) {
 	}
 	if res.Member.Color != "#46f0f0" {
 		t.Errorf("explicit self recolor = %q, want #46f0f0", res.Member.Color)
+	}
+}
+
+// An admin edits the profile of a member below admin, never a super
+// admin's: their name, color and commit identity are theirs.
+func TestAdminCannotEditASuperAdminsProfile(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	_, super := addMember(t, e, "Sam", domain.RoleSuperAdmin, false)
+	adminC := controlClient(t, e)
+	id := string(super.ID)
+	wantDenied(t, adminC.Call(protocol.MethodMemberRename, protocol.MemberRenameParams{MemberID: id, DisplayName: "Mallory"}, nil), "admin member.rename of a super admin")
+	wantDenied(t, adminC.Call(protocol.MethodMemberColor, protocol.MemberColorParams{MemberID: id, Color: "#911eb4"}, nil), "admin member.color of a super admin")
+	wantDenied(t, adminC.Call(protocol.MethodMemberGit, protocol.MemberGitParams{MemberID: id, Name: "Mallory", Email: "mallory@example.com"}, nil), "admin member.git of a super admin")
+	got, err := e.store.GetMember(context.Background(), super.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DisplayName != "Sam" || got.Color != "#3cb44b" || got.GitName != "" || got.GitEmail != "" {
+		t.Fatalf("super admin after refused edits = %+v, want unchanged", got)
 	}
 }

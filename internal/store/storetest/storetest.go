@@ -5,6 +5,7 @@
 package storetest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -58,4 +60,44 @@ func Open(path string) (*store.DB, error) {
 		return nil, fmt.Errorf("storetest: write %s: %w", path, joined)
 	}
 	return store.Open(path)
+}
+
+// Unscoped is db as it behaved before workspace-scoped access: every
+// member reaches every workspace, an admin as if they owned it and anyone
+// else as if granted it. Tests of behaviour that predates the access model
+// use it; tests of the model use the store itself.
+type Unscoped struct{ *store.DB }
+
+func (u Unscoped) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
+	m, err := u.DB.GetMember(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	all, err := u.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reach := make(map[domain.WorkspaceID]bool, len(all))
+	for _, w := range all {
+		reach[w.ID] = true
+	}
+	if m.Role == domain.RoleAdmin {
+		m.Access.Owned = reach
+	} else {
+		m.Access.Granted = reach
+	}
+	return m, nil
+}
+
+// WorkspaceMembers is every member: every member shares every workspace.
+func (u Unscoped) WorkspaceMembers(ctx context.Context, _ []domain.WorkspaceID) ([]domain.MemberID, error) {
+	all, err := u.ListMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]domain.MemberID, 0, len(all))
+	for _, m := range all {
+		ids = append(ids, m.ID)
+	}
+	return ids, nil
 }

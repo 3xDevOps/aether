@@ -14,6 +14,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -513,5 +514,40 @@ func TestHarnessUpdateHidesTheLogins(t *testing.T) {
 	})
 	if !hidden {
 		t.Fatalf("updater mounts %+v leave the Claude login visible", updates[0].Mounts)
+	}
+}
+
+// An update that changed the CLI, or failed after it may have, makes the
+// next model list ask the CLI again; a current CLI keeps the cached list.
+func TestHarnessUpdateExpiresTheModelList(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		after   string
+		code    int
+		expired bool
+	}{
+		{"updated", "2.1.1 (Claude Code)", 0, true},
+		{"failed", "2.1.0 (Claude Code)", 1, true},
+		{"current", "2.1.0 (Claude Code)", 0, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			e, rt, _ := newUpdateEnv(t, nil)
+			installInHome(t, e, "claude")
+			rt.after, rt.code = c.after, c.code
+			key := agentModelsKey{e.member.ID, "claude"}
+			e.sched.agentModelsMu.Lock()
+			e.sched.agentModels = map[agentModelsKey]agentModelsEntry{key: {
+				result: protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: "fable"}}},
+				probed: e.sched.cfg.Now(),
+			}}
+			e.sched.agentModelsMu.Unlock()
+
+			launchNotes(t, e, "claude", domain.LaunchTUI)
+			if _, cached := e.sched.CachedAgentModels(e.member.ID, "claude"); cached == c.expired {
+				t.Fatalf("model list cached = %v after the update, want %v", cached, !c.expired)
+			}
+		})
 	}
 }

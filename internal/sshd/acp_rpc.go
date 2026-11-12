@@ -39,6 +39,10 @@ func (s *Server) runInputAnswer(ctx context.Context, member domain.MemberID, raw
 	if perr != nil {
 		return nil, perr
 	}
+	// Outside control admission, which a sleep's surface revocation waits for.
+	if err := s.cfg.Runs.SettleSleep(ctx, run); err != nil {
+		return nil, rpcError(err)
+	}
 	return struct{}{}, s.admitACP(ctx, member, run, p.ACPLease, func() error {
 		return s.cfg.Runs.ACPAnswer(run, p.RequestID, p.OptionID, p.Values)
 	})
@@ -52,6 +56,9 @@ func (s *Server) runACPCancel(ctx context.Context, member domain.MemberID, raw j
 	run, perr := s.acpRun(ctx, p.RunID)
 	if perr != nil {
 		return nil, perr
+	}
+	if err := s.cfg.Runs.SettleSleep(ctx, run); err != nil {
+		return nil, rpcError(err)
 	}
 	return struct{}{}, s.admitACP(ctx, member, run, p.ACPLease, func() error {
 		return s.cfg.Runs.ACPCancel(ctx, run)
@@ -75,6 +82,10 @@ func (s *Server) runACPSetOption(ctx context.Context, member domain.MemberID, ra
 	run, perr := s.acpRun(ctx, p.RunID)
 	if perr != nil {
 		return nil, perr
+	}
+	// A model choice wakes the session, outside control admission.
+	if err := s.cfg.Runs.WakeRun(ctx, run, member); err != nil {
+		return nil, rpcError(err)
 	}
 	return struct{}{}, s.admitACP(ctx, member, run, p.ACPLease, func() error {
 		optionCtx, cancel := context.WithTimeout(ctx, acpOptionTimeout)

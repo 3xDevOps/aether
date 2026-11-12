@@ -23,8 +23,13 @@ type Run struct {
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
-	Effort          string `json:"effort,omitempty"`
-	Permission      string `json:"permission"`
+	// RefusedModel is the model the run asked for and the agent refused,
+	// ModelError why; Model is then the one the session runs on, empty for
+	// the agent's default.
+	RefusedModel string `json:"refused_model,omitempty"`
+	ModelError   string `json:"model_error,omitempty"`
+	Effort       string `json:"effort,omitempty"`
+	Permission   string `json:"permission"`
 	// Via is the connector client, such as ChatGPT, the run was launched
 	// through.
 	Via    string `json:"via,omitempty"`
@@ -54,6 +59,12 @@ type Run struct {
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused bool `json:"paused"`
+	// AsleepSince is when idleness stopped the live session's container, set
+	// while it sleeps; Waking while a wake starts it, and WakeError is the
+	// last wake's failure.
+	AsleepSince *string `json:"asleep_since,omitempty"`
+	Waking      bool    `json:"waking,omitempty"`
+	WakeError   string  `json:"wake_error,omitempty"`
 	// Runtime retention is enriched from scheduler ownership, not run-row age.
 	ContainerRetainedUntil *string `json:"container_retained_until,omitempty"`
 	CleanupPending         bool    `json:"cleanup_pending,omitempty"`
@@ -176,7 +187,12 @@ type Workspace struct {
 	BaseBranch  string `json:"base_branch"`
 	SteerOthers string `json:"steer_others,omitempty"`
 	// Origin is the upstream git URL run checkouts push to.
-	Origin    string `json:"origin,omitempty"`
+	Origin string `json:"origin,omitempty"`
+	// OwnerMemberID is the admin who owns and administers the workspace.
+	OwnerMemberID string `json:"owner_member_id,omitempty"`
+	// Role is the role the caller acts with in this workspace: admin,
+	// collaborator or viewer.
+	Role      string `json:"role,omitempty"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -234,6 +250,8 @@ func RunFromDomain(r *domain.Run) Run {
 		Harness:             r.Harness,
 		Mode:                string(r.Mode),
 		Model:               r.Model,
+		RefusedModel:        r.RefusedModel,
+		ModelError:          r.ModelError,
 		Effort:              r.Effort,
 		Permission:          string(r.Permission),
 		Via:                 r.Via,
@@ -287,12 +305,13 @@ func FallbackIDs(policy domain.AccountFallback) []string {
 
 func WorkspaceFromDomain(w *domain.Workspace) Workspace {
 	return Workspace{
-		ID:          string(w.ID),
-		Name:        w.Name,
-		BaseBranch:  w.BaseBranch,
-		SteerOthers: w.SteerOthers,
-		Origin:      w.Origin,
-		CreatedAt:   rfc3339(w.CreatedAt),
+		ID:            string(w.ID),
+		Name:          w.Name,
+		BaseBranch:    w.BaseBranch,
+		SteerOthers:   w.SteerOthers,
+		Origin:        w.Origin,
+		OwnerMemberID: string(w.OwnerID),
+		CreatedAt:     rfc3339(w.CreatedAt),
 	}
 }
 
@@ -335,6 +354,11 @@ const FeatureMultiRepo = "multi-repo"
 // FeaturePermission marks a server whose run.launch takes permission; an
 // older one drops it and runs the agent as root.
 const FeaturePermission = "permission"
+
+// FeatureWorkspaceAccess marks a server with workspace-scoped access: it
+// reports its administrator as super_admin and serves workspace.access.*. An
+// older server reports admin for the same role.
+const FeatureWorkspaceAccess = "workspace-access"
 
 // CapabilityRunRepos is listed in a gateway's capability methods but is not an RPC method.
 const CapabilityRunRepos = "run.repos"
@@ -904,6 +928,12 @@ type AgentInfo struct {
 	// LoginFound checks the launch home for login paths, not for a working
 	// session. Nil when the agent declares no login path.
 	LoginFound *bool `json:"login_found,omitempty"`
+	// LoginProblem is why the login cannot sign the agent in: what its file
+	// holds, or the agent's own refusal of a turn. Empty when the server
+	// knows of none. LoginBlocksLaunch: a launch on the account is refused
+	// over it unless a workspace variable signs the agent in.
+	LoginProblem      string `json:"login_problem,omitempty"`
+	LoginBlocksLaunch bool   `json:"login_blocks_launch,omitempty"`
 	// "acp" when enhanced mode is installed, else "tui": the mode a launch
 	// that names none starts in.
 	DefaultMode string `json:"default_mode"`
@@ -972,14 +1002,13 @@ type AgentModel struct {
 }
 
 const (
-	ModelSourceAgent    = "agent"
-	ModelSourceCache    = "cache"
-	ModelSourceFallback = "fallback"
-	ModelSourceNone     = "none"
+	ModelSourceAgent = "agent"
+	ModelSourceCache = "cache"
+	ModelSourceNone  = "none"
 )
 
 // AgentModelsResult.Error is the last failed discovery's error, also when
-// Models holds an older or fallback list.
+// Models holds the last list that worked.
 type AgentModelsResult struct {
 	Models       []AgentModel `json:"models"`
 	DefaultLabel string       `json:"default_label,omitempty"`

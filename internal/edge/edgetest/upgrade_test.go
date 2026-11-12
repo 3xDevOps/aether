@@ -531,7 +531,7 @@ func (q *qualify) edgeFingerprint() string {
 func (q *qualify) claim(c *client, id, code string) {
 	q.t.Helper()
 	res, err := q.h.claim(c, code)
-	if err != nil || res.Config.ServerID != id || res.Info.Member.Role != string(domain.RoleAdmin) {
+	if err != nil || res.Config.ServerID != id || res.Info.Member.Role != string(domain.RoleSuperAdmin) {
 		q.t.Fatalf("%s claims %s: %+v %v", c.user.Login, id, res.Info.Member, err)
 	}
 }
@@ -565,7 +565,7 @@ func (q *qualify) requireData(img edgeImage, clients []*client, servers []*serve
 			ctl, err := q.h.tryControl(c, servers[i])
 			if err == nil {
 				var info protocol.ServerInfoResult
-				if err = ctl.Call(protocol.MethodServerInfo, struct{}{}, &info); err == nil && info.Member.Role != string(domain.RoleAdmin) {
+				if err = ctl.Call(protocol.MethodServerInfo, struct{}{}, &info); err == nil && info.Member.Role != string(domain.RoleSuperAdmin) {
 					err = fmt.Errorf("member %+v", info.Member)
 				}
 			}
@@ -706,7 +706,7 @@ func (q *qualify) previousServer(bin, worktree string, c *client) {
 	}
 	q.claim(c, id, code)
 	ctl := q.h.control(c, &serverNode{id: id})
-	if info := call[protocol.ServerInfoResult](q.t, ctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != string(domain.RoleAdmin) {
+	if info := call[protocol.ServerInfoResult](q.t, ctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != string(domain.RoleSuperAdmin) {
 		q.t.Fatalf("server.info on the previous release's server = %+v", info.Member)
 	}
 	_ = stdin.Close()

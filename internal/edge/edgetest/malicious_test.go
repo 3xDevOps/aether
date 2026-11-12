@@ -139,7 +139,7 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 	}
 	found := call[protocol.MemberDeviceLookupResult](t, ctl, protocol.MethodMemberDeviceLookup,
 		protocol.MemberDeviceLookupParams{Code: a.pendingCode(t, "the attacker's device", r)})
-	if found.MemberID != string(a.memberOf(t, alice).ID) || found.Role != string(domain.RoleAdmin) || found.Device.Account != alice.Login {
+	if found.MemberID != string(a.memberOf(t, alice).ID) || found.Role != string(domain.RoleSuperAdmin) || found.Device.Account != alice.Login {
 		t.Fatalf("lookup of the attacker's code = %+v, want alice's admin member", found)
 	}
 	if got := a.snapshot(t); !sameKeys(got.approvedKeys(), approved) || len(got.admins()) != len(start.admins()) {
@@ -344,7 +344,7 @@ func TestMaliciousEdgeSubstitutesTheClaimingAccount(t *testing.T) {
 			}
 			// Without the substitution the same code claims for alice.
 			h.proxy.setTamper(t, nil)
-			if res, err := h.claim(al, code); err != nil || res.Info.Member.Role != string(domain.RoleAdmin) {
+			if res, err := h.claim(al, code); err != nil || res.Info.Member.Role != string(domain.RoleSuperAdmin) {
 				t.Fatalf("honest claim: %+v %v", res.Info.Member, err)
 			}
 		})
@@ -378,7 +378,7 @@ func TestMaliciousEdgeAccountAccess(t *testing.T) {
 	defer sc.Close() //nolint:errcheck // test client
 	forged := controlOver(t, sc)
 	info := call[protocol.ServerInfoResult](t, forged, protocol.MethodServerInfo, struct{}{})
-	if info.Member.Role != string(domain.RoleAdmin) || info.Member.ID != string(a.memberOf(t, alice).ID) {
+	if info.Member.Role != string(domain.RoleSuperAdmin) || info.Member.ID != string(a.memberOf(t, alice).ID) {
 		t.Fatalf("the forged connection is %+v, want alice's admin member", info.Member)
 	}
 	invite(t, forged, protocol.MemberInvitationCreateParams{Login: mallory.Login, Role: "admin"})

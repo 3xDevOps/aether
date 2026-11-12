@@ -85,6 +85,10 @@ type Docker struct {
 	sysboxMissingAt  time.Time
 	sysboxVeto       func() bool
 
+	cgroupMu         sync.Mutex
+	cgroupKnown      bool
+	cgroupParentName string
+
 	cpuLimits sync.Map // container ID to float64 CPU limit in cores
 	settingUp sync.Map // IDs of containers whose setup script runs
 }
@@ -161,7 +165,12 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 			return "", err
 		}
 	}
+	cgroupParent, err := d.cgroupParent(ctx)
+	if err != nil {
+		return "", err
+	}
 	cfg, hostCfg := d.containerConfig(spec, containerRuntime)
+	hostCfg.CgroupParent = cgroupParent
 	var name string
 	if spec.Name != "" {
 		name = d.namePrefix + spec.Name

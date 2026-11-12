@@ -131,7 +131,7 @@ export function NoteDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const request = useRef(0)
-  const self = useSelf()
+  const self = useSelf(workspaceID)
   const mergedInto = useStore((s) => s.mergedInto)
 
   const read = useCallback(async () => {

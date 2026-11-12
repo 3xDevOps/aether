@@ -184,7 +184,11 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	err = checkRunView(ctx, s.cfg.Store, member, domain.RunID(req.RunID))
+	var run *domain.Run
+	if err == nil {
+		run, err = s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	}
 	if err != nil {
 		e := rpcError(err)
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
@@ -229,6 +233,14 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		}
 	}
 
+	// A viewer only watches; a member who may type wakes a sleeping run.
+	if wantsControl && s.cfg.Runs != nil && checkSteer(ctx, s.cfg.Store, member, run.ID) == nil {
+		if werr := s.cfg.Runs.WakeRun(ctx, run.ID, member); werr != nil {
+			e := rpcError(werr)
+			_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
+			return
+		}
+	}
 	cols, rows, hasPTY := st.geometry()
 	if !hasPTY {
 		cols, rows = req.Cols, req.Rows
@@ -1107,6 +1119,9 @@ func (s *Server) revokeOnControlChange(ctx context.Context, revoke context.Cance
 // counts as a loss.
 func (s *Server) attachRevocation(ctx context.Context, member domain.MemberID, run domain.RunID, readOnly bool) error {
 	if s.checkMember(ctx, member) != nil {
+		return errAttachMembershipRevoked
+	}
+	if run != "" && checkRunView(ctx, s.cfg.Store, member, run) != nil {
 		return errAttachMembershipRevoked
 	}
 	if readOnly {

@@ -13,23 +13,17 @@ import (
 // satisfies it. Writes re-check the member's push permission themselves.
 type MemoryService interface {
 	Add(ctx context.Context, member domain.MemberID, p protocol.MemoryAddParams) (protocol.MemoryAddResult, error)
-	Search(ctx context.Context, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error)
-	Show(ctx context.Context, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error)
-	Brief(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, self domain.RunID) (string, error)
+	Search(ctx context.Context, member domain.MemberID, p protocol.MemorySearchParams) (protocol.MemorySearchResult, error)
+	Show(ctx context.Context, member domain.MemberID, p protocol.MemoryShowParams) (protocol.MemoryShowResult, error)
+	Brief(ctx context.Context, workspace domain.WorkspaceID, member, reader domain.MemberID, self domain.RunID) (string, error)
 	Pin(ctx context.Context, member domain.MemberID, p protocol.MemoryPinParams) (protocol.MemoryPinResult, error)
 	Unpin(ctx context.Context, member domain.MemberID, p protocol.MemoryUnpinParams) (protocol.MemoryUnpinResult, error)
 	Remove(ctx context.Context, member domain.MemberID, p protocol.MemoryRmParams) (protocol.MemoryRmResult, error)
 }
 
 func init() {
-	registerMemory(protocol.MethodMemorySearch, permissions.View,
-		func(m MemoryService, ctx context.Context, _ domain.MemberID, p protocol.MemorySearchParams) (any, error) {
-			return m.Search(ctx, p)
-		})
-	registerMemory(protocol.MethodMemoryShow, permissions.View,
-		func(m MemoryService, ctx context.Context, _ domain.MemberID, p protocol.MemoryShowParams) (any, error) {
-			return m.Show(ctx, p)
-		})
+	registerMemory(protocol.MethodMemorySearch, permissions.View, MemoryService.Search)
+	registerMemory(protocol.MethodMemoryShow, permissions.View, MemoryService.Show)
 	registerMemory(protocol.MethodMemoryAdd, permissions.Push, MemoryService.Add)
 	registerMemory(protocol.MethodMemoryPin, permissions.Push, MemoryService.Pin)
 	registerMemory(protocol.MethodMemoryUnpin, permissions.Push, MemoryService.Unpin)
@@ -64,8 +58,8 @@ func (s *Server) memory(method string) (MemoryService, *protocol.Error) {
 }
 
 // memoryBrief builds the brief a new run of the member would get: the
-// caller's, or for an admin member_id's, since it holds that member's own
-// pins.
+// caller's, or for the workspace's admin member_id's, since it holds that
+// member's own pins. member_id must reach the workspace.
 func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.memory(protocol.MethodMemoryBrief)
 	if perr != nil {
@@ -82,16 +76,18 @@ func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw js
 			return nil, rpcError(err)
 		}
 		if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: domain.WorkspaceID(p.WorkspaceID)}); cerr != nil {
-			return nil, &protocol.Error{Code: protocol.CodeDenied,
-				Message: protocol.MethodMemoryBrief + ": another member's brief: " + cerr.Error()}
+			return nil, checkError(protocol.MethodMemoryBrief+": another member's brief", cerr)
 		}
-		m, err := s.cfg.Store.GetMember(ctx, domain.MemberID(p.MemberID))
+		m, err := s.visibleMember(ctx, caller, domain.MemberID(p.MemberID))
 		if err != nil {
 			return nil, rpcError(err)
 		}
+		if !permissions.ActorOf(m).Reaches(domain.WorkspaceID(p.WorkspaceID)) {
+			return nil, rpcError(permissions.ErrNoAccess)
+		}
 		member = m.ID
 	}
-	text, err := svc.Brief(ctx, domain.WorkspaceID(p.WorkspaceID), member, "")
+	text, err := svc.Brief(ctx, domain.WorkspaceID(p.WorkspaceID), member, caller, "")
 	if err != nil {
 		return nil, rpcError(err)
 	}

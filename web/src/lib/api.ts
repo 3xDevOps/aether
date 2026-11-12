@@ -46,6 +46,7 @@ import type {
   InsightsResult,
   Invitation,
   InvitationResult,
+  WorkspaceAccess,
   LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
@@ -633,6 +634,7 @@ export const api = {
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
+  runWake: (runID: string) => call<unknown>('run.wake', { run_id: runID }),
   /** steer asks an enhanced run's agent to add the message to its running
    * turn; the lease makes delivery immediate instead of moderated. */
   runInject: (
@@ -794,9 +796,10 @@ export const api = {
   /** Admin only. Starts the install in the background; poll sysboxStatus. */
   sysboxInstall: () =>
     call<SysboxStatus>('server.sysbox.install'),
-  memberInvite: (ttlSeconds?: number) =>
+  memberInvite: (ttlSeconds?: number, workspaceIDs?: string[]) =>
     call<{ code: string; expires_at: string }>('member.invite', {
       ttl_seconds: ttlSeconds,
+      workspace_ids: workspaceIDs,
     }),
   memberApprove: (memberID: string) =>
     call<{ member: Member }>('member.approve', { member_id: memberID }).then(
@@ -852,6 +855,7 @@ export const api = {
     login?: string
     email?: string
     role: Member['role']
+    workspace_ids?: string[]
   }) =>
     call<InvitationResult>('member.invitation.create', params),
   memberInvitationRevoke: (invitationID: string) =>
@@ -868,6 +872,14 @@ export const api = {
     call<{ workspaces: Workspace[] }>('workspace.list').then(
       (r) => r.workspaces,
     ),
+  workspaceAccessList: (workspaceID: string) =>
+    call<WorkspaceAccess>('workspace.access.list', { workspace_id: workspaceID }),
+  workspaceAccessGrant: (workspaceID: string, memberIDs: string[]) =>
+    call<unknown>('workspace.access.grant', { workspace_id: workspaceID, member_ids: memberIDs }),
+  workspaceAccessRevoke: (workspaceID: string, memberID: string) =>
+    call<unknown>('workspace.access.revoke', { workspace_id: workspaceID, member_id: memberID }),
+  workspaceOwnerSet: (workspaceID: string, memberID: string) =>
+    call<unknown>('workspace.owner.set', { workspace_id: workspaceID, member_id: memberID }),
   workspaceDelete: (workspaceID: string) =>
     call<{ ok: true }>('workspace.delete', { workspace_id: workspaceID }),
   workspaceSettings: (params: { workspace_id: string; steer_others?: string }) =>

@@ -108,7 +108,12 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 	if err != nil {
 		return fmt.Errorf("store: create session: fallback order: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx,
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: create session: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
@@ -123,6 +128,13 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		r.Limits.CPUs, r.Limits.MemoryBytes, r.Limits.Pids,
 	); err != nil {
 		return fmt.Errorf("store: create session: %w", mapConstraint(err, ErrNotFound))
+	}
+	// Readers judge a run by every workspace it touches, so its extras must exist as soon as it does.
+	if err := upsertRunRepos(ctx, tx, domain.RunID(id), r.Extras); err != nil {
+		return fmt.Errorf("store: create session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: create session: commit: %w", err)
 	}
 	r.ID, r.CreatedAt, r.StatusChangedAt = domain.RunID(id), ts, &ts
 	return nil
@@ -147,7 +159,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt,
 		&r.Review, &reviewChangedAt, &r.ACP,
-		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Effort, &r.Permission, &r.Via,
+		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.RefusedModel, &r.ModelError, &r.Effort, &r.Permission, &r.Via,
 		&r.Children, &r.ChildrenSetBy, &r.Limits.CPUs, &r.Limits.MemoryBytes, &r.Limits.Pids, &r.UnansweredQuestions,
 		&r.UnackedMessages, &oldestUnacked,
 		&r.ParentRunID, &r.RootRunID, &r.ChildPurpose, &r.Detached); err != nil {
@@ -176,7 +188,7 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 	runs.reason, runs.activity, runs.status_seq, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at,
-	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.effort, runs.permission, runs.via,
+	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.refused_model, runs.model_error, runs.effort, runs.permission, runs.via,
 	runs.children, runs.children_set_by,
 	runs.cpu_limit, runs.memory_limit_bytes, runs.pids_limit`
 
@@ -257,7 +269,7 @@ func liveStatusArgs() (string, []any) {
 
 // RunSummary is the slim view of a live run that coordination lists. Task
 // holds at most the requested prefix of the task in bytes; TaskBytes is the
-// full task's length.
+// full task's length. Extras is the workspace of each extra repository.
 type RunSummary struct {
 	ID        domain.RunID
 	MemberID  domain.MemberID
@@ -267,10 +279,11 @@ type RunSummary struct {
 	Protected bool
 	Task      string
 	TaskBytes int
+	Extras    []domain.WorkspaceID
 }
 
 // ListLiveRunSummaries returns the non-terminal runs in workspace, most
-// recently created or status-changed first. It reads only the runs table.
+// recently created or status-changed first.
 func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.WorkspaceID, taskBytes int) ([]*RunSummary, error) {
 	placeholders, statuses := liveStatusArgs()
 	rows, err := d.db.QueryContext(ctx,
@@ -282,10 +295,47 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return nil, fmt.Errorf("store: list live session summaries: %w", err)
 	}
-	return collect(rows, func(row interface{ Scan(...any) error }) (*RunSummary, error) {
+	summaries, err := collect(rows, func(row interface{ Scan(...any) error }) (*RunSummary, error) {
 		var r RunSummary
 		return &r, row.Scan(&r.ID, &r.MemberID, &r.Status, &r.Activity, &r.Reason, &r.Protected, &r.Task, &r.TaskBytes)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if len(summaries) == 0 {
+		return summaries, nil
+	}
+	byID := make(map[domain.RunID]*RunSummary, len(summaries))
+	ids := make([]any, 0, len(summaries))
+	for _, r := range summaries {
+		byID[r.ID] = r
+		ids = append(ids, r.ID)
+	}
+	// By ID, not status: a session that finished after the read above
+	// keeps its extra workspaces, so it is never listed without them.
+	extras, err := d.db.QueryContext(ctx,
+		`SELECT run_id, workspace_id FROM run_repos
+		 WHERE run_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`) ORDER BY run_id, position`, ids...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list live session extra repos: %w", err)
+	}
+	defer extras.Close() //nolint:errcheck // read-only iteration
+	for extras.Next() {
+		var (
+			id domain.RunID
+			ws domain.WorkspaceID
+		)
+		if err := extras.Scan(&id, &ws); err != nil {
+			return nil, fmt.Errorf("store: scan live session extra repo: %w", err)
+		}
+		if r := byID[id]; r != nil {
+			r.Extras = append(r.Extras, ws)
+		}
+	}
+	if err := extras.Err(); err != nil {
+		return nil, fmt.Errorf("store: list live session extra repos: %w", err)
+	}
+	return summaries, nil
 }
 
 // UpdateRun writes a run snapshot back. It never writes home_member_id: the
@@ -659,17 +709,42 @@ func (d *DB) SetRunMode(ctx context.Context, id domain.RunID, mode domain.Launch
 	return err
 }
 
-// SetRunModel updates only the run's agent model.
+// SetRunModel updates only the run's agent model, clearing a refusal.
 func (d *DB) SetRunModel(ctx context.Context, id domain.RunID, model string) error {
 	if err := domain.ValidModel(model); err != nil {
 		return fmt.Errorf("store: set session model: %w", err)
 	}
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE runs SET model = ? WHERE id = ?`, model, id))
+		`UPDATE runs SET model = ?, refused_model = '', model_error = '' WHERE id = ?`, model, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: set session model: %w", err)
 	}
 	return err
+}
+
+// maxModelError bounds the agent's error kept with a refused model.
+const maxModelError = 1024
+
+// RefuseRunModel records that the agent refused model and runs on running,
+// empty for its default, and reports whether it did; a run whose model changed
+// since keeps it.
+func (d *DB) RefuseRunModel(ctx context.Context, id domain.RunID, model, running, reason string) (bool, error) {
+	if err := domain.ValidModel(running); err != nil {
+		return false, fmt.Errorf("store: record the refused session model: %w", err)
+	}
+	if len(reason) > maxModelError {
+		reason = strings.ToValidUTF8(reason[:maxModelError], "")
+	}
+	res, err := d.db.ExecContext(ctx, `UPDATE runs SET model = ?, refused_model = ?, model_error = ? WHERE id = ? AND model = ?`,
+		running, model, reason, id, model)
+	if err != nil {
+		return false, fmt.Errorf("store: record the refused session model: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: record the refused session model: %w", err)
+	}
+	return n > 0, nil
 }
 
 // SetRunEffort updates only the run's effort level.

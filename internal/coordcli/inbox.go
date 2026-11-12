@@ -71,5 +71,5 @@ func ack(ctx context.Context, socket string, args []string) (ackResult, error) {
 		}
 		return ackResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("ack: %s is not the current batch; run inbox to read batch %s", token, next.AckToken)}
 	}
-	return ackResult{Acked: token, Waiting: len(next.Messages)}, nil
+	return ackResult{Acked: token, Waiting: len(next.Messages) + next.More}, nil
 }

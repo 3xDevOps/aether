@@ -743,7 +743,7 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 		if !ack.OK {
 			t.Fatalf("ack = %+v, want ok", ack)
 		}
-		if err := e.store.DeleteMember(context.Background(), cm.ID); err != nil {
+		if err := e.store.DeleteMember(context.Background(), cm.ID, ""); err != nil {
 			t.Fatalf("delete member: %v", err)
 		}
 		c.expectExit(t, protocol.AttachExitMembershipRevoked)
@@ -775,7 +775,7 @@ func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
 		calls[len(calls)-1] != "terminal-tab:"+string(cm.ID)+":main:80:24" {
 		t.Fatalf("RunController calls = %v, want terminal and main tab", calls)
 	}
-	if err := e.store.DeleteMember(context.Background(), cm.ID); err != nil {
+	if err := e.store.DeleteMember(context.Background(), cm.ID, ""); err != nil {
 		t.Fatalf("delete member: %v", err)
 	}
 	c.expectExit(t, protocol.AttachExitMembershipRevoked)
@@ -898,7 +898,7 @@ func TestAttachDropsWriterOnEveryRevocationPath(t *testing.T) {
 		{
 			name: "member removed",
 			revoke: func(t *testing.T, e *testEnv, cody *domain.Member) {
-				if err := e.store.DeleteMember(ctx, cody.ID); err != nil {
+				if err := e.store.DeleteMember(ctx, cody.ID, ""); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -951,7 +951,7 @@ func TestAttachReadOnlySurvivesSteerLossUntilMembershipGoes(t *testing.T) {
 	}
 	c.expectOpen(t, 6*e.srv.cfg.revalidateInterval)
 
-	if err := e.store.DeleteMember(ctx, cm.ID); err != nil {
+	if err := e.store.DeleteMember(ctx, cm.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	c.expectExit(t, protocol.AttachExitMembershipRevoked)
@@ -966,7 +966,7 @@ type removedDuringShareCheck struct {
 
 func (s removedDuringShareCheck) AccountSharedWith(ctx context.Context, owner, grantee domain.MemberID) (bool, error) {
 	if grantee == s.grantee {
-		if err := s.DeleteMember(ctx, grantee); err != nil {
+		if err := s.DeleteMember(ctx, grantee, ""); err != nil {
 			return false, err
 		}
 	}

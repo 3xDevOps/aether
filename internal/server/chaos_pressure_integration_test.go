@@ -420,7 +420,7 @@ func newPressureEnv(ctx context.Context, t *testing.T, cfg Config) *pressureEnv 
 		DisplayName: "Pressure Tester",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(e.signer.PublicKey())),
 		Color:       "#4363d8",
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	if err := e.srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)

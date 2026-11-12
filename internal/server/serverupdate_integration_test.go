@@ -129,7 +129,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 		DisplayName: "Update Admin",
 		PublicKey:   string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
 		Color:       "#e6194b",
-		Role:        domain.RoleAdmin,
+		Role:        domain.RoleSuperAdmin,
 	}
 	ws := &domain.Workspace{
 		Name:        "update",
@@ -415,7 +415,7 @@ func (h *updateHarness) start(t *testing.T, ctx context.Context, ver string) *ru
 			DisplayName: "Update Admin",
 			PublicKey:   string(ssh.MarshalAuthorizedKey(h.signer.PublicKey())),
 			Color:       "#e6194b",
-			Role:        domain.RoleAdmin,
+			Role:        domain.RoleSuperAdmin,
 		}
 		if err := srv.Store().CreateMember(ctx, h.member); err != nil {
 			t.Fatalf("seed member: %v", err)

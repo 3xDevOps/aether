@@ -32,16 +32,17 @@ const (
 // Child states. queued, starting, cancelled and refused come from the
 // reservation; the rest from the started run.
 const (
-	ChildQueued    = "queued"
-	ChildStarting  = "starting"
-	ChildWorking   = "working"
-	ChildWaiting   = "waiting"
-	ChildNeedsYou  = "needs-you"
-	ChildFinished  = "finished"
-	ChildFailed    = "failed"
-	ChildEnded     = "ended"
-	ChildCancelled = "cancelled"
-	ChildRefused   = "refused"
+	ChildQueued       = "queued"
+	ChildStarting     = "starting"
+	ChildWorking      = "working"
+	ChildWaiting      = "waiting"
+	ChildNeedsYou     = "needs-you"
+	ChildDisconnected = "disconnected"
+	ChildFinished     = "finished"
+	ChildFailed       = "failed"
+	ChildEnded        = "ended"
+	ChildCancelled    = "cancelled"
+	ChildRefused      = "refused"
 )
 
 // ChildLimits bound a parent's child runs: MaxLive are busy at once, more
@@ -55,14 +56,19 @@ type ChildChoice struct {
 	AccountMemberID string   `json:"account_member_id"`
 	AccountName     string   `json:"account_name"`
 	Harness         string   `json:"harness"`
+	DisplayName     string   `json:"display_name,omitempty"`
 	Modes           []string `json:"modes"`
 	DefaultMode     string   `json:"default_mode"`
 	// Model is the exact model a choice fixes; empty with Models empty
 	// means any model the agent accepts.
 	Model  string   `json:"model,omitempty"`
 	Models []string `json:"models,omitempty"`
+	// ModelsError is the last failed discovery's error; Models then holds
+	// the last list that worked, or none.
+	ModelsError string `json:"models_error,omitempty"`
 	// Status is "ready", "exhausted" (usage at the fallback threshold),
-	// "not-installed" or "not-signed-in"; Detail is the exact sentence.
+	// "not-installed", "not-signed-in" or "off" (the owner turned it off for
+	// subsessions); Detail is the exact sentence.
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
 }
@@ -92,7 +98,7 @@ type ChildStartParams struct {
 	Harness         string `json:"harness" jsonschema:"agent from aether_subsession_options"`
 	Model           string `json:"model,omitempty" jsonschema:"model id; empty keeps the agent's default"`
 	Mode            string `json:"mode,omitempty" jsonschema:"standard, enhanced or background; empty picks enhanced where installed"`
-	AccountMemberID string `json:"account_member_id,omitempty" jsonschema:"account from aether_subsession_options; empty is the owner's own"`
+	AccountMemberID string `json:"account_member_id,omitempty" jsonschema:"account from aether_subsession_options; empty is the parent's account for the parent's agent, else the owner's own"`
 	Purpose         string `json:"purpose" jsonschema:"3-8 words shown in the dashboard, e.g. adversarial review of auth change"`
 	Task            string `json:"task" jsonschema:"everything the child needs: it sees only this text and your last commit"`
 	IdempotencyKey  string `json:"idempotency_key" jsonschema:"a stable key you choose; a retry with the same key returns the first receipt"`
@@ -121,8 +127,10 @@ type Child struct {
 	Branch          string       `json:"branch,omitempty"`
 	BaseCommit      string       `json:"base_commit,omitempty"`
 	Report          *ChildReport `json:"report,omitempty"`
-	Error           string       `json:"error,omitempty"`
-	CreatedAt       string       `json:"created_at"`
+	// Error is why the child was refused, or why a started child stopped on
+	// an error.
+	Error     string `json:"error,omitempty"`
+	CreatedAt string `json:"created_at"`
 	// CostUSD is nil when the run reported no cost.
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 }
@@ -153,14 +161,30 @@ type ChildFetchResult struct {
 }
 
 // ChildSettings is a member's child-run setting; child runs are on until
-// the member turns them off.
+// the member turns them off. Off lists the agents and accounts subsessions
+// may not use, an entry with no account turning the agent off on every
+// account. Choices is each agent on the member's own account and on every
+// account shared with them, with its login state; ChoicesError says which
+// accounts' agents could not be listed.
 type ChildSettings struct {
-	Enabled bool `json:"enabled"`
+	Enabled      bool                 `json:"enabled"`
+	Off          []ChildChoiceSetting `json:"off"`
+	Choices      []ChildChoice        `json:"choices"`
+	ChoicesError string               `json:"choices_error,omitempty"`
+}
+
+// ChildChoiceSetting turns one agent on or off for subsessions, on one
+// account or, with no account, on every account.
+type ChildChoiceSetting struct {
+	Harness         string `json:"harness"`
+	AccountMemberID string `json:"account_member_id,omitempty"`
+	On              bool   `json:"on,omitempty"`
 }
 
 // ChildSettingsParams: a nil field keeps its value.
 type ChildSettingsParams struct {
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled *bool               `json:"enabled,omitempty"`
+	Choice  *ChildChoiceSetting `json:"choice,omitempty"`
 }
 
 type RunChildrenParams struct {

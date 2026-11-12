@@ -101,7 +101,7 @@ func TestGatewaySignsInClaimsAndLinks(t *testing.T) {
 		Member   protocol.Member `json:"member"`
 	}
 	gatewayCall(t, g, "/local/v1/edge.claim", `{"code":"`+s.claimCode(t, time.Now())+`"}`, &linked)
-	if linked.ServerID != s.id || linked.Edge != h.relayURL || linked.Member.Role != "admin" {
+	if linked.ServerID != s.id || linked.Edge != h.relayURL || linked.Member.Role != "super_admin" {
 		t.Fatalf("edge.claim = %+v", linked)
 	}
 

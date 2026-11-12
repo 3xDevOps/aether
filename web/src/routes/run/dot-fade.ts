@@ -279,9 +279,13 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     }
     const move = (event: PointerEvent) => {
       if (event.pointerType !== 'mouse' && event.pointerId !== activePointerID) return
+      if (!pointer && activePointerID === undefined && event.target instanceof Node && !strip.contains(event.target)) return
       const point = pointOf(event)
       if (!point) {
-        if (event.pointerType === 'mouse' && activePointerID === undefined) pointer = undefined
+        if (event.pointerType === 'mouse' && activePointerID === undefined && pointer) {
+          pointer = undefined
+          schedule()
+        }
         return
       }
       const now = performance.now()
@@ -315,6 +319,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     }
     const down = (event: PointerEvent) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return
+      if (event.target instanceof Node && !strip.contains(event.target)) return
       const point = pointOf(event)
       if (!point) return
       if (event.pointerType !== 'mouse') activePointerID = event.pointerId
@@ -361,6 +366,11 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       }
       pulseAt(pointer ?? current)
     }
+    const blur = (event: FocusEvent) => {
+      if (event.target !== strip) return
+      pointer = undefined
+      schedule()
+    }
     const visibility = () => {
       visible = document.visibilityState !== 'hidden'
       if (visible) schedule()
@@ -385,6 +395,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       }
     })
     strip.addEventListener('keydown', key)
+    strip.addEventListener('blur', blur)
     strip.addEventListener('pointerleave', leave)
     window.addEventListener('pointermove', move, { passive: true })
     window.addEventListener('pointerdown', down, { passive: true })
@@ -402,6 +413,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     }
     return () => {
       strip.removeEventListener('keydown', key)
+      strip.removeEventListener('blur', blur)
       strip.removeEventListener('pointerleave', leave)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerdown', down)

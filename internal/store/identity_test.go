@@ -21,7 +21,7 @@ import (
 // keys on would have emptied.
 func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw := openLegacy(t, path, len(migrations)-1)
+	raw := openLegacy(t, path, 110)
 	key := testKey(t, "")
 	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image, git_name, git_email)
@@ -49,7 +49,7 @@ func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMemberByPublicKey: %v", err)
 	}
-	if m1.ID != "m1" || m1.Role != domain.RoleAdmin || m1.Image != "img:1" || m1.GitEmail != "ada@example.com" {
+	if m1.ID != "m1" || m1.Role != domain.RoleSuperAdmin || m1.Image != "img:1" || m1.GitEmail != "ada@example.com" {
 		t.Fatalf("m1 after migration = %+v", m1)
 	}
 	m2, err := db.GetMemberByTailnetLogin(ctx, "bob@example.com")
@@ -189,6 +189,17 @@ func TestClaimMemberOnlyOnEmptyServer(t *testing.T) {
 	}
 }
 
+// mustCreateSuperAdmin creates a member who may invite with any role.
+func mustCreateSuperAdmin(t *testing.T, db *DB) *domain.Member {
+	t.Helper()
+	m := mustCreateMember(t, db)
+	if _, err := db.SetMemberRole(context.Background(), m.ID, domain.RoleSuperAdmin, ""); err != nil {
+		t.Fatalf("SetMemberRole: %v", err)
+	}
+	m.Role = domain.RoleSuperAdmin
+	return m
+}
+
 func mustInvite(t *testing.T, db *DB, by domain.MemberID, inv domain.Invitation) *domain.Invitation {
 	t.Helper()
 	inv.CreatedBy = by
@@ -205,7 +216,7 @@ func TestAcceptInvitationCreatesOneMemberUnderConcurrency(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
 
 	const racers = 8
@@ -255,7 +266,7 @@ func TestAcceptInvitationRefusesExpired(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Email: "a@example.com", Role: domain.RoleCollaborator,
 		ExpiresAt: time.Now().Add(time.Minute)})
 	_, err := db.AcceptInvitation(ctx, inv.ID,
@@ -272,7 +283,7 @@ func TestAcceptLinkInvitationBindsExistingMember(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "ada", Member: admin.ID})
 	m, err := db.AcceptInvitation(ctx, inv.ID,
 		&domain.Identity{Provider: "github", Subject: "7", Login: "ada"}, edgeMember("ignored"), time.Now())
@@ -287,7 +298,7 @@ func TestAcceptLinkInvitationBindsExistingMember(t *testing.T) {
 // edgeMemberWithIdentity creates a member bound to (github, subject).
 func edgeMemberWithIdentity(t *testing.T, db *DB, subject string) *domain.Member {
 	t.Helper()
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	m, err := db.AcceptInvitation(context.Background(),
 		mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "u" + subject, Role: domain.RoleCollaborator}).ID,
 		&domain.Identity{Provider: "github", Subject: subject, Login: "u" + subject}, edgeMember("u"+subject), time.Now())
@@ -336,7 +347,13 @@ func TestDeviceStatusIsTheCallers(t *testing.T) {
 	if _, err = db.GetDeviceByApprovalCode(ctx, registered.ApprovalCode); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("approval code still resolves after approval: %v", err)
 	}
-	if err = db.RevokeDevice(ctx, pending.ID); err != nil {
+	if err = db.RevokeDevice(ctx, registered.ID, domain.DeviceRegistered); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RevokeDevice of a device approved since it was read as registered = %v, want ErrNotFound", err)
+	}
+	if got, err = db.GetDevice(ctx, registered.ID); err != nil || got.Status != domain.DeviceApproved {
+		t.Fatalf("device after a refused revoke = %+v, %v; want it still approved", got, err)
+	}
+	if err = db.RevokeDevice(ctx, pending.ID, ""); err != nil {
 		t.Fatalf("RevokeDevice: %v", err)
 	}
 	if err = db.ApproveDevice(ctx, pending.ID, m.ID); !errors.Is(err, ErrNotFound) {
@@ -442,7 +459,7 @@ func TestDeleteMemberRemovesIdentitiesDevicesAndInvitations(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	m, err := db.AcceptInvitation(ctx,
 		mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin}).ID,
 		&domain.Identity{Provider: "github", Subject: "42", Login: "octo"}, edgeMember("octo"), time.Now())
@@ -458,7 +475,7 @@ func TestDeleteMemberRemovesIdentitiesDevicesAndInvitations(t *testing.T) {
 	mustInvite(t, db, m.ID, domain.Invitation{Email: "c@example.com", Role: domain.RoleViewer})
 	mustInvite(t, db, admin.ID, domain.Invitation{Email: "m@example.com", Member: m.ID})
 
-	if err := db.DeleteMember(ctx, m.ID); err != nil {
+	if err := db.DeleteMember(ctx, m.ID, ""); err != nil {
 		t.Fatalf("DeleteMember: %v", err)
 	}
 	if _, err := db.GetMemberByIdentity(ctx, "github", "42"); !errors.Is(err, ErrNotFound) {
@@ -486,7 +503,7 @@ func TestInvitationDevices(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	now := time.Now()
 	invitee, forged := invitationDevice(t, inv, "42"), invitationDevice(t, inv, "666")
@@ -556,7 +573,7 @@ func TestApprovalAfterTheDeviceMovedIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db := openTestDB(t)
-	admin := mustCreateMember(t, db)
+	admin := mustCreateSuperAdmin(t, db)
 	shown := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
 	joined := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	now := time.Now()
@@ -632,5 +649,46 @@ func TestUnlinkIdentityRevokesItsDevices(t *testing.T) {
 	}
 	if _, err := db.GetMember(ctx, m.ID); err != nil {
 		t.Fatalf("member after unlink: %v", err)
+	}
+}
+
+// A device approval is decided with the approver's right in the same write:
+// an admin cannot approve the device of a member promoted to super admin
+// since, while a super admin and the machine's administrator still can.
+func TestApproveDeviceChecksTheApproverInTheWrite(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t)
+	m := edgeMemberWithIdentity(t, db, "42")
+	admin := &domain.Member{DisplayName: "Ada", PublicKey: testKey(t, "ada"), Color: "#e6194b", Role: domain.RoleAdmin}
+	super := &domain.Member{DisplayName: "Sam", PublicKey: testKey(t, "sam"), Color: "#3cb44b", Role: domain.RoleSuperAdmin}
+	for _, a := range []*domain.Member{admin, super} {
+		if err := db.CreateMember(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waiting := func() *domain.Device {
+		t.Helper()
+		dev := newDevice(t, m, "42", domain.DeviceRegistered)
+		if err := db.RegisterDevice(ctx, dev); err != nil {
+			t.Fatal(err)
+		}
+		return dev
+	}
+	first := waiting()
+	if _, err := db.SetMemberRole(ctx, m.ID, domain.RoleSuperAdmin, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ApproveDevice(ctx, first.ID, admin.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("an admin approving a super admin's device = %v, want ErrConflict", err)
+	}
+	if err := db.ApproveDevice(ctx, first.ID, super.ID); err != nil {
+		t.Fatalf("a super admin's approval: %v", err)
+	}
+	if err := db.ApproveDevice(ctx, waiting().ID, ""); err != nil {
+		t.Fatalf("the machine's administrator's approval: %v", err)
+	}
+	if err := db.ApproveDevice(ctx, "dev-missing", admin.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("approving a missing device = %v, want ErrNotFound", err)
 	}
 }

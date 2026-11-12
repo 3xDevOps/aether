@@ -180,6 +180,12 @@ const captureWords: Record<string, string> = {
   report: "Saved evidence for the agent's report",
 }
 
+const memberAccessWords: Record<string, string> = {
+  granted: 'You were granted a workspace',
+  revoked: 'Your access to a workspace was revoked',
+  owner: 'You became a workspace owner',
+}
+
 const deviceWords: Record<string, string> = {
   pending: 'A device is waiting for approval',
   registered: 'A device signed in for the first time',
@@ -250,6 +256,8 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     : "The agent's questions were answered",
   'run.deleted': () => 'Session deleted',
   'workspace.deleted': () => 'Workspace deleted',
+  'workspace.access': () => 'Workspace access changed',
+  'member.access': (p) => memberAccessWords[text(p.action)] ?? 'Your workspace access changed',
   'run.children': (p, e) => {
     if (p.detached) return 'Detached from its parent session'
     if (p.children === 'on') return <><Who id={e.actor_id} /> allowed subsessions for this session</>
@@ -265,8 +273,9 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.mode': (p) => modeLine(p),
   'run.account': (p) => <>Moved from <AccountOf id={p.previous_account_member_id} /> to <AccountOf id={p.account_member_id} /></>,
   'run.usage_limit': (p) => (text(p.message) ? `Usage limit reached: ${bounded(p.message, 160)}` : 'Usage limit reached'),
-  'run.model': (p) => <>Model set to <Quote>{bounded(p.model, 160)}</Quote></>,
+  'run.model': (p) => (text(p.model) ? <>Model set to <Quote>{bounded(p.model, 160)}</Quote></> : "Model refused, so the agent's default runs"),
   'run.effort': (p) => <>Effort set to <Quote>{bounded(p.effort, 160)}</Quote></>,
+  'run.sleep': (p) => p.waking ? 'Waking' : p.wake_error ? <>Wake failed: {bounded(p.wake_error, 160)}</> : p.asleep_since ? 'Fell asleep: its container stopped' : 'Woke',
   'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the session' : 'restored the session'}</>,
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished session</>,
   'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished session</>,

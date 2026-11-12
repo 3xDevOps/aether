@@ -31,6 +31,27 @@ func TestPrintAgents(t *testing.T) {
 	}
 }
 
+func TestPrintAgentsNamesASignedOutLoginAndTheWayBackIn(t *testing.T) {
+	found := true
+	var b strings.Builder
+	err := printAgents(&b, []protocol.AgentInfo{
+		{Name: "claude", Source: "shipped", Installed: true, Enhanced: "adapter", EnhancedInstalled: true, LoginFound: &found,
+			LoginProblem: "~/.claude/.credentials.json: Claude OAuth access token is missing or invalid", LoginCommand: "claude auth login", LoginKind: "interactive"},
+		{Name: "codex", Source: "shipped", Installed: true, Enhanced: "adapter", LoginFound: &found},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "AGENT   SOURCE   INSTALLED  ENHANCED       LOGIN FILE\n" +
+		"claude  shipped  yes        installed      signed out\n" +
+		"codex   shipped  yes        not installed  found\n" +
+		"claude is signed out: ~/.claude/.credentials.json: Claude OAuth access token is missing or invalid\n" +
+		"  sign in again: a human runs in a terminal: aether agent login claude\n"
+	if b.String() != want {
+		t.Fatalf("output =\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
 // loginTab stands in for a terminal tab: it records what is typed and
 // answers with what a PTY sends back.
 type loginTab struct {
@@ -239,5 +260,47 @@ func TestTerminalGuidanceErrorKeepsTheCause(t *testing.T) {
 	err := terminalGuidanceError("open the environment terminal", cause, "npm install codex")
 	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "image pull failed") || !strings.Contains(err.Error(), "aether terminal") || !strings.Contains(err.Error(), "npm install codex") {
 		t.Fatalf("err = %v, want the cause and the guidance", err)
+	}
+}
+
+func TestAgentModelsPrintsTheListAndTheError(t *testing.T) {
+	result := protocol.AgentModelsResult{
+		Models: []protocol.AgentModel{
+			{ID: "fable", Name: "Fable 5.2", Description: "For your toughest challenges"},
+			{ID: "claude-fable-5-1", Name: "Fable 5.1"},
+		},
+		DefaultLabel: "Fable 5.2", Source: protocol.ModelSourceAgent, FetchedAt: "2026-11-10T07:06:00Z",
+		Error: "claude models: run in the environment terminal: context deadline exceeded",
+	}
+	var out, errOut strings.Builder
+	if err := printModels(&out, &errOut, "claude", result); err != nil {
+		t.Fatal(err)
+	}
+	want := "claude models (agent, listed 2026-11-10T07:06:00Z)\n" +
+		"without --model: Fable 5.2\n" +
+		"MODEL             NAME       DESCRIPTION\n" +
+		"fable             Fable 5.2  For your toughest challenges\n" +
+		"claude-fable-5-1  Fable 5.1  \n"
+	if out.String() != want {
+		t.Fatalf("output =\n%q\nwant\n%q", out.String(), want)
+	}
+	if errOut.String() != "could not list claude's models: claude models: run in the environment terminal: context deadline exceeded\n" {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+
+	out.Reset()
+	if err := printModels(&out, io.Discard, "claude", protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Error: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "claude listed no models; --model passes any id to it as is\n" {
+		t.Fatalf("no models = %q", out.String())
+	}
+}
+
+func TestAgentModelsUsage(t *testing.T) {
+	for _, args := range [][]string{nil, {"--refresh"}, {"claude", "extra"}} {
+		if err := agentModels(args); err == nil || !strings.Contains(err.Error(), "usage: aether agent models") {
+			t.Fatalf("agentModels(%q) = %v, want the usage", args, err)
+		}
 	}
 }

@@ -38,15 +38,16 @@ import { registerRoute } from '@/routes/registry'
 import { choicePlan } from '@/routes/run/request-options'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
 import { useStore } from '@/store'
+import type { RunRecord } from '@/store/runs'
 import { stateContextOf } from '@/store/selectors'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 const tones: Partial<Record<AttentionItem['kind'], Tone>> = { failed: 'failed', disconnected: 'disconnected', ready: 'review' }
 
-function useOpen(item: AttentionItem) {
+function useOpen(item: AttentionItem, run: RunRecord | undefined) {
   const navigate = useStore((s) => s.navigate)
   return () => {
-    const route = targetRoute({ id: item.run_id }, needsYouConditions.find((c) => c.id === item.kind)?.target)
+    const route = targetRoute(run ?? { id: item.run_id }, needsYouConditions.find((c) => c.id === item.kind)?.target)
     navigate(route.name, route.params, { remember: false })
   }
 }
@@ -91,7 +92,7 @@ function Decision({ item, onError }: { item: AttentionItem; onError: (error?: st
   // The permission's preview is in the session view, whatever tab the session last showed.
   const review = () => {
     const route = runRoute(item.run_id, 'session')
-    navigate(route.name, route.params)
+    navigate(route.name, route.params, { remember: false })
   }
   const decide = async (approve: boolean) => {
     onError(undefined)
@@ -252,8 +253,9 @@ function inline(item: AttentionItem, replies: boolean) {
 }
 
 function AttentionCard({ item }: { item: AttentionItem }) {
-  const open = useOpen(item)
+  const navigate = useStore((s) => s.navigate)
   const run = useStore((s) => s.runs[item.run_id])
+  const openAction = useOpen(item, run)
   const [error, setError] = useState<string>()
   const condition = needsYouConditions.find((c) => c.id === item.kind)
   const action = run && condition?.action(run)
@@ -274,7 +276,7 @@ function AttentionCard({ item }: { item: AttentionItem }) {
         tone={tones[item.kind] ?? 'needs-you'}
         avatar={<IconTile aria-hidden><AgentGlyph agent={item.harness} className="size-4" /></IconTile>}
         title={(
-          <Button variant="quiet" onClick={open} className="text-left font-medium whitespace-normal text-text">
+          <Button variant="quiet" onClick={() => navigate('run', { runId: item.run_id })} className="text-left font-medium whitespace-normal text-text">
             <span className="line-clamp-2">{item.title}</span>
           </Button>
         )}
@@ -292,7 +294,7 @@ function AttentionCard({ item }: { item: AttentionItem }) {
             {holder && answers && <p className="text-ui-sm text-muted">{holderName} controls this session, so the request is theirs to answer.</p>}
             {Inline ? <Inline key={item.request?.id ?? item.message?.id ?? item.kind} item={item} onError={setError} /> : (
               <RequestActions>
-                <RequestAction label={action && action.kind === 'open' ? action.label : 'Open'} onClick={open} />
+                <RequestAction label={action && action.kind === 'open' ? action.label : 'Open'} onClick={openAction} />
               </RequestActions>
             )}
             {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
@@ -304,13 +306,13 @@ function AttentionCard({ item }: { item: AttentionItem }) {
 }
 
 function FinishedRow({ item }: { item: AttentionItem }) {
-  const open = useOpen(item)
+  const navigate = useStore((s) => s.navigate)
   return (
     <li>
       <ListRow
         leading={<StatusDot tone="review" />}
         trailing={item.since && <RelativeTime at={item.since} compact className="text-ui-sm text-muted" />}
-        onClick={open}
+        onClick={() => navigate('run', { runId: item.run_id })}
       >
         {item.title}
       </ListRow>

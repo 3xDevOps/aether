@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import { deliveryLabel } from '@/components/palette/inject-dialog'
@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { needsYouConditions, openAction, type NeedsYouTarget, type PrimaryAction } from '@/lib/needs-you'
 import type { BoardCard } from '@/routes/board/selectors'
-import { runRoute, type RunView } from '@/routes/run/views'
+import { defaultView, runRoute, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 import type { UiSlice, Route } from '@/store/ui'
@@ -49,8 +49,10 @@ let sends = 0
 
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
 
-export function targetRoute(run: Pick<RunRecord, 'id'>, target: NeedsYouTarget | undefined): Route {
-  return runRoute(run.id, target && targetView[target])
+// The view that shows a request depends on the run's mode, unknown until its record loads.
+export function targetRoute(run: Pick<RunRecord, 'id'> | RunRecord, target: NeedsYouTarget | undefined): Route {
+  const view = target === 'request' ? ('mode' in run ? defaultView(run) : undefined) : target && targetView[target]
+  return runRoute(run.id, view)
 }
 
 export function openCard(card: BoardCard, navigate: UiSlice['navigate']) {
@@ -95,15 +97,24 @@ export function ReplyComposer({
   onDone: () => void
   returnFocus: () => void
 }) {
-  const text = useReply((s) => s.reply?.text ?? '')
-  const sending = useReply((s) => Boolean(s.reply?.sending))
-  const error = useReply((s) => s.reply?.error)
+  const runId = card.run.id
+  // A board card claims the reply as it opens; a composer opened anywhere else, such as Lanes or Map, claims it here
+  // and lets it go on close, or the board card for that session would open its own.
+  useLayoutEffect(() => {
+    if (useReply.getState().reply?.runId === runId) return
+    setReplying(runId, true)
+    return () => setReplying(runId, false)
+  }, [runId])
+  const reply = useReply((s) => (s.reply?.runId === runId ? s.reply : null))
+  const text = reply?.text ?? ''
+  const sending = Boolean(reply?.sending)
+  const error = reply?.error
   const leftOutside = useRef(false)
 
   const send = async () => {
     const reply = useReply.getState().reply
     const payload = reply?.text.trim()
-    if (!reply || !payload || reply.sending) return
+    if (!reply || reply.runId !== runId || !payload || reply.sending) return
     const request = reply.request?.payload === payload ? reply.request : { payload, key: crypto.randomUUID() }
     const attempt = ++sends
     saveReply({ request, sending: attempt, error: undefined })
@@ -115,7 +126,9 @@ export function ReplyComposer({
       const label = `Message ${deliveryLabel(result).toLowerCase()}`
       if (state === 'not_sent' || state === 'uncertain') toast.error(label)
       else toast.success(label)
-      if (current()) onDone()
+      if (!current()) return
+      setReplying(runId, false)
+      onDone()
     } catch (err) {
       if (current()) saveReply({ sending: undefined, error: `Send failed: ${message(err)}` })
     }
@@ -146,7 +159,11 @@ export function ReplyComposer({
           aria-label="Message to the agent"
           placeholder="Message to the agent"
           value={text}
-          onChange={(event) => saveReply({ text: event.target.value })}
+          onChange={(event) => {
+            // An identity change clears the store under an open composer; typing claims it again.
+            if (useReply.getState().reply?.runId !== runId) setReplying(runId, true)
+            saveReply({ text: event.target.value })
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               event.preventDefault()

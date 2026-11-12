@@ -69,8 +69,19 @@ first prompt. An agent with no ACP command is refused:
 scheduler: harness "custom" has no command for mode "acp"
 ```
 
-`--model` is set after the session opens. If the agent rejects it, the Session
-view shows a **Model not set** error notice with the agent's error. A model you
+`--model` is set after the session opens, so the launch itself still
+succeeds. If the agent rejects it, the session runs on the agent's default
+model, or the one it already had, and says so: the session's `model` becomes
+that one, `refused_model` names the refused one, `model_error` holds the
+reason, and the Session view shows a **Model not set** error notice, such
+as `The agent refused "claude-fable-5-2", so the session runs on the agent's
+default model: ... Invalid value for config option model: claude-fable-5-2`
+from a Claude Code that predates the model. A Background session driven over
+ACP ends instead, with `model not set: <the agent's error>`. Standard
+sessions, and Claude Code's Background sessions, pass the model to the CLI,
+which fails the turn with its own error, for example `Claude Code 2.1.287
+does not support this model; version 2.1.290 or newer is required. Run
+'claude update'`. A model you
 pick later from the composer menu becomes the session's recorded model and survives a
 reopen, a server restart and a switch to Standard. A model id Aether cannot
 store (whitespace, a leading `-`, or over 128 bytes) shows a **Model not
@@ -161,11 +172,22 @@ the image before sending.
 
 ## Permissions and input
 
-A new session starts in the agent's no-prompt setting, so a request arrives only
-after you switch to a mode that asks, or from an agent whose own configuration
-still asks. Each request marks the session **Needs you** and docks above the
+A new session starts in the agent's no-prompt setting, so a request arrives
+after you switch to a mode that asks, from an agent whose own configuration
+still asks, or for a check the agent never skips. Claude Code in
+`bypassPermissions` still asks for an explicit `ask` rule in its settings, a
+tool that needs a person, and its own safety checks, at every
+[permission tier](security.md#permission-tiers). Answer here, with `aether
+answer`, or with a connector's `aether_decide_approval`. Each request marks the session **Needs you** and docks above the
 composer, one at a time (`1 of N`). The composer stays shut until you answer.
 **Interrupt** stops the turn and cancels the request instead.
+
+If the agent refuses its no-prompt mode, the Chat view shows a **Mode not
+set** error notice, such as `The agent refused mode "bypassPermissions", so
+the session runs in "default": ... Mode bypassPermissions is not available in
+this session`, and the agent asks as that mode does. Claude Code's adapter
+refuses `bypassPermissions` when its settings or managed policy set
+`permissions.disableBypassPermissionsMode` to `"disable"`.
 
 - The card names what the agent wants ("Claude Code wants to run a command")
   and shows the command, or the files it changes with their diffs.
@@ -225,6 +247,10 @@ on its own, the Chat view shows it as an autonomous turn. The session reason rea
 `working in background: <n> tasks`, or `waiting-agents` or `waiting-tools`
 between turns.
 
+- Claude Code runs the main agent's `Agent` calls in the background: the call
+  returns at once and its subagent's card follows the task until it reports. A
+  reload reads up to 5,000 earlier items to keep the card of a subagent that
+  still runs; past that, scroll up to load its launch.
 - A shell such as a dev server does not hold the session, because it may never end.
 - Stop cancels an autonomous turn and parks the session with `turn cancelled`. The
   tasks keep running in Claude Code.
@@ -349,14 +375,33 @@ adapter and the session parks with
 `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`.
 
 If the agent refuses a turn with `Authentication required`, Aether shows
-**Agent signed out**, restarts the adapter in the same container so it reads the
-account's login again, and restores the conversation. Send the refused message
-again; agent mail is offered again by itself. A session whose agent reported an
-outcome that is still waiting for its turn to end is not restarted. If the
-restarted agent refuses again within 5 minutes, the session parks with
-`enhanced turn failed: ... Authentication required ...; restarting the agent did not restore its sign-in, ...: start a new session`.
-That container's copy of the login is stale or unreadable; a new session's
-container mounts the current one.
+**Sign-in refused**, or **Agent signed out** when the login file cannot sign
+the agent in, restarts the adapter in the same container so it reads the
+account's login again, and restores the conversation. Agent mail is offered
+again by itself. A session whose agent reported an outcome that is still
+waiting for its turn to end is not restarted. The session parks with the
+agent's error followed by what to do, one of:
+
+```text
+enhanced turn failed: ... Authentication required ...; Ada's Claude Code login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login claude
+enhanced turn failed: ... Authentication required ...; Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: dashboard Agents page, or aether agent login claude
+enhanced turn failed: ... Authentication required ...; a restart did not help. Start a new session, or if Ada's Claude Code login is signed out, sign in: dashboard Agents page, or aether agent login claude
+```
+
+The first is a login file that cannot sign the agent in; the notice quotes
+what it lacks. The second is a refusal the file does not explain, which a
+restart fixes when only the agent's copy of the login was stale. The third is
+a second refusal within 5 minutes: either this container's copy of the login
+is stale, which a new session's container does not share, or the login is
+signed out. The owner named is the owner of the account the session runs on.
+A refusal after the login file changed restarts the agent once more inside
+those 5 minutes, so a message sent after signing in reaches an agent that has
+read the new login. A session Aether does not restart the agent of (a
+Background one, or one whose agent reported an outcome) ends its reason with
+`<owner>'s <agent> login may be signed out. Sign in: ...`, and so does a
+session whose agent refuses to open its conversation. See
+[harnesses.md](harnesses.md#when-a-login-is-signed-out) for where else a
+signed-out login shows.
 
 Each time it starts or restarts an adapter, Aether checks that your home still
 belongs to the session's user with owner `rwx`. A root command in any of your

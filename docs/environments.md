@@ -106,8 +106,13 @@ pushed to a registry.
 
 - New sessions, workspace shells and the next environment open use the saved image.
   Running containers keep theirs.
-- Each save replaces the previous one. To fix a bad save, repair it and save
-  again, or reset.
+- Each save replaces the previous one as your saved image. The new image
+  records a previous image: the saved image your environment was created
+  from, or, when it runs the standard image, the image new sessions started
+  from until then. Aether keeps that one on the server and removes older
+  ones. To fix a bad save, repair it and save again, or reset.
+- Every save is checked before it becomes your saved image
+  ([Saved image checks](#saved-image-checks)).
 - Saving needs a running terminal. If it is stopped, `aether env save` fails
   with `environment terminal is not running`. Open it with `aether terminal`,
   check your changes are there, then save.
@@ -128,11 +133,70 @@ pushed to a registry.
   session of yours holds your home as uid `1000`, since both cannot write it
   under different users. Save first to keep unsaved changes.
 
+### Saved image checks
+
+After the commit, Aether reads every file of the new image. An owner uid or
+gid above 65535 has no owner inside a container, and under Sysbox no
+container starts from such an image. If any file has one, the save fails,
+for example:
+
+```
+scheduler: save environment: nothing was saved, because the committed image would not start: 3 paths are owned by a uid or gid above 65535, which no container can map (3 owned by 231072:231072; for example /etc, /etc/passwd, /usr). Your environment and its unsaved changes are kept, and new sessions still start from your saved image <tag>. Run aether env save again; if it fails the same way, see "Saved image checks" in docs/environments.md
+```
+
+The rejected image is removed. Your saved image does not change, and your
+environment keeps running with its unsaved changes. Such owners are host
+uids, not ones a container sets: in this example `231072` is the host uid
+Sysbox maps container root to. If saving again fails the same way, report it to
+an admin. On the server host they can list such paths in any image, such as
+a saved image from before these checks:
+
+```sh
+c=$(docker create <tag> true)
+docker export "$c" | tar tvf - --numeric-owner | awk '{split($2,a,"/"); if (a[1]>65535||a[2]>65535) print}'
+docker rm "$c"
+```
+
+The check reads the whole image, so a large environment takes longer to
+save, up to 10 minutes before the check gives up. Your environment keeps
+running meanwhile, and sessions can launch. If the check itself fails, the
+save fails with `could not be checked` and the check's error, and nothing
+changes.
+
+On a host where every commit captures such owners, every save fails this
+way: the check stops a broken image from replacing your working one, but it
+does not fix the host.
+
+### When a saved image cannot start
+
+An image saved before these checks may still hold such owners. A container
+from it then fails to start with `value too large for defined data type`, or
+with a `mkdirall` `permission denied` on one of the image's own directories.
+Aether then starts that session, or your environment terminal, from your
+previous image, or from the standard image when there is none or it fails
+the same way. A session's status names the images that failed; the
+terminal shows nothing, and only the server log records its fallback:
+
+```
+Saved image <name> cannot start (value too large for defined data type); this session uses your previous saved image <name>. Save your environment again to replace it.
+```
+
+Open your environment, which now runs the same fallback image, and save it
+again. Aether skips a failed image only after another image started, and
+remembers it until the server restarts. When the standard image fails the
+same way, the image was not the cause: the launch fails with the runtime's
+own error and Aether forgets the failed images. A `permission denied` under
+a directory mounted into the container, such as your home, is never blamed
+on the image.
+
+The status shows from the session's start until the agent reports its own
+state.
+
 ## Reset to standard
 
 Open **Environment actions**, then **Reset to standard…** (offered once you
 have saved an image), or run `aether env reset`. Reset destroys the container,
-forgets your saved image and removes it from the server. Files outside your
+forgets your saved image and removes it and your previous image from the server. Files outside your
 home are lost. The next open and all new sessions use the standard image.
 
 On a terminal the command asks
@@ -240,19 +304,26 @@ support for CPU quotas, memory and swap limits, and PID limits, or new
 containers are refused.
 
 Before it creates a session, environment, browser or agent-updater container,
-Aether checks that the host has free disk and memory. Otherwise the launch
-fails with `scheduler: insufficient disk headroom`, `scheduler: insufficient
-host memory headroom` or `scheduler: host capacity unavailable`. Aether never
-stops a running agent to make room, and reopening a retained session needs no
-check. [Recover from disk pressure](failure-handling.md#recover-from-disk-pressure)
-has the thresholds and what to do.
+Aether checks that the host has free disk and memory, and that the server is
+not stalling on memory (its cgroup's `memory.pressure`, `some avg60` below
+10%). Otherwise the launch fails with `scheduler: insufficient disk headroom`,
+`scheduler: insufficient host memory headroom` or `scheduler: host capacity
+unavailable`. Aether never stops a running agent to make room, and reopening a
+retained session needs no check. [Recover from disk
+pressure](failure-handling.md#recover-from-disk-pressure) and [Recover from
+memory pressure](failure-handling.md#recover-from-memory-pressure) have the
+thresholds and what to do.
 
 ## After a session closes
 
 Reporting success or failure leaves an interactive session open for follow-up, and
-quiet sessions do not expire. **Close** keeps the session's container for seven days
+quiet sessions do not expire; an idle Enhanced Claude Code session sleeps
+instead ([Idle sleep](failure-handling.md#idle-sleep)). **Close** keeps the session's container for seven days
 (`--run-container-ttl`) so you can **Relaunch** it, unless disk runs low first. The seven days pause
-while the session is relaunched and start over at its next close.
+while the session is relaunched and start over at its next close. Close
+removes the session's browser companion, the Chromium container behind its
+Browser tab; a relaunched session creates a new companion when its Browser
+tab is next used.
 [What stays after a session ends](failure-handling.md#what-stays-after-a-session-ends)
 covers Close, Kill, **Free container…** and Delete.
 
@@ -264,8 +335,9 @@ before the agent, **variables** set in the session's container, and optional
 **egress control**, which limits the hosts sessions can reach. A variable can be
 marked **secret**.
 
-An admin edits both under **Environment** on the workspace's Repository page
-(workspace switcher → **Environment**), or with `aether workspace env`. Every
+An admin edits both under **Environment** on the workspace's settings page
+(workspace switcher → **Workspace settings**, or the workspace's **Settings**
+in **Manage workspaces**), or with `aether workspace env`. Every
 member can read the script, the variable names and the non-secret values.
 
 A change applies to sessions launched afterwards. An existing container keeps its

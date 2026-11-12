@@ -1416,7 +1416,7 @@ describe('onboarding wizard', () => {
     })
     seed({ onboardingFirstRun: { harness: 'claude', task: 'Inspect the repository' } })
     render(<FirstRunStep client={client} workspace={workspace} onBackToAgent={vi.fn()} onBackToRepository={vi.fn()} />)
-    await screen.findByText(/Review source mirror → Adopt candidate under Advanced on the Repository page/)
+    await screen.findByText(/Review source mirror → Adopt candidate under Advanced on the workspace settings page/)
   })
 
   it('keeps collaborator launch disabled while source status is pending or fails, then allows a confirmed local-only source', async () => {

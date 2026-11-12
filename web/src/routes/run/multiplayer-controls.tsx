@@ -60,7 +60,7 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   agent: AgentTerminal
   onPeople: () => void
 }) {
-  const self = useSelf()
+  const self = useSelf(run.workspace_id)
   const keyboardHelpID = useId()
   const strip = useRef<HTMLDivElement>(null)
   useDotFade(strip)

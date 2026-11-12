@@ -62,8 +62,11 @@ func (r *e2eRuns) answers() []string {
 	return slices.Clone(r.answered)
 }
 
-func (*e2eRuns) Paused(domain.RunID) bool                 { return false }
-func (*e2eRuns) Switching(domain.RunID) domain.LaunchMode { return "" }
+func (*e2eRuns) Paused(domain.RunID) bool                                     { return false }
+func (*e2eRuns) Sleep(domain.RunID) scheduler.SleepState                      { return scheduler.SleepState{} }
+func (*e2eRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (*e2eRuns) SettleSleep(context.Context, domain.RunID) error              { return nil }
+func (*e2eRuns) Switching(domain.RunID) domain.LaunchMode                     { return "" }
 func (*e2eRuns) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil
 }
@@ -99,6 +102,9 @@ type (
 func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
+	if err := h.db.GrantWorkspace(ctx, h.ws.ID, h.ada.ID, ""); err != nil {
+		t.Fatalf("GrantWorkspace: %v", err)
+	}
 	bus, err := events.NewInProc(ctx, nil)
 	if err != nil {
 		t.Fatalf("bus: %v", err)

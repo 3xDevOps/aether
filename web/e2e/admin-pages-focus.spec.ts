@@ -9,7 +9,7 @@ async function openFromPalette(page: Page, label: string) {
   await dialog.getByRole('option', { name: label, exact: true }).click()
 }
 
-test('keyboard focus survives the members tabs, the invite dialog and the workspace row menu', async ({ page, aether }) => {
+test('keyboard focus survives the members tabs, the invite dialog and the workspace row buttons', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('project'))
   await page.goto(alice.url)
@@ -32,16 +32,20 @@ test('keyboard focus survives the members tabs, the invite dialog and the worksp
   await openFromPalette(page, 'Manage workspaces')
   await page.getByRole('button', { name: 'Open project' }).focus()
   await page.keyboard.press('Tab')
-  const more = page.getByRole('button', { name: 'More actions for project' })
-  await expect(more).toBeFocused()
+  const access = page.getByRole('button', { name: 'Access to project' })
+  await expect(access).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('menu')).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Access to project' })).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(more).toBeFocused()
+  await expect(access).toBeFocused()
+  await page.keyboard.press('Tab')
+  const settings = page.getByRole('button', { name: 'Settings for project' })
+  await expect(settings).toBeFocused()
 
-  await page.keyboard.press('Enter')
-  await page.getByRole('menuitem', { name: 'Delete…' }).click()
+  await settings.click()
+  const remove = page.getByRole('region', { name: 'Danger zone' }).getByRole('button', { name: 'Delete…' })
+  await remove.click()
   await expect(page.getByRole('alertdialog', { name: 'Delete project?' })).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(more).toBeFocused()
+  await expect(remove).toBeFocused()
 })

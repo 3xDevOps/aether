@@ -148,12 +148,12 @@ func TestBehindNginx(t *testing.T) {
 	al := h.login(alice)[0]
 	h.claimServer(al, s)
 	ctl := h.control(al, s)
-	if info := call[protocol.ServerInfoResult](t, ctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "admin" {
+	if info := call[protocol.ServerInfoResult](t, ctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "super_admin" {
 		t.Fatalf("server.info through nginx = %+v", info.Member)
 	}
 	t.Logf("holding the relayed control channel silent for %s", nginxIdle)
 	time.Sleep(nginxIdle)
-	if info := call[protocol.ServerInfoResult](t, ctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "admin" {
+	if info := call[protocol.ServerInfoResult](t, ctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "super_admin" {
 		t.Fatalf("server.info after %s of silence = %+v", nginxIdle, info.Member)
 	}
 

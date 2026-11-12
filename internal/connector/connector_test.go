@@ -30,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -173,7 +174,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	}
 
 	third := e.connect(t, allScopes...)
-	if err := e.db.RevokeDevice(ctx, e.deviceID); err != nil {
+	if err := e.db.RevokeDevice(ctx, e.deviceID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if status, _, body := e.bearer(third.token.AccessToken); status != http.StatusUnauthorized || !strings.Contains(body, "revoked") {
@@ -267,6 +268,9 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 		Role: domain.RoleCollaborator}
 	for _, m := range []*domain.Member{grace, bo} {
 		if err := e.db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.db.GrantWorkspace(ctx, e.ws.ID, m.ID, domain.MemberID(info.Member.ID)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -620,7 +624,7 @@ func newEnv(t *testing.T) *env {
 	if err = db.RegisterDevice(ctx, dev); err != nil {
 		t.Fatal(err)
 	}
-	ws := &domain.Workspace{Name: "proj", BaseBranch: "main"}
+	ws := &domain.Workspace{Name: "proj", BaseBranch: "main", OwnerID: member.ID}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatal(err)
 	}
@@ -1003,11 +1007,17 @@ func (f *fakeRuns) launches() []string {
 	return slices.Clone(f.launched)
 }
 
-func (*fakeRuns) Paused(domain.RunID) bool { return false }
+func (*fakeRuns) Paused(domain.RunID) bool                                     { return false }
+func (*fakeRuns) Sleep(domain.RunID) scheduler.SleepState                      { return scheduler.SleepState{} }
+func (*fakeRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (*fakeRuns) SettleSleep(context.Context, domain.RunID) error              { return nil }
 func (*fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
 }
-func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
+func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
+func (*fakeRuns) LoginProblem(domain.MemberID, string, harness.Profile) (string, bool, error) {
+	return "", false, nil
+}
 func (*fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
 func (*fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 func (*fakeRuns) Liveness(domain.RunID) (domain.RunLiveness, bool) {

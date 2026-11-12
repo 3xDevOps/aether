@@ -22,6 +22,26 @@ type LogResult = protocol.RunGitLogResult
 
 const logFormat = "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%P%x1f%s"
 
+// upstreamBase resolves a run's base commit: origin/<baseBranch> when that ref
+// exists, else forkPoint. ref is empty when the fork point is used.
+func (s *Service) upstreamBase(ctx context.Context, run Execution, baseBranch, forkPoint string) (ref, oid string, err error) {
+	if baseBranch != "" {
+		if err = s.branch(ctx, run, baseBranch); err != nil {
+			return "", "", err
+		}
+		out, err := s.git(ctx, run, false, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+baseBranch+"^{commit}")
+		if err == nil {
+			return "origin/" + baseBranch, strings.TrimSpace(out.Stdout), nil
+		} else if !exitedOne(out, err) {
+			return "", "", err
+		}
+	}
+	if !validOID(forkPoint) {
+		return "", "", errors.New("runrepo: session has no upstream base: origin/" + baseBranch + " is missing and no fork point is recorded")
+	}
+	return "", forkPoint, nil
+}
+
 // Log reads the run branch against its upstream base: the commits on each
 // side of their merge base and the paths a merge of the two would conflict
 // on. merge-tree writes only unreferenced objects; refs, index and worktree
@@ -47,22 +67,9 @@ func (s *Service) Log(ctx context.Context, run Execution, req LogRequest) (LogRe
 	} else if !exitedOne(out, err) {
 		return result, err
 	}
-	if req.BaseBranch != "" {
-		if err = s.branch(ctx, run, req.BaseBranch); err != nil {
-			return result, err
-		}
-		out, err = s.git(ctx, run, false, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+req.BaseBranch+"^{commit}")
-		if err == nil {
-			result.BaseRef, result.Base = "origin/"+req.BaseBranch, strings.TrimSpace(out.Stdout)
-		} else if !exitedOne(out, err) {
-			return result, err
-		}
-	}
-	if result.Base == "" {
-		if !validOID(req.ForkPoint) {
-			return result, errors.New("runrepo: session has no upstream base: origin/" + req.BaseBranch + " is missing and no fork point is recorded")
-		}
-		result.Base = req.ForkPoint
+	result.BaseRef, result.Base, err = s.upstreamBase(ctx, run, req.BaseBranch, req.ForkPoint)
+	if err != nil {
+		return result, err
 	}
 	if !validOID(result.Head) || !validOID(result.Base) {
 		return result, errors.New("runrepo: invalid native commit ID")

@@ -1,0 +1,8 @@
+[Unit]
+Description=Aether session containers
+Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/install.md
+
+[Slice]
+# Half of system.slice and user.slice, which default to 100; see docs/install.md.
+CPUWeight=50
+IOWeight=50

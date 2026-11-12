@@ -1,6 +1,7 @@
 package runrepo
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -144,32 +145,58 @@ func (s *Service) Remotes(ctx context.Context, run Execution, branch string) ([]
 type DiffRequest struct {
 	Paths  []string `json:"paths,omitempty"`
 	Staged bool     `json:"staged"`
+	// Base diffs the worktree against the merge base of HEAD and the run's
+	// upstream base (BaseBranch, else ForkPoint), so committed, staged and
+	// unstaged tracked changes all appear. It excludes Staged.
+	Base       bool   `json:"base,omitempty"`
+	BaseBranch string `json:"-"`
+	ForkPoint  string `json:"-"`
 }
 type DiffResult struct {
 	State  Expected      `json:"state"`
 	Output CommandOutput `json:"output"`
+	// BaseRef names what Base compared against.
+	BaseRef string `json:"base_ref,omitempty"`
 }
 
-// Diff is the native tracked-file diff, either worktree vs index or index vs
-// HEAD. Untracked paths are explicitly present in Status, not fabricated as a
+// Diff is the native tracked-file diff: worktree vs index, index vs HEAD, or
+// with Base the worktree vs the merge base with the run's upstream base. Untracked paths are explicitly present in Status, not fabricated as a
 // tracked diff. State identifies the HEAD observed before reading the diff;
 // worktree contents can change during any native read.
 func (s *Service) Diff(ctx context.Context, run Execution, req DiffRequest) (DiffResult, error) {
 	if err := validatePaths(req.Paths, false); err != nil {
 		return DiffResult{}, err
 	}
+	if req.Base && req.Staged {
+		return DiffResult{}, errors.New("runrepo: a base diff cannot also be staged")
+	}
 	state, err := s.Status(ctx, run)
 	if err != nil {
 		return DiffResult{}, err
 	}
 	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
-	if req.Staged {
+	var baseRef string
+	if req.Base {
+		var ref, base, mergeBase string
+		ref, base, err = s.upstreamBase(ctx, run, req.BaseBranch, req.ForkPoint)
+		if err != nil {
+			return DiffResult{}, err
+		}
+		var out CommandOutput
+		out, err = s.git(ctx, run, false, "merge-base", state.Head, base)
+		mergeBase, err = complete(out, err)
+		if err != nil {
+			return DiffResult{}, err
+		}
+		baseRef = cmp.Or(ref, base)
+		args = append(args, strings.TrimSpace(mergeBase))
+	} else if req.Staged {
 		args = append(args, "--cached")
 	}
 	args = append(args, "--")
 	args = append(args, req.Paths...)
 	out, err := s.git(ctx, run, false, args...)
-	return DiffResult{State: Expected{Branch: state.Branch, Head: state.Head}, Output: out}, err
+	return DiffResult{State: Expected{Branch: state.Branch, Head: state.Head}, Output: out, BaseRef: baseRef}, err
 }
 
 type CommitRequest struct {

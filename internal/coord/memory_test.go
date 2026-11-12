@@ -11,6 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memory"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 var memoryMethods = []string{protocol.MethodMemoryAdd, protocol.MethodMemorySearch, protocol.MethodMemoryShow, protocol.MethodMemoryBrief}
@@ -25,7 +26,7 @@ func newMemoryHarness(t *testing.T, runs int) *coordHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = log.Close() })
-	mem, err := memory.New(memory.Config{Store: h.db, Bus: h.bus, Log: log})
+	mem, err := memory.New(memory.Config{Store: storetest.Unscoped{DB: h.db}, Bus: h.bus, Log: log})
 	if err != nil {
 		t.Fatal(err)
 	}

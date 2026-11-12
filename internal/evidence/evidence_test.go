@@ -589,7 +589,7 @@ func TestExpiredPacketsRemainVisibleAsMetadata(t *testing.T) {
 	if err != nil || got.ID != packet.ID {
 		t.Fatalf("expired get = %+v, %v, want metadata", got, err)
 	}
-	page, err := svc.List(context.Background(), "workspace-1", "run-1", "", 10)
+	page, err := svc.List(context.Background(), "workspace-1", "run-1", "", 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

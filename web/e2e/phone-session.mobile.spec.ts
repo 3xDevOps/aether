@@ -125,7 +125,7 @@ test('a Standard session opens on Terminal', async ({ page, aether }) => {
   await expect(page.getByRole('main').getByRole('region', { name: 'Sessions' })).toBeVisible()
 })
 
-test('Back leaves a session in one step, a reopened one lands on Chat, and the tabs return with the keyboard down', async ({ page, aether }) => {
+test('Back leaves a session in one step, a reopened one lands on the tab chosen last, and the tabs return with the keyboard down', async ({ page, aether }) => {
   await page.setViewportSize({ width: 360, height: 800 })
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -162,7 +162,8 @@ test('Back leaves a session in one step, a reopened one lands on Chat, and the t
   await views.getByRole('tab', { name: 'Terminal' }).tap()
   await page.getByRole('button', { name: 'Back' }).tap()
   await sessions.getByRole('button', { name: /demo/ }).tap()
-  await expect(views.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true')
+  await expect(views.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true')
+  await views.getByRole('tab', { name: 'Chat' }).tap()
 
   // Android's Back and iOS's Done drop the keyboard without a blur.
   const restore = await shrinkToKeyboardHeight(page)

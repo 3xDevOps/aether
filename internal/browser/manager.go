@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 )
 
 var ErrUnavailable = errors.New("browser companion unavailable; explicit restart required")
+
+// ErrReplaced reports that the journal no longer records the companion the
+// caller observed.
+var ErrReplaced = errors.New("browser companion was replaced")
 
 type Config struct {
 	Image            string
@@ -39,6 +44,9 @@ type Status struct {
 	ProcessID    string              `json:"process_id"`
 	State        string              `json:"state"`
 	Reason       string              `json:"reason,omitempty"`
+	// Unavailable keeps the companion out of use until a restart replaces
+	// its journal.
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 type managedRun struct {
@@ -92,8 +100,6 @@ func (m *Manager) entry(run Run) (*managedRun, string, error) {
 	if run.ID == "" || run.ContainerID == "" {
 		return nil, "", errors.New("browser session and container identities are required")
 	}
-	digest := sha256.Sum256([]byte(run.ID))
-	name := hex.EncodeToString(digest[:16])
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry := m.runs[run.ID]
@@ -101,7 +107,12 @@ func (m *Manager) entry(run Run) (*managedRun, string, error) {
 		entry = &managedRun{}
 		m.runs[run.ID] = entry
 	}
-	return entry, filepath.Join(m.root, name), nil
+	return entry, m.journalDir(run.ID), nil
+}
+
+func (m *Manager) journalDir(runID string) string {
+	digest := sha256.Sum256([]byte(runID))
+	return filepath.Join(m.root, hex.EncodeToString(digest[:16]))
 }
 
 func loadStatus(dir string) (Status, error) {
@@ -177,6 +188,10 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 		return status, nil, errors.New("browser companion ownership mismatch")
 	}
 	status.State = info.State
+	if status.Unavailable != "" {
+		status.Reason = status.Unavailable
+		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Unavailable)
+	}
 	if info.State != "running" {
 		status.Reason = "Recorded companion is " + info.State
 		if status != persisted {
@@ -219,8 +234,13 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 }
 
 // InputSessionGone is physical proof for a failed cleanup, not a health-check
-// fallback: an unreachable, paused or still-running companion is not gone.
+// fallback: an unreachable, paused or still-running companion is not gone. A
+// companion recorded unavailable counts as gone: Reconcile refuses every
+// writer until Restart destroys it.
 func (m *Manager) InputSessionGone(ctx context.Context, status Status) bool {
+	if journal, err := loadStatus(m.journalDir(status.RunID)); err == nil && journal.CreationKey == status.CreationKey && journal.Unavailable != "" {
+		return true
+	}
 	info, err := m.browser.InspectBrowser(ctx, status.ContainerID)
 	if errors.Is(err, containerruntime.ErrNotFound) {
 		return true
@@ -307,7 +327,7 @@ func (m *Manager) create(ctx context.Context, run Run, entry *managedRun, dir st
 	return m.reconcile(ctx, run, entry, dir)
 }
 
-func (m *Manager) transition(ctx context.Context, run Run, action string) (Status, error) {
+func (m *Manager) transition(ctx context.Context, run Run, action, creationKey string) (Status, error) {
 	entry, dir, err := m.entry(run)
 	if err != nil {
 		return Status{}, err
@@ -317,6 +337,9 @@ func (m *Manager) transition(ctx context.Context, run Run, action string) (Statu
 	status, err := loadStatus(dir)
 	if err != nil {
 		return status, err
+	}
+	if creationKey != "" && status.CreationKey != creationKey {
+		return status, ErrReplaced
 	}
 	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
 		return status, errors.New("browser lifecycle session identity mismatch")
@@ -384,19 +407,85 @@ func (m *Manager) transition(ctx context.Context, run Run, action string) (Statu
 	return status, nil
 }
 
+// MarkUnavailable records reason against the session's companion, which
+// Reconcile then reports as unavailable until Restart replaces it.
+func (m *Manager) MarkUnavailable(run Run, reason string) error {
+	entry, dir, err := m.entry(run)
+	if err != nil {
+		return err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	status, err := loadStatus(dir)
+	if err != nil {
+		return err
+	}
+	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
+		return errors.New("browser lifecycle session identity mismatch")
+	}
+	// loadStatus refuses a journal over 16 KiB; a companion error alone
+	// may be 8 KiB.
+	if len(reason) > 2048 {
+		reason = strings.ToValidUTF8(reason[:2048], "")
+	}
+	status.Unavailable = reason
+	return saveStatus(dir, status)
+}
+
 func (m *Manager) Pause(ctx context.Context, run Run) (Status, error) {
-	return m.transition(ctx, run, "pause")
+	return m.transition(ctx, run, "pause", "")
 }
 func (m *Manager) Resume(ctx context.Context, run Run) (Status, error) {
-	return m.transition(ctx, run, "resume")
+	return m.transition(ctx, run, "resume", "")
 }
 func (m *Manager) Restart(ctx context.Context, run Run) (Status, error) {
-	return m.transition(ctx, run, "restart")
+	return m.transition(ctx, run, "restart", "")
 }
-func (m *Manager) Remove(ctx context.Context, run Run) error {
-	_, err := m.transition(ctx, run, "remove")
+
+// Remove destroys the session's recorded companion, whichever session
+// container it was created for, and deletes its journal.
+func (m *Manager) Remove(ctx context.Context, runID string) error {
+	return m.remove(ctx, runID, "")
+}
+
+// RemoveObserved is Remove that refuses with ErrReplaced once the session's
+// journal records a companion other than observed.
+func (m *Manager) RemoveObserved(ctx context.Context, observed Status) error {
+	return m.remove(ctx, observed.RunID, observed.CreationKey)
+}
+
+func (m *Manager) remove(ctx context.Context, runID, creationKey string) error {
+	status, err := loadStatus(m.journalDir(runID))
+	if err == nil {
+		_, err = m.transition(ctx, Run{ID: runID, ContainerID: status.RunContainer}, "remove", creationKey)
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	return err
+}
+
+// Journals returns every recorded companion. A journal that cannot be read
+// is named in the error and left in place.
+func (m *Manager) Journals() ([]Status, error) {
+	entries, err := os.ReadDir(m.root)
+	if err != nil {
+		return nil, err
+	}
+	var out []Status
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		status, err := loadStatus(filepath.Join(m.root, entry.Name()))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			errs = append(errs, fmt.Errorf("browser journal %s: %w", entry.Name(), err))
+		default:
+			out = append(out, status)
+		}
+	}
+	return out, errors.Join(errs...)
 }

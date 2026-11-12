@@ -1,10 +1,10 @@
 import type { ComponentType } from 'react'
-import { Bell, Brain, Cable, Eye, Gauge, Globe, Monitor, Network, Rocket, ServerCog, Settings, Sparkles } from '@/components/icons'
+import { Bell, Bot, Brain, Cable, Eye, Gauge, Globe, Monitor, Network, Rocket, ServerCog, Settings, Sparkles } from '@/components/icons'
 import type { Capability } from '@/store/hooks'
 
-export type CategoryID = 'general' | 'launch' | 'connections' | 'notifications' | 'watches' | 'memory' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
+export type CategoryID = 'general' | 'launch' | 'agents' | 'connections' | 'notifications' | 'watches' | 'memory' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
 
-export type Gates = { cap: Capability; admin: boolean; assistant: boolean; onboarding: boolean; member: boolean; workspace: boolean }
+export type Gates = { cap: Capability; admin: boolean; superAdmin: boolean; assistant: boolean; onboarding: boolean; member: boolean; workspace: boolean }
 
 export type Category = {
   id: CategoryID
@@ -27,6 +27,7 @@ export type SettingEntry = {
 export const categories: Category[] = [
   { id: 'general', group: 'You', title: 'General', purpose: 'How this dashboard looks and responds, and who you are on this server.', Icon: Settings },
   { id: 'launch', group: 'You', title: 'Launch', purpose: 'The agent, mode, model, account and fallback your launches start from, on every device.', Icon: Rocket },
+  { id: 'agents', group: 'You', title: 'Agents', purpose: 'Which coding agents this server has installed, and which you are signed in to.', Icon: Bot },
   { id: 'connections', group: 'You', title: 'Connections', purpose: 'Services Aether works with on your behalf.', Icon: Cable },
   { id: 'notifications', group: 'You', title: 'Notifications', purpose: 'Where and how often Aether pushes to you.', Icon: Bell },
   { id: 'watches', group: 'You', title: 'Watches', purpose: 'Sessions and pull requests the server watches for you, and what it told you.', Icon: Eye },
@@ -48,6 +49,7 @@ export const entries: SettingEntry[] = [
   { id: 'profile', category: 'general', label: 'Profile', help: 'Name, colour and git identity.', keywords: 'display name git email avatar account sharing', visible: (g) => g.member },
   { id: 'setup-guide', category: 'general', label: 'Setup guide', help: 'Link this computer, add a repository, set up an agent and start a first session.', keywords: 'onboarding wizard', visible: (g) => g.onboarding },
   { id: 'saved-launch-defaults', category: 'launch', label: 'Saved defaults', help: 'The agent, mode, model, account and fallback a launch starts from.', keywords: 'launch defaults agent mode model account fallback remember preselect shared', visible: (g) => g.member && g.cap.hasMethod('launch.defaults.get') },
+  { id: 'agents-list', category: 'agents', label: 'Agent sign-in', help: 'Each agent\'s sign-in state, with the Agents page to install, sign in or update.', keywords: 'agents agent claude codex opencode login log in sign in signin auth install update cli account', visible: (g) => g.cap.hasMethod('agent.list') },
   { id: 'connectors', category: 'connections', label: 'ChatGPT and Claude', help: 'Connect ChatGPT or Claude to Aether over MCP.', keywords: 'mcp connector chatgpt claude plugin oauth pairing code revoke' },
   { id: 'github', category: 'connections', label: 'GitHub', help: 'Connect GitHub to choose repositories and let sessions publish changes.', keywords: 'github oauth repository import', visible: (g) => g.admin && g.cap.hasMethod('github.oauth.status') },
   { id: 'push', category: 'notifications', label: 'Notify this device when a session needs me', help: 'Push notifications on this device.', keywords: 'notification alert phone browser push' },
@@ -69,8 +71,8 @@ export const entries: SettingEntry[] = [
   { id: 'danger-zone', category: 'this-computer', label: 'Clear local state', help: 'Forget every server, edge sign-in and device key on this computer.', keywords: 'reset logout disconnect clear forget danger', visible: (g) => g.cap.hasLocal('link.reset') },
   { id: 'version', category: 'server', label: 'Version', help: 'Server version and updates.', keywords: 'update upgrade release tailnet' },
   { id: 'disk', category: 'server', label: 'Disk and performance', help: 'CPU, memory, disk and Docker storage.', keywords: 'disk storage cpu memory insights system' },
-  { id: 'run-limits', category: 'server', label: 'Session limits', help: 'Memory, CPU and process ceiling for every session.', keywords: 'memory cpu pids processes limit ceiling resources oom', visible: (g) => g.admin && g.cap.hasMethod('server.run_limits') },
-  { id: 'docker', category: 'server', label: 'Docker inside sessions', help: 'Lets agents build and run containers inside their sessions.', keywords: 'sysbox docker compose buildx container', visible: (g) => g.admin && g.cap.hasMethod('server.sysbox.status') },
+  { id: 'run-limits', category: 'server', label: 'Session limits', help: 'Memory, CPU and process ceiling for every session.', keywords: 'memory cpu pids processes limit ceiling resources oom', visible: (g) => g.superAdmin && g.cap.hasMethod('server.run_limits') },
+  { id: 'docker', category: 'server', label: 'Docker inside sessions', help: 'Lets agents build and run containers inside their sessions.', keywords: 'sysbox docker compose buildx container', visible: (g) => g.superAdmin && g.cap.hasMethod('server.sysbox.status') },
   { id: 'retained-containers', category: 'server', label: 'Retained containers', help: 'Remove containers that finished sessions keep.', keywords: 'cleanup free disk release', visible: (g) => g.admin && g.cap.hasMethod('run.release') },
   { id: 'workspace-settings', category: 'server', label: 'Workspace settings and budget', help: "The active workspace's settings, on its page.", keywords: 'budget limit workspace repository', link: { name: 'workspace', params: (active) => ({ workspaceId: active }) }, visible: (g) => g.workspace && g.cap.hasMethod('workspace.settings') },
   { id: 'members', category: 'server', label: 'Members and devices', help: 'Invite members and approve devices, on the Members page.', keywords: 'invite member device approve', link: { name: 'members' }, visible: (g) => g.admin && g.cap.hasMethod('member.list') },

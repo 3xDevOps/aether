@@ -426,7 +426,7 @@ var profiles = map[string]Profile{
 		Name:        "claude",
 		DisplayName: "Claude Code",
 		Capabilities: Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true,
-			ModeSwitch: true, BackgroundTasks: true},
+			ModeSwitch: true, BackgroundTasks: true, Sleep: true},
 		TUIArgs: []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
 		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},

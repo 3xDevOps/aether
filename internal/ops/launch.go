@@ -126,15 +126,28 @@ type launchReceipt struct {
 	DefaultsSkipped   []defaultSkip `json:"defaults_skipped,omitempty"`
 	DefaultsUnchecked []defaultSkip `json:"defaults_unchecked,omitempty"`
 	Via               string        `json:"via,omitempty"`
-	IdempotencyKey    string        `json:"idempotency_key,omitempty"`
-	URL               string        `json:"url,omitempty"`
+	// RefusedModel is the requested model the agent refused; model is then
+	// the one the session runs on, absent for the agent's default, and
+	// untrusted.model_error says why.
+	RefusedModel   string `json:"refused_model,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	URL            string `json:"url,omitempty"`
+}
+
+// nextAfterLaunch says to poll the session, and for an Enhanced model that
+// the agent takes or refuses only once the session opens, where that shows.
+func nextAfterLaunch(r protocol.Run) string {
+	if r.Mode == "acp" && r.Model != "" {
+		return "poll aether_get_session with run_id: an Enhanced session sets model after it opens; if the agent refuses it, launch.refused_model names it, model is the one the session runs on (absent for the agent's default) and untrusted.model_error says why"
+	}
+	return "poll aether_get_session with run_id"
 }
 
 func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {
 	run := choiceOf(r.Harness, r.Mode, r.Model, r.AccountMemberID, book)
 	out := &launchReceipt{Kind: "run", ID: r.ID, WorkspaceID: r.WorkspaceID, choice: &run,
 		RequestedAccount: book.ref(r.RequestedAccountMemberID), Fallback: policyOf(r.FallbackAccountMemberIDs, r.NoFallback), Children: r.Children,
-		Permission: r.Permission, Via: r.Via, URL: l.run(r.ID)}
+		Permission: r.Permission, Via: r.Via, RefusedModel: clip(r.RefusedModel, maxReport), URL: l.run(r.ID)}
 	for _, repo := range r.Repos {
 		out.Repos = append(out.Repos, repoRef{WorkspaceID: repo.WorkspaceID, Name: repo.Name, Primary: repo.Primary})
 	}
@@ -155,20 +168,42 @@ var launchOps = []Op{
 }
 
 // agentRow is an agent on one account. Refused is why a launch on the
-// account would be refused; Modes are the modes a run may start in.
+// account would be refused whatever the workspace; Modes are the modes a
+// run may start in. SignedOut is why the account's login cannot sign the
+// agent in and how its owner signs in again.
 type agentRow struct {
 	Name        string   `json:"name"`
 	Installed   bool     `json:"installed"`
 	SignedIn    *bool    `json:"signed_in,omitempty"`
+	SignedOut   string   `json:"signed_out,omitempty"`
 	DefaultMode string   `json:"default_mode"`
 	Modes       []string `json:"modes"`
 	Refused     string   `json:"refused,omitempty"`
 }
 
+// signedIn is whether a login is there and the server knows no reason it
+// cannot sign the agent in; signedOut is that reason with the way back in,
+// and what it means for a launch, which only the launch can decide: it
+// knows the workspace's variables.
+func signedIn(a protocol.AgentInfo) (in *bool, signedOut string) {
+	if a.LoginProblem == "" {
+		return a.LoginFound, ""
+	}
+	signedOut = a.LoginProblem + "; the account's owner signs in again on the dashboard's Agents page or with: aether agent login " + a.Name
+	if a.LoginCommand == "" {
+		signedOut = a.LoginProblem + "; the account's owner signs in again from: aether terminal"
+	}
+	if a.LoginBlocksLaunch {
+		signedOut += "; a launch is refused until then, unless a workspace variable signs the agent in"
+	}
+	return new(bool), signedOut
+}
+
 // rowOfAgent follows the dashboard's launch dialog: Enhanced needs it
 // installed.
 func rowOfAgent(a protocol.AgentInfo) agentRow {
-	row := agentRow{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}}
+	row := agentRow{Name: a.Name, Installed: a.Installed, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}}
+	row.SignedIn, row.SignedOut = signedIn(a)
 	switch {
 	case !a.Installed:
 		row.Refused = "not installed"
@@ -348,11 +383,15 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 		if err := c.read(ctx, protocol.MethodAgentModels, protocol.AgentModelsParams{Name: in.Models, AccountMemberID: in.AccountMemberID}, &res); err != nil {
 			return "", nil, err
 		}
-		models := make([]string, 0, min(len(res.Models), maxRows))
+		models := make([]map[string]string, 0, min(len(res.Models), maxRows))
 		for _, m := range res.Models[:min(len(res.Models), maxRows)] {
-			models = append(models, clip(m.ID, maxReport))
+			model := map[string]string{"id": clip(m.ID, maxReport)}
+			if m.Name != "" {
+				model["name"] = clip(m.Name, maxReport)
+			}
+			models = append(models, model)
 		}
-		listed := map[string]any{"agent": in.Models, "source": res.Source, "default": res.DefaultLabel, "ids": models, "fetched_at": res.FetchedAt}
+		listed := map[string]any{"agent": in.Models, "source": res.Source, "default": res.DefaultLabel, "models": models, "fetched_at": res.FetchedAt}
 		if res.Error != "" {
 			listed["error"] = clip(res.Error, maxReport)
 		}
@@ -413,7 +452,7 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 	}
 	receipt := runReceipt(res.Run, l, book)
 	receipt.IdempotencyKey = params.IdempotencyKey
-	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": "poll aether_get_session with run_id"}
+	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": nextAfterLaunch(res.Run)}
 	switch {
 	case dup:
 		out["duplicate"] = true

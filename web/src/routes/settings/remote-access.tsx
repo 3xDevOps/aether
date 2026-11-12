@@ -10,7 +10,7 @@ import type { EdgeAccount, EdgeLogin, ServerEdge } from '@/lib/types'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { loadEdge } from '@/store/edge'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useIsSuperAdmin } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 const pollMs = 2000
@@ -27,7 +27,7 @@ function connection(edge: ServerEdge): string {
 
 export function RemoteAccessSection({ client }: { client: Api }) {
   const edge = useStore((s) => s.edge)
-  const admin = useIsAdmin()
+  const admin = useIsSuperAdmin()
   const caps = useCapability()
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)

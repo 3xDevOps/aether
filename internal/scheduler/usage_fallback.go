@@ -50,7 +50,7 @@ func (s *Scheduler) usageFallbackSeam() *UsageFallback {
 // usageLimitReason starts the reason of a run whose account ran out with no
 // account to continue on, or whose move to one failed. The dashboard matches
 // it (web/src/lib/needs-you.ts).
-const usageLimitReason = "Usage limit reached on "
+const usageLimitReason = domain.UsageLimitReasonPrefix
 
 // usageLimitSegment is the reason an account segment records for a move.
 const usageLimitSegment = "usage limit"
@@ -641,9 +641,9 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised, m accountMov
 	return s.replaceContainer(ctx, entry, f, m, run, from, to, session)
 }
 
-// mayLaunch is the launch admission a member's own standing needs, checked
-// again for a move as for a launch.
-func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID) error {
+// mayLaunch is the launch admission a member's own standing needs in every
+// one of workspaces, checked again for a move as for a launch.
+func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID, workspaces []domain.WorkspaceID) error {
 	member, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
 		return err
@@ -651,7 +651,13 @@ func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID) error {
 	if member.Pending {
 		return fmt.Errorf("%w: %s's membership is pending admin approval", permissions.ErrDenied, member.DisplayName)
 	}
-	return permissions.Check(permissions.Launch, permissions.Actor{ID: member.ID, Role: member.Role}, permissions.Target{})
+	actor := permissions.ActorOf(member)
+	for _, ws := range workspaces {
+		if err := permissions.Check(permissions.Launch, actor, permissions.Target{Workspace: ws}); err != nil {
+			return fmt.Errorf("%s may not launch in workspace %s: %w", member.DisplayName, ws, err)
+		}
+	}
+	return nil
 }
 
 // chooseMove chooses the account under the authorization mutex and writes
@@ -673,8 +679,9 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 		return nil, "", nil, fmt.Errorf("the session moved to %s's account meanwhile", s.memberName(ctx, run.AccountMember()))
 	}
 	home := run.HomeMember()
+	workspaces := runWorkspaces(run)
 	for _, member := range slices.Compact([]domain.MemberID{home, run.MemberID}) {
-		if launchErr := s.mayLaunch(ctx, member); launchErr != nil {
+		if launchErr := s.mayLaunch(ctx, member, workspaces); launchErr != nil {
 			return nil, "", nil, launchErr
 		}
 	}
@@ -682,9 +689,20 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 	if run.ACP {
 		mode = domain.LaunchACP
 	}
-	to, excluded := fallback.Select(ctx, s.cfg.Store, measured, run.MemberID, from, run.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
+	var off domain.ChildChoicesOff
+	if run.ParentRunID != "" && !run.Detached {
+		settings, settingsErr := s.cfg.Store.ChildSettings(ctx, run.MemberID)
+		if settingsErr != nil {
+			return nil, "", nil, fmt.Errorf("read the owner's subsession agents: %w", settingsErr)
+		}
+		off = settings.Off
+	}
+	to, excluded := fallback.Select(ctx, s.cfg.Store, measured, run.MemberID, from, workspaces, run.Fallback, func(ctx context.Context, account domain.MemberID) (bool, error) {
+		if off.Covers(run.Harness, account) {
+			return false, nil
+		}
 		if home != run.MemberID {
-			if _, authErr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, home, string(account)); authErr != nil {
+			if _, authErr := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, home, string(account), workspaces); authErr != nil {
 				if errors.Is(authErr, permissions.ErrDenied) || errors.Is(authErr, store.ErrNotFound) {
 					return false, nil
 				}
@@ -692,9 +710,8 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 			}
 		}
 		// FallbackLaunchable does not look for home's own login; a read quota
-		// implies one, an Unknown one does not. An API key the agent signs in
-		// with in this mode counts as one: Claude's in every mode, Codex's
-		// CODEX_API_KEY in Background runs only (docs/harnesses.md).
+		// implies one, an Unknown one does not. A workspace variable the agent
+		// signs in with in this mode counts as one.
 		if account == home && measured[account] == fallback.Unknown && s.cfg.Homes != nil {
 			profile, _, profileErr := s.launchProfile(ctx, home, account, run.Harness)
 			if profileErr != nil {
@@ -711,27 +728,8 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 				return false, loginErr
 			}
 			if !signedIn {
-				ws, wsErr := s.cfg.Store.GetWorkspace(ctx, run.WorkspaceID)
-				if wsErr != nil {
-					return false, fmt.Errorf("read workspace environment: %w", wsErr)
-				}
-				ws, secrets, wsErr := s.workspaceEnvironment(ctx, ws)
-				if wsErr != nil {
-					return false, wsErr
-				}
-				env, envErr := explicitEnvironment(profile, ws, secrets)
-				if envErr != nil {
+				if byEnv, envErr := s.environmentSignsIn(ctx, run.WorkspaceID, run.Harness, profile, mode); envErr != nil || !byEnv {
 					return false, envErr
-				}
-				key := ""
-				switch {
-				case run.Harness == "claude":
-					key = "ANTHROPIC_API_KEY"
-				case run.Harness == "codex" && mode == domain.LaunchHeadless:
-					key = "CODEX_API_KEY"
-				}
-				if key == "" || env[key] == "" {
-					return false, nil
 				}
 			}
 		}
@@ -776,11 +774,12 @@ func (s *Scheduler) commitMove(ctx context.Context, entry *supervised, f *UsageF
 	if current.MemberID != run.MemberID {
 		return 0, errors.New("the session was handed off meanwhile")
 	}
+	workspaces := runWorkspaces(current)
 	for _, member := range slices.Compact([]domain.MemberID{run.HomeMember(), run.MemberID}) {
-		if launchErr := s.mayLaunch(ctx, member); launchErr != nil {
+		if launchErr := s.mayLaunch(ctx, member, workspaces); launchErr != nil {
 			return 0, launchErr
 		}
-		if _, authErr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(to)); authErr != nil {
+		if _, authErr := fallback.ResolveLaunchAccountIn(ctx, s.cfg.Store, member, string(to), workspaces); authErr != nil {
 			return 0, authErr
 		}
 	}

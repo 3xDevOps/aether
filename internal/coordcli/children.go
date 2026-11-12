@@ -23,14 +23,16 @@ Dispatch fresh-context subsessions on other agents and models, within what this
 session's owner allows, and manage them. A subsession cannot start subsessions.
   options [--harness <agent>]   whether you may start subsessions, the limits,
                                 and each agent and account with its state
-                                (ready, exhausted, not-installed, not-signed-in);
+                                (ready, exhausted, not-installed, not-signed-in,
+                                off: your session owner turned it off);
                                 --harness also lists that agent's models
   start --harness <agent> --purpose <words> (--task <text> | --task-file <path|->)
         [--model <id>] [--mode standard|enhanced|background]
         [--account <member-id>] [--idempotency-key <key>]
                                 start a subsession from your last published commit;
                                 commit first, uncommitted changes are not included;
-                                --account takes only your session owner's account
+                                --account takes your session owner's account or
+                                one shared with them, as options lists
   list [--run-id <subsession>]  your subsessions with state, latest report, branch,
                                 and account
   cancel --run-id <subsession>  stop a subsession, or drop it from the queue
@@ -156,10 +158,10 @@ func readTask(task, file string, in io.Reader) (string, error) {
 func childSkill(status *protocol.CoordStatusResult) string {
 	switch {
 	case slices.Contains(status.Capabilities, protocol.MethodChildStart):
-		return "Subsessions: `aether-internal subsession start` runs part of your task as a separate Aether session with a fresh context and its own container and branch, on any installed agent and model, on your session owner's own account; its report reaches your inbox and wakes you. " +
+		return "Subsessions: `aether-internal subsession start` runs part of your task as a separate Aether session with a fresh context and its own container and branch, on any installed agent and model, on this session's account for this session's agent or your session owner's own account otherwise; its report reaches your inbox and wakes you. " +
 			"Use one for what your own subagents cannot give: another agent or model, a separate branch or build, long work that would crowd out your context, or an independent review; honor the number of subsessions and agents the user asks for. " +
 			"When to start one, the steps, the task format and the account rules: `aether-internal skill subsessions`. " +
-			"Account for unfinished subsessions before reporting success. A subsession idle or waiting for over an hour is reported to your inbox: check it, then wake it with `send --to <subsession>` or stop it with `subsession cancel`.\n"
+			"Account for unfinished subsessions before reporting success. A subsession idle or waiting for over an hour, or stopped on an error for a minute, is reported to your inbox: check it, then wake it with `send --to <subsession>` or stop it with `subsession cancel`.\n"
 	case slices.Contains(status.Capabilities, protocol.MethodChildOptions):
 		return "Subsessions: not available to this session now; `aether-internal subsession options` gives the reason. If the user asks for one, tell them that reason.\n"
 	}
@@ -196,11 +198,13 @@ Steps:
    while one is unfinished.
 5. aether-internal subsession fetch --run-id <id>, then merge or cherry-pick
    refs/remotes/children/<id> and verify before you report success.
-Accounts: a subsession starts on your session owner's own sign-in for that
-agent; only this session's launch fallback can move it to another account, as
-for any launch. --account accepts only the owner's account; another member's
-account is refused. To delegate on another member's account, that member
-starts this session or is handed it.
+Accounts: a subsession of this session's agent starts on this session's
+account; any other agent starts on your session owner's own sign-in.
+--account picks the owner's account or one a teammate shared with the owner,
+from the accounts options lists; a choice that is not signed in is refused
+with the reason. A choice the owner turned off (state off) is refused; pick
+one options lists as ready. This session's launch fallback can still move it
+to another account the owner left on, as for any launch.
 A subsession cannot start subsessions.
 `
 

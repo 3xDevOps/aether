@@ -3,7 +3,7 @@ import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } fr
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 import { useDictating } from '@/components/dictation/state'
-import { RefusalNotes } from '@/components/launch/agent-picker'
+import { RefusalNotes, SignedOutNote } from '@/components/launch/agent-picker'
 import { AccountPicker, readiness, useAccountStatus } from '@/components/launch/account-picker'
 import { agentLabel } from '@/components/launch/modes'
 import { automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, FallbackOptions, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
@@ -220,6 +220,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         </Callout>
       )}
       {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} accountPlace={phone ? 'More options → Account' : 'Account'} />}
+      {agents && agentError === null && <SignedOutNote agent={choice.agent} owner={sharedAccount ? accountName : undefined} onSignIn={setUp} />}
       {savedRead.error && (
         <Callout
           tone="failed"
@@ -252,8 +253,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       role="alert"
       title="Launch failed"
       actions={unadopted && (isAdmin
-        ? <Button type="button" size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: unadopted.workspace }) }}>Open Repository</Button>
-        : <span className="text-ui-sm text-text">Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the Repository page.</span>)}
+        ? <Button type="button" size="sm" variant="secondary" onClick={() => { close(); navigate('workspace', { workspaceId: unadopted.workspace }) }}>Open workspace settings</Button>
+        : <span className="text-ui-sm text-text">Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the workspace settings page.</span>)}
     >
       {unadopted && error.endsWith(' ' + unadopted.command) ? error.slice(0, -unadopted.command.length - 1) : error}
       {setup && <SetupOutput output={setup} />}{unadopted && <AdoptCommand command={unadopted.command} />}
@@ -291,7 +292,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
             {accountChoice}
             <AgentOptions choice={choice} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} />
             {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-            {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
+            {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} settings={childSettings} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
             {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
           </>
         }
@@ -327,7 +328,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
           <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus shared={shared !== '' && task === shared} account={accountChoice} owner={sharedAccount ? accountName : undefined} />
           {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-          {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
+          {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} settings={childSettings} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
           {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
           {notes}
           {failure}

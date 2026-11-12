@@ -58,8 +58,8 @@ func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
 		t.Fatalf("member image = %q, want %q", member.Image, first)
 	}
 	calls := e.rt.commitCalls()
-	if len(calls) != 1 || calls[0].id != runtime.ID(terminal.ContainerID) || calls[0].tag != first {
-		t.Fatalf("commit calls = %+v, want terminal %q and %q", calls, terminal.ContainerID, first)
+	if len(calls) != 1 || calls[0].id != runtime.ID(terminal.ContainerID) || calls[0].tag != strings.Replace(first, memberImageRepo(e.member.ID), pendingImageRepo(e.member.ID), 1) {
+		t.Fatalf("commit calls = %+v, want terminal %q committed as the pending copy of %q", calls, terminal.ContainerID, first)
 	}
 
 	second, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
@@ -69,11 +69,8 @@ func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
 	if second == first {
 		t.Fatalf("second image reused first tag %q", second)
 	}
-	if e.rt.hasImage(first) {
-		t.Fatal("first image tag still exists after replacement")
-	}
-	if !e.rt.hasImage(second) {
-		t.Fatal("second image tag was not registered")
+	if !e.rt.hasImage(first) || !e.rt.hasImage(second) {
+		t.Fatal("second save did not keep the first image as the previous one")
 	}
 	member, err = e.db.GetMember(t.Context(), e.member.ID)
 	if err != nil {
@@ -213,8 +210,12 @@ func TestSaveAfterStopReleasesPreviousSaveTag(t *testing.T) {
 	if commits := e.rt.commitCalls(); commits[len(commits)-1].id != runtime.ID(first.ContainerID) {
 		t.Fatalf("second save committed %q, want the kept container %q", commits[len(commits)-1].id, first.ContainerID)
 	}
-	if e.rt.hasImage(savedFirst) || !e.rt.hasImage(savedSecond) {
-		t.Fatalf("images after second save: first=%v second=%v, want only the second", e.rt.hasImage(savedFirst), e.rt.hasImage(savedSecond))
+	savedThird, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("third SaveEnvironment: %v", err)
+	}
+	if e.rt.hasImage(savedFirst) || !e.rt.hasImage(savedSecond) || !e.rt.hasImage(savedThird) {
+		t.Fatalf("images after third save: first=%v second=%v third=%v, want the second and third", e.rt.hasImage(savedFirst), e.rt.hasImage(savedSecond), e.rt.hasImage(savedThird))
 	}
 }
 

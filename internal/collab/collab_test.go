@@ -210,7 +210,10 @@ func (s *collabStore) CancelQueuedSteerRequests(_ context.Context, run domain.Ru
 	}
 	return cancelled, nil
 }
-func (s *collabStore) TransitionRoomMessage(_ context.Context, id string, state store.RoomMessageState, deliveredAt *time.Time, failure *store.RoomMessageFailure) error {
+func (s *collabStore) TransitionRoomMessage(ctx context.Context, id string, state store.RoomMessageState, deliveredAt *time.Time, failure *store.RoomMessageFailure) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := s.messages[id]
@@ -339,6 +342,19 @@ func (s *collabStore) GetMember(_ context.Context, id domain.MemberID) (*domain.
 		return nil, store.ErrNotFound
 	}
 	copy := *m
+	if copy.Access.Owned == nil && copy.Access.Granted == nil {
+		// Members of this fake reach every workspace, as before
+		// workspace-scoped access.
+		reach := map[domain.WorkspaceID]bool{}
+		for ws := range s.workspaces {
+			reach[ws] = true
+		}
+		if copy.Role == domain.RoleAdmin {
+			copy.Access.Owned = reach
+		} else {
+			copy.Access.Granted = reach
+		}
+	}
 	return &copy, nil
 }
 func (s *collabStore) GetWorkspace(_ context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
@@ -800,6 +816,114 @@ func TestSteeringDelayAndControllerImmediateSend(t *testing.T) {
 	}
 }
 
+// Waking a sleeping session ends its viewers' streams, so the controller's
+// own message can arrive while its lease waits to reconnect.
+func TestReconnectingControllerSendsAtOnce(t *testing.T) {
+	st, clock, ws, owner, other, run := setupCollab(t)
+	pty := &collabPTY{}
+	controlService := control.New(control.Config{Now: clock.Now, ReconnectWindow: time.Minute})
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Inject: pty.Inject, Control: controlService, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, _, err := controlService.Acquire(string(run.ID), string(other.ID), "session", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlService.Disconnect(string(run.ID), lease.SessionID, lease.Generation)
+	stale, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "stale", IdempotencyKey: "stale", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Message.DeliverAfter == nil || pty.Calls() != 0 {
+		t.Fatalf("stale generation: deliver_after=%v inject calls=%d, want queued", stale.Message.DeliverAfter, pty.Calls())
+	}
+	borrowed, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "borrowed", IdempotencyKey: "borrowed", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if borrowed.Message.DeliverAfter == nil || pty.Calls() != 0 {
+		t.Fatalf("another member with the holder's lease: deliver_after=%v inject calls=%d, want queued", borrowed.Message.DeliverAfter, pty.Calls())
+	}
+	result, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "wake up", IdempotencyKey: "wake", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Message.DeliverAfter != nil || result.Message.State != store.RoomMessageSent || pty.Calls() != 1 {
+		t.Fatalf("reconnecting controller: deliver_after=%v state=%s inject calls=%d, want sent at once", result.Message.DeliverAfter, result.Message.State, pty.Calls())
+	}
+
+	leaseless, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "from a connector", IdempotencyKey: "leaseless"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaseless.Message.DeliverAfter != nil || leaseless.Message.State != store.RoomMessageSent || pty.Calls() != 2 {
+		t.Fatalf("reconnecting controller's lease-less client: deliver_after=%v state=%s inject calls=%d, want sent at once", leaseless.Message.DeliverAfter, leaseless.Message.State, pty.Calls())
+	}
+	// The agent has the message, so a caller that gives up does not lose its receipt.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelling, err := New(Config{Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
+		Inject: func(context.Context, domain.RunID, domain.MemberID, domain.AgentPrompt, bool, func(error)) (string, error) {
+			cancel()
+			return "", nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped, err := cancelling.Post(ctx, MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "dropped", IdempotencyKey: "dropped", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped.Message.State != store.RoomMessageSent {
+		t.Fatalf("caller cancelled after delivery: state=%s, want sent", dropped.Message.State)
+	}
+	clock.Add(time.Minute + time.Second)
+	expired, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "expired", IdempotencyKey: "expired", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Message.DeliverAfter == nil || pty.Calls() != 2 {
+		t.Fatalf("holder past its reconnect window: deliver_after=%v inject calls=%d, want queued", expired.Message.DeliverAfter, pty.Calls())
+	}
+}
+
+type disconnectingCollabBus struct {
+	events.Bus
+	disconnect func()
+}
+
+func (b *disconnectingCollabBus) Publish(_ context.Context, e events.Event) (events.Event, error) {
+	b.disconnect()
+	return e, nil
+}
+
+// The room once published a controller's message between reading its lease
+// and checking it again at delivery, and a disconnect there made the message
+// not_sent. A disconnect on that publish must not stop the delivery; the
+// message is now delivered before anything is published.
+func TestControllerSendSurvivesADisconnectBeforeDelivery(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	pty := &collabPTY{}
+	controlService := control.New(control.Config{Now: clock.Now, ReconnectWindow: time.Minute})
+	lease, _, err := controlService.Acquire(string(run.ID), string(other.ID), "session", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus := &disconnectingCollabBus{disconnect: func() { controlService.Disconnect(string(run.ID), lease.SessionID, lease.Generation) }}
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Bus: bus, Inject: pty.Inject, Control: controlService, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "wake up", IdempotencyKey: "wake", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Message.State != store.RoomMessageSent || pty.Calls() != 1 {
+		t.Fatalf("state=%s inject calls=%d, want sent", result.Message.State, pty.Calls())
+	}
+}
+
 func TestOwnerImmediateSendCannotBypassANewController(t *testing.T) {
 	st, clock, ws, owner, other, run := setupCollab(t)
 	pty := &collabPTY{}
@@ -1108,7 +1232,7 @@ func TestProtectedRunRejectsOwnerAndAdminSteering(t *testing.T) {
 // whose workspace allows steering others.
 func TestResolvePermissionsKindAndIdempotency(t *testing.T) {
 	st, clock, ws, owner, other, run := setupCollab(t)
-	admin := &domain.Member{ID: "admin", DisplayName: "Admin", Role: domain.RoleAdmin}
+	admin := &domain.Member{ID: "admin", DisplayName: "Admin", Role: domain.RoleAdmin, Access: domain.WorkspaceAccess{Owned: map[domain.WorkspaceID]bool{ws.ID: true}}}
 	third := &domain.Member{ID: "third", DisplayName: "Third", Role: domain.RoleCollaborator}
 	st.members[admin.ID], st.members[third.ID] = admin, third
 	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Now: clock.Now})
@@ -1308,6 +1432,51 @@ func TestDueDeliveryRechecksAuthorPermission(t *testing.T) {
 	}
 	if pty.Calls() != 0 {
 		t.Fatalf("revoked due PTY calls=%d, want 0", pty.Calls())
+	}
+}
+
+func TestSteeringNeedsEveryWorkspaceOfTheRun(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	st.workspaces["extra"] = &domain.Workspace{ID: "extra", Name: "extra"}
+	run.Extras = []domain.RunRepo{{WorkspaceID: "extra", Name: "extra"}}
+	pty := &collabPTY{}
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Inject: pty.Inject, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	st.members[other.ID].Access = domain.WorkspaceAccess{Granted: map[domain.WorkspaceID]bool{ws.ID: true}}
+	st.mu.Unlock()
+	if _, err = service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "no extra", IdempotencyKey: "no-extra",
+	}); !errors.Is(err, permissions.ErrNoAccess) {
+		t.Fatalf("steer without the extra workspace: err=%v, want ErrNoAccess", err)
+	}
+
+	st.mu.Lock()
+	st.members[other.ID].Access.Granted["extra"] = true
+	st.mu.Unlock()
+	result, err := service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "queued", IdempotencyKey: "queued",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	delete(st.members[other.ID].Access.Granted, "extra")
+	st.mu.Unlock()
+	clock.Add(SteeringDelay)
+	if _, err = service.DeliverDue(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetRoomMessage(context.Background(), result.Message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != store.RoomMessageNotSent || pty.Calls() != 0 {
+		t.Fatalf("queued after the extra grant was revoked: state=%q inject calls=%d, want not_sent and 0", got.State, pty.Calls())
 	}
 }
 

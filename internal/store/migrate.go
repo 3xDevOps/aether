@@ -2578,6 +2578,79 @@ ALTER TABLE room_messages ADD COLUMN resolved_at INTEGER;
 ALTER TABLE room_messages ADD COLUMN resolved_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE room_messages ADD COLUMN resolution TEXT NOT NULL DEFAULT '' CHECK (resolution IN ('', 'done', 'deleted'));
 `,
+	// v109: type-filtered event reads, such as a replaying subscriber, a
+	// run's diff snapshots or a workspace's timeline, scanned every event
+	// in their range for their types. internal/events.readQuery names these
+	// indexes.
+	`
+CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
+CREATE INDEX IF NOT EXISTS idx_events_run_type ON events (run_id, type);
+CREATE INDEX IF NOT EXISTS idx_events_workspace_type ON events (workspace_id, type);
+`,
+	// v110: the model an Enhanced run's agent refused and why; the run's
+	// model is then the one the session runs on, empty for the agent's default.
+	`
+ALTER TABLE runs ADD COLUMN refused_model TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN model_error TEXT NOT NULL DEFAULT '';
+`,
+	// v111: workspace-scoped access. A workspace has an owner and members
+	// reach it through a grant. The earliest live admin, the server's
+	// creator, becomes super admin and owns every existing workspace, and
+	// every approved member keeps the access they had, which was every
+	// workspace, as grants. Pending members had none and get none. An
+	// invitation carries the workspaces it grants, a JSON array of ids.
+	//
+	// The event log is rescoped to what publishers now write, so its
+	// history names no workspace past the one a reader is checked
+	// against: a run.pr from an extra repository gains that repository's
+	// workspace as repo, and one whose repository cannot be told any more
+	// goes; a coordination message or ack to a run in another workspace
+	// drops that run. Both are refresh hints, so dropping one loses no
+	// data.
+	`
+ALTER TABLE workspaces ADD COLUMN owner_member_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE identity_invitations ADD COLUMN workspaces TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE workspace_grants (
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	granted_by   TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, member_id)
+);
+CREATE INDEX idx_workspace_grants_member ON workspace_grants(member_id);
+UPDATE members SET role = 'super_admin' WHERE id = (
+	SELECT id FROM members WHERE role = 'admin' AND pending = 0 AND merged_into = ''
+	ORDER BY created_at, rowid LIMIT 1);
+UPDATE workspaces SET owner_member_id = COALESCE(
+	(SELECT id FROM members WHERE role = 'super_admin' ORDER BY created_at, rowid LIMIT 1), '');
+INSERT INTO workspace_grants (workspace_id, member_id, granted_by, created_at)
+	SELECT w.id, m.id, '', unixepoch() * 1000000000
+	FROM workspaces w, members m
+	WHERE m.pending = 0 AND m.merged_into = '' AND m.role <> 'super_admin';
+UPDATE events SET payload = json_set(payload, '$.repo', (
+	SELECT p.repo_workspace_id FROM run_pull_requests p
+	WHERE p.run_id = events.run_id AND p.url = json_extract(events.payload, '$.url') AND p.repo_workspace_id <> ''
+	ORDER BY p.created_at LIMIT 1))
+WHERE type = 'run.pr' AND json_extract(payload, '$.repo') IS NULL AND EXISTS (
+	SELECT 1 FROM run_pull_requests p
+	WHERE p.run_id = events.run_id AND p.url = json_extract(events.payload, '$.url') AND p.repo_workspace_id <> '');
+DELETE FROM events
+WHERE type = 'run.pr' AND json_extract(payload, '$.repo') IS NULL
+	AND EXISTS (SELECT 1 FROM run_repos rr WHERE rr.run_id = events.run_id)
+	AND NOT EXISTS (SELECT 1 FROM run_pull_requests p
+		WHERE p.run_id = events.run_id AND p.url = json_extract(events.payload, '$.url') AND p.repo_workspace_id = '');
+UPDATE events SET payload = json_set(payload, '$.to_run_id', '')
+WHERE type = 'coord.message' AND json_extract(payload, '$.to_run_id') <> '' AND NOT EXISTS (
+	SELECT 1 FROM runs r WHERE r.id = json_extract(events.payload, '$.to_run_id') AND r.workspace_id = events.workspace_id);
+UPDATE events SET run_id = '', payload = json_set(payload, '$.to_run_id', '')
+WHERE type = 'coord.message.acked' AND json_extract(payload, '$.to_run_id') <> '' AND NOT EXISTS (
+	SELECT 1 FROM runs r WHERE r.id = json_extract(events.payload, '$.to_run_id') AND r.workspace_id = events.workspace_id);
+`,
+	// v112: the agents and accounts a member's subsessions may not use, a
+	// JSON array of {harness, account_member_id}.
+	`
+ALTER TABLE child_settings ADD COLUMN off TEXT NOT NULL DEFAULT '[]';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

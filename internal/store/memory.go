@@ -131,6 +131,50 @@ const memoryJoins = `
 
 const memoryLive = `m.invalid_at IS NULL AND m.superseded_by = ''`
 
+// runReached holds when every workspace of session r is in the JSON array
+// bound to both its placeholders; reachArgs binds them.
+const runReached = `r.workspace_id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (
+	SELECT 1 FROM run_repos rr WHERE rr.run_id = r.id AND rr.workspace_id NOT IN (SELECT value FROM json_each(?)))`
+
+// memoryReached keeps the notes no session wrote and those of a session
+// runReached keeps. A deleted session's note is left out: which extra
+// workspaces it had is no longer known.
+const memoryReached = `(m.run_id = '' OR EXISTS (SELECT 1 FROM runs r WHERE r.id = m.run_id AND ` + runReached + `))`
+
+// unlinkHidden clears, for a reader limited to workspaces, the replacement
+// a note names when that replacement is a note the reader cannot see.
+func (d *DB) unlinkHidden(ctx context.Context, workspaces []domain.WorkspaceID, notes ...*Memory) error {
+	if workspaces == nil {
+		return nil
+	}
+	reach, err := reachArgs(workspaces)
+	if err != nil {
+		return err
+	}
+	for _, n := range notes {
+		if n.SupersededBy == "" {
+			continue
+		}
+		var seen bool
+		if err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM memory m WHERE m.id = ? AND `+memoryReached+`)`,
+			append([]any{n.SupersededBy}, reach...)...).Scan(&seen); err != nil {
+			return err
+		}
+		if !seen {
+			n.SupersededBy = ""
+		}
+	}
+	return nil
+}
+
+func reachArgs(workspaces []domain.WorkspaceID) ([]any, error) {
+	ids, err := json.Marshal(workspaces)
+	if err != nil {
+		return nil, fmt.Errorf("encode reachable workspaces: %w", err)
+	}
+	return []any{string(ids), string(ids)}, nil
+}
+
 func scanMemory(row interface{ Scan(...any) error }) (*Memory, error) {
 	var (
 		m                Memory
@@ -193,13 +237,15 @@ func memoryTitle(text string) string {
 // InsertMemory stores m and reads it back into m. When a live agent or
 // member note already has the same text, or the question already has an
 // answer note, it stores nothing, reads that note into m and reports true.
-func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
+// A non-nil workspaces refuses, without naming it, a duplicate of a session
+// with a workspace outside it.
+func (d *DB) InsertMemory(ctx context.Context, m *Memory, workspaces []domain.WorkspaceID) (bool, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("store: insert memory: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	duplicate, err := insertMemory(ctx, tx, m)
+	duplicate, err := insertMemory(ctx, tx, m, workspaces)
 	if err != nil {
 		return false, err
 	}
@@ -220,8 +266,9 @@ func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
 // scope's budget without old. A pin is refused on a duplicate of the other
 // scope, and on one vet refuses. A member pin stays its member's; a
 // workspace pin is pinned by the author m arrived with. It reports
-// whether m duplicated a live note and whether old's pin moved.
-func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent bool, vet func(old *Memory) error) (duplicate, movedPin bool, err error) {
+// whether m duplicated a live note and whether old's pin moved. workspaces
+// limits the duplicate it may return as InsertMemory's does.
+func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent bool, vet func(old *Memory) error, workspaces []domain.WorkspaceID) (duplicate, movedPin bool, err error) {
 	if m == nil {
 		return false, false, errors.New("store: supersede memory: note is required")
 	}
@@ -254,7 +301,7 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent b
 	if prior.Scope == MemoryScopeMember && prior.PinnedAt != nil {
 		by = prior.PinnedBy
 	}
-	if duplicate, err = insertMemory(ctx, tx, m); err != nil {
+	if duplicate, err = insertMemory(ctx, tx, m, workspaces); err != nil {
 		return false, false, err
 	}
 	if duplicate && agent {
@@ -291,7 +338,7 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent b
 	return duplicate, prior.PinnedAt != nil, nil
 }
 
-func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
+func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory, workspaces []domain.WorkspaceID) (bool, error) {
 	if m == nil || m.WorkspaceID == "" || strings.TrimSpace(m.Body) == "" {
 		return false, errors.New("store: insert memory: workspace and body are required")
 	}
@@ -329,6 +376,20 @@ func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
 			m.WorkspaceID, hash).Scan(&id); err != nil {
 			return false, fmt.Errorf("store: insert memory: read the note it duplicates: %w", err)
 		}
+		if workspaces != nil {
+			reach, reachErr := reachArgs(workspaces)
+			if reachErr != nil {
+				return false, fmt.Errorf("store: insert memory: %w", reachErr)
+			}
+			var reached bool
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM memory m WHERE m.id = ? AND `+memoryReached+`)`,
+				append([]any{id}, reach...)...).Scan(&reached); err != nil {
+				return false, fmt.Errorf("store: insert memory: check the note it duplicates: %w", err)
+			}
+			if !reached {
+				return false, fmt.Errorf("%w: a note of a session you cannot see already holds this text; reword it", ErrConflict)
+			}
+		}
 	}
 	stored, err := readMemory(ctx, tx, m.WorkspaceID, id)
 	if err != nil {
@@ -341,17 +402,19 @@ func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
 // MemoryQuery selects notes. Words match any word in titles, bodies and
 // files, titles weighing most; File keeps notes citing that path. Without
 // either the newest notes come first. All includes replaced notes, and
-// Replaced keeps only them.
+// Replaced keeps only them. A non-nil Workspaces leaves out the notes of a
+// session with a workspace outside it.
 type MemoryQuery struct {
-	Workspace domain.WorkspaceID
-	Words     string
-	Kind      MemoryKind
-	Source    MemorySource
-	File      string
-	All       bool
-	Replaced  bool
-	Pinned    bool
-	Limit     int
+	Workspace  domain.WorkspaceID
+	Workspaces []domain.WorkspaceID
+	Words      string
+	Kind       MemoryKind
+	Source     MemorySource
+	File       string
+	All        bool
+	Replaced   bool
+	Pinned     bool
+	Limit      int
 }
 
 // SearchMemory ranks matches by bm25 decayed by age: a 30-day-old note
@@ -378,6 +441,14 @@ func (d *DB) SearchMemory(ctx context.Context, q MemoryQuery) ([]*Memory, error)
 	if q.Pinned {
 		where += " AND m.pinned_at IS NOT NULL"
 	}
+	if q.Workspaces != nil {
+		reach, err := reachArgs(q.Workspaces)
+		if err != nil {
+			return nil, fmt.Errorf("store: search memory: %w", err)
+		}
+		where += " AND " + memoryReached
+		args = append(args, reach...)
+	}
 	var match []string
 	if q.File != "" {
 		match = append(match, "files : "+ftsPhrase(q.File))
@@ -402,7 +473,14 @@ func (d *DB) SearchMemory(ctx context.Context, q MemoryQuery) ([]*Memory, error)
 	if err != nil {
 		return nil, fmt.Errorf("store: search memory: %w", err)
 	}
-	return collect(rows, scanMemory)
+	notes, err := collect(rows, scanMemory)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.unlinkHidden(ctx, q.Workspaces, notes...); err != nil {
+		return nil, fmt.Errorf("store: search memory: %w", err)
+	}
+	return notes, nil
 }
 
 // ftsPhrase quotes s as one FTS5 phrase, so no input is read as query
@@ -415,10 +493,28 @@ func ftsPhrase(s string) string {
 // than itself, in replacement order: the notes it replaced, farthest
 // first, then those that replaced it. Notes as many replacements away,
 // such as two notes replaced by the same one, are ordered oldest first.
-func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*Memory, []*Memory, error) {
+// A non-nil workspaces leaves out the notes of a session with a workspace
+// outside it, the note itself reading as missing.
+func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string, workspaces []domain.WorkspaceID) (*Memory, []*Memory, error) {
 	m, err := readMemory(ctx, d.db, workspace, id)
 	if err != nil {
 		return nil, nil, err
+	}
+	reached, args := "1", []any{workspace, id}
+	if workspaces != nil {
+		reach, reachErr := reachArgs(workspaces)
+		if reachErr != nil {
+			return nil, nil, fmt.Errorf("store: read memory note %s: %w", id, reachErr)
+		}
+		reached, args = memoryReached, append(args, reach...)
+		var ok bool
+		if err = d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM memory m WHERE m.workspace_id = ? AND m.id = ? AND `+reached+`)`,
+			args...).Scan(&ok); err != nil {
+			return nil, nil, fmt.Errorf("store: read memory note %s: %w", id, err)
+		}
+		if !ok {
+			return nil, nil, fmt.Errorf("%w: memory note %s", ErrNotFound, id)
+		}
 	}
 	// No chain outgrows the workspace's notes, so the LIMITs only stop a
 	// superseded_by cycle, which the step column keeps UNION from ending.
@@ -436,14 +532,17 @@ func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 			SELECT id, step, min(abs(step)) FROM (SELECT id, step FROM newer UNION ALL SELECT id, step FROM older)
 			WHERE id <> ?2 GROUP BY id) chain
 		JOIN memory m ON m.id = chain.id`+memoryJoins+`
-		WHERE m.workspace_id = ?1
-		ORDER BY chain.step, m.created_at, m.id`, workspace, id)
+		WHERE m.workspace_id = ?1 AND `+reached+`
+		ORDER BY chain.step, m.created_at, m.id`, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("store: read memory chain of %s: %w", id, err)
 	}
 	chain, err := collect(rows, scanMemory)
 	if err != nil {
 		return nil, nil, err
+	}
+	if err := d.unlinkHidden(ctx, workspaces, append([]*Memory{m}, chain...)...); err != nil {
+		return nil, nil, fmt.Errorf("store: read memory note %s: %w", id, err)
 	}
 	return m, chain, nil
 }
@@ -690,13 +789,15 @@ func (d *DB) CountAgentNotesByRun(ctx context.Context, run domain.RunID) (int, e
 }
 
 // MemoryBriefQuery selects a member's brief inputs. Self, the run the
-// brief is for, is left out of the live-run count.
+// brief is for, is left out of the live-run count. A non-nil Workspaces
+// leaves out every session with a workspace outside it, and its notes.
 type MemoryBriefQuery struct {
-	Workspace domain.WorkspaceID
-	Member    domain.MemberID
-	Self      domain.RunID
-	Since     time.Time
-	Runs      int
+	Workspace  domain.WorkspaceID
+	Workspaces []domain.WorkspaceID
+	Member     domain.MemberID
+	Self       domain.RunID
+	Since      time.Time
+	Runs       int
 }
 
 // MemoryBrief is what a launch brief is built from. Pinned holds the
@@ -736,11 +837,18 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 		return nil, fmt.Errorf("store: read memory brief: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	notesReached, runsReached, reach := "1", "1", []any{}
+	if q.Workspaces != nil {
+		if reach, err = reachArgs(q.Workspaces); err != nil {
+			return nil, fmt.Errorf("store: read memory brief: %w", err)
+		}
+		notesReached, runsReached = memoryReached, runReached
+	}
 	var brief MemoryBrief
 	rows, err := tx.QueryContext(ctx, `SELECT `+memoryCols+` FROM memory m`+memoryJoins+`
 		WHERE m.workspace_id = ? AND m.pinned_at IS NOT NULL AND `+memoryLive+`
-		  AND (m.scope = 'workspace' OR m.pinned_by = ?)
-		ORDER BY m.scope = 'member', m.pinned_at, m.rowid`, q.Workspace, q.Member)
+		  AND (m.scope = 'workspace' OR m.pinned_by = ?) AND `+notesReached+`
+		ORDER BY m.scope = 'member', m.pinned_at, m.rowid`, append([]any{q.Workspace, q.Member}, reach...)...)
 	if err != nil {
 		return nil, fmt.Errorf("store: read memory brief: pins: %w", err)
 	}
@@ -756,8 +864,8 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 		LEFT JOIN members member ON member.id = r.member_id
 		LEFT JOIN run_pull_requests pr ON pr.rowid = (
 			SELECT rowid FROM run_pull_requests WHERE run_id = r.id ORDER BY created_at DESC, rowid DESC LIMIT 1)
-		WHERE r.workspace_id = ? AND r.finished_at >= ?
-		ORDER BY r.finished_at DESC, r.rowid DESC LIMIT ?`, q.Workspace, since, q.Runs)
+		WHERE r.workspace_id = ? AND r.finished_at >= ? AND `+runsReached+`
+		ORDER BY r.finished_at DESC, r.rowid DESC LIMIT ?`, append(append([]any{q.Workspace, since}, reach...), q.Runs)...)
 	if err != nil {
 		return nil, fmt.Errorf("store: read memory brief: sessions: %w", err)
 	}
@@ -778,12 +886,12 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 	}
 	placeholders, statuses := liveStatusArgs()
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM runs WHERE workspace_id = ? AND id <> ? AND status IN (`+placeholders+`)`,
-		append([]any{q.Workspace, q.Self}, statuses...)...).Scan(&brief.LiveRuns); err != nil {
+		`SELECT COUNT(*) FROM runs r WHERE r.workspace_id = ? AND r.id <> ? AND r.status IN (`+placeholders+`) AND `+runsReached,
+		append(append([]any{q.Workspace, q.Self}, statuses...), reach...)...).Scan(&brief.LiveRuns); err != nil {
 		return nil, fmt.Errorf("store: read memory brief: live sessions: %w", err)
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE m.source = 'agent' AND m.pinned_at IS NULL)
-		FROM memory m WHERE m.workspace_id = ? AND `+memoryLive, q.Workspace).Scan(&brief.Notes, &brief.AgentNotes); err != nil {
+		FROM memory m WHERE m.workspace_id = ? AND `+memoryLive+` AND `+notesReached, append([]any{q.Workspace}, reach...)...).Scan(&brief.Notes, &brief.AgentNotes); err != nil {
 		return nil, fmt.Errorf("store: read memory brief: notes: %w", err)
 	}
 	return &brief, nil
@@ -800,14 +908,19 @@ func withholdSecret(text string, files []string) (string, []string) {
 	return fmt.Sprintf("(withheld: gitleaks rule %s at %s)", hits[0].Kind, hits[0].Location), nil
 }
 
+// latestRunDiffQuery names its index because, without ANALYZE statistics,
+// SQLite reads it off idx_events_workspace_type and walks every run.diff
+// in the workspace.
+const latestRunDiffQuery = `SELECT payload FROM events INDEXED BY idx_events_run_type
+	WHERE workspace_id = ? AND run_id = ? AND type = 'run.diff' AND json_extract(payload, '$.repo') IS NULL
+	ORDER BY seq DESC LIMIT 1`
+
 // latestRunDiff reads the files and HEAD of the run's newest run.diff
 // event. It decodes the payload itself because the events package imports
 // this one.
 func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) ([]string, string, error) {
 	var payload string
-	err := d.db.QueryRowContext(ctx,
-		`SELECT payload FROM events WHERE workspace_id = ? AND run_id = ? AND type = 'run.diff' AND json_extract(payload, '$.repo') IS NULL ORDER BY seq DESC LIMIT 1`,
-		workspace, run).Scan(&payload)
+	err := d.db.QueryRowContext(ctx, latestRunDiffQuery, workspace, run).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", nil
 	}

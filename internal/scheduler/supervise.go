@@ -65,7 +65,7 @@ const finalizeTimeout = time.Minute
 func (s *Scheduler) superviseWait(entry *supervised) {
 	defer s.wg.Done()
 	s.mu.Lock()
-	cid := entry.containerID
+	cid, gen := entry.containerID, entry.sleepGen
 	s.mu.Unlock()
 	st, err := waitForExit(s.superCtx, func(ctx context.Context) (runtime.ExitStatus, error) {
 		return s.cfg.Runtime.Wait(ctx, cid)
@@ -92,6 +92,16 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 	// publish is in flight.
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
+	// A sleep stopped the container, or stopped and started it since this
+	// wait began: the exit is the sleep's, and a wake waits anew.
+	if entry.sleepGen != gen || entry.sleeping || !entry.asleepSince.IsZero() {
+		if entry.sleepGen == gen {
+			entry.waitStarted = false
+		}
+		s.mu.Unlock()
+		entry.lifecycleMu.Unlock()
+		return
+	}
 	// A move to another account replaced the container this waited on. A
 	// wait that started before the run had a container waited on none.
 	live, retained := s.runs[entry.runID] == entry && (cid == "" || entry.containerID == cid), entry.retained
@@ -564,7 +574,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	now := time.Now().UTC()
 	for _, e := range entries {
 		s.mu.Lock()
-		live := s.runs[e.runID] == e && !e.finalizing
+		live := s.runs[e.runID] == e && !e.finalizing && !e.sleeping && e.asleepSince.IsZero()
 		paused, status, started, acp := e.paused, e.status, e.startedAt, e.acp
 		if e.quietFrom.After(started) {
 			started = e.quietFrom
@@ -694,8 +704,31 @@ func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
 }
 
 // sweepCheckouts never removes the branch or transcript. It removes checkouts
-// of runs that finished at or before cutoff.
+// of runs that finished at or before cutoff. It waits for a running sweep, as
+// disk reclaim needs its own cutoff, unless ctx ends first.
 func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
+	select {
+	case s.checkoutSweepGate <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
+	defer func() { <-s.checkoutSweepGate }()
+	s.sweepCheckoutsHeld(ctx, cutoff)
+}
+
+// trySweepCheckouts skips while a sweep runs, so the supervisor never waits.
+func (s *Scheduler) trySweepCheckouts(ctx context.Context, cutoff time.Time) {
+	select {
+	case s.checkoutSweepGate <- struct{}{}:
+	default:
+		return
+	}
+	defer func() { <-s.checkoutSweepGate }()
+	s.sweepCheckoutsHeld(ctx, cutoff)
+}
+
+// sweepCheckoutsHeld requires the checkoutSweepGate slot.
+func (s *Scheduler) sweepCheckoutsHeld(ctx context.Context, cutoff time.Time) {
 	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
 		slog.Warn("scheduler: checkout gc: list workspaces", "error", err)
@@ -715,17 +748,43 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 			inUse[a.Worktree] = true
 		}
 	}
+	withCheckout := make(map[domain.RunID]bool)
+	listed := true
+	defer func() {
+		if !listed {
+			return
+		}
+		s.mu.Lock()
+		for run := range s.cleanupRetries {
+			if !withCheckout[run] {
+				delete(s.cleanupRetries, run)
+			}
+		}
+		s.mu.Unlock()
+	}()
 	for _, ws := range workspaces {
 		runs, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
 		if err != nil {
+			listed = false
 			slog.Warn("scheduler: checkout gc: list runs", "workspace", ws.ID, "error", err)
 			continue
 		}
 		for _, r := range runs {
+			// Each cleanup outlives cancellation by up to its own budget.
+			if ctx.Err() != nil {
+				listed = false
+				return
+			}
+			if r.Worktree != "" {
+				withCheckout[r.ID] = true
+			}
 			if !r.Status.Terminal() || r.Worktree == "" || r.FinishedAt == nil || r.FinishedAt.After(cutoff) {
 				continue
 			}
 			if inUse[r.Worktree] {
+				continue
+			}
+			if !s.cleanupDue(r.ID, *r.FinishedAt) {
 				continue
 			}
 
@@ -787,6 +846,8 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 				identity = "none"
 			}
 			cleanup := func(cleanupCtx context.Context) error {
+				cleanupCtx, cancel := context.WithTimeout(cleanupCtx, checkoutCleanupTimeout)
+				defer cancel()
 				if err := s.deleteDevelopment(cleanupCtx, r.ID); err != nil {
 					return err
 				}
@@ -795,13 +856,16 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 				}
 				return nil
 			}
-			if err := s.captureBeforeCleanupEvidence(ctx, r.ID, identity, cleanup); err != nil {
+			if gcErr := s.captureBeforeCleanupEvidence(ctx, r.ID, identity, cleanup); gcErr != nil {
 				if lifecycle != nil {
 					lifecycle.lifecycleMu.Unlock()
 				}
-				slog.Warn("scheduler: checkout gc: capture before cleanup", "run", r.ID, "error", err)
+				s.cleanupFailed(r.ID, *fresh.FinishedAt, gcErr)
 				continue
 			}
+			s.mu.Lock()
+			delete(s.cleanupRetries, r.ID)
+			s.mu.Unlock()
 			var clearErr error
 			if clearer, ok := s.cfg.Store.(store.RunWorktreeStore); ok {
 				clearErr = clearer.ClearRunWorktree(ctx, fresh.ID, fresh.Worktree, fresh.Status)

@@ -7,6 +7,19 @@
 
 const { contextBridge, ipcRenderer } = require('electron')
 
+// The shell has no View menu, so Cmd (macOS) or Ctrl with =, + or - zooms the
+// window and 0 resets it, matched on the character typed as browsers do. It
+// listens after the page: a key the page already claimed, like terminal zoom,
+// is left alone.
+const zoomKeys = new Map([['=', 'in'], ['+', 'in'], ['-', 'out'], ['0', 'reset']])
+window.addEventListener('keydown', (event) => {
+  const command = process.platform === 'darwin' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+  const step = zoomKeys.get(event.key)
+  if (event.defaultPrevented || !command || event.altKey || !step) return
+  event.preventDefault()
+  ipcRenderer.send('window:zoom', step)
+})
+
 // Which CLI built this shell. `aether gui build` stamps its own version into
 // the shell's package.json and main.js appends it to the renderer's argv: a
 // sandboxed preload cannot read a file, and this is the documented way to

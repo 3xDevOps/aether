@@ -24,7 +24,7 @@ func (s *Server) serverRunLimits(ctx context.Context, member domain.MemberID, ra
 		err    error
 	)
 	if p.CPUs != nil || p.MemoryBytes != nil || p.Pids != nil {
-		if perr := s.requireAdmin(ctx, member, protocol.MethodServerRunLimits); perr != nil {
+		if perr := s.requireSuperAdmin(ctx, member, protocol.MethodServerRunLimits); perr != nil {
 			return nil, perr
 		}
 		var cpus float64
@@ -41,7 +41,7 @@ func (s *Server) serverRunLimits(ctx context.Context, member domain.MemberID, ra
 		if err = scheduler.ValidateRunBudgets(cpus, memory, pids); err != nil {
 			return nil, invalidParams(err.Error())
 		}
-		limits, err = s.cfg.Store.UpdateServerRunLimits(ctx, p.CPUs, p.MemoryBytes, p.Pids)
+		limits, err = s.cfg.Store.UpdateServerRunLimits(ctx, member, p.CPUs, p.MemoryBytes, p.Pids)
 	} else {
 		limits, err = s.cfg.Store.ServerRunLimits(ctx)
 	}

@@ -178,7 +178,7 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 
 	cfg := Config{
 		Dir:      filepath.Join(dir, "coord"),
-		Store:    db,
+		Store:    storetest.Unscoped{DB: db},
 		Mail:     db,
 		Bus:      bus,
 		Peers:    h.peers,

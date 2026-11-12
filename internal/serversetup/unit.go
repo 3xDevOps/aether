@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // ServiceName is the system service identifier.
@@ -11,6 +12,8 @@ const ServiceName = "aether-server"
 
 // UnitPath is where the system unit belongs.
 const UnitPath = "/etc/systemd/system/" + ServiceName + ".service"
+
+const sliceFile = "aether.slice"
 
 // ActivateCommand enables and starts a freshly installed unit.
 const ActivateCommand = "systemctl daemon-reload && systemctl enable --now " + ServiceName
@@ -45,6 +48,10 @@ Requires=docker.service
 [Service]
 Type=simple
 OOMScoreAdjust=-500
+# Priority over session containers; see docs/install.md.
+CPUWeight=10000
+IOWeight=10000
+MemoryLow=1G
 # Runs as root. Two reasons, both deliberate (docs/security.md):
 #   1. The unit needs the Docker socket, and Docker socket access is already
 #      root-equivalent on the host - a dedicated user in the docker group
@@ -86,10 +93,44 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 `
 
+// DefaultSlice returns the slice session containers run in, pinned to
+// packaging/systemd/aether.slice like DefaultUnit. It sets no memory limit:
+// it must never throttle or kill a session.
+func DefaultSlice() string { return defaultSlice }
+
+const defaultSlice = `[Unit]
+Description=Aether session containers
+Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/install.md
+
+[Slice]
+# Half of system.slice and user.slice, which default to 100; see docs/install.md.
+CPUWeight=50
+IOWeight=50
+`
+
 // UnitOutdated reports whether the unit file at path exists and differs from
 // DefaultUnit(). A missing file is not outdated: the server may not run under
 // this unit at all.
 func UnitOutdated(path string) (bool, error) {
+	return fileOutdated(path, DefaultUnit())
+}
+
+// SliceOutdated reports whether the unit file at unitPath exists and the slice
+// file beside it is missing or differs from DefaultSlice().
+func SliceOutdated(unitPath string) (bool, error) {
+	if _, err := os.Stat(unitPath); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("serversetup: stat %s: %w", unitPath, err)
+	}
+	path := filepath.Join(filepath.Dir(unitPath), sliceFile)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return fileOutdated(path, DefaultSlice())
+}
+
+func fileOutdated(path, want string) (bool, error) {
 	got, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -97,5 +138,5 @@ func UnitOutdated(path string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("serversetup: read %s: %w", path, err)
 	}
-	return string(got) != DefaultUnit(), nil
+	return string(got) != want, nil
 }

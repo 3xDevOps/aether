@@ -290,7 +290,7 @@ func TestAssistantStartRefusesARemovedMember(t *testing.T) {
 	if err := e.db.CreateMember(t.Context(), gone); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.DeleteMember(t.Context(), gone.ID); err != nil {
+	if err := e.db.DeleteMember(t.Context(), gone.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.sched.StartAssistantLogin(t.Context(), gone.ID, "codex", 80, 24); err == nil {

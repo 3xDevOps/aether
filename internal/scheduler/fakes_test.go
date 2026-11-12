@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -38,7 +40,10 @@ type fakeRuntime struct {
 	startErr    error
 	waitErr     error
 	inspectWait time.Duration
+	// inspectHook runs at the start of every Inspect.
+	inspectHook func(id runtime.ID)
 	startHook   func(c *fakeContainer)
+	startDelay  time.Duration
 	stopHook    func()
 	commitErr   error
 	commits     []fakeCommitCall
@@ -54,6 +59,7 @@ type fakeRuntime struct {
 	execCalls   []fakeExecTTYCall
 	// execHandler answers Exec with an exit code and stdout; the default
 	// is exit 0 with no output, and nothing ever writes stderr.
+	execBudget  atomic.Int64
 	execHandler func(id runtime.ID, argv []string) (int, string, error)
 	// execStderr is what every exec writes to stderr, so a test can see
 	// what an answer built from both streams looks like.
@@ -61,6 +67,16 @@ type fakeRuntime struct {
 	execRunCalls []fakeExecCall
 	attaches     int
 	images       map[string]string
+	// imageLabels are the labels Commit set, by image tag.
+	imageLabels map[string]map[string]string
+	// exports are the tar streams ExportImage returns for an image committed
+	// from a container, by that container; any other image exports empty.
+	exports   map[runtime.ID][]byte
+	exportErr error
+	// exportHook runs at the start of every ExportImage.
+	exportHook func()
+	// imageStartErr fails Start of a container created from the image.
+	imageStartErr map[string]error
 }
 
 type fakeCommitCall struct {
@@ -197,9 +213,16 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 	if r.startErr != nil {
 		return r.startErr
 	}
+	time.Sleep(r.startDelay)
 	c, err := r.get(id)
 	if err != nil {
 		return err
+	}
+	r.mu.Lock()
+	imageErr := r.imageStartErr[c.spec.Image]
+	r.mu.Unlock()
+	if imageErr != nil {
+		return imageErr
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -343,6 +366,9 @@ func (r *fakeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, wo
 	handler := r.execHandler
 	stderr := r.execStderr
 	r.mu.Unlock()
+	if d, ok := ctx.Deadline(); ok {
+		r.execBudget.Store(int64(time.Until(d)))
+	}
 	if handler == nil {
 		return 0, "", stderr, nil
 	}
@@ -415,8 +441,11 @@ func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStat
 
 func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
 	r.mu.Lock()
-	waitErr, delay := r.waitErr, r.inspectWait
+	waitErr, delay, hook := r.waitErr, r.inspectWait, r.inspectHook
 	r.mu.Unlock()
+	if hook != nil {
+		hook(id)
+	}
 	if waitErr != nil {
 		return runtime.ContainerInfo{}, waitErr
 	}
@@ -458,7 +487,7 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
 }
 
-func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error {
+func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string, labels map[string]string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.commitErr != nil {
@@ -469,7 +498,47 @@ func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error
 		r.images = make(map[string]string)
 	}
 	r.images[tag] = string(id)
+	if r.imageLabels == nil {
+		r.imageLabels = make(map[string]map[string]string)
+	}
+	r.imageLabels[tag] = maps.Clone(labels)
 	return nil
+}
+
+func (r *fakeRuntime) ImageLabels(_ context.Context, tag string) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.images[tag]; !ok {
+		return nil, fmt.Errorf("fake runtime: image %q: %w", tag, runtime.ErrNotFound)
+	}
+	return maps.Clone(r.imageLabels[tag]), nil
+}
+
+func (r *fakeRuntime) TagImage(_ context.Context, source, target string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.images[source]
+	if !ok {
+		return fmt.Errorf("fake runtime: no such image %q", source)
+	}
+	r.images[target] = id
+	r.imageLabels[target] = maps.Clone(r.imageLabels[source])
+	return nil
+}
+
+func (r *fakeRuntime) ExportImage(_ context.Context, tag string) (io.ReadCloser, error) {
+	if r.exportHook != nil {
+		r.exportHook()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.exportErr != nil {
+		return nil, r.exportErr
+	}
+	if _, ok := r.images[tag]; !ok {
+		return nil, fmt.Errorf("fake runtime: no such image %q", tag)
+	}
+	return io.NopCloser(bytes.NewReader(r.exports[runtime.ID(r.images[tag])])), nil
 }
 
 func (r *fakeRuntime) commitCalls() []fakeCommitCall {
@@ -604,6 +673,7 @@ type fakeGit struct {
 	branchLookupErr   error
 	createErr         error
 	publishErr        error
+	removeErr         error
 	createHook        func(run domain.RunID)
 	watchHook         func(run domain.RunID)                 // runs at the top of StartDiffWatch
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
@@ -743,6 +813,12 @@ func (g *fakeGit) PublishRunBranch(_ context.Context, run domain.RunID) (string,
 }
 
 func (g *fakeGit) RemoveRunCheckout(_ context.Context, run domain.RunID) error {
+	g.mu.Lock()
+	removeErr := g.removeErr
+	g.mu.Unlock()
+	if removeErr != nil {
+		return removeErr
+	}
 	return os.RemoveAll(g.checkoutPath(run))
 }
 
@@ -825,6 +901,7 @@ type fakePTYSession struct {
 	mu    sync.Mutex
 	out   bytes.Buffer
 	last  time.Time
+	typed time.Time
 	ended bool
 }
 
@@ -948,6 +1025,18 @@ func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	return sess.last, true
+}
+
+func (p *fakePTY) LastInput(key ptyhost.SessionKey) (time.Time, bool) {
+	p.mu.Lock()
+	sess, ok := p.sessions[key]
+	p.mu.Unlock()
+	if !ok {
+		return time.Time{}, false
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	return sess.typed, true
 }
 
 func (p *fakePTY) LastLine(ctx context.Context, run domain.RunID, wait time.Duration) (string, error) {

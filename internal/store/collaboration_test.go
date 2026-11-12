@@ -732,7 +732,7 @@ func TestRoomMessageSurvivesActorRemovalWithDisplaySnapshot(t *testing.T) {
 		t.Fatalf("UpdateMember: %v", err)
 	}
 
-	if err := db.DeleteMember(ctx, actor.ID); err != nil {
+	if err := db.DeleteMember(ctx, actor.ID, ""); err != nil {
 		t.Fatalf("DeleteMember with room-only history: %v", err)
 	}
 	if _, err := db.GetMember(ctx, actor.ID); !errors.Is(err, ErrNotFound) {

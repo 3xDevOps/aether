@@ -292,7 +292,7 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 			d.cause = events.CauseTurnEnd
 		}
 	}
-	if entry != nil && !entry.paused && waiting != domain.ActivityAnswered && waiting == d.activity {
+	if entry != nil && (!entry.paused || !entry.asleepSince.IsZero()) && waiting != domain.ActivityAnswered && waiting == d.activity {
 		wait, stranded := s.runWaitLocked(ctx, entry)
 		d.wait = &wait
 		// A live child run or background task can still wake the agent, so a
