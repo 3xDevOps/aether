@@ -177,12 +177,14 @@ func (s *Service) Diff(ctx context.Context, run Execution, req DiffRequest) (Dif
 	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
 	var baseRef string
 	if req.Base {
-		ref, base, err := s.upstreamBase(ctx, run, req.BaseBranch, req.ForkPoint)
+		var ref, base, mergeBase string
+		ref, base, err = s.upstreamBase(ctx, run, req.BaseBranch, req.ForkPoint)
 		if err != nil {
 			return DiffResult{}, err
 		}
-		out, err := s.git(ctx, run, false, "merge-base", state.Head, base)
-		mergeBase, err := complete(out, err)
+		var out CommandOutput
+		out, err = s.git(ctx, run, false, "merge-base", state.Head, base)
+		mergeBase, err = complete(out, err)
 		if err != nil {
 			return DiffResult{}, err
 		}
