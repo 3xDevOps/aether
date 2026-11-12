@@ -335,8 +335,9 @@ before the agent, **variables** set in the session's container, and optional
 **egress control**, which limits the hosts sessions can reach. A variable can be
 marked **secret**.
 
-An admin edits both under **Environment** on the workspace's Repository page
-(workspace switcher → **Environment**), or with `aether workspace env`. Every
+An admin edits both under **Environment** on the workspace's settings page
+(workspace switcher → **Workspace settings**, or the workspace's **Settings**
+in **Manage workspaces**), or with `aether workspace env`. Every
 member can read the script, the variable names and the non-secret values.
 
 A change applies to sessions launched afterwards. An existing container keeps its

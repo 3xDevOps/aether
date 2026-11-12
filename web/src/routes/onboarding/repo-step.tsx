@@ -320,7 +320,7 @@ export function RepoStep({
 
   return (
     <section aria-label="Local repository" className="flex min-w-0 flex-col gap-3 self-stretch">
-      {mirrored && <p className="text-ui text-muted">This workspace has a server-owned source. Link the clone to pull session branches; {role === 'admin' ? 'use the Repository page to verify or adopt the base instead of pushing it.' : 'ask an administrator to verify or adopt the base on the Repository page instead of pushing it.'}</p>}
+      {mirrored && <p className="text-ui text-muted">This workspace has a server-owned source. Link the clone to pull session branches; {role === 'admin' ? 'use the workspace settings page to verify or adopt the base instead of pushing it.' : 'ask an administrator to verify or adopt the base on the workspace settings page instead of pushing it.'}</p>}
       {sourcePending && <p className="text-ui text-muted">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
       {remembered && !connected && <p className="text-ui text-muted">The saved connection is not confirmed as this gateway's current clone. Link the intended repository again. Each server profile keeps one current clone, not one per workspace.</p>}
       {!connected && (

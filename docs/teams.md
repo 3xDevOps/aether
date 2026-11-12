@@ -413,9 +413,10 @@ SSH in progress stops when its member loses the workspace, with `aether: git
 receive-pack: stopped: access ended: ...` on stderr.
 
 Invitations and invite codes carry `--workspace` grants
-([Join the server](#join-the-server)). The dashboard's **Manage workspaces**
-shows each workspace's owner, and **Access…** lists the grants and adds or
-removes members.
+([Join the server](#join-the-server)). The dashboard's **Manage workspaces**,
+in the sidebar above **Members**, shows each workspace's owner, and each row's
+**Access** button opens a searchable list of members to tick or untick; a super
+admin changes the owner there too.
 
 Members see each other through workspaces. A super admin sees every member.
 Anyone else sees themselves, the super admins, and every member who owns, was
@@ -598,7 +599,7 @@ add <name>`, then `aether terminal`). That home is mounted into every session th
 launch. A member's **agent account** is that vendor login and the subscription
 behind it. One member can let a collaborator launch sessions on theirs.
 
-The owner shares under **Profile → Agent account sharing → Share account**. The
+The owner turns on **Share my account** on the recipient's row in **Members**. The
 recipient picks the owner under **New session → Account**, below the agent.
 Each row there is marked **You** or **Shared** and says what a launch of the
 chosen agent on that account meets:

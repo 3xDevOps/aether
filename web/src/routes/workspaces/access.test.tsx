@@ -28,12 +28,18 @@ function seed(self: Member, roles: { owned?: boolean; other?: boolean }) {
   })
 }
 
-async function menuOf(name: string) {
-  const trigger = await screen.findByRole('button', { name: `More actions for ${name}` })
-  trigger.focus()
-  await userEvent.keyboard('{Enter}')
-  return within(await screen.findByRole('menu'))
+async function openAccess(name: string) {
+  fireEvent.click(await screen.findByRole('button', { name: `Access to ${name}` }))
+  return within(await screen.findByRole('dialog', { name: `Access to ${name}` }))
 }
+
+async function openOwner(name: string) {
+  const access = await openAccess(name)
+  fireEvent.click(await access.findByRole('button', { name: 'Change owner…' }))
+  return within(await screen.findByRole('dialog', { name: `Change owner of ${name}` }))
+}
+
+const box = (dialog: ReturnType<typeof within>, name: string) => dialog.getByRole('checkbox', { name: new RegExp(`^${name}`) })
 
 function client(over = {}) {
   return fakeApi({
@@ -49,47 +55,96 @@ function client(over = {}) {
 }
 
 describe('workspace access', () => {
-  it('offers Access only where the caller administers the workspace, and Change owner only to super admins', async () => {
+  it('puts Access on the rows the caller administers, and Change owner in it only for super admins', async () => {
     seed(admin, { owned: true })
     render(<WorkspacesRoute params={{}} client={client()} />)
-    const owned = await menuOf('main-repo')
-    expect(owned.getByRole('menuitem', { name: 'Access…' })).toBeTruthy()
-    expect(owned.queryByRole('menuitem', { name: 'Change owner…' })).toBeNull()
-    expect(owned.getByRole('menuitem', { name: 'Delete…' })).toBeTruthy()
-    await userEvent.keyboard('{Escape}')
-    const other = await menuOf('docs-site')
-    expect(other.queryByRole('menuitem', { name: 'Access…' })).toBeNull()
-    expect(other.queryByRole('menuitem', { name: 'Settings…' })).toBeNull()
-    expect(other.queryByRole('menuitem', { name: 'Delete…' })).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Settings for docs-site' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Access to docs-site' })).toBeNull()
+    const dialog = await openAccess('main-repo')
+    expect(await dialog.findByText('Owner · Admin')).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: 'Change owner…' })).toBeNull()
   })
 
-  it('lists the owner and grants, offers non-super admins only collaborators and viewers, and grants', async () => {
+  it('ticks who has access, locks super admins in as reaching every workspace, and grants with one click', async () => {
     seed(admin, { owned: true })
     const api = client()
     render(<WorkspacesRoute params={{}} client={api} />)
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    const list = within(await dialog.findByRole('list', { name: 'Members with access' }))
-    expect(list.getByText('Owner · Admin')).toBeTruthy()
-    expect(list.getByText('Bob')).toBeTruthy()
-    await userEvent.click(dialog.getByLabelText('Add a member'))
-    expect(await screen.findByRole('option', { name: /Vera/ })).toBeTruthy()
-    expect(screen.queryByRole('option', { name: /Root/ })).toBeNull()
-    expect(screen.queryByRole('option', { name: /Bob/ })).toBeNull()
-    await userEvent.keyboard('{Escape}')
-    await pickOption(dialog.getByLabelText('Add a member'), /^Vera/)
-    fireEvent.click(dialog.getByRole('button', { name: 'Add' }))
+    const dialog = await openAccess('main-repo')
+    await waitFor(() => expect(box(dialog, 'Bob').getAttribute('aria-checked')).toBe('true'))
+    expect(box(dialog, 'Vera').getAttribute('aria-checked')).toBe('false')
+    expect(box(dialog, 'Root').getAttribute('aria-checked')).toBe('true')
+    expect((box(dialog, 'Root') as HTMLButtonElement).disabled).toBe(true)
+    expect(dialog.getByText('Super admin · reaches every workspace')).toBeTruthy()
+    expect(dialog.getByText('Granted to 1 of 2 members. The owner and super admins always have access.')).toBeTruthy()
+    fireEvent.click(box(dialog, 'Vera'))
     await waitFor(() => expect(api.workspaceAccessGrant).toHaveBeenCalledWith(workspace.id, [vera.id]))
     await waitFor(() => expect(api.workspaceListFull).toHaveBeenCalled())
+  })
+
+  it('narrows the list as the caller types a name', async () => {
+    seed(admin, { owned: true })
+    render(<WorkspacesRoute params={{}} client={client()} />)
+    const dialog = await openAccess('main-repo')
+    await dialog.findByRole('checkbox', { name: /^Bob/ })
+    fireEvent.change(dialog.getByRole('searchbox', { name: 'Search members' }), { target: { value: 've' } })
+    expect(dialog.queryByRole('checkbox', { name: /^Bob/ })).toBeNull()
+    expect(box(dialog, 'Vera')).toBeTruthy()
+    fireEvent.change(dialog.getByRole('searchbox', { name: 'Search members' }), { target: { value: 'zed' } })
+    expect(dialog.getByText('No member matches “zed”.')).toBeTruthy()
+  })
+
+  it('lists a grant for a member the member list lacks, so it can be revoked', async () => {
+    seed(admin, { owned: true })
+    const api = client({ memberList: vi.fn(async () => ({ members: [admin, vera, root] })) })
+    render(<WorkspacesRoute params={{}} client={api} />)
+    const dialog = await openAccess('main-repo')
+    await waitFor(() => expect(box(dialog, bob.id).getAttribute('aria-checked')).toBe('true'))
+    expect(dialog.getByText('Granted')).toBeTruthy()
+    fireEvent.click(box(dialog, bob.id))
+    await waitFor(() => expect(api.workspaceAccessRevoke).toHaveBeenCalledWith(workspace.id, bob.id))
+  })
+
+  it('clears the search on Escape before closing the dialog', async () => {
+    seed(admin, { owned: true })
+    render(<WorkspacesRoute params={{}} client={client()} />)
+    const dialog = await openAccess('main-repo')
+    const search = dialog.getByRole('searchbox', { name: 'Search members' })
+    fireEvent.change(search, { target: { value: 've' } })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect((search as HTMLInputElement).value).toBe('')
+    expect(screen.getByRole('dialog', { name: 'Access to main-repo' })).toBeTruthy()
+  })
+
+  it('opens Change owner over Access and comes back to it', async () => {
+    seed(root, { owned: true, other: true })
+    render(<WorkspacesRoute params={{}} client={client()} />)
+    const dialog = await openAccess('main-repo')
+    const change = await dialog.findByRole('button', { name: 'Change owner…' })
+    change.focus()
+    fireEvent.click(change)
+    await screen.findByRole('dialog', { name: 'Change owner of main-repo' })
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Change owner of main-repo' })).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'Access to main-repo' })).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(change))
+  })
+
+  it('locks admins for a caller who is not a super admin', async () => {
+    seed(admin, { owned: true })
+    const other: Member = { ...bob, id: 'mem_ida', display_name: 'Ida', role: 'admin' }
+    render(<WorkspacesRoute params={{}} client={client({ memberList: vi.fn(async () => ({ members: [admin, bob, other, root] })) })} />)
+    const dialog = await openAccess('main-repo')
+    await waitFor(() => expect((box(dialog, 'Ida') as HTMLButtonElement).disabled).toBe(true))
+    expect(dialog.getByText("Admin · only a super admin changes an admin's access")).toBeTruthy()
   })
 
   it('shows the server error of a refused revoke verbatim', async () => {
     seed(admin, { owned: true })
     const api = client({ workspaceAccessRevoke: vi.fn(async () => { throw new ApiError(500, 'member has sessions in use here') }) })
     render(<WorkspacesRoute params={{}} client={api} />)
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    fireEvent.click(await dialog.findByRole('button', { name: 'Remove Bob' }))
+    const dialog = await openAccess('main-repo')
+    await waitFor(() => expect(box(dialog, 'Bob').getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(box(dialog, 'Bob'))
     expect((await dialog.findByRole('alert')).textContent).toContain('member has sessions in use here')
     expect(api.workspaceAccessRevoke).toHaveBeenCalledWith(workspace.id, bob.id)
   })
@@ -98,8 +153,7 @@ describe('workspace access', () => {
     seed(root, { owned: true, other: true })
     const api = client()
     render(<WorkspacesRoute params={{}} client={api} />)
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Change owner…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Change owner of main-repo' }))
+    const dialog = await openOwner('main-repo')
     await userEvent.click(dialog.getByLabelText('Owner'))
     expect(screen.queryByRole('option', { name: /Bob/ })).toBeNull()
     expect(screen.getByRole('option', { name: /^Alice \((you, )?current owner\)/ })).toBeTruthy()
@@ -125,25 +179,18 @@ describe('workspace access', () => {
     const api = client({ memberList: vi.fn(async () => { throw new ApiError(500, 'members unavailable') }) })
     render(<WorkspacesRoute params={{}} client={api} />)
     expect(await screen.findByText(/Could not list members: .*members unavailable/)).toBeTruthy()
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
+    const dialog = await openAccess('main-repo')
     expect(await dialog.findByText(/Could not list members: .*members unavailable/)).toBeTruthy()
   })
 
-  it('never offers a super admin to add, and tells an owner who else only a super admin can add', async () => {
+  it('tells an owner who is not a super admin how to reach members they cannot see', async () => {
     seed(admin, { owned: true })
-    const api = client({
-      memberList: vi.fn(async () => ({ members: [admin, bob, root] })),
-      workspaceAccessList: vi.fn(async () => ({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [{ member_id: bob.id, created_at: '2026-11-10T10:00:00Z' }] })),
-    })
-    render(<WorkspacesRoute params={{}} client={api} />)
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    expect(await dialog.findByText("Invite someone new from Members, or ask a super admin to add an existing member.")).toBeTruthy()
-    expect(dialog.queryByRole('button', { name: 'Add' })).toBeNull()
+    render(<WorkspacesRoute params={{}} client={client({ memberList: vi.fn(async () => ({ members: [admin, bob, root] })) })} />)
+    const dialog = await openAccess('main-repo')
+    expect(await dialog.findByText(/Invite someone new from Members, or ask a super admin to add a member you do not see here\./)).toBeTruthy()
   })
 
-  it('shows the owner on the row and says when no one else has access', async () => {
+  it('shows the owner on the row and counts who has access', async () => {
     seed(admin, { owned: true })
     const api = client({
       workspaceAccessList: vi.fn(async () => ({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [] })),
@@ -151,9 +198,8 @@ describe('workspace access', () => {
     render(<WorkspacesRoute params={{}} client={api} />)
     expect(await screen.findByText(/Owner: you/)).toBeTruthy()
     expect(screen.getByText(/Owner: Root/)).toBeTruthy()
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    expect(await dialog.findByText('No one else has access yet.')).toBeTruthy()
+    const dialog = await openAccess('main-repo')
+    expect(await dialog.findByText('Granted to 0 of 2 members. The owner and super admins always have access.')).toBeTruthy()
   })
 
   it('drops a workspace list that arrives after the identity changed', async () => {
@@ -165,9 +211,9 @@ describe('workspace access', () => {
         .mockImplementationOnce(() => new Promise((resolve) => { release = resolve })),
     })
     render(<WorkspacesRoute params={{}} client={api} />)
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Access to main-repo' }))
-    fireEvent.click(await dialog.findByRole('button', { name: 'Remove Bob' }))
+    const dialog = await openAccess('main-repo')
+    await waitFor(() => expect(box(dialog, 'Bob').getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(box(dialog, 'Bob'))
     await waitFor(() => expect(api.workspaceListFull).toHaveBeenCalledTimes(2))
     useStore.setState({ identityKey: 'another-server' })
     release([{ ...workspace, id: 'ws_stale' }])
@@ -184,20 +230,18 @@ describe('workspace access', () => {
       workspaceAccessList: vi.fn(() => new Promise((resolve) => { release = resolve })),
     })
     render(<WorkspacesRoute params={{}} client={api} />)
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Access…' }))
-    await screen.findByRole('dialog', { name: 'Access to main-repo' })
+    await openAccess('main-repo')
     useStore.setState({ identityKey: 'bob' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     release({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [] })
-    expect(screen.queryByText('No one else has access yet.')).toBeNull()
+    expect(screen.queryByText(/^Granted to/)).toBeNull()
   })
 
   it('closes the owner dialog when the signed-in member changes', async () => {
-    seed(root, { other: true })
+    seed(root, { owned: true, other: true })
     useStore.setState({ identityKey: 'root' })
     render(<WorkspacesRoute params={{}} client={client()} />)
-    fireEvent.click((await menuOf('main-repo')).getByRole('menuitem', { name: 'Change owner…' }))
-    await screen.findByRole('dialog', { name: 'Change owner of main-repo' })
+    await openOwner('main-repo')
     useStore.setState({ identityKey: 'alice' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
@@ -208,8 +252,7 @@ describe('a server without workspace access', () => {
     seed(root, { owned: true })
     useStore.setState({ info: { ...serverInfo, member: { ...root, role: 'admin' }, features: [] } })
     render(<WorkspacesRoute params={{}} client={client()} />)
-    const menu = await menuOf('main-repo')
-    expect(menu.queryByRole('menuitem', { name: 'Access…' })).toBeNull()
-    expect(menu.queryByRole('menuitem', { name: 'Change owner…' })).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Settings for main-repo' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Access to main-repo' })).toBeNull()
   })
 })

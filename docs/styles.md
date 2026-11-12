@@ -9,6 +9,20 @@ one, panes none. Do not add saturated colours, gradients or backdrop blur.
 The desktop launch splash is an intentional original-animation exception;
 see [Session state and motion](#session-state-and-motion).
 
+### Surface the common actions
+
+A control nobody can see is a control nobody uses. Put the actions people
+reach for most on the surface, beside what they act on: a row's main actions
+are visible buttons on that row, and a value someone changes in place, such as
+a member's role, is a select in the cell that shows it. Pick a list of
+checkboxes with a search field over adding items one at a time from a
+dropdown. Keep the overflow menu (`Ellipsis`) for rare actions, and never make
+it, or a hover-only control, the only way to a common one. A destructive action
+may sit on its row as a ghost icon button behind a confirm. A
+page someone needs often gets its own sidebar row, not a menu item two levels
+down. When a surface gets crowded, regroup it rather than folding actions
+into menus.
+
 ## Type
 
 Fonts ship in the bundle; nothing is fetched from Google.

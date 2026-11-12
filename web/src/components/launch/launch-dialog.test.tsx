@@ -413,7 +413,7 @@ describe('new run', () => {
     expect(within(alert).getByLabelText('Setup script output').textContent).toBe('npm error code E401\n')
   })
 
-  it('gives an admin the adopt command and the way to the Repository page', async () => {
+  it('gives an admin the adopt command and the way to the workspace settings page', async () => {
     const command = 'aether workspace mirror adopt --workspace ' + workspace.id + ' --generation 3 --commit ' + 'a'.repeat(40) + ' --yes'
     const text = 'gitengine: mirror no-candidate for branch "dev": revision ' + 'a'.repeat(40) + ' is waiting for an admin to adopt it; check that it is the upstream commit you expect, then run: ' + command
     vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(new Error(text), { data: { kind: 'no-candidate', adopt_command: command } }))
@@ -425,7 +425,7 @@ describe('new run', () => {
     expect(alert.textContent?.split(command)).toHaveLength(2)
     expect(within(alert).getByLabelText('Adopt command').textContent).toBe(command)
     fireEvent.click(within(alert).getByRole('button', { name: 'Copy the adopt command' }))
-    fireEvent.click(within(alert).getByRole('button', { name: 'Open Repository' }))
+    fireEvent.click(within(alert).getByRole('button', { name: 'Open workspace settings' }))
     expect(api.runLaunch).toHaveBeenCalledTimes(1)
     expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })
     expect(useStore.getState().paletteDialog).toBeNull()
@@ -438,9 +438,9 @@ describe('new run', () => {
     fireEvent.click(launchButton())
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the Repository page.')
+    expect(alert.textContent).toContain('Ask an admin to adopt it with Review source mirror → Adopt candidate under Advanced on the workspace settings page.')
     expect(within(alert).getByLabelText('Adopt command').textContent).toBe('aether workspace mirror adopt')
-    expect(within(alert).queryByRole('button', { name: 'Open Repository' })).toBeNull()
+    expect(within(alert).queryByRole('button', { name: 'Open workspace settings' })).toBeNull()
   })
 
   it('offers no adopt step when the pending mirror has no candidate yet', async () => {

@@ -488,7 +488,7 @@ describe('run rows', () => {
 })
 
 describe('navigation rows', () => {
-  it('marks the open page and lists Members for an admin only', () => {
+  it('marks the open page and keeps Manage workspaces, Members and Settings at the foot for every role', () => {
     useStore.setState((s) => ({ info: s.info && { ...s.info, member: { ...s.info.member, role: 'collaborator' } } }))
     render(<AppShell />)
 
@@ -497,10 +497,11 @@ describe('navigation rows', () => {
     expect(useStore.getState().route.name).toBe('environment')
     expect(navigation.getByRole('button', { name: 'Environment' }).getAttribute('aria-current')).toBe('page')
     expect(navigation.getByRole('button', { name: 'Board' }).getAttribute('aria-current')).toBeNull()
-    expect(nav().queryByRole('button', { name: 'Members' })).toBeNull()
+    const foot = ['Manage workspaces', 'Members', 'Settings']
+    expect(foot.map((name) => nav().getByRole('button', { name }).textContent)).toEqual(foot)
 
-    act(() => useStore.setState((s) => ({ info: s.info && { ...s.info, member: { ...s.info.member, role: 'admin' } } })))
-    expect(nav().getByRole('button', { name: 'Members' })).toBeDefined()
+    act(() => useStore.getState().navigate('workspace', { workspaceId: useStore.getState().activeWorkspace }))
+    expect(nav().getByRole('button', { name: 'Manage workspaces' }).getAttribute('aria-current')).toBe('page')
   })
 
   it('draws the selection beside the list, so the overflow measuring still counts only items', () => {
@@ -533,14 +534,11 @@ describe('workspace switcher', () => {
     expect(useStore.getState().route.name).toBe('overview')
   })
 
-  it('opens the active workspace at its Environment section', async () => {
+  it('opens the active workspace settings', async () => {
     render(<AppShell />)
     fireEvent.keyDown(nav().getByRole('button', { name: /^Workspace:/ }), { key: 'Enter' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Environment' }))
-    expect(useStore.getState().route).toEqual({
-      name: 'workspace',
-      params: { workspaceId: useStore.getState().activeWorkspace, section: 'environment' },
-    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Workspace settings' }))
+    expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: useStore.getState().activeWorkspace } })
   })
 })
 
