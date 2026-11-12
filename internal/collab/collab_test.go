@@ -898,8 +898,10 @@ func (b *disconnectingCollabBus) Publish(_ context.Context, e events.Event) (eve
 	return e, nil
 }
 
-// The holder's stream can also end after the room reads its lease and
-// publishes the message, before the agent takes it.
+// The room once published a controller's message between reading its lease
+// and checking it again at delivery, and a disconnect there made the message
+// not_sent. A disconnect on that publish must not stop the delivery; the
+// message is now delivered before anything is published.
 func TestControllerSendSurvivesADisconnectBeforeDelivery(t *testing.T) {
 	st, clock, ws, _, other, run := setupCollab(t)
 	pty := &collabPTY{}
