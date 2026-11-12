@@ -479,8 +479,12 @@ func TestAgentModelsProbeEndsBeforeCloseReturns(t *testing.T) {
 	if _, err := e.sched.AgentModels(ctx, e.member.ID, e.member.ID, "claude", false); err != nil {
 		t.Fatal(err)
 	}
+	began := time.Now()
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if took := time.Since(began); took > 5*time.Second {
+		t.Fatalf("Close took %s: the probe was not cancelled", took)
 	}
 	if _, ok := e.sched.CachedAgentModels(e.member.ID, "claude"); !ok {
 		t.Fatal("Close returned while the detached probe was still running")
