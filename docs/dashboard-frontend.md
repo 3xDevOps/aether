@@ -329,9 +329,8 @@ top to bottom:
    (`workspace-switcher.tsx`) shows the active workspace's name and base
    branch, and the total Needs you count across every workspace. Its menu
    lists each workspace with its own count, **All workspaces** (the
-   `overview` route), **Manage workspaces**, **Repository** (the
-   workspace page) and **Environment** (the same page, scrolled to that
-   section). With one workspace and no `workspace.list` method it is a
+   `overview` route), **Manage workspaces** and **Workspace settings** (the
+   workspace page). With one workspace and no `workspace.list` method it is a
    plain label. The search button opens the command palette.
 2. **New session**, the only filled button in the shell, for a member who may
    launch. A slanted cut splits it in two. The left half, **New session** (`n`),
@@ -371,12 +370,13 @@ top to bottom:
    scrolls on its own, and while more rows sit below the fold its bottom edge
    fades out. The sidebar never collapses on its own at narrow widths; the
    splitter and `⌘B` stay the reader's call.
-4. **Members** (admins only) and **Settings**. Board through Templates live
-   in the header instead, leaving the sidebar's height for sessions. The current
-   destination carries `aria-current="page"`. Gates come from
-   `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
-   `palette` entries (Members › Devices, Manage workspaces, and Members for a
-   non-admin) are reached from the palette only, and its `link` entries
+4. **Manage workspaces**, **Members** and **Settings**, for every member.
+   Board through Templates live in the header instead, leaving the sidebar's
+   height for sessions. The current destination carries
+   `aria-current="page"`; a workspace's own page keeps **Manage workspaces**
+   current. Gates come from `src/lib/surfaces.ts`, which also feeds the
+   palette's Navigate group; its `palette` entry (Members › Devices) is
+   reached from the palette only, and its `link` entries
    (the board's Needs you; Onboarding, opened from **Settings › General ›
    Setup guide**) only from a link.
 5. **One update notice row** when a server, CLI or desktop update exists, for
@@ -6266,13 +6266,13 @@ subscriptions are removed on cleanup, while closing a tab or an exited shell
 unregisters its socket, so route changes and tab remounts cannot deliver late
 output, resizes, or image actions to a disposed host.
 
-The same stop confirmation (`StopEnvironmentDialog`) backs the Profile
-dialog's notice after a member's first account share: containers started
+The same stop confirmation (`StopEnvironmentDialog`) backs the Members
+page's notice after a member's first account share: containers started
 before that share lack the in-place mount of Claude Code's login file
 ([security.md](security.md#account-sharing)), so when the store's
 `envTerminal.status`, re-read with `terminal.status` at the share, says the
-container is running, or that re-read fails, **Agent account sharing** says
-so and offers **Stop environment**. The advice follows the first share the
+container is running, or that re-read fails, the roster says so and offers
+**Stop environment**. The advice follows the first share the
 server answered while no other grant was saved; a later share shows
 nothing, because the page cannot tell whether the container predates the
 first one.
@@ -6284,11 +6284,16 @@ Each tab has its own route name (`members`, `devices`), so the address, back
 button and the palette's **Devices** entry land on the right tab, and the
 sidebar's **Members** row stays current on both.
 
-**Members** is a roster table, each row filling on hover: name, role, whether you and that member share
-an agent account, and last seen (**Online**, a relative time, or
-**Offline**). Roles are Viewer, Collaborator, Admin and Super admin. Only a
-super admin changes a role or removes a member from the row's menu; giving up
-your own super admin role, and removing anyone, ask first. Members
+**Members** is a roster table, each row filling on hover: name, role, agent
+account and last seen (**Online**, a relative time, or **Offline**; below the
+name under 48rem, where the table also scrolls inside its panel). Roles are
+Viewer, Collaborator, Admin and Super admin. A super admin changes a role with
+the select in the **Role** column and removes a member with the row's trash
+button; giving up your own super admin role, and removing anyone, ask first.
+The **Agent account** column holds **Share my account** or **Stop sharing**
+for every other member (`account.share`, `account.revoke`) and says when that
+member shares theirs with you; the omp warning sits behind **What sharing
+hands over** above the table. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
 admins see **Open invitations** with **Revoke** and the workspaces each
 invitation grants.
@@ -6299,10 +6304,12 @@ not a super admin must pick at least one and may invite only a viewer or a
 collaborator; a super admin may pick any role and no workspace.
 
 **Manage workspaces** shows each workspace's owner. Where the caller's `role`
-in `workspace.list` is `admin`, the row menu offers **Settings…**, **Access…**
-and **Delete…**; **Access…** lists the owner and granted members, adds members
-(an admin sees only collaborators and viewers) and removes them, showing the
-server's error verbatim. Super admins also get **Change owner…**. A grant,
+in `workspace.list` is `admin`, a row's **Access** button opens the owner, a
+search field and a scrolling list of every other member who is not a super
+admin, each with a checkbox; ticking grants and unticking revokes at once,
+showing the server's error verbatim. An admin who is not a super admin cannot
+tick or untick another admin. Super admins also get **Change owner…** on the
+owner's line. A grant,
 revoke, `workspace.access` event or `member.access` event reloads the workspace
 list. `member.access` (workspace id `server`) goes only to the member whose
 access changed, so a member who just lost a workspace still gets it. Server-wide
@@ -6395,11 +6402,10 @@ list is an `InsetList`; until it arrives, three row skeletons stand in after
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
 the member's name and role, **Display name** (an input with **Save**, sent
-as `member.rename`), **Colour**, **Git identity** (the name and email
+as `member.rename`), **Colour** and **Git identity** (the name and email
 the member's agents commit as, saved with `member.git`; the same form
-onboarding shows) and **Agent account sharing** (**Share account** or
-**Revoke access** per teammate, with the omp warning behind **Learn more**).
-Profile is the one place that edits the git identity; Agents links to it.
+onboarding shows). Agent account sharing lives on **Members**. Profile is the
+one place that edits the git identity; Agents links to it.
 
 Display name, colour, and share or revoke follow [Actions](#actions): the
 header, roster and avatars take the new name or colour, and the teammate's
@@ -6483,14 +6489,14 @@ without a reload.
 ## Manage workspaces
 
 `src/routes/workspaces/` lists workspaces as rows, with three row skeletons
-while the list loads. Selecting a row opens the
-workspace: it becomes the active one and the board shows. Each row's menu
-holds **Repository** (the repository page), **Environment** (its Environment
-section), **Settings…** (who may message others' sessions) and **Delete…**, each
-gated by its permission. **Add
+while the list loads. A row's name opens the
+workspace: it becomes the active one and the board shows. Below the name sit
+**Current** for the active workspace, its base branch and its owner, and beside
+it two buttons, never a menu: **Settings** (the workspace page, for every
+member) and **Access** (for the workspace's admin). **Add
 workspace** in the header shows the creation choices above the list; with no
-workspace yet they show without it. Open the page from the workspace
-switcher or the command palette.
+workspace yet they show without it. Open the page from the sidebar, the
+workspace switcher or the command palette.
 
 The creation choices are the shared `src/components/workspace-create.tsx`,
 the same ones onboarding's Repository step shows:
@@ -6570,10 +6576,10 @@ After deletion, the list and workspace switcher update together.
 `workspace.deleted` events reconcile other connected dashboards, including
 their selection and any open deleted workspace or run.
 
-### Repository page
+### Workspace settings page
 
-The workspace switcher's **Repository** item and the **Repository** item of
-a row's menu in Manage workspaces open `routes/workspace.tsx`. It is one
+The workspace switcher's **Workspace settings** item and a row's **Settings**
+button in Manage workspaces open `routes/workspace.tsx`. It is one
 workspace in sections: **Base branch**, read-only because sessions have already
 forked from it; **Source and clone**, the shared
 `components/workspace-repository.tsx` (link a local clone, the
@@ -6583,15 +6589,17 @@ the budget with **Set budget…** (`budget.set`) and who may message others'
 sessions with **Change…** (`workspace.settings`), and, where the server offers
 `workspace.child_limits`, the subsession limit ("8 subsessions busy at once per parent session"). The
 admin's **Change…** dialog edits it as **Busy at once**, saving with
-`workspace.child_limits`. Each button is gated by its
+`workspace.child_limits`. Last, for the workspace's admin, **Danger zone**
+holds **Delete…** (`workspace.delete`), which confirms, then lands on Manage
+workspaces. Each button is gated by its
 server-side permission; a member without it reads the same facts. The page
 lists no sessions: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
 setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
-read with `workspace.environment.get` when the page opens. Opening the page
-through an **Environment** menu item passes `section: 'environment'`, and the
-section scrolls into view once it has loaded.
+read with `workspace.environment.get` when the page opens. A link that opens
+the page with `section: 'environment'` scrolls that section into view once it
+has loaded.
 
 - An admin edits the **Setup script** in a monospace field and each variable
   as a row: name, value, a **Secret** checkbox and **Remove**. A saved secret
@@ -6697,7 +6705,7 @@ the query is non-empty the nav lists the results with their category, and a
 polite status reads `N settings` or `No settings match “q”`. Enter opens the
 first result; ArrowDown moves to the results; Escape clears the query, then
 leaves the field. Two results leave the page: **Workspace settings and
-budget** opens the active workspace's Repository page, and **Members and
+budget** opens the active workspace's settings page, and **Members and
 devices** opens Members.
 
 **Phone.** Below 768px the category list is the page. A category shows on its
@@ -6910,7 +6918,7 @@ Categories:
   copy ([edge.md](edge.md#server-id-and-claiming)).
 
 Repository settings, base freshness and the source mirror live on the
-[Repository page](#repository-page) on either gateway.
+[Workspace settings page](#workspace-settings-page) on either gateway.
 
 ### Watches
 

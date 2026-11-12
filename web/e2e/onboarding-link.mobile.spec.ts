@@ -68,8 +68,7 @@ test('the repository page keeps its content inside the phone after a Git push', 
   await page.getByRole('button', { name: 'Search', exact: true }).tap()
   await page.getByPlaceholder('Search commands, sessions, workspaces…').fill('Manage workspaces')
   await page.getByRole('option', { name: 'Manage workspaces' }).tap()
-  await page.getByRole('button', { name: 'More actions for project' }).tap()
-  await page.getByRole('menuitem', { name: 'Repository' }).tap()
+  await page.getByRole('button', { name: 'Settings for project' }).tap()
   await page.getByRole('button', { name: 'Link local repository', exact: true }).tap()
 
   const main = page.getByRole('main')

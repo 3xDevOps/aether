@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { Search } from '@/components/icons'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -12,6 +15,7 @@ import { type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
 import { isAdminRole } from '@/lib/permissions'
+import { cn } from '@/lib/utils'
 import type { Member, WorkspaceAccess } from '@/lib/types'
 import { roleLabel } from '@/routes/members/roster'
 import { sameIdentity, useStore } from '@/store'
@@ -77,15 +81,15 @@ function MemberLine({ member, id, detail, selfID }: { member?: Member; id: strin
   )
 }
 
-export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { workspaceID: string; client: Api; onClose: () => void }) {
+export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOwner }: { workspaceID: string; client: Api; onClose: () => void; onChangeOwner?: () => void }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const superAdmin = useIsSuperAdmin()
   const [members, membersError] = useMembers(client)
   const byID = new Map(members.map((m) => [m.id, m]))
   const [access, setAccess] = useState<WorkspaceAccess | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [pick, setPick] = useState('')
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
+  const [query, setQuery] = useState('')
   const selfID = useSelfID()
   const returnFocus = useReturnFocus()
   useCloseOnIdentityChange(onClose)
@@ -104,23 +108,28 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
     void load()
   }, [load])
 
-  const change = async (send: () => Promise<unknown>, done: string) => {
-    setBusy(true)
+  const where = workspace?.name ?? 'the workspace'
+  const turn = async (member: Member, on: boolean) => {
+    setBusy((ids) => new Set(ids).add(member.id))
     setError(null)
     try {
-      await send()
-      toast.success(done)
+      await (on ? client.workspaceAccessGrant(workspaceID, [member.id]) : client.workspaceAccessRevoke(workspaceID, member.id))
+      toast.success(on ? `${member.display_name} now reaches ${where}` : `${member.display_name} no longer reaches ${where}`)
       await Promise.all([load(), refreshWorkspaces(client)])
     } catch (err) {
       setError(message(err))
     } finally {
-      setBusy(false)
+      setBusy((ids) => new Set([...ids].filter((id) => id !== member.id)))
     }
   }
 
-  const ownerMember = access ? byID.get(access.owner_member_id) : undefined
-  const granted = new Set([access?.owner_member_id, ...(access?.grants.map((g) => g.member_id) ?? [])])
-  const addable = members.filter((m) => !granted.has(m.id) && m.role !== 'super_admin' && (superAdmin || !isAdminRole(m.role)))
+  const owner = access ? byID.get(access.owner_member_id) : undefined
+  const granted = new Set(access?.grants.map((g) => g.member_id))
+  const superAdmins = members.filter((m) => m.role === 'super_admin' && m.id !== access?.owner_member_id)
+  const people = members.filter((m) => m.role !== 'super_admin' && m.id !== access?.owner_member_id)
+  const needle = query.trim().toLowerCase()
+  const shown = people.filter((m) => m.display_name.toLowerCase().includes(needle))
+  const reaching = people.filter((m) => granted.has(m.id)).length
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -128,7 +137,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
         <DialogHeader>
           <DialogTitle>Access to {workspace?.name ?? 'this workspace'}</DialogTitle>
           <DialogDescription>
-            The owner and the members listed here can use this workspace. Granted admins work here as collaborators. Super admins can use every workspace.
+            Tick each member who may use this workspace. Each change is saved at once. A granted admin works here as a collaborator.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-3">
@@ -136,58 +145,59 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose }: { worksp
           {error && <Callout tone="failed" role="alert">{error}</Callout>}
           {!access && !error && (
             <div role="status" aria-label="Loading access" className="flex flex-col gap-0.5">
-              {[0, 1].map((row) => <Skeleton key={row} className="h-7" />)}
+              {[0, 1, 2].map((row) => <Skeleton key={row} className="h-9" />)}
             </div>
           )}
           {access && (
-            <InsetList aria-label="Members with access">
-              <InsetListItem>
-                <MemberLine member={byID.get(access.owner_member_id)} id={access.owner_member_id} detail={ownerMember ? `Owner · ${roleLabel[ownerMember.role]}` : 'Owner'} selfID={selfID} />
-              </InsetListItem>
-              {access.grants.map((grant) => {
-                const member = byID.get(grant.member_id)
-                const name = member?.display_name ?? grant.member_id
-                return (
-                  <InsetListItem key={grant.member_id}>
-                    <MemberLine member={member} id={grant.member_id} detail={member ? grantedRole(member) : 'Granted'} selfID={selfID} />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      aria-label={`Remove ${name}`}
-                      onClick={() => void change(() => client.workspaceAccessRevoke(workspaceID, grant.member_id), `${name} no longer reaches ${workspace?.name ?? 'the workspace'}`)}
-                    >
-                      Remove
-                    </Button>
-                  </InsetListItem>
-                )
-              })}
-            </InsetList>
-          )}
-          {access?.grants.length === 0 && <p className="text-ui-sm text-muted">No one else has access yet.</p>}
-          {addable.length === 0 ? (
-            <p className="text-ui-sm text-muted">{superAdmin ? 'Everyone already has access.' : "Invite someone new from Members, or ask a super admin to add an existing member."}</p>
-          ) : (
-          <div className="flex min-w-0 items-end gap-2">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <Label htmlFor="access-member">Add a member</Label>
-              <Select value={pick} onValueChange={setPick}>
-                <SelectTrigger id="access-member"><SelectValue placeholder="Choose a member" /></SelectTrigger>
-                <SelectContent>
-                  {addable.map((m) => <SelectItem key={m.id} value={m.id} detail={grantedRole(m)}><PickerName member={m} selfID={selfID} /></SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button
-              disabled={busy || pick === ''}
-              onClick={() => {
-                const name = byID.get(pick)?.display_name ?? pick
-                void change(() => client.workspaceAccessGrant(workspaceID, [pick]), `${name} now reaches ${workspace?.name ?? 'the workspace'}`).then(() => setPick(''))
-              }}
-            >
-              Add
-            </Button>
-          </div>
+            <>
+              <InsetList aria-label="Owner">
+                <InsetListItem>
+                  <MemberLine member={owner} id={access.owner_member_id} detail={owner ? `Owner · ${roleLabel[owner.role]}` : 'Owner'} selfID={selfID} />
+                  {onChangeOwner && <Button size="sm" variant="secondary" onClick={onChangeOwner}>Change owner…</Button>}
+                </InsetListItem>
+              </InsetList>
+              <div className="relative flex items-center">
+                <Search aria-hidden className="pointer-events-none absolute left-2 size-3.5 text-muted" />
+                <Input
+                  type="search"
+                  aria-label="Search members"
+                  placeholder="Search members"
+                  className="pl-7"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+              <div className="flex items-baseline justify-between gap-3 text-ui-sm text-muted">
+                <span>{people.length === 0 ? 'No other members yet' : `${reaching} of ${people.length} ${people.length === 1 ? 'member has' : 'members have'} access`}</span>
+              </div>
+              {shown.length > 0 && (
+                <InsetList aria-label="Members" className="max-h-80 overflow-y-auto">
+                  {shown.map((member) => {
+                    const id = `access-${member.id}`
+                    // An admin grants and revokes only members below admin; the server holds the same rule.
+                    const locked = !superAdmin && isAdminRole(member.role)
+                    return (
+                      <InsetListItem key={member.id}>
+                        <Checkbox
+                          id={id}
+                          checked={granted.has(member.id)}
+                          disabled={locked || busy.has(member.id)}
+                          onCheckedChange={(on) => void turn(member, on === true)}
+                        />
+                        <label htmlFor={id} className={cn('flex min-w-0 flex-1 items-center gap-3', locked ? 'cursor-not-allowed' : 'cursor-pointer')}>
+                          <MemberLine member={member} id={member.id} detail={locked ? `${roleLabel[member.role]} · only a super admin changes an admin's access` : grantedRole(member)} selfID={selfID} />
+                        </label>
+                      </InsetListItem>
+                    )
+                  })}
+                </InsetList>
+              )}
+              {people.length > 0 && shown.length === 0 && <p className="text-ui-sm text-muted">No member matches &ldquo;{query.trim()}&rdquo;.</p>}
+              <p className="text-ui-sm text-muted">
+                {superAdmins.length > 0 && `Super admins reach every workspace: ${superAdmins.map((m) => m.display_name).join(', ')}. `}
+                {superAdmin ? 'Invite someone new from Members.' : 'Invite someone new from Members, or ask a super admin to add a member you do not see here.'}
+              </p>
+            </>
           )}
         </div>
         <DialogFooter>

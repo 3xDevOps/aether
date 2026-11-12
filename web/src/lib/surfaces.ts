@@ -29,7 +29,7 @@ interface Surface {
   tabs?: string[]
 }
 
-export function surfaces(cap: Capability, admin = false): Surface[] {
+export function surfaces(cap: Capability): Surface[] {
   const list: Surface[] = [{ name: 'board', label: 'Board', Icon: LayoutGrid, place: 'nav' }]
   if (cap.hasMethod('workspace.timeline'))
     list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav', keywords: 'log history events timeline' })
@@ -46,13 +46,13 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
     list.push({ name: 'agents', label: 'Agents', Icon: Bot, place: 'nav', keywords: 'Agent config files configuration' })
   if (cap.hasMethod('template.save'))
     list.push({ name: 'templates', label: 'Templates', Icon: FileText, place: 'nav' })
+  if (cap.hasMethod('workspace.list'))
+    list.push({ name: 'workspaces', label: 'Manage workspaces', Icon: FolderGit2, place: 'admin', tabs: ['workspace'], keywords: 'repository environment access owner' })
   if (cap.hasMethod('member.list'))
-    list.push({ name: 'members', label: 'Members', Icon: Users, place: admin ? 'admin' : 'palette', tabs: ['devices'], keywords: 'invite people team' })
+    list.push({ name: 'members', label: 'Members', Icon: Users, place: 'admin', tabs: ['devices'], keywords: 'invite people team roles account sharing' })
   list.push({ name: 'settings', label: 'Settings', Icon: Settings, place: 'admin', keywords: 'preferences options' })
   if (cap.hasMethod('member.device.list'))
     list.push({ name: 'devices', label: 'Members › Devices', Icon: MonitorSmartphone, place: 'palette', keywords: 'Devices' })
-  if (cap.hasMethod('workspace.list'))
-    list.push({ name: 'workspaces', label: 'Manage workspaces', Icon: FolderGit2, place: 'palette' })
   if (cap.hasLocal('link.status') || (cap.hasMethod('member.git') && cap.hasMethod('agent.list')))
     list.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass, place: 'link' })
   return list

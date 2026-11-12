@@ -19,7 +19,7 @@ import { cn, focusRing } from '@/lib/utils'
 import { askingByWorkspace, useAttention } from '@/routes/needs-you/attention'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
+import { useCapability, useSelfRole } from '@/store/hooks'
 import { sidebarGroups, stateContextOf } from '@/store/selectors'
 import { maxSidebarWidth, minSidebarWidth } from '@/store/ui'
 
@@ -199,12 +199,11 @@ function DesktopSidebar({ onHide }: { onHide: () => void }) {
 
 function SidebarContent({ onHide }: { onHide: () => void }) {
   const cap = useCapability()
-  const admin = useIsAdmin()
   const role = useSelfRole()
   const blocked = useStore((s) => launchBlocked(s.linkStatus))
   const togglePalette = useStore((s) => s.togglePalette)
   const openDialog = useStore((s) => s.openPaletteDialog)
-  const lower = surfaces(cap, admin).filter((surface) => surface.place === 'admin')
+  const lower = surfaces(cap).filter((surface) => surface.place === 'admin')
 
   return (
     <nav aria-label="Aether" className="flex min-h-0 flex-1 flex-col">
@@ -255,10 +254,9 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
 /** On a phone the tab bar carries Needs you, sessions, launch and the assistant; More holds every other page. */
 function MoreContent() {
   const cap = useCapability()
-  const admin = useIsAdmin()
   const items = useAttention((s) => s.items)
   const needsYou = useMemo(() => askingByWorkspace(items), [items])
-  const list = surfaces(cap, admin)
+  const list = surfaces(cap)
     .filter((surface) => surface.place !== 'link')
     .map((surface) => (surface.name === 'devices' ? { ...surface, label: 'Devices' } : surface))
   return (

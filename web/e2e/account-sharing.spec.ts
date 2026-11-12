@@ -1,4 +1,4 @@
-// Account sharing through the dashboard: the owner shares in Profile, the
+// Account sharing through the dashboard: the owner shares on Members, the
 // recipient's launch dialog offers the owner's account only after that, lists
 // the agents installed in either home for it, and the run launches in the
 // recipient's environment with the owner's login mounted and, since the
@@ -74,7 +74,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(dialog).toBeHidden()
 
     // Alice's environment terminal is running when she first shares, so
-    // Profile offers to stop it.
+    // Members offers to stop it.
     await page.goto(alice.url)
     await page.getByRole('navigation', { name: 'Main navigation' })
       .getByRole('button', { name: 'Environment', exact: true }).click()
@@ -85,16 +85,10 @@ test('a member shares their agent account and a teammate launches on it', async 
     })
 
     await page.getByRole('navigation', { name: 'Aether' })
-      .getByRole('button', { name: /, (Live|Reconnecting|Offline)$/ }).click()
-    await page.getByRole('menuitem', { name: 'Profile' }).click()
-    const profile = page.getByRole('dialog', { name: 'Profile' })
-    const sharing = profile.getByRole('region', { name: 'Account sharing' })
-    await sharing
-      .getByRole('listitem')
-      .filter({ hasText: bobName })
-      .getByRole('button', { name: 'Share account' })
-      .click()
-    await expect(sharing.getByRole('button', { name: 'Revoke access' })).toBeVisible()
+      .getByRole('button', { name: 'Members', exact: true }).click()
+    const sharing = page.getByRole('region', { name: 'Roster' })
+    await sharing.getByRole('button', { name: `Share your agent account with ${bobName}` }).click()
+    await expect(sharing.getByRole('button', { name: `Stop sharing your agent account with ${bobName}` })).toBeVisible()
     const notice = sharing.getByRole('status')
     await expect(notice).toContainText(
       `Your Environment was started before you shared, so a Claude Code login written there will not reach ${bobName}'s sessions`,
@@ -104,8 +98,6 @@ test('a member shares their agent account and a teammate launches on it', async 
     await confirm.getByRole('button', { name: 'Stop environment' }).click()
     await expect(confirm).toBeHidden()
     await expect(notice).toBeHidden()
-    await page.keyboard.press('Escape')
-    await expect(profile).toBeHidden()
 
     // After the share, Alice's account is offered with the agents installed
     // in her home, both refused until Alice has a login.

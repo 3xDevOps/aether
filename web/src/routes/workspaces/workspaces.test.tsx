@@ -1,5 +1,4 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { WorkspacesRoute } from '@/routes/workspaces'
 import { useStore, type RootState } from '@/store'
 import { applyEvent } from '@/store/sync'
@@ -21,18 +20,6 @@ function seed(extra: Partial<RootState> = {}) {
     route: { name: 'workspaces', params: {} },
     ...extra,
   })
-}
-
-async function rowMenu(name: string): Promise<HTMLElement> {
-  const trigger = await screen.findByRole('button', { name: `More actions for ${name}` })
-  trigger.focus()
-  await userEvent.keyboard('{Enter}')
-  return screen.findByRole('menu')
-}
-
-async function deleteFrom(name: string) {
-  fireEvent.click(within(await rowMenu(name)).getByRole('menuitem', { name: 'Delete…' }))
-  return within(await screen.findByRole('alertdialog'))
 }
 
 // A legacy null capability set covers only the pre-capabilities allowlist,
@@ -144,138 +131,38 @@ describe('workspaces view', () => {
     })
   })
 
-  it('reaches the repository page and the workspace settings from the row menu', async () => {
+  it('puts each workspace settings and access on buttons in its row', async () => {
     seed()
-    render(<WorkspacesRoute params={{}} client={fakeApi()} />)
+    const client = fakeApi({ workspaceAccessList: vi.fn(async () => ({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [] })) })
+    render(<WorkspacesRoute params={{}} client={client} />)
 
-    fireEvent.click(within(await rowMenu(workspace.name)).getByRole('menuitem', { name: 'Settings…' }))
-    expect(await screen.findByRole('dialog', { name: /settings/i })).toBeDefined()
+    fireEvent.click(await screen.findByRole('button', { name: `Access to ${workspace.name}` }))
+    expect(await screen.findByRole('dialog', { name: `Access to ${workspace.name}` })).toBeDefined()
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 
-    fireEvent.click(within(await rowMenu(workspace.name)).getByRole('menuitem', { name: 'Repository' }))
+    fireEvent.click(screen.getByRole('button', { name: `Settings for ${workspace.name}` }))
     expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })
-
-    useStore.getState().navigate('workspaces')
-    fireEvent.click(within(await rowMenu(workspace.name)).getByRole('menuitem', { name: 'Environment' }))
-    expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id, section: 'environment' } })
+    expect(screen.queryByRole('button', { name: /^More actions/ })).toBeNull()
   })
 
-  it.each([bob, vera])('does not offer deletion to $role members', async (member) => {
+  it.each([bob, vera])('offers $role members only the settings page', async (member) => {
     seed({ info: { ...serverInfo, member } })
     render(<WorkspacesRoute params={{}} client={fakeApi()} />)
 
-    const menu = within(await rowMenu(otherWorkspace.name))
-    expect(menu.queryByRole('menuitem', { name: 'Delete…' })).toBeNull()
-    expect(menu.queryByRole('menuitem', { name: 'Settings…' })).toBeNull()
+    expect(await screen.findByRole('button', { name: `Settings for ${otherWorkspace.name}` })).toBeDefined()
+    expect(screen.queryByRole('button', { name: `Access to ${otherWorkspace.name}` })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Add workspace' })).toBeNull()
   })
 
-  it('does not offer deletion when the gateway lacks the method', async () => {
-    seed({ capabilities: { gateway: 'remote', methods: ['workspace.list'], ws: [] } })
-    render(<WorkspacesRoute params={{}} client={fakeApi()} />)
-
-    expect(within(await rowMenu(otherWorkspace.name)).queryByRole('menuitem', { name: 'Delete…' })).toBeNull()
-  })
-
-  it('cancels without deleting and reflects subsequent live workspace changes', async () => {
-    const client = fakeApi()
+  it('reflects live workspace changes', async () => {
     seed()
-    render(<WorkspacesRoute params={{}} client={client} />)
+    render(<WorkspacesRoute params={{}} client={fakeApi()} />)
     await screen.findByText(otherWorkspace.name)
-
-    const dialog = await deleteFrom(workspace.name)
-    expect(dialog.getByRole('heading', { name: `Delete ${workspace.name}?` })).toBeDefined()
-    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
-    expect(client.workspaceDelete).not.toHaveBeenCalled()
-    expect(screen.queryByRole('alertdialog')).toBeNull()
 
     act(() => useStore.getState().setWorkspaces([otherWorkspace]))
     expect(screen.queryByText(workspace.name)).toBeNull()
     expect(screen.getByText(otherWorkspace.name)).toBeDefined()
-  })
-
-  it('keeps a refusal visible and allows deletion to be retried', async () => {
-    const refusal = 'workspace has active sessions; close them before deleting'
-    const client = fakeApi({
-      workspaceListFull: vi.fn().mockResolvedValueOnce([workspace]).mockResolvedValue([]),
-      workspaceDelete: vi.fn()
-        .mockRejectedValueOnce(new Error(refusal))
-        .mockResolvedValue({ ok: true }),
-    })
-    seed({ activeWorkspace: workspace.id })
-    render(<WorkspacesRoute params={{}} client={client} />)
-    const dialog = await deleteFrom(workspace.name)
-
-    fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
-    expect((await dialog.findByRole('alert')).textContent).toBe(refusal)
-    expect(useStore.getState().workspaces[workspace.id]).toEqual(workspace)
-    fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
-
-    await screen.findByText(/No workspaces yet/)
-    expect(screen.queryByRole('alertdialog')).toBeNull()
-    expect(useStore.getState().activeWorkspace).toBe('')
-    expect(client.workspaceDelete).toHaveBeenNthCalledWith(2, workspace.id)
-  })
-
-  it('reconciles the selected workspace after confirmed deletion', async () => {
-    const client = fakeApi({
-      workspaceListFull: vi.fn()
-        .mockResolvedValueOnce([workspace, otherWorkspace])
-        .mockResolvedValue([otherWorkspace]),
-    })
-    seed({ activeWorkspace: workspace.id })
-    render(<WorkspacesRoute params={{}} client={client} />)
-    await screen.findByText(otherWorkspace.name)
-    const dialog = await deleteFrom(workspace.name)
-    expect(client.workspaceDelete).not.toHaveBeenCalled()
-    fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
-
-    await waitFor(() => expect(screen.queryByText(workspace.name)).toBeNull())
-    expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
-    expect(useStore.getState().workspaces).toEqual({ [otherWorkspace.id]: otherWorkspace })
-    expect(screen.getByText(otherWorkspace.name)).toBeDefined()
-  })
-
-  it('does not restore a deleted target when refreshing the list fails', async () => {
-    const client = fakeApi({
-      workspaceListFull: vi.fn()
-        .mockResolvedValueOnce([workspace])
-        .mockRejectedValueOnce(new Error('workspace list unavailable'))
-        .mockResolvedValue([otherWorkspace]),
-    })
-    seed({ activeWorkspace: workspace.id })
-    render(<WorkspacesRoute params={{}} client={client} />)
-    const dialog = await deleteFrom(workspace.name)
-    fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
-
-    expect((await screen.findByRole('alert')).textContent).toContain('workspace list unavailable')
-    expect(screen.queryByRole('alertdialog')).toBeNull()
-    expect(useStore.getState().activeWorkspace).toBe('')
-    expect(screen.queryByText(workspace.name)).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    await screen.findByText(otherWorkspace.name)
-    expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
-  })
-  it('ignores a list request started before the workspace was deleted', async () => {
-    let resolveInitial!: (value: typeof workspace[]) => void
-    const initial = new Promise<typeof workspace[]>((resolve) => {
-      resolveInitial = resolve
-    })
-    const client = fakeApi({
-      workspaceListFull: vi.fn()
-        .mockReturnValueOnce(initial)
-        .mockResolvedValue([otherWorkspace]),
-    })
-    seed({ activeWorkspace: workspace.id })
-    render(<WorkspacesRoute params={{}} client={client} />)
-    const dialog = await deleteFrom(workspace.name)
-    fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
-    await screen.findByText(otherWorkspace.name)
-
-    await act(async () => resolveInitial([workspace, otherWorkspace]))
-    expect(screen.queryByText(workspace.name)).toBeNull()
-    expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
   })
 
   it.each([

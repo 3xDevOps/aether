@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { WorkspaceView } from '@/routes/workspace'
 import { useStore, type RootState } from '@/store'
 import { alice, bob, budget, fakeApi, serverInfo, workspace } from '@/test/fixtures'
@@ -61,6 +61,41 @@ describe('repository page', () => {
     expect(await environment.findByRole('textbox', { name: 'Setup script' })).toBeDefined()
     expect(environment.getByRole('button', { name: 'Import .env…' })).toBeDefined()
     expect(scrolled).toHaveBeenCalled()
+  })
+
+  it('keeps deletion in a danger zone for the workspace admin', async () => {
+    seed({ info: { ...serverInfo, member: bob } })
+    const { unmount } = render(<WorkspaceView params={{ workspaceId: workspace.id }} client={fakeApi()} />)
+    expect(screen.queryByRole('region', { name: 'Danger zone' })).toBeNull()
+    unmount()
+
+    seed({ capabilities: { gateway: 'remote', methods: ['workspace.list'], ws: [] } })
+    render(<WorkspaceView params={{ workspaceId: workspace.id }} client={fakeApi()} />)
+    expect(screen.queryByRole('button', { name: 'Delete…' })).toBeNull()
+  })
+
+  it('deletes after a confirm that keeps a refusal and can be retried, then lands on Manage workspaces', async () => {
+    const refusal = 'workspace has active sessions; close them before deleting'
+    const client = fakeApi({ workspaceDelete: vi.fn().mockRejectedValueOnce(new Error(refusal)).mockResolvedValue({ ok: true }) })
+    seed({ route: { name: 'workspace', params: { workspaceId: workspace.id } } })
+    render(<WorkspaceView params={{ workspaceId: workspace.id }} client={client} />)
+
+    fireEvent.click(within(screen.getByRole('region', { name: 'Danger zone' })).getByRole('button', { name: 'Delete…' }))
+    let dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    expect(client.workspaceDelete).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete…' }))
+    dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
+    expect((await dialog.findByRole('alert')).textContent).toBe(refusal)
+    expect(useStore.getState().workspaces[workspace.id]).toEqual(workspace)
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
+    await waitFor(() => expect(useStore.getState().route).toEqual({ name: 'workspaces', params: {} }))
+    expect(useStore.getState().workspaces[workspace.id]).toBeUndefined()
+    expect(useStore.getState().activeWorkspace).toBe('')
+    expect(client.workspaceDelete).toHaveBeenNthCalledWith(2, workspace.id)
   })
 
   it('says when the workspace no longer exists', () => {

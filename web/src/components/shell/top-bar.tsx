@@ -193,7 +193,7 @@ function PhoneToolbar() {
   const workspace = useStore((s) => (s.route.name === 'workspace' ? s.workspaces[s.route.params.workspaceId ?? ''] : undefined))
   const togglePalette = useStore((s) => s.togglePalette)
   const activeWorkspace = useStore((s) => (Object.keys(s.workspaces).length > 1 ? s.workspaces[s.activeWorkspace]?.name : undefined))
-  const title = workspace?.name ?? titles[route.name] ?? surfaces(cap, true).find((surface) => surface.name === route.name)?.label ?? 'Aether'
+  const title = workspace?.name ?? titles[route.name] ?? surfaces(cap).find((surface) => surface.name === route.name)?.label ?? 'Aether'
 
   return (
     <>

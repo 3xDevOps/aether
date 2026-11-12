@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
+import { Confirm } from '@/components/confirm'
 import { FolderGit2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
@@ -31,13 +33,14 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
   const budget = useStore((s) => s.budgets[workspaceID])
   const caps = useCapability()
   const isAdmin = useIsWorkspaceAdmin(workspaceID)
-  const [dialog, setDialog] = useState<'budget' | 'settings' | null>(null)
+  const navigate = useStore((s) => s.navigate)
+  const [dialog, setDialog] = useState<'budget' | 'settings' | 'delete' | null>(null)
   const [settingsClosed, setSettingsClosed] = useState(0)
 
   if (!workspace) {
     return (
       <div className="flex h-full min-w-0 flex-col">
-        <ViewHeader title="Repository" />
+        <ViewHeader title="Workspace settings" />
         <EmptyState icon={<FolderGit2 />} title="Unknown workspace">It may have been deleted, or this link names another server&apos;s workspace.</EmptyState>
       </div>
     )
@@ -46,7 +49,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <ViewHeader title={workspace.name} subtitle="Repository" />
+      <ViewHeader title={workspace.name} subtitle="Workspace settings" />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <PageBody>
           <SettingsSection title="Base branch" heading="h2">
@@ -105,10 +108,37 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
               />
             )}
           </SettingsSection>
+          {isAdmin && caps.hasMethod('workspace.delete') && (
+            <SettingsSection title="Danger zone" heading="h2">
+              <SettingRow
+                label="Delete this workspace"
+                help="Deletes its finished sessions, retained containers, files, history and server repository. Members and their environments stay."
+                control={<Button size="sm" variant="secondary" className="text-state-failed" onClick={() => setDialog('delete')}>Delete…</Button>}
+              />
+            </SettingsSection>
+          )}
         </PageBody>
       </div>
       {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
       {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => { setDialog(null); setSettingsClosed((n) => n + 1) }} />}
+      {dialog === 'delete' && (
+        <Confirm
+          title={`Delete ${workspace.name}?`}
+          description="This permanently deletes the workspace, its finished sessions, retained containers, files, history and server repository. Members, their environments and external repositories stay."
+          action="Delete workspace"
+          onConfirm={() => client.workspaceDelete(workspaceID)}
+          onDone={() => {
+            toast.success(`${workspace.name} deleted`)
+            navigate('workspaces')
+            useStore.getState().removeWorkspace(workspaceID)
+          }}
+          onClose={() => setDialog(null)}
+        >
+          <p className="text-ui-sm text-muted">
+            The server refuses while a session is unfinished, review work or cleanup is pending, or a schedule remains.
+          </p>
+        </Confirm>
+      )}
     </div>
   )
 }

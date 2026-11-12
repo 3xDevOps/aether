@@ -28,6 +28,10 @@ In practice, across docs, CLI output, and dashboard copy:
 - Keep the no-fluff rule above. Explain a concept once, then use it.
 - Make every surface obvious on first contact, never by taking away
   developer control.
+- Put the actions people use most on the surface, as visible buttons and
+  controls beside what they act on. Overflow menus and dropdowns are for
+  rare or destructive actions, never the only way to a common one
+  ([docs/styles.md](docs/styles.md#surface-the-common-actions)).
 
 ## Before changing code
 

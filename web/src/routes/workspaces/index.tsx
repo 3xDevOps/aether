@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { toast } from 'sonner'
-import { Ellipsis, FolderGit2 } from '@/components/icons'
-import { Confirm } from '@/components/confirm'
+import { FolderGit2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { ListRow } from '@/components/ui/list-row'
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { PageBody } from '@/components/ui/page-body'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,7 +12,6 @@ import { api, type Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
 import { message } from '@/lib/format'
 import type { Workspace } from '@/lib/types'
-import { WorkspaceSettingsDialog } from '@/routes/admin-dialogs'
 import { WorkspaceAccessDialog, WorkspaceOwnerDialog } from '@/routes/workspaces/access-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { isAdminRole } from '@/lib/permissions'
@@ -36,8 +32,6 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   const workspaces = useMemo(() => Object.values(workspaceMap), [workspaceMap])
   const [loaded, setLoaded] = useState(useStore.getState().hydrated)
   const [adding, setAdding] = useState(false)
-  const [deleting, setDeleting] = useState<Workspace | null>(null)
-  const [settings, setSettings] = useState<Workspace | null>(null)
   const [accessing, setAccessing] = useState<Workspace | null>(null)
   const [chowning, setChowning] = useState<Workspace | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -128,84 +122,58 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
             <SectionLabel as="h2">{loaded ? `${workspaces.length} ${workspaces.length === 1 ? 'workspace' : 'workspaces'}` : 'Workspaces'}</SectionLabel>
             {loading && (
               <div role="status" aria-label="Loading workspaces" className="flex flex-col gap-0.5">
-                {[0, 1, 2].map((row) => <Skeleton key={row} className="h-7" />)}
+                {[0, 1, 2].map((row) => <Skeleton key={row} className="h-11" />)}
               </div>
             )}
             {empty && <p className="text-ui text-muted">{canAdd ? 'No workspaces yet. Add the first one above.' : 'No workspaces yet. An admin adds the first one.'}</p>}
             {loaded && workspaces.length > 0 && (
-              <ul aria-label="Workspace list" className="flex flex-col gap-0.5">
+              <InsetList aria-label="Workspace list">
                 {workspaces.map((workspace) => (
-                  <li key={workspace.id}>
-                    <ListRow
-                      aria-label={`Open ${workspace.name}`}
-                      leading={<FolderGit2 />}
-                      trailing={[workspace.id === active ? `Current · ${workspace.base_branch}` : workspace.base_branch, ownerOf(workspace) && `Owner: ${ownerOf(workspace)}`].filter(Boolean).join(' · ')}
-                      onClick={() => open(workspace)}
-                      hoverAction={(
-                        <Menu>
-                          <MenuTrigger asChild>
-                            <Button variant="ghost" size="icon-sm" label={`More actions for ${workspace.name}`}>
-                              <Ellipsis />
-                            </Button>
-                          </MenuTrigger>
-                          <MenuContent align="end">
-                            <MenuItem onSelect={() => navigate('workspace', { workspaceId: workspace.id })}>Repository</MenuItem>
-                            {caps.hasMethod('workspace.environment.get') && (
-                              <MenuItem onSelect={() => navigate('workspace', { workspaceId: workspace.id, section: 'environment' })}>Environment</MenuItem>
-                            )}
-                            {administers(workspace) && caps.hasMethod('workspace.settings') && <MenuItem onSelect={() => setSettings(workspace)}>Settings…</MenuItem>}
-                            {scoped && administers(workspace) && caps.hasMethod('workspace.access.list') && <MenuItem onSelect={() => setAccessing(workspace)}>Access…</MenuItem>}
-                            {scoped && superAdmin && caps.hasMethod('workspace.owner.set') && <MenuItem onSelect={() => setChowning(workspace)}>Change owner…</MenuItem>}
-                            {administers(workspace) && caps.hasMethod('workspace.delete') && (
-                              <>
-                                <MenuSeparator />
-                                <MenuItem onSelect={() => setDeleting(workspace)}>Delete…</MenuItem>
-                              </>
-                            )}
-                          </MenuContent>
-                        </Menu>
+                  <InsetListItem key={workspace.id} className="flex-wrap">
+                    <FolderGit2 aria-hidden className="size-4 shrink-0 text-muted" />
+                    <span className="flex min-w-0 flex-[1_1_12rem] flex-col items-start">
+                      <Button
+                        variant="link"
+                        size="sm"
+                        aria-label={`Open ${workspace.name}`}
+                        className="h-auto max-w-full justify-start truncate px-0 text-ui font-medium text-text"
+                        onClick={() => open(workspace)}
+                      >
+                        {workspace.name}
+                      </Button>
+                      <span className="max-w-full truncate text-ui-sm text-muted">
+                        {[workspace.id === active && 'Current', workspace.base_branch, ownerOf(workspace) && `Owner: ${ownerOf(workspace)}`].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <Button size="sm" variant="secondary" aria-label={`Settings for ${workspace.name}`} onClick={() => navigate('workspace', { workspaceId: workspace.id })}>
+                        Settings
+                      </Button>
+                      {scoped && administers(workspace) && caps.hasMethod('workspace.access.list') && (
+                        <Button size="sm" variant="secondary" aria-label={`Access to ${workspace.name}`} onClick={() => setAccessing(workspace)}>
+                          Access
+                        </Button>
                       )}
-                    >
-                      {workspace.name}
-                    </ListRow>
-                  </li>
+                    </span>
+                  </InsetListItem>
                 ))}
-              </ul>
+              </InsetList>
             )}
           </section>
         </PageBody>
       </div>
-      {settings && (
-        <WorkspaceSettingsDialog
-          workspaceID={settings.id}
+      {accessing && (
+        <WorkspaceAccessDialog
+          workspaceID={accessing.id}
           client={client}
-          onRepository={() => {
-            setSettings(null)
-            navigate('workspace', { workspaceId: settings.id })
-          }}
-          onClose={() => setSettings(null)}
+          onClose={() => setAccessing(null)}
+          onChangeOwner={superAdmin && caps.hasMethod('workspace.owner.set') ? () => {
+            setAccessing(null)
+            setChowning(accessing)
+          } : undefined}
         />
       )}
-      {accessing && <WorkspaceAccessDialog workspaceID={accessing.id} client={client} onClose={() => setAccessing(null)} />}
       {chowning && <WorkspaceOwnerDialog workspaceID={chowning.id} client={client} onClose={() => setChowning(null)} />}
-      {deleting && (
-        <Confirm
-          title={`Delete ${deleting.name}?`}
-          description="This permanently deletes the workspace, its finished sessions, retained containers, files, history and server repository. Members, their environments and external repositories stay."
-          action="Delete workspace"
-          onConfirm={() => client.workspaceDelete(deleting.id)}
-          onDone={() => {
-            toast.success(`${deleting.name} deleted`)
-            useStore.getState().removeWorkspace(deleting.id)
-            void refetch()
-          }}
-          onClose={() => setDeleting(null)}
-        >
-          <p className="text-ui-sm text-muted">
-            The server refuses while a session is unfinished, review work or cleanup is pending, or a schedule remains.
-          </p>
-        </Confirm>
-      )}
     </div>
   )
 }
