@@ -2,6 +2,7 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -925,12 +926,15 @@ func TestBlockedReportRetriesFullInboxAndPreservesChildReason(t *testing.T) {
 	if err != nil || report.State != store.CoordReportFinalized || report.PublishedAt != nil {
 		t.Fatalf("full-inbox report = %+v, %v; want finalized with publication pending", report, err)
 	}
-	batch, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
-	if rpcErr != nil {
-		t.Fatalf("read earlier messages: %v", rpcErr)
-	}
-	if _, ackErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: batch.AckToken}); ackErr != nil {
-		t.Fatalf("ack earlier messages: %v", ackErr)
+	var token string
+	for {
+		batch, readErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: token})
+		if readErr != nil {
+			t.Fatalf("read earlier messages: %v", readErr)
+		}
+		if token = batch.AckToken; token == "" {
+			break
+		}
 	}
 	if _, _, drainErr := h.svc.drainOutboxPage(ctx); drainErr != nil {
 		t.Fatalf("retry blocked publication: %v", drainErr)
@@ -980,5 +984,29 @@ func TestChildSuccessAndFailureReportsReachTheParent(t *testing.T) {
 				t.Fatalf("%s inbox = %+v, %v", outcome, inbox, rpcErr)
 			}
 		})
+	}
+}
+
+func TestInboxBatchPrintsWithinTheBound(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, 2)
+	from, to := h.run(0), h.run(1)
+	for range protocol.CoordMaxUnread {
+		if err := h.db.AppendRunMessage(ctx, &store.RunMessage{
+			WorkspaceID: h.workspace, FromRun: from, ToRun: to, Body: strings.Repeat("\x00", 160),
+		}, protocol.CoordMaxUnread); err != nil {
+			t.Fatalf("fill inbox: %v", err)
+		}
+	}
+	inbox, rpcErr := h.svc.Inbox(ctx, to, protocol.CoordInboxParams{})
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	printed, err := json.Marshal(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(inbox.Messages); n == 0 || n+inbox.More != protocol.CoordMaxUnread || len(printed) > store.RunMessageBatchBytes+64 {
+		t.Fatalf("a batch of control characters holds %d messages (more %d) and prints %d bytes, want it within %d", n, inbox.More, len(printed), store.RunMessageBatchBytes)
 	}
 }
