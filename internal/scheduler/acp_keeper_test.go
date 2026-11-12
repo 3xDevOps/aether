@@ -10,6 +10,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -546,4 +548,64 @@ func TestEnhancedAnswerRightAfterARestartWaitsForRecovery(t *testing.T) {
 		t.Fatalf("answer during recovery: %v", err)
 	}
 	waitItems(t, s, run.ID, "the answered turn", assistantSaid("permission: allow"))
+}
+
+func TestEnhancedRunsReconnectWhileOneIsStuckAfterARestart(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	runs := make([]domain.RunID, 3)
+	for i := range runs {
+		run := e.launchACP(t, "say pong")
+		waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+		runs[i] = run.ID
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stuck := make(chan struct{})
+	release := sync.OnceFunc(func() { close(stuck) })
+	var attaches atomic.Int32
+	rt.mu.Lock()
+	rt.onAttach = func() error {
+		if attaches.Add(1) == 1 {
+			<-stuck
+		}
+		return nil
+	}
+	rt.mu.Unlock()
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	startScheduler(t, s)
+	t.Cleanup(release)
+	adopted := func() int {
+		n := 0
+		for _, id := range runs {
+			if s.acp.session(id) != nil {
+				n++
+			}
+		}
+		return n
+	}
+	waitFor(t, "the other sessions while one reconnect is stuck", func() bool { return adopted() == len(runs)-1 })
+	select {
+	case <-s.RecoveryReady():
+		t.Fatal("recovery finished before the stuck session reconnected")
+	default:
+	}
+	release()
+	select {
+	case <-s.RecoveryReady():
+	case <-time.After(waitTimeout):
+		t.Fatal("recovery did not finish")
+	}
+	waitFor(t, "every session", func() bool { return adopted() == len(runs) })
+	if execs := rt.all(); len(execs) != len(runs) {
+		t.Fatalf("%d agents, want the %d from before the restart adopted", len(execs), len(runs))
+	}
 }
