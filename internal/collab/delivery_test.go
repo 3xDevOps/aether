@@ -1,12 +1,17 @@
 package collab
 
 import (
+	"cmp"
 	"context"
+	"fmt"
+	"io/fs"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -53,5 +58,110 @@ func TestDeliveredMessageSettlesAfterTheCallerGoesAway(t *testing.T) {
 	}
 	if result.Receipt != ReceiptSent || stored.State != store.RoomMessageSent {
 		t.Fatalf("receipt %q, stored state %q, want both sent", result.Receipt, stored.State)
+	}
+}
+
+func TestNotSentSteerRecordsTheDeliveryError(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+		want string
+	}{
+		{fmt.Errorf("%w: scheduler: stat attached file: %w", domain.ErrPromptNotSent, &fs.PathError{Op: "stat", Path: "/srv/homes/member/files/shot.png", Err: fs.ErrNotExist}),
+			"prompt_not_sent", "agent prompt was not sent: scheduler: stat attached file: stat shot.png: file does not exist"},
+		{fmt.Errorf("%w: inject requires a running or needs-attention session", ptyhost.ErrNoSession), "session_unavailable", ""},
+		{fmt.Errorf("%w: wake the session: container start refused", domain.ErrPromptNotSent), "prompt_not_sent", ""},
+		{acphost.ErrUnsupportedImage, "unsupported_image", ""},
+	} {
+		st, clock, ws, owner, _, run := setupCollab(t)
+		pty := &collabPTY{err: tc.err}
+		service, err := New(Config{Store: st, Runs: st, Workspaces: st, Inject: pty.Inject, Control: control.New(control.Config{Now: clock.Now}), Now: clock.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "hello", IdempotencyKey: tc.code})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := result.Message.Failure
+		want := cmp.Or(tc.want, tc.err.Error())
+		if result.Message.State != store.RoomMessageNotSent || f == nil || f.Code != tc.code || f.Message != want {
+			t.Fatalf("inject error %q: state %s failure %+v, want not_sent with code %s and the error", tc.err, result.Message.State, f, tc.code)
+		}
+	}
+}
+
+func TestSteerRedeliveredAfterTheRestartKeepsWhyItWasNotSent(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	st.messages["unsent"] = &store.RoomMessage{
+		ID: "unsent", WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "after this turn",
+		State: store.RoomMessageSent, AgentDelivery: store.AgentQueued, CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
+	}
+	clock.Add(time.Second)
+	injectErr := fmt.Errorf("%w: inject requires a running or needs-attention session", ptyhost.ErrNoSession)
+	service, err := New(Config{
+		Store: st, Runs: st, Workspaces: st, Now: clock.Now, WorkerInterval: time.Hour,
+		Inject: func(context.Context, domain.RunID, domain.MemberID, domain.AgentPrompt, bool, func(error)) (string, error) {
+			return "", injectErr
+		},
+		Reattached: func(domain.RunID) ([]string, Reattach) { return nil, Adopted },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err = service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	var got *store.RoomMessage
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if got, err = st.GetRoomMessage(ctx, "unsent"); err != nil {
+			t.Fatal(err)
+		}
+		if got.State == store.RoomMessageNotSent {
+			break
+		}
+	}
+	if got.State != store.RoomMessageNotSent || got.Failure == nil || got.Failure.Code != "session_unavailable" || got.Failure.Message != injectErr.Error() {
+		t.Fatalf("redelivered steer = %q %+v, want not_sent with the delivery error", got.State, got.Failure)
+	}
+}
+
+func TestDelayedSteerRecordsWhyItWasNotSent(t *testing.T) {
+	for _, tc := range []struct {
+		code   string
+		change func(*collabStore, *domain.Run, *domain.Member)
+	}{
+		{"session_protected", func(_ *collabStore, run *domain.Run, _ *domain.Member) { run.Protected = true }},
+		{"access_revoked", func(st *collabStore, _ *domain.Run, other *domain.Member) { delete(st.members, other.ID) }},
+		{"steer_denied", func(st *collabStore, run *domain.Run, _ *domain.Member) {
+			st.workspaces[run.WorkspaceID].SteerOthers = domain.SteerOthersAdminsOnly
+		}},
+	} {
+		st, clock, ws, _, other, run := setupCollab(t)
+		pty := &collabPTY{}
+		service, err := New(Config{Store: st, Runs: st, Workspaces: st, Inject: pty.Inject, Control: control.New(control.Config{Now: clock.Now}), Now: clock.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		posted, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID, Kind: store.RoomMessageSteerRequest, Body: "later", IdempotencyKey: tc.code})
+		if err != nil || posted.Message.DeliverAfter == nil {
+			t.Fatalf("post = %+v, %v; want a delayed steer", posted.Message, err)
+		}
+		tc.change(st, run, other)
+		clock.Add(SteeringDelay + time.Second)
+		if _, deliverErr := service.DeliverDue(context.Background(), 0); deliverErr != nil {
+			t.Fatal(deliverErr)
+		}
+		got, err := st.GetRoomMessage(context.Background(), posted.Message.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != store.RoomMessageNotSent || got.Failure == nil || got.Failure.Code != tc.code || got.Failure.Message == "" || pty.Calls() != 0 {
+			t.Fatalf("%s: state %s failure %+v, %d injects; want not_sent with the reason and nothing sent", tc.code, got.State, got.Failure, pty.Calls())
+		}
 	}
 }

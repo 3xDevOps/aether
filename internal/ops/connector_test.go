@@ -872,6 +872,35 @@ func TestConnectorMessage(t *testing.T) {
 	}
 }
 
+func TestConnectorMessageNotSentFailsWithTheReason(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-bo"}})
+	cs := connectorSession(t, f, ScopeWrite)
+	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-1", State: protocol.RoomMessageNotSent,
+		Failure: &protocol.RoomMessageFailure{Code: "session_protected", Message: "the session was protected before delivery"}}})
+	text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "use postgres", "idempotency_key": "m1"})
+	if !failed || !strings.Contains(text, "message to session run-1 was not sent (session_protected; the error is under untrusted.failure); unprotect it with aether_session_lifecycle") ||
+		!strings.Contains(text, "new idempotency_key, since m1 returns this refusal") ||
+		!strings.Contains(text, `"untrusted":{"failure":{"code":"session_protected","message":"the session was protected before delivery"}}`) {
+		t.Fatalf("a message the session refused = %q (failed %v), want a failed call with the reason", text, failed)
+	}
+
+	f.calls = nil
+	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-2", State: protocol.RoomMessageNotSent,
+		Failure: &protocol.RoomMessageFailure{Code: "unsupported_image", Message: "acphost: agent does not support image prompts"}}})
+	text, _, failed = try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "see the screenshot"})
+	if !failed || !strings.Contains(text, "(unsupported_image; the error is under untrusted.failure); drop the images; send it again") || strings.Contains(text, "idempotency_key") {
+		t.Fatalf("a keyless message the session refused = %q, want the hint without a key the caller never passed", text)
+	}
+	refusedKey := f.acted().params
+	f.calls = nil
+	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-3", State: protocol.RoomMessageSent}})
+	if text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "see the screenshot"}); failed || strings.Contains(text, "within the last 60s") ||
+		f.acted().params == refusedKey {
+		t.Fatalf("resending a refused keyless message = %q (failed %v) with params %s, want a new send under a new key", text, failed, f.acted().params)
+	}
+}
+
 func TestConnectorAnswerAndDecide(t *testing.T) {
 	items := []protocol.AttentionItem{
 		{Kind: protocol.AttentionKindRoomQuestion, RunID: "run-2", WorkspaceID: "ws-1", Message: &protocol.AttentionMessage{ID: "rm-1", Body: "Ready?"}},

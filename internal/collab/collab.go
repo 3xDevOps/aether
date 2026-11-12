@@ -401,9 +401,10 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 	}
 
 	var (
-		msg           *store.RoomMessage
-		deliveryProof *control.Snapshot
-		immediate     *Result
+		msg              *store.RoomMessage
+		deliveryProof    *control.Snapshot
+		immediate        *Result
+		immediateFailure *store.RoomMessageFailure
 	)
 	createSteer := func(current control.Snapshot, hasController bool) error {
 		freshRun, freshActor, freshWS, err := s.scope(ctx, in.WorkspaceID, in.RunID, in.ActorID)
@@ -447,8 +448,8 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 			if err != nil || !claimed {
 				return err
 			}
-			receipt, outcome, err := s.deliver(ctx, msg, actor, run, func(fn func() error) error { return fn() }, in.Steer)
-			immediate = &Result{Receipt: receipt, Outcome: outcome}
+			receipt, outcome, failure, err := s.deliver(ctx, msg, actor, run, func(fn func() error) error { return fn() }, in.Steer)
+			immediate, immediateFailure = &Result{Receipt: receipt, Outcome: outcome}, failure
 			return err
 		default:
 			due := s.now().Add(SteeringDelay)
@@ -464,7 +465,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		return Result{}, err
 	}
 	if immediate != nil {
-		return s.settleResult(ctx, msg, immediate.Receipt, immediate.Outcome)
+		return s.settleResult(ctx, msg, immediate.Receipt, immediate.Outcome, immediateFailure)
 	}
 	if err := s.publishMessage(ctx, msg); err != nil {
 		return Result{}, err
@@ -612,7 +613,7 @@ func (s *Service) authorizeDecision(run domain.RunID, actor domain.MemberID, ses
 	return nil
 }
 
-func (s *Service) settleRoomMessage(ctx context.Context, msg *store.RoomMessage, receipt Receipt, agentQueued bool) error {
+func (s *Service) settleRoomMessage(ctx context.Context, msg *store.RoomMessage, receipt Receipt, agentQueued bool, notSent *store.RoomMessageFailure) error {
 	var (
 		state     store.RoomMessageState
 		delivered *time.Time
@@ -625,7 +626,7 @@ func (s *Service) settleRoomMessage(ctx context.Context, msg *store.RoomMessage,
 		delivered = &now
 	case ReceiptNotSent:
 		state = store.RoomMessageNotSent
-		failure = &store.RoomMessageFailure{Code: "session_unavailable", Message: "agent unavailable"}
+		failure = notSent
 	case ReceiptUncertain:
 		state = store.RoomMessageUncertain
 		failure = &store.RoomMessageFailure{Code: "write_uncertain", Message: "delivery outcome uncertain", Retryable: true}

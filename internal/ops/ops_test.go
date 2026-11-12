@@ -158,23 +158,23 @@ func TestMessageKeyKeepsInFlight(t *testing.T) {
 		t.Fatal("a first message is a duplicate")
 	}
 	other, _, otherDone := messageKey("mem-inflight", protocol.RunInjectParams{RunID: "run-1", Message: "another"}, start)
-	otherDone(true)
+	otherDone(true, false)
 	later := start.Add(2 * duplicateWindow)
 	again, dup, againDone := messageKey("mem-inflight", p, later)
 	if again != key || !dup {
 		t.Fatalf("a repeat while the first is in flight got key %q (dup %t), want %q", again, dup, key)
 	}
-	done(true)
-	againDone(true)
+	done(true, false)
+	againDone(true, false)
 	if k, _, d := messageKey("mem-inflight", protocol.RunInjectParams{RunID: "run-1", Message: "another"}, later); k == other {
 		t.Fatal("a finished message older than the window kept its key")
 	} else {
-		d(false)
+		d(false, false)
 	}
 	if k, dup, d := messageKey("mem-inflight", p, time.Now().Add(2*duplicateWindow)); k == key || dup {
 		t.Fatalf("a message repeated after the window got key %q (dup %t), want a new one", k, dup)
 	} else {
-		d(false)
+		d(false, false)
 	}
 }
 
@@ -259,5 +259,24 @@ func TestKeylessLaunchKeepsKeyAfterUncertainFailure(t *testing.T) {
 	run(t, cs, "aether_launch_session", args)
 	if k := keys(); len(k) != 4 || k[2] == k[3] {
 		t.Fatalf("a retry after a refused launch used keys %v, want a new one", k)
+	}
+}
+
+func TestMessageKeyRotatesOnceForOverlappingRefusals(t *testing.T) {
+	p := protocol.RunInjectParams{RunID: "run-1", Message: "refused twice"}
+	now := time.Now()
+	first, _, firstDone := messageKey("mem-refused", p, now)
+	_, _, secondDone := messageKey("mem-refused", p, now)
+	firstDone(false, true)
+	resent, _, resentDone := messageKey("mem-refused", p, now)
+	if resent == first {
+		t.Fatalf("a resend after a refusal kept key %q, want a new key", resent)
+	}
+	secondDone(false, true)
+	resentDone(true, false)
+	if again, dup, d := messageKey("mem-refused", p, now); again != resent || !dup {
+		t.Fatalf("a repeat of the sent resend got key %q (dup %t), want %q again", again, dup, resent)
+	} else {
+		d(false, false)
 	}
 }
