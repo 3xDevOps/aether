@@ -6285,9 +6285,9 @@ button and the palette's **Devices** entry land on the right tab, and the
 sidebar's **Members** row stays current on both.
 
 **Members** is a roster table, each row filling on hover: name, role, agent
-account and last seen (**Online**, a relative time, or **Offline**). Under
-48rem the agent account and last seen sit below the name, so the table never
-scrolls sideways. Roles are
+account and last seen (**Online**, a relative time, or **Offline**). Below
+64rem, where the sidebar leaves the table too little room, the agent account
+and last seen sit below the name, so the table never scrolls sideways. Roles are
 Viewer, Collaborator, Admin and Super admin. A super admin changes a role with
 the select in the **Role** column and removes a member with the row's trash
 button; giving up your own super admin role, and removing anyone, ask first.

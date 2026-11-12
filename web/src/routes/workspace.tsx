@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Confirm } from '@/components/confirm'
 import { FolderGit2 } from '@/components/icons'
@@ -43,14 +43,22 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
     return !id ? '' : id === selfID ? 'you' : s.members[id]?.display_name ?? id
   })
   const [dialog, setDialog] = useState<'budget' | 'settings' | 'delete' | 'access' | null>(null)
+  const [granted, setGranted] = useState<number | null>(null)
   // A route that moves to another workspace, as a deletion elsewhere does, closes any dialog opened for this one.
   const [dialogFor, setDialogFor] = useState(workspaceID)
+  const shown = useRef(workspaceID)
+  shown.current = workspaceID
+  // A late answer for the workspace a dialog was opened on never closes one opened since on another.
+  const closeFor = (target: string) => () => {
+    if (shown.current === target) setDialog(null)
+  }
   if (dialogFor !== workspaceID) {
     setDialogFor(workspaceID)
     setDialog(null)
+    setGranted(null)
   }
   const canAccess = scoped && isAdmin && caps.hasMethod('workspace.access.list')
-  const [granted, setGranted] = useState<number | null>(null)
+  // Re-read whenever the workspace record changes, as a grant elsewhere reloads it.
   useEffect(() => {
     if (!canAccess || dialog === 'access') return
     let live = true
@@ -58,7 +66,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
     return () => {
       live = false
     }
-  }, [canAccess, client, dialog, workspaceID])
+  }, [canAccess, client, dialog, workspaceID, workspace])
   const [settingsClosed, setSettingsClosed] = useState(0)
 
   if (!workspace) {
@@ -108,7 +116,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
             {scoped && ownerName && (
               <SettingRow
                 label="Access"
-                help={granted === null
+                help={granted === null || !canAccess
                   ? `Owner: ${ownerName}. The owner, super admins and the members granted access can use this workspace.`
                   : `Owner: ${ownerName}. Granted to ${granted} ${granted === 1 ? 'member' : 'members'}; super admins always have access.`}
                 control={canAccess && (
@@ -154,13 +162,13 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
           )}
         </PageBody>
       </div>
-      {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
-      {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => { setDialog(null); setSettingsClosed((n) => n + 1) }} />}
+      {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={closeFor(workspaceID)} />}
+      {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => { closeFor(workspaceID)(); setSettingsClosed((n) => n + 1) }} />}
       {dialog === 'access' && (
         <WorkspaceAccessDialog
           workspaceID={workspaceID}
           client={client}
-          onClose={() => setDialog(null)}
+          onClose={closeFor(workspaceID)}
           canChangeOwner={superAdmin && caps.hasMethod('workspace.owner.set')}
         />
       )}
@@ -176,7 +184,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
             if (route.name === 'workspace' && route.params.workspaceId === workspaceID) navigate('workspaces')
             useStore.getState().removeWorkspace(workspaceID)
           }}
-          onClose={() => setDialog(null)}
+          onClose={closeFor(workspaceID)}
         >
           <p className="text-ui-sm text-muted">
             The server refuses while a session is unfinished, review work or cleanup is pending, or a schedule remains.

@@ -137,7 +137,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                           variant="link"
                           size="sm"
                           aria-label={`Open ${workspace.name}`}
-                          className="h-auto min-w-0 justify-start truncate px-0 text-ui font-medium text-text"
+                          className="h-auto min-w-0 max-w-full shrink justify-start truncate px-0 text-ui font-medium"
                           onClick={() => open(workspace)}
                         >
                           {workspace.name}

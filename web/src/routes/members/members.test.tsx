@@ -52,10 +52,10 @@ describe('members page', () => {
     render(<MembersRoute params={{}} client={client} />)
 
     await waitFor(() => expect(within(row('Bob')).getByText('Shares their account with you')).toBeDefined())
-    expect(within(row('Bob')).getAllByText('Online')).toHaveLength(2)
+    expect(within(row('Bob')).getByText('Online')).toBeDefined()
     expect(within(row('Bob')).getByRole('combobox', { name: 'Role of Bob' }).textContent).toBe('Collaborator')
     expect(within(row('Bob')).getByRole('switch', { name: 'Share my account with Bob' }).getAttribute('aria-checked')).toBe('false')
-    expect(within(row('Vera')).getAllByText(/ago/)).toHaveLength(2)
+    expect(within(row('Vera')).getByText(/ago/)).toBeDefined()
     expect(within(row('Vera')).queryByText('Shares their account with you')).toBeNull()
     expect(within(row('Alice')).getByText('(you)')).toBeDefined()
     expect(within(row('Alice')).queryByRole('switch')).toBeNull()

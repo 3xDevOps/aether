@@ -51,8 +51,9 @@ export function Roster({ client }: { client: Api }) {
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
   const { failures, run } = useFailure()
   const sharing = useAccountSharing(client)
-  // Under 48rem the share control sits below the name, so the table never scrolls sideways.
-  const wide = useMediaQuery('(min-width: 48rem)')
+  // Below 64rem, where the sidebar leaves the table too little room, the share
+  // control and last seen sit below the name, so the table never scrolls sideways.
+  const wide = useMediaQuery('(min-width: 64rem)')
   const canShare = caps.hasMethod('account.share') && caps.hasMethod('account.revoke')
 
   const readMembers = useCallback(() => useStore.getState().readMembers(client.memberList()), [client])
@@ -132,9 +133,9 @@ export function Roster({ client }: { client: Api }) {
             <thead className="border-b border-seam bg-chrome text-left text-ui-sm text-muted">
               <tr>
                 <th className="px-3 py-1.5 font-medium">Name</th>
-                <th className="w-36 px-3 py-1.5 font-medium md:w-40">Role</th>
+                <th className="w-36 px-3 py-1.5 font-medium lg:w-40">Role</th>
                 {wide && <th className="w-48 px-3 py-1.5 font-medium">Agent account</th>}
-                <th className="hidden w-32 px-3 py-1.5 font-medium md:table-cell">Last seen</th>
+                {wide && <th className="w-32 px-3 py-1.5 font-medium">Last seen</th>}
                 {canRemove && <th className="w-11 px-1 py-1.5"><span className="sr-only">Remove</span></th>}
               </tr>
             </thead>
@@ -172,7 +173,7 @@ export function Roster({ client }: { client: Api }) {
                             <span className="min-w-0 truncate font-medium text-text">{member.display_name}</span>
                             {you && <span className="shrink-0 text-ui-sm text-muted">(you)</span>}
                           </span>
-                          <span className="text-ui-sm text-muted md:hidden">{presence}</span>
+                          {!wide && <span className="text-ui-sm text-muted">{presence}</span>}
                         </span>
                       </span>
                       {!wide && account && <div className="pt-2">{account}</div>}
@@ -192,7 +193,7 @@ export function Roster({ client }: { client: Api }) {
                       ) : <span className="text-text">{roleLabel[member.role]}</span>}
                     </td>
                     {wide && <td className="px-3 py-2 align-top">{account}</td>}
-                    <td className="hidden px-3 py-2 align-top text-muted md:table-cell"><span className="flex min-h-7 items-center coarse:min-h-11">{presence}</span></td>
+                    {wide && <td className="px-3 py-2 align-top text-muted"><span className="flex min-h-7 items-center coarse:min-h-11">{presence}</span></td>}
                     {canRemove && (
                       <td className="px-1 py-1 text-right align-top">
                         {!you && (
