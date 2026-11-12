@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FolderGit2 } from '@/components/icons'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { InsetList, InsetListItem } from '@/components/ui/inset-list'
@@ -132,28 +133,31 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                   <InsetListItem key={workspace.id} className="flex-wrap">
                     <FolderGit2 aria-hidden className="size-4 shrink-0 text-muted" />
                     <span className="flex min-w-0 flex-[1_1_12rem] flex-col items-start">
-                      <Button
-                        variant="link"
-                        size="sm"
-                        aria-label={`Open ${workspace.name}`}
-                        className="h-auto max-w-full justify-start truncate px-0 text-ui font-medium text-text"
-                        onClick={() => open(workspace)}
-                      >
-                        {workspace.name}
-                      </Button>
+                      <span className="flex max-w-full min-w-0 items-center gap-2">
+                        <Button
+                          variant="link"
+                          size="sm"
+                          aria-label={`Open ${workspace.name}`}
+                          className="h-auto min-w-0 justify-start truncate px-0 text-ui font-medium text-text"
+                          onClick={() => open(workspace)}
+                        >
+                          {workspace.name}
+                        </Button>
+                        {workspace.id === active && <Badge>Current</Badge>}
+                      </span>
                       <span className="max-w-full truncate text-ui-sm text-muted">
-                        {[workspace.id === active && 'Current', workspace.base_branch, ownerOf(workspace) && `Owner: ${ownerOf(workspace)}`].filter(Boolean).join(' · ')}
+                        {[workspace.base_branch, ownerOf(workspace) && `Owner: ${ownerOf(workspace)}`].filter(Boolean).join(' · ')}
                       </span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <Button size="sm" variant="secondary" aria-label={`Settings for ${workspace.name}`} onClick={() => navigate('workspace', { workspaceId: workspace.id })}>
-                        Settings
-                      </Button>
+                    <span className="flex shrink-0 items-center gap-2 max-sm:pl-7">
                       {scoped && administers(workspace) && caps.hasMethod('workspace.access.list') && (
                         <Button size="sm" variant="secondary" aria-label={`Access to ${workspace.name}`} onClick={() => setAccessing(workspace)}>
                           Access
                         </Button>
                       )}
+                      <Button size="sm" variant="secondary" aria-label={`Settings for ${workspace.name}`} onClick={() => navigate('workspace', { workspaceId: workspace.id })}>
+                        Settings
+                      </Button>
                     </span>
                   </InsetListItem>
                 ))}

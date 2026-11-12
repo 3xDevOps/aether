@@ -6290,10 +6290,10 @@ name under 48rem, where the table also scrolls inside its panel). Roles are
 Viewer, Collaborator, Admin and Super admin. A super admin changes a role with
 the select in the **Role** column and removes a member with the row's trash
 button; giving up your own super admin role, and removing anyone, ask first.
-The **Agent account** column holds **Share my account** or **Stop sharing**
-for every other member (`account.share`, `account.revoke`) and says when that
-member shares theirs with you; the omp warning sits behind **What sharing
-hands over** above the table. Members
+The **Agent account** column holds a **Share my account** switch for every
+other member (`account.share`, `account.revoke`) and says when that member
+shares their account with you; the omp warning sits behind **What a teammate
+can do with your account** above the table. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
 admins see **Open invitations** with **Revoke** and the workspaces each
 invitation grants.
@@ -6304,12 +6304,13 @@ not a super admin must pick at least one and may invite only a viewer or a
 collaborator; a super admin may pick any role and no workspace.
 
 **Manage workspaces** shows each workspace's owner. Where the caller's `role`
-in `workspace.list` is `admin`, a row's **Access** button opens the owner, a
-search field and a scrolling list of every other member who is not a super
-admin, each with a checkbox; ticking grants and unticking revokes at once,
-showing the server's error verbatim. An admin who is not a super admin cannot
-tick or untick another admin. Super admins also get **Change owner…** on the
-owner's line. A grant,
+in `workspace.list` is `admin`, a row's **Access** button, or **Access…** under
+**Team** on the workspace's settings page, opens the owner, a search field and
+a scrolling list of every other member, each with a checkbox; ticking grants
+and unticking revokes at once, showing the server's error verbatim. Super
+admins are ticked and locked, since they reach every workspace, and an admin
+who is not a super admin cannot tick or untick another admin. Super admins
+also get **Change owner…** on the owner's line. A grant,
 revoke, `workspace.access` event or `member.access` event reloads the workspace
 list. `member.access` (workspace id `server`) goes only to the member whose
 access changed, so a member who just lost a workspace still gets it. Server-wide
@@ -6491,9 +6492,10 @@ without a reload.
 `src/routes/workspaces/` lists workspaces as rows, with three row skeletons
 while the list loads. A row's name opens the
 workspace: it becomes the active one and the board shows. Below the name sit
-**Current** for the active workspace, its base branch and its owner, and beside
-it two buttons, never a menu: **Settings** (the workspace page, for every
-member) and **Access** (for the workspace's admin). **Add
+its base branch and its owner, and beside
+it two buttons, never a menu: **Access** (for the workspace's admin) and
+**Settings** (the workspace page, for every member). **Current** marks the
+active workspace beside its name. **Add
 workspace** in the header shows the creation choices above the list; with no
 workspace yet they show without it. Open the page from the sidebar, the
 workspace switcher or the command palette.
@@ -6584,8 +6586,9 @@ workspace in sections: **Base branch**, read-only because sessions have already
 forked from it; **Source and clone**, the shared
 `components/workspace-repository.tsx` (link a local clone, the
 server-fetched source with its mirror status and deploy key, the checkout
-Origin) with its Advanced part open; **Environment**, below; and **Team**,
-the budget with **Set budget…** (`budget.set`) and who may message others'
+Origin) with its Advanced part open; **Environment**, below; and **Team**:
+**Access**, naming the owner, with **Access…** for the workspace's admin; the
+budget with **Set budget…** (`budget.set`) and who may message others'
 sessions with **Change…** (`workspace.settings`), and, where the server offers
 `workspace.child_limits`, the subsession limit ("8 subsessions busy at once per parent session"). The
 admin's **Change…** dialog edits it as **Busy at once**, saving with

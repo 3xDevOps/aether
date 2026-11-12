@@ -87,8 +87,9 @@ test('a member shares their agent account and a teammate launches on it', async 
     await page.getByRole('navigation', { name: 'Aether' })
       .getByRole('button', { name: 'Members', exact: true }).click()
     const sharing = page.getByRole('region', { name: 'Roster' })
-    await sharing.getByRole('button', { name: `Share your agent account with ${bobName}` }).click()
-    await expect(sharing.getByRole('button', { name: `Stop sharing your agent account with ${bobName}` })).toBeVisible()
+    const share = sharing.getByRole('switch', { name: `Share my account with ${bobName}` })
+    await share.click()
+    await expect(share).toBeChecked()
     const notice = sharing.getByRole('status')
     await expect(notice).toContainText(
       `Your Environment was started before you shared, so a Claude Code login written there will not reach ${bobName}'s sessions`,

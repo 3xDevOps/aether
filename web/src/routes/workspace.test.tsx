@@ -63,6 +63,16 @@ describe('repository page', () => {
     expect(scrolled).toHaveBeenCalled()
   })
 
+  it('names the owner under Team and opens Access from there for an admin', async () => {
+    seed({ workspaces: { [workspace.id]: { ...workspace, owner_member_id: bob.id, role: 'admin' } } })
+    const client = fakeApi({ workspaceAccessList: vi.fn(async () => ({ workspace_id: workspace.id, owner_member_id: bob.id, grants: [] })) })
+    render(<WorkspaceView params={{ workspaceId: workspace.id }} client={client} />)
+
+    expect(screen.getByText(/^Owner: Bob\. /)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Access…' }))
+    expect(await screen.findByRole('dialog', { name: `Access to ${workspace.name}` })).toBeDefined()
+  })
+
   it('keeps deletion in a danger zone for the workspace admin', async () => {
     seed({ info: { ...serverInfo, member: bob } })
     const { unmount } = render(<WorkspaceView params={{ workspaceId: workspace.id }} client={fakeApi()} />)

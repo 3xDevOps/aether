@@ -51,14 +51,14 @@ describe('members page', () => {
     })
     render(<MembersRoute params={{}} client={client} />)
 
-    await waitFor(() => expect(within(row('Bob')).getByText('Shares theirs with you')).toBeDefined())
+    await waitFor(() => expect(within(row('Bob')).getByText('Shares their account with you')).toBeDefined())
     expect(within(row('Bob')).getAllByText('Online')).toHaveLength(2)
     expect(within(row('Bob')).getByRole('combobox', { name: 'Role of Bob' }).textContent).toBe('Collaborator')
-    expect(within(row('Bob')).getByRole('button', { name: 'Share your agent account with Bob' }).textContent).toBe('Share my account')
+    expect(within(row('Bob')).getByRole('switch', { name: 'Share my account with Bob' }).getAttribute('aria-checked')).toBe('false')
     expect(within(row('Vera')).getAllByText(/ago/)).toHaveLength(2)
-    expect(within(row('Vera')).queryByText('Shares theirs with you')).toBeNull()
+    expect(within(row('Vera')).queryByText('Shares their account with you')).toBeNull()
     expect(within(row('Alice')).getByText('(you)')).toBeDefined()
-    expect(within(row('Alice')).queryByRole('button', { name: /agent account/ })).toBeNull()
+    expect(within(row('Alice')).queryByRole('switch')).toBeNull()
     expect(within(row('Alice')).queryByRole('button', { name: 'Remove Alice' })).toBeNull()
   })
 

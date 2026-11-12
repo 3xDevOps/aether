@@ -9,6 +9,7 @@ import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { useMediaQuery } from '@/lib/hooks'
@@ -147,22 +148,23 @@ export function Roster({ client }: { client: Api }) {
                 const account = !you && (
                   <span className="flex min-w-0 flex-col items-start gap-1">
                     {canShare && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        aria-label={sharing.shares(member.id) ? `Stop sharing your agent account with ${member.display_name}` : `Share your agent account with ${member.display_name}`}
-                        disabled={sharing.pending.has(member.id)}
-                        onClick={() => sharing.toggle(member)}
-                      >
-                        {sharing.shares(member.id) ? 'Stop sharing' : 'Share my account'}
-                      </Button>
+                      <span className="flex min-h-7 items-center gap-2 coarse:min-h-11">
+                        <Switch
+                          id={`share-${member.id}`}
+                          aria-label={`Share my account with ${member.display_name}`}
+                          checked={sharing.shares(member.id)}
+                          disabled={sharing.pending.has(member.id)}
+                          onCheckedChange={() => sharing.toggle(member)}
+                        />
+                        <label htmlFor={`share-${member.id}`} className="text-ui-sm text-text">Share my account</label>
+                      </span>
                     )}
-                    {sharing.sharesWithMe(member.id) && <span className="text-ui-sm text-muted">Shares theirs with you</span>}
+                    {sharing.sharesWithMe(member.id) && <span className="text-ui-sm text-muted">Shares their account with you</span>}
                   </span>
                 )
                 return (
                   <tr key={member.id} className="transition-colors hover:bg-hover motion-reduce:transition-none">
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 align-top">
                       <span className="flex min-w-0 items-center gap-2">
                         <Avatar name={member.display_name} color={member.color} size="header" />
                         <span className="flex min-w-0 flex-col">
@@ -175,7 +177,7 @@ export function Roster({ client }: { client: Api }) {
                       </span>
                       {!wide && account && <div className="pt-2">{account}</div>}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 align-top">
                       {canRole ? (
                         <Select value={member.role} onValueChange={(role) => changeRole(member, role as Member['role'])}>
                           <SelectTrigger aria-label={`Role of ${member.display_name}`} className="h-7 w-full">
@@ -189,10 +191,10 @@ export function Roster({ client }: { client: Api }) {
                         </Select>
                       ) : <span className="text-text">{roleLabel[member.role]}</span>}
                     </td>
-                    {wide && <td className="px-3 py-2">{account}</td>}
-                    <td className="hidden px-3 py-2 text-muted md:table-cell">{presence}</td>
+                    {wide && <td className="px-3 py-2 align-top">{account}</td>}
+                    <td className="hidden px-3 py-2 align-top text-muted md:table-cell">{presence}</td>
                     {canRemove && (
-                      <td className="px-1 py-1 text-right">
+                      <td className="px-1 py-1 text-right align-top">
                         {!you && (
                           <Button variant="ghost" size="icon" label={`Remove ${member.display_name}`} onClick={() => setRemoving(member)}>
                             <Trash2 />

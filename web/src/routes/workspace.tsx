@@ -14,11 +14,12 @@ import { api, type Api } from '@/lib/api'
 import { budgetStateLabel, money } from '@/lib/format'
 import type { BudgetReport } from '@/lib/types'
 import { BudgetDialog, WorkspaceSettingsDialog } from '@/routes/admin-dialogs'
+import { WorkspaceAccessDialog, WorkspaceOwnerDialog } from '@/routes/workspaces/access-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { ChildLimitsRow } from '@/routes/settings/children'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
-import { useCapability, useIsWorkspaceAdmin } from '@/store/hooks'
+import { useCapability, useIsSuperAdmin, useIsWorkspaceAdmin, useWorkspaceAccessServer } from '@/store/hooks'
 
 function budgetWords(report: BudgetReport | undefined): string {
   if (!report?.budget) return 'No budget set. A budget warns and reports; it never stops a session.'
@@ -34,7 +35,14 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
   const caps = useCapability()
   const isAdmin = useIsWorkspaceAdmin(workspaceID)
   const navigate = useStore((s) => s.navigate)
-  const [dialog, setDialog] = useState<'budget' | 'settings' | 'delete' | null>(null)
+  const scoped = useWorkspaceAccessServer()
+  const superAdmin = useIsSuperAdmin()
+  const selfID = useStore((s) => s.info?.member.id)
+  const ownerName = useStore((s) => {
+    const id = s.workspaces[workspaceID]?.owner_member_id
+    return !id ? '' : id === selfID ? 'you' : s.members[id]?.display_name ?? id
+  })
+  const [dialog, setDialog] = useState<'budget' | 'settings' | 'delete' | 'access' | 'owner' | null>(null)
   const [settingsClosed, setSettingsClosed] = useState(0)
 
   if (!workspace) {
@@ -81,6 +89,15 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
             />
           )}
           <SettingsSection title="Team" heading="h2">
+            {scoped && ownerName && (
+              <SettingRow
+                label="Access"
+                help={`Owner: ${ownerName}. The owner, super admins and the members granted access can use this workspace.`}
+                control={isAdmin && caps.hasMethod('workspace.access.list') && (
+                  <Button size="sm" variant="secondary" onClick={() => setDialog('access')}>Access…</Button>
+                )}
+              />
+            )}
             <SettingRow
               label="Budget"
               help={budgetWords(budget)}
@@ -121,6 +138,15 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
       </div>
       {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
       {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => { setDialog(null); setSettingsClosed((n) => n + 1) }} />}
+      {dialog === 'access' && (
+        <WorkspaceAccessDialog
+          workspaceID={workspaceID}
+          client={client}
+          onClose={() => setDialog(null)}
+          onChangeOwner={superAdmin && caps.hasMethod('workspace.owner.set') ? () => setDialog('owner') : undefined}
+        />
+      )}
+      {dialog === 'owner' && <WorkspaceOwnerDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
       {dialog === 'delete' && (
         <Confirm
           title={`Delete ${workspace.name}?`}

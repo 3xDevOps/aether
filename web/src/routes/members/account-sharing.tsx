@@ -1,5 +1,4 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -108,10 +107,7 @@ export function useAccountSharing(client: Api): AccountSharing {
         flip(saved.current.has(member.id))
         settle()
       },
-    }), {
-      onDone: () => toast.success(shared ? `${member.display_name} can no longer use your agent account` : `${member.display_name} can now use your agent account`),
-      key: member.id,
-    })
+    }), { key: member.id })
   }
 
   const notices = (
@@ -156,10 +152,10 @@ export function AccountSharingNote() {
   return (
     <div className="flex min-w-0 flex-col">
       <p className="text-ui-sm text-muted">
-        <span className="text-text">Share my account</span> lets a teammate launch sessions on your agent logins and quota; their sessions stay theirs.
+        <span className="text-text">Share my account</span> lets a teammate launch sessions on your agent logins and quota. The sessions they start stay theirs.
       </p>
       <Collapsible>
-        <CollapsibleTrigger><span className="text-muted">What sharing hands over</span></CollapsibleTrigger>
+        <CollapsibleTrigger><span className="text-muted">What a teammate can do with your account</span></CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-2 pt-1 pl-4">
           <p className="text-ui-sm text-muted">Their sessions can use, refresh, replace or log out your agent logins. Your environment, files and GitHub login are not shared, and running agents are not stopped when you stop sharing.</p>
           <p className="text-ui-sm text-muted">Except omp: an omp share hands over your whole omp agent directory, where their sessions can plant code your own omp conversations run with your home. Share omp only with someone you would give your home to.</p>

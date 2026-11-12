@@ -250,9 +250,9 @@ that loses that permission drops to read-only.
 ## Account sharing
 
 Sharing your agent account lets another member session tasks on your agent
-subscription. Share with **Share my account** on their row in **Members**, or
-with `aether account share <member-id>`; revoke with **Stop sharing** on the
-same row or `aether account revoke <member-id>`. The other member picks your account in
+subscription. Turn on **Share my account** on their row in **Members**, or
+run `aether account share <member-id>`; turn it off again, or run `aether
+account revoke <member-id>`, to revoke. The other member picks your account in
 the launch dialog's **Account** picker, or with `aether session --account
 <your-member-id>`. They stay the session's owner; usage and cost count against your
 account. Their agents can use it too: a subsession running the same agent as a

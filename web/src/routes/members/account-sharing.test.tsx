@@ -48,7 +48,7 @@ describe('agent account sharing on Members', () => {
       return <><Toaster />{shown && <MembersRoute params={{}} client={client} />}</>
     }
     render(<Host />)
-    const share = await within(await screen.findByRole('region', { name: 'Roster' })).findByRole('button', { name: 'Share your agent account with Bob' })
+    const share = await within(await screen.findByRole('region', { name: 'Roster' })).findByRole('switch', { name: 'Share my account with Bob' })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       fireEvent.click(share)
@@ -81,12 +81,12 @@ describe('agent account sharing on Members', () => {
     render(<MembersRoute params={{}} client={client} />)
     const sharing = within(await screen.findByRole('region', { name: 'Roster' }))
 
-    fireEvent.click(await sharing.findByRole('button', { name: 'Share your agent account with Bob' }))
-    expect(sharing.getByRole('button', { name: 'Stop sharing your agent account with Bob' })).toBeDefined()
-    expect(sharing.getByRole('button', { name: 'Stop sharing your agent account with Bob' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(await sharing.findByRole('switch', { name: 'Share my account with Bob' }))
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: true })).toBeDefined()
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: true }).hasAttribute('disabled')).toBe(true)
     await act(async () => share.answer.resolve({}))
-    fireEvent.click(sharing.getByRole('button', { name: 'Stop sharing your agent account with Bob' }))
-    expect(sharing.getByRole('button', { name: 'Share your agent account with Bob' })).toBeDefined()
+    fireEvent.click(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: true }))
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: false })).toBeDefined()
     expect(client.accountShare).toHaveBeenCalledWith(bob.id)
     expect(client.accountRevoke).toHaveBeenCalledWith(bob.id)
     expect(client.accountList).toHaveBeenCalledTimes(1)
@@ -102,10 +102,10 @@ describe('agent account sharing on Members', () => {
     render(<MembersRoute params={{}} client={client} />)
     const sharing = within(await screen.findByRole('region', { name: 'Roster' }))
 
-    fireEvent.click(await sharing.findByRole('button', { name: 'Share your agent account with Bob' }))
-    await sharing.findByRole('button', { name: 'Stop sharing your agent account with Bob' })
+    fireEvent.click(await sharing.findByRole('switch', { name: 'Share my account with Bob' }))
+    await sharing.findByRole('switch', { name: 'Share my account with Bob', checked: true })
     await act(async () => list.answer.resolve({ accounts: [alice], shared_with: [] }))
-    expect(sharing.getByRole('button', { name: 'Stop sharing your agent account with Bob' })).toBeDefined()
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: true })).toBeDefined()
   })
 
   it('shows a share the server answers after the deadline as shared', async () => {
@@ -117,7 +117,7 @@ describe('agent account sharing on Members', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
     const sharing = within(await screen.findByRole('region', { name: 'Roster' }))
-    const button = await sharing.findByRole('button', { name: 'Share your agent account with Bob' })
+    const button = await sharing.findByRole('switch', { name: 'Share my account with Bob' })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       fireEvent.click(button)
@@ -126,10 +126,10 @@ describe('agent account sharing on Members', () => {
     } finally {
       vi.useRealTimers()
     }
-    expect(sharing.getByRole('button', { name: 'Share your agent account with Bob' })).toBeDefined()
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: false })).toBeDefined()
 
     await act(async () => share.answer.resolve({}))
-    expect(sharing.getByRole('button', { name: 'Stop sharing your agent account with Bob' })).toBeDefined()
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: true })).toBeDefined()
     expect(sharing.queryByRole('alert')).toBeNull()
   })
 
@@ -142,20 +142,20 @@ describe('agent account sharing on Members', () => {
     seed()
     render(<MembersRoute params={{}} client={client} />)
     const sharing = within(await screen.findByRole('region', { name: 'Roster' }))
-    const button = await sharing.findByRole('button', { name: 'Share your agent account with Bob' })
+    const button = await sharing.findByRole('switch', { name: 'Share my account with Bob' })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       fireEvent.click(button)
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       await act(async () => {})
-      fireEvent.click(sharing.getByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(sharing.getByRole('switch', { name: 'Share my account with Bob' }))
       await act(async () => first.answer.resolve({}))
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       await act(async () => {})
     } finally {
       vi.useRealTimers()
     }
-    expect(sharing.getByRole('button', { name: 'Stop sharing your agent account with Bob' })).toBeDefined()
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: true })).toBeDefined()
   })
 
   it('takes a refused share back and shows the error', async () => {
@@ -167,10 +167,10 @@ describe('agent account sharing on Members', () => {
     render(<MembersRoute params={{}} client={client} />)
     const sharing = within(await screen.findByRole('region', { name: 'Roster' }))
 
-    fireEvent.click(await sharing.findByRole('button', { name: 'Share your agent account with Bob' }))
+    fireEvent.click(await sharing.findByRole('switch', { name: 'Share my account with Bob' }))
     expect((await sharing.findByRole('alert')).textContent).toBe('cannot share an account with a member pending admin approval')
-    expect(sharing.getByRole('button', { name: 'Share your agent account with Bob' })).toBeDefined()
-    expect(sharing.getByRole('button', { name: 'Share your agent account with Bob' }).hasAttribute('disabled')).toBe(false)
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob', checked: false })).toBeDefined()
+    expect(sharing.getByRole('switch', { name: 'Share my account with Bob' }).hasAttribute('disabled')).toBe(false)
   })
 
   it('keeps one teammate\'s refused share on screen while a share for another starts', async () => {
@@ -183,7 +183,7 @@ describe('agent account sharing on Members', () => {
     seed({ members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera } })
     render(<MembersRoute params={{}} client={client} />)
     const sharing = within(await screen.findByRole('region', { name: 'Roster' }))
-    const [shareBob, shareVera] = await sharing.findAllByRole('button', { name: /^Share your agent account with/ })
+    const [shareBob, shareVera] = await sharing.findAllByRole('switch', { name: /^Share my account with/ })
 
     fireEvent.click(shareBob)
     expect((await sharing.findByRole('alert')).textContent).toBe('Bob is pending admin approval')
@@ -212,7 +212,7 @@ describe('agent account sharing on Members', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
       const status = await screen.findByRole('status')
       expect(status.textContent).toContain(notice)
 
@@ -237,7 +237,7 @@ describe('agent account sharing on Members', () => {
       })
       render(<MembersRoute params={{}} client={client} />)
 
-      const [shareBob, shareVera] = await screen.findAllByRole('button', { name: /^Share your agent account with/ })
+      const [shareBob, shareVera] = await screen.findAllByRole('switch', { name: /^Share my account with/ })
       fireEvent.click(shareBob)
       fireEvent.click(shareVera)
       expect((await screen.findByRole('status')).textContent).toContain("will not reach Vera's sessions")
@@ -251,7 +251,7 @@ describe('agent account sharing on Members', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
       fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
       const dialog = within(await screen.findByRole('alertdialog'))
       fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
@@ -265,7 +265,7 @@ describe('agent account sharing on Members', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
       const status = await screen.findByRole('status')
       expect(status.textContent).toContain(
         "Your Environment could not be checked. If it is open, it was started before you shared, so a Claude Code login written there will not reach Bob's sessions until you stop it and open it again from Environment. Sessions you already have running keep the mounts they started with until they end.",
@@ -279,7 +279,7 @@ describe('agent account sharing on Members', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
       fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
       fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop environment' }))
 
@@ -297,7 +297,7 @@ describe('agent account sharing on Members', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
       fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
       fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop environment' }))
       await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
@@ -319,8 +319,8 @@ describe('agent account sharing on Members', () => {
       })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
-      await waitFor(() => expect(screen.getAllByRole('button', { name: /^Stop sharing your agent account with/ })).toHaveLength(2))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
+      await waitFor(() => expect(screen.getAllByRole('switch', { name: /^Share my account with/, checked: true })).toHaveLength(2))
       expect(client.terminalStatus).not.toHaveBeenCalled()
       expect(screen.queryByRole('status')).toBeNull()
     })
@@ -336,12 +336,12 @@ describe('agent account sharing on Members', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
       await screen.findByRole('status')
-      fireEvent.click(await screen.findByRole('button', { name: 'Stop sharing your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob', checked: true }))
 
       await waitFor(() => expect(client.accountRevoke).toHaveBeenCalledWith(bob.id))
-      await screen.findByRole('button', { name: 'Share your agent account with Bob' })
+      await screen.findByRole('switch', { name: 'Share my account with Bob' })
       expect(screen.queryByRole('status')).toBeNull()
     })
 
@@ -350,9 +350,9 @@ describe('agent account sharing on Members', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
       render(<MembersRoute params={{}} client={client} />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Share your agent account with Bob' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Share my account with Bob' }))
       await waitFor(() => expect(client.terminalStatus).toHaveBeenCalled())
-      await screen.findByRole('button', { name: 'Stop sharing your agent account with Bob' })
+      await screen.findByRole('switch', { name: 'Share my account with Bob', checked: true })
       expect(screen.queryByRole('status')).toBeNull()
       expect(screen.queryByRole('button', { name: 'Stop environment' })).toBeNull()
     })

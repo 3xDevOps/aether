@@ -66,7 +66,7 @@ function ownerChoice(member: Member, selfID: string | undefined, current: string
 }
 
 function grantedRole(member: Member) {
-  return member.role === 'admin' ? 'Admin · collaborator here' : roleLabel[member.role]
+  return member.role === 'admin' ? 'Admin · joins as a collaborator' : roleLabel[member.role]
 }
 
 function MemberLine({ member, id, detail, selfID }: { member?: Member; id: string; detail: string; selfID: string | undefined }) {
@@ -108,13 +108,11 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
     void load()
   }, [load])
 
-  const where = workspace?.name ?? 'the workspace'
   const turn = async (member: Member, on: boolean) => {
     setBusy((ids) => new Set(ids).add(member.id))
     setError(null)
     try {
       await (on ? client.workspaceAccessGrant(workspaceID, [member.id]) : client.workspaceAccessRevoke(workspaceID, member.id))
-      toast.success(on ? `${member.display_name} now reaches ${where}` : `${member.display_name} no longer reaches ${where}`)
       await Promise.all([load(), refreshWorkspaces(client)])
     } catch (err) {
       setError(message(err))
@@ -125,11 +123,11 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
 
   const owner = access ? byID.get(access.owner_member_id) : undefined
   const granted = new Set(access?.grants.map((g) => g.member_id))
-  const superAdmins = members.filter((m) => m.role === 'super_admin' && m.id !== access?.owner_member_id)
-  const people = members.filter((m) => m.role !== 'super_admin' && m.id !== access?.owner_member_id)
+  const people = members.filter((m) => m.id !== access?.owner_member_id)
+  const grantable = people.filter((m) => m.role !== 'super_admin')
   const needle = query.trim().toLowerCase()
   const shown = people.filter((m) => m.display_name.toLowerCase().includes(needle))
-  const reaching = people.filter((m) => granted.has(m.id)).length
+  const reaching = grantable.filter((m) => granted.has(m.id)).length
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -137,7 +135,7 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
         <DialogHeader>
           <DialogTitle>Access to {workspace?.name ?? 'this workspace'}</DialogTitle>
           <DialogDescription>
-            Tick each member who may use this workspace. Each change is saved at once. A granted admin works here as a collaborator.
+            Tick each member who may use this workspace. Each change is saved at once.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-3">
@@ -167,25 +165,31 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </div>
-              <div className="flex items-baseline justify-between gap-3 text-ui-sm text-muted">
-                <span>{people.length === 0 ? 'No other members yet' : `${reaching} of ${people.length} ${people.length === 1 ? 'member has' : 'members have'} access`}</span>
-              </div>
+              <p className="text-ui-sm text-muted">
+                {grantable.length === 0
+                  ? 'No other members to grant yet. The owner and super admins always have access.'
+                  : `Granted to ${reaching} of ${grantable.length} ${grantable.length === 1 ? 'member' : 'members'}. The owner and super admins always have access.`}
+              </p>
               {shown.length > 0 && (
                 <InsetList aria-label="Members" className="max-h-80 overflow-y-auto">
                   {shown.map((member) => {
                     const id = `access-${member.id}`
+                    const everywhere = member.role === 'super_admin'
                     // An admin grants and revokes only members below admin; the server holds the same rule.
-                    const locked = !superAdmin && isAdminRole(member.role)
+                    const locked = everywhere || (!superAdmin && isAdminRole(member.role))
+                    const detail = everywhere
+                      ? 'Super admin · reaches every workspace'
+                      : locked ? `${roleLabel[member.role]} · only a super admin changes an admin's access` : grantedRole(member)
                     return (
                       <InsetListItem key={member.id}>
                         <Checkbox
                           id={id}
-                          checked={granted.has(member.id)}
+                          checked={everywhere || granted.has(member.id)}
                           disabled={locked || busy.has(member.id)}
                           onCheckedChange={(on) => void turn(member, on === true)}
                         />
                         <label htmlFor={id} className={cn('flex min-w-0 flex-1 items-center gap-3', locked ? 'cursor-not-allowed' : 'cursor-pointer')}>
-                          <MemberLine member={member} id={member.id} detail={locked ? `${roleLabel[member.role]} · only a super admin changes an admin's access` : grantedRole(member)} selfID={selfID} />
+                          <MemberLine member={member} id={member.id} detail={detail} selfID={selfID} />
                         </label>
                       </InsetListItem>
                     )
@@ -194,7 +198,6 @@ export function WorkspaceAccessDialog({ workspaceID, client, onClose, onChangeOw
               )}
               {people.length > 0 && shown.length === 0 && <p className="text-ui-sm text-muted">No member matches &ldquo;{query.trim()}&rdquo;.</p>}
               <p className="text-ui-sm text-muted">
-                {superAdmins.length > 0 && `Super admins reach every workspace: ${superAdmins.map((m) => m.display_name).join(', ')}. `}
                 {superAdmin ? 'Invite someone new from Members.' : 'Invite someone new from Members, or ask a super admin to add a member you do not see here.'}
               </p>
             </>

@@ -16,8 +16,9 @@ reach for most on the surface, beside what they act on: a row's main actions
 are visible buttons on that row, and a value someone changes in place, such as
 a member's role, is a select in the cell that shows it. Pick a list of
 checkboxes with a search field over adding items one at a time from a
-dropdown. Keep the overflow menu (`Ellipsis`) for rare or destructive actions,
-and never make it, or a hover-only control, the only way to a common one. A
+dropdown. Keep the overflow menu (`Ellipsis`) for rare actions, and never make
+it, or a hover-only control, the only way to a common one. A destructive action
+may sit on its row as a ghost icon button behind a confirm. A
 page someone needs often gets its own sidebar row, not a menu item two levels
 down. When a surface gets crowded, regroup it rather than folding actions
 into menus.

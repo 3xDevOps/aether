@@ -65,16 +65,17 @@ describe('workspace access', () => {
     expect(dialog.queryByRole('button', { name: 'Change owner…' })).toBeNull()
   })
 
-  it('ticks who has access, leaves super admins out of the list, and grants with one click', async () => {
+  it('ticks who has access, locks super admins in as reaching every workspace, and grants with one click', async () => {
     seed(admin, { owned: true })
     const api = client()
     render(<WorkspacesRoute params={{}} client={api} />)
     const dialog = await openAccess('main-repo')
     await waitFor(() => expect(box(dialog, 'Bob').getAttribute('aria-checked')).toBe('true'))
     expect(box(dialog, 'Vera').getAttribute('aria-checked')).toBe('false')
-    expect(dialog.queryByRole('checkbox', { name: /^Root/ })).toBeNull()
-    expect(dialog.getByText(/Super admins reach every workspace: Root\./)).toBeTruthy()
-    expect(dialog.getByText('1 of 2 members have access')).toBeTruthy()
+    expect(box(dialog, 'Root').getAttribute('aria-checked')).toBe('true')
+    expect((box(dialog, 'Root') as HTMLButtonElement).disabled).toBe(true)
+    expect(dialog.getByText('Super admin · reaches every workspace')).toBeTruthy()
+    expect(dialog.getByText('Granted to 1 of 2 members. The owner and super admins always have access.')).toBeTruthy()
     fireEvent.click(box(dialog, 'Vera'))
     await waitFor(() => expect(api.workspaceAccessGrant).toHaveBeenCalledWith(workspace.id, [vera.id]))
     await waitFor(() => expect(api.workspaceListFull).toHaveBeenCalled())
@@ -162,7 +163,7 @@ describe('workspace access', () => {
     expect(await screen.findByText(/Owner: you/)).toBeTruthy()
     expect(screen.getByText(/Owner: Root/)).toBeTruthy()
     const dialog = await openAccess('main-repo')
-    expect(await dialog.findByText('0 of 2 members have access')).toBeTruthy()
+    expect(await dialog.findByText('Granted to 0 of 2 members. The owner and super admins always have access.')).toBeTruthy()
   })
 
   it('drops a workspace list that arrives after the identity changed', async () => {
@@ -197,7 +198,7 @@ describe('workspace access', () => {
     useStore.setState({ identityKey: 'bob' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     release({ workspace_id: workspace.id, owner_member_id: alice.id, grants: [] })
-    expect(screen.queryByText(/members have access/)).toBeNull()
+    expect(screen.queryByText(/^Granted to/)).toBeNull()
   })
 
   it('closes the owner dialog when the signed-in member changes', async () => {

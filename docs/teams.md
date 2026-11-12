@@ -599,7 +599,7 @@ add <name>`, then `aether terminal`). That home is mounted into every session th
 launch. A member's **agent account** is that vendor login and the subscription
 behind it. One member can let a collaborator launch sessions on theirs.
 
-The owner shares with **Share my account** on the recipient's row in **Members**. The
+The owner turns on **Share my account** on the recipient's row in **Members**. The
 recipient picks the owner under **New session → Account**, below the agent.
 Each row there is marked **You** or **Shared** and says what a launch of the
 chosen agent on that account meets:

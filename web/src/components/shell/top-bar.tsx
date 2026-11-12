@@ -187,6 +187,9 @@ function HeaderNavigation() {
   )
 }
 
+// Pages that span every workspace name none.
+const serverWide = new Set(['members', 'devices', 'workspaces', 'settings'])
+
 function PhoneToolbar() {
   const cap = useCapability()
   const route = useStore((s) => s.route)
@@ -200,7 +203,7 @@ function PhoneToolbar() {
       <div className="flex h-[calc(var(--top-bar-height)-1px)] items-center gap-1 pr-1 pl-3">
         <p className="flex min-w-0 flex-1 items-baseline gap-2 text-ui">
           <span className="truncate font-medium text-text">{title}</span>
-          {activeWorkspace && activeWorkspace !== title && <span className="truncate text-ui-sm text-muted">{activeWorkspace}</span>}
+          {activeWorkspace && activeWorkspace !== title && !serverWide.has(route.name) && <span className="truncate text-ui-sm text-muted">{activeWorkspace}</span>}
         </p>
         {route.name === 'sessions' && <SessionsViewSwitch />}
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
