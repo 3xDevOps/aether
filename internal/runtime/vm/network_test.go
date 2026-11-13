@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -55,10 +57,16 @@ func TestEnsureNATIsolatesVMs(t *testing.T) {
 	var calls []string
 	e.run = func(_ context.Context, name string, args ...string) error {
 		call := strings.Join(append([]string{name}, args...), " ")
+		if name == "iptables-restore" {
+			rules, err := os.ReadFile(args[len(args)-1])
+			if err != nil {
+				return err
+			}
+			call += "\n" + string(rules)
+		}
 		calls = append(calls, call)
-		switch {
-		case strings.Contains(call, "-F AETHER-VM"), strings.Contains(call, "-C FORWARD"):
-			return errors.New("no such chain or rule")
+		if strings.Contains(call, "-C FORWARD") {
+			return errors.New("no such rule")
 		}
 		return nil
 	}
@@ -69,23 +77,24 @@ func TestEnsureNATIsolatesVMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"sysctl -q -w net.ipv4.ip_forward=1", "iptables -t filter -F AETHER-VM", "iptables -t filter -N AETHER-VM"}
+	restore := "iptables-restore --noflush " + filepath.Join(e.root, firewallFile) + "\n*filter\n:AETHER-VM - [0:0]\n"
 	for _, uplink := range uplinks {
-		want = append(want, "iptables -t filter -A AETHER-VM -i aethervm+ -o "+uplink+" -j ACCEPT")
+		restore += "-A AETHER-VM -i aethervm+ -o " + uplink + " -j ACCEPT\n"
 	}
 	for _, dns := range hostDNS() {
-		want = append(want,
-			"iptables -t filter -A AETHER-VM -i aethervm+ -d "+dns.String()+" -p udp --dport 53 -j ACCEPT",
-			"iptables -t filter -A AETHER-VM -i aethervm+ -d "+dns.String()+" -p tcp --dport 53 -j ACCEPT")
+		restore += "-A AETHER-VM -i aethervm+ -d " + dns.String() + " -p udp --dport 53 -j ACCEPT\n"
+		restore += "-A AETHER-VM -i aethervm+ -d " + dns.String() + " -p tcp --dport 53 -j ACCEPT\n"
 	}
-	want = append(want,
-		"iptables -t filter -A AETHER-VM -i aethervm+ -j DROP",
-		"iptables -t filter -A AETHER-VM -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-		"iptables -t filter -A AETHER-VM -o aethervm+ -j DROP",
+	restore += "-A AETHER-VM -i aethervm+ -j DROP\n" +
+		"-A AETHER-VM -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n" +
+		"-A AETHER-VM -o aethervm+ -j DROP\nCOMMIT\n"
+	want := []string{
+		"sysctl -q -w net.ipv4.ip_forward=1",
+		restore,
 		"iptables -t filter -C FORWARD -j AETHER-VM",
 		"iptables -t filter -I FORWARD -j AETHER-VM",
 		"iptables -t nat -C POSTROUTING -s 10.200.0.0/16 ! -d 10.200.0.0/16 -j MASQUERADE",
-	)
+	}
 	if !slices.Equal(calls, want) {
 		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))
 	}

@@ -206,29 +206,8 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 	if err != nil {
 		return 0, false
 	}
-	waitCtx, cancel := context.WithCancel(ctx)
+	waitCtx, cancel, rebooted := e.whileUp(ctx, key)
 	defer cancel()
-	var rebooted atomic.Bool
-	go func() {
-		tick := time.NewTicker(time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-waitCtx.Done():
-				return
-			case <-tick.C:
-				if e.rebooted(key) {
-					rebooted.Store(true)
-					cancel()
-					return
-				}
-				if up, upErr := e.running(waitCtx, key); upErr == nil && !up {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
 	code, err := h.Process(guest.MainID).Wait(waitCtx)
 	if err != nil && !rebooted.Load() {
 		return 0, false
@@ -251,6 +230,36 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 		return 0, false
 	}
 	return code, true
+}
+
+// whileUp is ctx ending as soon as the VM's unit stops or Cloud Hypervisor
+// reports that the guest rebooted, for calls into the guest: the helper's
+// client retries a VM that died until its context ends. The flag tells a
+// reboot apart.
+func (e *engine) whileUp(ctx context.Context, key string) (context.Context, context.CancelFunc, *atomic.Bool) {
+	upCtx, cancel := context.WithCancel(ctx)
+	rebooted := &atomic.Bool{}
+	go func() {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-upCtx.Done():
+				return
+			case <-tick.C:
+				if e.rebooted(key) {
+					rebooted.Store(true)
+					cancel()
+					return
+				}
+				if up, upErr := e.running(upCtx, key); upErr == nil && !up {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return upCtx, cancel, rebooted
 }
 
 // rebooted reads Cloud Hypervisor's event log for a guest reset.

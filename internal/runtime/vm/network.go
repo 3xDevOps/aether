@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -86,8 +87,12 @@ func (e *engine) releaseNet(index int) {
 	e.netMu.Unlock()
 }
 
-// vmChain holds the VMs' forwarding rules, rebuilt whole once per process.
-const vmChain = "AETHER-VM"
+// vmChain holds the VMs' forwarding rules, rebuilt whole once per process
+// from firewallFile beside the VMs.
+const (
+	vmChain      = "AETHER-VM"
+	firewallFile = "firewall.rules"
+)
 
 // ensureNAT lets VMs out only through the host's default-route interfaces,
 // so they reach the internet but not each other or any bridge of Docker's,
@@ -103,11 +108,6 @@ func (e *engine) ensureNAT(ctx context.Context) error {
 	}
 	if err := e.run(ctx, "sysctl", "-q", "-w", "net.ipv4.ip_forward=1"); err != nil {
 		return err
-	}
-	if e.run(ctx, "iptables", "-t", "filter", "-F", vmChain) != nil {
-		if err := e.run(ctx, "iptables", "-t", "filter", "-N", vmChain); err != nil {
-			return err
-		}
 	}
 	taps := tapPrefix + "+"
 	uplinks, err := defaultRoutes()
@@ -128,10 +128,22 @@ func (e *engine) ensureNAT(ctx context.Context) error {
 		[]string{"-o", taps, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
 		[]string{"-o", taps, "-j", "DROP"},
 	)
+	// iptables-restore swaps the chain's rules in one commit, so VMs that
+	// already run are never left without them.
+	restore := "*filter\n:" + vmChain + " - [0:0]\n"
 	for _, rule := range rules {
-		if err := e.run(ctx, "iptables", append([]string{"-t", "filter", "-A", vmChain}, rule...)...); err != nil {
-			return err
-		}
+		restore += "-A " + vmChain + " " + strings.Join(rule, " ") + "\n"
+	}
+	restore += "COMMIT\n"
+	if err := os.MkdirAll(e.root, 0o700); err != nil {
+		return fmt.Errorf("vm runtime: %w", err)
+	}
+	path := filepath.Join(e.root, firewallFile)
+	if err := writeFileAtomic(path, []byte(restore)); err != nil {
+		return err
+	}
+	if err := e.run(ctx, "iptables-restore", "--noflush", path); err != nil {
+		return err
 	}
 	subnet := vmSubnet.String()
 	for _, rule := range [][]string{

@@ -297,6 +297,8 @@ type fakeHelper struct {
 	ignoreTE bool
 	clock    time.Time
 	clockErr error
+	// bootHangs makes Boot wait for its context, as a dead guest does.
+	bootHangs bool
 	// unresponsive makes calls fail as a guest that stopped answering does.
 	unresponsive bool
 	stats        guest.Stats
@@ -312,7 +314,11 @@ func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
 	return guest.Info{BootID: "b1", Protocol: 1}, nil
 }
 
-func (g *fakeHelper) Boot(_ context.Context, spec guest.BootSpec) error {
+func (g *fakeHelper) Boot(ctx context.Context, spec guest.BootSpec) error {
+	if g.bootHangs {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.boots = append(g.boots, spec)

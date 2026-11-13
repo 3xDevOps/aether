@@ -254,3 +254,23 @@ func TestRestoreKeepsTheGuestWhenTheResumeReplyIsLost(t *testing.T) {
 		t.Error("a restore whose resume reply was lost killed the only copy of the guest")
 	}
 }
+
+func TestStartEndsWhenTheVMDiesDuringSetup(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.engine.create(t.Context(), sessionSpec("run-a")); err != nil {
+		t.Fatal(err)
+	}
+	h.guest("run-a").bootHangs = true
+	done := make(chan error, 1)
+	go func() { done <- h.engine.start(context.Background(), "run-a") }()
+	time.Sleep(200 * time.Millisecond)
+	_ = h.units.Stop(t.Context(), unitName("run-a"))
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "stopped while booting") {
+			t.Errorf("start after the VM died during setup = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("start kept waiting on a VM that died during setup")
+	}
+}

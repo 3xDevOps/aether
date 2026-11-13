@@ -373,15 +373,23 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	if err = e.waitHelper(ctx, rec.Key, h); err != nil {
 		return err
 	}
+	upCtx, stop, _ := e.whileUp(ctx, rec.Key)
+	defer stop()
+	stopped := func(err error) error {
+		if upCtx.Err() != nil && ctx.Err() == nil {
+			return fmt.Errorf("vm runtime: VM %s stopped while booting%s", rec.Key, e.logTail(rec.Key))
+		}
+		return err
+	}
 	if runtime.Unprivileged(rec.User) {
 		allow := ""
 		if rec.Sudo {
 			allow = "sudo"
 		}
 		home := cmp.Or(runtime.EnvValue(rec.Env, "HOME"), "/")
-		code, out, prepErr := e.runAsRoot(ctx, h, rec, []string{"/bin/sh", "-c", runtime.UserScript, "aether-user", rec.User, home, allow})
+		code, out, prepErr := e.runAsRoot(upCtx, h, rec, []string{"/bin/sh", "-c", runtime.UserScript, "aether-user", rec.User, home, allow})
 		if prepErr != nil {
-			return fmt.Errorf("vm runtime: prepare user %s: %w", rec.User, prepErr)
+			return stopped(fmt.Errorf("vm runtime: prepare user %s: %w", rec.User, prepErr))
 		}
 		if code != 0 {
 			return fmt.Errorf("vm runtime: prepare user %s exited %d: %s", rec.User, code, strings.TrimSpace(out))
@@ -392,7 +400,7 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 		tty = &guest.Size{Cols: 80, Rows: 24}
 	}
 	e.setFlag(e.booting, rec.Key, true)
-	err = h.Boot(ctx, guest.BootSpec{
+	err = h.Boot(upCtx, guest.BootSpec{
 		Main: guest.ProcessSpec{
 			ID: guest.MainID, Argv: rec.Command, Env: rec.Env, User: rec.User, Dir: rec.WorkingDir, TTY: tty,
 			NoNewPrivileges: !rec.Sudo,
@@ -405,7 +413,7 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 		return &runtime.SetupError{ExitCode: setup.ExitCode, Output: runtime.SetupOutput(setup.Output, setup.Cut, runtime.SecretValues(rec.SecretEnv, rec.Env))}
 	}
 	if err != nil {
-		return fmt.Errorf("vm runtime: boot VM %s: %w", rec.Key, err)
+		return stopped(fmt.Errorf("vm runtime: boot VM %s: %w", rec.Key, err))
 	}
 	return nil
 }
