@@ -355,8 +355,9 @@ func (s *Scheduler) startOrCreateTerminal(ctx context.Context, kept runtime.ID, 
 			if startErr == nil {
 				return kept, info.Image, nil
 			}
-			if ctx.Err() != nil {
-				// A cancelled open says nothing about the container.
+			if ctx.Err() != nil || errors.Is(startErr, runtime.ErrStartLater) {
+				// A cancelled open, or a host that could not start it now,
+				// says nothing about the container.
 				return "", "", fmt.Errorf("scheduler: start kept terminal: %w", startErr)
 			}
 			slog.Warn("scheduler: kept terminal did not start; recreating it from the saved image", "container", kept, "error", startErr)

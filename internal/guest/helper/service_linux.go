@@ -29,6 +29,7 @@ type service struct {
 	bootError string
 	powerOff  func() error
 	setClock  func(time.Time) error
+	freezer   *freezer
 
 	bootOnce  sync.Once
 	bootDone  chan struct{}
@@ -202,6 +203,10 @@ func (s *service) Sync(context.Context, *guestpb.SyncRequest) (*guestpb.SyncRepl
 func (s *service) PowerOff(context.Context, *guestpb.PowerOffRequest) (*guestpb.PowerOffReply, error) {
 	if s.powerOff == nil {
 		return nil, status.Error(codes.FailedPrecondition, "the helper is not PID 1")
+	}
+	// sync waits on a frozen filesystem.
+	if s.freezer != nil {
+		_ = s.freezer.thawAny()
 	}
 	syscall.Sync()
 	go func() {

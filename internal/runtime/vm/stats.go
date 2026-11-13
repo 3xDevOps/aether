@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -112,7 +113,7 @@ func (e *engine) sample(ctx context.Context, key string) (*runtime.ContainerStat
 		cores = float64(rec.CPUs)
 	}
 	return &runtime.ContainerStat{
-		ID: idPrefix + key, CreationKey: key, Read: time.Now(),
+		ID: idPrefix + key, CreationKey: cmp.Or(rec.CreationKey, key), Read: time.Now(),
 		CPUUsageNanos: g.CPUUsageNanos, CPULimitCores: cores,
 		MemoryBytes: g.MemoryBytes, MemoryLimitBytes: g.MemoryLimitBytes, Pids: g.Pids, PidsLimit: g.PidsLimit,
 		NetRxBytes: counters["net0"]["rx_bytes"], NetTxBytes: counters["net0"]["tx_bytes"],

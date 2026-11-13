@@ -24,6 +24,16 @@ type ID string
 // FindByCreationKey when no container carries the key.
 var ErrNotFound = errors.New("runtime: container not found")
 
+// ErrUnstartableImage reports a container that cannot start because of its
+// image, not its settings: an older image may still start.
+var ErrUnstartableImage = errors.New("runtime: the image cannot start a container")
+
+// ErrStartLater reports a kept container that failed to start for a reason
+// of the host's, not its own, such as a VM monitor that could not run: a
+// later start may succeed, so a caller keeps the container, and what only it
+// holds, rather than replace it.
+var ErrStartLater = errors.New("runtime: the host could not start the container now")
+
 // FilesystemCapacity is available capacity at a verified runtime storage root.
 // Name describes its role, not a private host path. Roots may share a filesystem.
 type FilesystemCapacity struct {

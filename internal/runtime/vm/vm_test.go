@@ -76,3 +76,28 @@ func TestEveryContainerMethodIsRouted(t *testing.T) {
 		t.Error("Runtime must also route FindByCreationKey, ContainerStats and Capacity")
 	}
 }
+
+func TestMemberKindMatchesOnlyTheseMembersTerminals(t *testing.T) {
+	members := []string{"mem-a", "01m2w6cky0mwwgxmr2sdgev2gs"}
+	for key, want := range map[string]bool{
+		"terminal:mem-a":                      true,
+		"terminal:01m2w6cky0mwwgxmr2sdgev2gs": true,
+		"terminal:mem-b":                      false,
+		"terminal:mem-a-x":                    false,
+		"mem-a":                               false,
+		"run-mem-a":                           false,
+		"assistant:mem-a":                     false,
+	} {
+		if got := memberKind(key, members); got != want {
+			t.Errorf("memberKind(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
+func TestDestroyLeavesAStoppedDockerTerminal(t *testing.T) {
+	r := &Runtime{}
+	r.stopped.Store(runtime.ID("0123abcd"), true)
+	if err := r.Destroy(t.Context(), "0123abcd"); err != nil {
+		t.Fatalf("Destroy of a Docker terminal the server stopped = %v; it must leave it for a server switched back to docker", err)
+	}
+}

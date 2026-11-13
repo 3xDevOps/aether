@@ -319,9 +319,9 @@ thresholds and what to do.
 `--session-runtime` (config key `session-runtime`) defaults to `docker`. With
 `vm`, each new session runs in its own [Cloud
 Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) virtual
-machine instead of a container. Environment terminals, the assistant, the
-agent updater, the development browser and **Save environment** stay on
-Docker.
+machine instead of a container, and so does each member's environment
+terminal. The assistant, the agent updater and the development browser stay
+on Docker.
 This is work in progress; [the plan](plans/2026-11-13-microvm-sessions.md)
 lists what is still to come.
 
@@ -385,6 +385,28 @@ What changes:
   behind ufw. While the table is gone, the `FORWARD` policy drops all
   traffic VMs send through the host, and what they send to the host itself
   is unfiltered. A change of default route applies when the next VM boots.
+- The environment terminal runs in `aether-vm-terminal-<member id>.service`
+  and keeps its root disk across a stop and start, as its container did.
+  When the server starts with `vm`, it stops a member's terminal container
+  still running in Docker and leaves it there, so its unsaved changes come
+  back if you set `session-runtime` back to `docker`; the next open creates
+  the VM from the saved image. Save first to keep unsaved changes in the VM.
+  A terminal VM the host cannot start, as when its VM monitor fails, keeps
+  its disk for the next open; one whose root disk no longer mounts is
+  replaced, as a container that fails to start is.
+- **Save environment** freezes the terminal's root filesystem while it
+  copies the disk's changes, well under a second on a host whose filesystem
+  can share blocks (XFS, Btrfs), then builds a new base disk from the copy
+  while the terminal goes on. Writes to `/` wait meanwhile; the home and
+  `/tmp` stay writable. A copy that takes longer than 5 minutes fails the
+  save, and the terminal thaws by itself then even if the server died. The
+  check boots the new image in a VM with no network, which systemd stops
+  after 10 minutes at most, and runs a shell in it as your terminal's user;
+  an image it cannot boot fails the save with `would not start` and the boot
+  error. Saved images live in `<data dir>/vm/images`, not in Docker; one
+  saved in Docker before still works and is copied over at its first use. A
+  session whose saved image no longer boots starts from the previous one, as
+  in [When a saved image cannot start](#when-a-saved-image-cannot-start).
 - Not yet supported, refused at launch with an error naming the work item:
   the development browser beside a session.
 - Close or kill every session that runs in a VM before you set

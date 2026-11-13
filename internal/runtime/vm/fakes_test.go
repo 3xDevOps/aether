@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -80,6 +82,16 @@ type fakeImages struct {
 	mu        sync.Mutex
 	rootDisks int
 	promoted  chan string
+	tags      map[string]vmimage.Base
+	saves     []fakeSave
+	saveErr   error
+}
+
+type fakeSave struct {
+	disk, ref string
+	labels    map[string]string
+	// copied is what the disk held when SaveBase read it.
+	copied string
 }
 
 func (f *fakeImages) Kernel() (string, error) { return "/k/vmlinux", nil }
@@ -95,6 +107,68 @@ func (f *fakeImages) BaseDisk(_ context.Context, ref string) (vmimage.Base, erro
 	return vmimage.Base{ID: "sha256:b", Path: "/images/b.raw", Config: vmimage.ImageConfig{
 		Env: []string{"PATH=/usr/bin:/bin", "HOME=/image-home"}, WorkingDir: "/srv",
 	}}, nil
+}
+
+func (f *fakeImages) LookupBase(ref string) (vmimage.Base, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if b, ok := f.tags[ref]; ok {
+		return b, nil
+	}
+	return vmimage.Base{}, fmt.Errorf("image %s: %w", ref, runtime.ErrNotFound)
+}
+
+func (f *fakeImages) SaveBase(_ context.Context, disk, ref string, labels map[string]string) (vmimage.Base, error) {
+	data, err := os.ReadFile(disk)
+	if err != nil {
+		return vmimage.Base{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.saves = append(f.saves, fakeSave{disk: disk, ref: ref, labels: labels, copied: string(data)})
+	if f.saveErr != nil {
+		return vmimage.Base{}, f.saveErr
+	}
+	b := vmimage.Base{ID: "local:1", Path: "/images/saved.raw", Config: vmimage.ImageConfig{Labels: labels}}
+	f.tagLocked(ref, b)
+	return b, nil
+}
+
+func (f *fakeImages) tagLocked(ref string, b vmimage.Base) {
+	if f.tags == nil {
+		f.tags = map[string]vmimage.Base{}
+	}
+	f.tags[ref] = b
+}
+
+func (f *fakeImages) Tag(source, target string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.tags[source]
+	if !ok {
+		return runtime.ErrNotFound
+	}
+	f.tagLocked(target, b)
+	return nil
+}
+
+func (f *fakeImages) Untag(ref string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.tags, ref)
+	return nil
+}
+
+func (f *fakeImages) Tags(repo string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for ref := range f.tags {
+		if strings.HasPrefix(ref, repo+":") {
+			out = append(out, ref)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeImages) NewRootDisk(_ context.Context, _ vmimage.Base, path string) (vmimage.Disk, error) {
@@ -323,14 +397,24 @@ type fakeHelper struct {
 	stats        guest.Stats
 	// finals are dev-exec's own exit records, which outlive the helper's.
 	finals map[string]int
+	// freezes records Freeze and Thaw calls in order.
+	freezes   []string
+	freezeErr error
+	thawed    bool
+	bootError string
 }
 
 func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
-	if g.pingErr != nil {
+	g.mu.Lock()
+	pingErr := g.pingErr
+	g.mu.Unlock()
+	if pingErr != nil {
 		<-ctx.Done()
-		return guest.Info{}, g.pingErr
+		return guest.Info{}, pingErr
 	}
-	return guest.Info{BootID: "b1", Protocol: 1}, nil
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return guest.Info{BootID: "b1", Protocol: 1, BootError: g.bootError}, nil
 }
 
 func (g *fakeHelper) Boot(ctx context.Context, spec guest.BootSpec) error {
@@ -345,7 +429,12 @@ func (g *fakeHelper) Boot(ctx context.Context, spec guest.BootSpec) error {
 		return g.bootErr
 	}
 	if main := g.procs[guest.MainID]; main == nil || main.exited() {
-		g.procs[guest.MainID] = newFakeProc(spec.Main, "", 0, g.ignoreTE)
+		main = newFakeProc(spec.Main, "", 0, g.ignoreTE)
+		g.procs[guest.MainID] = main
+		if code, ok := strings.CutPrefix(strings.Join(spec.Main.Argv, " "), "/bin/sh -c exit "); ok {
+			n, _ := strconv.Atoi(code)
+			main.exit(n)
+		}
 	}
 	return nil
 }
@@ -442,6 +531,28 @@ func (g *fakeHelper) Sync(context.Context) error {
 }
 
 func (g *fakeHelper) Close() error { return nil }
+
+func (g *fakeHelper) Freeze(_ context.Context, _ string, timeout time.Duration) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.freezes = append(g.freezes, "freeze "+timeout.String())
+	return g.freezeErr
+}
+
+// Thaw reports the freeze held, unless thawed set its deadline as passed.
+func (g *fakeHelper) Thaw(context.Context, string) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.freezes = append(g.freezes, "thaw")
+	frozen := !g.thawed && len(g.freezes) > 1 && strings.HasPrefix(g.freezes[len(g.freezes)-2], "freeze")
+	return frozen, nil
+}
+
+func (g *fakeHelper) frozen() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.freezes...)
+}
 
 type fakeProc struct {
 	unresponsive bool

@@ -18,7 +18,7 @@ import (
 
 func (h *harness) createStarted(key string, spec runtime.Spec) runtime.ID {
 	h.t.Helper()
-	id, err := h.engine.create(h.t.Context(), spec)
+	id, err := h.engine.create(h.t.Context(), spec.CreationKey, spec, options{})
 	if err != nil {
 		h.t.Fatalf("create: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestCreateRecordsWhatAContainerWouldReport(t *testing.T) {
 	spec := sessionSpec("run-a")
 	spec.WorktreeHostPath, spec.WorktreeMountPath = t.TempDir(), "/workspace"
 	spec.User = "1000:1000"
-	id, err := h.engine.create(t.Context(), spec)
+	id, err := h.engine.create(t.Context(), spec.CreationKey, spec, options{})
 	if err != nil || id != "vm-run-a" {
 		t.Fatalf("create = %q, %v", id, err)
 	}
@@ -56,7 +56,7 @@ func TestCreateRecordsWhatAContainerWouldReport(t *testing.T) {
 	if rec.CPUs != 2 || rec.CPULimit != 1.5 || rec.MemoryMiB != 2048 || rec.WorkingDir != "/srv" {
 		t.Errorf("record = %+v", rec)
 	}
-	if _, err := h.engine.create(t.Context(), spec); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := h.engine.create(t.Context(), spec.CreationKey, spec, options{}); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("second create = %v", err)
 	}
 	if found, err := h.engine.find("run-a"); err != nil || found != id {
@@ -71,7 +71,7 @@ func TestCreateRefusesAMissingImage(t *testing.T) {
 	h := newHarness(t)
 	missing := sessionSpec("run-m")
 	missing.Image = "missing:1"
-	if _, err := h.engine.create(t.Context(), missing); err == nil || !strings.Contains(err.Error(), "manifest unknown") {
+	if _, err := h.engine.create(t.Context(), missing.CreationKey, missing, options{}); err == nil || !strings.Contains(err.Error(), "manifest unknown") {
 		t.Errorf("missing image create = %v", err)
 	}
 	if _, err := os.Stat(h.engine.dir("run-m")); !errors.Is(err, os.ErrNotExist) {
@@ -144,7 +144,7 @@ func TestStartReportsSetupFailureMaskedAndKillsTheVM(t *testing.T) {
 	h := newHarness(t)
 	spec := sessionSpec("run-a")
 	spec.SecretEnv = []string{"TOKEN"}
-	if _, err := h.engine.create(t.Context(), spec); err != nil {
+	if _, err := h.engine.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
 	}
 	h.guest("run-a").bootErr = &guest.SetupError{ExitCode: 3, Output: "using s3cret\nfailed\n"}
@@ -160,7 +160,7 @@ func TestStartReportsSetupFailureMaskedAndKillsTheVM(t *testing.T) {
 
 func TestStartFailsWithTheLogWhenTheVMDiesWhileBooting(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.engine.create(t.Context(), sessionSpec("run-a")); err != nil {
+	if _, err := h.engine.create(t.Context(), "run-a", sessionSpec("run-a"), options{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(h.engine.path("run-a", monitorLog), []byte("cloud-hypervisor: Error booting VM: KvmNotAvailable\n"), 0o600); err != nil {

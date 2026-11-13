@@ -75,7 +75,7 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	// the check can take minutes. The terminal lock keeps other saves,
 	// resets and sweeps of this member out.
 	unlockCaches()
-	checkErr := s.checkSavedImage(ctx, pending)
+	checkErr := s.checkSavedImage(ctx, pending, info.User)
 	if s.cfg.Homes != nil {
 		unlockCaches = sync.OnceFunc(s.cfg.Homes.LockCaches(member))
 	}
@@ -85,7 +85,7 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 			current = "your saved image " + starting
 		}
 		problem := "could not be checked"
-		if _, ok := errors.AsType[*errImageOwners](checkErr); ok {
+		if _, ok := errors.AsType[*errImageOwners](checkErr); ok || errors.Is(checkErr, runtime.ErrUnstartableImage) {
 			problem = "would not start"
 		}
 		err := fmt.Errorf("scheduler: save environment: nothing was saved, because the committed image %s: %w. Your environment and its unsaved changes are kept, and new sessions still start from %s. Run aether env save again; if it fails the same way, see \"Saved image checks\" in docs/environments.md", problem, checkErr, current)

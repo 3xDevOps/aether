@@ -1394,6 +1394,186 @@ func (*PowerOffReply) Descriptor() ([]byte, []int) {
 	return file_guest_proto_rawDescGZIP(), []int{24}
 }
 
+type FreezeRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	TimeoutMs uint32                 `protobuf:"varint,1,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	// id names this freeze for its Thaw, so a Thaw retried after a lost
+	// reply gets the first one's answer.
+	Id            string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FreezeRequest) Reset() {
+	*x = FreezeRequest{}
+	mi := &file_guest_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FreezeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FreezeRequest) ProtoMessage() {}
+
+func (x *FreezeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FreezeRequest.ProtoReflect.Descriptor instead.
+func (*FreezeRequest) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *FreezeRequest) GetTimeoutMs() uint32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
+func (x *FreezeRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type FreezeReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FreezeReply) Reset() {
+	*x = FreezeReply{}
+	mi := &file_guest_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FreezeReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FreezeReply) ProtoMessage() {}
+
+func (x *FreezeReply) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FreezeReply.ProtoReflect.Descriptor instead.
+func (*FreezeReply) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{26}
+}
+
+type ThawRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThawRequest) Reset() {
+	*x = ThawRequest{}
+	mi := &file_guest_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThawRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThawRequest) ProtoMessage() {}
+
+func (x *ThawRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThawRequest.ProtoReflect.Descriptor instead.
+func (*ThawRequest) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ThawRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type ThawReply struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// frozen is whether the freeze id named held until this Thaw, or until an
+	// earlier Thaw of it: false after its deadline thawed it.
+	Frozen        bool `protobuf:"varint,1,opt,name=frozen,proto3" json:"frozen,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThawReply) Reset() {
+	*x = ThawReply{}
+	mi := &file_guest_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThawReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThawReply) ProtoMessage() {}
+
+func (x *ThawReply) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThawReply.ProtoReflect.Descriptor instead.
+func (*ThawReply) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *ThawReply) GetFrozen() bool {
+	if x != nil {
+		return x.Frozen
+	}
+	return false
+}
+
 type SyncRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1402,7 +1582,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_guest_proto_msgTypes[25]
+	mi := &file_guest_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1414,7 +1594,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_guest_proto_msgTypes[25]
+	mi := &file_guest_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1427,7 +1607,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_guest_proto_rawDescGZIP(), []int{25}
+	return file_guest_proto_rawDescGZIP(), []int{29}
 }
 
 type SyncReply struct {
@@ -1438,7 +1618,7 @@ type SyncReply struct {
 
 func (x *SyncReply) Reset() {
 	*x = SyncReply{}
-	mi := &file_guest_proto_msgTypes[26]
+	mi := &file_guest_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1450,7 +1630,7 @@ func (x *SyncReply) String() string {
 func (*SyncReply) ProtoMessage() {}
 
 func (x *SyncReply) ProtoReflect() protoreflect.Message {
-	mi := &file_guest_proto_msgTypes[26]
+	mi := &file_guest_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1463,7 +1643,7 @@ func (x *SyncReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncReply.ProtoReflect.Descriptor instead.
 func (*SyncReply) Descriptor() ([]byte, []int) {
-	return file_guest_proto_rawDescGZIP(), []int{26}
+	return file_guest_proto_rawDescGZIP(), []int{30}
 }
 
 var File_guest_proto protoreflect.FileDescriptor
@@ -1551,13 +1731,22 @@ const file_guest_proto_rawDesc = "" +
 	"unix_nanos\x18\x01 \x01(\x03R\tunixNanos\"\x0f\n" +
 	"\rSetClockReply\"\x11\n" +
 	"\x0fPowerOffRequest\"\x0f\n" +
-	"\rPowerOffReply\"\r\n" +
+	"\rPowerOffReply\">\n" +
+	"\rFreezeRequest\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\x01 \x01(\rR\ttimeoutMs\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\"\r\n" +
+	"\vFreezeReply\"\x1d\n" +
+	"\vThawRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"#\n" +
+	"\tThawReply\x12\x16\n" +
+	"\x06frozen\x18\x01 \x01(\bR\x06frozen\"\r\n" +
 	"\vSyncRequest\"\v\n" +
 	"\tSyncReply*F\n" +
 	"\x06Stream\x12\x16\n" +
 	"\x12STREAM_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTREAM_STDOUT\x10\x01\x12\x11\n" +
-	"\rSTREAM_STDERR\x10\x022\xd2\x06\n" +
+	"\rSTREAM_STDERR\x10\x022\xdc\a\n" +
 	"\x05Guest\x12@\n" +
 	"\x04Info\x12\x1c.aether.guest.v1.InfoRequest\x1a\x1a.aether.guest.v1.InfoReply\x12@\n" +
 	"\x04Boot\x12\x1c.aether.guest.v1.BootRequest\x1a\x1a.aether.guest.v1.BootReply\x12C\n" +
@@ -1569,7 +1758,9 @@ const file_guest_proto_rawDesc = "" +
 	"\x06Status\x12\x1e.aether.guest.v1.StatusRequest\x1a\x1c.aether.guest.v1.StatusReply\x12C\n" +
 	"\x05Stats\x12\x1d.aether.guest.v1.StatsRequest\x1a\x1b.aether.guest.v1.StatsReply\x12L\n" +
 	"\bSetClock\x12 .aether.guest.v1.SetClockRequest\x1a\x1e.aether.guest.v1.SetClockReply\x12L\n" +
-	"\bPowerOff\x12 .aether.guest.v1.PowerOffRequest\x1a\x1e.aether.guest.v1.PowerOffReply\x12@\n" +
+	"\bPowerOff\x12 .aether.guest.v1.PowerOffRequest\x1a\x1e.aether.guest.v1.PowerOffReply\x12F\n" +
+	"\x06Freeze\x12\x1e.aether.guest.v1.FreezeRequest\x1a\x1c.aether.guest.v1.FreezeReply\x12@\n" +
+	"\x04Thaw\x12\x1c.aether.guest.v1.ThawRequest\x1a\x1a.aether.guest.v1.ThawReply\x12@\n" +
 	"\x04Sync\x12\x1c.aether.guest.v1.SyncRequest\x1a\x1a.aether.guest.v1.SyncReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
 
 var (
@@ -1585,7 +1776,7 @@ func file_guest_proto_rawDescGZIP() []byte {
 }
 
 var file_guest_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_guest_proto_goTypes = []any{
 	(Stream)(0),             // 0: aether.guest.v1.Stream
 	(*InfoRequest)(nil),     // 1: aether.guest.v1.InfoRequest
@@ -1613,8 +1804,12 @@ var file_guest_proto_goTypes = []any{
 	(*SetClockReply)(nil),   // 23: aether.guest.v1.SetClockReply
 	(*PowerOffRequest)(nil), // 24: aether.guest.v1.PowerOffRequest
 	(*PowerOffReply)(nil),   // 25: aether.guest.v1.PowerOffReply
-	(*SyncRequest)(nil),     // 26: aether.guest.v1.SyncRequest
-	(*SyncReply)(nil),       // 27: aether.guest.v1.SyncReply
+	(*FreezeRequest)(nil),   // 26: aether.guest.v1.FreezeRequest
+	(*FreezeReply)(nil),     // 27: aether.guest.v1.FreezeReply
+	(*ThawRequest)(nil),     // 28: aether.guest.v1.ThawRequest
+	(*ThawReply)(nil),       // 29: aether.guest.v1.ThawReply
+	(*SyncRequest)(nil),     // 30: aether.guest.v1.SyncRequest
+	(*SyncReply)(nil),       // 31: aether.guest.v1.SyncReply
 }
 var file_guest_proto_depIdxs = []int32{
 	3,  // 0: aether.guest.v1.Process.terminal:type_name -> aether.guest.v1.Size
@@ -1633,21 +1828,25 @@ var file_guest_proto_depIdxs = []int32{
 	20, // 13: aether.guest.v1.Guest.Stats:input_type -> aether.guest.v1.StatsRequest
 	22, // 14: aether.guest.v1.Guest.SetClock:input_type -> aether.guest.v1.SetClockRequest
 	24, // 15: aether.guest.v1.Guest.PowerOff:input_type -> aether.guest.v1.PowerOffRequest
-	26, // 16: aether.guest.v1.Guest.Sync:input_type -> aether.guest.v1.SyncRequest
-	2,  // 17: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
-	6,  // 18: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
-	8,  // 19: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
-	11, // 20: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
-	13, // 21: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
-	15, // 22: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
-	17, // 23: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
-	19, // 24: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
-	21, // 25: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
-	23, // 26: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
-	25, // 27: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
-	27, // 28: aether.guest.v1.Guest.Sync:output_type -> aether.guest.v1.SyncReply
-	17, // [17:29] is the sub-list for method output_type
-	5,  // [5:17] is the sub-list for method input_type
+	26, // 16: aether.guest.v1.Guest.Freeze:input_type -> aether.guest.v1.FreezeRequest
+	28, // 17: aether.guest.v1.Guest.Thaw:input_type -> aether.guest.v1.ThawRequest
+	30, // 18: aether.guest.v1.Guest.Sync:input_type -> aether.guest.v1.SyncRequest
+	2,  // 19: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
+	6,  // 20: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
+	8,  // 21: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
+	11, // 22: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
+	13, // 23: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
+	15, // 24: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
+	17, // 25: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
+	19, // 26: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
+	21, // 27: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
+	23, // 28: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
+	25, // 29: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
+	27, // 30: aether.guest.v1.Guest.Freeze:output_type -> aether.guest.v1.FreezeReply
+	29, // 31: aether.guest.v1.Guest.Thaw:output_type -> aether.guest.v1.ThawReply
+	31, // 32: aether.guest.v1.Guest.Sync:output_type -> aether.guest.v1.SyncReply
+	19, // [19:33] is the sub-list for method output_type
+	5,  // [5:19] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -1664,7 +1863,7 @@ func file_guest_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_guest_proto_rawDesc), len(file_guest_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   27,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -77,7 +77,7 @@ func serve() error {
 			failures = append(failures, fmt.Errorf("%s: %w", step, err))
 		}
 	}
-	record("switch to the root disk", switchRoot())
+	record(guest.RootStep, switchRoot())
 	record("mount system filesystems", mountSystem())
 	cmdline, err := os.ReadFile("/proc/cmdline")
 	record("read the kernel command line", err)
@@ -106,6 +106,7 @@ func serve() error {
 		ts := unix.NsecToTimespec(t.UnixNano())
 		return unix.ClockSettime(unix.CLOCK_REALTIME, &ts)
 	}
+	svc.freezer = &freezer{set: freezeRoot}
 	listener, err := vsock.Listen(guest.APIPort, nil)
 	if err != nil {
 		return fmt.Errorf("listen on vsock port %d: %w", guest.APIPort, err)

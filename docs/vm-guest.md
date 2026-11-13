@@ -216,6 +216,18 @@ save it calls `Sync`, which writes every filesystem's dirty data to its
 disk, so the cache disk of a saved VM that is deleted without a restore
 holds what the session wrote.
 
+## Freezing the root disk
+
+`Freeze` flushes the root filesystem and holds every write to it, as
+`fsfreeze` does, so the server can copy the root disk whole for **Save
+environment**. Reads go on, and so do writes to the data disk and the share.
+`Thaw` ends it and reports whether the filesystem was still frozen; thawing
+one that is not frozen is not an error. The helper thaws by itself at the
+deadline the request names, at most 10 minutes, so a server that dies
+mid-save never leaves the VM unwritable, and a copy that outlasted the
+deadline can tell. A second `Freeze` moves the deadline. `PowerOff` thaws
+first, since its sync would wait on a frozen filesystem.
+
 ## Versions
 
 `Info` reports the helper's protocol number. A helper in a VM restored from a

@@ -316,6 +316,30 @@ func (c *Client) PowerOff(ctx context.Context) error {
 	return nil
 }
 
+// Freeze flushes the VM's root filesystem and holds every write to it until
+// Thaw of the same id, or until timeout, when the helper thaws it by itself.
+func (c *Client) Freeze(ctx context.Context, id string, timeout time.Duration) error {
+	_, err := retry(ctx, func() (*guestpb.FreezeReply, error) {
+		return c.api.Freeze(ctx, &guestpb.FreezeRequest{Id: id, TimeoutMs: uint32(timeout.Milliseconds())})
+	})
+	if err != nil {
+		return fmt.Errorf("guest: freeze: %w", err)
+	}
+	return nil
+}
+
+// Thaw ends freeze id and reports whether it held until then, the same
+// answer for a retry; one that is not frozen is not an error.
+func (c *Client) Thaw(ctx context.Context, id string) (bool, error) {
+	reply, err := retry(ctx, func() (*guestpb.ThawReply, error) {
+		return c.api.Thaw(ctx, &guestpb.ThawRequest{Id: id})
+	})
+	if err != nil {
+		return false, fmt.Errorf("guest: thaw: %w", err)
+	}
+	return reply.GetFrozen(), nil
+}
+
 // Process is a handle on one process in the VM.
 type Process struct {
 	c  *Client

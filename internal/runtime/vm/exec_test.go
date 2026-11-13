@@ -257,7 +257,7 @@ func TestRestoreKeepsTheGuestWhenTheResumeReplyIsLost(t *testing.T) {
 
 func TestStartEndsWhenTheVMDiesDuringSetup(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.engine.create(t.Context(), sessionSpec("run-a")); err != nil {
+	if _, err := h.engine.create(t.Context(), "run-a", sessionSpec("run-a"), options{}); err != nil {
 		t.Fatal(err)
 	}
 	h.guest("run-a").bootHangs = true

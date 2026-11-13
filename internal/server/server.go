@@ -329,7 +329,15 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		switch cfg.SessionRuntime {
 		case "", SessionRuntimeDocker:
 		case SessionRuntimeVM:
-			if s.rt, err = newVMRuntime(cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), s.docker); err != nil {
+			var members []*domain.Member
+			if members, err = s.db.ListMembers(ctx); err != nil {
+				return nil, fmt.Errorf("server: list members: %w", err)
+			}
+			ids := make([]string, len(members))
+			for i, m := range members {
+				ids[i] = string(m.ID)
+			}
+			if s.rt, err = newVMRuntime(ctx, cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), ids, s.docker); err != nil {
 				return nil, err
 			}
 		default:

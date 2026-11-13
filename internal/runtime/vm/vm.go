@@ -7,8 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -23,6 +26,11 @@ const idPrefix = "vm-"
 type Runtime struct {
 	*runtime.Docker
 	vms *engine
+	// stopped are the Docker containers StopDockerContainers stopped. This
+	// server never removes them, so a server switched back to docker finds
+	// them as they were, even when a terminal open finds one first by the
+	// ID its record kept.
+	stopped sync.Map
 }
 
 var (
@@ -55,11 +63,30 @@ func New(cfg Config) (*Runtime, error) {
 	return &Runtime{Docker: cfg.Docker, vms: newEngine(cfg, systemdUnits{}, dialHelper)}, nil
 }
 
-// isSession is the one routing rule: a session container carries its run ID
-// both as creation key and in AETHER_RUN_ID. Environment terminals, the
-// assistant, the agent updater and the cleanup helper carry no run ID.
+// terminalKey prefixes the creation key of a member's environment
+// terminal, terminal:<member>; its VM is terminal-<member>.
+const terminalKey = "terminal:"
+
+// isSession matches a session container, which carries its run ID both as
+// creation key and in AETHER_RUN_ID.
 func isSession(spec runtime.Spec) bool {
 	return spec.CreationKey != "" && spec.Env[coordtransport.RunIDEnv] == spec.CreationKey
+}
+
+// vmFor is the routing rule: sessions and environment terminals run in VMs,
+// everything else in Docker. A terminal keeps its root disk across a stop
+// and start, as a container keeps its filesystem; a session gets a fresh one
+// on every cold start.
+func vmFor(spec runtime.Spec) (string, options, bool) {
+	if name, ok := terminalVM(spec.CreationKey); ok {
+		return name, options{KeepRoot: true}, true
+	}
+	return spec.CreationKey, options{}, isSession(spec)
+}
+
+func terminalVM(key string) (string, bool) {
+	member, ok := strings.CutPrefix(key, terminalKey)
+	return "terminal-" + member, ok
 }
 
 func vmKey(id runtime.ID) (string, bool) {
@@ -67,15 +94,54 @@ func vmKey(id runtime.ID) (string, bool) {
 }
 
 func (r *Runtime) Create(ctx context.Context, spec runtime.Spec) (runtime.ID, error) {
-	if !isSession(spec) {
+	name, opts, ok := vmFor(spec)
+	if !ok {
 		return r.Docker.Create(ctx, spec)
 	}
-	return r.vms.create(ctx, spec)
+	return r.vms.create(ctx, name, spec, opts)
+}
+
+// dockerStopGrace is short: a terminal's interactive shell ignores SIGTERM,
+// and a kill loses nothing of a container's filesystem.
+const dockerStopGrace = time.Second
+
+// StopDockerContainers stops the containers Docker still runs of members'
+// kinds that now run in VMs, as the server left them when it ran them in
+// Docker. FindByCreationKey no longer finds them, so each is replaced by a
+// VM at its next use, and a stopped terminal keeps its unsaved changes for a
+// server switched back to docker. Only these members' containers are
+// touched: another server may share the daemon. The server runs it at
+// start, before it recovers anything; it logs each container, and one that
+// will not stop stays in Docker until it ends.
+func (r *Runtime) StopDockerContainers(ctx context.Context, members []string) {
+	keys, err := r.CreationKeys(ctx)
+	if err != nil {
+		slog.Warn("vm runtime: list Docker's containers to stop the ones VMs replace", "error", err)
+		return
+	}
+	for key, id := range keys {
+		if !memberKind(key, members) {
+			continue
+		}
+		r.stopped.Store(id, true)
+		if err := r.Docker.Stop(ctx, id, dockerStopGrace); err != nil {
+			slog.Warn("vm runtime: stop a container a VM replaces", "creation_key", key, "container", id, "error", err)
+			continue
+		}
+		slog.Info("vm runtime: stopped a container a VM replaces; it stays in Docker", "creation_key", key, "container", id)
+	}
+}
+
+// memberKind reports whether key is the creation key of one of members'
+// containers of a kind that runs in a VM.
+func memberKind(key string, members []string) bool {
+	member, ok := strings.CutPrefix(key, terminalKey)
+	return ok && slices.Contains(members, member)
 }
 
 func (r *Runtime) Start(ctx context.Context, id runtime.ID) error {
 	if key, ok := vmKey(id); ok {
-		return r.vms.start(ctx, key)
+		return r.vms.startKept(ctx, key)
 	}
 	return r.Docker.Start(ctx, id)
 }
@@ -102,6 +168,9 @@ func (r *Runtime) Stop(ctx context.Context, id runtime.ID, grace time.Duration) 
 }
 
 func (r *Runtime) Destroy(ctx context.Context, id runtime.ID) error {
+	if _, ok := r.stopped.Load(id); ok {
+		return nil
+	}
 	if key, ok := vmKey(id); ok {
 		return r.vms.destroy(ctx, key)
 	}
@@ -150,9 +219,12 @@ func (r *Runtime) Inspect(ctx context.Context, id runtime.ID) (runtime.Container
 	return r.Docker.Inspect(ctx, id)
 }
 
-// FindByCreationKey looks among VMs first: a session's key names a VM only
-// when it was created under this runtime.
+// FindByCreationKey finds a terminal only among VMs, and a session among VMs
+// first: its key names a VM only when it was created under this runtime.
 func (r *Runtime) FindByCreationKey(ctx context.Context, key string) (runtime.ID, error) {
+	if name, ok := terminalVM(key); ok {
+		return r.vms.find(name)
+	}
 	id, err := r.vms.find(key)
 	if !errors.Is(err, runtime.ErrNotFound) {
 		return id, err
@@ -174,13 +246,6 @@ func (r *Runtime) EgressGateway(ctx context.Context, _ bool) (netip.Addr, error)
 // no route to the VMs' proxy address.
 func (r *Runtime) EgressCreationKey(_ context.Context, ip netip.Addr) (string, error) {
 	return r.vms.egressKey(ip)
-}
-
-func (r *Runtime) Commit(ctx context.Context, id runtime.ID, tag string, labels map[string]string) error {
-	if _, ok := vmKey(id); ok {
-		return errors.New("vm runtime: Commit (Save environment) of a session VM is not supported until work item 9")
-	}
-	return r.Docker.Commit(ctx, id, tag, labels)
 }
 
 func (r *Runtime) InitPID(ctx context.Context, id runtime.ID) (int, error) {

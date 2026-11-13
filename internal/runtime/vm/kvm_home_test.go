@@ -36,7 +36,7 @@ func kvmUserSession(t *testing.T, e *engine, key string, mounts ...runtime.Mount
 		Env: map[string]string{"AETHER_RUN_ID": key, "HOME": "/root"}, CPULimit: 1, MemoryLimitBytes: 512 << 20, Mounts: mounts,
 	}
 	start := time.Now()
-	if _, err := e.create(t.Context(), spec); err != nil {
+	if _, err := e.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.start(t.Context(), key); err != nil {

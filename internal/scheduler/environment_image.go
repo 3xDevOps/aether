@@ -22,11 +22,20 @@ import (
 // Sysbox refuses to set up a root filesystem that holds one.
 const maxContainerID = 65535
 
-// checkSavedImage reads every entry of the committed image, so a save that
-// captured host-shifted owners never becomes the member's image.
-func (s *Scheduler) checkSavedImage(ctx context.Context, tag string) error {
+// imageChecker is the VM runtime, which proves an image by booting it.
+type imageChecker interface {
+	CheckImage(ctx context.Context, ref, user string) error
+}
+
+// checkSavedImage proves the committed image starts as user, so a broken
+// save never becomes the member's image. Docker's check reads every entry,
+// for owners copied from the host that no container can map.
+func (s *Scheduler) checkSavedImage(ctx context.Context, tag, user string) error {
 	ctx, cancel := context.WithTimeout(ctx, protocol.EnvSaveCheckTimeout)
 	defer cancel()
+	if checker, ok := s.cfg.Runtime.(imageChecker); ok {
+		return checker.CheckImage(ctx, tag, user)
+	}
 	export, err := s.cfg.Runtime.ExportImage(ctx, tag)
 	if err != nil {
 		return err
@@ -197,6 +206,9 @@ func imageNotice(failed []failedImage, using string) string {
 func unstartableImageCause(err error, mounts []string) string {
 	if _, setup := errors.AsType[*runtime.SetupError](err); setup {
 		return ""
+	}
+	if errors.Is(err, runtime.ErrUnstartableImage) {
+		return "it does not boot"
 	}
 	msg := err.Error()
 	if !slices.ContainsFunc([]string{"create container: ", "start container: ", "scheduler: create terminal: ", "scheduler: start terminal: "}, func(prefix string) bool {

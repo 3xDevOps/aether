@@ -177,29 +177,35 @@ func (d *Docker) RemoveImage(ctx context.Context, tag string) error {
 	return nil
 }
 
-// ImageCacheEnvironment returns only the tool-cache and global-install
-// settings whose image defaults must survive Aether's defaults. It never
-// exports unrelated image environment (which may contain credentials).
-// ImageUser has already ensured the image is local before the scheduler
-// assembles its plan.
+// ImageCacheEnvironment returns the image's CacheEnvironment. ImageUser has
+// already ensured the image is local before the scheduler assembles its plan.
 func (d *Docker) ImageCacheEnvironment(ctx context.Context, ref string) (map[string]string, error) {
 	info, err := d.cli.ImageInspect(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: inspect image cache environment: %w", err)
 	}
+	if info.Config == nil {
+		return map[string]string{}, nil
+	}
+	return CacheEnvironment(info.Config.Env), nil
+}
+
+// CacheEnvironment picks from an image's environment only the tool-cache and
+// global-install settings whose image defaults must survive Aether's
+// defaults. It never returns unrelated image environment, which may hold
+// credentials.
+func CacheEnvironment(imageEnv []string) map[string]string {
 	env := make(map[string]string)
-	if info.Config != nil {
-		for _, pair := range info.Config.Env {
-			key, value, ok := strings.Cut(pair, "=")
-			if !ok {
-				continue
-			}
-			switch key {
-			case "npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE", "BUN_INSTALL_CACHE_DIR", "YARN_CACHE_FOLDER", "npm_config_store_dir",
-				"NPM_CONFIG_PREFIX", "npm_config_prefix", "CARGO_INSTALL_ROOT":
-				env[key] = value
-			}
+	for _, pair := range imageEnv {
+		key, value, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE", "BUN_INSTALL_CACHE_DIR", "YARN_CACHE_FOLDER", "npm_config_store_dir",
+			"NPM_CONFIG_PREFIX", "npm_config_prefix", "CARGO_INSTALL_ROOT":
+			env[key] = value
 		}
 	}
-	return env, nil
+	return env
 }
