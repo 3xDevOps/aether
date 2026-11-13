@@ -14,7 +14,7 @@ pull request sessions are in
 | Server code that touches containers, git, SSH or storage | `make test-integration` | Docker, git; root to match CI |
 | Dashboard components in `web/src` | `cd web && bun run typecheck && bun run test` | Bun, Node 22+ |
 | Something a person clicks through in the dashboard | `make test-e2e` | Docker, git, Bun, Node 22+, Playwright's Chromium |
-| `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3, jq |
+| `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3, jq, Go |
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
 | How an agent CLI is launched (`internal/harness`) | [Real-agent smoke tests](#real-agent-smoke-tests) | Docker |
 | How a session drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
@@ -945,17 +945,20 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 | `go` | `lint`, `build-and-test` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
 | `web` | `dashboard` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
 | `caches` | The full suite on a push to `main` | `go.mod`, `go.sum`, `.golangci.yml`, `.github/`, `images/`, the fonts the browser image copies from `web/public/fonts/`, the web and desktop package manifests and lockfiles, `web/.bun-version`, the Gradle files |
-| `vm` | `kvm` in the merge queue and on a push to `main` | `internal/runtime/vm/`, `internal/guest/`, `internal/vmimage/`, `images/kernel/`, `internal/acpkeeper/` (the helper's terminals), the runtime helpers the VM engine shares (`session.go`, `stream.go` and `managed_exec.go` in `internal/runtime/`), files named `vm*.go` or `*_vm.go` (and their tests) anywhere under `internal/`, `go.mod`, `go.sum` |
+| `vm` | `kvm` in the merge queue and on a push to `main` | `internal/runtime/vm/`, `internal/vmimage/`, the packages the VM code runs (`internal/guest/`, `internal/acpkeeper/`, `internal/version/`, `internal/devexec/`, `internal/disk/`), `images/kernel/`, the `kvm*_test.go` files, the files of `internal/runtime/` the VM engine shares (`session.go`, `stream.go`, `managed_exec.go`, `docker_image.go`, `docker_cgroup.go`), files named `vm*.go` or `*_vm.go` (and their tests) anywhere under `internal/`, `go.mod`, `go.sum`, `vm.mk` and `kvm.yml` |
 
 VM code outside the VM packages goes in files named for the `vm` mode, so the
-merge queue still runs `kvm` for it. A change to `kvm.yml` or the make targets
-it runs is left to the nightly run or a run started by hand (below); `make
-lint` builds the VM tests on every pull request. The merge queue and a push
-classify the files GitHub's compare lists for the change; past its 300-file
-limit, or when the lookup fails, `kvm` runs. The guest kernel takes up to six
-minutes to build, so `kvm` restores it from a cache keyed by a hash of
-`images/kernel/` and the `make kernel` recipe, and builds it only on a miss;
-runs on `main` save it.
+merge queue still runs `kvm` for it. `make test-scripts` fails when the KVM
+tests compile a package that is neither in the list nor in the exclusions in
+`scripts/ci-classify-areas-test.sh`, each with the reason it needs no VM run,
+or when a test file with the `kvm` tag is outside the list. `make lint` builds
+the VM tests on every pull request. The merge queue classifies the files
+GitHub's compare lists between `main` and the group, because a group also
+carries the entries ahead of it; a push compares with the commit before it;
+past its 300-file limit, or when the lookup fails, `kvm` runs. The guest
+kernel takes up to six minutes to build, so `kvm` restores it from a cache
+keyed by a hash of `images/kernel/` and the `make kernel` recipe, and builds
+it only on a miss; runs on `main` save it.
 
 The classifier runs from the pull request's (or merge group's) base revision,
 so a pull request cannot change its own classification, and a renamed file
@@ -972,8 +975,7 @@ gh workflow run edge-image.yml --ref <branch>
 gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
 ```
 
-To run the VM tests on a branch, for example to check a change to `kvm.yml`
-or the make targets before the nightly run does:
+To run the VM tests on a branch without the merge queue:
 
 ```sh
 gh workflow run kvm.yml --ref <branch>

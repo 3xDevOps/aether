@@ -70,10 +70,41 @@ expect vm true internal/acpkeeper/term_linux.go
 expect vm true internal/gitengine/checkout_vm.go
 expect vm true internal/egress/proxy_vm_test.go
 expect vm true docs/testing.md go.sum
+expect vm true vm.mk
+expect vm true .github/workflows/kvm.yml
 expect vm false internal/runtime/docker.go internal/runtime/runtime.go internal/scheduler/environment.go
 expect vm false cmd/aether-server/main.go
 expect vm false internal/scheduler/envmerge.go web/src/app.tsx docs/testing.md
 expect vm false images/standard/Dockerfile .github/workflows/ci-suite.yml Makefile
+
+# Every package the KVM tests compile is in the vm list or here, with the
+# reason the merge queue need not boot VMs for it, so a new dependency of
+# the VM code is a decision rather than a silent skip.
+not_vm='
+internal/runtime: the Docker runtime; the vm list names the files the VM engine shares
+internal/coordtransport: the VM engine reads two of its constants
+internal/protocol: reached only through coordtransport
+internal/store: reached only through coordtransport
+internal/domain: reached only through coordtransport
+internal/edge/proto: reached only through coordtransport
+internal/secretscan: reached only through coordtransport
+'
+cd "$script_dir/.."
+kvm_files=$(grep -rl --include='*_test.go' -E '^//go:build .*kvm' internal)
+for file in $kvm_files; do
+	expect vm true "$file"
+done
+kvm_pkgs=$(printf '%s\n' "$kvm_files" | sed 's|/[^/]*$||; s|^|./|' | sort -u)
+for dir in $(GOOS=linux go list -deps -test -tags kvm -f '{{if .Module}}{{if .Module.Main}}{{.Dir}}{{end}}{{end}}' $kvm_pkgs | sort -u); do
+	pkg=${dir#"$PWD"/}
+	case $not_vm in *"
+$pkg: "*) continue ;;
+	esac
+	if [ "$(printf '%s/x.go\n' "$pkg" | sh "$script" vm)" != true ]; then
+		echo "ci-classify-areas-test: the KVM tests compile $pkg; add it to vm in ci-classify-areas.sh, or to not_vm here with the reason it needs no VM run" >&2
+		exit 1
+	fi
+done
 
 for mode in web go caches vm; do
 	got=$(sh "$script" "$mode" </dev/null)

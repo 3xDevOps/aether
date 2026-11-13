@@ -11,14 +11,13 @@
 # changes. caches covers every file a cache key in .github/ hashes, every
 # file the cached browser and standard image builds copy in, and .github/
 # itself, which names the keys; any other path is outside it. vm covers what
-# make test-kvm builds, boots or runs: the VM packages, the guest kernel,
-# the terminal code the helper runs in the guest, the runtime helpers the VM
-# engine shares with Docker, the dependencies and the VM files other
-# packages name vm*.go or *_vm.go; any other path is outside it, so a change
-# to the job or its make targets waits for the nightly run or a run started
-# by hand. false only when at least one path is present and every path is in
-# the unrelated set for the mode. Empty input prints true. Blank lines are
-# ignored. For web and go, a path in neither set prints true.
+# make test-kvm builds, boots or runs: the VM packages, every package the
+# guest helper compiles, the guest kernel, the KVM tests, the runtime
+# helpers the VM engine shares with Docker, the dependencies, the VM files
+# other packages name vm*.go or *_vm.go, vm.mk and kvm.yml; any other path
+# is outside it. false only when at least one path is present and every path
+# is in the unrelated set for the mode. Empty input prints true. Blank lines
+# are ignored. For web and go, a path in neither set prints true.
 set -eu
 
 if [ "$#" -ne 1 ]; then
@@ -77,9 +76,12 @@ caches() {
 
 vm() {
 	case $1 in
-	internal/runtime/vm/* | internal/guest/* | internal/vmimage/* | images/kernel/* | internal/acpkeeper/* | \
-		internal/runtime/session.go | internal/runtime/stream.go | internal/runtime/managed_exec.go | \
-		internal/*/vm*.go | internal/*/*_vm.go | internal/*/*_vm_test.go | go.mod | go.sum)
+	internal/runtime/vm/* | internal/guest/* | internal/vmimage/* | images/kernel/* | \
+		internal/acpkeeper/* | internal/version/* | internal/devexec/* | internal/disk/* | \
+		internal/*/kvm*_test.go | internal/runtime/session.go | internal/runtime/stream.go | \
+		internal/runtime/managed_exec.go | internal/runtime/docker_image.go | internal/runtime/docker_cgroup.go | \
+		internal/*/vm*.go | internal/*/*_vm.go | internal/*/*_vm_test.go | go.mod | go.sum | \
+		vm.mk | .github/workflows/kvm.yml)
 		return 0
 		;;
 	esac
