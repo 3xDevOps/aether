@@ -485,6 +485,17 @@ describe('run rows', () => {
     expect(useStore.getState().mineOnly).toBe(true)
     expect(runList().getByText('answer the schema question')).toBeDefined()
   })
+
+  it('lets me leave Mine when it hides every session', async () => {
+    useStore.setState({ runs: {}, mineOnly: true })
+    render(<AppShell />)
+
+    expect(runList().getByText('No sessions of yours.')).toBeDefined()
+    fireEvent.click(runList().getByRole('button', { name: "Show everyone's sessions" }))
+
+    expect(useStore.getState().mineOnly).toBe(false)
+    expect(runList().getByText('No sessions yet.')).toBeDefined()
+  })
 })
 
 describe('navigation rows', () => {
