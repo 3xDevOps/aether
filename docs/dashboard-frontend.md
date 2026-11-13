@@ -2631,7 +2631,8 @@ then reveals it. A refusal shows the server's error and any setup output.
 
 The launch form lives in `components/launch/`. It asks for a
 task, an agent, an account when one is shared with the caller, a mode and a
-model. The agent picker is a list of rows from `agent.list`: the vendor glyph
+model. The Task field grows with ordinary input to 192px, then scrolls inside
+the field. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Ready" or "Sign in after launch"
 for a shipped agent (`login_found` checks the launch home for login files, not
 for a working session; a server that does not report it shows nothing), or

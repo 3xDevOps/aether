@@ -115,6 +115,17 @@ describe('child runs switch', () => {
 })
 
 describe('new run', () => {
+  it('resizes the task textarea from its controlled value', async () => {
+    await open()
+    const task = screen.getByLabelText('Task') as HTMLTextAreaElement
+    task.style.border = '1px solid'
+    Object.defineProperty(task, 'scrollHeight', { configurable: true, get: () => 300 })
+
+    fireEvent.change(task, { target: { value: 'a long task' } })
+
+    await waitFor(() => expect(Number.parseFloat(task.style.height)).toBeGreaterThanOrEqual(300))
+  })
+
   it('returns focus to what had it before the dialog opened', async () => {
     render(<button type="button">Board</button>)
     const before = screen.getByRole('button', { name: 'Board' })
