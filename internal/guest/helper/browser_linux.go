@@ -203,14 +203,8 @@ func (b *browser) prepare() error {
 // directory, the last owned by its user.
 func freshMounts(cred *syscall.Credential, shm uint64) error {
 	control := filepath.Dir(guest.BrowserSocket)
-	for _, target := range []string{browserRoot + "/tmp", browserRoot + "/dev/shm", browserRoot + "/aether-control", control} {
-		if mounted, err := isMountPoint(target); err != nil {
-			return err
-		} else if mounted {
-			if err = unix.Unmount(target, unix.MNT_DETACH); err != nil {
-				return fmt.Errorf("unmount the last browser's %s: %w", target, err)
-			}
-		}
+	if err := dropMounts(); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(control, 0o700); err != nil {
 		return err
@@ -235,8 +229,24 @@ func freshMounts(cred *syscall.Credential, shm uint64) error {
 	return nil
 }
 
-// stop kills every process in the browser's cgroup and waits for the
-// companion's exit.
+// dropMounts unmounts a companion's /tmp, /dev/shm and control directory,
+// which hold its profile, cache and shared memory: tmpfs pages stay
+// resident while mounted.
+func dropMounts() error {
+	for _, target := range []string{browserRoot + "/tmp", browserRoot + "/dev/shm", browserRoot + "/aether-control", filepath.Dir(guest.BrowserSocket)} {
+		if mounted, err := isMountPoint(target); err != nil {
+			return err
+		} else if mounted {
+			if err = unix.Unmount(target, unix.MNT_DETACH); err != nil {
+				return fmt.Errorf("unmount the browser's %s: %w", target, err)
+			}
+		}
+	}
+	return nil
+}
+
+// stop kills every process in the browser's cgroup, waits for the
+// companion's exit and gives back its memory.
 func (b *browser) stop(procs *processes) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -249,16 +259,14 @@ func (b *browser) stop(procs *processes) error {
 	if err := writeCgroup("cgroup.kill", "1"); err != nil {
 		return err
 	}
-	p, err := procs.get(b.current)
-	if err != nil {
-		return nil
+	if p, err := procs.get(b.current); err == nil {
+		select {
+		case <-p.done:
+		case <-time.After(browserStopped):
+			return fmt.Errorf("the browser %s did not end within %s of being killed", b.current, browserStopped)
+		}
 	}
-	select {
-	case <-p.done:
-		return nil
-	case <-time.After(browserStopped):
-		return fmt.Errorf("the browser %s did not end within %s of being killed", b.current, browserStopped)
-	}
+	return dropMounts()
 }
 
 func touch(path string) error {

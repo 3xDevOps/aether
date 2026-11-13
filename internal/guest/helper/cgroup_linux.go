@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -154,11 +155,16 @@ func readStats(cgroup *sessionCgroup) (*guestpb.StatsReply, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The development browser's kills at its own cap are not the session's.
+	browser, err := readCounters(browserCgroup+"/memory.events", 1)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
 	stats := &guestpb.StatsReply{
 		CpuUsageNanos:    cpu,
 		MemoryLimitBytes: meminfo["MemTotal"],
 		MemoryBytes:      meminfo["MemTotal"] - min(meminfo["MemAvailable"], meminfo["MemTotal"]),
-		OomKills:         vmstat["oom_kill"],
+		OomKills:         vmstat["oom_kill"] - min(browser["oom_kill"], vmstat["oom_kill"]),
 	}
 	if cgroup != nil {
 		// The git service's own kills are not the session's.

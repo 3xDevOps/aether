@@ -43,8 +43,8 @@ const startArg = "start"
 // enterRootArg runs the helper binary as the first step of a process
 // spawned in another root: in its new mount namespace, still root, it makes
 // that root its own with pivot_root, as a container runtime does, then
-// drops to the process's user without new privileges and executes the
-// program. A chroot would keep the program from making user namespaces,
+// drops to the process's user without new privileges or vsock and executes
+// the program. A chroot would keep the program from making user namespaces,
 // which Chromium's sandbox needs.
 const enterRootArg = "enter-root"
 
@@ -156,6 +156,9 @@ func execInRoot(root, uid, gid, dir, program string, argv []string) int {
 	}
 	if err == nil {
 		err = unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+	}
+	if err == nil {
+		err = denyVsock()
 	}
 	if err == nil {
 		err = unix.Exec(program, argv, env)
