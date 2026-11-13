@@ -44,7 +44,7 @@ const (
 	// dataDiskBytes and stateDiskBytes are sparse: they cost only what the
 	// guest writes.
 	dataDiskBytes  = 128 << 30
-	stateDiskBytes = 16 << 30
+	stateDiskBytes = 1 << 30
 	minMemoryMiB   = 256
 	bootTimeout    = 90 * time.Second
 	agentOOMScore  = 500
