@@ -27,6 +27,7 @@ pull request sessions are in
 | `android/` | `make android` | Docker |
 | `internal/vmimage` | `go test ./internal/vmimage` | e2fsprogs, qemu-utils; root for the owner test |
 | `images/kernel/` | [The guest kernel](#the-guest-kernel) | Docker; a KVM host to boot it |
+| `internal/guest` (the VM helper) | `go test ./internal/guest/...`, then [the VM helper](#the-vm-helper) | Go; a KVM host for the VM test |
 | Only `docs/` or root `*.md` | `make public-audit` | sh |
 
 ## Unit tests
@@ -782,6 +783,26 @@ with real `mkfs.ext4`, `debugfs` and `qemu-img`; it skips the tests whose
 tools are missing. Run it once as root too, as CI's `build-and-test` does:
 only root can keep other owners, set-user-ID bits and file capabilities, as
 the server does.
+
+## The VM helper
+
+`go test ./internal/guest/...` runs the real helper service against the real
+client over a Unix socket that answers Cloud Hypervisor's vsock handshake:
+processes on pipes and terminals, reattaching from a new client, lossless
+output, spawn failures, signals, orphan reaping and `Boot`. What only PID 1
+in a VM does (switching root, mounts, the network, socket forwarding, the
+process limit, an out-of-memory kill) needs a KVM host. `TestKVMHelper` boots
+an image from `internal/vmimage` disks with the test binary as the helper and
+drives it through the client; it also needs `virtiofsd` at
+`/usr/libexec/virtiofsd` and root. Run it alone: the unit tests' reaper
+collects every child of the test binary, including the VM monitor's.
+
+```sh
+CGO_ENABLED=0 go test -c -tags kvm -o helper-kvm.test ./internal/guest/helper
+sudo AETHER_TEST_KERNEL=dist/aether-vmlinux-x86_64 \
+  AETHER_TEST_IMAGE=ghcr.io/3xdevops/aether-standard:<release> \
+  ./helper-kvm.test -test.run TestKVM -test.v
+```
 
 ## Windows
 

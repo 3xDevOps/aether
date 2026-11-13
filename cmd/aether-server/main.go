@@ -23,6 +23,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/guest/helper"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -44,6 +45,10 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == acpkeeper.Command {
 		os.Exit(acpKeeper(os.Args[2:]))
+	}
+	// A session VM's kernel starts the binary as /init with this argument.
+	if len(os.Args) > 1 && os.Args[1] == "guest" {
+		os.Exit(helper.Main(os.Args[2:]))
 	}
 	if filepath.Base(os.Args[0]) == "aether-internal" {
 		os.Exit(coordcli.Main(os.Args[1:]))

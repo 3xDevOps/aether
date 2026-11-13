@@ -59,7 +59,7 @@ func ServeTerm(socket, user, home string, cols, rows uint16, argv []string) int 
 		return fail(125, err)
 	}
 	defer func() { _ = ln.Close() }()
-	master, slave, err := openPTY(cred)
+	master, slave, err := OpenPTY(cred)
 	if err != nil {
 		return fail(125, err)
 	}
@@ -197,10 +197,10 @@ func passwdHome(uid uint32) string {
 	return "/"
 }
 
-// openPTY opens a new PTY whose terminal belongs to cred's user, when set.
+// OpenPTY opens a new PTY whose terminal belongs to cred's user, when set.
 // Its master does not block, so the keeper's input check holds across a
 // write.
-func openPTY(cred *syscall.Credential) (master, slave *os.File, err error) {
+func OpenPTY(cred *syscall.Credential) (master, slave *os.File, err error) {
 	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open a PTY: %w", err)

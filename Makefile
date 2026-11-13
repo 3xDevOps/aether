@@ -186,7 +186,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug kernel release release-binaries deploy clean
+.PHONY: all build proto chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug kernel release release-binaries deploy clean
 
 all: build
 
@@ -306,6 +306,14 @@ lint-workflows:
 # non-zero until upstream ships a fix. See docs/security.md.
 vulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+# The VM helper's API code (internal/guest/guestpb). buf compiles the .proto
+# in Go, so this needs no protoc; every tool is pinned here.
+BUF_TEMPLATE = {"version":"v2","plugins":[ \
+  {"local":["go","run","google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11"],"out":"internal/guest/guestpb","opt":"paths=source_relative"}, \
+  {"local":["go","run","google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2"],"out":"internal/guest/guestpb","opt":"paths=source_relative"}]}
+proto:
+	go run github.com/bufbuild/buf/cmd/buf@v1.75.0 generate --template '$(BUF_TEMPLATE)' internal/guest/guestpb
 
 fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
