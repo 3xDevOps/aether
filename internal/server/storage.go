@@ -213,6 +213,11 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		case "vm-cache":
 			e.Reason = "Package cache new session VMs start from; rebuildable"
 		case "vm", "vm-state", "vm-db":
+			if member, ok := strings.CutPrefix(e.Key, "terminal-"); ok {
+				e.OwnerKind, e.OwnerID = "member", member
+				e.Reason = "Environment VM disks, with what the member installed; deleted when the environment is removed"
+				continue
+			}
 			run, err := d.Store.GetRun(ctx, domain.RunID(e.Key))
 			if err != nil {
 				unknownStorageOwner(e, err)
