@@ -95,7 +95,9 @@ for file in $kvm_files; do
 	expect vm true "$file"
 done
 kvm_pkgs=$(printf '%s\n' "$kvm_files" | sed 's|/[^/]*$||; s|^|./|' | sort -u)
-for dir in $(GOOS=linux go list -deps -test -tags kvm -f '{{if .Module}}{{if .Module.Main}}{{.Dir}}{{end}}{{end}}' $kvm_pkgs | sort -u); do
+# An assignment, so set -e stops the test when go list fails.
+deps=$(GOOS=linux go list -deps -test -tags kvm -f '{{if .Module}}{{if .Module.Main}}{{.Dir}}{{end}}{{end}}' $kvm_pkgs)
+for dir in $(printf '%s\n' "$deps" | sort -u); do
 	pkg=${dir#"$PWD"/}
 	case $not_vm in *"
 $pkg: "*) continue ;;
