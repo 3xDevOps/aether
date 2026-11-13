@@ -288,9 +288,19 @@ func TestDiskReclaimDropsASavedStateAndTheWakeStartsFromDisk(t *testing.T) {
 	if len(saved) != 1 {
 		t.Fatalf("saved sessions = %d, want 1", len(saved))
 	}
-	note, err := e.sched.dropSavedState(t.Context(), saved[0])
-	if err != nil || !strings.Contains(note, "starts again from its disk") {
-		t.Fatalf("dropSavedState = %q, %v", note, err)
+	// The sleep holds the run's lifecycle lock a moment after it is
+	// recorded, and reclaim skips a run whose lock is held.
+	var note string
+	waitFor(t, "the saved state dropped", func() bool {
+		var err error
+		note, err = e.sched.dropSavedState(t.Context(), saved[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return note != ""
+	})
+	if !strings.Contains(note, "starts again from its disk") {
+		t.Fatalf("dropSavedState note = %q", note)
 	}
 	if sr.isSaved(e.cid(t, run.ID)) || e.sched.Sleep(run.ID).Saved || len(e.sched.savedByAge()) != 0 {
 		t.Fatal("the saved state was not dropped")
