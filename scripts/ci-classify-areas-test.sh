@@ -67,6 +67,7 @@ expect vm true internal/server/vmruntime.go
 expect vm true internal/sshd/sync_vm.go
 expect vm true internal/runtime/managed_exec.go
 expect vm true internal/acpkeeper/term_linux.go
+expect vm true internal/egress/proxy.go
 expect vm true internal/gitengine/checkout_vm.go
 expect vm true internal/egress/proxy_vm_test.go
 expect vm true docs/testing.md go.sum
@@ -88,6 +89,7 @@ internal/store: reached only through coordtransport
 internal/domain: reached only through coordtransport
 internal/edge/proto: reached only through coordtransport
 internal/secretscan: reached only through coordtransport
+internal/events: reached only through egress, which logs to it
 '
 cd "$script_dir/.."
 kvm_files=$(grep -rl --include='*_test.go' -E '^//go:build .*kvm' internal)
