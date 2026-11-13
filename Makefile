@@ -61,6 +61,18 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
   grep -rl --include='*_test.go' -E '^//go:build .*integration' . \
   | xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u))
 
+# The packages whose test files carry the `kvm` build tag, minus KVM_SKIP.
+# Assigned lazily - only `test-kvm` reads it.
+KVM_PKGS = $(filter-out $(KVM_SKIP),$(shell \
+  grep -rl --include='*_test.go' -E '^//go:build .*kvm' . \
+  | xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u))
+
+# What `test-kvm` boots: the guest kernel `make kernel` builds, the image the
+# test VMs run, and a scratch directory on the filesystem their disks use.
+KVM_KERNEL ?= $(CURDIR)/$(DIST)/aether-vmlinux-x86_64
+KVM_IMAGE  ?= ghcr.io/3xdevops/aether-standard:latest
+KVM_DIR    ?= /tmp/aether-kvm
+
 # Every package, minus TEST_SKIP. Assigned lazily - only `test` reads it.
 TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|.|'))
 
@@ -186,7 +198,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build proto chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug kernel release release-binaries deploy clean
+.PHONY: all build proto chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-kvm test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug kernel release release-binaries deploy clean
 
 all: build
 
@@ -220,6 +232,24 @@ test-integration:
 	go test $(if $(INTEGRATION_NORACE),,-race) -timeout=30m -tags integration $(INTEGRATION_PKGS) \
 		$(if $(INTEGRATION_RUN),-run '$(INTEGRATION_RUN)') \
 		$(if $(INTEGRATION_SKIP_PATTERN),-skip '$(INTEGRATION_SKIP_PATTERN)')
+
+# The `kvm`-tagged tests boot real Cloud Hypervisor VMs, so they need root
+# on a host with /dev/kvm and `make kernel` first. The test binaries and the
+# server are static because they also run inside the VMs. Only the TestKVM
+# tests run: the helper's unit tests reap every child of the test binary,
+# the VM monitor's too. KVM_RUN replaces the -run pattern.
+test-kvm:
+	@[ "$$(id -u)" = 0 ] && [ -c /dev/kvm ] || { echo 'make test-kvm: run it as root on a host with /dev/kvm' >&2; exit 1; }
+	@for tool in cloud-hypervisor qemu-img mkfs.ext4 /usr/libexec/virtiofsd; do \
+		command -v $$tool >/dev/null || { echo "make test-kvm: $$tool not found" >&2; exit 1; }; done
+	@[ -s '$(KVM_KERNEL)' ] || { echo 'make test-kvm: no kernel at $(KVM_KERNEL); run make kernel or set KVM_KERNEL' >&2; exit 1; }
+	@mkdir -p '$(KVM_DIR)/engine'
+	CGO_ENABLED=0 go build -o '$(KVM_DIR)/aether-server' ./cmd/aether-server
+	CGO_ENABLED=0 TMPDIR='$(KVM_DIR)' \
+		AETHER_TEST_KERNEL='$(KVM_KERNEL)' AETHER_TEST_IMAGE='$(KVM_IMAGE)' \
+		AETHER_VM_TEST_KERNEL='$(KVM_KERNEL)' AETHER_VM_TEST_DIR='$(KVM_DIR)/engine' \
+		AETHER_VM_TEST_SERVER='$(KVM_DIR)/aether-server' \
+		go test -count=1 -p 1 -timeout=30m -tags kvm -run '$(or $(KVM_RUN),^TestKVM)' $(KVM_PKGS)
 
 agents-image:
 	docker build --tag '$(AGENTS_IMAGE)' --build-arg 'BASE=$(AGENTS_BASE)' --file images/agents/Dockerfile .
@@ -275,6 +305,7 @@ test-native-hooks:
 vet:
 	go vet ./...
 	go vet -tags edgeupgrade ./internal/edge/edgetest/
+	go vet -tags kvm $(KVM_PKGS)
 
 # golangci-lint cannot decode export data produced by a Go newer than the one
 # that built it, so on a host whose default Go is ahead of go.mod's toolchain
@@ -293,6 +324,7 @@ lint:
 		--schema "file://$$(go env GOMODCACHE)/$(GOLANGCI_LINT_MODULE)/jsonschema/golangci.next.jsonschema.json"
 	$(GOLANGCI_LINT) run
 	$(GOLANGCI_LINT) run --build-tags edgeupgrade ./internal/edge/edgetest/
+	$(GOLANGCI_LINT) run --build-tags kvm $(KVM_PKGS)
 
 lint-workflows:
 	@command -v shellcheck >/dev/null 2>&1 || { \

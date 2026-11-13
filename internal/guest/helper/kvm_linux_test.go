@@ -23,6 +23,8 @@ import (
 
 // The test binary is the VM's helper as PID 1, and its own client inside
 // the VM for what the image may lack.
+var kvmHogHeld [][]byte
+
 func init() {
 	switch {
 	case os.Getpid() == 1:
@@ -30,13 +32,12 @@ func init() {
 	case len(os.Args) == 3 && os.Args[1] == "kvm-connect":
 		os.Exit(kvmConnect(os.Args[2]))
 	case len(os.Args) == 2 && os.Args[1] == "kvm-hog":
-		var held [][]byte
 		for {
 			chunk := make([]byte, 64<<20)
 			for i := range chunk {
 				chunk[i] = 1
 			}
-			held = append(held, chunk)
+			kvmHogHeld = append(kvmHogHeld, chunk)
 		}
 	}
 }
@@ -135,11 +136,11 @@ func TestKVMHelper(t *testing.T) {
 
 	share := filepath.Join(dir, "share")
 	for _, d := range []string{"run-aether", "workspace", "bin"} {
-		if err := os.MkdirAll(filepath.Join(share, d), 0o755); err != nil {
+		if err = os.MkdirAll(filepath.Join(share, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Link(self, filepath.Join(share, "bin", "aether-internal")); err != nil {
+	if err = os.Link(self, filepath.Join(share, "bin", "aether-internal")); err != nil {
 		t.Fatal(err)
 	}
 	coord := filepath.Join(share, "run-aether", "coord3.sock")
@@ -148,7 +149,7 @@ func TestKVMHelper(t *testing.T) {
 	echoSocket(t, signing, "signing")
 	vsockPath := filepath.Join(dir, "vsock.sock")
 	for port, target := range map[int]string{1025: coord, 1026: signing} {
-		if err := os.Symlink(target, fmt.Sprintf("%s_%d", vsockPath, port)); err != nil {
+		if err = os.Symlink(target, fmt.Sprintf("%s_%d", vsockPath, port)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,12 +171,12 @@ func TestKVMHelper(t *testing.T) {
 	}
 	fsSocket := filepath.Join(dir, "virtiofs.sock")
 	fs := exec.CommandContext(ctx, virtiofsd, "--socket-path="+fsSocket, "--shared-dir="+share, "--cache=auto")
-	if err := fs.Start(); err != nil {
+	if err = fs.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = fs.Process.Kill(); _ = fs.Wait() }()
 	for start := time.Now(); time.Since(start) < 5*time.Second; time.Sleep(50 * time.Millisecond) {
-		if _, err := os.Stat(fsSocket); err == nil {
+		if _, err = os.Stat(fsSocket); err == nil {
 			break
 		}
 	}
@@ -186,7 +187,7 @@ func TestKVMHelper(t *testing.T) {
 		"--vsock", "cid=3,socket="+vsockPath, "--net", "ip=10.203.9.1,mask=255.255.255.0",
 		"--serial", "file="+serial, "--console", "off")
 	vm.Stdout, vm.Stderr = os.Stderr, os.Stderr
-	if err := vm.Start(); err != nil {
+	if err = vm.Start(); err != nil {
 		t.Fatal(err)
 	}
 	exited := make(chan error, 1)
@@ -211,7 +212,7 @@ func TestKVMHelper(t *testing.T) {
 	}
 	t.Logf("helper answered %v after the VM started", time.Since(start).Round(time.Millisecond))
 	env := []string{"PATH=" + defaultPath}
-	if err := client.Boot(ctx, guest.BootSpec{
+	if err = client.Boot(ctx, guest.BootSpec{
 		Main:         guest.ProcessSpec{Argv: []string{"/bin/sh", "-c", "echo main; exec sleep infinity"}, Env: env},
 		SetupScript:  "echo set up > /tmp/setup",
 		NestedDocker: true,
@@ -222,16 +223,16 @@ func TestKVMHelper(t *testing.T) {
 
 	run := func(id, user string, argv ...string) (string, int) {
 		t.Helper()
-		p, err := client.Spawn(ctx, guest.ProcessSpec{ID: id, Argv: argv, Env: env, User: user})
-		if err != nil {
-			t.Fatal(err)
+		p, spawnErr := client.Spawn(ctx, guest.ProcessSpec{ID: id, Argv: argv, Env: env, User: user})
+		if spawnErr != nil {
+			t.Fatal(spawnErr)
 		}
 		a := p.Attach(true)
 		defer func() { _ = a.Close() }()
 		out, _ := io.ReadAll(io.MultiReader(a.Stdout(), a.Stderr()))
-		code, err := p.Wait(ctx)
-		if err != nil {
-			t.Fatal(err)
+		code, waitErr := p.Wait(ctx)
+		if waitErr != nil {
+			t.Fatal(waitErr)
 		}
 		return string(out), code
 	}
@@ -246,14 +247,14 @@ func TestKVMHelper(t *testing.T) {
 		t.Errorf("nested dockerd: exit %d: %s", code, out)
 	}
 	ahead := time.Now().Add(time.Hour)
-	if err := client.SyncClock(ctx, ahead); err != nil {
+	if err = client.SyncClock(ctx, ahead); err != nil {
 		t.Fatal(err)
 	}
 	out, _ := run("clock", "", "date", "+%s")
-	if got, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64); err != nil || got < ahead.Unix()-5 || got > ahead.Unix()+60 {
+	if got, parseErr := strconv.ParseInt(strings.TrimSpace(out), 10, 64); parseErr != nil || got < ahead.Unix()-5 || got > ahead.Unix()+60 {
 		t.Errorf("the clock was set to %d, the VM says %s", ahead.Unix(), out)
 	}
-	if err := client.SyncClock(ctx, time.Now()); err != nil {
+	if err = client.SyncClock(ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,10 +264,10 @@ func TestKVMHelper(t *testing.T) {
 	}
 	terminal := shell.Attach(true)
 	waitFor(t, terminal.Stdout(), "24 80")
-	if err := terminal.Resize(ctx, 132, 40); err != nil {
+	if err = terminal.Resize(ctx, 132, 40); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := terminal.Stdin().Write([]byte("\n")); err != nil {
+	if _, err = terminal.Stdin().Write([]byte("\n")); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, terminal.Stdout(), "40 132")
@@ -338,7 +339,7 @@ func TestKVMHelper(t *testing.T) {
 	client = again
 	reattached := client.Process("ticker").Attach(true)
 	waitFor(t, reattached.Stdout(), "started")
-	if _, err := reattached.Stdin().Write([]byte("again\n")); err != nil {
+	if _, err = reattached.Stdin().Write([]byte("again\n")); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, reattached.Stdout(), "got again")
