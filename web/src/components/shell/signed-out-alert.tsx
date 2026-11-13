@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { signedOutTitle } from '@/components/agents/agent-copy'
+import { X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { toneClasses } from '@/components/ui/status-dot'
 import { cn } from '@/lib/utils'
@@ -37,6 +38,7 @@ export function SignedOutAlert() {
   const { agents, reload } = useAgentList()
   useLoginWatch(reload)
   const navigate = useStore((s) => s.navigate)
+  const [dismissed, setDismissed] = useState(false)
   // The Agents page shows every finding beside its Log in, and a live
   // session's Chat shows its own agent's beside Sign in on Agents after a
   // refusal.
@@ -48,10 +50,10 @@ export function SignedOutAlert() {
     return refused && own && s.shownRunView?.runId === run?.id && s.shownRunView?.view === 'session' ? run?.harness : undefined
   })
   const signedOut = agents?.filter((agent) => agent.installed && agent.login_problem && agent.name !== inChat) ?? []
-  if (!signedOut.length || onAgents) return null
+  if (!signedOut.length || onAgents || dismissed) return null
   const { text, soft } = toneClasses('needs-you')
   return (
-    <div role="alert" data-tone="needs-you" className={cn('flex flex-col gap-x-3 gap-y-1 border-b border-seam px-3 py-1.5 text-ui text-text md:flex-row md:items-center', soft)}>
+    <div role="alert" data-tone="needs-you" className={cn('flex min-w-0 items-start gap-2 border-b border-seam px-3 py-1.5 text-ui text-text md:items-center', soft)}>
       <ul className="flex min-w-0 flex-1 flex-col gap-0.5">
         {signedOut.map((agent) => (
           <li key={agent.name} className="flex min-w-0 flex-col gap-x-3 md:flex-row md:items-baseline">
@@ -60,7 +62,10 @@ export function SignedOutAlert() {
           </li>
         ))}
       </ul>
-      <Button size="sm" variant="secondary" className="self-start md:self-center" onClick={() => navigate('agents')}>Sign in on Agents</Button>
+      <div className="flex shrink-0 items-center gap-1 self-start md:self-center">
+        <Button size="sm" variant="secondary" onClick={() => navigate('agents')}>Sign in on Agents</Button>
+        <Button size="icon-sm" variant="ghost" label="Dismiss notification" onClick={() => setDismissed(true)}><X aria-hidden="true" /></Button>
+      </div>
     </div>
   )
 }
