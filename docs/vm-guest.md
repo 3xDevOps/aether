@@ -71,10 +71,13 @@ the path the session expects, such as `/run/aether/coord3.sock` or
 Cloud Hypervisor delivers a connection to port `N` to the host socket
 `<vsock socket>_<N>`, which the server points at the real socket.
 
-While the host socket does not answer, as during a server restart, a relay
-holds the connection and keeps trying for 60 seconds, the time the
-coordination client retries a refused connection. The call is then delivered
-once the server is back, instead of being cut off after it was sent.
+While the host socket does not answer, as during a server restart, the
+helper stops listening on the path, so a connection there is refused exactly
+as one to a stopped server's socket is, and the coordination client retries
+it for 60 seconds. The helper listens again as soon as the host answers. The
+one connection it accepted before it noticed waits up to 60 seconds for the
+host; if its client hangs up first, for example because the call timed out,
+its request never reaches the server.
 
 When the path is an entry in a read-only share, as the coordination socket in
 the run's shared directory is, the helper binds its own socket over the
@@ -88,12 +91,14 @@ retries.
 `Boot` starts the session the way Docker starts a container, each step only
 after the one before succeeded:
 
-1. With `nested_docker`, and when the image has `dockerd` and `docker`,
-   `dockerd -H unix:///var/run/docker.sock --group <main gid> --cgroup-parent
-   /session`, logging to `/var/log/aether-dockerd.log`. It must answer within
+1. With `nested_docker`, and when the image has `dockerd` and `docker` on
+   Docker's default `PATH`, `dockerd -H unix:///var/run/docker.sock --group
+   <main gid> --cgroup-parent /session` as root, logging to
+   `/var/log/aether-dockerd.log`. It gets the main process's environment
+   with that `PATH`, never the session's, which starts in the member's home. It must answer within
    60 seconds.
 2. The setup script, as `/bin/sh -ec "exec 2>&1; <script>"` with the main
-   process's user, environment and directory. A nonzero exit returns its code
+   process's user, environment and directory, and no input. A nonzero exit returns its code
    and the last 16 KiB of its output, and the main process never starts.
 3. The main process, under the ID `main`.
 
@@ -101,13 +106,15 @@ A later `Boot` call, also from a restarted server, returns the first call's
 result. Setup runs once per boot, and the server gives every cold start a new
 root disk.
 
-`Spawn` starts any other process. Its ID is the caller's and can be used once
-per boot, so a spawn whose reply was lost is found again rather than started
-twice; `main`, `setup` and `dockerd` are reserved. The user is `uid:gid`,
+`Spawn` starts any other process. Its ID is the caller's and cannot be used
+again while the helper keeps the process's record, so a spawn whose reply was
+lost is found again rather than started twice; `main`, `setup` and `dockerd`
+are reserved. The user is `uid:gid`,
 `uid` or empty for root, with supplementary groups and the home taken from
 the uid's passwd entry. `HOME`, Docker's default `PATH` and, on a terminal,
-`TERM=xterm` are added when the environment lacks them. A process runs in its
-own session, either as the leader of a new terminal or with three pipes. A
+`TERM=xterm` are added when the environment lacks them. A relative program
+is found from the working directory, which must exist; `Boot` creates the main
+process's, as Docker does. A process runs in its own session, either as the leader of a new terminal or with three pipes. A
 program that cannot be executed fails the spawn with exit code 127 when it
 was not found and 126 otherwise. A process a signal killed exits with 128
 plus the signal number. The helper keeps the records of the 32 most recent
@@ -127,7 +134,8 @@ bytes before it. A lossy stream keeps its newest 256 KiB, and a reply whose
 offset is past the requested one says what was dropped. A `lossless` process
 blocks once 256 KiB of its output are unacknowledged. A stream ends once its
 process and every descendant closed it, or one second after the process
-exited.
+exited with what the pipe then still holds, which a lossless stream keeps
+for its reader however late it comes.
 
 Because the output stays in the VM, a restarted server attaches by ID and
 reads on from what the helper still holds, and so does a client whose

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -211,9 +212,10 @@ func TestKVMHelper(t *testing.T) {
 	t.Logf("helper answered %v after the VM started", time.Since(start).Round(time.Millisecond))
 	env := []string{"PATH=" + defaultPath}
 	if err := client.Boot(ctx, guest.BootSpec{
-		Main:        guest.ProcessSpec{Argv: []string{"/bin/sh", "-c", "echo main; exec sleep infinity"}, Env: env},
-		SetupScript: "echo set up > /tmp/setup",
-		PidsLimit:   128,
+		Main:         guest.ProcessSpec{Argv: []string{"/bin/sh", "-c", "echo main; exec sleep infinity"}, Env: env},
+		SetupScript:  "echo set up > /tmp/setup",
+		NestedDocker: true,
+		PidsLimit:    128,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -233,11 +235,26 @@ func TestKVMHelper(t *testing.T) {
 		}
 		return string(out), code
 	}
-	mounts, _ := run("mounts", "", "/bin/sh", "-c", `cat /tmp/setup; hostname; cat /proc/1/comm; cut -d" " -f5,6 /proc/self/mountinfo`)
-	for _, want := range []string{"set up\n", "kvm-helper\n", "/workspace rw,nosuid,nodev", "/run/aether ro,nosuid,nodev", "/usr/local/bin/aether-internal ro,nosuid,nodev", "/tmp rw", "/run/aether/coord3.sock"} {
+	mounts, _ := run("mounts", "", "/bin/sh", "-c", `cat /tmp/setup; hostname; cat /proc/1/comm; cut -d" " -f5,6 /proc/self/mountinfo; echo pids.max=$(cat /sys/fs/cgroup/session/pids.max)`)
+	for _, want := range []string{"set up\n", "kvm-helper\n", "/workspace rw,nosuid,nodev", "/run/aether ro,nosuid,nodev", "/usr/local/bin/aether-internal ro,nosuid,nodev", "/tmp rw", "/run/aether/coord3.sock", "pids.max=128"} {
 		if !strings.Contains(mounts, want) {
 			t.Errorf("the VM lacks %q:\n%s", want, mounts)
 		}
+	}
+
+	if out, code := run("docker", "", "docker", "info", "--format", "{{.ServerVersion}} {{.CgroupVersion}}"); code != 0 || !strings.HasSuffix(strings.TrimSpace(out), " 2") {
+		t.Errorf("nested dockerd: exit %d: %s", code, out)
+	}
+	ahead := time.Now().Add(time.Hour)
+	if err := client.SyncClock(ctx, ahead); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := run("clock", "", "date", "+%s")
+	if got, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64); err != nil || got < ahead.Unix()-5 || got > ahead.Unix()+60 {
+		t.Errorf("the clock was set to %d, the VM says %s", ahead.Unix(), out)
+	}
+	if err := client.SyncClock(ctx, time.Now()); err != nil {
+		t.Fatal(err)
 	}
 
 	shell, err := client.Spawn(ctx, guest.ProcessSpec{ID: "shell", Argv: []string{"/bin/sh", "-c", "tty; stty size; read x; stty size"}, Env: env, TTY: &guest.Size{Cols: 80, Rows: 24}})
@@ -262,23 +279,34 @@ func TestKVMHelper(t *testing.T) {
 		t.Errorf("signing socket: exit %d: %s", code, out)
 	}
 	// A stopped server leaves its socket file behind, and the next one
-	// unlinks it and listens again. A call made in between waits for the
-	// new server; virtio-fs then drops the helper's bind, which it binds
-	// again.
+	// unlinks it and listens again. A call accepted just before the helper
+	// noticed waits for the new server; later ones are refused and retried,
+	// as under Docker. virtio-fs then drops the helper's bind, which it
+	// binds again.
 	coordListener.(*net.UnixListener).SetUnlinkOnClose(false)
 	_ = coordListener.Close()
-	waiting, err := client.Spawn(ctx, guest.ProcessSpec{ID: "coord-waits", Env: env, User: "1000:1000",
-		Argv: []string{"/usr/local/bin/aether-internal", "kvm-connect", "/run/aether/coord3.sock"}})
+	connect := []string{"/usr/local/bin/aether-internal", "kvm-connect", "/run/aether/coord3.sock"}
+	held, err := client.Spawn(ctx, guest.ProcessSpec{ID: "coord-held", Env: env, User: "1000:1000", Argv: connect})
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
+	refused, err := client.Spawn(ctx, guest.ProcessSpec{ID: "coord-refused", Env: env, User: "1000:1000", Argv: connect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1500 * time.Millisecond)
 	echoSocket(t, coord, "restarted-coord")
-	waited := waiting.Attach(true)
-	out, _ := io.ReadAll(waited.Stdout())
-	_ = waited.Close()
-	if !strings.Contains(string(out), "restarted-coord answers") {
-		t.Errorf("a call made while the server restarted: %s", out)
+	for _, p := range []*guest.Process{held, refused} {
+		a := p.Attach(true)
+		out, _ := io.ReadAll(a.Stdout())
+		_ = a.Close()
+		if !strings.Contains(string(out), "restarted-coord answers") {
+			t.Errorf("%s, a call made while the server restarted: %s", p.ID(), out)
+		}
+		if p == refused && !strings.Contains(string(out), "connection refused") {
+			t.Errorf("a connection while the server is down must be refused: %s", out)
+		}
 	}
 	if out, code := run("coord-again", "1000:1000", "/usr/local/bin/aether-internal", "kvm-connect", "/run/aether/coord3.sock"); code != 0 || !strings.Contains(out, "restarted-coord answers") {
 		t.Errorf("coordination socket after a server restart: exit %d: %s", code, out)

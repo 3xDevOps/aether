@@ -21,11 +21,16 @@ import (
 // forward is one socket the helper relays to the host.
 type forward struct {
 	guest.Socket
-	listener net.Listener
-	// overlay is the helper's own socket bound over Path, empty when the
-	// helper could create Path itself.
-	overlay string
+	// path is where the helper listens: Path, or with overlay a socket of its
+	// own that it binds over Path.
+	path    string
+	overlay bool
 	failing bool
+
+	// mu guards listener and the bind over Path.
+	mu sync.Mutex
+	// listener is nil while the host socket does not answer.
+	listener net.Listener
 }
 
 // forwardSockets listens on every configured socket and relays each
@@ -43,10 +48,9 @@ func forwardSockets(sockets []guest.Socket) error {
 			errs = append(errs, fmt.Errorf("socket %s: %w", s.Path, err))
 			continue
 		}
-		if f.overlay != "" {
+		if f.overlay {
 			overlaid = append(overlaid, f)
 		}
-		go f.serve()
 	}
 	if len(overlaid) > 0 {
 		go keepBound(overlaid)
@@ -58,39 +62,61 @@ func (f *forward) listen() error {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil && !errors.Is(err, syscall.EROFS) {
 		return err
 	}
-	path := f.Path
+	f.path = f.Path
 	if _, err := os.Lstat(f.Path); err == nil {
 		if err := os.Remove(f.Path); err != nil {
-			path = filepath.Join(privateDir, "sockets", strconv.FormatUint(uint64(f.Port), 10)+".sock")
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			f.path = filepath.Join(privateDir, "sockets", strconv.FormatUint(uint64(f.Port), 10)+".sock")
+			if err := os.MkdirAll(filepath.Dir(f.path), 0o755); err != nil {
 				return err
 			}
-			_ = os.Remove(path)
-			f.overlay = path
+			f.overlay = true
 		}
 	}
-	listener, err := net.Listen("unix", path)
+	return f.open()
+}
+
+// open listens on a fresh socket at path. Its file outlives the listener,
+// so a connection while the listener is closed is refused, as one to a
+// stopped server's socket is.
+func (f *forward) open() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.overlay && f.bound() {
+		if err := unix.Unmount(f.Path, unix.MNT_DETACH); err != nil {
+			return fmt.Errorf("unbind the previous socket: %w", err)
+		}
+	}
+	if err := os.Remove(f.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	listener, err := net.Listen("unix", f.path)
 	if err != nil {
 		return err
 	}
-	f.listener = listener
-	if err := os.Chmod(path, 0o666); err != nil {
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := os.Chmod(f.path, 0o666); err != nil {
+		_ = listener.Close()
 		return err
 	}
-	if f.overlay != "" {
-		return f.bind()
+	if f.overlay {
+		if err := f.bind(); err != nil {
+			_ = listener.Close()
+			return err
+		}
 	}
+	f.listener = listener
+	go f.serve(listener)
 	return nil
 }
 
 func (f *forward) bind() error {
-	return unix.Mount(f.overlay, f.Path, "", unix.MS_BIND, "")
+	return unix.Mount(f.path, f.Path, "", unix.MS_BIND, "")
 }
 
 // bound reports whether Path is still the helper's socket.
 func (f *forward) bound() bool {
 	var path, own unix.Stat_t
-	return unix.Stat(f.Path, &path) == nil && unix.Stat(f.overlay, &own) == nil && path.Dev == own.Dev && path.Ino == own.Ino
+	return unix.Stat(f.Path, &path) == nil && unix.Stat(f.path, &own) == nil && path.Dev == own.Dev && path.Ino == own.Ino
 }
 
 // keepBound rebinds a dropped socket on every mount table change, and
@@ -113,30 +139,30 @@ func keepBound(forwards []*forward) {
 		}
 		timeout = -1
 		for _, f := range forwards {
-			if f.bound() {
-				continue
-			}
-			err := f.bind()
-			if err != nil {
+			if err := f.rebind(); err != nil {
 				timeout = int((100 * time.Millisecond).Milliseconds())
-				if !f.failing {
-					slog.Warn("guest: bind a socket again", "path", f.Path, "error", err)
-				}
 			}
-			f.failing = err != nil
 		}
 	}
 }
 
-// hostWait is how long a relay waits for the host's socket: as long as the
-// coordination client retries a refused one, so a call made while the
-// server restarts is delivered once it is back instead of being cut off
-// after it was sent.
-const hostWait = 60 * time.Second
+func (f *forward) rebind() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.bound() {
+		return nil
+	}
+	err := f.bind()
+	if err != nil && !f.failing {
+		slog.Warn("guest: bind a socket again", "path", f.Path, "error", err)
+	}
+	f.failing = err != nil
+	return err
+}
 
-func (f *forward) serve() {
+func (f *forward) serve(listener net.Listener) {
 	for {
-		conn, err := f.listener.Accept()
+		conn, err := listener.Accept()
 		if errors.Is(err, net.ErrClosed) {
 			return
 		}
@@ -151,10 +177,14 @@ func (f *forward) serve() {
 
 func (f *forward) relay(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	host, err := dialHost(f.Port)
+	var host net.Conn
+	host, err := vsock.Dial(vsock.Host, f.Port, nil)
 	if err != nil {
-		slog.Warn("guest: reach host socket", "path", f.Path, "port", f.Port, "error", err)
-		return
+		f.hostDown()
+		if host, err = awaitHost(conn, f.Port); err != nil {
+			slog.Warn("guest: reach host socket", "path", f.Path, "port", f.Port, "error", err)
+			return
+		}
 	}
 	defer func() { _ = host.Close() }()
 	var wg sync.WaitGroup
@@ -164,17 +194,74 @@ func (f *forward) relay(conn net.Conn) {
 	wg.Wait()
 }
 
-func dialHost(port uint32) (net.Conn, error) {
-	deadline := time.Now().Add(hostWait)
-	delay := 50 * time.Millisecond
-	for {
-		conn, err := vsock.Dial(vsock.Host, port, nil)
-		if err == nil || time.Now().After(deadline) {
-			return conn, err
-		}
-		time.Sleep(delay)
-		delay = min(2*delay, time.Second)
+// hostDown closes the listener once the host socket stops answering, as
+// while the server restarts, so new connections are refused and the
+// coordination client retries them, and listens again once the host
+// answers.
+func (f *forward) hostDown() {
+	f.mu.Lock()
+	listener := f.listener
+	f.listener = nil
+	f.mu.Unlock()
+	if listener == nil {
+		return
 	}
+	_ = listener.Close()
+	go func() {
+		for delay := 50 * time.Millisecond; ; delay = min(2*delay, time.Second) {
+			if probe, err := vsock.Dial(vsock.Host, f.Port, nil); err == nil {
+				_ = probe.Close()
+				break
+			}
+			time.Sleep(delay)
+		}
+		for {
+			err := f.open()
+			if err == nil {
+				return
+			}
+			slog.Warn("guest: listen on a forwarded socket again", "path", f.Path, "error", err)
+			time.Sleep(time.Second)
+		}
+	}()
+}
+
+// hostWait bounds how long a connection accepted before the host stopped
+// answering waits for it.
+const hostWait = 60 * time.Second
+
+var errHungUp = errors.New("the client in the VM hung up")
+
+// awaitHost holds a connection that was accepted before the host stopped
+// answering until the host answers again. A client that hangs up first,
+// such as one whose call timed out, never has its request reach the server.
+func awaitHost(conn net.Conn, port uint32) (net.Conn, error) {
+	raw, err := conn.(syscall.Conn).SyscallConn()
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(hostWait)
+	for delay := 50 * time.Millisecond; time.Now().Before(deadline); delay = min(2*delay, time.Second) {
+		if hungUp(raw, delay) {
+			return nil, errHungUp
+		}
+		if host, err := vsock.Dial(vsock.Host, port, nil); err == nil {
+			return host, nil
+		}
+	}
+	return nil, fmt.Errorf("the host socket did not answer within %s", hostWait)
+}
+
+// hungUp waits up to wait for the peer to close the connection. A peer that
+// only closed its writing side still waits for a reply.
+func hungUp(raw syscall.RawConn, wait time.Duration) bool {
+	gone := false
+	_ = raw.Control(func(fd uintptr) {
+		fds := []unix.PollFd{{Fd: int32(fd)}}
+		n, _ := unix.Poll(fds, int(wait.Milliseconds()))
+		gone = n > 0 && fds[0].Revents&(unix.POLLHUP|unix.POLLERR) != 0
+	})
+	return gone
 }
 
 type halfCloser interface {
