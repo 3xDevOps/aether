@@ -88,7 +88,9 @@ type record struct {
 	OwnedDirs []string       `json:"owned_dirs,omitempty"`
 	Serves    []guest.Socket `json:"serves,omitempty"`
 	// Browser is the development browser's disk, attached read-only; empty
-	// when its image was not built yet when the VM was created.
+	// while its image was not built yet. A VM that WantsBrowser takes the
+	// current image's at every cold start.
+	WantsBrowser bool         `json:"wants_browser,omitempty"`
 	Browser      vmimage.Disk `json:"browser"`
 	BrowserImage string       `json:"browser_image,omitempty"`
 	BrowserEnv   []string     `json:"browser_env,omitempty"`

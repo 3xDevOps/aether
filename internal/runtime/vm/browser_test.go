@@ -46,7 +46,8 @@ func TestSessionVMBootsWithTheBrowsersDiskAndSocket(t *testing.T) {
 	if !strings.Contains(args, "id=browser,serial=browser,backing_files=on,readonly=on") || !strings.Contains(args, "aether.serve=2001,") {
 		t.Errorf("a session VM boots without the browser's disk or socket: %s", args)
 	}
-	h.engine.cfg.BrowserImage = "ghcr.io/3xdevops/aether-browser:v2"
+	const newer = "ghcr.io/3xdevops/aether-browser:v2"
+	h.engine.cfg.BrowserImage = newer
 	spec := sessionSpec("run-b")
 	if _, err := h.engine.create(t.Context(), "run-b", spec, options{Browser: true}); err != nil {
 		t.Fatal(err)
@@ -54,13 +55,31 @@ func TestSessionVMBootsWithTheBrowsersDiskAndSocket(t *testing.T) {
 	if rec, _ := h.engine.load("run-b"); rec.Browser.Path != "" {
 		t.Errorf("a VM got a browser disk whose image was not built: %+v", rec.Browser)
 	}
-	newer := browserSpec(t, "run-a")
-	newer.Image = h.engine.cfg.BrowserImage
-	if _, err := h.engine.createBrowser(t.Context(), "run-a", newer); err == nil || !strings.Contains(err.Error(), "restart the session") {
-		t.Errorf("a browser of another image = %v", err)
+	if err := h.engine.start(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := h.engine.createBrowser(t.Context(), "run-b", browserSpec(t, "run-b")); err == nil {
-		t.Error("a browser in a VM without its disk")
+	if _, err := h.engine.createBrowser(t.Context(), "run-b", browserSpec(t, "run-b")); err == nil || !strings.Contains(err.Error(), "starts again") {
+		t.Errorf("a browser in a VM without its disk = %v", err)
+	}
+	older := browserSpec(t, "run-a")
+	older.Image = newer
+	if _, err := h.engine.createBrowser(t.Context(), "run-a", older); err != nil {
+		t.Errorf("a running VM's companion of the image it booted with = %v", err)
+	}
+
+	h.images.mu.Lock()
+	h.images.tagLocked(newer, vmimage.Base{ID: "sha256:browser2", Path: "/images/browser2.raw"})
+	h.images.mu.Unlock()
+	for _, key := range []string{"run-a", "run-b"} {
+		if err := h.engine.stop(t.Context(), key, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.engine.start(t.Context(), key); err != nil {
+			t.Fatal(err)
+		}
+		if rec, _ := h.engine.load(key); rec.BrowserImage != newer || rec.Browser.Path == "" || rec.Companion != nil {
+			t.Errorf("%s after a cold start: browser %q at %q, companion %+v", key, rec.BrowserImage, rec.Browser.Path, rec.Companion)
+		}
 	}
 }
 

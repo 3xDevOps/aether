@@ -1008,13 +1008,13 @@ func TestKVMBrowserInTheSessionVM(t *testing.T) {
 		t.Fatalf("open the session's dev server = %+v, %v", res.Page, err)
 	}
 	var out strings.Builder
-	check := `for p in /proc/[0-9]*; do grep -q server.mjs $p/cmdline 2>/dev/null && grep -E '^(Uid|NoNewPrivs):' $p/status; done | sort -u
-cat /sys/fs/cgroup/browser/memory.max /sys/fs/cgroup/browser/pids.max
+	check := `for p in /proc/[0-9]*; do grep -q server.mjs $p/cmdline 2>/dev/null && grep -E '^(Uid|NoNewPrivs|Seccomp):' $p/status; done | sort -u
+cat /sys/fs/cgroup/session/browser/memory.max /sys/fs/cgroup/session/browser/pids.max
 touch /run/aether-guest/browser/root/x 2>&1 | grep -o 'Read-only file system'`
 	if _, err = e.execAttached(t.Context(), key, runtime.AttachedExec{Argv: []string{"/bin/sh", "-c", check}, User: "0:0", Stdout: &out, Stderr: &out}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Uid:\t65533", "NoNewPrivs:\t1", "1073741824", "512", "Read-only file system"} {
+	for _, want := range []string{"Uid:\t65533", "NoNewPrivs:\t1", "Seccomp:\t2", "1073741824", "512", "Read-only file system"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("confinement check lacks %q:\n%s", want, out.String())
 		}
@@ -1034,8 +1034,36 @@ touch /run/aether-guest/browser/root/x 2>&1 | grep -o 'Read-only file system'`
 	if _, err = client.Health(t.Context()); err != nil {
 		t.Errorf("health after resume: %v", err)
 	}
+	shmem := func() int {
+		t.Helper()
+		var out strings.Builder
+		if _, execErr := e.execAttached(t.Context(), key, runtime.AttachedExec{Argv: []string{"/bin/sh", "-c", "sync; awk '/^Shmem:/{print $2}' /proc/meminfo"}, User: "0:0", Stdout: &out, Stderr: &out}); execErr != nil {
+			t.Fatal(execErr)
+		}
+		kb, _ := strconv.Atoi(strings.TrimSpace(out.String()))
+		return kb
+	}
+	var fill strings.Builder
+	if _, err = e.execAttached(t.Context(), key, runtime.AttachedExec{Argv: []string{"/bin/sh", "-c", "head -c 200000000 /dev/zero > /run/aether-guest/browser/root/tmp/fill"}, User: "0:0", Stdout: &fill, Stderr: &fill}); err != nil {
+		t.Fatalf("fill the companion's /tmp: %v %s", err, fill.String())
+	}
+	held := shmem()
+	// Removed from a paused VM, as when a closed session sleeps: the VM runs
+	// just long enough for the helper to kill the companion.
+	if err = e.pause(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
 	if err = e.destroyBrowser(t.Context(), key); err != nil {
 		t.Fatal(err)
+	}
+	if !e.paused(t.Context(), key) {
+		t.Error("removing the browser left a paused VM running")
+	}
+	if err = e.resume(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	if freed := held - shmem(); freed < 190000 {
+		t.Errorf("a stopped browser gave back %d KiB of the %d KiB tmpfs it held", freed, held)
 	}
 	client.Close()
 	client = open("b")

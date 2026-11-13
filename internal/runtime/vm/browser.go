@@ -96,13 +96,14 @@ func (e *engine) createBrowser(ctx context.Context, key string, spec runtime.Bro
 	if err != nil {
 		return "", err
 	}
+	// A VM runs the companion of the browser image it booted with, which
+	// the client's protocol check holds to one the server speaks; the next
+	// cold start takes the current one.
 	switch {
 	case e.paused(ctx, key):
 		return "", fmt.Errorf("vm runtime: open the browser in VM %s: it is paused", key)
 	case rec.Browser.Path == "":
-		return "", fmt.Errorf("vm runtime: VM %s started before the browser's disk was built; restart the session to use the browser", key)
-	case rec.BrowserImage != spec.Image:
-		return "", fmt.Errorf("vm runtime: VM %s has the browser of %s, not %s; restart the session to use it", key, rec.BrowserImage, spec.Image)
+		return "", fmt.Errorf("vm runtime: VM %s started while the server was still building the browser's disk; the browser works once the session's VM starts again, as after it sleeps", key)
 	}
 	if rec.Companion != nil {
 		if err = e.stopCompanion(ctx, key); err != nil {
