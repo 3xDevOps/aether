@@ -74,6 +74,58 @@ func (Stream) EnumDescriptor() ([]byte, []int) {
 	return file_guest_proto_rawDescGZIP(), []int{0}
 }
 
+type BrowserRequest_Action int32
+
+const (
+	BrowserRequest_START  BrowserRequest_Action = 0
+	BrowserRequest_PAUSE  BrowserRequest_Action = 1
+	BrowserRequest_RESUME BrowserRequest_Action = 2
+	BrowserRequest_STOP   BrowserRequest_Action = 3
+)
+
+// Enum value maps for BrowserRequest_Action.
+var (
+	BrowserRequest_Action_name = map[int32]string{
+		0: "START",
+		1: "PAUSE",
+		2: "RESUME",
+		3: "STOP",
+	}
+	BrowserRequest_Action_value = map[string]int32{
+		"START":  0,
+		"PAUSE":  1,
+		"RESUME": 2,
+		"STOP":   3,
+	}
+)
+
+func (x BrowserRequest_Action) Enum() *BrowserRequest_Action {
+	p := new(BrowserRequest_Action)
+	*p = x
+	return p
+}
+
+func (x BrowserRequest_Action) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (BrowserRequest_Action) Descriptor() protoreflect.EnumDescriptor {
+	return file_guest_proto_enumTypes[1].Descriptor()
+}
+
+func (BrowserRequest_Action) Type() protoreflect.EnumType {
+	return &file_guest_proto_enumTypes[1]
+}
+
+func (x BrowserRequest_Action) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use BrowserRequest_Action.Descriptor instead.
+func (BrowserRequest_Action) EnumDescriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{33, 0}
+}
+
 type InfoRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1726,6 +1778,121 @@ func (*SyncReply) Descriptor() ([]byte, []int) {
 	return file_guest_proto_rawDescGZIP(), []int{32}
 }
 
+type BrowserRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Action BrowserRequest_Action  `protobuf:"varint,1,opt,name=action,proto3,enum=aether.guest.v1.BrowserRequest_Action" json:"action,omitempty"`
+	// process is what START runs: a program path in the browser's root and a
+	// numeric user. Only one companion runs at a time.
+	Process     *Process `protobuf:"bytes,2,opt,name=process,proto3" json:"process,omitempty"`
+	MemoryBytes uint64   `protobuf:"varint,3,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"`
+	// cpu_millis caps CPU in thousandths of a core; 0 is unlimited.
+	CpuMillis     uint32 `protobuf:"varint,4,opt,name=cpu_millis,json=cpuMillis,proto3" json:"cpu_millis,omitempty"`
+	ShmBytes      uint64 `protobuf:"varint,5,opt,name=shm_bytes,json=shmBytes,proto3" json:"shm_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BrowserRequest) Reset() {
+	*x = BrowserRequest{}
+	mi := &file_guest_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BrowserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BrowserRequest) ProtoMessage() {}
+
+func (x *BrowserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BrowserRequest.ProtoReflect.Descriptor instead.
+func (*BrowserRequest) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *BrowserRequest) GetAction() BrowserRequest_Action {
+	if x != nil {
+		return x.Action
+	}
+	return BrowserRequest_START
+}
+
+func (x *BrowserRequest) GetProcess() *Process {
+	if x != nil {
+		return x.Process
+	}
+	return nil
+}
+
+func (x *BrowserRequest) GetMemoryBytes() uint64 {
+	if x != nil {
+		return x.MemoryBytes
+	}
+	return 0
+}
+
+func (x *BrowserRequest) GetCpuMillis() uint32 {
+	if x != nil {
+		return x.CpuMillis
+	}
+	return 0
+}
+
+func (x *BrowserRequest) GetShmBytes() uint64 {
+	if x != nil {
+		return x.ShmBytes
+	}
+	return 0
+}
+
+type BrowserReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BrowserReply) Reset() {
+	*x = BrowserReply{}
+	mi := &file_guest_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BrowserReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BrowserReply) ProtoMessage() {}
+
+func (x *BrowserReply) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BrowserReply.ProtoReflect.Descriptor instead.
+func (*BrowserReply) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{34}
+}
+
 var File_guest_proto protoreflect.FileDescriptor
 
 const file_guest_proto_rawDesc = "" +
@@ -1825,11 +1992,25 @@ const file_guest_proto_rawDesc = "" +
 	"\x06frozen\x18\x01 \x01(\bR\x06frozen\"\x14\n" +
 	"\x12FreezeSessionReply\"\r\n" +
 	"\vSyncRequest\"\v\n" +
-	"\tSyncReply*F\n" +
+	"\tSyncReply\"\x99\x02\n" +
+	"\x0eBrowserRequest\x12>\n" +
+	"\x06action\x18\x01 \x01(\x0e2&.aether.guest.v1.BrowserRequest.ActionR\x06action\x122\n" +
+	"\aprocess\x18\x02 \x01(\v2\x18.aether.guest.v1.ProcessR\aprocess\x12!\n" +
+	"\fmemory_bytes\x18\x03 \x01(\x04R\vmemoryBytes\x12\x1d\n" +
+	"\n" +
+	"cpu_millis\x18\x04 \x01(\rR\tcpuMillis\x12\x1b\n" +
+	"\tshm_bytes\x18\x05 \x01(\x04R\bshmBytes\"4\n" +
+	"\x06Action\x12\t\n" +
+	"\x05START\x10\x00\x12\t\n" +
+	"\x05PAUSE\x10\x01\x12\n" +
+	"\n" +
+	"\x06RESUME\x10\x02\x12\b\n" +
+	"\x04STOP\x10\x03\"\x0e\n" +
+	"\fBrowserReply*F\n" +
 	"\x06Stream\x12\x16\n" +
 	"\x12STREAM_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTREAM_STDOUT\x10\x01\x12\x11\n" +
-	"\rSTREAM_STDERR\x10\x022\xb9\b\n" +
+	"\rSTREAM_STDERR\x10\x022\x84\t\n" +
 	"\x05Guest\x12@\n" +
 	"\x04Info\x12\x1c.aether.guest.v1.InfoRequest\x1a\x1a.aether.guest.v1.InfoReply\x12@\n" +
 	"\x04Boot\x12\x1c.aether.guest.v1.BootRequest\x1a\x1a.aether.guest.v1.BootReply\x12C\n" +
@@ -1845,7 +2026,8 @@ const file_guest_proto_rawDesc = "" +
 	"\x06Freeze\x12\x1e.aether.guest.v1.FreezeRequest\x1a\x1c.aether.guest.v1.FreezeReply\x12@\n" +
 	"\x04Thaw\x12\x1c.aether.guest.v1.ThawRequest\x1a\x1a.aether.guest.v1.ThawReply\x12[\n" +
 	"\rFreezeSession\x12%.aether.guest.v1.FreezeSessionRequest\x1a#.aether.guest.v1.FreezeSessionReply\x12@\n" +
-	"\x04Sync\x12\x1c.aether.guest.v1.SyncRequest\x1a\x1a.aether.guest.v1.SyncReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
+	"\x04Sync\x12\x1c.aether.guest.v1.SyncRequest\x1a\x1a.aether.guest.v1.SyncReply\x12I\n" +
+	"\aBrowser\x12\x1f.aether.guest.v1.BrowserRequest\x1a\x1d.aether.guest.v1.BrowserReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
 
 var (
 	file_guest_proto_rawDescOnce sync.Once
@@ -1859,85 +2041,92 @@ func file_guest_proto_rawDescGZIP() []byte {
 	return file_guest_proto_rawDescData
 }
 
-var file_guest_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_guest_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_guest_proto_goTypes = []any{
 	(Stream)(0),                  // 0: aether.guest.v1.Stream
-	(*InfoRequest)(nil),          // 1: aether.guest.v1.InfoRequest
-	(*InfoReply)(nil),            // 2: aether.guest.v1.InfoReply
-	(*Size)(nil),                 // 3: aether.guest.v1.Size
-	(*Process)(nil),              // 4: aether.guest.v1.Process
-	(*BootRequest)(nil),          // 5: aether.guest.v1.BootRequest
-	(*BootReply)(nil),            // 6: aether.guest.v1.BootReply
-	(*SpawnRequest)(nil),         // 7: aether.guest.v1.SpawnRequest
-	(*SpawnReply)(nil),           // 8: aether.guest.v1.SpawnReply
-	(*SpawnFailure)(nil),         // 9: aether.guest.v1.SpawnFailure
-	(*ReadRequest)(nil),          // 10: aether.guest.v1.ReadRequest
-	(*ReadReply)(nil),            // 11: aether.guest.v1.ReadReply
-	(*WriteRequest)(nil),         // 12: aether.guest.v1.WriteRequest
-	(*WriteReply)(nil),           // 13: aether.guest.v1.WriteReply
-	(*ResizeRequest)(nil),        // 14: aether.guest.v1.ResizeRequest
-	(*ResizeReply)(nil),          // 15: aether.guest.v1.ResizeReply
-	(*SignalRequest)(nil),        // 16: aether.guest.v1.SignalRequest
-	(*SignalReply)(nil),          // 17: aether.guest.v1.SignalReply
-	(*StatusRequest)(nil),        // 18: aether.guest.v1.StatusRequest
-	(*StatusReply)(nil),          // 19: aether.guest.v1.StatusReply
-	(*StatsRequest)(nil),         // 20: aether.guest.v1.StatsRequest
-	(*StatsReply)(nil),           // 21: aether.guest.v1.StatsReply
-	(*SetClockRequest)(nil),      // 22: aether.guest.v1.SetClockRequest
-	(*SetClockReply)(nil),        // 23: aether.guest.v1.SetClockReply
-	(*PowerOffRequest)(nil),      // 24: aether.guest.v1.PowerOffRequest
-	(*PowerOffReply)(nil),        // 25: aether.guest.v1.PowerOffReply
-	(*FreezeRequest)(nil),        // 26: aether.guest.v1.FreezeRequest
-	(*FreezeReply)(nil),          // 27: aether.guest.v1.FreezeReply
-	(*ThawRequest)(nil),          // 28: aether.guest.v1.ThawRequest
-	(*ThawReply)(nil),            // 29: aether.guest.v1.ThawReply
-	(*FreezeSessionRequest)(nil), // 30: aether.guest.v1.FreezeSessionRequest
-	(*FreezeSessionReply)(nil),   // 31: aether.guest.v1.FreezeSessionReply
-	(*SyncRequest)(nil),          // 32: aether.guest.v1.SyncRequest
-	(*SyncReply)(nil),            // 33: aether.guest.v1.SyncReply
+	(BrowserRequest_Action)(0),   // 1: aether.guest.v1.BrowserRequest.Action
+	(*InfoRequest)(nil),          // 2: aether.guest.v1.InfoRequest
+	(*InfoReply)(nil),            // 3: aether.guest.v1.InfoReply
+	(*Size)(nil),                 // 4: aether.guest.v1.Size
+	(*Process)(nil),              // 5: aether.guest.v1.Process
+	(*BootRequest)(nil),          // 6: aether.guest.v1.BootRequest
+	(*BootReply)(nil),            // 7: aether.guest.v1.BootReply
+	(*SpawnRequest)(nil),         // 8: aether.guest.v1.SpawnRequest
+	(*SpawnReply)(nil),           // 9: aether.guest.v1.SpawnReply
+	(*SpawnFailure)(nil),         // 10: aether.guest.v1.SpawnFailure
+	(*ReadRequest)(nil),          // 11: aether.guest.v1.ReadRequest
+	(*ReadReply)(nil),            // 12: aether.guest.v1.ReadReply
+	(*WriteRequest)(nil),         // 13: aether.guest.v1.WriteRequest
+	(*WriteReply)(nil),           // 14: aether.guest.v1.WriteReply
+	(*ResizeRequest)(nil),        // 15: aether.guest.v1.ResizeRequest
+	(*ResizeReply)(nil),          // 16: aether.guest.v1.ResizeReply
+	(*SignalRequest)(nil),        // 17: aether.guest.v1.SignalRequest
+	(*SignalReply)(nil),          // 18: aether.guest.v1.SignalReply
+	(*StatusRequest)(nil),        // 19: aether.guest.v1.StatusRequest
+	(*StatusReply)(nil),          // 20: aether.guest.v1.StatusReply
+	(*StatsRequest)(nil),         // 21: aether.guest.v1.StatsRequest
+	(*StatsReply)(nil),           // 22: aether.guest.v1.StatsReply
+	(*SetClockRequest)(nil),      // 23: aether.guest.v1.SetClockRequest
+	(*SetClockReply)(nil),        // 24: aether.guest.v1.SetClockReply
+	(*PowerOffRequest)(nil),      // 25: aether.guest.v1.PowerOffRequest
+	(*PowerOffReply)(nil),        // 26: aether.guest.v1.PowerOffReply
+	(*FreezeRequest)(nil),        // 27: aether.guest.v1.FreezeRequest
+	(*FreezeReply)(nil),          // 28: aether.guest.v1.FreezeReply
+	(*ThawRequest)(nil),          // 29: aether.guest.v1.ThawRequest
+	(*ThawReply)(nil),            // 30: aether.guest.v1.ThawReply
+	(*FreezeSessionRequest)(nil), // 31: aether.guest.v1.FreezeSessionRequest
+	(*FreezeSessionReply)(nil),   // 32: aether.guest.v1.FreezeSessionReply
+	(*SyncRequest)(nil),          // 33: aether.guest.v1.SyncRequest
+	(*SyncReply)(nil),            // 34: aether.guest.v1.SyncReply
+	(*BrowserRequest)(nil),       // 35: aether.guest.v1.BrowserRequest
+	(*BrowserReply)(nil),         // 36: aether.guest.v1.BrowserReply
 }
 var file_guest_proto_depIdxs = []int32{
-	3,  // 0: aether.guest.v1.Process.terminal:type_name -> aether.guest.v1.Size
-	4,  // 1: aether.guest.v1.BootRequest.main:type_name -> aether.guest.v1.Process
-	4,  // 2: aether.guest.v1.SpawnRequest.process:type_name -> aether.guest.v1.Process
+	4,  // 0: aether.guest.v1.Process.terminal:type_name -> aether.guest.v1.Size
+	5,  // 1: aether.guest.v1.BootRequest.main:type_name -> aether.guest.v1.Process
+	5,  // 2: aether.guest.v1.SpawnRequest.process:type_name -> aether.guest.v1.Process
 	0,  // 3: aether.guest.v1.ReadRequest.stream:type_name -> aether.guest.v1.Stream
-	3,  // 4: aether.guest.v1.ResizeRequest.size:type_name -> aether.guest.v1.Size
-	1,  // 5: aether.guest.v1.Guest.Info:input_type -> aether.guest.v1.InfoRequest
-	5,  // 6: aether.guest.v1.Guest.Boot:input_type -> aether.guest.v1.BootRequest
-	7,  // 7: aether.guest.v1.Guest.Spawn:input_type -> aether.guest.v1.SpawnRequest
-	10, // 8: aether.guest.v1.Guest.Read:input_type -> aether.guest.v1.ReadRequest
-	12, // 9: aether.guest.v1.Guest.Write:input_type -> aether.guest.v1.WriteRequest
-	14, // 10: aether.guest.v1.Guest.Resize:input_type -> aether.guest.v1.ResizeRequest
-	16, // 11: aether.guest.v1.Guest.Signal:input_type -> aether.guest.v1.SignalRequest
-	18, // 12: aether.guest.v1.Guest.Status:input_type -> aether.guest.v1.StatusRequest
-	20, // 13: aether.guest.v1.Guest.Stats:input_type -> aether.guest.v1.StatsRequest
-	22, // 14: aether.guest.v1.Guest.SetClock:input_type -> aether.guest.v1.SetClockRequest
-	24, // 15: aether.guest.v1.Guest.PowerOff:input_type -> aether.guest.v1.PowerOffRequest
-	26, // 16: aether.guest.v1.Guest.Freeze:input_type -> aether.guest.v1.FreezeRequest
-	28, // 17: aether.guest.v1.Guest.Thaw:input_type -> aether.guest.v1.ThawRequest
-	30, // 18: aether.guest.v1.Guest.FreezeSession:input_type -> aether.guest.v1.FreezeSessionRequest
-	32, // 19: aether.guest.v1.Guest.Sync:input_type -> aether.guest.v1.SyncRequest
-	2,  // 20: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
-	6,  // 21: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
-	8,  // 22: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
-	11, // 23: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
-	13, // 24: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
-	15, // 25: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
-	17, // 26: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
-	19, // 27: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
-	21, // 28: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
-	23, // 29: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
-	25, // 30: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
-	27, // 31: aether.guest.v1.Guest.Freeze:output_type -> aether.guest.v1.FreezeReply
-	29, // 32: aether.guest.v1.Guest.Thaw:output_type -> aether.guest.v1.ThawReply
-	31, // 33: aether.guest.v1.Guest.FreezeSession:output_type -> aether.guest.v1.FreezeSessionReply
-	33, // 34: aether.guest.v1.Guest.Sync:output_type -> aether.guest.v1.SyncReply
-	20, // [20:35] is the sub-list for method output_type
-	5,  // [5:20] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	4,  // 4: aether.guest.v1.ResizeRequest.size:type_name -> aether.guest.v1.Size
+	1,  // 5: aether.guest.v1.BrowserRequest.action:type_name -> aether.guest.v1.BrowserRequest.Action
+	5,  // 6: aether.guest.v1.BrowserRequest.process:type_name -> aether.guest.v1.Process
+	2,  // 7: aether.guest.v1.Guest.Info:input_type -> aether.guest.v1.InfoRequest
+	6,  // 8: aether.guest.v1.Guest.Boot:input_type -> aether.guest.v1.BootRequest
+	8,  // 9: aether.guest.v1.Guest.Spawn:input_type -> aether.guest.v1.SpawnRequest
+	11, // 10: aether.guest.v1.Guest.Read:input_type -> aether.guest.v1.ReadRequest
+	13, // 11: aether.guest.v1.Guest.Write:input_type -> aether.guest.v1.WriteRequest
+	15, // 12: aether.guest.v1.Guest.Resize:input_type -> aether.guest.v1.ResizeRequest
+	17, // 13: aether.guest.v1.Guest.Signal:input_type -> aether.guest.v1.SignalRequest
+	19, // 14: aether.guest.v1.Guest.Status:input_type -> aether.guest.v1.StatusRequest
+	21, // 15: aether.guest.v1.Guest.Stats:input_type -> aether.guest.v1.StatsRequest
+	23, // 16: aether.guest.v1.Guest.SetClock:input_type -> aether.guest.v1.SetClockRequest
+	25, // 17: aether.guest.v1.Guest.PowerOff:input_type -> aether.guest.v1.PowerOffRequest
+	27, // 18: aether.guest.v1.Guest.Freeze:input_type -> aether.guest.v1.FreezeRequest
+	29, // 19: aether.guest.v1.Guest.Thaw:input_type -> aether.guest.v1.ThawRequest
+	31, // 20: aether.guest.v1.Guest.FreezeSession:input_type -> aether.guest.v1.FreezeSessionRequest
+	33, // 21: aether.guest.v1.Guest.Sync:input_type -> aether.guest.v1.SyncRequest
+	35, // 22: aether.guest.v1.Guest.Browser:input_type -> aether.guest.v1.BrowserRequest
+	3,  // 23: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
+	7,  // 24: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
+	9,  // 25: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
+	12, // 26: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
+	14, // 27: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
+	16, // 28: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
+	18, // 29: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
+	20, // 30: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
+	22, // 31: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
+	24, // 32: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
+	26, // 33: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
+	28, // 34: aether.guest.v1.Guest.Freeze:output_type -> aether.guest.v1.FreezeReply
+	30, // 35: aether.guest.v1.Guest.Thaw:output_type -> aether.guest.v1.ThawReply
+	32, // 36: aether.guest.v1.Guest.FreezeSession:output_type -> aether.guest.v1.FreezeSessionReply
+	34, // 37: aether.guest.v1.Guest.Sync:output_type -> aether.guest.v1.SyncReply
+	36, // 38: aether.guest.v1.Guest.Browser:output_type -> aether.guest.v1.BrowserReply
+	23, // [23:39] is the sub-list for method output_type
+	7,  // [7:23] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_guest_proto_init() }
@@ -1950,8 +2139,8 @@ func file_guest_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_guest_proto_rawDesc), len(file_guest_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   33,
+			NumEnums:      2,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

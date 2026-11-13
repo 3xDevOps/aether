@@ -3,9 +3,13 @@ package helper
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/guest"
 )
 
 type fakeFS struct {
@@ -119,5 +123,25 @@ func TestASessionFreezeWaitsForASpawnOnlyAsLongAsItsCaller(t *testing.T) {
 	procs.mu.Unlock()
 	if !errors.Is(err, context.DeadlineExceeded) || procs.sessionFrozen {
 		t.Fatalf("a freeze behind a spawn whose caller gave up = %v, spawns refused %t", err, procs.sessionFrozen)
+	}
+}
+
+func TestAFrozenSessionRefusesItsBrowser(t *testing.T) {
+	procs := newProcesses(nil)
+	procs.sessionFrozen = true
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd, err := syscall.Dup(int(null.Fd()))
+	_ = null.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cgroup := os.NewFile(uintptr(fd), browserCgroup)
+	defer func() { _ = cgroup.Close() }()
+	_, err = procs.spawn(spawnSpec{ProcessSpec: guest.ProcessSpec{ID: "browser", Argv: []string{"/bin/true"}}, cgroup: cgroup})
+	if !errors.Is(err, errPaused) {
+		t.Fatalf("a browser start in a frozen session = %v", err)
 	}
 }
