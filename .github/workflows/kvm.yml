@@ -1,0 +1,65 @@
+name: VM tests
+
+# make test-kvm on a hosted x86-64 runner, which exposes /dev/kvm through
+# nested virtualization. ci-suite.yml calls it in the merge queue for a
+# change that can affect the VM tests and in every nightly run;
+# `gh workflow run kvm.yml --ref <branch>` runs it for any branch. The guest
+# kernel takes up to six minutes to build, so it builds only when its
+# inputs change: the cache is keyed by their hash and written on main. The
+# static test binaries reuse most of the native compiler cache, so this
+# workflow saves none of its own.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kvm:
+    name: make test-kvm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUD_HYPERVISOR_VERSION: v54.1
+      CLOUD_HYPERVISOR_SHA256: f9ffb9646783233d1f0fb09e77db1fca66499d1041e63bc011b90683c0d49933
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - name: Install Cloud Hypervisor, virtiofsd and qemu-img
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-utils virtiofsd
+          curl -fsSL -o "$RUNNER_TEMP/cloud-hypervisor" "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CLOUD_HYPERVISOR_VERSION/cloud-hypervisor-static"
+          echo "$CLOUD_HYPERVISOR_SHA256  $RUNNER_TEMP/cloud-hypervisor" | sha256sum -c --quiet
+          sudo install -m 0755 "$RUNNER_TEMP/cloud-hypervisor" /usr/local/bin/cloud-hypervisor
+      # The config, the build script and the container recipe make kernel
+      # runs are everything that decides the kernel's bytes.
+      - name: Hash the guest kernel's inputs
+        id: kernel
+        run: echo "key=kernel-v1-$({ cat images/kernel/*; make -n kernel; } | sha256sum | cut -c1-32)" >> "$GITHUB_OUTPUT"
+      - id: kernel-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: dist/aether-vmlinux-x86_64
+          key: ${{ steps.kernel.outputs.key }}
+      - name: Build the guest kernel
+        if: ${{ steps.kernel-cache.outputs.cache-hit != 'true' }}
+        run: make kernel
+      - uses: actions/cache/save@v4
+        if: ${{ steps.kernel-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' }}
+        with:
+          path: dist/aether-vmlinux-x86_64
+          key: ${{ steps.kernel.outputs.key }}
+      - name: VM tests (real Cloud Hypervisor VMs)
+        env:
+          GOFLAGS: -v
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" make test-kvm

@@ -934,7 +934,7 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` install (zip) and update legs package and launch the Windows desktop zip on amd64 and arm64 | |
 | `release-build (binaries, desktop, android)` | `make release-binaries`, `aether gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
 | `edge-image` | [The edge image](#the-edge-image) and [qualification](#edge-upgrade-qualification) | |
-| `kvm` | [VM tests](#vm-tests) on a hosted runner, which has `/dev/kvm` | `make kernel`, then `make test-kvm` as root |
+| `kvm` | [VM tests](#vm-tests) on a hosted runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
 
 A pull request that changes only `docs/**` or root-level `*.md` files runs
 `audit` and nothing else. A Markdown file anywhere else counts as code.
@@ -948,13 +948,14 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 | `vm` | `kvm` in the merge queue and on a push to `main` | `internal/runtime/vm/`, `internal/guest/`, `internal/vmimage/`, `images/kernel/`, `internal/acpkeeper/` (the helper's terminals), the runtime helpers the VM engine shares (`session.go`, `stream.go` and `managed_exec.go` in `internal/runtime/`), files named `vm*.go` or `*_vm.go` (and their tests) anywhere under `internal/`, `go.mod`, `go.sum` |
 
 VM code outside the VM packages goes in files named for the `vm` mode, so the
-merge queue still runs `kvm` for it. A change to the `kvm` job or the make
-targets it runs is left to the nightly run; `make lint` builds the VM tests on
-every pull request. The merge queue and a push classify the files GitHub's
-compare lists for the change; past its 300-file limit, or when the lookup
-fails, `kvm` runs. The guest kernel takes up to six minutes to build, so `kvm`
-restores it from a cache keyed by a hash of `images/kernel/` and the `make
-kernel` recipe, and builds it only on a miss; runs on `main` save it.
+merge queue still runs `kvm` for it. A change to `kvm.yml` or the make targets
+it runs is left to the nightly run or a run started by hand (below); `make
+lint` builds the VM tests on every pull request. The merge queue and a push
+classify the files GitHub's compare lists for the change; past its 300-file
+limit, or when the lookup fails, `kvm` runs. The guest kernel takes up to six
+minutes to build, so `kvm` restores it from a cache keyed by a hash of
+`images/kernel/` and the `make kernel` recipe, and builds it only on a miss;
+runs on `main` save it.
 
 The classifier runs from the pull request's (or merge group's) base revision,
 so a pull request cannot change its own classification, and a renamed file
@@ -970,6 +971,17 @@ To run the edge image jobs on a pull request branch, with write access to the re
 gh workflow run edge-image.yml --ref <branch>
 gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
 ```
+
+To run the VM tests on a branch, for example to check a change to `kvm.yml`
+or the make targets before the nightly run does:
+
+```sh
+gh workflow run kvm.yml --ref <branch>
+```
+
+A failed `kvm` fails `suite` and `CI gate`, so a nightly failure reaches
+whoever GitHub notifies about the scheduled run: the person who last changed
+its `cron` line.
 
 To rerun only the failed jobs of a session: `gh run rerun <session-id> --failed`.
 
