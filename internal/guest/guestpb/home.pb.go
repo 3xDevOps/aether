@@ -31,9 +31,12 @@ const (
 // boot, and sends the flags it was opened with, so a service that does not
 // know the id, such as a new one after a restore, opens the path again.
 type HomeHandle struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Flags         uint32                 `protobuf:"varint,2,opt,name=flags,proto3" json:"flags,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Flags uint32                 `protobuf:"varint,2,opt,name=flags,proto3" json:"flags,omitempty"`
+	// node is the file's when it was opened: a path that now names another
+	// file is stale.
+	Node          uint64 `protobuf:"varint,3,opt,name=node,proto3" json:"node,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -78,6 +81,13 @@ func (x *HomeHandle) GetId() uint64 {
 func (x *HomeHandle) GetFlags() uint32 {
 	if x != nil {
 		return x.Flags
+	}
+	return 0
+}
+
+func (x *HomeHandle) GetNode() uint64 {
+	if x != nil {
+		return x.Node
 	}
 	return 0
 }
@@ -1369,11 +1379,12 @@ var File_home_proto protoreflect.FileDescriptor
 const file_home_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"home.proto\x12\x0faether.guest.v1\"2\n" +
+	"home.proto\x12\x0faether.guest.v1\"F\n" +
 	"\n" +
 	"HomeHandle\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x14\n" +
-	"\x05flags\x18\x02 \x01(\rR\x05flags\"\xe9\x01\n" +
+	"\x05flags\x18\x02 \x01(\rR\x05flags\x12\x12\n" +
+	"\x04node\x18\x03 \x01(\x04R\x04node\"\xe9\x01\n" +
 	"\bHomeAttr\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\x04R\x04node\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\rR\x04mode\x12\x12\n" +

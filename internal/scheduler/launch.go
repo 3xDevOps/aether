@@ -613,7 +613,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 		if ownErr := s.applyRunOwnership(ws, run, entry.memberID, nil, plan.User); ownErr != nil {
 			return nil, fmt.Errorf("apply session ownership: %w", ownErr)
 		}
-		return plan, s.recordVMSingleLaunch(profile, run)
+		return plan, nil
 	}
 	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
 		return nil, fmt.Errorf("apply session ownership: %w", ownErr)
@@ -621,7 +621,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 	if ownErr := s.applyLoginOwnership(entry, plan.LoginMember, plan.Mounts, plan.User); ownErr != nil {
 		return nil, fmt.Errorf("apply login ownership: %w", ownErr)
 	}
-	return plan, s.recordVMSingleLaunch(profile, run)
+	return plan, nil
 }
 
 // startRunContainer is the part of a launch a move to another account
@@ -703,6 +703,11 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	}
 	if serr := s.cfg.Runtime.Start(ctx, cid); serr != nil {
 		return nil, s.failContainer(ctx, entry, cid, "start container", serr)
+	}
+	// Only now can the agent have opened the databases a closed session's VM
+	// still holds.
+	if rerr := s.recordVMSingleLaunch(profile, run); rerr != nil {
+		return nil, s.failContainer(ctx, entry, cid, "record the launch", rerr)
 	}
 	s.mu.Lock()
 	if entry.loginMember != "" && !slices.Contains(entry.verifiedLogins, entry.loginMember) {

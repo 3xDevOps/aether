@@ -87,7 +87,7 @@ mounted. It is package `internal/guest/home`, API
   keeps every inode, so a restored VM keeps its open files and working
   directories. The service keeps nothing a restore needs: a handle it does
   not know, as after a restore, is opened again by path, and is stale
-  (`ESTALE`) when the file is gone.
+  (`ESTALE`) when the file is gone or another replaced it.
 - Every file shows as owned by the session user, and every file the guest
   creates on the host gets that owner, its mode without set-user-ID and
   set-group-ID bits, and no device nodes; `chown` changes nothing. A session

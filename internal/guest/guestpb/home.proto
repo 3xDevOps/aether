@@ -38,6 +38,9 @@ service Home {
 message HomeHandle {
   uint64 id = 1;
   uint32 flags = 2;
+  // node is the file's when it was opened: a path that now names another
+  // file is stale.
+  uint64 node = 3;
 }
 
 message HomeAttr {

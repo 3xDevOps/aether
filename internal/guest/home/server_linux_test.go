@@ -160,9 +160,11 @@ func TestServerOpensAHandleAgainAfterARestart(t *testing.T) {
 	dir, s := fixture(t)
 	ctx := t.Context()
 	rw := handle(7, unix.O_RDWR)
-	if r, _ := s.Open(ctx, &guestpb.HomeOpenRequest{Path: "1", Handle: rw}); r.GetErrno() != 0 {
-		t.Fatalf("open = %v", syscall.Errno(r.GetErrno()))
+	opened, _ := s.Open(ctx, &guestpb.HomeOpenRequest{Path: "1", Handle: rw})
+	if opened.GetErrno() != 0 {
+		t.Fatalf("open = %v", syscall.Errno(opened.GetErrno()))
 	}
+	rw.Node = opened.GetAttr().GetNode()
 	if r, _ := s.Write(ctx, &guestpb.HomeWriteRequest{Path: "1", Handle: rw, Data: []byte("token-2")}); r.GetWritten() != 7 {
 		t.Fatalf("write = %+v", r)
 	}
@@ -184,6 +186,20 @@ func TestServerOpensAHandleAgainAfterARestart(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "home/a.txt")); string(data) != "hello12" {
 		t.Errorf("two appends at the same stale offset left %q", data)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "home/dir/new.json"), []byte("token-3"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "home/dir/new.json"), filepath.Join(dir, "home/dir/login.json")); err != nil {
+		t.Fatal(err)
+	}
+	replaced := newServer(Config{Shares: []Share{{Source: filepath.Join(dir, "home")}}})
+	t.Cleanup(replaced.close)
+	if r, _ := replaced.Write(ctx, &guestpb.HomeWriteRequest{Path: "0/dir/login.json", Handle: rw, Data: []byte("x")}); syscall.Errno(r.GetErrno()) != unix.ESTALE {
+		t.Errorf("write through a handle whose file was replaced since the restart = %v, want ESTALE", syscall.Errno(r.GetErrno()))
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "home/dir/login.json")); string(data) != "token-3" {
+		t.Errorf("the replacement was written through the old handle: %q", data)
 	}
 	if err := os.Remove(filepath.Join(dir, "home/dir/login.json")); err != nil {
 		t.Fatal(err)

@@ -152,10 +152,6 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		if err = s.vmSingleRelaunch(ctx, fresh); err != nil {
 			return nil, err
 		}
-		profile, _ := harness.Lookup(fresh.Harness)
-		if err = s.recordVMSingleLaunch(profile, fresh); err != nil {
-			return nil, err
-		}
 	}
 	if !valid {
 		if entry.destroyPending || deadline == nil || !time.Now().UTC().Before(*deadline) {
@@ -415,6 +411,10 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.mu.Lock()
 		entry.paused = false
 		s.mu.Unlock()
+	}
+	agent, _ := harness.Lookup(fresh.Harness)
+	if recordErr := s.recordVMSingleLaunch(agent, fresh); recordErr != nil {
+		return nil, rollback(recordErr)
 	}
 
 	att, err := s.cfg.Runtime.Attach(ctx, cid)

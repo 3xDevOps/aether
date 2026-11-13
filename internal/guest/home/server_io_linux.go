@@ -136,7 +136,8 @@ func (s *server) keep(id uint64, f *openFile) syscall.Errno {
 }
 
 // handle returns the file h names, opening p again when the service does
-// not know h, as after a restore; a file gone since then is stale.
+// not know h, as after a restore; a file gone or replaced since then is
+// stale.
 func (s *server) handle(p string, h *guestpb.HomeHandle) (*os.File, syscall.Errno) {
 	if f := s.known(h); f != nil {
 		return f.File, 0
@@ -155,6 +156,17 @@ func (s *server) handle(p string, h *guestpb.HomeHandle) (*os.File, syscall.Errn
 	f, errno := s.open(e, flags, false, 0)
 	if errno != 0 {
 		return nil, stale(errno)
+	}
+	if want := h.GetNode(); want != 0 {
+		var st unix.Statx_t
+		errno = withFD(f, func(fd int) syscall.Errno { st, errno = statFD(fd); return errno })
+		if errno == 0 && nodeID(&st) != want {
+			errno = unix.ESTALE
+		}
+		if errno != 0 {
+			_ = f.Close()
+			return nil, errno
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

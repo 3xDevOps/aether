@@ -296,10 +296,12 @@ func (n *node) Rename(ctx context.Context, name string, parent fs.InodeEmbedder,
 func (n *node) Create(ctx context.Context, name string, flags, mode uint32, out *fuse.EntryOut) (*fs.Inode, fs.FileHandle, uint32, syscall.Errno) {
 	h := &guestpb.HomeHandle{Id: n.fsys.handles.Add(1), Flags: flags}
 	req := &guestpb.HomeOpenRequest{Path: n.child(name), Handle: h, Create: true, Mode: mode}
-	child, errno := n.entry(ctx, name, out, func(ctx context.Context) (*guestpb.HomeEntryReply, error) { return n.fsys.api.Open(ctx, req) })
+	r, errno := call(ctx, func(ctx context.Context) (*guestpb.HomeEntryReply, error) { return n.fsys.api.Open(ctx, req) })
 	if errno != 0 {
 		return nil, nil, 0, errno
 	}
+	h.Node = r.GetAttr().GetNode()
+	child := n.newChild(ctx, name, r.GetAttr(), out)
 	return child, &file{handle: h, inode: child, fsys: n.fsys}, fuse.FOPEN_KEEP_CACHE, 0
 }
 
@@ -308,9 +310,11 @@ func (n *node) Create(ctx context.Context, name string, flags, mode uint32, out 
 func (n *node) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
 	h := &guestpb.HomeHandle{Id: n.fsys.handles.Add(1), Flags: flags}
 	req := &guestpb.HomeOpenRequest{Path: n.path(), Handle: h}
-	if _, errno := call(ctx, func(ctx context.Context) (*guestpb.HomeEntryReply, error) { return n.fsys.api.Open(ctx, req) }); errno != 0 {
+	r, errno := call(ctx, func(ctx context.Context) (*guestpb.HomeEntryReply, error) { return n.fsys.api.Open(ctx, req) })
+	if errno != 0 {
 		return nil, 0, errno
 	}
+	h.Node = r.GetAttr().GetNode()
 	return &file{handle: h, inode: n.EmbeddedInode(), fsys: n.fsys}, fuse.FOPEN_KEEP_CACHE, 0
 }
 
