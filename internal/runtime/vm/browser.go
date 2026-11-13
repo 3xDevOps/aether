@@ -19,10 +19,7 @@ import (
 // image's disk attached at boot (docs/vm-guest.md, "The development
 // browser"). Its runtime ID is the session VM's key under browserPrefix.
 const (
-	browserPrefix = "vmb-"
-	// browserUser is not the session's uid 1000, so the session's processes
-	// can neither signal nor trace the companion's.
-	browserUser    = "1001:1001"
+	browserPrefix  = "vmb-"
 	browserProgram = "/usr/local/bin/node"
 	browserServer  = "/opt/aether-browser/server.mjs"
 	browserBuild   = time.Hour
@@ -39,6 +36,15 @@ type companion struct {
 }
 
 var warming atomic.Bool
+
+// browserUser is never the session's user, so the session's processes can
+// neither signal nor trace the companion's.
+func browserUser(session string) string {
+	if uid, _, _ := strings.Cut(session, ":"); uid == "65533" {
+		return "65532:65532"
+	}
+	return "65533:65533"
+}
 
 func browserKey(id runtime.ID) (string, bool) {
 	return strings.CutPrefix(string(id), browserPrefix)
@@ -131,7 +137,7 @@ func (e *engine) startBrowser(ctx context.Context, key string) error {
 	})
 	err = h.StartBrowser(ctx, guest.BrowserSpec{
 		Process: guest.ProcessSpec{
-			ID: c.CreationKey, Argv: []string{browserProgram, browserServer}, Env: env, User: browserUser,
+			ID: c.CreationKey, Argv: []string{browserProgram, browserServer}, Env: env, User: browserUser(rec.User),
 			Dir: filepath.Dir(browserServer), NoNewPrivileges: true,
 		},
 		MemoryBytes: uint64(max(c.MemoryBytes, 0)), CPUMillis: uint32(math.Ceil(c.CPULimit * 1000)),
@@ -144,8 +150,7 @@ func (e *engine) startBrowser(ctx context.Context, key string) error {
 	if err = e.store(rec); err != nil {
 		return err
 	}
-	e.relay(key, guest.BrowserPort, filepath.Join(c.Control, "browser.sock"))
-	return nil
+	return e.relay(key, guest.BrowserPort, filepath.Join(c.Control, "browser.sock"))
 }
 
 func (e *engine) pauseBrowser(ctx context.Context, key string, paused bool) error {
@@ -192,8 +197,10 @@ func (e *engine) destroyBrowser(ctx context.Context, key string) error {
 }
 
 // stopCompanion kills the companion in a running VM and drops its relay; it
-// holds the key's lock.
-func (e *engine) stopCompanion(ctx context.Context, key string) error {
+// holds the key's lock. A paused VM, as a closed session's is, runs just
+// long enough for the helper to kill the companion; its session processes
+// stay as frozen as the companion's cgroup is.
+func (e *engine) stopCompanion(ctx context.Context, key string) (err error) {
 	e.stopRelay(key)
 	up, err := e.running(ctx, key)
 	if err != nil || !up {
@@ -204,13 +211,26 @@ func (e *engine) stopCompanion(ctx context.Context, key string) error {
 		return err
 	}
 	if e.paused(ctx, key) {
-		return fmt.Errorf("vm runtime: remove the browser in VM %s: it is paused", key)
+		api := newCHAPI(e.path(key, apiSocket))
+		if err = api.resume(ctx); err != nil {
+			return fmt.Errorf("vm runtime: resume VM %s to remove its browser: %w", key, err)
+		}
+		defer func() {
+			if pauseErr := api.pause(context.WithoutCancel(ctx)); pauseErr != nil {
+				err = errors.Join(err, fmt.Errorf("vm runtime: pause VM %s again: %w", key, pauseErr))
+			}
+		}()
 	}
-	if err = h.StopBrowser(ctx); err != nil {
+	stopCtx, cancel := context.WithTimeout(ctx, helperCallTimeout+browserStopWait)
+	defer cancel()
+	if err = h.StopBrowser(stopCtx); err != nil {
 		return fmt.Errorf("vm runtime: stop the browser in VM %s: %w", key, err)
 	}
 	return nil
 }
+
+// browserStopWait is how long the helper waits for a killed companion.
+const browserStopWait = 10 * time.Second
 
 // inspectBrowser reads the companion's state and, for a running one whose
 // relay a server restart dropped, listens for it again.
@@ -258,7 +278,9 @@ func (e *engine) inspectBrowser(ctx context.Context, key string) (runtime.Browse
 		relayed := e.relays[key] != nil
 		e.mu.Unlock()
 		if !relayed {
-			e.relay(key, guest.BrowserPort, filepath.Join(c.Control, "browser.sock"))
+			if err = e.relay(key, guest.BrowserPort, filepath.Join(c.Control, "browser.sock")); err != nil {
+				return runtime.BrowserInfo{}, err
+			}
 		}
 	}
 	return info, nil

@@ -1014,7 +1014,7 @@ touch /run/aether-guest/browser/root/x 2>&1 | grep -o 'Read-only file system'`
 	if _, err = e.execAttached(t.Context(), key, runtime.AttachedExec{Argv: []string{"/bin/sh", "-c", check}, User: "0:0", Stdout: &out, Stderr: &out}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Uid:\t1001", "NoNewPrivs:\t1", "1073741824", "512", "Read-only file system"} {
+	for _, want := range []string{"Uid:\t65533", "NoNewPrivs:\t1", "1073741824", "512", "Read-only file system"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("confinement check lacks %q:\n%s", want, out.String())
 		}

@@ -12,8 +12,10 @@ import (
 
 const testBrowserImage = "ghcr.io/3xdevops/aether-browser:v1"
 
-func (h *harness) browserSession(key string) {
+// browserSession starts run-a with the browser's disk.
+func (h *harness) browserSession() {
 	h.t.Helper()
+	const key = "run-a"
 	h.engine.cfg.BrowserImage = testBrowserImage
 	h.images.mu.Lock()
 	h.images.tagLocked(testBrowserImage, vmimage.Base{ID: "sha256:browser", Path: "/images/browser.raw", Config: vmimage.ImageConfig{Env: []string{"PATH=/usr/local/bin:/usr/bin", "NODE_VERSION=24"}}})
@@ -38,7 +40,7 @@ func browserSpec(t *testing.T, key string) runtime.BrowserSpec {
 
 func TestSessionVMBootsWithTheBrowsersDiskAndSocket(t *testing.T) {
 	h := newHarness(t)
-	h.browserSession("run-a")
+	h.browserSession()
 	last := h.units.last()
 	args := strings.Join(last.launch.Args, " ")
 	if !strings.Contains(args, "id=browser,serial=browser,backing_files=on,readonly=on") || !strings.Contains(args, "aether.serve=2001,") {
@@ -64,7 +66,7 @@ func TestSessionVMBootsWithTheBrowsersDiskAndSocket(t *testing.T) {
 
 func TestBrowserRunsInTheSessionVM(t *testing.T) {
 	h := newHarness(t)
-	h.browserSession("run-a")
+	h.browserSession()
 	h.engine.cfg.BrowserImage = testBrowserImage
 	spec := browserSpec(t, "run-a")
 	r := &Runtime{vms: h.engine}
@@ -84,7 +86,7 @@ func TestBrowserRunsInTheSessionVM(t *testing.T) {
 	}
 	g := h.guest("run-a")
 	p := g.browserSpec.Process
-	if p.User != browserUser || !p.NoNewPrivileges || p.Argv[0] != browserProgram || !slices.Contains(p.Env, "AETHER_BROWSER_CREATION_KEY=browser-0123") || !slices.Contains(p.Env, "NODE_VERSION=24") {
+	if p.User != "65533:65533" || !p.NoNewPrivileges || p.Argv[0] != browserProgram || !slices.Contains(p.Env, "AETHER_BROWSER_CREATION_KEY=browser-0123") || !slices.Contains(p.Env, "NODE_VERSION=24") {
 		t.Errorf("companion process = %+v", p)
 	}
 	if g.browserSpec.MemoryBytes != 1<<30 || g.browserSpec.CPUMillis != 1500 || g.browserSpec.ShmBytes != uint64(runtime.BrowserSharedMemoryBytes) {
@@ -124,7 +126,7 @@ func TestBrowserRunsInTheSessionVM(t *testing.T) {
 
 func TestBrowserOfAStoppedSessionReadsExited(t *testing.T) {
 	h := newHarness(t)
-	h.browserSession("run-a")
+	h.browserSession()
 	r := &Runtime{vms: h.engine}
 	id, err := r.CreateBrowser(t.Context(), browserSpec(t, "run-a"))
 	if err != nil {
@@ -145,5 +147,40 @@ func TestBrowserOfAStoppedSessionReadsExited(t *testing.T) {
 	}
 	if info, _ := r.InspectBrowser(t.Context(), id); info.State != "exited" {
 		t.Errorf("the browser of a stopped VM reads %s", info.State)
+	}
+}
+
+func TestBrowserUserIsNeverTheSessions(t *testing.T) {
+	for session, want := range map[string]string{"": "65533:65533", "1000:1000": "65533:65533", "65533:65533": "65532:65532", "65533": "65532:65532"} {
+		if got := browserUser(session); got != want {
+			t.Errorf("browserUser(%q) = %q, want %q", session, got, want)
+		}
+	}
+}
+
+func TestClosedSessionsBrowserIsRemovedWithItsVMPausedAgain(t *testing.T) {
+	h := newHarness(t)
+	h.browserSession()
+	r := &Runtime{vms: h.engine}
+	id, err := r.CreateBrowser(t.Context(), browserSpec(t, "run-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.engine.pause(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Destroy(t.Context(), id); err != nil {
+		t.Fatalf("remove the browser of a paused session = %v", err)
+	}
+	vmm := h.units.vmm("run-a")
+	calls := vmm.called()
+	if vmm.state != "Paused" || !slices.Contains(calls, "vm.resume") {
+		t.Errorf("the VM is %s after %v; want it resumed for the stop and paused again", vmm.state, calls)
+	}
+	if got := h.guest("run-a").browserCalls; got[len(got)-1] != "stop" {
+		t.Errorf("helper calls = %v", got)
 	}
 }

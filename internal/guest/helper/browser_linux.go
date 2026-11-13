@@ -77,6 +77,10 @@ func (b *browser) start(procs *processes, req *guestpb.BrowserRequest) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if p, err := procs.get(b.current); err == nil && !p.exited() {
+		// A START repeated after its reply was lost finds its own companion.
+		if b.current == spec.ID {
+			return nil
+		}
 		return fmt.Errorf("%w: the browser %s still runs", errExists, b.current)
 	}
 	if err := b.prepare(); err != nil {
