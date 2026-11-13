@@ -7,8 +7,12 @@
 # memory.reclaim and waits 15 s), times one prompt on the live VM as the
 # baseline, saves it to $A1/snap/$LABEL, then
 # for each mode: resets the root disk and home to their saved copies,
-# evicts the snapshot from the host page cache, restores, and sends a
-# prompt. Times are from the restore request.
+# evicts the snapshot from the host page cache, restarts its own mock model
+# (a1-mock2) and destroys every host socket to the VM, so the agent's
+# kept-alive connections get a reset as from a server that dropped them
+# during the sleep (restoring one snapshot several times otherwise resumes
+# connections whose host side has moved on, and they hang ~2 min), restores,
+# and sends a prompt. Times are from the restore request.
 set -euo pipefail
 A1=/srv/aether/1
 M=$A1/m
@@ -20,7 +24,7 @@ SNAP=$A1/snap/$LABEL
 D=$A1/vms/vm$V
 rm -rf "$OUT" && mkdir -p "$OUT"
 exec > >(tee "$OUT/log.txt") 2>&1
-export MEM
+export MEM MOCK_URL=http://10.201.0.1:18081
 
 now() { date +%s.%N; }
 since() { echo "$(now) - $1" | bc; }
@@ -30,12 +34,13 @@ evict() { sudo python3 -c 'import os, sys
 for p in sys.argv[1:]:
     fd = os.open(p, os.O_RDONLY); os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED); os.close(fd)' "$@"; }
 
-trap '"$M/host/vm.sh" stop $V' EXIT
+trap '"$M/host/vm.sh" stop $V; sudo systemctl stop a1-mock2' EXIT
 "$M/host/vm.sh" stop $V
 sudo rm -rf "$D" && mkdir -p "$D" && sudo mkdir -p "$D/home"
-"$M/host/seed-home.sh" "$D/home"
+"$M/host/seed-home.sh" "$D/home" "$MOCK_URL"
+"$M/host/mock.sh" a1-mock2 10.201.0.1:18081
 "$M/host/vm.sh" start $V
-[ "${HOME_FS:-1}" = 0 ] && "$M/host/vm.sh" ssh $V 'bash -s /root' <"$M/host/seed-home.sh"
+[ "${HOME_FS:-1}" = 0 ] && "$M/host/vm.sh" ssh $V "bash -s /root $MOCK_URL" <"$M/host/seed-home.sh"
 "$M/host/vm.sh" ssh $V "mkdir -p /workspace"
 "$M/host/agent.sh" vm $V "$AGENT" turn
 for _ in $(seq 120); do [ "$(answers)" -ge 1 ] && break; sleep 1; done
@@ -76,6 +81,8 @@ for mode in $MODES; do
   cp --reflink=always "$D/root.saved" "$D/root.disk"
   sudo rm -rf "$D/home" && sudo cp -a --reflink=always "$D/home.saved" "$D/home"
   evict "$SNAP"/*
+  "$M/host/mock.sh" a1-mock2 10.201.0.1:18081
+  sudo ss -K dst "10.201.0.$((10 + V))" >/dev/null
   t0=$(now)
   RESTORE_MODE=$mode "$M/host/vm.sh" restore $V "$SNAP"
   until api info 2>/dev/null | jq -e '.state == "Running"' >/dev/null; do
@@ -85,7 +92,7 @@ for mode in $MODES; do
   running=$(since "$t0")
   "$M/host/vm.sh" wait-ssh $V
   ssh_at=$(since "$t0")
-  MOCK_URL=http://10.201.0.1:18080 "$M/host/agent.sh" prompt vm $V "w$w"
+  "$M/host/agent.sh" prompt vm $V "w$w"
   "$M/host/vm.sh" ssh $V "until [ \$(tmux capture-pane -p -S - -t agent | grep -c aether-turn-done) -ge 3 ]; do sleep 0.05; done"
   answer=$(since "$t0")
   printf 'restore %s: running %.3fs ssh %.3fs answered %.3fs; %s\n' "$mode" "$running" "$ssh_at" "$answer" "$("$M/host/vm.sh" mem $V)"

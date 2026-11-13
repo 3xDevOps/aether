@@ -1,0 +1,22 @@
+started 10 vm sessions, agent claude; settling 60 s
+session 11: 0.608% of one CPU
+session 12: 0.608% of one CPU
+session 13: 0.558% of one CPU
+session 14: 0.583% of one CPU
+session 15: 0.600% of one CPU
+session 16: 0.533% of one CPU
+session 17: 0.592% of one CPU
+session 18: 0.592% of one CPU
+session 19: 0.617% of one CPU
+session 20: 0.575% of one CPU
+sum of 10 sessions: 5.867% of one CPU = 0.367% of the 16-CPU host; host busy overall (all tenants): 2.69%
+
+
+
+
+
+
+
+
+
+

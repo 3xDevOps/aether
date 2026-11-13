@@ -1,0 +1,7 @@
+phase       own_avg    own_max   file_avg   host_delta
+booted          135        135          0          257
+idle           1320       1320          0          568
+npm            2028       2028          0         1810
+after          1708       1708          0         1025
+reclaimed        500        500          0           47
+later           740        740          0         1554

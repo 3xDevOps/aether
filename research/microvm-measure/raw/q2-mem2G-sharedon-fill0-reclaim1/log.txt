@@ -1,0 +1,22 @@
+baseline: live VM, prompt to answer .635120389s (ssh connect included)
+before reclaim: vm29 VmRSS=670064 RssAnon=1016 RssFile=5096 RssShmem=663952 virtiofsd_anon=0
+before save: vm29 VmRSS=543284 RssAnon=1016 RssFile=5096 RssShmem=537172 virtiofsd_anon=0
+
+save: pause 0.008s snapshot 0.205s stop+sync 0.197s total 0.409s
+total 537240
+     4 -rw------- 1 root root       1446 Nov 13 02:44 config.json
+537176 -rw------- 1 root root 2147483648 Nov 13 02:44 memory-ranges
+    60 -rw------- 1 root root      60054 Nov 13 02:44 state.json
+snapshot size: 525M on disk, 2.1G apparent
+RTNETLINK answers: Invalid argument
+restore copy: running 0.411s ssh 0.689s answered 2.259s; vm29 VmRSS=566520 RssAnon=1184 RssFile=5340 RssShmem=559996 virtiofsd_anon=0
+  30 s later: vm29 VmRSS=547184 RssAnon=1184 RssFile=5340 RssShmem=540660 virtiofsd_anon=0
+
+RTNETLINK answers: Invalid argument
+restore ondemand: running 0.068s ssh 1.008s answered 2.789s; vm29 VmRSS=576160 RssAnon=1208 RssFile=5340 RssShmem=569612 virtiofsd_anon=0
+  30 s later: vm29 VmRSS=554620 RssAnon=1208 RssFile=5340 RssShmem=548072 virtiofsd_anon=0
+
+RTNETLINK answers: Invalid argument
+restore copyonwrite: running 0.408s ssh 0.699s answered 2.277s; vm29 VmRSS=566116 RssAnon=1168 RssFile=5340 RssShmem=559608 virtiofsd_anon=0
+  30 s later: vm29 VmRSS=546940 RssAnon=1168 RssFile=5340 RssShmem=540432 virtiofsd_anon=0
+

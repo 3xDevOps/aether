@@ -1,0 +1,99 @@
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm6: Name or service not known
+sudo: unable to resolve host a1-vm6: Name or service not known
+sudo: unable to resolve host a1-vm6: Name or service not known
+sudo: unable to resolve host a1-vm6: Name or service not known
+sudo: unable to resolve host a1-vm6: Name or service not known
+sudo: unable to resolve host a1-vm7: Name or service not known
+sudo: unable to resolve host a1-vm7: Name or service not known
+sudo: unable to resolve host a1-vm7: Name or service not known
+sudo: unable to resolve host a1-vm7: Name or service not known
+sudo: unable to resolve host a1-vm7: Name or service not known
+sudo: unable to resolve host a1-vm8: Name or service not known
+sudo: unable to resolve host a1-vm8: Name or service not known
+sudo: unable to resolve host a1-vm8: Name or service not known
+sudo: unable to resolve host a1-vm8: Name or service not known
+sudo: unable to resolve host a1-vm8: Name or service not known
+sudo: unable to resolve host a1-vm9: Name or service not known
+sudo: unable to resolve host a1-vm9: Name or service not known
+sudo: unable to resolve host a1-vm9: Name or service not known
+sudo: unable to resolve host a1-vm9: Name or service not known
+sudo: unable to resolve host a1-vm9: Name or service not known
+sudo: unable to resolve host a1-vm10: Name or service not known
+sudo: unable to resolve host a1-vm10: Name or service not known
+sudo: unable to resolve host a1-vm10: Name or service not known
+sudo: unable to resolve host a1-vm10: Name or service not known
+sudo: unable to resolve host a1-vm10: Name or service not known
+booted 10 in 15.760719705s
+all 10 answered
+session 1 npm: exit 0 took 33s 471M 301 
+session 2 npm: exit 0 took 33s 471M 301 
+session 3 npm: exit 0 took 34s 471M 301 
+session 4 npm: exit 0 took 34s 471M 301 
+session 5 npm: exit 0 took 36s 471M 301 
+session 6 npm: exit 0 took 33s 471M 301 
+session 7 npm: exit 0 took 35s 471M 301 
+session 8 npm: exit 0 took 35s 471M 301 
+session 9 npm: exit 0 took 38s 471M 301 
+session 10 npm: exit 0 took 39s 471M 301 
+guest1 before reclaim: Mem:         2014320      219836      395340        2616     1434864     1794484
+guest2 before reclaim: Mem:         2014320      220268      384792        2616     1444976     1794052
+guest3 before reclaim: Mem:         2014320      222044      385844        2616     1442204     1792276
+guest4 before reclaim: Mem:         2014320      220516      389056        2616     1440520     1793804
+guest5 before reclaim: Mem:         2014320      222248      390048        2616     1437712     1792072
+guest6 before reclaim: Mem:         2014320      219028      387972        2616     1443020     1795292
+guest7 before reclaim: Mem:         2014320      222592      368596        2616     1458820     1791728
+guest8 before reclaim: Mem:         2014320      222568      371032        2616     1456492     1791752
+guest9 before reclaim: Mem:         2014320      220156      371220        2612     1458628     1794164
+guest10 before reclaim: Mem:         2014320      219396      388784        2616     1441828     1794924
+guest1 after reclaim: Mem:         2014320      221936     1640512        2616      187596     1792384
+guest2 after reclaim: Mem:         2014320      221316     1644840        2616      183852     1793004
+guest3 after reclaim: Mem:         2014320      219184     1643436        2616      187404     1795136
+guest4 after reclaim: Mem:         2014320      219940     1642680        2616      187400     1794380
+guest5 after reclaim: Mem:         2014320      220896     1641548        2616      187648     1793424
+guest6 after reclaim: Mem:         2014320      215704     1646748        2616      187640     1798616
+guest7 after reclaim: Mem:         2014320      220788     1641864        2616      187440     1793532
+guest8 after reclaim: Mem:         2014320      225044     1637332        2616      187632     1789276
+guest9 after reclaim: Mem:         2014320      221480     1645148        2616      183380     1792840
+guest10 after reclaim: Mem:         2014320      221504     1642780        2616      185724     1792816
+phase       own_avg    own_max   file_avg   host_delta
+booted          132        135          0          136
+idle            606        608          0          685
+npm            1678       1759          0         2121
+after          1674       1702          0         2089
+reclaimed        437        458          0         1170
+later           559        583          0         1003
+
+
+
+
+
+
+
+
+
+

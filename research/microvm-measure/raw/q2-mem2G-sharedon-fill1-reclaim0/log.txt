@@ -1,0 +1,23 @@
+head: error writing 'standard output': No space left on device
+Mem:            1967        1241         421         983        1316         725
+baseline: live VM, prompt to answer .623011700s (ssh connect included)
+before save: vm29 VmRSS=1660504 RssAnon=1048 RssFile=5096 RssShmem=1654360 virtiofsd_anon=0
+
+save: pause 0.008s snapshot 0.514s stop+sync 0.453s total 0.976s
+total 1654424
+      4 -rw------- 1 root root       1446 Nov 13 02:46 config.json
+1654360 -rw------- 1 root root 2147483648 Nov 13 02:46 memory-ranges
+     60 -rw------- 1 root root      59731 Nov 13 02:46 state.json
+snapshot size: 1.6G on disk, 2.1G apparent
+RTNETLINK answers: Invalid argument
+restore copy: running 1.067s ssh 1.322s answered 2.938s; vm29 VmRSS=1683404 RssAnon=1144 RssFile=5340 RssShmem=1676920 virtiofsd_anon=0
+  30 s later: vm29 VmRSS=1638680 RssAnon=1180 RssFile=5340 RssShmem=1632160 virtiofsd_anon=0
+
+RTNETLINK answers: Invalid argument
+restore ondemand: running 0.053s ssh 0.589s answered 2.482s; vm29 VmRSS=1680420 RssAnon=1168 RssFile=5340 RssShmem=1673912 virtiofsd_anon=0
+  30 s later: vm29 VmRSS=1637912 RssAnon=1204 RssFile=5340 RssShmem=1631368 virtiofsd_anon=0
+
+RTNETLINK answers: Invalid argument
+restore copyonwrite: running 1.747s ssh 2.000s answered 3.626s; vm29 VmRSS=1683908 RssAnon=1136 RssFile=5340 RssShmem=1677432 virtiofsd_anon=0
+  30 s later: vm29 VmRSS=1637068 RssAnon=1172 RssFile=5340 RssShmem=1630556 virtiofsd_anon=0
+

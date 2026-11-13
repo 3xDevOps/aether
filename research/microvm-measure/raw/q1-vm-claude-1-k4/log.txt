@@ -1,0 +1,13 @@
+booted 1 in 1.552244191s
+all 1 answered
+session 1 npm: exit 0 took 35s 471M 301 
+guest1 before reclaim: Mem:         2043264      394088      431632        2616     1388540     1649176
+guest1 after reclaim: Mem:         2043264      367808     1652408        2612      173904     1675456
+phase        own_avg    own_max   file_avg   host_delta  ksm_saved_avg
+booted           105        105          0          104              0
+idle             612        612          0          645              0
+npm             1993       1993          0         2069              0
+after           1625       1625          0         1962              0
+reclaimed        431        431          0          808              0
+later            586        586          0          937              0
+

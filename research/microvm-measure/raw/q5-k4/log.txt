@@ -1,0 +1,28 @@
+qcow2 overlay create ms: 7 5 5 5 5 5 5 5 5 5; on disk 196 KiB
+reflink copy create ms:  1 2 1 1 1 1 1 1 1 1; /srv used grew 1 MiB for 10 overlays + 10 reflink copies
+full copy create ms: 998; sync after it: 3485 ms; /srv used grew 4096 MiB
+vda 6630501011898 16384 MiB
+vdb ov1.qcow2 4096 MiB
+vdc rl1.raw 4096 MiB
+vdd full.raw 4096 MiB
+qcow2-overlay first randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 3173 IOPS 12 MiB/s, clat p99 11206 us
+qcow2-overlay again randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 3412 IOPS 13 MiB/s, clat p99 11599 us
+qcow2-overlay randread 4k qd32: read 11479 IOPS 44 MiB/s, write 0 IOPS 0 MiB/s, clat p99 4423 us
+qcow2-overlay seqwrite 1M qd8: read 0 IOPS 0 MiB/s, write 274 IOPS 274 MiB/s, clat p99 32636 us
+qcow2-overlay seqread 1M qd8: read 411 IOPS 411 MiB/s, write 0 IOPS 0 MiB/s, clat p99 26607 us
+reflink-copy first randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 19823 IOPS 77 MiB/s, clat p99 7897 us
+reflink-copy again randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 63496 IOPS 248 MiB/s, clat p99 3522 us
+reflink-copy randread 4k qd32: read 174588 IOPS 681 MiB/s, write 0 IOPS 0 MiB/s, clat p99 272 us
+reflink-copy seqwrite 1M qd8: read 0 IOPS 0 MiB/s, write 2632 IOPS 2632 MiB/s, clat p99 9633 us
+reflink-copy seqread 1M qd8: read 8752 IOPS 8752 MiB/s, write 0 IOPS 0 MiB/s, clat p99 1466 us
+full-copy first randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 139772 IOPS 545 MiB/s, clat p99 569 us
+full-copy again randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 144035 IOPS 562 MiB/s, clat p99 528 us
+full-copy randread 4k qd32: read 156177 IOPS 610 MiB/s, write 0 IOPS 0 MiB/s, clat p99 309 us
+full-copy seqwrite 1M qd8: read 0 IOPS 0 MiB/s, write 4023 IOPS 4023 MiB/s, clat p99 10289 us
+full-copy seqread 1M qd8: read 9022 IOPS 9022 MiB/s, write 0 IOPS 0 MiB/s, clat p99 1318 us
+
+after io: overlay 2.1G, reflink copy unshared extents: 16268 extent lines
+VM ext4 data disk (virtio-blk raw): files 40000: add -A 4455 ms, commit 145 ms, status warm 36/31/30 ms, status cold 75 ms, status after 1000 edits 44 ms, add -A after edits 215 ms
+virtio-fs cache=auto: files 40000: add -A 30461 ms, commit 2307 ms, status warm 434/259/212 ms, status cold 647 ms, status after 1000 edits 251 ms, add -A after edits 1204 ms
+host XFS native: files 40000: add -A 3404 ms, commit 124 ms, status warm 20/19/42 ms, status cold 20 ms, status after 1000 edits 20 ms, add -A after edits 153 ms
+

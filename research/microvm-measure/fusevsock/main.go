@@ -133,7 +133,8 @@ type conn struct {
 	w *bufio.Writer
 }
 
-func dialVsock(port uint32) (net.Conn, error) {
+// dialVsock returns the socket as a file: net.FileConn rejects AF_VSOCK.
+func dialVsock(port uint32) (io.ReadWriter, error) {
 	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
@@ -142,12 +143,10 @@ func dialVsock(port uint32) (net.Conn, error) {
 		unix.Close(fd)
 		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), "vsock")
-	defer f.Close()
-	return net.FileConn(f)
+	return os.NewFile(uintptr(fd), "vsock"), nil
 }
 
-func dial(target string) (net.Conn, error) {
+func dial(target string) (io.ReadWriter, error) {
 	kind, addr, _ := strings.Cut(target, ":")
 	if kind == "tcp" {
 		return net.Dial("tcp", addr)

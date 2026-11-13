@@ -1,0 +1,21 @@
+vda 6630501076749021 16384 MiB
+vdb ov1.qcow2 4096 MiB
+vdc rl1.raw 4096 MiB
+vdd full.raw 4096 MiB
+qcow2-overlay first randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 19894 IOPS 77 MiB/s, clat p99 5472 us
+qcow2-overlay again randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 25437 IOPS 99 MiB/s, clat p99 1630 us
+qcow2-overlay randread 4k qd32: read 202976 IOPS 792 MiB/s, write 0 IOPS 0 MiB/s, clat p99 195 us
+qcow2-overlay seqwrite 1M qd8: read 0 IOPS 0 MiB/s, write 1470 IOPS 1470 MiB/s, clat p99 6651 us
+qcow2-overlay seqread 1M qd8: read 1568 IOPS 1568 MiB/s, write 0 IOPS 0 MiB/s, clat p99 5996 us
+reflink-copy first randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 214696 IOPS 838 MiB/s, clat p99 226 us
+reflink-copy again randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 254879 IOPS 995 MiB/s, clat p99 193 us
+reflink-copy randread 4k qd32: read 237019 IOPS 925 MiB/s, write 0 IOPS 0 MiB/s, clat p99 185 us
+reflink-copy seqwrite 1M qd8: read 0 IOPS 0 MiB/s, write 1785 IOPS 1785 MiB/s, clat p99 4554 us
+reflink-copy seqread 1M qd8: read 5417 IOPS 5417 MiB/s, write 0 IOPS 0 MiB/s, clat p99 1957 us
+full-copy first randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 230253 IOPS 899 MiB/s, clat p99 214 us
+full-copy again randwrite 4k qd32: read 0 IOPS 0 MiB/s, write 246956 IOPS 964 MiB/s, clat p99 305 us
+full-copy randread 4k qd32: read 265596 IOPS 1037 MiB/s, write 0 IOPS 0 MiB/s, clat p99 185 us
+full-copy seqwrite 1M qd8: read 0 IOPS 0 MiB/s, write 1762 IOPS 1762 MiB/s, clat p99 6127 us
+full-copy seqread 1M qd8: read 4120 IOPS 4120 MiB/s, write 0 IOPS 0 MiB/s, clat p99 2539 us
+
+after io: overlay 2.1G, reflink copy unshared extents: 5 extent lines

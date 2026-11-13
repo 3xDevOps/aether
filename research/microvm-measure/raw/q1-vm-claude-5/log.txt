@@ -1,0 +1,54 @@
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm2: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm3: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm4: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+sudo: unable to resolve host a1-vm5: Name or service not known
+booted 5 in 6.818358630s
+all 5 answered
+session 1 npm: exit 0 took 36s 471M 301 
+session 2 npm: exit 0 took 36s 471M 301 
+session 3 npm: exit 0 took 35s 471M 301 
+session 4 npm: exit 0 took 37s 471M 301 
+session 5 npm: exit 0 took 35s 471M 301 
+guest1 before reclaim: Mem:         2014320      221148      393968        2616     1434896     1793172
+guest2 before reclaim: Mem:         2014320      222904      382668        2616     1444444     1791416
+guest3 before reclaim: Mem:         2014320      217260      383404        2616     1449428     1797060
+guest4 before reclaim: Mem:         2014320      218924      374388        2616     1456696     1795396
+guest5 before reclaim: Mem:         2014320      220532      379316        2616     1450244     1793788
+guest1 after reclaim: Mem:         2014320      219344     1647340        2616      183408     1794976
+guest2 after reclaim: Mem:         2014320      226860     1644644        2616      178504     1787460
+guest3 after reclaim: Mem:         2014320      217416     1649116        2616      183492     1796904
+guest4 after reclaim: Mem:         2014320      220272     1646400        2616      183336     1794048
+guest5 after reclaim: Mem:         2014320      226404     1642180        2616      181440     1787916
+phase       own_avg    own_max   file_avg   host_delta
+booted          132        133          0           94
+idle            606        610          0          585
+npm            1753       2041          0         1747
+after          1685       1732          0         1914
+reclaimed        434        449          0          883
+later           561        588          0         1000
+
+
+
+
+

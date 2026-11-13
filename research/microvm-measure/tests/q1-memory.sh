@@ -17,11 +17,16 @@ exec > >(tee "$OUT/log.txt") 2>&1
 on() { # i command
   case "$KIND" in
     vm) "$M/host/vm.sh" ssh "$1" "$2" ;;
-    ctr) docker exec "a1-ctr$1" bash -c "$2" ;;
+    ctr) docker exec -i "a1-ctr$1" bash -c "$2" ;;
   esac
 }
 
-hostmem() { awk '/^(MemAvailable|AnonPages|Shmem|Cached):/{printf "%s=%s ", $1, $2}' /proc/meminfo; }
+target() { if [ "$KIND" = ctr ]; then echo "a1-ctr$1"; else echo "$1"; fi; }
+
+hostmem() {
+  awk '/^(MemAvailable|AnonPages|Shmem|Cached):/{printf "%s=%s ", $1, $2}' /proc/meminfo
+  echo "ksm_sharing_kib=$(($(cat /sys/kernel/mm/ksm/pages_sharing) * 4))"
+}
 
 sample() { # phase
   local i
@@ -82,7 +87,7 @@ sample booted
 
 url=http://10.201.0.1:18080
 [ "$KIND" = ctr ] && url=http://172.17.0.1:18080
-for i in $(seq "$N"); do MOCK_URL=$url "$M/host/agent.sh" "$KIND" "$i" "$AGENT" turn; done
+for i in $(seq "$N"); do MOCK_URL=$url "$M/host/agent.sh" "$KIND" "$(target "$i")" "$AGENT" turn; done
 for i in $(seq "$N"); do
   for _ in $(seq 120); do
     on "$i" "tmux capture-pane -p -t agent" | grep -q aether-turn-done && break
@@ -96,7 +101,7 @@ sample idle
 
 for i in $(seq "$N"); do
   on "$i" "mkdir -p /workspace/app && cat >/workspace/app/package.json" <"$M/tests/package.json"
-  on "$i" "cd /workspace/app && nohup bash -c 's=\$(date +%s); npm install --no-audit --no-fund >/tmp/npm.log 2>&1; echo exit \$? took \$((\$(date +%s) - s))s >/tmp/npm.done' </dev/null >/dev/null 2>&1 &"
+  on "$i" "nohup bash -c 'cd /workspace/app; s=\$(date +%s); npm install --no-audit --no-fund >/tmp/npm.log 2>&1; echo exit \$? took \$((\$(date +%s) - s))s >/tmp/npm.done' </dev/null >/dev/null 2>&1 &"
 done
 while :; do
   sample npm
@@ -114,7 +119,7 @@ if [ "$KIND" = vm ]; then
   sleep 20
   sample reclaimed
   for i in $(seq "$N"); do on "$i" "free -k | sed -n 2p" | sed "s/^/guest$i after reclaim: /"; done
-  for i in $(seq "$N"); do MOCK_URL=$url "$M/host/agent.sh" prompt "$KIND" "$i" w1; done
+  for i in $(seq "$N"); do MOCK_URL=$url "$M/host/agent.sh" prompt "$KIND" "$(target "$i")" w1; done
   sleep 60
   sample later
 fi

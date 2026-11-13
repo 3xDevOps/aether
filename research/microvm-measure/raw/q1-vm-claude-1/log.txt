@@ -1,0 +1,18 @@
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+sudo: unable to resolve host a1-vm1: Name or service not known
+booted 1 in 1.680928937s
+all 1 answered
+session 1 npm: exit 0 took 34s 471M 301 
+guest1 before reclaim: Mem:         2014320      222312      394192        2616     1433588     1792008
+guest1 after reclaim: Mem:         2014320      222816     1648932        2620      178348     1791504
+phase       own_avg    own_max   file_avg   host_delta
+booted          133        133          0          128
+idle            607        607          0          670
+npm            2041       2041          0         2128
+after          1660       1660          0         2136
+reclaimed        443        443          0         1056
+later           567        567          0         1753
+

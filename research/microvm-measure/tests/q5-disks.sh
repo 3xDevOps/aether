@@ -3,8 +3,9 @@
 # the KVM host. Parts (PARTS, default "create io git"):
 #   create  time and space for a qcow2 overlay over a 4 GiB raw base versus
 #           an XFS reflink copy of it (10 each), and one full copy
-#   io      fio in VM 6 on a fresh overlay, a fresh reflink copy and a full
-#           copy, attached as extra disks with DISK_OPTS (default direct=on)
+#   io      fio in the VM on a fresh overlay, a fresh reflink copy and a full
+#           copy, attached as extra disks with DISK_OPTS (default direct=on),
+#           after evicting all four files from the host page cache
 #   tree    only generate the 40,000-file tree ($Q/tree.tar)
 #   git     git add -A / commit / status on a 40,000-file tree on the VM's
 #           ext4 data disk, over virtio-fs (FS_CACHE, default auto), and on
@@ -27,21 +28,22 @@ trap '"$M/host/vm.sh" stop $V' EXIT
 if [[ " $PARTS " == *" create "* ]]; then
   rm -f "$Q"/ov*.qcow2 "$Q"/rl*.raw "$Q/full.raw"
   sync
+  used0=$(df -k --output=used /srv | tail -n 1)
   q=() r=()
   for i in $(seq 10); do
     q+=("$(ms qemu-img create -q -f qcow2 -b "$Q/base4g.raw" -F raw "$Q/ov$i.qcow2")")
     r+=("$(ms cp --reflink=always "$Q/base4g.raw" "$Q/rl$i.raw")")
   done
   echo "qcow2 overlay create ms: ${q[*]}; on disk $(du -k "$Q/ov1.qcow2" | cut -f1) KiB"
-  echo "reflink copy create ms:  ${r[*]}; on disk (shared extents) $(du -k "$Q/rl1.raw" | cut -f1) KiB, fs used delta for 10 copies: see df"
-  df -k /srv | tail -n 1
-  echo "full copy create ms: $(ms cp --reflink=never "$Q/base4g.raw" "$Q/full.raw"); sync after it: $(ms sync) ms"
-  df -k /srv | tail -n 1
+  sync
+  used1=$(df -k --output=used /srv | tail -n 1)
+  echo "reflink copy create ms:  ${r[*]}; /srv used grew $(((used1 - used0) / 1024)) MiB for 10 overlays + 10 reflink copies"
+  echo "full copy create ms: $(ms cp --reflink=never "$Q/base4g.raw" "$Q/full.raw"); sync after it: $(ms sync) ms; /srv used grew $((($(df -k --output=used /srv | tail -n 1) - used1) / 1024)) MiB"
   rm -f "$Q"/ov[2-9].qcow2 "$Q"/ov10.qcow2 "$Q"/rl[2-9].raw "$Q"/rl10.raw
 fi
 
 fio_run() { # dev name rw bs depth
-  g "fio --name=$2 --filename=$1 --rw=$3 --bs=$4 --iodepth=$5 --ioengine=libaio --direct=1 --size=2G --runtime=20 --time_based=0 --output-format=json" |
+  g "fio --name=${2// /-} --filename=$1 --rw=$3 --bs=$4 --iodepth=$5 --ioengine=libaio --direct=1 --size=2G --runtime=20 --time_based=0 --output-format=json" |
     jq -r --arg n "$2" '.jobs[0] | "\($n): read \(.read.iops | floor) IOPS \(.read.bw / 1024 | floor) MiB/s, write \(.write.iops | floor) IOPS \(.write.bw / 1024 | floor) MiB/s, clat p99 \((.write.clat_ns.percentile["99.000000"] // .read.clat_ns.percentile["99.000000"]) / 1000 | floor) us"'
 }
 
@@ -50,6 +52,10 @@ if [[ " $PARTS " == *" io "* ]]; then
   qemu-img create -q -f qcow2 -b "$Q/base4g.raw" -F raw "$Q/ov1.qcow2"
   cp --reflink=always "$Q/base4g.raw" "$Q/rl1.raw"
   [ -f "$Q/full.raw" ] || cp --reflink=never "$Q/base4g.raw" "$Q/full.raw"
+  sync
+  sudo python3 -I -c 'import os, sys
+for p in sys.argv[1:]:
+    fd = os.open(p, os.O_RDONLY); os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED); os.close(fd)' "$Q/base4g.raw" "$Q/ov1.qcow2" "$Q/rl1.raw" "$Q/full.raw"
   sudo rm -rf "$A1/vms/vm$V" && mkdir -p "$A1/vms/vm$V/home"
   MEM=2G HOME_FS=0 DISKS="$Q/ov1.qcow2 $Q/rl1.raw $Q/full.raw" DISK_OPTS=${DISK_OPTS:-direct=on} "$M/host/vm.sh" start $V
   g 'for d in /sys/block/vd*; do echo "$(basename $d) $(cat $d/serial 2>/dev/null) $(($(cat $d/size) / 2048)) MiB"; done'
@@ -71,6 +77,7 @@ git_run() { # vm|host dir; the host run does not drop the host page cache
   $run "set -e; cd $2; t() { s=\$(date +%s%N); \"\$@\" >/dev/null; echo \$(( (\$(date +%s%N) - s) / 1000000 )); }
     export GIT_CONFIG_GLOBAL=/tmp/a1-gitconfig
     git config --global user.email a1@example.invalid; git config --global user.name a1; git config --global init.defaultBranch main
+    git config --global safe.directory '*'; git config --global gc.auto 0; git config --global maintenance.auto false
     git init -q .
     add=\$(t git add -A); commit=\$(t git commit -q -m init)
     s1=\$(t git status); s2=\$(t git status); s3=\$(t git status)

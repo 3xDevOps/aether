@@ -1,0 +1,5 @@
+phase        own_avg    own_max   file_avg   host_delta  ksm_saved_avg
+booted             0          0          0           99              0
+idle              97         97        521          105              0
+npm              501        501       1471          526              0
+after            163        163       1517          124              0

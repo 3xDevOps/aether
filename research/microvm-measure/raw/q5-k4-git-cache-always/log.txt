@@ -1,0 +1,4 @@
+VM ext4 data disk (virtio-blk raw): files 40000: add -A 4476 ms, commit 130 ms, status warm 38/46/53 ms, status cold 82 ms, status after 1000 edits 36 ms, add -A after edits 207 ms
+virtio-fs cache=always: files 40000: add -A 25193 ms, commit 1665 ms, status warm 74/69/80 ms, status cold 378 ms, status after 1000 edits 87 ms, add -A after edits 630 ms
+host XFS native: files 40000: add -A 3374 ms, commit 121 ms, status warm 19/21/20 ms, status cold 20 ms, status after 1000 edits 23 ms, add -A after edits 152 ms
+

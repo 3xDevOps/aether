@@ -1,0 +1,31 @@
+dockerd 29.1.3
+ Container stack-web-1  Starting
+ Container stack-web-1  Started
+OK
+before save:
+stack-cache-1 running Up 1 second
+stack-web-1 running Up 1 second
+/stack-cache-1 started=2026-11-13T02:23:02.514523188Z restarts=0
+/stack-web-1 started=2026-11-13T02:23:02.608672891Z restarts=0
+dev server pid 646
+664
+host -> nginx :8080 200
+host -> dev server: dev 646
+
+saved: 2.1G; sleeping 30s
+after restore:
+stack-cache-1 running Up 2 seconds
+stack-web-1 running Up 2 seconds
+/stack-cache-1 started=2026-11-13T02:23:02.514523188Z restarts=0
+/stack-web-1 started=2026-11-13T02:23:02.608672891Z restarts=0
+dev server pid 646
+739
+ok   redis keeps its data: before-save
+ok   nginx answers in the VM: 200
+ok   web reaches cache by name: reachable
+ok   dev server answers in the VM: dev 646
+ok   new container starts: redis-cli 7.4.12
+ok   guest clock vs host: guest 1794536586 host 1794536617
+host -> nginx :8080 after restore 200
+host -> dev server after restore: dev 646
+

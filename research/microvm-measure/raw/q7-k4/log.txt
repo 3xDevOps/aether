@@ -1,0 +1,13 @@
+vsock:5000 5000 round trips, 64-byte reply: p50 73.814µs p99 305.637µs max 2.140559ms
+tcp:10.201.0.1:5001 5000 round trips, 64-byte reply: p50 77.334µs p99 206.06µs max 681.418µs
+vsock:5000 5000 round trips, 4096-byte reply: p50 73.563µs p99 138.879µs max 1.064424ms
+tcp:10.201.0.1:5001 5000 round trips, 4096-byte reply: p50 89.754µs p99 134.127µs max 3.819052ms
+vsock:5000 5000 round trips, 131072-byte reply: p50 305.199µs p99 933.313µs max 4.588346ms
+tcp:10.201.0.1:5001 5000 round trips, 131072-byte reply: p50 345.307µs p99 941.349µs max 18.263567ms
+fusevsock on /mnt/lb type fuse.rawBridge (rw,nosuid,nodev,relatime,user_id=0,group_id=0,max_read=131072)
+fusevsock on /mnt/fv type fuse.rawBridge (rw,nosuid,nodev,relatime,user_id=0,group_id=0,max_read=131072)
+/var/tmp/tree: walk cold 18 ms, stat all 74 ms, stat all after 2 s (attr TTL 1 s) 245 ms, read all cold 2246 ms, read all again 431 ms
+/mnt/lb: walk cold 287 ms, stat all 211 ms, stat all after 2 s (attr TTL 1 s) 284 ms, read all cold 6787 ms, read all again 2963 ms
+/mnt/fv: walk cold 3941 ms, stat all 3803 ms, stat all after 2 s (attr TTL 1 s) 3789 ms, read all cold 15568 ms, read all again 4152 ms
+server CPU:       10s
+

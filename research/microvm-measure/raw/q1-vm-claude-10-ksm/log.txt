@@ -1,0 +1,49 @@
+booted 10 in 11.118152421s
+all 10 answered
+session 1 npm: exit 0 took 42s 471M 301 
+session 2 npm: exit 0 took 43s 471M 301 
+session 3 npm: exit 0 took 43s 471M 301 
+session 4 npm: exit 0 took 42s 471M 301 
+session 5 npm: exit 0 took 41s 471M 301 
+session 6 npm: exit 0 took 42s 471M 301 
+session 7 npm: exit 0 took 43s 471M 301 
+session 8 npm: exit 0 took 46s 471M 301 
+session 9 npm: exit 0 took 44s 471M 301 
+session 10 npm: exit 0 took 43s 471M 301 
+guest1 before reclaim: Mem:         2043264      380364      437624        2616     1396364     1662900
+guest2 before reclaim: Mem:         2043264      379296      424768        2616     1410456     1663968
+guest3 before reclaim: Mem:         2043264      392564      432864        2616     1388900     1650700
+guest4 before reclaim: Mem:         2043264      393676      428096        2616     1392484     1649588
+guest5 before reclaim: Mem:         2043264      377220      429200        2616     1408024     1666044
+guest6 before reclaim: Mem:         2043264      383784      413508        2616     1417328     1659480
+guest7 before reclaim: Mem:         2043264      392348      411556        2616     1410464     1650916
+guest8 before reclaim: Mem:         2043264      398540      421476        2616     1394376     1644724
+guest9 before reclaim: Mem:         2043264      385772      435860        2616     1392676     1657492
+guest10 before reclaim: Mem:         2043264      383376      423392        2616     1407512     1659888
+guest1 after reclaim: Mem:         2043264      369540     1638680        2616      186024     1673724
+guest2 after reclaim: Mem:         2043264      365504     1644488        2616      184124     1677760
+guest3 after reclaim: Mem:         2043264      370904     1641460        2612      181644     1672360
+guest4 after reclaim: Mem:         2043264      356452     1655828        2616      181800     1686812
+guest5 after reclaim: Mem:         2043264      372380     1635864        2616      185844     1670884
+guest6 after reclaim: Mem:         2043264      358104     1651812        2616      184204     1685160
+guest7 after reclaim: Mem:         2043264      358924     1649408        2616      185680     1684340
+guest8 after reclaim: Mem:         2043264      357968     1650348        2612      185792     1685296
+guest9 after reclaim: Mem:         2043264      362976     1645396        2616      185728     1680288
+guest10 after reclaim: Mem:         2043264      359012     1656564        2616      178604     1684252
+phase        own_avg    own_max   file_avg   host_delta  ksm_saved_avg
+booted            93        105          0           51             44
+idle             593        609          0          250            360
+npm             1988       2008          0         1822            185
+after           1622       1644          0         1075            665
+reclaimed        413        428          0          375             94
+later            549        561          0          318            276
+
+
+
+
+
+
+
+
+
+

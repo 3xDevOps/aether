@@ -66,7 +66,7 @@ done
 if [ "$AGENT" != none ]; then
   url=http://10.201.0.1:18080
   [ "$KIND" = ctr ] && url=http://172.17.0.1:18080
-  for i in $ids; do on "$i" "mkdir -p /workspace"; MOCK_URL=$url "$M/host/agent.sh" "$KIND" "$i" "$AGENT" turn; done
+  for i in $ids; do on "$i" "mkdir -p /workspace"; t=$i; [ "$KIND" = ctr ] && t=a1-ctr$i; MOCK_URL=$url "$M/host/agent.sh" "$KIND" "$t" "$AGENT" turn; done
   for i in $ids; do
     for _ in $(seq 120); do on "$i" "tmux capture-pane -p -t agent" | grep -q aether-turn-done && break; sleep 1; done
   done

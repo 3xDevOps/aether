@@ -1,0 +1,17 @@
+booted 10 in 2.117691987s
+all 10 answered
+session 1 npm: exit 0 took 38s 471M 301 
+session 2 npm: exit 0 took 47s 471M 301 
+session 3 npm: exit 0 took 47s 471M 301 
+session 4 npm: exit 0 took 50s 471M 301 
+session 5 npm: exit 0 took 44s 471M 301 
+session 6 npm: exit 0 took 39s 471M 301 
+session 7 npm: exit 0 took 51s 471M 301 
+session 8 npm: exit 0 took 46s 471M 301 
+session 9 npm: exit 0 took 47s 471M 301 
+session 10 npm: exit 0 took 43s 471M 301 
+phase        own_avg    own_max   file_avg   host_delta  ksm_saved_avg
+booted             0          0          0           19              0
+idle             168        170         17          181              0
+npm              599        630       1065          562              0
+after            221        223       1085          167              0

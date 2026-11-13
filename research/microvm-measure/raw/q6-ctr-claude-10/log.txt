@@ -1,0 +1,12 @@
+started 10 ctr sessions, agent claude; settling 60 s
+session 11: 0.201% of one CPU
+session 12: 0.189% of one CPU
+session 13: 0.190% of one CPU
+session 14: 0.197% of one CPU
+session 15: 0.218% of one CPU
+session 16: 0.190% of one CPU
+session 17: 0.188% of one CPU
+session 18: 0.207% of one CPU
+session 19: 0.204% of one CPU
+session 20: 0.213% of one CPU
+sum of 10 sessions: 1.997% of one CPU = 0.125% of the 16-CPU host; host busy overall (all tenants): 1.52%

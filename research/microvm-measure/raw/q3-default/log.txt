@@ -1,0 +1,52 @@
+host-before
+held.log lines before save: 4
+ok   snapshot with virtio-fs attached: 125M
+
+ok   restore: VM answers ssh
+FAIL guest file written before save: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+cat: /mnt/work/guest.txt: Bad file descriptor
+FAIL held fd keeps appending: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+bash: line 1: 0: Bad file descriptor
+bash: line 1: 0: Bad file descriptor
+bash: line 1: [: : integer expression expected
+stuck at  -> ; writer alive: bash: line 1: kill: (135) - No such process
+FAIL host edit while saved is seen: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+reads: 
+cat: /mnt/work/host-edit.txt: Bad file descriptor
+FAIL host-created file is seen: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+cat: /mnt/work/host-new.txt: Bad file descriptor
+FAIL host-deleted file is gone: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+ls: cannot access '/mnt/work/dir': Bad file descriptor
+FAIL list a dir known before save: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+ls: cannot access '/mnt/work/dir': Bad file descriptor
+0
+FAIL stat a file known before save: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+stat: cannot statx '/mnt/work/dir/f1': Bad file descriptor
+FAIL create a file after restore: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+bash: line 1: 1: Bad file descriptor
+FAIL shell with cwd in share: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+ls: cannot open directory '.': Bad file descriptor 2 
+FAIL home share readable: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+cat: /root/.claude/settings.json: Bad file descriptor
+FAIL home write: Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+bash: line 1: 1: Bad file descriptor
+host sees guest write after restore: cat: /srv/aether/1/vms/vm8/work/after.txt: No such file or directory
+Could not chdir to home directory /root: Bad file descriptor
+bash: /root/.bashrc: Bad file descriptor
+[    0.337802] virtiofs virtio5: discovered new tag: work
+[    0.341230] virtio-pci 0000:00:07.0: enabling device (0000 -> 0002)
+[    0.343721] virtio-pci 0000:00:08.0: enabling device (0000 -> 0002)
+[    0.381169] virtio_blk virtio1: 1/0/0 default/read/poll queues
+[    0.383327] virtio_blk virtio1: [vda] 33554432 512-byte logical blocks (17.2 GB/16.0 GiB)
+

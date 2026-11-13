@@ -1,0 +1,13 @@
+phase=before t=1794536479 host MemAvailable:=61756032 Cached:=55629804 AnonPages:=1069324 Shmem:=3216 
+phase=booted t=1794536481 host MemAvailable:=61492808 Cached:=54055776 AnonPages:=1329800 Shmem:=3216 
+phase=booted t=1794536481 vm1 VmRSS=143308 RssAnon=138212 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=idle t=1794536544 host MemAvailable:=61174484 Cached:=51854456 AnonPages:=1520548 Shmem:=3204 
+phase=idle t=1794536544 vm1 VmRSS=1356760 RssAnon=1351664 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=npm t=1794536580 host MemAvailable:=59902176 Cached:=52635844 AnonPages:=2775948 Shmem:=3216 
+phase=npm t=1794536580 vm1 VmRSS=2081344 RssAnon=2076248 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=after t=1794536641 host MemAvailable:=60706432 Cached:=49677560 AnonPages:=1915084 Shmem:=3196 
+phase=after t=1794536641 vm1 VmRSS=1754544 RssAnon=1749448 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=reclaimed t=1794536662 host MemAvailable:=61707576 Cached:=49764644 AnonPages:=677752 Shmem:=3196 
+phase=reclaimed t=1794536662 vm1 VmRSS=517216 RssAnon=512120 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=later t=1794536722 host MemAvailable:=60164320 Cached:=52828564 AnonPages:=935988 Shmem:=1255024 
+phase=later t=1794536722 vm1 VmRSS=762700 RssAnon=757604 RssFile=5092 RssShmem=4 virtiofsd_anon=0
