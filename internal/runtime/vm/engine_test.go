@@ -474,7 +474,7 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	shared := sessionSpec("run-s")
 	shared.WorktreeHostPath, shared.WorktreeMountPath = t.TempDir(), "/workspace"
 	h.createStarted("run-s", shared)
-	if err := h.engine.save(t.Context(), "run-s"); err == nil || !strings.Contains(err.Error(), "/workspace") {
+	if err := h.engine.save(t.Context(), "run-s"); err == nil || !strings.Contains(err.Error(), "over virtio-fs") {
 		t.Fatalf("save with a share = %v", err)
 	}
 	if h.units.vmm("run-s") == nil {

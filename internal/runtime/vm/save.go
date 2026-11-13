@@ -26,12 +26,16 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if len(rec.Checkouts) > 0 {
-		targets := make([]string, len(rec.Checkouts))
-		for i, m := range rec.Checkouts {
-			targets[i] = m.ContainerPath
+	booted, err := readLaunch(e.dir(key))
+	if err != nil {
+		return err
+	}
+	if len(booted.Shares) > 0 {
+		sources := make([]string, len(booted.Shares))
+		for i, s := range booted.Shares {
+			sources[i] = s.Source
 		}
-		return fmt.Errorf("vm runtime: cannot save VM %s: its checkouts (%s) are virtio-fs mounts, which would come back unusable after a restore; work item 6 moves them onto the VM's disk", key, strings.Join(targets, ", "))
+		return fmt.Errorf("vm runtime: cannot save VM %s: it shares %s over virtio-fs, which would come back unusable after a restore; work item 6 moves checkouts onto the VM's disk", key, strings.Join(sources, ", "))
 	}
 	api := newCHAPI(e.path(key, apiSocket))
 	state, err := api.state(ctx)
