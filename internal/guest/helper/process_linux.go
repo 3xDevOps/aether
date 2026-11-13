@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,8 +31,13 @@ const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 const startupTimeout = 10 * time.Second
 
 // maxExited is how many exited processes keep their record and output for
-// a late reader, besides the main process, which always does.
-const maxExited = 32
+// a late reader, besides the main process, which always does. A record
+// whose exit or output a caller has not read yet stays past it, up to
+// maxKept.
+const (
+	maxExited = 32
+	maxKept   = 4 * maxExited
+)
 
 var (
 	errInvalid = errors.New("invalid process")
@@ -60,6 +66,14 @@ type process struct {
 	stderr   *output
 	done     chan struct{}
 	code     int
+	// reported is set once a caller has been told the exit.
+	reported atomic.Bool
+}
+
+// settled reports that no caller has more to read of p: its exit was
+// reported and both streams were read to their end.
+func (p *process) settled() bool {
+	return p.reported.Load() && p.stdout.drained() && p.stderr.drained()
 }
 
 // processes is the helper's process table. The helper reaps every child,
@@ -122,6 +136,7 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 			failed = &execError{code: 126, err: err}
 		}
 		p.code = failed.code
+		p.reported.Store(true)
 		p.stdout.close()
 		p.stderr.close()
 		close(p.done)
@@ -411,22 +426,30 @@ func (t *processes) reap() {
 	}
 }
 
-// retire lists p as exited and forgets the oldest exited processes past
-// maxExited. The main process is never forgotten.
+// retire lists p as exited and, past maxExited, forgets the oldest exited
+// processes no caller still reads, or past maxKept the oldest of all. The
+// main process is never forgotten.
 func (t *processes) retire(p *process) {
 	if p.id == guest.MainID {
 		return
 	}
 	t.exited = append(t.exited, p.id)
 	for len(t.exited) > maxExited {
+		i := slices.IndexFunc(t.exited, func(id string) bool { return t.byID[id] == nil || t.byID[id].settled() })
+		if i < 0 {
+			if len(t.exited) <= maxKept {
+				return
+			}
+			i = 0
+		}
 		// Closing the output also ends a pump still waiting for a reader of
 		// lossless output, which no one can attach to any more.
-		if old := t.byID[t.exited[0]]; old != nil {
+		if old := t.byID[t.exited[i]]; old != nil {
 			old.stdout.close()
 			old.stderr.close()
 		}
-		delete(t.byID, t.exited[0])
-		t.exited = t.exited[1:]
+		delete(t.byID, t.exited[i])
+		t.exited = slices.Delete(t.exited, i, i+1)
 	}
 }
 

@@ -496,3 +496,50 @@ func TestHostOnly(t *testing.T) {
 		t.Fatalf("accepted %v, %v; want only the host's connection", conn.RemoteAddr(), err)
 	}
 }
+
+func TestRecordsStayUntilTheirCallersAreDone(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	unread := spawn(t, client, guest.ProcessSpec{ID: "unread", Argv: []string{"sh", "-c", "echo late output"}, Lossless: true})
+	unwaited := spawn(t, client, guest.ProcessSpec{ID: "unwaited", Argv: []string{"sh", "-c", "exit 7"}, Lossless: true})
+	// Watch the table, not Status: a Status that sees the exit reports it.
+	for _, id := range []string{unread.ID(), unwaited.ID()} {
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			p, err := testProcs.get(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.exited() {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s did not exit", id)
+			}
+		}
+	}
+	a := unwaited.Attach(true)
+	if out, err := io.ReadAll(a.Stdout()); err != nil || len(out) != 0 {
+		t.Fatalf("unwaited output %q, %v", out, err)
+	}
+	_ = a.Close()
+	for i := range maxExited + 8 {
+		p := spawn(t, client, guest.ProcessSpec{ID: fmt.Sprintf("later-%d", i), Argv: []string{"true"}})
+		if _, err := p.Wait(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a = unread.Attach(true)
+	defer func() { _ = a.Close() }()
+	if out, err := io.ReadAll(a.Stdout()); err != nil || string(out) != "late output\n" {
+		t.Fatalf("output read after %d later exits = %q, %v", maxExited+8, out, err)
+	}
+	if code, err := unwaited.Wait(ctx); err != nil || code != 7 {
+		t.Fatalf("exit read after %d later exits = %d, %v", maxExited+8, code, err)
+	}
+	testProcs.mu.Lock()
+	kept := len(testProcs.exited)
+	testProcs.mu.Unlock()
+	if kept > maxKept {
+		t.Errorf("%d exited records kept, over %d", kept, maxKept)
+	}
+}

@@ -76,6 +76,13 @@ func (o *output) append(b []byte) {
 	o.notify()
 }
 
+// drained reports a stream that ended and was read to its end.
+func (o *output) drained() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.closed && o.read >= o.end()
+}
+
 func (o *output) close() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
