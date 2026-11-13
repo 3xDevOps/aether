@@ -99,7 +99,7 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 	}
 	args := strings.Join(call.launch.Args, " ")
 	for _, want := range []string{
-		"--cpus boot=2", "--memory size=2048M,shared=on", "--balloon size=0,free_page_reporting=on",
+		"--cpus boot=2,nested=off", "--memory size=2048M,shared=on", "--balloon size=0,free_page_reporting=on",
 		"--kernel /k/vmlinux", "page_reporting.page_reporting_order=0", "aether.mount=home,0,/root",
 		"helper.img,image_type=raw,id=helper,serial=helper,readonly=on", "root.img,image_type=qcow2,id=root,serial=root,backing_files=on",
 		"--net id=net0,tap=aethervm1,ip=10.200.0.5,mask=255.255.255.252",
