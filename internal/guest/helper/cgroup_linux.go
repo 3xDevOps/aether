@@ -25,14 +25,32 @@ type sessionCgroup struct {
 // sessionCgroupParent is the cgroup dockerd puts nested containers under.
 const sessionCgroupParent = "/session"
 
+// sessionReserve is kept from the session on top of what was in use or held
+// free when the helper started: the helper serves the file service, and
+// with no memory left the session's page faults through it would thrash
+// instead of ending in an OOM kill.
+const sessionReserve = 48 << 20
+
 func newSessionCgroup(root string) (*sessionCgroup, error) {
-	if err := os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte("+pids"), 0); err != nil {
-		return nil, fmt.Errorf("enable the pids controller: %w", err)
+	if err := os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte("+pids +memory"), 0); err != nil {
+		return nil, fmt.Errorf("enable the pids and memory controllers: %w", err)
 	}
 	dir := filepath.Join(root, sessionCgroupParent)
 	procs := filepath.Join(dir, "procs")
 	if err := os.MkdirAll(procs, 0o755); err != nil {
 		return nil, err
+	}
+	meminfo, err := readCounters("/proc/meminfo", 1024)
+	if err != nil {
+		return nil, err
+	}
+	available := meminfo["MemAvailable"]
+	if available <= sessionReserve {
+		return nil, fmt.Errorf("cap the session's memory: %d MiB is available and the helper keeps %d MiB", available>>20, sessionReserve>>20)
+	}
+	limit := strconv.FormatUint(available-sessionReserve, 10)
+	if err = os.WriteFile(filepath.Join(dir, "memory.max"), []byte(limit), 0); err != nil {
+		return nil, fmt.Errorf("cap the session's memory: %w", err)
 	}
 	f, err := os.Open(procs)
 	if err != nil {

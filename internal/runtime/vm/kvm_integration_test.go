@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/vmimage"
 )
@@ -281,6 +282,100 @@ func TestKVMRootSessionStartsFromTheFileService(t *testing.T) {
 		cancel()
 		if execErr != nil || code != 0 {
 			t.Errorf("%v in %q: %d, %v: %s", tc.argv, tc.dir, code, execErr, errOut)
+		}
+	}
+}
+
+// hogged keeps what TestKVMHogNow allocates until the kernel kills it.
+var hogged [][]byte
+
+func TestKVMHogNow(t *testing.T) {
+	if os.Getenv("AETHER_VM_TEST_HOG_NOW") == "" {
+		t.Skip("runs inside a guest only")
+	}
+	for {
+		b := make([]byte, 8<<20)
+		for i := 0; i < len(b); i += 4096 {
+			b[i] = 1
+		}
+		hogged = append(hogged, b)
+	}
+}
+
+// TestKVMSessionThatFillsTheVMIsKilled fills the VM from a program the file
+// service serves, whose pages the helper must still be able to fault back in.
+func TestKVMSessionThatFillsTheVMIsKilled(t *testing.T) {
+	e := kvmEngine(t)
+	key := "run-vmtest-oom"
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kvmSession(t, e, key, runtime.Mount{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	start := time.Now()
+	code, _, errOut, err := e.exec(ctx, key, []string{"/bin/sh", "-c", "AETHER_VM_TEST_HOG_NOW=1 exec /opt/aether-vmtest -test.run '^TestKVMHogNow$'"}, "")
+	if err != nil || code != 128+int(unix.SIGKILL) {
+		t.Fatalf("the program that filled the VM ended with %d, %v after %s: %s", code, err, time.Since(start), errOut)
+	}
+	t.Logf("the kernel killed the program %s after it started", time.Since(start))
+	out, _ := vmRun(t, e, key, "grep '^oom ' /sys/fs/cgroup/session/memory.events; grep MemTotal /proc/meminfo; cat /sys/fs/cgroup/session/memory.max; grep VmHWM /proc/1/status")
+	if !strings.Contains(out, "oom ") || strings.Contains(out, "oom 0") {
+		t.Errorf("the session cgroup's own OOMs and memory: %q", out)
+	}
+	t.Logf("session cgroup and helper: %q", out)
+	if _, code := vmRun(t, e, key, "/opt/aether-vmtest -test.run '^$'"); code != 0 {
+		t.Errorf("the file service's program after the kill exited %d", code)
+	}
+}
+
+func TestKVMHoldNow(t *testing.T) {
+	var n int
+	if _, err := fmt.Sscan(os.Getenv("AETHER_VM_TEST_HOLD_NOW"), &n); err != nil {
+		t.Skip("runs inside a guest only")
+	}
+	b := make([]byte, n)
+	for i := 0; i < len(b); i += 4096 {
+		b[i] = 1
+	}
+	hogged = append(hogged, b)
+	fmt.Println("held")
+	time.Sleep(time.Hour)
+}
+
+// TestKVMFileServiceWritesAtTheCap writes to the file service from many
+// processes while the session is near its memory cap: what the helper holds
+// for them is outside the cap.
+func TestKVMFileServiceWritesAtTheCap(t *testing.T) {
+	e := kvmEngine(t)
+	key := "run-vmtest-writes"
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := t.TempDir()
+	kvmSession(t, e, key, runtime.Mount{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true}, runtime.Mount{HostPath: written, ContainerPath: "/mnt/h"})
+	out, _ := vmRun(t, e, key, "echo $(( $(cat /sys/fs/cgroup/session/memory.max) - $(cat /sys/fs/cgroup/session/memory.current) - (96 << 20) ))")
+	_, att, err := e.spawn(t.Context(), key, guest.ProcessSpec{
+		ID: "hold", Argv: []string{"/opt/aether-vmtest", "-test.run", "^TestKVMHoldNow$"}, Env: []string{"AETHER_VM_TEST_HOLD_NOW=" + strings.TrimSpace(out)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = att.Close() }()
+	readUntil(t, att, "held")
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	start := time.Now()
+	code, stdout, errOut, err := e.exec(ctx, key, []string{"/bin/sh", "-c", "for i in $(seq 64); do dd if=/dev/zero of=/mnt/h/f$i bs=1M count=16 status=none & pids=\"$pids $!\"; done; for p in $pids; do wait $p || exit 1; done; grep VmHWM /proc/1/status"}, "")
+	if err != nil || code != 0 {
+		t.Fatalf("64 writers at the cap: %d, %v after %s: %s", code, err, time.Since(start), errOut)
+	}
+	t.Logf("64 writers at the cap took %s; helper %s", time.Since(start), strings.TrimSpace(stdout))
+	for i := 1; i <= 64; i++ {
+		if info, statErr := os.Stat(filepath.Join(written, fmt.Sprint("f", i))); statErr != nil || info.Size() != 16<<20 {
+			t.Errorf("writer %d's file on the host: %v, %v", i, info, statErr)
 		}
 	}
 }

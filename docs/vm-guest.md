@@ -223,6 +223,16 @@ reports how many bytes the process took; it never closes the input.
 ## Limits, stats and the clock
 
 The session cgroup's `pids.max` is the session's process limit from `Boot`.
+Its `memory.max` is the guest's `MemAvailable` when the helper starts, less
+48 MiB: what the kernel and the helper already hold, the free memory the
+kernel keeps back, and 48 MiB for the helper to grow stay outside the
+session. A session that filled the VM would leave the helper no memory to
+serve the file service, and pages the session faults back in from it would
+never arrive, so the kernel would thrash instead of killing a process. The
+helper, as PID 1, is never the kernel's OOM victim. The file service holds
+at most 8 MiB of requests at once and the kernel queues the rest; what it
+keeps per file the kernel caches, about 1 KiB, is not bounded, and the
+kernel frees it under memory pressure.
 Every process the helper starts begins in its leaf `/sys/fs/cgroup/session/procs`,
 and dockerd puts nested containers beside it, so they count too. The helper
 itself stays outside.
