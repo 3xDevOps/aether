@@ -261,10 +261,25 @@ func TestKVMHelper(t *testing.T) {
 	if out, code := run("signing", "1000:1000", "/usr/local/bin/aether-internal", "kvm-connect", "/run/aether-signing/agent.sock"); code != 0 || !strings.Contains(out, "signing answers") {
 		t.Errorf("signing socket: exit %d: %s", code, out)
 	}
-	// A server restart unlinks the socket and listens again: virtio-fs
-	// drops the helper's bind, and the helper binds again.
+	// A stopped server leaves its socket file behind, and the next one
+	// unlinks it and listens again. A call made in between waits for the
+	// new server; virtio-fs then drops the helper's bind, which it binds
+	// again.
+	coordListener.(*net.UnixListener).SetUnlinkOnClose(false)
 	_ = coordListener.Close()
+	waiting, err := client.Spawn(ctx, guest.ProcessSpec{ID: "coord-waits", Env: env, User: "1000:1000",
+		Argv: []string{"/usr/local/bin/aether-internal", "kvm-connect", "/run/aether/coord3.sock"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
 	echoSocket(t, coord, "restarted-coord")
+	waited := waiting.Attach(true)
+	out, _ := io.ReadAll(waited.Stdout())
+	_ = waited.Close()
+	if !strings.Contains(string(out), "restarted-coord answers") {
+		t.Errorf("a call made while the server restarted: %s", out)
+	}
 	if out, code := run("coord-again", "1000:1000", "/usr/local/bin/aether-internal", "kvm-connect", "/run/aether/coord3.sock"); code != 0 || !strings.Contains(out, "restarted-coord answers") {
 		t.Errorf("coordination socket after a server restart: exit %d: %s", code, out)
 	}

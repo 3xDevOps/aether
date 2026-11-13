@@ -342,6 +342,9 @@ func (t *processes) reap() {
 		}
 		close(p.done)
 		t.retire(p)
+		// A write blocked on a pipe its descendants still hold keeps the
+		// lock until its deadline, so this must not wait for it.
+		go func() { _ = p.closeInput() }()
 	}
 }
 

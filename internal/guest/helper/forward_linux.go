@@ -126,12 +126,22 @@ func keepBound(forwards []*forward) {
 	}
 }
 
+// hostWait is how long a relay waits for the host's socket: as long as the
+// coordination client retries a refused one, so a call made while the
+// server restarts is delivered once it is back instead of being cut off
+// after it was sent.
+const hostWait = 60 * time.Second
+
 func (f *forward) serve() {
 	for {
 		conn, err := f.listener.Accept()
-		if err != nil {
-			slog.Error("guest: socket forward stopped", "path", f.Path, "error", err)
+		if errors.Is(err, net.ErrClosed) {
 			return
+		}
+		if err != nil {
+			slog.Warn("guest: accept on a forwarded socket", "path", f.Path, "error", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		go f.relay(conn)
 	}
@@ -139,7 +149,7 @@ func (f *forward) serve() {
 
 func (f *forward) relay(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	host, err := vsock.Dial(vsock.Host, f.Port, nil)
+	host, err := dialHost(f.Port)
 	if err != nil {
 		slog.Warn("guest: reach host socket", "path", f.Path, "port", f.Port, "error", err)
 		return
@@ -150,6 +160,19 @@ func (f *forward) relay(conn net.Conn) {
 	go func() { defer wg.Done(); splice(host, conn) }()
 	go func() { defer wg.Done(); splice(conn, host) }()
 	wg.Wait()
+}
+
+func dialHost(port uint32) (net.Conn, error) {
+	deadline := time.Now().Add(hostWait)
+	delay := 50 * time.Millisecond
+	for {
+		conn, err := vsock.Dial(vsock.Host, port, nil)
+		if err == nil || time.Now().After(deadline) {
+			return conn, err
+		}
+		time.Sleep(delay)
+		delay = min(2*delay, time.Second)
+	}
 }
 
 type halfCloser interface {

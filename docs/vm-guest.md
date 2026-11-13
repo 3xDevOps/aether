@@ -71,12 +71,17 @@ the path the session expects, such as `/run/aether/coord3.sock` or
 Cloud Hypervisor delivers a connection to port `N` to the host socket
 `<vsock socket>_<N>`, which the server points at the real socket.
 
+While the host socket does not answer, as during a server restart, a relay
+holds the connection and keeps trying for 60 seconds, the time the
+coordination client retries a refused connection. The call is then delivered
+once the server is back, instead of being cut off after it was sent.
+
 When the path is an entry in a read-only share, as the coordination socket in
 the run's shared directory is, the helper binds its own socket over the
 entry. The server re-creates that socket on every restart, and virtio-fs then
 drops the bind; the helper watches the mount table and binds again. The first
-connection after a server restart can be refused once; the coordination
-client retries refused connections for 60 seconds.
+connection after that can be refused once, which the coordination client
+retries.
 
 ## Sessions and processes
 
