@@ -313,8 +313,9 @@ VM the same way: the server packs what the parent lacks and `Install` sets
 `refs/remotes/children/<id>`.
 
 A live overlay is pinned by the server as for a checkout on its disk, then
-relayed to the VM, whose endpoint pins the root to the checkout again and
-keeps its staging under `/run/aether-guest/data/git/mutagen`. Files and live
+relayed to the VM, whose endpoint pins the root to the checkout again, gives
+what it creates to the checkout's owner, and keeps its staging under
+`/run/aether-guest/data/git/mutagen`. Files and live
 sync need the VM to run.
 
 ## Versions

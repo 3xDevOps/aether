@@ -154,11 +154,11 @@ func (e *Engine) vmFetchBranch(ctx context.Context, repo, branch string, into do
 		haves = append(haves, tip)
 	}
 	install := func(haves []string) error {
-		var pack bytes.Buffer
-		if packErr := e.packObjects(ctx, repo, []string{commit}, haves, &pack); packErr != nil {
-			return packErr
-		}
-		return g.Install(ctx, string(into), []guest.RefUpdate{{Ref: ref, New: commit}}, "fetch: "+branch, "", &pack)
+		pack, writer := io.Pipe()
+		go func() { _ = writer.CloseWithError(e.packObjects(ctx, repo, []string{commit}, haves, writer)) }()
+		installErr := g.Install(ctx, string(into), []guest.RefUpdate{{Ref: ref, New: commit}}, "fetch: "+branch, "", pack)
+		_ = pack.CloseWithError(io.ErrClosedPipe)
+		return installErr
 	}
 	// The VM may have dropped the commits of a branch it rewrote since it
 	// published them; then only the fork point is known to be there.

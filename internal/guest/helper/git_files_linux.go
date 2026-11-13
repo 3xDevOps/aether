@@ -15,11 +15,11 @@ import (
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
 	"github.com/mutagen-io/mutagen/pkg/encoding"
 	"github.com/mutagen-io/mutagen/pkg/logging"
+	"github.com/mutagen-io/mutagen/pkg/synchronization"
 	"github.com/mutagen-io/mutagen/pkg/synchronization/endpoint/remote"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -99,7 +99,8 @@ func (s *gitService) Install(stream grpc.ClientStreamingServer[guestpb.InstallCh
 			data = chunk.GetData()
 		}
 	}()
-	err = ownerGit(ctx, dir, pack, "index-pack", "--stdin", "--strict", "--max-input-size="+strconv.Itoa(gitengine.MaxSnapshotInputBytes))
+	// The server's pack is trusted, so it is checked but not bounded.
+	err = ownerGit(ctx, dir, pack, "index-pack", "--stdin", "--strict")
 	_ = pack.CloseWithError(io.ErrClosedPipe)
 	if err != nil {
 		return gitStatus(fmt.Errorf("index the server's objects: %w", err))
@@ -267,14 +268,25 @@ func (c *syncConn) pin() error {
 		return fmt.Errorf("sync initialization of %d bytes", length)
 	}
 	frame := make([]byte, length)
-	if _, err := io.ReadFull(readerFunc(c.read), frame); err != nil {
+	if _, err = io.ReadFull(readerFunc(c.read), frame); err != nil {
 		return err
 	}
 	req := &remote.InitializeSynchronizationRequest{}
-	if err := proto.Unmarshal(frame, req); err != nil {
+	if err = proto.Unmarshal(frame, req); err != nil {
 		return err
 	}
+	info, err := os.Stat(c.root)
+	if err != nil {
+		return err
+	}
+	// The endpoint runs as root; what it creates belongs to the session.
+	st := info.Sys().(*syscall.Stat_t)
 	req.Root = c.root
+	if req.Configuration == nil {
+		req.Configuration = &synchronization.Configuration{}
+	}
+	req.Configuration.DefaultOwner = "id:" + strconv.FormatUint(uint64(st.Uid), 10)
+	req.Configuration.DefaultGroup = "id:" + strconv.FormatUint(uint64(st.Gid), 10)
 	return encoding.EncodeProtobuf(&c.ahead, req)
 }
 
