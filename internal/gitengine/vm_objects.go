@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/guest"
 )
 
 // maxVMPackBytes bounds one pack of a snapshot, whose input is bounded by
@@ -98,7 +99,7 @@ func (e *Engine) fetchVMObjects(ctx context.Context, run domain.RunID, store str
 		return fmt.Errorf("%w: the server has too little free disk for objects from session %s", ErrSnapshotStorageLimit, run)
 	}
 	limit = min(limit, int64(free-maxVMPackBytes))
-	g, err := e.cfg.VM.Guest(ctx, vmOf(run))
+	g, err := e.vmGit(ctx, run)
 	if err != nil {
 		return err
 	}
@@ -196,4 +197,18 @@ func (e *Engine) PackObjects(ctx context.Context, run domain.RunID, wants, haves
 func vmOf(key domain.RunID) domain.RunID {
 	run, _ := domain.ParentRun(key)
 	return run
+}
+
+// vmGit returns the git service of the VM the checkout of run lives in. A
+// server that runs no VMs treats every one as stopped, so what it shows of
+// the session comes from the recorded history.
+func (e *Engine) vmGit(ctx context.Context, run domain.RunID) (*guest.Git, error) {
+	if e.cfg.VM == nil {
+		return nil, fmt.Errorf("gitengine: session %s has its checkout in a VM, and this server runs no VMs: %w", run, guest.ErrVMNotRunning)
+	}
+	g, err := e.cfg.VM.Guest(ctx, vmOf(run))
+	if err != nil {
+		return nil, fmt.Errorf("gitengine: session %s: %w", run, err)
+	}
+	return g, nil
 }

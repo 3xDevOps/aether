@@ -194,7 +194,7 @@ func TestGitServiceRecordsSnapshotsOnTheServer(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	if err := os.WriteFile(filepath.Join(p.checkout, "last.txt"), []byte("x\n"), 0o644); err != nil {
+	if err = os.WriteFile(filepath.Join(p.checkout, "last.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	p.host.StopDiffWatch(testRun)
@@ -203,6 +203,21 @@ func TestGitServiceRecordsSnapshotsOnTheServer(t *testing.T) {
 	}
 	if _, ok := p.host.LastFileChange(testRun); ok {
 		t.Fatal("a stopped watch still reports file changes")
+	}
+
+	// A server that runs no VMs, as after switching back to Docker sessions,
+	// shows the session from its recorded history.
+	repos := filepath.Dir(p.repo)
+	noVMs, err := gitengine.New(gitengine.Config{ReposDir: repos, CheckoutsDir: filepath.Join(filepath.Dir(repos), "checkouts")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = noVMs.Close() })
+	if patch, err = noVMs.RunPatch(ctx, testRun, gitengine.PatchRequest{}); err != nil || !patch.Recorded || !strings.Contains(patch.Text, "last.txt") {
+		t.Fatalf("patch on a server without VMs = %+v, %v", patch, err)
+	}
+	if _, err = noVMs.PublishRunBranch(ctx, testRun); !errors.Is(err, guest.ErrVMNotRunning) {
+		t.Fatalf("publish on a server without VMs = %v", err)
 	}
 }
 

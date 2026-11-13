@@ -115,7 +115,7 @@ func (w *vmWatch) stop(final bool) {
 	if final {
 		w.flushing.Store(true)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*snapshotTimeout)
-		g, err := w.e.cfg.VM.Guest(ctx, vmOf(w.run))
+		g, err := w.e.vmGit(ctx, w.run)
 		if err == nil {
 			err = g.Flush(ctx, string(w.run))
 		}
@@ -155,7 +155,7 @@ func (w *vmWatch) loop() {
 // follow reads the VM's watch until it breaks, reporting whether any event
 // arrived.
 func (w *vmWatch) follow() (bool, error) {
-	g, err := w.e.cfg.VM.Guest(w.ctx, vmOf(w.run))
+	g, err := w.e.vmGit(w.ctx, w.run)
 	if err != nil {
 		return false, err
 	}
@@ -420,7 +420,7 @@ func (e *Engine) vmPatch(ctx context.Context, run domain.RunID, checkout string,
 	if req.From != "" && !validObjectID(req.From) {
 		return Patch{}, fmt.Errorf("%w: %q", ErrInvalidObjectID, req.From)
 	}
-	g, err := e.cfg.VM.Guest(ctx, vmOf(run))
+	g, err := e.vmGit(ctx, run)
 	if errors.Is(err, guest.ErrVMNotRunning) {
 		return e.recordedPatch(ctx, run, req.From, maxBytes)
 	}

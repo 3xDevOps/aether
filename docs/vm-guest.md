@@ -285,7 +285,8 @@ records the snapshot only when the tree is a tree within the snapshot's
 HEAD. The store borrows the workspace repository's objects, which hold the
 fork point. A moved HEAD is published by fetching it from that store into
 the workspace repository, as for a checkout on the server's disk. While the
-VM is not running, the session's patch is its last recorded snapshot.
+VM is not running, the session's patch is its last recorded snapshot, also on
+a server switched back to `session-runtime docker`.
 
 ## Versions
 

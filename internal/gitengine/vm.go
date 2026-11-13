@@ -150,7 +150,7 @@ func vmUnsupported(run domain.RunID) error {
 
 // publishVM publishes the run branch at the HEAD of the checkout in the VM.
 func (e *Engine) publishVM(ctx context.Context, run domain.RunID, meta runMeta) (string, error) {
-	g, err := e.cfg.VM.Guest(ctx, vmOf(run))
+	g, err := e.vmGit(ctx, run)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrCheckoutNotFound, err)
 	}
