@@ -58,6 +58,8 @@ var VMTools = []VMTool{
 	{Program: "mkfs.ext4", Package: "e2fsprogs"},
 	{Program: "/usr/libexec/virtiofsd", Package: "virtiofsd"},
 	{Program: "iptables", Package: "iptables"},
+	{Program: "nft", Package: "nftables"},
+	{Program: "ip", Package: "iproute2"},
 }
 
 // CheckKVM opens device read-write, as Cloud Hypervisor does.

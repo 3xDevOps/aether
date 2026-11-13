@@ -78,8 +78,8 @@ sudo aether-server vm install                     # a server already installed
 Both first open `/dev/kvm` and stop with the error when they cannot, such as
 `session VMs need KVM: open /dev/kvm: no such file or directory`; `install`
 then writes nothing. They install `qemu-img`, `mkfs.ext4`,
-`/usr/libexec/virtiofsd` and `iptables` with `apt-get` when missing (Debian 12
-or Ubuntu 24.04 and newer ship `virtiofsd` at that path), Cloud Hypervisor
+`/usr/libexec/virtiofsd`, `iptables`, `nft` and `ip` with `apt-get` when
+missing (Debian 12 or Ubuntu 24.04 and newer ship `virtiofsd` at that path), Cloud Hypervisor
 v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, and the
 release's guest kernel `aether-vmlinux-x86_64` at
 `/usr/local/lib/aether/vmlinux` after checking it against the signed release

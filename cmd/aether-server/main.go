@@ -186,8 +186,9 @@ example:
 	"vm": `usage: aether-server vm install [--config <file>]
 
 check for /dev/kvm, then install what sessions in VMs need: qemu-img,
-mkfs.ext4, virtiofsd and iptables with apt-get when missing, Cloud Hypervisor,
-and this release's guest kernel at vm-kernel (docs/install.md#hosts-for-vm-sessions)
+mkfs.ext4, virtiofsd, iptables, nft and ip with apt-get when missing, Cloud
+Hypervisor, and this release's guest kernel at vm-kernel
+(docs/install.md#hosts-for-vm-sessions)
 
 example:
   sudo aether-server vm install
