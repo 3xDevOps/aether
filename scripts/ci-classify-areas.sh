@@ -14,10 +14,11 @@
 # make test-kvm builds, boots or runs: the VM packages, every package the
 # guest helper compiles, the guest kernel, the KVM tests, the runtime
 # helpers the VM engine shares with Docker, the dependencies, the VM files
-# other packages name vm*.go or *_vm.go, vm.mk and kvm.yml; any other path
-# is outside it. false only when at least one path is present and every path
-# is in the unrelated set for the mode. Empty input prints true. Blank lines
-# are ignored. For web and go, a path in neither set prints true.
+# other packages name vm*.go or *_vm.go, vm.mk, kvm.yml and the vm install
+# command the job runs; any other path is outside it. false only when at
+# least one path is present and every path is in the unrelated set for the
+# mode. Empty input prints true. Blank lines are ignored. For web and go, a
+# path in neither set prints true.
 set -eu
 
 if [ "$#" -ne 1 ]; then
@@ -82,7 +83,7 @@ vm() {
 		internal/*/kvm*_test.go | internal/runtime/session.go | internal/runtime/stream.go | \
 		internal/runtime/managed_exec.go | internal/runtime/docker_image.go | internal/runtime/docker_cgroup.go | \
 		internal/*/vm*.go | internal/*/*_vm.go | internal/*/*_vm_test.go | go.mod | go.sum | \
-		vm.mk | .github/workflows/kvm.yml)
+		vm.mk | .github/workflows/kvm.yml | cmd/aether-server/vm.go)
 		return 0
 		;;
 	esac

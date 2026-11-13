@@ -33,7 +33,7 @@ type Pinned struct {
 }
 
 // CloudHypervisor is the release session VMs are tested on; the kvm CI job
-// pins the same one. /usr/local/bin precedes /usr/bin on systemd's PATH, so
+// installs it with aether-server vm install. /usr/local/bin precedes /usr/bin on systemd's PATH, so
 // it wins over a distribution package.
 var CloudHypervisor = Pinned{
 	Name: "Cloud Hypervisor v54.1",

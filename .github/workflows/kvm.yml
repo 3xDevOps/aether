@@ -20,9 +20,6 @@ jobs:
     name: make test-kvm
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      CLOUD_HYPERVISOR_VERSION: v54.1
-      CLOUD_HYPERVISOR_SHA256: f9ffb9646783233d1f0fb09e77db1fca66499d1041e63bc011b90683c0d49933
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,13 +31,6 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
-      - name: Install Cloud Hypervisor, virtiofsd and qemu-img
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-utils virtiofsd
-          curl -fsSL -o "$RUNNER_TEMP/cloud-hypervisor" "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CLOUD_HYPERVISOR_VERSION/cloud-hypervisor-static"
-          echo "$CLOUD_HYPERVISOR_SHA256  $RUNNER_TEMP/cloud-hypervisor" | sha256sum -c --quiet
-          sudo install -m 0755 "$RUNNER_TEMP/cloud-hypervisor" /usr/local/bin/cloud-hypervisor
       # The config, the build script and the container recipe make kernel
       # runs are everything that decides the kernel's bytes.
       - name: Hash the guest kernel's inputs
@@ -59,6 +49,12 @@ jobs:
         with:
           path: dist/aether-vmlinux-x86_64
           key: ${{ steps.kernel.outputs.key }}
+      # The install a server runs, so the job uses the Cloud Hypervisor pin
+      # and the tool list servers get.
+      - name: Install what session VMs need (aether-server vm install)
+        run: |
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/aether-server" ./cmd/aether-server
+          sudo "$RUNNER_TEMP/aether-server" vm install --vm-kernel "$PWD/dist/aether-vmlinux-x86_64"
       - name: VM tests (real Cloud Hypervisor VMs)
         env:
           GOFLAGS: -v

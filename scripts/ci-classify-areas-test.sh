@@ -73,6 +73,7 @@ expect vm true internal/egress/proxy_vm_test.go
 expect vm true docs/testing.md go.sum
 expect vm true vm.mk
 expect vm true .github/workflows/kvm.yml
+expect vm true cmd/aether-server/vm.go
 expect vm false internal/runtime/docker.go internal/runtime/runtime.go internal/scheduler/environment.go
 expect vm false cmd/aether-server/main.go
 expect vm false internal/scheduler/envmerge.go web/src/app.tsx docs/testing.md
