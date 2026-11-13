@@ -310,9 +310,10 @@ by UNKNOWN port 65535`:
 
 ## Sign in to agents and set up GitHub
 
-The Agents page and onboarding embed the environment terminal with the agent's
-login command typed in. Press Enter to run it. Login state lives in your home,
-so you do not save the environment. See
+The Agents page and onboarding open a fresh terminal tab for each setup and
+type the agent's login command there. Press Enter to run it. This keeps an
+unfinished interactive sign-in from receiving the next agent's command. Login
+state lives in your home, so you do not save the environment. See
 [environment-home.md](environment-home.md#set-up-an-agent) and
 [GitHub](environment-home.md#connect-github).
 
