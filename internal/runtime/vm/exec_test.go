@@ -196,6 +196,24 @@ func TestWaitEndsAVMWhoseGuestRebootedOnItsOwn(t *testing.T) {
 	}
 }
 
+func TestWaitEndsAVMWhoseGuestRebootedBeforeAnyCheck(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	g := h.guest("run-a")
+	g.mu.Lock()
+	delete(g.procs, guest.MainID)
+	g.mu.Unlock()
+	if err := os.WriteFile(h.engine.path("run-a", eventsFile), []byte(`{"source": "vm", "event": "rebooting"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	st, err := h.engine.wait(ctx, "run-a")
+	if err != nil || st.Code != lostExitCode {
+		t.Errorf("wait after the guest rebooted and its new helper knew no Main = %+v, %v", st, err)
+	}
+}
+
 func TestExecAttachedEndsWithItsContextOnASilentGuest(t *testing.T) {
 	h := newHarness(t)
 	h.createStarted("run-a", sessionSpec("run-a"))
