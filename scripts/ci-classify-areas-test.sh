@@ -58,7 +58,23 @@ expect caches true desktop/package-lock.json
 expect caches true android/app/build.gradle.kts
 expect caches true android/gradle/libs.versions.toml
 
-for mode in web go caches; do
+expect vm true internal/runtime/vm/engine.go
+expect vm true internal/guest/helper/main_linux.go
+expect vm true internal/vmimage/store.go
+expect vm true images/kernel/config-x86_64
+expect vm true internal/scheduler/vm_sessions.go
+expect vm true internal/server/vmruntime.go
+expect vm true internal/sshd/sync_vm.go
+expect vm true internal/runtime/managed_exec.go
+expect vm true internal/gitengine/checkout_vm.go
+expect vm true internal/egress/proxy_vm_test.go
+expect vm true docs/testing.md go.sum
+expect vm false internal/runtime/docker.go internal/runtime/runtime.go internal/scheduler/environment.go
+expect vm false cmd/aether-server/main.go
+expect vm false internal/scheduler/envmerge.go web/src/app.tsx docs/testing.md
+expect vm false images/standard/Dockerfile .github/workflows/ci-suite.yml Makefile
+
+for mode in web go caches vm; do
 	got=$(sh "$script" "$mode" </dev/null)
 	if [ "$got" != true ]; then
 		echo "ci-classify-areas-test: $mode empty stdin gave $got, wanted true" >&2

@@ -4,9 +4,10 @@ on:
   push:
     branches: [main]
   # A pull request runs changes, audit, lint, build-and-test and dashboard
-  # only. The merge queue and the nightly run on main run every job. A push to
-  # main runs only changes and CI gate when its commit passed the merge queue
-  # and changed nothing a cache key hashes.
+  # only. The merge queue and the nightly run on main run every job, except
+  # that the merge queue boots VMs only for a change that can affect them. A
+  # push to main runs only changes and CI gate when its commit passed the
+  # merge queue and changed nothing a cache key hashes.
   pull_request:
   merge_group:
   # Refreshes the per-commit caches, which only a run on main can write, and
@@ -50,7 +51,8 @@ jobs:
   # scripts/ci-classify-areas.sh sets go and web: a change confined to
   # docs/ and root-level markdown files skips both, one confined to web/
   # skips the Go jobs, and one that no dashboard input can see skips
-  # dashboard.
+  # dashboard. A merge-queue entry or a push to main also sets vm from the
+  # files it changes, which decides whether the suite boots VMs.
   # Each classifier is the base revision's copy: a pull request can edit
   # its own, and that copy is not what this job runs. A rename is
   # classified by its old path as well as its new one, so a move into docs/
@@ -69,11 +71,12 @@ jobs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
       suite: ${{ steps.classify.outputs.suite }}
+      vm: ${{ steps.classify.outputs.vm }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-areas.sh
             scripts/ci-queue-verdict.sh
@@ -93,6 +96,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BEFORE: ${{ github.event.before }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             verdict=$(sh scripts/ci-queue-verdict.sh "$GITHUB_REPOSITORY" "$BEFORE" "$GITHUB_SHA") || verdict=
@@ -104,6 +108,20 @@ jobs:
           fi
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
             printf '%s\n' go=true web=true suite=true >> "$GITHUB_OUTPUT"
+            case $GITHUB_EVENT_NAME in
+            merge_group) range="$QUEUE_BASE...$GITHUB_SHA" ;;
+            push) range="$BEFORE...$GITHUB_SHA" ;;
+            *) range= ;;
+            esac
+            # A failed or truncated file list, or a failed classifier, runs
+            # the VM tests.
+            vm=true
+            if [ -n "$range" ] &&
+              files=$(gh api "repos/${GITHUB_REPOSITORY}/compare/$range" --jq 'if (.files | length) >= 300 then error("at the file limit") else .files[] | .filename, (.previous_filename // empty) end') &&
+              out=$(printf '%s\n' "$files" | sh scripts/ci-classify-areas.sh vm); then
+              vm=$out
+            fi
+            echo "vm=$vm" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo suite=false >> "$GITHUB_OUTPUT"
@@ -280,6 +298,8 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.suite == 'true') }}
     uses: ./.github/workflows/ci-suite.yml
+    with:
+      vm: ${{ needs.changes.outputs.vm != 'false' }}
 
   # The one required check on main, for pull requests and merge queue
   # entries. It fails when any job failed or was cancelled; outside the merge
