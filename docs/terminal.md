@@ -315,7 +315,7 @@ by UNKNOWN port 65535`:
 ## Sign in to agents and set up GitHub
 
 The Agents page and onboarding show the login or install command above the
-terminal. Use its Run button when the main terminal is ready.
+terminal. Copy the command, paste at a shell prompt, review it, then press Enter.
 Login state lives in your home, so you do not save the environment. See
 [environment-home.md](environment-home.md#set-up-an-agent) and
 [GitHub](environment-home.md#connect-github).

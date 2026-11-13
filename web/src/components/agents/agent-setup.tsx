@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { copyText } from '@/lib/clipboard'
 import type { AgentInfo, AgentInstallResult } from '@/lib/types'
 import { TerminalDock } from '@/routes/environment/terminal-dock'
 import { useStore } from '@/store'
@@ -69,6 +70,7 @@ export function AgentSetup({
   const hasTerminal = caps.hasWS('terminal')
   const login = loginFor(agent)
   const typedInstall = enhanced ? agent.enhanced_install_script ?? agent.install_script : agent.install_script
+  const setupCommand = canInstall ? login?.command : typedInstall
 
   const check = async () => {
     setChecking(true)
@@ -175,13 +177,19 @@ export function AgentSetup({
                   Log in once by running <Code>{login.command}</Code> in your environment terminal. {login.hint}
                 </p>
               )}
-              <TerminalDock
-                client={client}
-                openOnMount
-                runCommand={canInstall
-                  ? login?.command ? { label: 'Run login command', command: login.command } : undefined
-                  : typedInstall ? { label: 'Run install command', command: typedInstall } : undefined}
-              />
+              {setupCommand && (
+                <>
+                  <p className="text-ui text-text">Paste the command at a shell prompt, review it, then press Enter.</p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void copyText(setupCommand, null)}
+                  >
+                    {canInstall ? 'Copy login command' : 'Copy install command'}
+                  </Button>
+                </>
+              )}
+              <TerminalDock client={client} openOnMount />
             </>
           ) : (
             <>

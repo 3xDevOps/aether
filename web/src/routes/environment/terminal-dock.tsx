@@ -65,8 +65,8 @@ interface StructuralReplayState {
 interface TerminalDockProps {
   client?: Api
   openOnMount?: boolean
+  /** A line to type into the main tab after its first attach. */
   initialLine?: string
-  runCommand?: { label: string; command: string }
   /** Embedded intrinsic sections use the viewport cap; fixed flex layouts opt into 'parent'. */
   containment?: DockContainment
   header?: (actions: ReactNode, hint?: string) => ReactNode
@@ -76,7 +76,6 @@ export function TerminalDock({
   client = api,
   openOnMount = false,
   initialLine,
-  runCommand,
   containment = 'viewport',
   header,
 }: TerminalDockProps) {
@@ -104,7 +103,6 @@ export function TerminalDock({
   const [resetError, setResetError] = useState<string | null>(null)
   const [statusAttempt, setStatusAttempt] = useState(0)
   const [attachedTab, setAttachedTab] = useState<string | null>(null)
-  const [inputReadyTab, setInputReadyTab] = useState<string | null>(null)
   const [replaying, setReplaying] = useState(false)
   const actionsTrigger = useRef<HTMLButtonElement>(null)
   const openTrigger = useRef<HTMLButtonElement>(null)
@@ -119,17 +117,12 @@ export function TerminalDock({
   const activeTab = dock.activeTab
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
-  const inputReadyTabRef = useRef<string | null>(null)
-  const setInputReady = (tab: string | null) => {
-    inputReadyTabRef.current = tab
-    setInputReadyTab(tab)
-  }
   const terminalRef = useRef<XtermController['terminal']>(null)
   const controllerRef = useRef<XtermController | null>(null)
   const attachmentGenerationRef = useRef(0)
   const replayRevisionRef = useRef(0)
   const structuralReplayRef = useRef<StructuralReplayState | null>(null)
-  const replaySettlingGenerationRef = useRef<number | null>(null)
+  const fullReplaySettlingGenerationRef = useRef<number | null>(null)
   const gate = useRef(
     replayGate(
       (chunk, done) => terminalRef.current?.write(chunk, done),
@@ -139,18 +132,16 @@ export function TerminalDock({
           return
         }
         if (!full) {
-          if (replaySettlingGenerationRef.current === attachmentGenerationRef.current) {
-            replaySettlingGenerationRef.current = null
-            setInputReady(activeTabRef.current)
-          }
           setReplaying(false)
           return
         }
         const replay = structuralReplayRef.current
         if (!replay) {
-          if (replaySettlingGenerationRef.current === attachmentGenerationRef.current) {
-            replaySettlingGenerationRef.current = null
-            setInputReady(activeTabRef.current)
+          if (
+            fullReplaySettlingGenerationRef.current !== null &&
+            attachmentGenerationRef.current === fullReplaySettlingGenerationRef.current
+          ) {
+            fullReplaySettlingGenerationRef.current = null
           }
           setReplaying(false)
           return
@@ -166,11 +157,10 @@ export function TerminalDock({
             replayRevisionRef.current !== replay.revision ||
             attachmentGenerationRef.current !== replay.attachmentGeneration
           ) return
-          if (replaySettlingGenerationRef.current === replay.attachmentGeneration) {
-            replaySettlingGenerationRef.current = null
+          if (fullReplaySettlingGenerationRef.current === replay.attachmentGeneration) {
+            fullReplaySettlingGenerationRef.current = null
           }
           structuralReplayRef.current = null
-          setInputReady(activeTabRef.current)
           setReplaying(false)
         })()
       },
@@ -186,7 +176,7 @@ export function TerminalDock({
       if (
         !activeTab ||
         activeTabRef.current !== activeTab ||
-        replaySettlingGenerationRef.current !== null ||
+        fullReplaySettlingGenerationRef.current !== null ||
         gate.current.muted()
       ) return
       getEnvTerminalSocket(activeTab)?.send(data)
@@ -228,9 +218,6 @@ export function TerminalDock({
   }, [terminal])
   const setFindOpen = controller.setFindOpen
   const focusTerminal = controller.focusTerminal
-  const canRunCommand = Boolean(
-    runCommand && activeTab === 'main' && inputReadyTab === 'main' && attachedTab === 'main',
-  )
   useEffect(() => {
     setFindOpen(false)
   }, [activeTab, setFindOpen])
@@ -309,8 +296,8 @@ export function TerminalDock({
         replayRevisionRef.current++
         void replay.controller.cancelStructuralReplay?.(replay.controllerGeneration)
       }
-      if (replaySettlingGenerationRef.current === attachmentGeneration) {
-        replaySettlingGenerationRef.current = null
+      if (fullReplaySettlingGenerationRef.current === attachmentGeneration) {
+        fullReplaySettlingGenerationRef.current = null
       }
     }
     const handlers = {
@@ -320,13 +307,11 @@ export function TerminalDock({
         if (isCurrent()) {
           setEnvTerminalSocketReady(socketKey, true)
           setAttachedTab(socketKey)
-          setInputReady(null)
           replayAccepted = true
           if (resumed) {
             cancelStructuralReplay()
-            replaySettlingGenerationRef.current = attachmentGeneration
           } else {
-            replaySettlingGenerationRef.current = attachmentGeneration
+            fullReplaySettlingGenerationRef.current = attachmentGeneration
             const replayController = controllerRef.current
             const controllerGeneration = replayController?.beginStructuralReplay?.()
             const revision = ++replayRevisionRef.current
@@ -355,7 +340,7 @@ export function TerminalDock({
         if (!isCurrent()) return
         if (!replayAccepted) return
         replayAccepted = false
-        replaySettlingGenerationRef.current = attachmentGeneration
+        if (full) fullReplaySettlingGenerationRef.current = attachmentGeneration
         gate.current.start(full ? 'full' : 'delta')
         if (bytes === 0) void gate.current.write(emptyReplay, 'replay-end')
       },
@@ -364,26 +349,22 @@ export function TerminalDock({
         if (connection !== 'live') {
           setEnvTerminalSocketReady(socketKey, false)
           setAttachedTab(null)
-          setInputReady(null)
         }
       },
       onRefused: (detail: string) => {
         if (!isCurrent()) return
         setAttachedTab(null)
-        setInputReady(null)
         setStatus(useStore.getState().envTerminal.status, detail)
       },
       onWriteDenied: () => {
         if (!isCurrent()) return
         setAttachedTab(null)
-        setInputReady(null)
         setStatus(useStore.getState().envTerminal.status, 'Terminal input was denied')
       },
       onExit: () => {
         if (isCurrent()) {
           setEnvTerminalSocketReady(socketKey, false)
           setAttachedTab(null)
-          setInputReady(null)
           if (socketKey === 'main') {
             const status = useStore.getState().envTerminal.status
             reset()
@@ -411,7 +392,6 @@ export function TerminalDock({
 
     setEnvTerminalSocketReady(socketKey, false)
     setAttachedTab(null)
-    setInputReady(null)
     const unsubscribe = subscribeEnvTerminalSocket(socketKey, gate.current.write)
     return () => {
       unsubscribe()
@@ -466,28 +446,8 @@ export function TerminalDock({
   }
 
   const actions = (
-    (!empty || !!dock.status?.saved_image || !!runCommand) && (
+    (!empty || !!dock.status?.saved_image) && (
       <div className="flex max-w-full items-center justify-end gap-1">
-        {runCommand && (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            disabled={!canRunCommand}
-            onClick={() => {
-              const socket = getEnvTerminalSocket('main')
-              if (
-                !socket || !canRunCommand || activeTabRef.current !== 'main' ||
-                inputReadyTabRef.current !== 'main' || replaySettlingGenerationRef.current !== null ||
-                gate.current.muted()
-              ) return
-              socket.send(`${runCommand.command}\n`)
-              focusTerminal()
-            }}
-          >
-            {runCommand.label}
-          </Button>
-        )}
         {dock.status?.running && (
           <Button
             type="button"
