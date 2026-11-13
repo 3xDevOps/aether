@@ -5,9 +5,9 @@ name: VM tests
 # change that can affect the VM tests and in every nightly run;
 # `gh workflow run kvm.yml --ref <branch>` runs it for any branch. The guest
 # kernel takes up to six minutes to build, so it builds only when its
-# inputs change: the cache is keyed by their hash and written on main. The
-# static test binaries reuse most of the native compiler cache, so this
-# workflow saves none of its own.
+# inputs change: the cache is keyed by their hash and written on main. It
+# saves no compiler cache for its static builds: the repository's Actions
+# cache is already over its size limit.
 on:
   workflow_call:
   workflow_dispatch:

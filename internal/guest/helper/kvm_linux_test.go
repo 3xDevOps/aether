@@ -21,10 +21,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/vmimage"
 )
 
-// The test binary is the VM's helper as PID 1, and its own client inside
-// the VM for what the image may lack.
 var kvmHogHeld [][]byte
 
+// The test binary is the VM's helper as PID 1, and its own client inside
+// the VM for what the image may lack.
 func init() {
 	switch {
 	case os.Getpid() == 1:
