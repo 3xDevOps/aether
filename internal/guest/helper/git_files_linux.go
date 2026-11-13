@@ -78,6 +78,25 @@ func (s *gitService) Install(stream grpc.ClientStreamingServer[guestpb.InstallCh
 		return err
 	}
 	dir := s.target(key)
+	// A commit's tree was staged into the service's own store; the
+	// checkout takes its objects from there, the commit from the server.
+	if tree := first.GetIndex(); tree != "" {
+		var haves []string
+		for _, u := range first.GetUpdates() {
+			if u.GetOld() != "" {
+				haves = append(haves, u.GetOld())
+			}
+		}
+		staged, stagedWriter := io.Pipe()
+		go func() {
+			_ = stagedWriter.CloseWithError(s.engine.PackObjects(ctx, domain.RunID(key), []string{tree}, haves, stagedWriter))
+		}()
+		err = ownerGit(ctx, dir, staged, "index-pack", "--stdin", "--strict")
+		_ = staged.CloseWithError(io.ErrClosedPipe)
+		if err != nil {
+			return gitStatus(fmt.Errorf("index the staged objects: %w", err))
+		}
+	}
 	pack, writer := io.Pipe()
 	go func() {
 		data := first.GetData()

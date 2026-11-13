@@ -191,7 +191,9 @@ func vmOf(key domain.RunID) domain.RunID {
 
 // vmGit returns the git service of the VM the checkout of run lives in. A
 // server that runs no VMs treats every one as stopped, so what it shows of
-// the session comes from the recorded history.
+// the session comes from the recorded history. A VM known not to run fails
+// with guest.ErrVMNotRunning, never ErrCheckoutNotFound: its disk still
+// holds the checkout, which cleanup must not take for gone.
 func (e *Engine) vmGit(ctx context.Context, run domain.RunID) (*guest.Git, error) {
 	if e.cfg.VM == nil {
 		return nil, fmt.Errorf("gitengine: session %s has its checkout in a VM, and this server runs no VMs: %w", run, guest.ErrVMNotRunning)

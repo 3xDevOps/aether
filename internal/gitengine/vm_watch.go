@@ -72,6 +72,13 @@ func (e *Engine) startVMWatch(ctx context.Context, workspace domain.WorkspaceID,
 	if err != nil {
 		return err
 	}
+	// The session runs again, so its last commit no longer stands for its
+	// checkout.
+	if meta.FinalTree != "" {
+		if err = e.recordFinalTree(run, ""); err != nil {
+			return err
+		}
+	}
 	lastTree := e.lastSnapshotTree(run)
 	if lastTree == "" {
 		out, _, treeErr := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")

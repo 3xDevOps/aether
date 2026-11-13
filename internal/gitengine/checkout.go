@@ -42,8 +42,10 @@ type runMeta struct {
 	// origin remote the VM sets on its first boot.
 	VM     bool   `json:"vm,omitempty"`
 	Origin string `json:"origin,omitempty"`
-	// Target is where the session sees a checkout in a VM.
-	Target string `json:"target,omitempty"`
+	// Target is where the session sees a checkout in a VM, and FinalTree
+	// the tree its last commit recorded since the VM last started.
+	Target    string `json:"target,omitempty"`
+	FinalTree string `json:"final_tree,omitempty"`
 }
 
 func (e *Engine) runMetaPath(run domain.RunID) (string, error) {

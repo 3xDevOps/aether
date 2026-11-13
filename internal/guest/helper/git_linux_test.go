@@ -418,6 +418,24 @@ func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
 		}
 	})
 
+	t.Run("commit past the snapshot bound", func(t *testing.T) {
+		// commitAll has no size bound, so neither has a VM's.
+		big, err := os.Create(filepath.Join(p.checkout, "big.bin"))
+		if err == nil {
+			err = errors.Join(big.Truncate(gitengine.MaxSnapshotInputBytes+(2<<20)), big.Close())
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		commit, err := p.host.CommitAll(ctx, testRun, "wip: big", domain.GitIdentity{}, nil)
+		if err != nil || commit == "" {
+			t.Fatalf("commit of a checkout over %d bytes = %q, %v", gitengine.MaxSnapshotInputBytes, commit, err)
+		}
+		if got := runGit(t, p.checkout, "ls-tree", "--name-only", "HEAD", "big.bin"); got != "big.bin" {
+			t.Fatalf("the commit lacks big.bin: %q", got)
+		}
+	})
+
 	t.Run("subsession fetch", func(t *testing.T) {
 		child := filepath.Join(t.TempDir(), "child")
 		runGit(t, filepath.Dir(child), "clone", "--quiet", p.repo, child)

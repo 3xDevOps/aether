@@ -300,15 +300,21 @@ HEAD. The store borrows the workspace repository's objects, which hold the
 fork point. A moved HEAD is published by fetching it from that store into
 the workspace repository, as for a checkout on the server's disk. While the
 VM is not running, the session's patch is its last recorded snapshot, also on
-a server switched back to `session-runtime docker`, and evidence retains
-that snapshot: the checkout cannot have changed since.
+a server switched back to `session-runtime docker`.
 
 The final commit is built on the server, so the member's signing key never
 enters the VM. The VM stages the checkout; the server copies the tree,
 checks it, and writes the commit with `git commit-tree`, authored by the
 member, committed by Aether, the message cleaned as `git commit -m` cleans
-it, and signed. `Install` then makes it the checkout's HEAD, moving HEAD only
-from the commit it was staged on. A subsession's branch reaches a parent in a
+it, and signed. `Install` then moves the staged objects into the checkout,
+adds the commit object, the only one the server sends, and makes it HEAD,
+moving HEAD only from the commit it was staged on. As on the server's disk,
+the commit has no bound on the checkout's size; its new objects, like a
+moved HEAD's, may take up to 4 GiB, and the server keeps 128 MiB of disk
+free. The server records the committed tree; while the VM does not run,
+evidence retains that tree, and without one capture fails and cleanup keeps
+the checkout's disk, since only the VM can read it. On Close, a checkout in
+a VM is committed before the VM pauses, as a paused VM runs no git. A subsession's branch reaches a parent in a
 VM the same way: the server packs what the parent lacks and `Install` sets
 `refs/remotes/children/<id>`.
 

@@ -115,22 +115,14 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 		}
 		return EvidenceRevision{}, fmt.Errorf("gitengine: evidence base for session %s is unavailable: %w", run, err)
 	}
-	if !meta.VM {
-		if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
-			return EvidenceRevision{}, boundsErr
-		}
-	}
-	// Keep the source objects pinned until fetch has copied them into the
-	// independently retained evidence repository.
-	lock := e.snapshotLock(run)
-	lock.Lock()
-	defer lock.Unlock()
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return EvidenceRevision{}, err
 	}
 	var tree string
 	if meta.VM {
+		// Staged before the lock below: the VM's watch may hold its own
+		// snapshot lock while it waits on the server's.
 		if _, err = e.vmStore(ctx, run, meta); err != nil {
 			return EvidenceRevision{}, err
 		}
@@ -138,7 +130,15 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 			return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
 		}
 		checkout = ""
-	} else {
+	} else if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
+		return EvidenceRevision{}, boundsErr
+	}
+	// Keep the source objects pinned until fetch has copied them into the
+	// independently retained evidence repository.
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	if !meta.VM {
 		if tree, err = e.writeSnapshotTreeLocked(ctx, run, checkout); err != nil {
 			return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
 		}

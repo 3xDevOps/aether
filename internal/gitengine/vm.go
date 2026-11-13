@@ -159,7 +159,7 @@ func ChownCheckout(dir string, uid, gid int) error {
 func (e *Engine) publishVM(ctx context.Context, run domain.RunID, meta runMeta) (string, error) {
 	g, err := e.vmGit(ctx, run)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrCheckoutNotFound, err)
+		return "", err
 	}
 	head, err := g.Head(ctx, string(run))
 	if err != nil {

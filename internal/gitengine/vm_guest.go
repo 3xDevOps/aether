@@ -80,10 +80,11 @@ func (e *Engine) StageCheckout(ctx context.Context, key domain.RunID, evidence b
 
 const commitIndexName = "commit-index"
 
+// maxCommitIndexBytes bounds the checkout index a commit stages over.
+const maxCommitIndexBytes = 1 << 30
+
+// stageCommitLocked has no size bound, as commitAll has none.
 func (e *Engine) stageCommitLocked(ctx context.Context, key domain.RunID, checkout string) (string, error) {
-	if err := e.checkCaptureBounds(ctx, key, checkout, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
-		return "", err
-	}
 	store, err := e.snapshotStorePath(key)
 	if err != nil {
 		return "", err
@@ -92,7 +93,7 @@ func (e *Engine) stageCommitLocked(ctx context.Context, key domain.RunID, checko
 		return "", err
 	}
 	index := filepath.Join(store, commitIndexName)
-	data, err := e.readCheckoutGitFile(checkout, "index", MaxSnapshotInputBytes)
+	data, err := e.readCheckoutGitFile(checkout, "index", maxCommitIndexBytes)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		err = os.Remove(index)
@@ -115,9 +116,6 @@ func (e *Engine) stageCommitLocked(ctx context.Context, key domain.RunID, checko
 	tree := strings.TrimSpace(out)
 	if !validObjectID(tree) {
 		return "", fmt.Errorf("gitengine: git write-tree for session %s returned %q, not an object id", key, tree)
-	}
-	if err = e.checkSnapshotBounds(ctx, checkout, index, tree, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
-		return "", err
 	}
 	return tree, nil
 }

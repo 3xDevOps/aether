@@ -16,7 +16,9 @@ import (
 // vmCommit is commitAll for a checkout in a VM. The VM stages the checkout
 // as commitAll stages it; the server builds and signs the commit from the
 // staged tree, so the signing key never enters the VM, and the VM installs
-// it as the checkout's HEAD with the staged index.
+// it as the checkout's HEAD with the staged index. As commitAll, it has no
+// bound on the checkout's size; only the new objects are bounded, as a
+// moved HEAD's are.
 func (e *Engine) vmCommit(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (string, error) {
 	meta, err := e.readRunMeta(run)
 	if err != nil {
@@ -34,48 +36,47 @@ func (e *Engine) vmCommit(ctx context.Context, run domain.RunID, message string,
 	if err != nil {
 		return "", err
 	}
-	if err = e.fetchStagedTree(ctx, run, meta, store, tree, head, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
+	if err = e.fetchVMObjects(ctx, run, store, []string{tree, head}, []string{meta.Base, e.lastSnapshotTree(run)}, maxVMHistoryBytes); err != nil {
 		return "", err
 	}
-	if e.objectType(ctx, store, head) != "commit" {
-		return "", fmt.Errorf("%w: session %s reported %s as its HEAD commit", ErrInvalidObjectID, run, head)
+	if e.objectType(ctx, store, tree) != "tree" || e.objectType(ctx, store, head) != "commit" {
+		return "", fmt.Errorf("%w: session %s staged %s on %s, not a tree on a commit", ErrInvalidObjectID, run, tree, head)
 	}
 	headTree, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", head+"^{tree}")
 	if err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(headTree) == tree {
-		return "", nil
+		return "", e.recordFinalTree(run, tree)
 	}
 	commit, subject, err := e.commitTree(ctx, store, tree, head, message, author, signingKey)
 	if err != nil {
 		return "", err
 	}
+	// The VM holds the tree it staged; it gets the commit object alone.
 	var pack bytes.Buffer
-	if err = e.packObjects(ctx, store, []string{commit}, []string{head}, &pack); err != nil {
+	if err = e.packObjects(ctx, store, []string{commit}, []string{head, tree}, &pack); err != nil {
 		return "", err
 	}
 	err = g.Install(ctx, string(run), []guest.RefUpdate{{Ref: "HEAD", New: commit, Old: head}}, "commit: "+subject, tree, &pack)
 	if err != nil {
 		return "", vmErr(err)
 	}
-	return commit, nil
+	return commit, e.recordFinalTree(run, tree)
 }
 
-// fetchStagedTree copies a tree the VM staged, and the head it staged it
-// on, into the run's store and checks the tree against limit.
-func (e *Engine) fetchStagedTree(ctx context.Context, run domain.RunID, meta runMeta, store, tree, head string, limit uint64, limitErr error) error {
-	wants := []string{tree}
-	if head != "" {
-		wants = append(wants, head)
-	}
-	if err := e.fetchVMObjects(ctx, run, store, wants, []string{meta.Base, e.lastSnapshotTree(run)}); err != nil {
+// recordFinalTree records tree, committed into the checkout, as what a
+// stopped VM's checkout holds: evidence may retain it once the VM is down.
+func (e *Engine) recordFinalTree(run domain.RunID, tree string) error {
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	meta, err := e.readRunMeta(run)
+	if err != nil {
 		return err
 	}
-	if kind := e.objectType(ctx, store, tree); kind != "tree" {
-		return fmt.Errorf("%w: session %s staged a %s, not a tree", ErrInvalidObjectID, run, kind)
-	}
-	return e.checkTreeBounds(ctx, store, tree, limit, limitErr)
+	meta.FinalTree = tree
+	return e.writeRunMeta(run, meta)
 }
 
 // commitTree builds the commit commitAll would: the message cleaned up as
@@ -172,18 +173,18 @@ func (e *Engine) vmFetchBranch(ctx context.Context, repo, branch string, into do
 }
 
 // vmEvidenceTree is the tree evidence of a checkout in a VM retains: staged
-// now while the VM runs, or its last recorded snapshot when it does not,
-// which the checkout cannot have moved from since. It holds the run's
-// snapshot lock.
+// now while the VM runs, or the tree the session's last commit recorded
+// while it does not, which nothing can have changed since. Without such a
+// commit it fails, so cleanup keeps the checkout. The caller must not hold
+// the run's snapshot lock: the VM's watch may hold its own while it waits
+// on the server.
 func (e *Engine) vmEvidenceTree(ctx context.Context, run domain.RunID, meta runMeta, store string) (string, error) {
 	g, err := e.vmGit(ctx, run)
-	if errors.Is(err, ErrCheckoutNotFound) {
-		out, _, refErr := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "--quiet", snapshotPublishedRef)
-		if refErr != nil {
-			return "", fmt.Errorf("%w: session %s recorded no snapshot", ErrCheckoutNotFound, run)
+	if errors.Is(err, guest.ErrVMNotRunning) {
+		if meta.FinalTree == "" {
+			return "", fmt.Errorf("gitengine: session %s has uncommitted work its VM holds: %w", run, err)
 		}
-		tree := strings.TrimSpace(out)
-		return tree, e.checkTreeBounds(ctx, store, tree, MaxEvidenceInputBytes, ErrEvidenceStorageLimit)
+		return meta.FinalTree, e.checkTreeBounds(ctx, store, meta.FinalTree, MaxEvidenceInputBytes, ErrEvidenceStorageLimit)
 	}
 	if err != nil {
 		return "", err
@@ -192,7 +193,7 @@ func (e *Engine) vmEvidenceTree(ctx context.Context, run domain.RunID, meta runM
 	if err != nil {
 		return "", vmErr(err)
 	}
-	if err = e.fetchVMObjects(ctx, run, store, []string{tree}, []string{meta.Base}); err != nil {
+	if err = e.fetchVMObjects(ctx, run, store, []string{tree}, []string{meta.Base, e.lastSnapshotTree(run)}, maxVMPackBytes); err != nil {
 		return "", err
 	}
 	if kind := e.objectType(ctx, store, tree); kind != "tree" {

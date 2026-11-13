@@ -3,14 +3,12 @@ package gitengine
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/guest"
 )
 
 // The Files view of a checkout in a VM asks the VM, which answers with the
