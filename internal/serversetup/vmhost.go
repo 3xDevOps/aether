@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
@@ -27,6 +28,8 @@ type Pinned struct {
 	Path  string
 	Mode  fs.FileMode
 	Asset selfupdate.Asset
+	// Release is the Aether release a guest kernel comes from.
+	Release string
 }
 
 // CloudHypervisor is the release session VMs are tested on; the kvm CI job
@@ -116,32 +119,83 @@ func Installed(path string, want selfupdate.Asset) (bool, error) {
 	return n == want.Size && hex.EncodeToString(h.Sum(nil)) == want.SHA256, nil
 }
 
-// Install downloads p beside its path and renames it into place once it
-// matches its digest, so a running VM keeps the file it started with and
-// the next one gets the new file.
-func (p Pinned) Install(ctx context.Context) error {
-	dir := filepath.Dir(p.Path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dir, "."+filepath.Base(p.Path)+".*")
-	if err != nil {
-		return err
-	}
+// InstallAll downloads every file beside its path and checks it against its
+// digest, then renames them into place one after another, so a failed
+// download replaces none of them. A running VM keeps the files it started
+// with; the next one gets the new files. A kernel's release is recorded
+// beside it, which ReleaseOf reads.
+func InstallAll(ctx context.Context, files []Pinned) error {
+	var staged []string
 	defer func() {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
+		for _, tmp := range staged {
+			_ = os.Remove(tmp)
+		}
 	}()
-	if err = selfupdate.DownloadPinned(ctx, p.URL, f, p.Asset, nil); err != nil {
-		return err
+	for _, p := range files {
+		tmp, err := p.download(ctx)
+		if err != nil {
+			return err
+		}
+		staged = append(staged, tmp)
 	}
-	if err = f.Chmod(p.Mode); err == nil {
-		err = f.Close()
+	for i, p := range files {
+		if err := os.Rename(staged[i], p.Path); err != nil {
+			return err
+		}
+		if err := p.Record(); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// download writes p to a new file beside its path and returns that file's
+// name once its bytes match the pin. Files an interrupted download left
+// there are removed first; one written to in the last ten minutes may be
+// another install's, still running.
+func (p Pinned) download(ctx context.Context) (string, error) {
+	dir, base := filepath.Split(p.Path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	stale, err := filepath.Glob(filepath.Join(dir, "."+base+".*"))
 	if err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(f.Name(), p.Path)
+	for _, name := range stale {
+		if info, serr := os.Stat(name); serr == nil && time.Since(info.ModTime()) > 10*time.Minute {
+			if err = os.Remove(name); err != nil {
+				return "", err
+			}
+		}
+	}
+	f, err := os.CreateTemp(dir, "."+base+".*")
+	if err != nil {
+		return "", err
+	}
+	err = selfupdate.DownloadPinned(ctx, p.URL, f, p.Asset, nil)
+	if err == nil {
+		err = f.Chmod(p.Mode)
+	}
+	if err = errors.Join(err, f.Close()); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// Record notes beside a release kernel which release it came from.
+func (p Pinned) Record() error {
+	if p.Release == "" {
+		return nil
+	}
+	return os.WriteFile(p.Path+".release", []byte(p.Release+"\n"), 0o644)
+}
+
+// ReleaseOf is the release whose kernel Record noted at path, or "".
+func ReleaseOf(path string) string {
+	data, _ := os.ReadFile(path + ".release")
+	return strings.TrimSpace(string(data))
 }
 
 // ReleaseKernel is tag's guest kernel, from the release's signed manifest,
@@ -155,5 +209,5 @@ func ReleaseKernel(ctx context.Context, baseURL, tag, path string) (Pinned, erro
 	if !ok {
 		return Pinned{}, fmt.Errorf("release %s does not publish %s", tag, KernelAsset)
 	}
-	return Pinned{Name: "the " + tag + " guest kernel", URL: m.AssetURL(KernelAsset), Path: path, Mode: 0o644, Asset: want}, nil
+	return Pinned{Name: "the " + tag + " guest kernel", URL: m.AssetURL(KernelAsset), Path: path, Mode: 0o644, Asset: want, Release: tag}, nil
 }

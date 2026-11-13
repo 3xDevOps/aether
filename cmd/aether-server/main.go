@@ -438,13 +438,24 @@ func serve(args []string) error {
 		})
 		defer timer.Stop()
 	}
+	// Under its unit, before any VM starts. Files that cannot be installed
+	// fail an update's trial, which rolls back to the binary whose files
+	// are still in place; on any other start the server keeps serving.
+	if *o.sessionRuntime == server.SessionRuntimeVM && os.Getenv("INVOCATION_ID") != "" {
+		vmCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err = ensureVMFiles(vmCtx, *o.vmKernel)
+		cancel()
+		if err != nil && !deadline.IsZero() {
+			return trial.Fail(errors.Join(fmt.Errorf("install this release's files for session VMs: %w", err), srv.Close()))
+		}
+		if err != nil {
+			slog.Error("session VMs: could not install this release's Cloud Hypervisor and guest kernel; `sudo aether-server vm install` retries", "error", err)
+		}
+	}
 	go commitWhenServing(ctx, srv, trial)
 	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
 		version.String(), *o.addr, *o.dataDir, from)
 	go warnIfUnitOutdated()
-	if *o.sessionRuntime == server.SessionRuntimeVM {
-		go keepVMFilesCurrent(*o.vmKernel)
-	}
 	err = srv.Run(ctx)
 	drainMu.Lock()
 	argv := drained

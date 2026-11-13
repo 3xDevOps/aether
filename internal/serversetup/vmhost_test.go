@@ -20,39 +20,44 @@ func asset(body []byte) selfupdate.Asset {
 	return selfupdate.Asset{SHA256: hex.EncodeToString(sum[:]), Size: int64(len(body))}
 }
 
-// Install replaces the file only with bytes that match the pin, so a bad
-// download leaves the installed file, and nothing else, in the directory.
-func TestPinnedInstallReplacesOnlyWithMatchingBytes(t *testing.T) {
-	served := []byte("cloud-hypervisor v2")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(served) }))
+// InstallAll replaces files only once every download matches its pin, so a
+// bad one, even of the right length, leaves every installed file, and
+// nothing else, in place.
+func TestInstallAllReplacesNothingUnlessEveryFileMatches(t *testing.T) {
+	served := map[string][]byte{"/ch": []byte("cloud-hypervisor v2"), "/kernel": []byte("vmlinux v2")}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(served[r.URL.Path]) }))
 	defer srv.Close()
 	dir := filepath.Join(t.TempDir(), "bin")
-	p := Pinned{Name: "ch", URL: srv.URL, Path: filepath.Join(dir, "cloud-hypervisor"), Mode: 0o755, Asset: asset(served)}
-
-	if ok, err := Installed(p.Path, p.Asset); ok || err != nil {
-		t.Fatalf("Installed before install = %v, %v", ok, err)
+	files := []Pinned{
+		{Name: "ch", URL: srv.URL + "/ch", Path: filepath.Join(dir, "cloud-hypervisor"), Mode: 0o755, Asset: asset(served["/ch"])},
+		{Name: "kernel", URL: srv.URL + "/kernel", Path: filepath.Join(dir, "vmlinux"), Mode: 0o644, Asset: asset(served["/kernel"]), Release: "v1.0.0"},
 	}
-	if err := p.Install(t.Context()); err != nil {
+	if err := InstallAll(t.Context(), files); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := Installed(p.Path, p.Asset); !ok || err != nil {
-		t.Fatalf("Installed after install = %v, %v", ok, err)
+	for _, f := range files {
+		if ok, err := Installed(f.Path, f.Asset); !ok || err != nil {
+			t.Fatalf("%s after install: %v, %v", f.Name, ok, err)
+		}
 	}
-	if info, err := os.Stat(p.Path); err != nil || info.Mode().Perm() != 0o755 {
-		t.Fatalf("installed file: %v, %v", info, err)
+	if info, err := os.Stat(files[0].Path); err != nil || info.Mode().Perm() != 0o755 || ReleaseOf(files[1].Path) != "v1.0.0" {
+		t.Fatalf("installed mode %v, %v; kernel release %q", info, err, ReleaseOf(files[1].Path))
 	}
 
-	served = []byte("cloud-hypervisor v3, tampered")
-	p.Asset = asset([]byte("cloud-hypervisor v3"))
-	err := p.Install(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "mismatch") {
-		t.Fatalf("install of bytes that do not match the pin = %v", err)
+	served = map[string][]byte{"/ch": []byte("cloud-hypervisor v3"), "/kernel": []byte("vmlinux v3, tampered")}
+	files[0].Asset = asset(served["/ch"])
+	files[1].Asset, files[1].Release = asset([]byte("vmlinux v3, expected")), "v1.0.1"
+	err := InstallAll(t.Context(), files)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("install with one download that does not match its pin = %v", err)
 	}
-	if got, _ := os.ReadFile(p.Path); !bytes.Equal(got, []byte("cloud-hypervisor v2")) {
-		t.Errorf("a failed install changed the file to %q", got)
+	for path, want := range map[string]string{files[0].Path: "cloud-hypervisor v2", files[1].Path: "vmlinux v2", files[1].Path + ".release": "v1.0.0\n"} {
+		if got, _ := os.ReadFile(path); string(got) != want {
+			t.Errorf("a failed install changed %s to %q", path, got)
+		}
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
-		t.Errorf("a failed install left %d files in %s", len(entries), dir)
+	if entries, _ := os.ReadDir(dir); len(entries) != 3 {
+		t.Errorf("a failed install left %d files in %s, want the 3 it found", len(entries), dir)
 	}
 }
 
@@ -64,11 +69,11 @@ func TestReleaseKernelComesFromTheSignedManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = k.Install(t.Context()); err != nil {
+	if err = InstallAll(t.Context(), []Pinned{k}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(path); !bytes.Equal(got, kernel) {
-		t.Errorf("installed kernel = %q", got)
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, kernel) || ReleaseOf(path) != "v1.2.3" {
+		t.Errorf("installed kernel = %q from release %q", got, ReleaseOf(path))
 	}
 
 	without := releasetest.Serve(t, "v1.2.3", map[string][]byte{"aether-server-linux-amd64": []byte("server")})

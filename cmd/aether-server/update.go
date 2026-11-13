@@ -105,8 +105,12 @@ func updateCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	vmKernel := ""
+	if *o.sessionRuntime == server.SessionRuntimeVM {
+		vmKernel = *o.vmKernel
+	}
 	if target == version.Version {
-		return restartIfStale(self, *o.addr, database)
+		return restartIfStale(self, *o.addr, database, vmKernel)
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
 
@@ -130,27 +134,39 @@ func updateCmd(args []string) error {
 	if out, err := exec.CommandContext(probeCtx, self, "version").CombinedOutput(); err != nil {
 		return errors.Join(fmt.Errorf("the new aether-server does not run: %w: %s", err, strings.TrimSpace(string(out))), staged.Undo())
 	}
-	if *o.sessionRuntime == server.SessionRuntimeVM {
-		if err := installVMFiles(ctx, self, *o.vmKernel); err != nil {
+	if vmKernel != "" {
+		// Interrupted, the step returns here so the update is undone rather
+		// than left staged.
+		vmCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		err := installVMFiles(vmCtx, self, vmKernel)
+		stop()
+		if err != nil {
 			return errors.Join(err, staged.Undo())
 		}
 	}
 	before, began := unitPID(), time.Now()
 	if err := restartOnto(staged, database); err != nil {
+		if vmKernel != "" {
+			// After an undo the previous binary is back, and may still be
+			// running: it gets its own files again.
+			restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			err = errors.Join(err, installVMFiles(restoreCtx, self, vmKernel))
+		}
 		return err
 	}
 	return awaitUpdate(stateDir, database, target, staged, before, began)
 }
 
-// installVMFiles has the new binary at self install the Cloud Hypervisor and
-// guest kernel it was released with, before the restart, so the VMs it
-// boots get them. A running VM keeps the files it started with.
+// installVMFiles has the binary at self install the Cloud Hypervisor and
+// guest kernel it was released with, before a restart onto it, so the VMs
+// it boots get them. A running VM keeps the files it started with.
 func installVMFiles(ctx context.Context, self, kernel string) error {
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, self, "vm", "install", "--vm-kernel", kernel)
 	cmd.Stdout, cmd.Stderr = os.Stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("the new aether-server could not prepare session VMs: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("%s vm install: %w: %s", self, err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
@@ -305,10 +321,11 @@ func unitServe() (string, *serveOptions, error) {
 
 // restartIfStale restarts the unit when it still runs an earlier file than
 // the binary installed at self, as after `aether update` replaced it, and
-// starts it when it runs nothing. The unit is Type=simple, so a new PID
-// only means the process started; it serves once it accepts connections on
+// starts it when it runs nothing. With vmKernel set, that binary installs
+// its session VM files first. The unit is Type=simple, so a new PID only
+// means the process started; it serves once it accepts connections on
 // addr, within 2 minutes of migrating database.
-func restartIfStale(self, addr, database string) error {
+func restartIfStale(self, addr, database, vmKernel string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("--addr %q: %w", addr, err)
@@ -333,6 +350,14 @@ func restartIfStale(self, addr, database string) error {
 			return nil
 		}
 		verb = "restart"
+	}
+	if vmKernel != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		err = installVMFiles(ctx, self, vmKernel)
+		stop()
+		if err != nil {
+			return err
+		}
 	}
 	if out, rerr := exec.Command("systemctl", verb, updateUnit).CombinedOutput(); rerr != nil {
 		return fmt.Errorf("systemctl %s %s: %w: %s", verb, updateUnit, rerr, out)
