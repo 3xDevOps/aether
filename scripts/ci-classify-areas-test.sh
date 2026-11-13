@@ -86,10 +86,10 @@ internal/runtime: the Docker runtime; the vm list names the files the VM engine 
 internal/coordtransport: the VM engine reads two of its constants
 internal/protocol: reached only through coordtransport
 internal/store: reached only through coordtransport
-internal/domain: reached only through coordtransport
+internal/domain: data types; the gitengine and guest helper unit tests cover how the guest uses them
 internal/edge/proto: reached only through coordtransport
 internal/secretscan: reached only through coordtransport
-internal/events: reached only through egress, which logs to it
+internal/events: data types; the gitengine and guest helper unit tests cover how the guest uses them
 '
 cd "$script_dir/.."
 kvm_files=$(grep -rl --include='*_test.go' -E '^//go:build .*kvm' internal)
