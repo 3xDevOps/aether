@@ -24,6 +24,9 @@ const (
 	// helperCallTimeout bounds one short call to the helper, whose client
 	// otherwise waits for a guest that may never answer again.
 	helperCallTimeout = 5 * time.Second
+	// sessionFreezeTimeout bounds freezing a session, which waits for every
+	// task to leave its killable waits.
+	sessionFreezeTimeout = 10 * time.Second
 	// lostExitCode reports a VM that ended without its helper reporting
 	// Main's exit: the host killed it, the guest crashed or the host
 	// rebooted.
@@ -96,9 +99,9 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		}
 	}
 	if rec.Frozen {
-		if err = e.thawSession(ctx, rec); err != nil {
-			return fmt.Errorf("vm runtime: thaw before stop: %w", err)
-		}
+		// SIGKILL reaches a frozen session too, so a thaw that fails costs
+		// only the grace period.
+		_ = e.thawSession(ctx, rec)
 	}
 	if grace < 0 {
 		grace = defaultStopGrace
@@ -458,10 +461,12 @@ func (e *engine) resume(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if rec.Frozen {
-		err = e.thawSession(ctx, rec)
-	} else {
+	// A frozen VM can also be halted, as after a failed save.
+	if !rec.Frozen || e.halted(ctx, key) {
 		err = newCHAPI(e.path(key, apiSocket)).resume(ctx)
+	}
+	if err == nil && rec.Frozen {
+		err = e.thawSession(ctx, rec)
 	}
 	if err != nil {
 		return fmt.Errorf("vm runtime: resume VM %s: %w", key, err)
@@ -469,26 +474,38 @@ func (e *engine) resume(ctx context.Context, key string) error {
 	return nil
 }
 
-// freezeSession records the freeze first, so a failed one still reads as
-// paused and the next Resume thaws whatever froze.
+// freezeSession records the freeze first, so a server that dies mid-call
+// reads the session as paused and Resume thaws it. A freeze that fails is
+// thawed back, as runc thaws a failed pause, so the session runs on; only a
+// thaw that fails too leaves it read as paused.
 func (e *engine) freezeSession(ctx context.Context, rec *record) error {
-	rec.Frozen = true
-	if err := e.store(rec); err != nil {
-		return err
-	}
 	h, err := e.helper(rec.Key)
 	if err != nil {
 		return err
 	}
-	return h.FreezeSession(ctx, true)
+	rec.Frozen = true
+	if err = e.store(rec); err != nil {
+		return err
+	}
+	freezeCtx, cancel := context.WithTimeout(ctx, sessionFreezeTimeout)
+	err = h.FreezeSession(freezeCtx, true)
+	cancel()
+	if err != nil {
+		return errors.Join(err, e.thawSession(context.WithoutCancel(ctx), rec))
+	}
+	return nil
 }
 
+// thawSession is bounded, so a guest that stopped answering cannot hold the
+// VM's lock. A helper that cannot freeze never froze the session.
 func (e *engine) thawSession(ctx context.Context, rec *record) error {
 	h, err := e.helper(rec.Key)
 	if err != nil {
 		return err
 	}
-	if err = h.FreezeSession(ctx, false); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, helperCallTimeout)
+	defer cancel()
+	if err = h.FreezeSession(ctx, false); err != nil && !errors.Is(err, errors.ErrUnsupported) {
 		return err
 	}
 	rec.Frozen = false

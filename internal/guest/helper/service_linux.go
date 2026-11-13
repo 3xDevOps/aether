@@ -249,7 +249,7 @@ func rpcError(err error) error {
 		return status.Error(codes.OutOfRange, err.Error())
 	case errors.Is(err, errInvalid):
 		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, errExited), errors.Is(err, errNoInput), errors.Is(err, errNoTerm), errors.Is(err, syscall.EPIPE), errors.Is(err, os.ErrClosed):
+	case errors.Is(err, errExited), errors.Is(err, errPaused), errors.Is(err, errNoInput), errors.Is(err, errNoTerm), errors.Is(err, syscall.EPIPE), errors.Is(err, os.ErrClosed):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, os.ErrDeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, err.Error())

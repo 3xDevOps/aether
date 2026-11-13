@@ -266,6 +266,16 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{}); err != nil || patch.Recorded || !strings.Contains(patch.Text, "+++ b/tick") {
 		t.Fatalf("patch of a paused session = %+v, %v", patch, err)
 	}
+	member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
+	pausedCommit, err := h.git.CommitAll(ctx, run, "wip: a task", member, nil)
+	if err != nil || pausedCommit == "" {
+		t.Fatalf("commit of a paused session = %q, %v", pausedCommit, err)
+	}
+	store := filepath.Join(filepath.Dir(h.repos), "checkouts", key+".diffsnap")
+	if got := hostGit(t, store, "show", pausedCommit+":tick"); got != strings.TrimSpace(frozen) || tick() != frozen {
+		t.Fatalf("the paused session's commit holds tick %q, the checkout %q; both should be %q", got, tick(), frozen)
+	}
+	head = pausedCommit
 	if err = h.e.resume(ctx, key); err != nil {
 		t.Fatal(err)
 	}
@@ -282,11 +292,9 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.git.StopDiffWatch(run)
-	store := filepath.Join(filepath.Dir(h.repos), "checkouts", key+".diffsnap")
 	if got := hostGit(t, store, "ls-tree", "--name-only", "refs/aether/published", "after-commit.txt"); got != "after-commit.txt" {
 		t.Fatalf("the last snapshot, taken after the main process exited, lacks the last file: %q", got)
 	}
-	member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
 	final, err := h.git.CommitAll(ctx, run, "aether: a task", member, nil)
 	if err != nil || final == "" {
 		t.Fatalf("final commit = %q, %v", final, err)
@@ -298,7 +306,7 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	if author := hostGit(t, repo, "log", "-1", "--format=%an <%ae>|%cn|%P", "refs/heads/"+branch); author != "Member <member@localhost>|Aether|"+head {
 		t.Fatalf("published final commit: %s", author)
 	}
-	if files := hostGit(t, repo, "show", "--name-only", "--format=", final); !strings.Contains(files, "after-commit.txt") || !strings.Contains(files, "uploads/blob.bin") {
+	if files := hostGit(t, repo, "ls-tree", "-r", "--name-only", final); !strings.Contains(files, "after-commit.txt") || !strings.Contains(files, "uploads/blob.bin") {
 		t.Fatalf("final commit holds %q", files)
 	}
 	revision, err := h.git.CaptureEvidence(ctx, run, "packet-"+prefix)

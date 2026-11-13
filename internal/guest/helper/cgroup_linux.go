@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,28 +77,36 @@ func (c *sessionCgroup) setLimit(limit int64) error {
 }
 
 // freeze sets the session's cgroup.freeze and waits until cgroup.events
-// reports it: the kernel freezes and thaws processes asynchronously.
+// reports it: the kernel freezes and thaws processes asynchronously, and a
+// task in a killable wait, such as a slow home request, holds a freeze up.
+// A freeze that does not complete is thawed back, as runc does, so a failed
+// pause leaves the session running.
 func (c *sessionCgroup) freeze(ctx context.Context, frozen bool) error {
 	value := "0"
 	if frozen {
 		value = "1"
 	}
-	if err := os.WriteFile(filepath.Join(c.dir, "cgroup.freeze"), []byte(value), 0); err != nil {
+	control := filepath.Join(c.dir, "cgroup.freeze")
+	if err := os.WriteFile(control, []byte(value), 0); err != nil {
 		return err
 	}
 	for {
 		events, err := os.ReadFile(filepath.Join(c.dir, "cgroup.events"))
-		if err != nil {
-			return err
-		}
-		if slices.Contains(strings.Split(string(events), "\n"), "frozen "+value) {
+		if err == nil && slices.Contains(strings.Split(string(events), "\n"), "frozen "+value) {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(10 * time.Millisecond):
+		if err == nil {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+				continue
+			}
 		}
+		if frozen {
+			err = errors.Join(err, os.WriteFile(control, []byte("0"), 0))
+		}
+		return err
 	}
 }
 

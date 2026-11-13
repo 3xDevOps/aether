@@ -342,7 +342,10 @@ helper's `FreezeSession`, as Docker's pause freezes a container's, and
 leaves the VM running: the git service is outside the session, so Close
 pauses the session first and then commits it, as for a container, and the
 Files view of a paused session reads the live checkout. Exec into a paused
-session is refused. A subsession's branch reaches a parent in a
+session is refused. Root in the VM, which a sudo-tier session and nested
+Docker have, can move a process out of the session cgroup, and with it out
+of a pause, the session's process limit and the kill when the main process
+exits. A subsession's branch reaches a parent in a
 VM the same way: the server packs what the parent lacks and `Install` sets
 `refs/remotes/children/<id>`.
 

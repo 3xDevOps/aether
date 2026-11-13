@@ -143,11 +143,22 @@ func (s *service) Thaw(_ context.Context, req *guestpb.ThawRequest) (*guestpb.Th
 	return &guestpb.ThawReply{Frozen: frozen}, nil
 }
 
+// FreezeSession refuses session spawns before it freezes, under the
+// process table's lock, so no spawn forks into the frozen cgroup. A failed
+// thaw keeps them refused.
 func (s *service) FreezeSession(ctx context.Context, req *guestpb.FreezeSessionRequest) (*guestpb.FreezeSessionReply, error) {
 	if s.cgroup == nil {
 		return nil, status.Error(codes.FailedPrecondition, "the session has no cgroup")
 	}
-	if err := s.cgroup.freeze(ctx, req.GetFrozen()); err != nil {
+	frozen := req.GetFrozen()
+	if frozen {
+		s.procs.setSessionFrozen(true)
+	}
+	err := s.cgroup.freeze(ctx, frozen)
+	if frozen && err != nil || !frozen && err == nil {
+		s.procs.setSessionFrozen(false)
+	}
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "freeze the session: %v", err)
 	}
 	return &guestpb.FreezeSessionReply{}, nil

@@ -405,6 +405,7 @@ type fakeHelper struct {
 	freezeErr     error
 	thawed        bool
 	sessionFrozen bool
+	sessionErr    error
 	bootError     string
 }
 
@@ -555,11 +556,26 @@ func (g *fakeHelper) Thaw(context.Context, string) (bool, error) {
 	return frozen, nil
 }
 
+// FreezeSession fails a freeze with sessionErr after it took hold, as a
+// slow one does; errors.ErrUnsupported fails every call, as a helper from
+// before the call does.
 func (g *fakeHelper) FreezeSession(_ context.Context, frozen bool) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if errors.Is(g.sessionErr, errors.ErrUnsupported) {
+		return g.sessionErr
+	}
 	g.sessionFrozen = frozen
+	if frozen {
+		return g.sessionErr
+	}
 	return nil
+}
+
+func (g *fakeHelper) isSessionFrozen() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.sessionFrozen
 }
 
 func (g *fakeHelper) frozen() []string {

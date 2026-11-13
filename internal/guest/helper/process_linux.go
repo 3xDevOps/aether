@@ -43,6 +43,7 @@ const (
 var (
 	errInvalid = errors.New("invalid process")
 	errExists  = errors.New("process ID was already used")
+	errPaused  = errors.New("the session is paused")
 	errUnknown = errors.New("no such process")
 	errExited  = errors.New("process exited")
 	errNoInput = errors.New("process input is closed")
@@ -93,6 +94,15 @@ type processes struct {
 	cgroup *os.File
 	// mainExited, when set, runs once the main process exited.
 	mainExited func()
+	// sessionFrozen refuses session processes while FreezeSession holds the
+	// session: one forked into a frozen cgroup never reaches exec.
+	sessionFrozen bool
+}
+
+func (t *processes) setSessionFrozen(frozen bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sessionFrozen = frozen
 }
 
 func newProcesses(cgroup *os.File) *processes {
@@ -122,6 +132,9 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 	defer t.mu.Unlock()
 	if _, ok := t.byID[spec.ID]; ok {
 		return nil, errExists
+	}
+	if t.sessionFrozen && !spec.helper {
+		return nil, errPaused
 	}
 	p := &process{
 		id: spec.ID, done: make(chan struct{}),

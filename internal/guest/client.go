@@ -372,11 +372,15 @@ func (c *Client) Thaw(ctx context.Context, id string) (bool, error) {
 }
 
 // FreezeSession freezes or thaws every process of the session; either is
-// idempotent.
+// idempotent. A helper from before the call fails with
+// errors.ErrUnsupported: a VM keeps the helper it booted with.
 func (c *Client) FreezeSession(ctx context.Context, frozen bool) error {
 	_, err := retry(ctx, func() (*guestpb.FreezeSessionReply, error) {
 		return c.api.FreezeSession(ctx, &guestpb.FreezeSessionRequest{Frozen: frozen})
 	})
+	if status.Code(err) == codes.Unimplemented {
+		return fmt.Errorf("guest: freeze the session: the VM's helper predates it; restart the session: %w", errors.ErrUnsupported)
+	}
 	if err != nil {
 		return fmt.Errorf("guest: freeze the session: %w", err)
 	}
