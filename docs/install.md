@@ -83,9 +83,11 @@ or Ubuntu 24.04 and newer ship `virtiofsd` at that path), Cloud Hypervisor
 v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, and the
 release's guest kernel `aether-vmlinux-x86_64` at
 `/usr/local/lib/aether/vmlinux` after checking it against the signed release
-manifest. A `vm-kernel` set to another path, or a development build, keeps the
-kernel already there. Install leaves Sysbox out: a session VM runs its own
-Docker daemon.
+manifest, noting the release in `vmlinux.release` beside it. Nothing is
+replaced until every download has checked out. A `vm-kernel` set to another
+path, or a development build, keeps the kernel already there. With
+`session-runtime vm` the server manages `/usr/local/bin/cloud-hypervisor`:
+replace it, and the next start puts the pinned one back.
 
 On AWS:
 
@@ -109,7 +111,7 @@ On AWS:
   sudo mount /dev/nvme1n1 /var/lib/aether
   ```
 
-  XFS clones caches and saved environments without copying them. VM disks,
+  XFS clones package-cache disks without copying them. VM disks,
   checkouts and the image store must share one filesystem, because they
   hard-link each other. Instance storage is lost when the instance stops or
   fails, so keep the [backups](#what-lives-in-the-data-directory) current, or
@@ -684,10 +686,13 @@ aether         /usr/local/bin/aether  v0.8.7-beta.13
 With `session-runtime vm`, `sudo aether-server update` has the new binary run
 `aether-server vm install` before the restart, and prints its steps, so new VMs
 boot the release's Cloud Hypervisor and guest kernel. Running VMs keep theirs,
-and their helper disk, until they stop. A server started by its systemd unit
-also puts its release's Cloud Hypervisor and kernel in place, which covers an
-update from a client or the dashboard and a rollback; `AETHER_NO_UPDATE_CHECK=1`
-turns that off.
+and their helper disk, until they stop; Ctrl-C during that step undoes the
+update. Before it starts any VM, a server started by its systemd unit also puts
+its release's Cloud Hypervisor and kernel in place, downloading the kernel only
+when the one there came from another release. That covers an update from a
+client or the dashboard, and a rollback. If it cannot during an update's first
+start, the update rolls back; on any other start the server logs the error and
+keeps serving. `AETHER_NO_UPDATE_CHECK=1` turns that check off.
 
 `aether server update --when idle` waits until no session is working, no terminal
 is attached and no SSH connection into a session is open; `--cancel` clears that
@@ -881,6 +886,7 @@ sudo docker volume rm $(sudo docker volume ls -q --filter label=aether.managed=t
 sudo rm -rf /var/lib/aether /etc/aether
 sudo rm -f /usr/local/bin/aether-server
 sudo rm -rf /usr/local/bin/cloud-hypervisor /usr/local/lib/aether   # with session-runtime vm
+# The VM firewall rules and IP forwarding stay until the next reboot.
 sudo rm -rf /tmp/aether-patch-*
 ```
 
