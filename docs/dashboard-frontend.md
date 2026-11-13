@@ -3620,10 +3620,10 @@ the corners do not meet. Each image is named by its place in the row
 ("Image 2 of 3", or "Attached image" when it is alone), and its thumbnail is a
 button that opens the same blob in a `Dialog` filling the window
 (the whole screen on a phone). The dialog shows only the image on a near-black
-backdrop, with the composer's thin border and corner radius, at up to 80% of
-the viewport width and height. A top-bar row keeps the image clear of macOS
-window controls and holds a 44px Close button; the image name stays for screen
-readers. Each image fits the frame, enlarging small images when needed. Zoom
+backdrop, vertically centered in the viewport with the composer's thin border
+and corner radius, at up to 80% of the viewport width and height. Escape or
+clicking outside the image closes it; the image name stays for screen readers.
+Each image fits the frame, enlarging small images when needed. Zoom
 runs from fitted to 400% of the larger of the image's native size or fitted
 size, in a frame that scrolls and takes keyboard focus; the focus outline
 follows the image. A trackpad pinch (a ctrl wheel, or Safari's gesture events,

@@ -1,7 +1,6 @@
 import type * as React from 'react'
-import { Dialog as DialogPrimitive } from 'radix-ui'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, File as FileIcon, X } from '@/components/icons'
+import { ChevronLeft, ChevronRight, File as FileIcon } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
@@ -223,7 +222,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
         aria-label={`${name}, ${scale === undefined ? 'fitted' : `zoomed to ${Math.round(scale * 100)}%`}`}
         data-image-viewer-frame
         className={cn(
-          'group col-start-1 row-start-2 mx-auto mb-4 flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none',
+          'group col-start-1 row-start-1 m-auto flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none',
           viewerBounds,
           scale !== undefined && 'focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus',
         )}
@@ -243,7 +242,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
         <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
       </div>
       {gallery && (
-        <div className={cn('pointer-events-none relative z-10 col-start-1 row-start-2 mx-auto mb-4', viewerBounds)}>
+        <div className={cn('pointer-events-none relative z-10 col-start-1 row-start-1 m-auto', viewerBounds)}>
           {canStepBack && (
             <Button variant="secondary" size="icon" label="Previous image" data-image-gallery-control className={cn('pointer-events-auto absolute left-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(-1)}>
               <ChevronLeft className="size-5" />
@@ -256,20 +255,13 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
           )}
         </div>
       )}
-      <div className="row-start-1 flex min-h-[calc(var(--top-bar-height)_+_var(--safe-top))] items-center justify-end px-2 pt-[var(--safe-top)]">
-        <DialogTitle className="sr-only">{name}</DialogTitle>
-        <DialogDescription className="sr-only">
-          {[
-            'Pinch, or press Command or Control with plus, minus or zero, to zoom.',
-            gallery && 'Use the Previous image and Next image buttons, arrow keys, or a horizontal swipe to see the other images.',
-          ].filter(Boolean).join(' ')}
-        </DialogDescription>
-        <DialogPrimitive.Close asChild>
-          <Button variant="secondary" size="icon" label="Close" className="size-11">
-            <X className="size-5" />
-          </Button>
-        </DialogPrimitive.Close>
-      </div>
+      <DialogTitle className="sr-only">{name}</DialogTitle>
+      <DialogDescription className="sr-only">
+        {[
+          'Press Escape or click outside the image to close. Pinch, or press Command or Control with plus, minus or zero, to zoom.',
+          gallery && 'Use the Previous image and Next image buttons, arrow keys, or a horizontal swipe to see the other images.',
+        ].filter(Boolean).join(' ')}
+      </DialogDescription>
     </div>
   )
 }
@@ -400,7 +392,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
         <DialogContent
           showCloseButton={false}
           overlayClassName="bg-scrim-strong"
-          className="inset-0 h-dvh max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[calc(var(--top-bar-height)_+_var(--safe-top))_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:w-auto max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:p-0"
+          className="inset-0 h-dvh max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:w-auto max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:p-0"
           onKeyDown={(event) => {
             keys.current?.(event)
             if (event.defaultPrevented) return
