@@ -27,6 +27,7 @@ const (
 	helperImage = "helper.img"
 	rootDisk    = "root.img"
 	rootCopy    = "root-copy.img"
+	browserDisk = "browser.img"
 	dataDisk    = "data.img"
 	cacheDisk   = "cache.qcow2"
 	// stateDiskFile is the session's state disk, in the directory its state
@@ -86,6 +87,13 @@ type record struct {
 	Lifetime  time.Duration  `json:"lifetime,omitempty"`
 	OwnedDirs []string       `json:"owned_dirs,omitempty"`
 	Serves    []guest.Socket `json:"serves,omitempty"`
+	// Browser is the development browser's disk, attached read-only; empty
+	// when its image was not built yet when the VM was created.
+	Browser      vmimage.Disk `json:"browser"`
+	BrowserImage string       `json:"browser_image,omitempty"`
+	BrowserEnv   []string     `json:"browser_env,omitempty"`
+	// Companion is the browser companion created in the VM, if any.
+	Companion *companion `json:"companion,omitempty"`
 	// Booted is set once a boot was launched: the next cold start builds a
 	// fresh root disk. Boots counts them, so a wait on one boot can tell it
 	// from the next.

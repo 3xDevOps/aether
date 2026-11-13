@@ -586,6 +586,17 @@ mounts none of the checkout, your home, keys, agent logins or the Docker
 socket. It shares the session's network, so it reaches the app's loopback ports
 and everything else the session can. Chromium is driven over a pipe, not a port.
 
+With `session-runtime vm` the companion runs inside the session's VM
+instead ([The development browser](vm-guest.md#the-development-browser)):
+from the browser image's read-only disk, as the root of its own mount
+namespace, as UID `1001` rather than the session's `1000`, with
+`no-new-privileges`, its own IPC namespace and cgroup (the same memory and
+512-process caps), a `/proc` that hides other users' processes, and
+Chromium's sandbox on. The session's processes can neither see its files nor
+trace it, and only the server reaches its control socket, through the VM's
+helper. It does not get the container's seccomp profile, and a session with
+**Root access** can reach it as root inside the VM.
+
 Page content is not protected: cookies, tokens, customer data, console output,
 URLs and anything on screen can end up in a capture. Use test accounts, never
 production credentials, and review a capture before you keep it. **Annotate**

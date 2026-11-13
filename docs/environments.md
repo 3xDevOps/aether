@@ -324,7 +324,7 @@ Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) virtual
 machine instead of a container, and so do each member's environment
 terminal, assistant and agent updater, and the
 [dictation](dictation.md#the-engine-container) engine. The development
-browser stays on Docker.
+browser runs inside the session's VM.
 This is work in progress; [the plan](plans/2026-11-13-microvm-sessions.md)
 lists what is still to come.
 
@@ -424,8 +424,13 @@ What changes:
   saved in Docker before still works and is copied over at its first use. A
   session whose saved image no longer boots starts from the previous one, as
   in [When a saved image cannot start](#when-a-saved-image-cannot-start).
-- Not yet supported, refused at launch with an error naming the work item:
-  the development browser beside a session.
+- The development browser runs inside the session's VM, from a read-only
+  disk built from the browser image that every session VM gets at boot
+  ([The development browser](vm-guest.md#the-development-browser)), so a
+  saved session keeps its pages. Its memory comes out of the session VM's,
+  under the companion's own cap. A session created while the server was
+  still building that disk, as just after an install or upgrade, has no
+  browser: opening one fails with `restart the session to use the browser`.
 - Closing a session while it is asleep makes no final commit: its VM is
   stopped, so the run branch lacks the changes the session had not
   committed. They stay on the session's checkout disk, which is kept.

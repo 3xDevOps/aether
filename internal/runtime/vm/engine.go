@@ -186,6 +186,8 @@ type options struct {
 	OwnedDirs []string
 	// Serves are the VM's sockets the host reaches through the helper.
 	Serves []guest.Socket
+	// Browser gives the VM the development browser's disk, once built.
+	Browser bool
 }
 
 func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts options) (_ runtime.ID, err error) {
@@ -254,6 +256,11 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
 		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: shared, CheckoutDisks: disks, Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
 		KeepRoot: opts.KeepRoot, Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
+	}
+	if opts.Browser {
+		if err = e.attachBrowser(ctx, rec); err != nil {
+			return "", err
+		}
 	}
 	if err = e.store(rec); err != nil {
 		return "", err
@@ -387,6 +394,9 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		checkouts[i] = guest.CheckoutMount{Serial: checkoutSerial(i), Key: c.Checkout.Key, Target: c.Target}
 	}
 	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves}
+	if rec.Browser.Path != "" {
+		cfg.Serves = append(cfg.Serves, guest.Socket{Port: guest.BrowserPort, Path: guest.BrowserSocket})
+	}
 	if rec.Net != offline {
 		var dns []netip.Addr
 		if !rec.Egress {
@@ -412,6 +422,9 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	}
 	if rec.State.Path != "" {
 		args = append(args, diskArg(rec.State, "state"))
+	}
+	if rec.Browser.Path != "" {
+		args = append(args, diskArg(rec.Browser, "browser")+",readonly=on")
 	}
 	args = append(args,
 		"--cpus", fmt.Sprintf("boot=%d", rec.CPUs),
