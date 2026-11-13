@@ -81,6 +81,8 @@ export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) =>
   const listed = useSidebarGroups()
   const groups = regroup ? regroup(listed) : listed
   const hydrated = useStore((s) => s.hydrated)
+  const mineOnly = useStore((s) => s.mineOnly)
+  const setMineOnly = useStore((s) => s.setMineOnly)
   const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -121,7 +123,14 @@ export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) =>
           ) : loading ? (
             <LoadingRuns />
           ) : hydrated && (
-            <p className="px-2 py-1 text-ui-sm text-muted">No sessions yet.</p>
+            mineOnly ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1">
+                <p className="text-ui-sm text-muted">No sessions of yours.</p>
+                <Button variant="link" size="sm" onClick={() => setMineOnly(false)}>Show everyone&apos;s sessions</Button>
+              </div>
+            ) : (
+              <p className="px-2 py-1 text-ui-sm text-muted">No sessions yet.</p>
+            )
           )
         ) : (
           groups.map((group) => {

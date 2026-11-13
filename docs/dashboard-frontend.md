@@ -368,7 +368,9 @@ top to bottom:
    list the selected workspace, and only the viewer's own sessions while **Mine**
    (`mineOnly`, persisted) in the Working header is pressed. The region
    scrolls on its own, and while more rows sit below the fold its bottom edge
-   fades out. The sidebar never collapses on its own at narrow widths; the
+   fades out. If Mine hides every session, the empty state says "No sessions of
+   yours" and **Show everyone's sessions** clears the filter. The sidebar never
+   collapses on its own at narrow widths; the
    splitter and `⌘B` stay the reader's call.
 4. **Manage workspaces**, **Members** and **Settings**, for every member.
    Board through Templates live in the header instead, leaving the sidebar's
