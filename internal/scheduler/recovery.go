@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -147,6 +148,15 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		deadline != nil && time.Now().UTC().Before(*deadline)
 	paused, cid, asleep := entry.paused, entry.containerID, !entry.asleepSince.IsZero()
 	s.mu.Unlock()
+	if valid {
+		if err = s.vmSingleRelaunch(ctx, fresh); err != nil {
+			return nil, err
+		}
+		profile, _ := harness.Lookup(fresh.Harness)
+		if err = s.recordVMSingleLaunch(profile, fresh); err != nil {
+			return nil, err
+		}
+	}
 	if !valid {
 		if entry.destroyPending || deadline == nil || !time.Now().UTC().Before(*deadline) {
 			if deadline == nil || entry.destroyPending {

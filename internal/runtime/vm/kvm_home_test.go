@@ -105,17 +105,23 @@ func TestKVMHomeIsLiveAcrossVMsAndASave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// An agent's databases are each session's own, mounted over a
-	// directory in the home from the data disk.
-	if err := os.MkdirAll(filepath.Join(owner, ".codex/vm-sqlite"), 0o700); err != nil {
-		t.Fatal(err)
+	// An agent's databases are each session's own: a directory of the
+	// session on the host, mounted over one in the home.
+	states := map[string]runtime.Mount{}
+	for _, key := range []string{"a", "b"} {
+		dir := filepath.Join(src, "vm-state-"+key)
+		for _, d := range []string{dir, filepath.Join(owner, ".codex/vm-sqlite")} {
+			if err := os.MkdirAll(d, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		states[key] = runtime.Mount{HostPath: dir, ContainerPath: "/root/.codex/vm-sqlite"}
 	}
-	state := runtime.Mount{HostPath: filepath.Join(src, "scratch"), ContainerPath: "/root/.codex/vm-sqlite", Kind: runtime.MountScratch}
-	took := kvmUserSession(t, e, "run-vmhome-a", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login, state,
+	took := kvmUserSession(t, e, "run-vmhome-a", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login, states["a"],
 		runtime.Mount{HostPath: signing, ContainerPath: "/run/aether-signing", ReadOnly: true},
 		runtime.Mount{HostPath: coord, ContainerPath: "/run/aether", ReadOnly: true})
 	t.Logf("create and start with the home took %s", took)
-	kvmUserSession(t, e, "run-vmhome-b", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login, state)
+	kvmUserSession(t, e, "run-vmhome-b", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login, states["b"])
 	if out, code := vmRun(t, e, "run-vmhome-a", "echo a > /root/.codex/vm-sqlite/state_5.sqlite && stat -c '%u %a' /root/.codex/vm-sqlite"); code != 0 || !strings.Contains(out, "1000 700") {
 		t.Errorf("the session's own database directory: %d %q", code, out)
 	}
@@ -124,6 +130,9 @@ func TestKVMHomeIsLiveAcrossVMsAndASave(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Join(owner, ".codex/vm-sqlite")); len(entries) != 0 {
 		t.Errorf("a session's databases reached the home: %v", entries)
+	}
+	if _, err := os.Stat(filepath.Join(states["a"].HostPath, "state_5.sqlite")); err != nil {
+		t.Errorf("the session's databases are not in its own host directory: %v", err)
 	}
 	kvmUserSession(t, e, "run-vmhome-c", runtime.Mount{HostPath: recipient, ContainerPath: "/root"}, login)
 

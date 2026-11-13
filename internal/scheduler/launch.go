@@ -316,6 +316,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err = s.checkLogin(ctx, workspace, account, harness, profile, mode); err != nil {
 		return nil, err
 	}
+	if err = s.vmSingleConflict(ctx, profile, harness, member, account, ""); err != nil {
+		return nil, err
+	}
 	release, err := s.reserveCapacity(ctx)
 	if err != nil {
 		return nil, err
@@ -591,7 +594,7 @@ func (s *Scheduler) leaveIfRevoked(ctx context.Context, entry *supervised, run *
 }
 
 func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, profile harness.Profile) (*EnvironmentPlan, error) {
-	if err := s.checkVMSingle(ctx, run, profile); err != nil {
+	if err := s.vmSingleConflict(ctx, profile, run.Harness, run.HomeMember(), run.AccountMember(), run.ID); err != nil {
 		return nil, err
 	}
 	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, actor, profile, EnvironmentPurposeRun)
@@ -610,7 +613,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 		if ownErr := s.applyRunOwnership(ws, run, entry.memberID, nil, plan.User); ownErr != nil {
 			return nil, fmt.Errorf("apply session ownership: %w", ownErr)
 		}
-		return plan, nil
+		return plan, s.recordVMSingleLaunch(profile, run)
 	}
 	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
 		return nil, fmt.Errorf("apply session ownership: %w", ownErr)
@@ -618,7 +621,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 	if ownErr := s.applyLoginOwnership(entry, plan.LoginMember, plan.Mounts, plan.User); ownErr != nil {
 		return nil, fmt.Errorf("apply login ownership: %w", ownErr)
 	}
-	return plan, nil
+	return plan, s.recordVMSingleLaunch(profile, run)
 }
 
 // startRunContainer is the part of a launch a move to another account

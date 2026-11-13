@@ -637,8 +637,9 @@ sessions nothing below applies: every container of a member shares the home's
 databases as before.
 
 Agents whose shared databases can move get a copy of their own in each
-session, on the session's data disk, kept across its restarts. Their logins
-and other files stay shared:
+session: a directory of the session on the server, mounted over the one in
+the home, kept until the session is deleted, also across a move to another
+account. Their logins and other files stay shared:
 
 | Agent | Session's own | How |
 | --- | --- | --- |
@@ -646,18 +647,32 @@ and other files stay shared:
 | `opencode` | `~/.local/share/opencode/vm-db/opencode.db` | `OPENCODE_DB` |
 | `cursor` | `~/.cursor/ai-tracking` and `~/.local/state/cursor/agent-stores` | `CURSOR_AGENT_STORE_DIR` for the second |
 
-A variable the workspace already sets is kept. The agent's history and
-indexes in those databases then belong to that session only.
+The agent's history and indexes in those databases belong to that session
+only. A variable the workspace already sets is kept, and then the agent
+shares that database again; so does Codex when `~/.codex/config.toml` sets
+`sqlite_home`, which wins over `CODEX_SQLITE_HOME`. OpenCode's
+`opencode console login` keeps its tokens in `opencode.db`, so each session
+starts signed out of OpenCode Console; provider logins in `auth.json` stay
+shared.
 
 `omp`, `copilot` and `antigravity` keep such databases where no setting moves
 them (oh-my-pi's logins, Copilot's session index beside its login,
 Antigravity's conversations). Only one VM session at a time runs each of them
-on a home: the launcher's home or, on a shared account, the account owner's.
-Every live session counts, sleeping ones too, and a second launch fails with:
+on a home: the launcher's, and for oh-my-pi on a shared account also the
+owner's, whose `~/.omp/agent` it mounts. Every session that still has its VM
+counts, sleeping ones and ones shutting down too. A launch, or a move to a
+fallback account, that would make a second one is refused:
 
 ```text
-scheduler: oh-my-pi keeps its logins in a SQLite database that two session VMs cannot share, and session run-k3v9q2m7xd already runs it on the same home; close or kill that session first
+scheduler: oh-my-pi keeps its logins in a SQLite database that two session VMs cannot share, and Ada's session run-k3v9q2m7xd already runs it on the same home; close or kill it first
 ```
+
+A closed session of one of them does not reopen while another runs it on the
+same home, nor after one did since it closed, because its VM kept the
+databases open: launch a new session instead. The member's environment
+terminal and the agent started by hand in a session's shell open the same
+databases from another kernel, so do not run the agent there, `aether agent
+login` included, while a VM session runs it.
 
 ### Choose a model
 
