@@ -116,8 +116,19 @@ func (h *checkoutHost) session(t *testing.T, ws domain.WorkspaceID, key, base st
 	if err != nil {
 		t.Fatal(err)
 	}
+	created := h.boot(t, key, checkout, "1000:1000")
+	if err := h.git.StartDiffWatch(t.Context(), ws, domain.RunID(key)); err != nil {
+		t.Fatal(err)
+	}
+	return created
+}
+
+// boot creates and starts the VM of the session key as user, and returns
+// how long the create took.
+func (h *checkoutHost) boot(t *testing.T, key, checkout, user string) time.Duration {
+	t.Helper()
 	spec := runtime.Spec{
-		Image: cmp.Or(os.Getenv("AETHER_TEST_IMAGE"), checkoutImage), CreationKey: key, TTY: true, User: "1000:1000",
+		Image: cmp.Or(os.Getenv("AETHER_TEST_IMAGE"), checkoutImage), CreationKey: key, TTY: true, User: user,
 		Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
 		Env:     map[string]string{"AETHER_RUN_ID": key, "HOME": "/home/aether"}, CPULimit: 2, MemoryLimitBytes: 1 << 30,
 		WorktreeHostPath: checkout, WorktreeMountPath: "/workspace", WorkingDir: "/workspace",
@@ -128,9 +139,6 @@ func (h *checkoutHost) session(t *testing.T, ws domain.WorkspaceID, key, base st
 	}
 	created := time.Since(start)
 	if err := h.e.start(t.Context(), key); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.git.StartDiffWatch(t.Context(), ws, domain.RunID(key)); err != nil {
 		t.Fatal(err)
 	}
 	return created
@@ -156,6 +164,16 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	t.Logf("%d files: the first checkout disk took %s with its prepared disk, the second %s", files, first, second)
 	if second > 2*time.Second {
 		t.Errorf("a checkout over an existing prepared disk took %s", second)
+	}
+	// Started again as another user, as from an older image after its own
+	// failed to start, a session gets its checkout handed over.
+	other := prefix + "-b"
+	if err := h.e.destroy(t.Context(), other); err != nil {
+		t.Fatal(err)
+	}
+	h.boot(t, other, filepath.Join(filepath.Dir(h.repos), "checkouts", other), "1001:1001")
+	if owner := h.sh(t, other, "stat -c %u:%g /workspace /workspace/src/0/f0.txt /workspace/.git/index | sort -u"); owner != "1001:1001" {
+		t.Errorf("the checkout of a session started again as 1001:1001 is owned by %q", owner)
 	}
 
 	key := prefix + "-a"

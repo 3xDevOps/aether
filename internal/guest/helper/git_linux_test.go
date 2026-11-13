@@ -121,6 +121,7 @@ func newGitPair(t *testing.T, server func(*gitService) guestpb.GitServer) *gitPa
 	runGit(t, p.checkout, "checkout", "--quiet", "-b", gitengine.PreparedBranch, p.base)
 	if err := git.setup(ctx, []*guestpb.Checkout{{
 		Key: string(testRun), Workspace: string(testWorkspace), Branch: p.branch, Base: p.base, BaseBranch: "main",
+		Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid()),
 	}}); err != nil {
 		t.Fatal(err)
 	}

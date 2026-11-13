@@ -96,7 +96,7 @@ func (e *Engine) VMCheckoutDisk(ctx context.Context, path string, uid, gid int) 
 	}
 	id := guest.Checkout{
 		Key: string(key), Workspace: string(meta.Workspace), Branch: meta.Branch,
-		Base: meta.Base, BaseBranch: meta.BaseBranch, Origin: meta.Origin,
+		Base: meta.Base, BaseBranch: meta.BaseBranch, Origin: meta.Origin, UID: uid, GID: gid,
 	}
 	lock := e.snapshotLock(key)
 	lock.Lock()
@@ -132,6 +132,13 @@ func (e *Engine) fillPreparedCheckout(ctx context.Context, repo, base, dir strin
 	if _, err := e.git(ctx, dir, "checkout", "--quiet", "-b", PreparedBranch, base); err != nil {
 		return err
 	}
+	return ChownCheckout(dir, uid, gid)
+}
+
+// ChownCheckout gives every file of the checkout at dir to uid:gid. It is
+// for a checkout on a disk of its own, which shares no file with the
+// workspace repository.
+func ChownCheckout(dir string, uid, gid int) error {
 	return filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
 		if err != nil {
 			return err

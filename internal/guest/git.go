@@ -69,7 +69,8 @@ func (g *Git) Close() error { return g.conn.Close() }
 
 // Checkout is the identity of a checkout the configuration mounted under
 // Key: on its first boot it gets Branch at Base, and Origin as its origin
-// remote when set.
+// remote when set. UID and GID are the session user, who must own its
+// files.
 type Checkout struct {
 	Key        string
 	Workspace  string
@@ -77,6 +78,7 @@ type Checkout struct {
 	Base       string
 	BaseBranch string
 	Origin     string
+	UID, GID   int
 }
 
 // Setup sets up the checkouts, which must come before the session's first
@@ -86,6 +88,7 @@ func (g *Git) Setup(ctx context.Context, checkouts []Checkout) error {
 	for _, c := range checkouts {
 		req.Checkouts = append(req.Checkouts, &guestpb.Checkout{
 			Key: c.Key, Workspace: c.Workspace, Branch: c.Branch, Base: c.Base, BaseBranch: c.BaseBranch, Origin: c.Origin,
+			Uid: uint32(c.UID), Gid: uint32(c.GID),
 		})
 	}
 	if _, err := retry(ctx, func() (*guestpb.SetupReply, error) { return g.api.Setup(ctx, req) }); err != nil {

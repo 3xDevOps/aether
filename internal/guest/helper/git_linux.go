@@ -225,10 +225,13 @@ func (s *gitService) setup(ctx context.Context, checkouts []*guestpb.Checkout) e
 	for _, c := range checkouts {
 		id := guest.Checkout{
 			Key: c.GetKey(), Workspace: c.GetWorkspace(), Branch: c.GetBranch(), Base: c.GetBase(),
-			BaseBranch: c.GetBaseBranch(), Origin: c.GetOrigin(),
+			BaseBranch: c.GetBaseBranch(), Origin: c.GetOrigin(), UID: int(c.GetUid()), GID: int(c.GetGid()),
 		}
 		if !guest.ValidCheckoutKey(id.Key) {
 			return fmt.Errorf("checkout key %q is invalid", id.Key)
+		}
+		if err := ownCheckout(filepath.Join(s.dir, id.Key), id.UID, id.GID); err != nil {
+			return fmt.Errorf("checkout %s: %w", id.Key, err)
 		}
 		dir, ok := s.targets[id.Key]
 		if !ok {
@@ -248,6 +251,20 @@ func (s *gitService) setup(ctx context.Context, checkouts []*guestpb.Checkout) e
 		s.mu.Unlock()
 	}
 	return nil
+}
+
+// ownCheckout gives the checkout at dir to the session user when its top
+// directory belongs to someone else, as after the session started again
+// from an image with another user.
+func ownCheckout(dir string, uid, gid int) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if st := info.Sys().(*syscall.Stat_t); int(st.Uid) == uid && int(st.Gid) == gid {
+		return nil
+	}
+	return gitengine.ChownCheckout(dir, uid, gid)
 }
 
 // prepareBranch turns a checkout still on its prepared disk's branch into

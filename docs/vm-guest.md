@@ -269,7 +269,7 @@ engine's own wait. It serves `internal/guest/guestpb/git.proto` on vsock port
 
 | Call | What it does |
 | --- | --- |
-| `Setup` | Called before `Boot` on every boot and server restart. On a checkout's first boot it sets `aether.base`, `aether.branch`, `aether.workspace` and the origin remote, and renames `aether-prepared` to the run branch, running git as the checkout's owner so the session can keep writing everything git wrote. Then it starts the checkout's diff watch. |
+| `Setup` | Called before `Boot` on every boot and server restart. When the checkout's top directory belongs to someone other than the session user, as when a session starts again from an image with another user, it hands every file of the checkout to that user. On a checkout's first boot it sets `aether.base`, `aether.branch`, `aether.workspace` and the origin remote, and renames `aether-prepared` to the run branch, running git as the checkout's owner so the session can keep writing everything git wrote. Then it starts the checkout's diff watch. |
 | `Watch` | Streams the checkout's diff watch: each snapshot's `run.diff` payload, each moved HEAD, and at most one file change report a second. A snapshot or HEAD counts as delivered only once the server acknowledges it; a refusal is a history gap the watch retries, as a failed publication on the server is. |
 | `Flush` | Takes a snapshot now and returns once `Watch` delivered it. |
 | `Objects` | Streams a pack of what `wants` reach and no `haves` do. |

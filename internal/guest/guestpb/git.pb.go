@@ -117,8 +117,9 @@ func (x *SetupRequest) GetCheckouts() []*Checkout {
 }
 
 // Checkout describes a session checkout the kernel command line mounted
-// under key: the run branch it gets on its first boot and the identity the
-// git service reads it with.
+// under key: the run branch it gets on its first boot, the identity the
+// git service reads it with, and the session user, uid:gid, who must own
+// its files.
 type Checkout struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
@@ -127,6 +128,8 @@ type Checkout struct {
 	Base          string                 `protobuf:"bytes,4,opt,name=base,proto3" json:"base,omitempty"`
 	BaseBranch    string                 `protobuf:"bytes,5,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
 	Origin        string                 `protobuf:"bytes,6,opt,name=origin,proto3" json:"origin,omitempty"`
+	Uid           uint32                 `protobuf:"varint,7,opt,name=uid,proto3" json:"uid,omitempty"`
+	Gid           uint32                 `protobuf:"varint,8,opt,name=gid,proto3" json:"gid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,6 +204,20 @@ func (x *Checkout) GetOrigin() string {
 		return x.Origin
 	}
 	return ""
+}
+
+func (x *Checkout) GetUid() uint32 {
+	if x != nil {
+		return x.Uid
+	}
+	return 0
+}
+
+func (x *Checkout) GetGid() uint32 {
+	if x != nil {
+		return x.Gid
+	}
+	return 0
 }
 
 type SetupReply struct {
@@ -824,7 +841,7 @@ const file_git_proto_rawDesc = "" +
 	"GitFailure\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"G\n" +
 	"\fSetupRequest\x127\n" +
-	"\tcheckouts\x18\x01 \x03(\v2\x19.aether.guest.v1.CheckoutR\tcheckouts\"\x9f\x01\n" +
+	"\tcheckouts\x18\x01 \x03(\v2\x19.aether.guest.v1.CheckoutR\tcheckouts\"\xc3\x01\n" +
 	"\bCheckout\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1c\n" +
 	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x16\n" +
@@ -832,7 +849,9 @@ const file_git_proto_rawDesc = "" +
 	"\x04base\x18\x04 \x01(\tR\x04base\x12\x1f\n" +
 	"\vbase_branch\x18\x05 \x01(\tR\n" +
 	"baseBranch\x12\x16\n" +
-	"\x06origin\x18\x06 \x01(\tR\x06origin\"\f\n" +
+	"\x06origin\x18\x06 \x01(\tR\x06origin\x12\x10\n" +
+	"\x03uid\x18\a \x01(\rR\x03uid\x12\x10\n" +
+	"\x03gid\x18\b \x01(\rR\x03gid\"\f\n" +
 	"\n" +
 	"SetupReply\"D\n" +
 	"\bWatchAck\x12\x10\n" +

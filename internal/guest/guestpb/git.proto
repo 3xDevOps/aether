@@ -8,8 +8,8 @@ package aether.guest.v1;
 option go_package = "github.com/3xDevOps/Aether/internal/guest/guestpb";
 
 service Git {
-  // Setup gives each checkout the run branch on its first boot, records its
-  // identity and starts its diff watch. It is called before the session's
+  // Setup gives each checkout the run branch on its first boot and its files
+  // to the session user, records its identity and starts its diff watch. It is called before the session's
   // first process starts, and again after every server restart.
   rpc Setup(SetupRequest) returns (SetupReply);
   // Watch streams one checkout's diff watch. The first acknowledgement
@@ -42,8 +42,9 @@ message SetupRequest {
 }
 
 // Checkout describes a session checkout the kernel command line mounted
-// under key: the run branch it gets on its first boot and the identity the
-// git service reads it with.
+// under key: the run branch it gets on its first boot, the identity the
+// git service reads it with, and the session user, uid:gid, who must own
+// its files.
 message Checkout {
   string key = 1;
   string workspace = 2;
@@ -51,6 +52,8 @@ message Checkout {
   string base = 4;
   string base_branch = 5;
   string origin = 6;
+  uint32 uid = 7;
+  uint32 gid = 8;
 }
 
 message SetupReply {}

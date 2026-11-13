@@ -35,8 +35,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type GitClient interface {
-	// Setup gives each checkout the run branch on its first boot, records its
-	// identity and starts its diff watch. It is called before the session's
+	// Setup gives each checkout the run branch on its first boot and its files
+	// to the session user, records its identity and starts its diff watch. It is called before the session's
 	// first process starts, and again after every server restart.
 	Setup(ctx context.Context, in *SetupRequest, opts ...grpc.CallOption) (*SetupReply, error)
 	// Watch streams one checkout's diff watch. The first acknowledgement
@@ -141,8 +141,8 @@ func (c *gitClient) Head(ctx context.Context, in *HeadRequest, opts ...grpc.Call
 // All implementations must embed UnimplementedGitServer
 // for forward compatibility.
 type GitServer interface {
-	// Setup gives each checkout the run branch on its first boot, records its
-	// identity and starts its diff watch. It is called before the session's
+	// Setup gives each checkout the run branch on its first boot and its files
+	// to the session user, records its identity and starts its diff watch. It is called before the session's
 	// first process starts, and again after every server restart.
 	Setup(context.Context, *SetupRequest) (*SetupReply, error)
 	// Watch streams one checkout's diff watch. The first acknowledgement
