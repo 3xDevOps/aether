@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,8 +31,13 @@ const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 const startupTimeout = 10 * time.Second
 
 // maxExited is how many exited processes keep their record and output for
-// a late reader, besides the main process, which always does.
-const maxExited = 32
+// a late reader, besides the main process, which always does. A record
+// whose exit or output a caller has not read yet stays until maxKept later
+// exits.
+const (
+	maxExited = 32
+	maxKept   = 4 * maxExited
+)
 
 var (
 	errInvalid = errors.New("invalid process")
@@ -60,6 +66,15 @@ type process struct {
 	stderr   *output
 	done     chan struct{}
 	code     int
+	// reported is set once a caller has been told the exit.
+	reported atomic.Bool
+	exit     uint64
+}
+
+// settled reports that no caller has more to read of p: its exit was
+// reported and both streams were read to their end.
+func (p *process) settled() bool {
+	return p.reported.Load() && p.stdout.drained() && p.stderr.drained()
 }
 
 // processes is the helper's process table. The helper reaps every child,
@@ -71,6 +86,8 @@ type processes struct {
 	byID   map[string]*process
 	byPID  map[int]*process
 	exited []string
+	// exits counts the exits retire saw; a process's exit is its count then.
+	exits uint64
 	// cgroup is the directory every spawned process starts in, nil for none.
 	cgroup *os.File
 }
@@ -122,6 +139,7 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 			failed = &execError{code: 126, err: err}
 		}
 		p.code = failed.code
+		p.reported.Store(true)
 		p.stdout.close()
 		p.stderr.close()
 		close(p.done)
@@ -411,23 +429,41 @@ func (t *processes) reap() {
 	}
 }
 
-// retire lists p as exited and forgets the oldest exited processes past
-// maxExited. The main process is never forgotten.
+// retire lists p as exited and keeps the newest maxExited exited processes.
+// An older one is forgotten once no caller still reads it, or once maxKept
+// processes exited after it, read or not; the output of an older one that
+// was read to its end is dropped at once. The main process is never
+// forgotten.
 func (t *processes) retire(p *process) {
 	if p.id == guest.MainID {
 		return
 	}
+	t.exits++
+	p.exit = t.exits
 	t.exited = append(t.exited, p.id)
-	for len(t.exited) > maxExited {
-		// Closing the output also ends a pump still waiting for a reader of
-		// lossless output, which no one can attach to any more.
-		if old := t.byID[t.exited[0]]; old != nil {
+	older := len(t.exited) - maxExited
+	kept := t.exited[:0]
+	for i, id := range t.exited {
+		old := t.byID[id]
+		switch {
+		case i >= older:
+		case old == nil:
+			continue
+		case old.settled() || t.exits-old.exit >= maxKept:
+			// Closing the output also ends a pump still waiting for a
+			// reader of lossless output, which no one can attach to any
+			// more, and so the writer behind it.
 			old.stdout.close()
 			old.stderr.close()
+			delete(t.byID, id)
+			continue
+		default:
+			old.stdout.release()
+			old.stderr.release()
 		}
-		delete(t.byID, t.exited[0])
-		t.exited = t.exited[1:]
+		kept = append(kept, id)
 	}
+	t.exited = kept
 }
 
 func (t *processes) get(id string) (*process, error) {

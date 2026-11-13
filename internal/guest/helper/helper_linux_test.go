@@ -499,3 +499,129 @@ func TestHostOnly(t *testing.T) {
 		t.Fatalf("accepted %v, %v; want only the host's connection", conn.RemoteAddr(), err)
 	}
 }
+
+func TestRecordsStayUntilTheirCallersAreDone(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	unread := spawn(t, client, guest.ProcessSpec{ID: "unread", Argv: []string{"sh", "-c", "echo late output >&2"}, Lossless: true})
+	unwaited := spawn(t, client, guest.ProcessSpec{ID: "unwaited", Argv: []string{"sh", "-c", "exit 7"}, Lossless: true})
+	// The unread one's exit is reported and its stdout read, its stderr
+	// left unread; the
+	// unwaited one's exit is watched in the table, since a Status that sees
+	// an exit reports it.
+	if code, err := unread.Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		p, err := testProcs.get(unwaited.ID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.exited() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the unwaited process did not exit")
+		}
+	}
+	u := unread.Attach(true)
+	if out, err := io.ReadAll(u.Stdout()); err != nil || len(out) != 0 {
+		t.Fatalf("unread stdout %q, %v", out, err)
+	}
+	_ = u.Close()
+	a := unwaited.Attach(true)
+	if out, err := io.ReadAll(a.Stdout()); err != nil || len(out) != 0 {
+		t.Fatalf("unwaited output %q, %v", out, err)
+	}
+	_ = a.Close()
+	for i := range maxExited + 8 {
+		p := spawn(t, client, guest.ProcessSpec{ID: fmt.Sprintf("later-%d", i), Argv: []string{"true"}})
+		if _, err := p.Wait(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a = unread.Attach(true)
+	defer func() { _ = a.Close() }()
+	if out, err := io.ReadAll(a.Stderr()); err != nil || string(out) != "late output\n" {
+		t.Fatalf("stderr read after %d later exits = %q, %v", maxExited+8, out, err)
+	}
+	if code, err := unwaited.Wait(ctx); err != nil || code != 7 {
+		t.Fatalf("exit read after %d later exits = %d, %v", maxExited+8, code, err)
+	}
+}
+
+func TestReadAndAbandonedRecordsAreForgotten(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	run := func(n int, prefix string) {
+		t.Helper()
+		for i := range n {
+			p := spawn(t, client, guest.ProcessSpec{ID: fmt.Sprintf("%s-%d", prefix, i), Argv: []string{"true"}})
+			if _, err := p.Wait(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	read := spawn(t, client, guest.ProcessSpec{ID: "read", Argv: []string{"true"}})
+	if _, err := read.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	abandoned := spawn(t, client, guest.ProcessSpec{ID: "abandoned", Argv: []string{"sh", "-c", "echo never read"}, Lossless: true})
+	// A terminal's attachment reads it to its end, and nobody asks its exit.
+	terminal := spawn(t, client, guest.ProcessSpec{ID: "terminal", Argv: []string{"sh", "-c", "head -c 100000 /dev/zero"}, TTY: &guest.Size{Cols: 80, Rows: 24}})
+	ta := terminal.Attach(true)
+	if out, err := io.ReadAll(ta.Stdout()); err != nil || len(out) < 100000 {
+		t.Fatalf("terminal output %d bytes, %v", len(out), err)
+	}
+	_ = ta.Close()
+	run(maxExited+1, "after")
+	held, err := testProcs.get(terminal.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	held.stdout.mu.Lock()
+	kept := len(held.stdout.data)
+	held.stdout.mu.Unlock()
+	if kept != 0 {
+		t.Errorf("an older record read to its end still holds %d bytes of output", kept)
+	}
+	if _, err := read.Status(ctx); !errors.Is(err, guest.ErrNotFound) {
+		t.Fatalf("a record whose exit was read, older than the newest %d: %v; it must be forgotten", maxExited, err)
+	}
+	if _, err := abandoned.Status(ctx); err != nil {
+		t.Fatalf("a record nobody read yet was forgotten early: %v", err)
+	}
+	run(maxKept, "later")
+	if _, err := abandoned.Status(ctx); !errors.Is(err, guest.ErrNotFound) {
+		t.Fatalf("a record nobody read, %d exits old: %v; it must be forgotten", maxKept+maxExited+1, err)
+	}
+	testProcs.mu.Lock()
+	records := len(testProcs.exited)
+	testProcs.mu.Unlock()
+	if records > maxKept {
+		t.Errorf("%d exited records kept, over %d", records, maxKept)
+	}
+}
+
+func TestNewestRecordsStayWhileOlderOnesAreUnread(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	for i := range maxExited + 1 {
+		p := spawn(t, client, guest.ProcessSpec{ID: fmt.Sprintf("unread-%d", i), Argv: []string{"sh", "-c", "echo unread"}, Lossless: true})
+		if _, err := p.Wait(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recent := spawn(t, client, guest.ProcessSpec{ID: "recent", Argv: []string{"sh", "-c", "exit 5"}})
+	if code, err := recent.Wait(ctx); err != nil || code != 5 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+	next := spawn(t, client, guest.ProcessSpec{ID: "next", Argv: []string{"true"}})
+	if _, err := next.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A Wait retried after a lost reply still finds the recent exit.
+	if code, err := recent.Wait(ctx); err != nil || code != 5 {
+		t.Fatalf("a retried wait on one of the newest records = %d, %v", code, err)
+	}
+}

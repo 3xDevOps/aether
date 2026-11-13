@@ -122,8 +122,11 @@ executes the program. `Boot` gives the setup script and dockerd the main
 process's setting. A process runs in its own session, either as the leader of a new terminal or with three pipes. A
 program that cannot be executed fails the spawn with exit code 127 when it
 was not found and 126 otherwise. A process a signal killed exits with 128
-plus the signal number. The helper keeps the records of the 32 most recent
-exited processes, and the main process's for good. It reaps every orphan.
+plus the signal number. The helper keeps the records of the 32 most recently
+exited processes. An older one stays while its exit was not reported or its
+output not read to its end, but only until 128 more processes have exited,
+and once its output was read only its exit code is kept. The main process's
+record it keeps for good. It reaps every orphan.
 
 PID 1 passes `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGTERM`, `SIGUSR1`, `SIGUSR2`,
 `SIGALRM` and `SIGWINCH` on to the main process, as `docker-init` does. When

@@ -169,6 +169,7 @@ func (s *service) Status(ctx context.Context, req *guestpb.StatusRequest) (*gues
 	if !p.exited() {
 		return &guestpb.StatusReply{}, nil
 	}
+	p.reported.Store(true)
 	return &guestpb.StatusReply{Exited: true, ExitCode: int32(p.code)}, nil
 }
 
