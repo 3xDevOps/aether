@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { DictationButton } from '@/components/dictation/dictation-button'
 import { DictationNotice } from '@/components/dictation/dictation-notice'
@@ -230,9 +230,37 @@ export function AgentOptions({ choice, onSetUp, onChoice, disabled = false }: {
 /** Takes the id and descriptions FormField gives its child, so the label still names the textarea above the mic. */
 function TaskBox({ onTask, ...props }: React.ComponentProps<'textarea'> & { value: string; onTask: (task: string) => void }) {
   const textarea = useRef<HTMLTextAreaElement>(null)
+  const textSize = useStore((s) => s.textSize)
+  useLayoutEffect(() => {
+    const el = textarea.current
+    if (!el) return
+    const resize = () => {
+      el.style.height = '0px'
+      const style = getComputedStyle(el)
+      const maxHeight = Number.parseFloat(style.maxHeight)
+      const borderHeight = Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth)
+      const contentHeight = el.scrollHeight + borderHeight
+      const height = Number.isFinite(maxHeight) ? Math.min(contentHeight, maxHeight) : contentHeight
+      el.style.height = `${height}px`
+      el.style.overflowY = contentHeight > height ? 'auto' : 'hidden'
+    }
+    resize()
+    const frame = requestAnimationFrame(resize)
+    let width = el.getBoundingClientRect().width
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return
+      width = entry.contentRect.width
+      resize()
+    })
+    observer.observe(el)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [props.value, textSize])
   return (
     <div className="flex flex-col gap-1">
-      <Textarea ref={textarea} className="max-h-48 [field-sizing:content]" rows={3} placeholder="What should the agent do?" onChange={(event) => onTask(event.target.value)} {...props} />
+      <Textarea className="max-h-48 [field-sizing:content]" rows={3} placeholder="What should the agent do?" onChange={(event) => onTask(event.target.value)} {...props} ref={textarea} />
       <DictationNotice textarea={textarea} />
       <div className="flex justify-end empty:hidden">
         <DictationButton textarea={textarea} onInsert={onTask} />

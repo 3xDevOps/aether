@@ -2658,6 +2658,10 @@ installed in your environment." with a **Set up an agent** button in place of
 **Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
+The Task textarea grows as text is typed or pasted, up to 12rem; longer tasks
+scroll inside the field. A shared prompt grows without that cap so the whole
+prompt is visible.
+
 Below 768px the same form is a bottom sheet (`phone-launch.tsx`): **Task**
 first, focused, with one-word help; then the **Repository** chip, the base
 branch as muted text ("from main"; sessions always start from it) and the

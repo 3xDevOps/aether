@@ -1,0 +1,82 @@
+import { expect, test } from './fixtures'
+import { dockerReachable } from './harness/server'
+import { memberID, seedWorkspace } from './harness/setup'
+
+test.use({ colorScheme: 'dark', video: 'on' })
+test.skip(!dockerReachable(), 'the launch dialog needs a reachable Docker daemon')
+
+test('pasted tasks grow to the limit and scroll past it', async ({ page, aether }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const alice = await aether.member('alice')
+  await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('project'))
+  aether.installClaudeACPMock(await memberID(alice))
+  await page.goto(alice.url)
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(alice.url).origin })
+  const nav = page.getByRole('navigation', { name: 'Aether' })
+  await nav.getByRole('button', { name: 'New session' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New session' })
+  const task = dialog.getByLabel('Task')
+  const paste = async (text: string) => {
+    await page.evaluate((value) => navigator.clipboard.writeText(value), text)
+    await task.click()
+    await page.keyboard.press('Control+V')
+  }
+  await task.fill('Existing words')
+  const initial = await task.evaluate((el) => el.clientHeight)
+  await paste('\nfirst line\nsecond line\nthird line\nfourth line\nfifth line')
+  await expect(task).toHaveValue('Existing words\nfirst line\nsecond line\nthird line\nfourth line\nfifth line')
+  const grownSizing = await task.evaluate((el) => ({ height: el.clientHeight, styleHeight: Number.parseFloat(el.style.height), scrollHeight: el.scrollHeight, overflowY: getComputedStyle(el).overflowY }))
+  const grown = grownSizing.height
+  expect(grown).toBeGreaterThan(initial)
+  expect(grownSizing.styleHeight).toBeGreaterThan(grown)
+  expect(grownSizing.scrollHeight).toBe(grown)
+  expect(grownSizing.overflowY).toBe('hidden')
+  await page.screenshot({ path: testInfo.outputPath('task-field-grown.png') })
+
+  await task.evaluate((el) => { el.style.width = '100px' })
+  await expect.poll(() => task.evaluate((el) => el.clientHeight)).toBeGreaterThan(grown)
+  await task.evaluate((el) => { el.style.width = '' })
+
+  await task.fill('')
+  const longPrompt = Array.from({ length: 32 }, (_, index) => `Pasted line ${index + 1}: review the change`).join('\n')
+  await paste(longPrompt)
+  await expect(task).toHaveValue(longPrompt)
+  const sizing = await task.evaluate((el) => ({ height: el.clientHeight, scrollHeight: el.scrollHeight, overflowY: getComputedStyle(el).overflowY }))
+  expect(sizing.height).toBeLessThanOrEqual(192)
+  expect(sizing.height).toBeGreaterThanOrEqual(188)
+  expect(sizing.scrollHeight).toBeGreaterThan(sizing.height)
+  expect(sizing.overflowY).toBe('auto')
+  await task.evaluate((el) => { el.scrollTop = 0 })
+  await page.screenshot({ path: testInfo.outputPath('task-field-capped.png') })
+
+  await task.click()
+  await task.fill('short task')
+  const shortHeight = await task.evaluate((el) => el.clientHeight)
+  expect(shortHeight).toBeLessThan(sizing.height)
+  await task.fill('tiny')
+  expect(await task.evaluate((el) => el.clientHeight)).toBeLessThan(sizing.height)
+  await task.fill(longPrompt)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const phoneTask = page.getByRole('dialog', { name: 'New session' }).getByLabel('Task')
+  await expect(phoneTask).toHaveValue(longPrompt)
+  await phoneTask.scrollIntoViewIfNeeded()
+  await phoneTask.evaluate((el) => { el.scrollTop = 0 })
+  await page.screenshot({ path: testInfo.outputPath('task-field-phone.png') })
+
+  const sharedURL = new URL(alice.url)
+  sharedURL.searchParams.set('new', '1')
+  sharedURL.searchParams.set('prompt', longPrompt)
+  await page.goto(sharedURL.toString())
+  const sharedTask = page.getByRole('dialog', { name: 'New session' }).getByLabel('Task')
+  await expect(sharedTask).toHaveValue(longPrompt)
+  const sharedSizing = await sharedTask.evaluate((el) => ({ height: el.clientHeight, scrollHeight: el.scrollHeight, maxHeight: getComputedStyle(el).maxHeight }))
+  expect(sharedSizing.maxHeight).toBe('none')
+  expect(sharedSizing.height).toBeGreaterThan(192)
+  expect(sharedSizing.scrollHeight).toBe(sharedSizing.height)
+  await sharedTask.click()
+  await sharedTask.fill('short shared prompt')
+  await expect(sharedTask).toHaveValue('short shared prompt')
+  expect(await sharedTask.evaluate((el) => el.clientHeight)).toBeLessThan(sharedSizing.height)
+})
