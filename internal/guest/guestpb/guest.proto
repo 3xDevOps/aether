@@ -28,6 +28,10 @@ service Guest {
   // Freeze while frozen moves the deadline.
   rpc Freeze(FreezeRequest) returns (FreezeReply);
   rpc Thaw(ThawRequest) returns (ThawReply);
+  // FreezeSession freezes or thaws every process of the session, as
+  // Docker's pause does a container's, and returns once the kernel reports
+  // the state. The helper and its git service run outside the session.
+  rpc FreezeSession(FreezeSessionRequest) returns (FreezeSessionReply);
   // Sync writes every filesystem's dirty data to its disk.
   rpc Sync(SyncRequest) returns (SyncReply);
 }
@@ -200,6 +204,12 @@ message ThawReply {
   // earlier Thaw of it: false after its deadline thawed it.
   bool frozen = 1;
 }
+
+message FreezeSessionRequest {
+  bool frozen = 1;
+}
+
+message FreezeSessionReply {}
 
 message SyncRequest {}
 

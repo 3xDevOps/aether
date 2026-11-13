@@ -336,8 +336,13 @@ the commit has no bound on the checkout's size; its new objects, like a
 moved HEAD's, may take up to 4 GiB, and the server keeps 128 MiB of disk
 free. The server records the committed tree; while the VM does not run,
 evidence retains that tree, and without one capture fails and cleanup keeps
-the checkout's disk, since only the VM can read it. On Close, a checkout in
-a VM is committed before the VM pauses, as a paused VM runs no git. A subsession's branch reaches a parent in a
+the checkout's disk, since only the VM can read it. Pausing a VM whose
+checkouts live on its own disks freezes the session cgroup with the
+helper's `FreezeSession`, as Docker's pause freezes a container's, and
+leaves the VM running: the git service is outside the session, so Close
+pauses the session first and then commits it, as for a container, and the
+Files view of a paused session reads the live checkout. Exec into a paused
+session is refused. A subsession's branch reaches a parent in a
 VM the same way: the server packs what the parent lacks and `Install` sets
 `refs/remotes/children/<id>`.
 

@@ -343,7 +343,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 			return err
 		}
 	}
-	rec.Booted, rec.Exited = true, false
+	rec.Booted, rec.Exited, rec.Frozen = true, false, false
 	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 	rec.Boots++
 	if err = e.store(rec); err != nil {

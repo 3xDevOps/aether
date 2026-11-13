@@ -371,6 +371,18 @@ func (c *Client) Thaw(ctx context.Context, id string) (bool, error) {
 	return reply.GetFrozen(), nil
 }
 
+// FreezeSession freezes or thaws every process of the session; either is
+// idempotent.
+func (c *Client) FreezeSession(ctx context.Context, frozen bool) error {
+	_, err := retry(ctx, func() (*guestpb.FreezeSessionReply, error) {
+		return c.api.FreezeSession(ctx, &guestpb.FreezeSessionRequest{Frozen: frozen})
+	})
+	if err != nil {
+		return fmt.Errorf("guest: freeze the session: %w", err)
+	}
+	return nil
+}
+
 // Process is a handle on one process in the VM.
 type Process struct {
 	c  *Client

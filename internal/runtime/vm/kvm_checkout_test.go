@@ -5,7 +5,6 @@ package vm
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -241,21 +240,40 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 		t.Fatalf("the VM's children ref is %s, want %s", got, childHead)
 	}
 
-	// A paused VM runs no git: calls into it fail at once and reads come
-	// from the recorded snapshot.
+	// Pause freezes the session, not the VM: a writer in it stops, exec is
+	// refused, and git still serves the checkout, so a close can commit a
+	// paused session as it commits a paused container.
+	h.sh(t, key, "(while [ ! -e stop ]; do date +%s%N > tick; sleep 0.05; done) >/dev/null 2>&1 &")
+	tick := func() string {
+		t.Helper()
+		got, readErr := h.git.FilesRead(ctx, ws, run, "", "tick", 0)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return string(got.Content)
+	}
 	if err = h.e.pause(ctx, key); err != nil {
 		t.Fatal(err)
 	}
-	paused := time.Now()
-	if _, err = h.git.CommitAll(ctx, run, "wip: paused", domain.GitIdentity{}, nil); !errors.Is(err, guest.ErrVMNotRunning) || time.Since(paused) > 5*time.Second {
-		t.Fatalf("commit into a paused VM = %v after %s", err, time.Since(paused))
+	frozen := tick()
+	time.Sleep(300 * time.Millisecond)
+	if now := tick(); now != frozen {
+		t.Fatalf("a paused session still writes: %q then %q", frozen, now)
 	}
-	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{}); err != nil || !patch.Recorded {
-		t.Fatalf("patch of a paused VM = %+v, %v", patch, err)
+	if _, _, _, err = h.e.exec(ctx, key, []string{"true"}, "/"); err == nil {
+		t.Fatal("exec into a paused session was not refused")
+	}
+	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{}); err != nil || patch.Recorded || !strings.Contains(patch.Text, "+++ b/tick") {
+		t.Fatalf("patch of a paused session = %+v, %v", patch, err)
 	}
 	if err = h.e.resume(ctx, key); err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(300 * time.Millisecond)
+	if now := tick(); now == frozen {
+		t.Fatal("a resumed session does not write")
+	}
+	h.sh(t, key, "touch stop && sleep 0.3 && rm -f stop tick")
 
 	// Finalize's order: the main process exits, then the last snapshot, the
 	// commit, publication and evidence, then the VM goes.

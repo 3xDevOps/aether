@@ -142,3 +142,13 @@ func (s *service) Thaw(_ context.Context, req *guestpb.ThawRequest) (*guestpb.Th
 	}
 	return &guestpb.ThawReply{Frozen: frozen}, nil
 }
+
+func (s *service) FreezeSession(ctx context.Context, req *guestpb.FreezeSessionRequest) (*guestpb.FreezeSessionReply, error) {
+	if s.cgroup == nil {
+		return nil, status.Error(codes.FailedPrecondition, "the session has no cgroup")
+	}
+	if err := s.cgroup.freeze(ctx, req.GetFrozen()); err != nil {
+		return nil, status.Errorf(codes.Internal, "freeze the session: %v", err)
+	}
+	return &guestpb.FreezeSessionReply{}, nil
+}

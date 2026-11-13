@@ -3,12 +3,15 @@ package helper
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
 )
@@ -70,6 +73,32 @@ func (c *sessionCgroup) setLimit(limit int64) error {
 	}
 	c.limit.Store(max(limit, 0))
 	return nil
+}
+
+// freeze sets the session's cgroup.freeze and waits until cgroup.events
+// reports it: the kernel freezes and thaws processes asynchronously.
+func (c *sessionCgroup) freeze(ctx context.Context, frozen bool) error {
+	value := "0"
+	if frozen {
+		value = "1"
+	}
+	if err := os.WriteFile(filepath.Join(c.dir, "cgroup.freeze"), []byte(value), 0); err != nil {
+		return err
+	}
+	for {
+		events, err := os.ReadFile(filepath.Join(c.dir, "cgroup.events"))
+		if err != nil {
+			return err
+		}
+		if slices.Contains(strings.Split(string(events), "\n"), "frozen "+value) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // readStats counts the whole VM, which is the session: memory in use is

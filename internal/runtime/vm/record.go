@@ -94,6 +94,9 @@ type record struct {
 	// Saved means the snapshot directory holds the VM's state; the VM reads
 	// as exited until Restore.
 	Saved bool `json:"saved,omitempty"`
+	// Frozen means Pause froze the session's processes, which stay frozen
+	// through a save and restore until Resume or the next boot.
+	Frozen bool `json:"frozen,omitempty"`
 	// CacheRan means the VM ran on its cache disk since the disk last
 	// became its pool's newest cache. CacheSynced means the disk holds every
 	// write the guest made: the VM powered off cleanly, or was saved after

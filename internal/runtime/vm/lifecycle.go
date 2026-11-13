@@ -95,6 +95,11 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 			return fmt.Errorf("vm runtime: resume before stop: %w", err)
 		}
 	}
+	if rec.Frozen {
+		if err = e.thawSession(ctx, rec); err != nil {
+			return fmt.Errorf("vm runtime: thaw before stop: %w", err)
+		}
+	}
 	if grace < 0 {
 		grace = defaultStopGrace
 	}
@@ -423,26 +428,71 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	return nil
 }
 
-// pause stops the vCPUs; the guest keeps its memory, as a frozen container
-// does.
+// pause freezes the session's processes, as Docker's pause freezes a
+// container's, when the VM's checkouts live on its own disks: the git
+// service outside the session keeps serving them, so a close can commit a
+// paused session. Any other VM's vCPUs stop. The guest keeps its memory
+// either way.
 func (e *engine) pause(ctx context.Context, key string) error {
-	if _, err := e.requireRunning(ctx, key, "pause"); err != nil {
+	unlock := e.lock(key)
+	defer unlock()
+	rec, err := e.requireRunning(ctx, key, "pause")
+	if err != nil {
 		return err
 	}
-	if err := newCHAPI(e.path(key, apiSocket)).pause(ctx); err != nil {
+	if len(rec.CheckoutDisks) == 0 {
+		err = newCHAPI(e.path(key, apiSocket)).pause(ctx)
+	} else {
+		err = e.freezeSession(ctx, rec)
+	}
+	if err != nil {
 		return fmt.Errorf("vm runtime: pause VM %s: %w", key, err)
 	}
 	return nil
 }
 
 func (e *engine) resume(ctx context.Context, key string) error {
-	if _, err := e.requireRunning(ctx, key, "resume"); err != nil {
+	unlock := e.lock(key)
+	defer unlock()
+	rec, err := e.requireRunning(ctx, key, "resume")
+	if err != nil {
 		return err
 	}
-	if err := newCHAPI(e.path(key, apiSocket)).resume(ctx); err != nil {
+	if rec.Frozen {
+		err = e.thawSession(ctx, rec)
+	} else {
+		err = newCHAPI(e.path(key, apiSocket)).resume(ctx)
+	}
+	if err != nil {
 		return fmt.Errorf("vm runtime: resume VM %s: %w", key, err)
 	}
 	return nil
+}
+
+// freezeSession records the freeze first, so a failed one still reads as
+// paused and the next Resume thaws whatever froze.
+func (e *engine) freezeSession(ctx context.Context, rec *record) error {
+	rec.Frozen = true
+	if err := e.store(rec); err != nil {
+		return err
+	}
+	h, err := e.helper(rec.Key)
+	if err != nil {
+		return err
+	}
+	return h.FreezeSession(ctx, true)
+}
+
+func (e *engine) thawSession(ctx context.Context, rec *record) error {
+	h, err := e.helper(rec.Key)
+	if err != nil {
+		return err
+	}
+	if err = h.FreezeSession(ctx, false); err != nil {
+		return err
+	}
+	rec.Frozen = false
+	return e.store(rec)
 }
 
 // inspect answers from the record and the unit, never from the guest.

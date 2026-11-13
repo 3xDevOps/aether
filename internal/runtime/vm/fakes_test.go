@@ -401,10 +401,11 @@ type fakeHelper struct {
 	// finals are dev-exec's own exit records, which outlive the helper's.
 	finals map[string]int
 	// freezes records Freeze and Thaw calls in order.
-	freezes   []string
-	freezeErr error
-	thawed    bool
-	bootError string
+	freezes       []string
+	freezeErr     error
+	thawed        bool
+	sessionFrozen bool
+	bootError     string
 }
 
 func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
@@ -552,6 +553,13 @@ func (g *fakeHelper) Thaw(context.Context, string) (bool, error) {
 	g.freezes = append(g.freezes, "thaw")
 	frozen := !g.thawed && len(g.freezes) > 1 && strings.HasPrefix(g.freezes[len(g.freezes)-2], "freeze")
 	return frozen, nil
+}
+
+func (g *fakeHelper) FreezeSession(_ context.Context, frozen bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.sessionFrozen = frozen
+	return nil
 }
 
 func (g *fakeHelper) frozen() []string {
