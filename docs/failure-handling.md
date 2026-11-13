@@ -674,7 +674,11 @@ a pending one fires that much later after the next wake. Aether's own wakes
 still wake a sleeping session: mail, `aether-internal report --until`
 conditions and watches reach it as any message does.
 
-A wake takes STUB_WAKE. The Chat view and the session's terminal say
+A wake takes a second or two on local NVMe: on a test host, a message to a
+sleeping Claude Code or Codex session running a dev server and a
+`docker compose` stack was accepted 0.7 to 1.5 seconds after it was sent,
+**Relaunch** of a closed one took 3 seconds, and a start from disk after a
+failed restore 5 seconds. The Chat view and the session's terminal say
 `Aether had saved this idle session to disk and restored it`.
 
 When the saved state cannot be restored, because the server now runs
@@ -686,8 +690,9 @@ a Standard one among them, stays asleep: the wake fails with the restore's
 error, and the VM keeps its disk and saved state. Launch a new session on
 its branch, or wake it again.
 
-A saved VM takes about as much disk as the memory the guest used, a few
-hundred MiB for an idle agent. When disk runs low, Aether deletes the saved
+A saved VM takes about as much disk as the memory its processes use, after
+the guest drops its page cache: 0.6 to 1.3 GB for those test sessions in
+2 GiB VMs. When disk runs low, Aether deletes the saved
 memory of the longest-sleeping sessions first
 ([Recover from disk pressure](#recover-from-disk-pressure)). A server
 restart or update leaves sleeping VMs asleep; the next use wakes them.
