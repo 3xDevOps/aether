@@ -60,6 +60,8 @@ func TestAgentWakeupsAreReadBackFromTheLog(t *testing.T) {
 		{Kind: KindToolCall, Time: at.Add(-2 * time.Hour), ToolCall: wakeupCall("old", "ScheduleWakeup", map[string]any{"delaySeconds": 60})},
 		{Kind: KindReset, Time: at.Add(-time.Hour)},
 		{Kind: KindToolCall, Time: at, ToolCall: cronCall("cron", map[string]any{"cron": "*/5 * * * *"}, "Scheduled job job-3")},
+		{Kind: KindToolCall, Time: at, ToolCall: cronCall("gone", map[string]any{"cron": "0 * * * *"}, "Scheduled job job-4")},
+		{Kind: KindToolCall, Time: at.Add(time.Minute), ToolCall: wakeupCall("delete", "CronDelete", map[string]any{"id": "job-4"})},
 	} {
 		if err = log.Append(&it); err != nil {
 			t.Fatal(err)

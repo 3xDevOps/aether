@@ -69,21 +69,33 @@ func (w *agentWakeups) pending(now time.Time) bool {
 	return w.at.After(now) || len(w.crons) > 0
 }
 
-// scanAgentWakeups reads the wakeups the log records since its last reset.
+// scanAgentWakeups reads the wakeups the log records since its last reset,
+// replaying its tool calls oldest first, as a delete must follow its job.
 func scanAgentWakeups(log *Log) (agentWakeups, error) {
 	w := newAgentWakeups()
+	var calls []Item
+	replay := func() {
+		for i := len(calls) - 1; i >= 0; i-- {
+			w.note(calls[i].ToolCall, calls[i].Time)
+		}
+	}
 	for before := int64(math.MaxInt64); ; {
 		items, err := log.ReadBefore(before, 512)
-		if err != nil || len(items) == 0 {
+		if err != nil {
 			return w, err
+		}
+		if len(items) == 0 {
+			replay()
+			return w, nil
 		}
 		for i := len(items) - 1; i >= 0; i-- {
 			it := items[i]
 			if it.Kind == KindReset {
+				replay()
 				return w, nil
 			}
 			if it.Kind == KindToolCall {
-				w.note(it.ToolCall, it.Time)
+				calls = append(calls, it)
 			}
 		}
 		before = items[0].Seq
