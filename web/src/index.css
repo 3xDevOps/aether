@@ -134,20 +134,34 @@
   z-index: -1;
   pointer-events: none;
   color: color-mix(in srgb, var(--text) 24%, transparent);
+  --dot-color: color-mix(in srgb, var(--text) 24%, transparent);
+  --dot-intensity: 1;
+  --dot-breathing: 0;
+  --dot-drift: 0;
 }
 
-@property --dot-fade {
-  syntax: '<number>';
-  inherits: true;
-  initial-value: 0;
+.control-matrix-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  color: var(--dot-color, currentColor);
 }
 
-[data-dot-fade] {
-  transition: --dot-fade var(--dot-return) ease-out;
+.control-matrix-grid-accent {
+  z-index: 2;
+  color: var(--dot-accent-color, inherit);
 }
 
-[data-dot-fade] > .control-matrix {
-  mask-image: radial-gradient(circle var(--dot-radius) at var(--dot-px, 0) var(--dot-py, 0), rgb(0 0 0 / calc(1 - var(--dot-fade) * (1 - var(--dot-min)))) var(--dot-inner), #000);
+.control-matrix[data-dot-grid-active] {
+  background: none;
+}
+
+.control-matrix[data-dot-grid-active] > .control-matrix-light > .control-matrix-reach {
+  background: none;
 }
 
 .control-matrix ~ .text-muted,

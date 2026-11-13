@@ -3106,11 +3106,20 @@ and below 30rem **Multiplayer** keeps only its icon. The controller summary
 truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
-With a mouse on a layout wider than the 767px phone breakpoint and motion allowed, the strip's
-dots fade to nothing under the pointer and return to full 54px away:
-`useDotFade` (`routes/run/dot-fade.ts`) writes the pointer position into a
-`mask-image` on `.control-matrix` from one `pointermove` listener, batched per
-frame, and eases the mask out over 1200ms on `pointerleave`.
+With a mouse or touch pointer on the multiplayer strip, `useDotFade`
+(`routes/run/dot-fade.ts`) renders an interactive copy of the dot texture.
+Each dot springs away from the pointer; pointer speed adds a two-branch V wake
+with a 1.02 overshoot, and a click or tap displaces and swells a ring. The
+clear bars behind text feather motion to 25% of the response. `--dot-color`,
+`--dot-accent-color`, `--dot-ring-color`, `--dot-intensity` (0–1),
+`--dot-breathing` and `--dot-drift`
+are CSS custom properties; breathing and drift default to off. A focused strip
+accepts Enter or Space for a ring and arrow keys to move the point; its
+accessible instructions describe these keys. An
+`IntersectionObserver` and page visibility listener pause the loop offscreen or
+in the background, and the loop sleeps when the dots settle. Reduced motion
+keeps the composed layout still with a frozen ring; the static CSS texture is
+the rest state.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates
@@ -3121,13 +3130,15 @@ generation. Takeover denials belong to the requester, not the holder.
 `MultiplayerControls` renders `ControlMatrix` as the strip's background,
 and `TerminalPane` renders it behind the agent terminal's toolbar. The
 component is a neutral dot layer, one `radial-gradient` tile, under a
-colored copy of the same dots. The bars give each group of text and
-buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
-shadow of the same colour that hides the dots under the group and fades
-them back in around it. A rule on the matrix's siblings turns
-`text-muted` on the bar to `--text`. The copy is clipped from the left by
-`--control-reach`, a registered `@property` number (1 empty, 0 full), so it
-is revealed from the right edge, where the control button sits. The
+colored copy of the same dots. Interactive SVG copies sit above those static
+layers, remain pointer-transparent, and use the same control-edge clipping
+for the colored copy.
+The bars give each group of text and buttons `.control-matrix-clear`, a 90%
+`--chrome` fill with a blurred shadow of the same colour that hides the dots
+under the group and fades them back in around it. A rule on the matrix's
+siblings turns `text-muted` on the bar to `--text`. The copy is clipped from the
+left by `--control-reach`, a registered `@property` number (1 empty, 0 full),
+so it is revealed from the right edge, where the control button sits. The
 acquisition, release and takeover animations drive `--control-reach` and
 `color` on the colored layer. Its opacity is a separate animation: 70%
 while the dots move or a hold is under way, then half once acquisition
