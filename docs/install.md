@@ -54,12 +54,71 @@ flowchart LR
 - Optional: Sysbox, so agents can run Docker inside their sessions. Setup offers
   it on Ubuntu and Debian
   ([environments.md](environments.md#docker-inside-sessions)).
+- Optional: sessions in virtual machines instead of containers need an x86-64
+  host with `/dev/kvm` ([Hosts for VM sessions](#hosts-for-vm-sessions)).
 - Optional: Tailscale. Without it the server needs only outbound HTTPS to the
   edge ([networking.md](networking.md)).
 - Optional: dictation, which transcribes speech on the server in a Docker
   container, needs 690 MB of disk plus a 100 MB image, and 2 GiB of available
   memory while it runs; install it with `sudo aether-server dictation install`
   ([dictation.md](dictation.md)).
+
+## Hosts for VM sessions
+
+With `session-runtime vm`, each session runs in its own Cloud Hypervisor
+virtual machine ([environments.md](environments.md#sessions-in-virtual-machines)).
+The host must be x86-64 and expose `/dev/kvm`: bare metal, or a cloud VM with
+nested virtualization. Install a server for it with:
+
+```sh
+sudo aether-server install --session-runtime vm   # a new server
+sudo aether-server vm install                     # a server already installed
+```
+
+Both first open `/dev/kvm` and stop with the error when they cannot, such as
+`session VMs need KVM: open /dev/kvm: no such file or directory`; `install`
+then writes nothing. They install `qemu-img`, `mkfs.ext4`,
+`/usr/libexec/virtiofsd` and `iptables` with `apt-get` when missing (Debian 12
+or Ubuntu 24.04 and newer ship `virtiofsd` at that path), Cloud Hypervisor
+v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, and the
+release's guest kernel `aether-vmlinux-x86_64` at
+`/usr/local/lib/aether/vmlinux` after checking it against the signed release
+manifest. A `vm-kernel` set to another path, or a development build, keeps the
+kernel already there. Install leaves Sysbox out: a session VM runs its own
+Docker daemon.
+
+On AWS:
+
+- Use an Intel instance from the M7i, C7i, R7i, M8i, C8i or R8i families,
+  which support nested virtualization, or any `.metal` instance
+  ([EC2 nested virtualization](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html)).
+  The M8id, C8id and R8id variants add local NVMe, where a sleeping session's
+  saved memory wakes fastest.
+- Turn nested virtualization on at launch with
+  `--cpu-options NestedVirtualization=enabled`, or on a stopped instance with
+  `aws ec2 modify-instance-cpu-options --nested-virtualization enabled`.
+- Keep the instance metadata hop limit at 1
+  (`--metadata-options HttpTokens=required,HttpPutResponseHopLimit=1`), so the
+  instance's credentials never answer a VM, whose traffic takes one more hop.
+- Format the local NVMe as XFS and mount the data directory on it before
+  installing (`lsblk` names the device, `Amazon EC2 NVMe Instance Storage`):
+
+  ```sh
+  sudo mkfs.xfs /dev/nvme1n1
+  sudo mkdir -p /var/lib/aether
+  sudo mount /dev/nvme1n1 /var/lib/aether
+  ```
+
+  XFS clones caches and saved environments without copying them. VM disks,
+  checkouts and the image store must share one filesystem, because they
+  hard-link each other. Instance storage is lost when the instance stops or
+  fails, so keep the [backups](#what-lives-in-the-data-directory) current, or
+  keep the data directory on EBS and accept slower wakes.
+
+[Nitro Sandboxes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)
+do not fit: they cannot snapshot, pause or resume, which saving an idle
+session needs, and a sandbox's memory is fixed for its lifetime, so every
+session would hold the memory of its busiest moment.
 
 ## The install script
 
@@ -622,6 +681,14 @@ aether-server  v0.8.7-beta.12 -> v0.8.7-beta.13  restarted in 1m12s (pid 1234 ->
 aether         /usr/local/bin/aether  v0.8.7-beta.13
 ```
 
+With `session-runtime vm`, `sudo aether-server update` has the new binary run
+`aether-server vm install` before the restart, and prints its steps, so new VMs
+boot the release's Cloud Hypervisor and guest kernel. Running VMs keep theirs,
+and their helper disk, until they stop. A server started by its systemd unit
+also puts its release's Cloud Hypervisor and kernel in place, which covers an
+update from a client or the dashboard and a rollback; `AETHER_NO_UPDATE_CHECK=1`
+turns that off.
+
 `aether server update --when idle` waits until no session is working, no terminal
 is attached and no SSH connection into a session is open; `--cancel` clears that
 pending update. `--allow-downgrade` allows an older release, `--yes` skips the
@@ -766,11 +833,17 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 | `mirrors/`, `profiles/` | Source mirror settings and deploy keys, and agent profile snapshots. |
 | `server-update/` | Update state, and the database copy taken before an update that changes its schema. |
 | `home-caches/`, `scratch/` | Package caches and each container's `/tmp`. Rebuildable; no backup needed. |
+| `vm/` | With `session-runtime vm`: each VM's disks, logs and saved memory in `<key>/`, and in `images/` the disks VMs boot from, package caches, and the environments members saved (`images/tags.json` and `images/bases/local-*/`). |
 | `dictation/` | The speech-to-text engine and model `aether-server dictation install` downloaded. Reinstallable; no backup needed. |
 
 The other directories hold internal server state. To recover a server, back
 up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,
-`signing-keys/`, `profiles/`, `mirrors/` and `workspace-secrets/`.
+`signing-keys/`, `profiles/`, `mirrors/` and `workspace-secrets/`. With
+`session-runtime vm`, also back up `vm/images/tags.json` and
+`vm/images/bases/local-*/`, the environments members saved; they are sparse
+disks, so copy them with `tar --sparse` or `cp --sparse=always`. Like
+containers, each VM's own disks and saved memory are left out: a recovered
+server keeps those sessions' branches and history, and cannot reopen them.
 
 > [!WARNING]
 > These backups hold every member's agent logins, GitHub tokens and signing
@@ -797,8 +870,9 @@ sudo aether-server edge leave
 sudo systemctl disable --now aether-server
 sudo rm -f /etc/systemd/system/aether-server.service /etc/systemd/system/aether.slice
 sudo systemctl daemon-reload
-# 2. Containers. Stopping the server does NOT remove them.
+# 2. Containers and VMs. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
+sudo systemctl stop 'aether-vm-*'   # with session-runtime vm
 # Volumes for shared agent accounts. Removing one does not delete a home.
 sudo docker volume rm $(sudo docker volume ls -q --filter label=aether.managed=true)
 # Remove the standard image and saved member images according to your Docker
@@ -806,6 +880,7 @@ sudo docker volume rm $(sudo docker volume ls -q --filter label=aether.managed=t
 # 3. State, config, binary.
 sudo rm -rf /var/lib/aether /etc/aether
 sudo rm -f /usr/local/bin/aether-server
+sudo rm -rf /usr/local/bin/cloud-hypervisor /usr/local/lib/aether   # with session-runtime vm
 sudo rm -rf /tmp/aether-patch-*
 ```
 

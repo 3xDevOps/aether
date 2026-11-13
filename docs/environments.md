@@ -327,13 +327,17 @@ lists what is still to come.
 
 ```sh
 sudo aether-server config set session-runtime vm
+sudo aether-server vm install
 sudo systemctl restart aether-server
 ```
 
-The host needs `/dev/kvm`, `cloud-hypervisor`, `/usr/libexec/virtiofsd`,
-`qemu-img`, `mkfs.ext4`, `nft`, `iptables`, `ip` and systemd, besides Docker, and the
-release's guest kernel `aether-vmlinux-x86_64` at `/usr/local/lib/aether/vmlinux`
-(`--vm-kernel`, config key `vm-kernel`, names another path).
+The host needs `/dev/kvm` and systemd, besides Docker; `aether-server vm
+install` checks for KVM and installs the rest: Cloud Hypervisor, the tools
+VM disks and the VM firewall need, and the release's guest kernel at
+`/usr/local/lib/aether/vmlinux` (`--vm-kernel`, config key `vm-kernel`, names
+another path).
+[Hosts for VM sessions](install.md#hosts-for-vm-sessions) lists what it
+installs and which cloud instances work.
 
 What changes:
 
@@ -387,6 +391,9 @@ What changes:
   is unfiltered. A change of default route applies when the next VM boots.
 - Not yet supported, refused at launch with an error naming the work item:
   the development browser beside a session.
+- Switching to `vm` moves no running session: a session already in a
+  container keeps it, through the restart and its sleeps and relaunches, and
+  gets a VM only when it needs a new container.
 - Close or kill every session that runs in a VM before you set
   `session-runtime` back to `docker`: a Docker server does not manage VMs,
   so their units would keep running unattended.

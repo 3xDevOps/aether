@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -99,5 +100,24 @@ func TestInstallRefusesToDropANamedOption(t *testing.T) {
 	}
 	if err := refuseKeptChanges(filepath.Join(t.TempDir(), "none.conf"), same); err != nil {
 		t.Errorf("first install: %v", err)
+	}
+}
+
+// Sessions in VMs need KVM: without it install stops with the error and
+// leaves the unit and config unwritten.
+func TestInstallForVMsWithoutKVMWritesNothing(t *testing.T) {
+	kvmDevice = filepath.Join(t.TempDir(), "kvm")
+	t.Cleanup(func() { kvmDevice = "/dev/kvm" })
+	dir := t.TempDir()
+	unitPath, configPath := filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf")
+	var out bytes.Buffer
+	err := writeInstall(&out, unitPath, configPath, map[string]string{"data-dir": filepath.Join(dir, "data"), "session-runtime": "vm"}, false, true)
+	if err == nil || runtime.GOARCH == "amd64" && !strings.Contains(err.Error(), kvmDevice+": no such file or directory") {
+		t.Fatalf("install without KVM = %v\n%s", err, out.String())
+	}
+	for _, path := range []string{unitPath, configPath} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("install without KVM wrote %s: %v", path, err)
+		}
 	}
 }

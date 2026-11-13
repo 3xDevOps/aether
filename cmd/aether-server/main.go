@@ -111,6 +111,8 @@ func main() {
 		exitOn(slackCmd(args))
 	case "dictation":
 		exitOn(dictationCmd(args))
+	case "vm":
+		exitOn(vmCmd(args))
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", cmd)
 		usage(os.Stderr)
@@ -181,6 +183,15 @@ from stdin, or remove them; restart the server to apply either (docs/slack.md)
 example:
   sudo aether-server slack setup
 `,
+	"vm": `usage: aether-server vm install [--config <file>]
+
+check for /dev/kvm, then install what sessions in VMs need: qemu-img,
+mkfs.ext4, virtiofsd and iptables with apt-get when missing, Cloud Hypervisor,
+and this release's guest kernel at vm-kernel (docs/install.md#hosts-for-vm-sessions)
+
+example:
+  sudo aether-server vm install
+`,
 	"sysbox": `usage: aether-server sysbox status
        aether-server sysbox install
 
@@ -220,6 +231,7 @@ commands:
   member   role <member-id> <role>: set a member's role
   slack    setup | remove: store or remove the Slack bot's tokens (docs/slack.md)
   dictation install [--gpu] | status | remove: speech-to-text for the dashboard (docs/dictation.md)
+  vm       install: what sessions in VMs need (session-runtime vm)
   version  print the version (also --version)
 
 serve and install options, which are also the config file keys:
@@ -430,6 +442,9 @@ func serve(args []string) error {
 	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
 		version.String(), *o.addr, *o.dataDir, from)
 	go warnIfUnitOutdated()
+	if *o.sessionRuntime == server.SessionRuntimeVM {
+		go keepVMFilesCurrent(*o.vmKernel)
+	}
 	err = srv.Run(ctx)
 	drainMu.Lock()
 	argv := drained

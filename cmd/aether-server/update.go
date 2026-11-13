@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -109,7 +111,7 @@ func updateCmd(args []string) error {
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
 
 	var staged *serverupdate.Staged
-	if err := step("checking and downloading the release", func() (err error) {
+	if err := step(os.Stdout, "checking and downloading the release", func() (err error) {
 		staged, err = serverupdate.Stage(ctx, serverupdate.Plan{
 			BaseURL:  baseURL,
 			Self:     self,
@@ -128,6 +130,11 @@ func updateCmd(args []string) error {
 	if out, err := exec.CommandContext(probeCtx, self, "version").CombinedOutput(); err != nil {
 		return errors.Join(fmt.Errorf("the new aether-server does not run: %w: %s", err, strings.TrimSpace(string(out))), staged.Undo())
 	}
+	if *o.sessionRuntime == server.SessionRuntimeVM {
+		if err := installVMFiles(ctx, self, *o.vmKernel); err != nil {
+			return errors.Join(err, staged.Undo())
+		}
+	}
 	before, began := unitPID(), time.Now()
 	if err := restartOnto(staged, database); err != nil {
 		return err
@@ -135,14 +142,27 @@ func updateCmd(args []string) error {
 	return awaitUpdate(stateDir, database, target, staged, before, began)
 }
 
-func step(what string, do func() error) error {
-	fmt.Printf("%s ... ", what)
+// installVMFiles has the new binary at self install the Cloud Hypervisor and
+// guest kernel it was released with, before the restart, so the VMs it
+// boots get them. A running VM keeps the files it started with.
+func installVMFiles(ctx context.Context, self, kernel string) error {
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, self, "vm", "install", "--vm-kernel", kernel)
+	cmd.Stdout, cmd.Stderr = os.Stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("the new aether-server could not prepare session VMs: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func step(w io.Writer, what string, do func() error) error {
+	_, _ = fmt.Fprintf(w, "%s ... ", what)
 	start := time.Now()
 	if err := do(); err != nil {
-		fmt.Println("failed")
+		_, _ = fmt.Fprintln(w, "failed")
 		return err
 	}
-	fmt.Printf("done in %s\n", time.Since(start).Round(10*time.Millisecond))
+	_, _ = fmt.Fprintf(w, "done in %s\n", time.Since(start).Round(10*time.Millisecond))
 	return nil
 }
 
@@ -171,7 +191,7 @@ func updateTarget(ctx context.Context, baseURL, tag string) (string, error) {
 // binary again instead. So does a start systemd refuses, which leaves no
 // process to count the trial and roll it back.
 func restartOnto(staged *serverupdate.Staged, database string) error {
-	if err := step("stopping aether-server; sessions keep running", func() error {
+	if err := step(os.Stdout, "stopping aether-server; sessions keep running", func() error {
 		if out, err := exec.Command("systemctl", "stop", updateUnit).CombinedOutput(); err != nil {
 			return fmt.Errorf("systemctl stop %s: %w: %s", updateUnit, err, out)
 		}
@@ -185,7 +205,7 @@ func restartOnto(staged *serverupdate.Staged, database string) error {
 		if info, err := os.Stat(database); err == nil {
 			size = uint64(info.Size())
 		}
-		if snapErr = step(fmt.Sprintf("copying the %s database to %s so a failed start can roll back", humanize.Bytes(size), snapshot), staged.Snapshot); snapErr != nil {
+		if snapErr = step(os.Stdout, fmt.Sprintf("copying the %s database to %s so a failed start can roll back", humanize.Bytes(size), snapshot), staged.Snapshot); snapErr != nil {
 			snapErr = errors.Join(snapErr, staged.Undo())
 		}
 	}
@@ -194,7 +214,7 @@ func restartOnto(staged *serverupdate.Staged, database string) error {
 		starting = "starting the previous aether-server " + version.Version + " again"
 	}
 	var out []byte
-	err := step(starting, func() (err error) {
+	err := step(os.Stdout, starting, func() (err error) {
 		out, err = exec.Command("systemctl", "start", updateUnit).CombinedOutput()
 		return err
 	})
