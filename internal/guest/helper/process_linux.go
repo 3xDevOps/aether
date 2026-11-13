@@ -99,9 +99,13 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 		id: spec.ID, done: make(chan struct{}),
 		stdout: newOutput(spec.Lossless), stderr: newOutput(spec.Lossless),
 	}
-	program, err := lookPath(spec.Argv[0], envValue(env, "PATH"))
+	dir := cmp.Or(spec.Dir, "/")
+	program, err := lookPath(spec.Argv[0], envValue(env, "PATH"), dir)
+	if info, statErr := os.Stat(dir); err == nil && (statErr != nil || !info.IsDir()) {
+		err = &execError{code: 126, err: fmt.Errorf("working directory %s: %w", dir, cmp.Or[error](statErr, syscall.ENOTDIR))}
+	}
 	if err == nil {
-		err = t.start(p, spec, program, env, cred)
+		err = t.start(p, spec, program, dir, env, cred)
 	}
 	if err != nil {
 		var failed *execError
@@ -127,7 +131,7 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 
 // start forks p. Its ends of the pipes or terminal are the only ones the
 // helper keeps; the child's are closed once it runs.
-func (t *processes) start(p *process, spec spawnSpec, program string, env []string, cred *syscall.Credential) error {
+func (t *processes) start(p *process, spec spawnSpec, program, dir string, env []string, cred *syscall.Credential) error {
 	attr := &syscall.SysProcAttr{Setsid: true, Credential: cred}
 	if t.cgroup != nil {
 		attr.UseCgroupFD, attr.CgroupFD = true, int(t.cgroup.Fd())
@@ -185,7 +189,6 @@ func (t *processes) start(p *process, spec spawnSpec, program string, env []stri
 	for i, f := range child {
 		fds[i] = f.Fd()
 	}
-	dir := cmp.Or(spec.Dir, "/")
 	pid, err := syscall.ForkExec(program, spec.Argv, &syscall.ProcAttr{Dir: dir, Env: env, Files: fds, Sys: attr})
 	if err != nil {
 		for _, f := range []*os.File{p.stdin, stdoutR, stderrR} {
@@ -290,13 +293,20 @@ func envValue(env []string, key string) string {
 	return ""
 }
 
-// lookPath finds name on the process's PATH, not the helper's.
-func lookPath(name, path string) (string, error) {
+// lookPath finds name on the process's PATH, not the helper's, and a
+// relative name in the process's working directory, dir.
+func lookPath(name, path, dir string) (string, error) {
 	if strings.Contains(name, "/") {
+		if !filepath.IsAbs(name) {
+			name = filepath.Join(dir, name)
+		}
 		return name, executable(name)
 	}
-	for _, dir := range filepath.SplitList(path) {
-		candidate := filepath.Join(cmp.Or(dir, "."), name)
+	for _, d := range filepath.SplitList(path) {
+		candidate := filepath.Join(cmp.Or(d, "."), name)
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(dir, candidate)
+		}
 		if err := executable(candidate); err == nil {
 			return candidate, nil
 		}
@@ -356,6 +366,12 @@ func (t *processes) retire(p *process) {
 	}
 	t.exited = append(t.exited, p.id)
 	for len(t.exited) > maxExited {
+		// Closing the output also ends a pump still waiting for a reader of
+		// lossless output, which no one can attach to any more.
+		if old := t.byID[t.exited[0]]; old != nil {
+			old.stdout.close()
+			old.stderr.close()
+		}
 		delete(t.byID, t.exited[0])
 		t.exited = t.exited[1:]
 	}

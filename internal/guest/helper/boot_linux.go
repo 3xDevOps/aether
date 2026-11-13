@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,12 @@ func (s *service) boot(req *guestpb.BootRequest) (*guestpb.BootReply, error) {
 	if s.cgroup != nil {
 		if err := s.cgroup.setLimit(req.GetPidsLimit()); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
+		}
+	}
+	// Docker creates a container's missing working directory.
+	if main.Dir != "" {
+		if err := os.MkdirAll(main.Dir, 0o755); err != nil {
+			return nil, status.Errorf(codes.FailedPrecondition, "working directory: %v", err)
 		}
 	}
 	if req.GetNestedDocker() {
@@ -69,6 +76,11 @@ func (s *service) setup(main guest.ProcessSpec, script string) (*guestpb.BootRep
 		}
 		return nil, rpcError(err)
 	}
+	// Docker gives setup no input, so a prompt reads end of file instead of
+	// holding Boot forever.
+	if err := p.closeInput(); err != nil {
+		return nil, rpcError(err)
+	}
 	<-p.done
 	p.stdout.waitClosed()
 	if p.code == 0 {
@@ -86,9 +98,11 @@ func (s *service) startDockerd(main guest.ProcessSpec) error {
 	if err != nil {
 		return err
 	}
-	env := withDefaults(main.Env, home, false)
+	// dockerd runs as root, so it is never looked up on the session's PATH,
+	// which starts in the member's writable home.
+	env := withDefaults(slices.DeleteFunc(slices.Clone(main.Env), func(e string) bool { return strings.HasPrefix(e, "PATH=") }), home, false)
 	for _, name := range []string{"dockerd", "docker"} {
-		if _, err = lookPath(name, envValue(env, "PATH")); err != nil {
+		if _, err = lookPath(name, defaultPath, "/"); err != nil {
 			return nil
 		}
 	}

@@ -205,7 +205,7 @@ func mountVolume(v guest.Volume, root string) error {
 // persistent data disk cannot point a mount anywhere else.
 func bind(root string, m guest.Mount) error {
 	if m.Volume == guest.VolumeData {
-		if err := createLike(filepath.Join(root, m.Source), m.Target); err != nil {
+		if err := createLike(root, m.Source, m.Target); err != nil {
 			return err
 		}
 	}
@@ -243,9 +243,15 @@ func bind(root string, m guest.Mount) error {
 }
 
 // createLike creates a missing data-disk directory with the mode and owner
-// its target has in the image, so /tmp keeps its sticky bit.
-func createLike(source, target string) error {
-	if _, err := os.Lstat(source); err == nil || !errors.Is(err, fs.ErrNotExist) {
+// its target has in the image, so /tmp keeps its sticky bit. It works
+// beneath the volume, which a symlink on the persistent disk cannot leave.
+func createLike(root, source, target string) error {
+	volume, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = volume.Close() }()
+	if _, err := volume.Lstat(source); err == nil || !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	mode, uid, gid := os.FileMode(0o755), 0, 0
@@ -253,10 +259,10 @@ func createLike(source, target string) error {
 		st := info.Sys().(*syscall.Stat_t)
 		mode, uid, gid = info.Mode()&(os.ModePerm|os.ModeSticky|os.ModeSetgid), int(st.Uid), int(st.Gid)
 	}
-	if err := os.MkdirAll(source, 0o755); err != nil {
+	if err := volume.MkdirAll(source, 0o755); err != nil {
 		return err
 	}
-	return errors.Join(os.Chown(source, uid, gid), os.Chmod(source, mode))
+	return errors.Join(volume.Chown(source, uid, gid), volume.Chmod(source, mode))
 }
 
 func ensureTarget(target string, dir bool) error {
