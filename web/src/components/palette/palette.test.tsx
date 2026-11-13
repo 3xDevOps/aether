@@ -666,6 +666,7 @@ describe('command palette', () => {
   })
 
   it('launches with the selected shared account and its agent roster', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] } })
     vi.mocked(api.accountList).mockResolvedValue({
       accounts: [alice, bob],
       shared_with: [],
