@@ -242,6 +242,15 @@ func (s *Server) writeRepoFile(ctx context.Context, member domain.MemberID, meth
 			return gitengine.FileRead{}, rpcError(err)
 		}
 	}
+	// A checkout in a VM is written by the VM, which a sleeping session
+	// has to run again for it.
+	if vm, ok := reader.(interface{ IsVMCheckout(domain.RunID) bool }); ok && p.RunID != "" && s.cfg.Runs != nil && vm.IsVMCheckout(checkout) {
+		release, holdErr := s.cfg.Runs.HoldRunAwake(ctx, domain.RunID(p.RunID))
+		if holdErr != nil {
+			return gitengine.FileRead{}, rpcError(holdErr)
+		}
+		defer release()
+	}
 	result, err := reader.FilesWrite(ctx, workspace, checkout, ref, p.Path, content, p.Revision, m.GitIdentity(), signingKey)
 	if err != nil {
 		return gitengine.FileRead{}, filesWriteError(method, p.RunID, err)

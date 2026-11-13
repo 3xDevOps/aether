@@ -99,7 +99,12 @@ func (e *Engine) listBare(ctx context.Context, repoPath, ref, dir string) ([]Tre
 	if strings.TrimSpace(ref) == "" {
 		return nil, errors.New("gitengine: repository ref is required")
 	}
-	args := []string{"ls-tree", "-z", "-l", "refs/heads/" + ref, "--"}
+	return e.listTreeAt(ctx, repoPath, "refs/heads/"+ref, dir)
+}
+
+// listTreeAt lists the children of dir in rev, a ref or a tree.
+func (e *Engine) listTreeAt(ctx context.Context, repoPath, rev, dir string) ([]TreeEntry, error) {
+	args := []string{"ls-tree", "-z", "-l", rev, "--"}
 	if dir != "" {
 		args = append(args, strings.TrimSuffix(dir, "/")+"/")
 	}
@@ -442,7 +447,12 @@ func (e *Engine) bareFileEntry(ctx context.Context, repo, ref, name string) (bar
 	if err := e.checkBranchName(ctx, ref); err != nil {
 		return bareFileEntry{}, err
 	}
-	output, err := e.gitBytes(ctx, repo, "ls-tree", "-z", "-l", "refs/heads/"+ref, "--", name)
+	return e.fileEntryAt(ctx, repo, "refs/heads/"+ref, name)
+}
+
+// fileEntryAt finds the regular file name in rev, a ref or a tree.
+func (e *Engine) fileEntryAt(ctx context.Context, repo, rev, name string) (bareFileEntry, error) {
+	output, err := e.gitBytes(ctx, repo, "ls-tree", "-z", "-l", rev, "--", name)
 	if err != nil {
 		return bareFileEntry{}, err
 	}
@@ -480,6 +490,10 @@ func (e *Engine) readBareFile(ctx context.Context, repo, ref, name string, maxBy
 	if err != nil {
 		return nil, false, 0, err
 	}
+	return e.readEntry(ctx, repo, entry, maxBytes)
+}
+
+func (e *Engine) readEntry(ctx context.Context, repo string, entry bareFileEntry, maxBytes int) ([]byte, bool, int64, error) {
 	if entry.oid == "" {
 		return nil, false, 0, fmt.Errorf("gitengine: file not found: %w", fs.ErrNotExist)
 	}

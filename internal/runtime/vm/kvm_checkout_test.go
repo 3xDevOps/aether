@@ -277,6 +277,18 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	if err != nil || !patch.Recorded || !strings.Contains(patch.Text, "after-commit.txt") {
 		t.Fatalf("patch of an ended session = %+v, %v", patch, err)
 	}
+	if read, err := h.git.FilesRead(ctx, ws, run, "", "after-commit.txt", 0); err != nil || string(read.Content) != "after\n" {
+		t.Fatalf("files read of an ended session = %+v, %v", read, err)
+	}
+	if err := h.git.RemoveRunCheckout(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store, "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("removed checkout's history still borrows the workspace's objects: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(h.repos), "checkouts", key, "disk.qcow2")); !os.IsNotExist(err) {
+		t.Fatalf("removed checkout's disk remains: %v", err)
+	}
 }
 
 func waitDiff(t *testing.T, diffs <-chan events.Event, path string) {

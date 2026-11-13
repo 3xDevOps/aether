@@ -9,11 +9,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/guest"
 )
 
 // The Files view of a checkout in a VM asks the VM, which answers with the
 // same engine code a checkout on the server's disk gets. What comes back is
-// checked as everything from a VM is.
+// checked as everything from a VM is. While the VM does not run, reads come
+// from the last recorded snapshot and writes fail: the caller wakes a
+// sleeping session first.
 
 func (e *Engine) vmFilesTree(ctx context.Context, run domain.RunID, dir string) ([]TreeEntry, error) {
 	if err := ValidatePath(dir); err != nil {
@@ -21,7 +24,7 @@ func (e *Engine) vmFilesTree(ctx context.Context, run domain.RunID, dir string) 
 	}
 	g, err := e.vmGit(ctx, run)
 	if err != nil {
-		return nil, err
+		return e.recordedFilesTree(ctx, run, dir)
 	}
 	entries, err := g.Tree(ctx, string(run), dir)
 	if err != nil {
@@ -51,7 +54,7 @@ func (e *Engine) vmFilesRead(ctx context.Context, run domain.RunID, path string,
 	}
 	g, err := e.vmGit(ctx, run)
 	if err != nil {
-		return FileRead{}, err
+		return e.recordedFilesRead(ctx, run, path, maxBytes)
 	}
 	content, truncated, size, err := g.ReadFile(ctx, string(run), path, maxBytes)
 	if err != nil {
@@ -87,7 +90,7 @@ func (e *Engine) vmFilesWrite(ctx context.Context, run domain.RunID, name string
 func (e *Engine) vmFileDiff(ctx context.Context, run domain.RunID, path string) (Patch, error) {
 	g, err := e.vmGit(ctx, run)
 	if err != nil {
-		return Patch{}, err
+		return e.recordedFileDiff(ctx, run, path)
 	}
 	p, err := g.FileDiff(ctx, string(run), path)
 	if err != nil {

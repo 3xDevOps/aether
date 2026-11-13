@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,6 +39,8 @@ type gitPair struct {
 	checkout string
 	socket   string
 	diffs    <-chan events.Event
+	// down makes the VM read as not running.
+	down atomic.Bool
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -110,7 +113,12 @@ func newGitPair(t *testing.T, server func(*gitService) guestpb.GitServer) *gitPa
 	p.diffs = sub.Events()
 	p.host, err = gitengine.New(gitengine.Config{
 		ReposDir: filepath.Join(root, "repos"), CheckoutsDir: filepath.Join(root, "checkouts"), Bus: bus,
-		VM: &gitengine.VM{Guest: func(context.Context, domain.RunID) (*guest.Git, error) { return client, nil }},
+		VM: &gitengine.VM{Guest: func(context.Context, domain.RunID) (*guest.Git, error) {
+			if p.down.Load() {
+				return nil, guest.ErrVMNotRunning
+			}
+			return client, nil
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -501,4 +509,51 @@ func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
 			t.Fatal("the relay kept the VM's sync endpoint after its client left")
 		}
 	})
+}
+
+func TestStoppedVMSessionIsShownFromItsLastSnapshot(t *testing.T) {
+	p := newGitPair(t, nil)
+	ctx := testContext(t)
+	if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.checkout, "README"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.host.StopDiffWatch(testRun)
+	p.down.Store(true)
+
+	entries, err := p.host.FilesTree(ctx, testWorkspace, testRun, "", "")
+	if err != nil || len(entries) != 2 || entries[1].Name != "new.txt" {
+		t.Fatalf("tree of a stopped VM = %+v, %v", entries, err)
+	}
+	read, err := p.host.FilesRead(ctx, testWorkspace, testRun, "", "README", 0)
+	if err != nil || string(read.Content) != "changed\n" {
+		t.Fatalf("read of a stopped VM = %+v, %v", read, err)
+	}
+	diff, err := p.host.FileDiff(ctx, testRun, "README")
+	if err != nil || !strings.Contains(diff.Text, "+changed") || !diff.Recorded {
+		t.Fatalf("file diff of a stopped VM = %+v, %v", diff, err)
+	}
+	if _, err = p.host.FilesWrite(ctx, testWorkspace, testRun, "", "README", []byte("x\n"), "", domain.GitIdentity{}, nil); !errors.Is(err, gitengine.ErrCheckoutNotFound) {
+		t.Fatalf("write to a stopped VM = %v", err)
+	}
+
+	if err = p.host.RemoveRunCheckout(ctx, testRun); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(filepath.Dir(p.repo), "..", "checkouts", string(testRun)+".diffsnap")
+	if _, err = os.Stat(filepath.Join(store, "objects", "info", "alternates")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the removed checkout's history still borrows the workspace's objects: %v", err)
+	}
+	if err = os.RemoveAll(p.repo); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := p.host.RunPatch(ctx, testRun, gitengine.PatchRequest{})
+	if err != nil || !patch.Recorded || !strings.Contains(patch.Text, "-hello") || !strings.Contains(patch.Text, "+new") {
+		t.Fatalf("patch of a removed checkout without its workspace = %+v, %v", patch, err)
+	}
 }
