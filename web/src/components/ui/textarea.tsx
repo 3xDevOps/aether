@@ -1,7 +1,8 @@
 import type * as React from 'react'
+import { forwardRef } from 'react'
 import { cn, field } from '@/lib/utils'
 
-export function Textarea({ variant = 'default', className, ...props }: React.ComponentProps<'textarea'> & { variant?: 'default' | 'embedded' }) {
+export const Textarea = forwardRef<HTMLTextAreaElement, React.ComponentProps<'textarea'> & { variant?: 'default' | 'embedded' }>(function Textarea({ variant = 'default', className, ...props }, ref) {
   return (
     <textarea
       data-slot="textarea"
@@ -12,6 +13,7 @@ export function Textarea({ variant = 'default', className, ...props }: React.Com
         className,
       )}
       {...props}
+      ref={ref}
     />
   )
-}
+})

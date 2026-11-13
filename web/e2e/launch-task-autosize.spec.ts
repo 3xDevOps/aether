@@ -26,8 +26,12 @@ test('pasted tasks grow to the limit and scroll past it', async ({ page, aether 
   const initial = await task.evaluate((el) => el.clientHeight)
   await paste('\nfirst line\nsecond line\nthird line\nfourth line\nfifth line')
   await expect(task).toHaveValue('Existing words\nfirst line\nsecond line\nthird line\nfourth line\nfifth line')
-  const grown = await task.evaluate((el) => el.clientHeight)
+  const grownSizing = await task.evaluate((el) => ({ height: el.clientHeight, styleHeight: Number.parseFloat(el.style.height), scrollHeight: el.scrollHeight, overflowY: getComputedStyle(el).overflowY }))
+  const grown = grownSizing.height
   expect(grown).toBeGreaterThan(initial)
+  expect(grownSizing.styleHeight).toBeGreaterThan(grown)
+  expect(grownSizing.scrollHeight).toBe(grown)
+  expect(grownSizing.overflowY).toBe('hidden')
   await page.screenshot({ path: testInfo.outputPath('task-field-grown.png') })
 
   await task.evaluate((el) => { el.style.width = '100px' })
