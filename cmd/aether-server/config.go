@@ -116,7 +116,7 @@ func configSet(w io.Writer, path, key, value string) error {
 	_, _ = fmt.Fprintf(w, "%s: %s = %s (was %s)\n", path, key, value, was)
 	apply := serversetup.RestartCommand
 	if key == "session-runtime" && value == server.SessionRuntimeVM {
-		apply = "aether-server vm install && " + apply
+		apply = "aether-server vm install" + configFlag(path) + " && " + apply
 	}
 	_, _ = fmt.Fprintf(w, "apply it with:\n  %s\n", apply)
 	return nil

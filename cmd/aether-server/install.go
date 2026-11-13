@@ -96,7 +96,7 @@ func configFlag(configPath string) string {
 // writeInstall carries on when Docker does not answer, since automation
 // may install it next, but leaves Sysbox out: its installer needs Docker.
 // When sessions are to run in VMs it prepares the host for them first, so a
-// host without KVM gets nothing written, and Sysbox is left out.
+// host without KVM gets nothing written.
 func writeInstall(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox bool) error {
 	vm, kernel, err := installsVMs(configPath, values, force)
 	if err != nil {
@@ -110,7 +110,6 @@ func writeInstall(w io.Writer, unitPath, configPath string, values map[string]st
 			return err
 		}
 		_, _ = fmt.Fprintln(w)
-		sysbox = false
 	}
 	docker := checkDocker(w)
 	if err = writeAndReport(w, unitPath, configPath, values, force); err != nil {
