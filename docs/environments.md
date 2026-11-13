@@ -421,9 +421,11 @@ What changes:
   in [When a saved image cannot start](#when-a-saved-image-cannot-start).
 - Not yet supported, refused at launch with an error naming the work item:
   the development browser beside a session.
-- Closing a session while it is asleep makes no final commit: its VM is
-  stopped, so the run branch lacks the changes the session had not
-  committed. They stay on the session's checkout disk, which is kept.
+- An idle session's VM is saved to disk with every process, and closing a
+  session saves its VM too
+  ([Sessions in VMs](failure-handling.md#sessions-in-vms)). Closing a
+  session while it is asleep wakes it first, so its final commit has its
+  uncommitted changes.
 - Switching to `vm` moves no running session: a session already in a
   container keeps it, through the restart and its sleeps and relaunches, and
   gets a VM only when it needs a new container.
