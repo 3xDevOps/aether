@@ -178,8 +178,10 @@ record it keeps for good. It reaps every orphan.
 PID 1 passes `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGTERM`, `SIGUSR1`, `SIGUSR2`,
 `SIGALRM` and `SIGWINCH` on to the main process, as `docker-init` does. When
 the main process exits the helper keeps running, kills every process left in
-the session cgroup, as a container's end does, and writes to the root
-cgroup's `memory.reclaim`. The server reads the exit code and powers the VM
+the session cgroup, as a container's end does, and drops the clean page cache
+(`/proc/sys/vm/drop_caches`) so the host gets the memory back. It does not
+write `memory.reclaim`: from the helper, which serves the home, that stalls
+on the home's own pages. The server reads the exit code and powers the VM
 off, unless its checkouts live on its own disks ([Checkouts](#checkouts)):
 then the VM stays up for the git work that ends a session on its checkout,
 the last snapshot, the final commit, branch publication and evidence, until

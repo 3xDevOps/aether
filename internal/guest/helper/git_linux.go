@@ -108,17 +108,12 @@ func endSession(cgroup *sessionCgroup) {
 	}
 }
 
-// reclaimMemory hands the session's memory back once its main process
-// exited: the VM may stay up a while for the server's last git work.
-func reclaimMemory() {
-	meminfo, err := readCounters("/proc/meminfo", 1024)
-	if err == nil {
-		err = os.WriteFile("/sys/fs/cgroup/memory.reclaim", []byte(strconv.FormatUint(meminfo["MemTotal"], 10)), 0)
-	}
-	// The kernel reports EAGAIN when it reclaimed less than asked, which is
-	// the point of asking for everything.
-	if err != nil && !errors.Is(err, syscall.EAGAIN) {
-		slog.Warn("guest: reclaim memory after the main process exited", "error", err)
+// dropCaches hands the guest's clean page cache back to the host. Writing
+// the root cgroup's memory.reclaim from the helper, which serves the home's
+// FUSE mount, instead stalls on the home's own pages.
+func dropCaches() {
+	if err := os.WriteFile("/proc/sys/vm/drop_caches", []byte("3"), 0); err != nil {
+		slog.Warn("guest: drop the page cache", "error", err)
 	}
 }
 

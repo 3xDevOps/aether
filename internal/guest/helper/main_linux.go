@@ -100,7 +100,7 @@ func serve() error {
 	procs := newProcesses(procsDir)
 	procs.mainExited = func() {
 		endSession(cgroup)
-		reclaimMemory()
+		dropCaches()
 	}
 	go reapForever(procs)
 	if len(cfg.Checkouts) > 0 {
