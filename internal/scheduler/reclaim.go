@@ -138,14 +138,13 @@ func (s *Scheduler) reclaimLevel(ctx context.Context) (free uint64, short, ok bo
 }
 
 // savedByAge returns the runs asleep in a saved VM, the longest asleep
-// first. A wake holds its run's lifecycle lock while its capacity
-// reservation runs reclaim, so a run being woken is left out.
+// first.
 func (s *Scheduler) savedByAge() []*supervised {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var entries []*supervised
 	for _, entry := range s.runs {
-		if _, saving := s.saver(entry.containerID); saving && entry.asleepSaved && !entry.sleeping && entry.waking == nil {
+		if _, saving := s.saver(entry.containerID); saving && entry.asleepSaved && !entry.sleeping {
 			entries = append(entries, entry)
 		}
 	}
@@ -154,13 +153,16 @@ func (s *Scheduler) savedByAge() []*supervised {
 }
 
 // dropSavedState stops entry's saved VM, which deletes its memory and keeps
-// its disks, if it is still asleep and no wake is under way, and returns the
-// timeline note that says what its next wake does.
+// its disks, if it is still asleep, and returns the timeline note that says
+// what its next wake does. A run whose lifecycle lock is held is left: a
+// wake holds it while its capacity reservation waits for this reclaim.
 func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (string, error) {
-	entry.lifecycleMu.Lock()
+	if !entry.lifecycleMu.TryLock() {
+		return "", nil
+	}
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
-	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && entry.asleepSaved && entry.waking == nil
+	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && entry.asleepSaved
 	cid := entry.containerID
 	s.mu.Unlock()
 	if !asleep {
@@ -169,7 +171,10 @@ func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (stri
 	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
 		return "", err
 	}
-	s.recordSaved(entry, false)
+	if err := s.recordSaved(entry, false); err != nil {
+		return "", err
+	}
+	s.publishSleep(entry)
 	const dropped = "Deleted this sleeping session's saved memory because disk space was low"
 	if reason := s.coldStartRefusal(ctx, entry); reason != "" {
 		return dropped + ", so it cannot wake: " + reason, nil

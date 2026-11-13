@@ -25,7 +25,10 @@ type saveRuntime struct {
 	saveMu     sync.Mutex
 	saved      map[runtime.ID]bool
 	restoreErr error
-	restores   int
+	// restoreLate fails a restore only after it deleted the saved state
+	// and started the guest, as a failed clock set does.
+	restoreLate bool
+	restores    int
 }
 
 func (r *saveRuntime) Saves(runtime.ID) bool { return true }
@@ -48,12 +51,14 @@ func (r *saveRuntime) Save(_ context.Context, id runtime.ID) error {
 func (r *saveRuntime) Restore(ctx context.Context, id runtime.ID) error {
 	r.saveMu.Lock()
 	r.restores++
-	err, saved := r.restoreErr, r.saved[id]
-	if err == nil {
+	err, late, saved := r.restoreErr, r.restoreLate, r.saved[id]
+	if err == nil || late {
 		delete(r.saved, id)
 	}
 	r.saveMu.Unlock()
 	switch {
+	case err != nil && late:
+		return errors.Join(err, r.Start(ctx, id))
 	case err != nil:
 		return err
 	case !saved:
@@ -183,31 +188,38 @@ func TestAVMWhoseStateCannotBeRestoredStartsFromItsDisk(t *testing.T) {
 }
 
 // An agent that cannot restore its conversation in a new process keeps its
-// saved state through a failed restore, for the next wake to try again.
+// saved state through a failed restore, for the next wake to try again,
+// also when the restore failed after it had started the guest.
 func TestAFailedRestoreOfAnAgentThatCannotResumeKeepsItsState(t *testing.T) {
 	t.Parallel()
-	e, rt, sr := newSaveEnv(t, false)
-	run := e.launchACP(t, "say pong")
-	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
-	e.sleepRun(t, run.ID)
-	sr.saveMu.Lock()
-	sr.restoreErr = errors.New("restore: monitor exited")
-	sr.saveMu.Unlock()
-	_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "wake"}, false, nil)
-	if err == nil || !strings.Contains(err.Error(), "monitor exited") || !strings.Contains(err.Error(), "cannot restore its conversation") {
-		t.Fatalf("Inject = %v, want the restore's error and why it did not start from disk", err)
-	}
-	if state := e.sched.Sleep(run.ID); state.AsleepSince == nil || !state.Saved || !strings.Contains(state.WakeError, "monitor exited") {
-		t.Fatalf("sleep state after a failed restore = %+v", state)
-	}
-	sr.saveMu.Lock()
-	sr.restoreErr = nil
-	sr.saveMu.Unlock()
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "wake"}, false, nil); err != nil {
-		t.Fatalf("the next prompt: %v", err)
-	}
-	if !adopted(rt, 1) {
-		t.Fatal("the second restore did not reattach to the saved agent")
+	for name, late := range map[string]bool{"before the guest ran": false, "after the guest ran": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e, rt, sr := newSaveEnv(t, false)
+			run := e.launchACP(t, "say pong")
+			waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+			e.sleepRun(t, run.ID)
+			sr.saveMu.Lock()
+			sr.restoreErr, sr.restoreLate = errors.New("restore: monitor exited"), late
+			sr.saveMu.Unlock()
+			_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "wake"}, false, nil)
+			if err == nil || !strings.Contains(err.Error(), "monitor exited") || !strings.Contains(err.Error(), "cannot restore its conversation") {
+				t.Fatalf("Inject = %v, want the restore's error and why it did not start from disk", err)
+			}
+			state := e.sched.Sleep(run.ID)
+			if state.AsleepSince == nil || !state.Saved || !sr.isSaved(e.cid(t, run.ID)) || !strings.Contains(state.WakeError, "monitor exited") {
+				t.Fatalf("sleep state after a failed restore = %+v", state)
+			}
+			sr.saveMu.Lock()
+			sr.restoreErr = nil
+			sr.saveMu.Unlock()
+			if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "wake"}, false, nil); err != nil {
+				t.Fatalf("the next prompt: %v", err)
+			}
+			if !adopted(rt, 1) {
+				t.Fatal("the second restore did not reattach to the saved agent")
+			}
+		})
 	}
 }
 

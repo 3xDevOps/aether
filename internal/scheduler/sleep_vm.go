@@ -59,14 +59,14 @@ func (s *Scheduler) saveLive(ctx context.Context, entry *supervised, saver runti
 	// From here exec and terminal recovery treat the VM as frozen.
 	entry.paused = true
 	s.mu.Unlock()
-	s.detachForSave(ctx, entry)
+	detachErr := s.detachForSave(ctx, entry)
 	saveErr := saver.Save(ctx, cid)
 	if saveErr == nil {
-		s.recordSaved(entry, true)
+		recordErr := s.recordSaved(entry, true)
 		s.endSleep(entry, true)
-		return nil
+		return errors.Join(detachErr, recordErr)
 	}
-	saveErr = fmt.Errorf("save the idle session: %w", saveErr)
+	saveErr = errors.Join(fmt.Errorf("save the idle session: %w", saveErr), detachErr)
 	s.mu.Lock()
 	entry.paused = false
 	s.mu.Unlock()
@@ -84,12 +84,16 @@ func (s *Scheduler) saveLive(ctx context.Context, entry *supervised, saver runti
 
 // detachForSave lets go of everything this server holds in entry's VM: the
 // agent's session and terminal, the development terminals and the diff
-// watch. What they connect to keeps running, and is saved with the VM.
-func (s *Scheduler) detachForSave(ctx context.Context, entry *supervised) {
+// watch. What they connect to keeps running, and is saved with the VM, so
+// the save goes ahead whatever this returns: a keeper or terminal left
+// attached is preempted by the next generation that attaches after the
+// restore.
+func (s *Scheduler) detachForSave(ctx context.Context, entry *supervised) error {
 	run := entry.runID
 	s.cfg.Git.StopDiffWatch(run)
+	var errs []error
 	if err := s.detachDevelopmentTerminals(ctx, run); err != nil {
-		slog.Warn("scheduler: let go of a saving session's terminals", "run", run, "error", err)
+		errs = append(errs, fmt.Errorf("let go of the terminals: %w", err))
 	}
 	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(run, "")))
 	s.mu.Lock()
@@ -98,18 +102,17 @@ func (s *Scheduler) detachForSave(ctx context.Context, entry *supervised) {
 	if !acpDriven {
 		// The Standard drivers only hold the terminal and the bridge.
 		if err := s.entryDriver(entry).Stop(ctx, run); err != nil {
-			slog.Warn("scheduler: let go of a saving session's agent", "run", run, "error", err)
+			errs = append(errs, fmt.Errorf("let go of the agent: %w", err))
 		}
-		return
+		return errors.Join(errs...)
 	}
-	// A keeper left attached is preempted by the next generation that
-	// attaches after the restore.
 	if err := s.acp.detach(ctx, run); err != nil {
-		slog.Warn("scheduler: let go of a saving session's agent", "run", run, "error", err)
+		errs = append(errs, fmt.Errorf("let go of the agent: %w", err))
 	}
 	if err := s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(run)); err != nil && !errors.Is(err, ptyhost.ErrNoSession) {
-		slog.Warn("scheduler: let go of a saving session's terminal", "run", run, "error", err)
+		errs = append(errs, fmt.Errorf("let go of the agent's terminal: %w", err))
 	}
+	return errors.Join(errs...)
 }
 
 // reattach takes up the session in entry's running container again: its
@@ -157,7 +160,7 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 		return woke{}, restoreErr
 	}
 	if reason := s.coldStartRefusal(ctx, entry); reason != "" {
-		return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
+		return woke{}, errors.Join(fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason), s.resaveFailedRestore(ctx, entry, saver))
 	}
 	slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
 	// Stop discards the saved state and a half-restored VM alike.
@@ -181,13 +184,29 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	// The agent and its keeper did not survive, so the open restores the
 	// conversation rather than trying to reattach.
 	entry.agentExec, entry.agentKeeper = nil, nil
-	err := s.writeSidecar(entry.sidecar())
 	s.mu.Unlock()
-	if err != nil {
-		slog.Warn("scheduler: record the cold-started session", "run", entry.runID, "error", err)
-	}
 	s.superviseWoken(entry)
 	return woke{restoreErr: restoreErr}, nil
+}
+
+// resaveFailedRestore saves again a guest a restore left running when it
+// failed after it had deleted the saved state, as when the guest's clock
+// could not be set: the guest holds the session's only copy of it.
+func (s *Scheduler) resaveFailedRestore(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	info, err := s.cfg.Runtime.Inspect(ctx, cid)
+	if err != nil {
+		return fmt.Errorf("look at the guest the restore left: %w", err)
+	}
+	if info.Exited {
+		return nil
+	}
+	if err = saver.Save(ctx, cid); err != nil {
+		return errors.Join(fmt.Errorf("save again the guest the restore left running: %w", err), s.recordSaved(entry, false))
+	}
+	return nil
 }
 
 // coldStartRefusal is why entry cannot start again from its disk, empty
@@ -228,13 +247,14 @@ func (s *Scheduler) superviseWoken(entry *supervised) {
 }
 
 // recordSaved records whether entry's sleeping VM holds its saved memory.
-func (s *Scheduler) recordSaved(entry *supervised, saved bool) {
+func (s *Scheduler) recordSaved(entry *supervised, saved bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry.asleepSaved = saved
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		slog.Warn("scheduler: record whether a sleeping session is saved", "run", entry.runID, "error", err)
+		return fmt.Errorf("record whether the sleeping session is saved: %w", err)
 	}
+	return nil
 }
 
 // resaveAsleep saves entry's VM again after a failed wake reattached part of
@@ -244,16 +264,15 @@ func (s *Scheduler) resaveAsleep(ctx context.Context, entry *supervised, saver r
 	cid := entry.containerID
 	entry.paused = true
 	s.mu.Unlock()
-	s.detachForSave(ctx, entry)
+	detachErr := s.detachForSave(ctx, entry)
 	err := saver.Save(ctx, cid)
 	if err == nil {
-		s.recordSaved(entry, true)
-		return nil
+		return errors.Join(detachErr, s.recordSaved(entry, true))
 	}
 	s.mu.Lock()
 	entry.agentExec, entry.agentKeeper = nil, nil
 	s.mu.Unlock()
-	return errors.Join(fmt.Errorf("save the session again: %w", err), s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace))
+	return errors.Join(fmt.Errorf("save the session again: %w", err), detachErr, s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace))
 }
 
 // saveClosed saves a closed session's frozen VM. The close stopped its agent
@@ -269,9 +288,9 @@ func (s *Scheduler) saveClosed(ctx context.Context, entry *supervised, saver run
 	}
 	saveErr := saver.Save(ctx, cid)
 	if saveErr == nil {
-		s.recordSaved(entry, true)
+		recordErr := s.recordSaved(entry, true)
 		s.endSleep(entry, true)
-		return nil
+		return recordErr
 	}
 	saveErr = fmt.Errorf("save the closed session: %w", saveErr)
 	if err := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid); err != nil {
@@ -292,8 +311,7 @@ func (s *Scheduler) saveRecoveredAsleep(ctx context.Context, entry *supervised, 
 	s.mu.Unlock()
 	err := saver.Save(ctx, cid)
 	if err == nil {
-		s.recordSaved(entry, true)
-		return nil
+		return s.recordSaved(entry, true)
 	}
 	return errors.Join(fmt.Errorf("save the session the restart caught falling asleep: %w", err), s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace))
 }
