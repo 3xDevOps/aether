@@ -10,7 +10,7 @@ export function RunRetention({ run, className = '' }: { run: Run; className?: st
         <p>
           Runtime grace ends <time dateTime={run.container_retained_until}>{new Date(run.container_retained_until).toLocaleString()}</time>.
           {canReopenRun(run) && ' Relaunch is available until then; closing the relaunched session starts a new grace period.'}
-          {' '}Paused compute still holds memory during the grace period.
+          {run.asleep_saved ? ' The saved session holds no memory, only disk.' : ' Paused compute still holds memory during the grace period.'}
         </p>
       )}
       {run.cleanup_pending && <p>Compute cleanup is pending; ownership stays protected until cleanup succeeds.</p>}

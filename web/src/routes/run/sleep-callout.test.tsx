@@ -46,7 +46,7 @@ describe('SleepCallout', () => {
 
   it('says a saved session keeps its processes', () => {
     render(<SleepCallout run={record({ asleep_since: since, asleep_saved: true })} />)
-    expect(screen.getByText(/Its processes, terminals and conversation come back where they were/)).toBeDefined()
+    expect(screen.getByText(/Its processes, terminals, files and conversation come back where they were; connections to outside the session may not/)).toBeDefined()
     expect(screen.queryByText(/running processes are not/)).toBeNull()
   })
 

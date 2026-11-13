@@ -11,6 +11,7 @@ import { message } from '@/lib/format'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { usePresenceSummary } from '@/routes/run/multiplayer-controls'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
+import { SleepCallout } from '@/routes/run/sleep-callout'
 import { limitReason, StopShellDialog, terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
 import { TerminalHistory } from '@/routes/terminal/history'
 import { ControlButton } from '@/routes/terminal/control-button'
@@ -148,6 +149,9 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
           {retryShellList && <Button size="sm" variant="ghost" onClick={retryShellList}>Retry</Button>}
         </div>
       )}
+      <div className="shrink-0 px-3 pt-2 empty:hidden">
+        <SleepCallout run={run} />
+      </div>
       <div className="relative min-h-0 flex-1">
       {shellShown && (
         <div

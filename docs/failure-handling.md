@@ -662,9 +662,10 @@ lost, so more sessions sleep, sooner:
 A sleeping VM keeps everything: its processes, including dev servers,
 nested Docker containers such as a `docker compose` stack and the Browser
 tab's browser; its terminals and shell tabs, which reconnect on the wake;
-the agent process and its conversation; its disks. Open network
-connections to the outside end while it sleeps and the programs holding
-them see them fail after the wake, as after a network outage. The VM's
+the agent process and its conversation; its disks. Connections to outside
+the session, such as a database client's or a port forward's, can end while
+it sleeps, and the programs holding them see them fail after the wake, as
+after a network outage. The VM's
 clock is set right on the wake.
 
 The agent's own scheduled wakeups (`/loop`, `ScheduleWakeup`, `CronCreate`)
@@ -673,6 +674,9 @@ live in the agent process and are frozen with it: a session left running
 a pending one fires that much later after the next wake. Aether's own wakes
 still wake a sleeping session: mail, `aether-internal report --until`
 conditions and watches reach it as any message does.
+
+A Standard session's Chat and Terminal views, and an Enhanced session's
+Chat view, show **Asleep since** with a **Wake** button while it sleeps.
 
 A wake takes a second or two on local NVMe: on a test host, a message to a
 sleeping Claude Code or Codex session running a dev server and a

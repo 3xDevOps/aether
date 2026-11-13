@@ -166,7 +166,8 @@ function container(run: RunRecord): string {
     return run.waking ? 'Starting (waking)' : 'Stopped while asleep'
   }
   if (!isTerminal(run.status)) return 'Running'
-  return isRetainedRun(run) ? 'Stopped, kept for reopening' : 'Removed'
+  if (!isRetainedRun(run)) return 'Removed'
+  return run.asleep_saved ? 'Saved to disk, kept for reopening' : 'Stopped, kept for reopening'
 }
 
 function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentTerminal; agentName: string; inset: boolean }) {
