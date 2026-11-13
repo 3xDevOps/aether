@@ -16,6 +16,7 @@ Research only; nothing here ships. Raw logs of every run quoted below are in
 | Copy-on-write format | Create: qcow2 overlay 5 ms, reflink copy 1 ms. Cloud Hypervisor's qcow2 is slow with `direct=on` (3.2k random-write IOPS) and close to raw for reads with `direct=off` (203k vs 237k random-read IOPS; 20-25k vs 215k random-write IOPS). Coordinator decision: qcow2 over a raw base, `direct=off` (Q5) |
 | git on the VM disk vs virtio-fs | 40,000 files: `git add -A` 4.5 s on the VM's ext4 disk, 25-27 s over virtio-fs, 3.4 s on the host; `git status` 28-52 ms, 70-350 ms, 20 ms (Q5) |
 | Idle CPU, tickless guest | 10 idle Claude Code VMs: 0.53-0.62% of one CPU each, 0.37% of the 16-CPU host in total; bare VMs 0.26%; containers 0.20% (Q6) |
+| Enhanced sessions, tuned VM (coordinator's follow-up) | Idle after a turn, per session: Claude Code 676 MiB in a VM, 343 MiB settled within 5 s of a guest `memory.reclaim` with memory `shared=on` and `page_reporting_order=0`; container 143-162 MiB. Codex 692 -> 331 MiB; container 78-80 MiB + 97 MiB host cache. Fixed VM cost with no agent: 106 MiB at 2 GiB, 198 MiB at 4 GiB (Q8) |
 | Home over a FUSE file service on vsock (coordinator's follow-up) | vsock round trip 74 us (p50), same as TCP over the tap. A path-forwarding FUSE prototype stats 40,000 files in 3.8 s (local ext4 74 ms) and reads them in 15.6 s cold (2.2 s) (Q7) |
 
 ## Conditions
@@ -316,6 +317,61 @@ thousands of files (`~/.npm`, `~/.cache`). Longer TTLs with host-driven
 invalidation and READDIRPLUS would cut the repeat cost; the first walk
 stays one round trip per entry.
 
+## Q8: Enhanced sessions and the wave 2 tuning
+
+The coordinator's follow-up. `tests/q8-enhanced.sh` via `tests/q8-matrix.sh`,
+item 4 kernel, 3 sessions per row (10 for no agent), each with a fresh home.
+[acpdrive/](acpdrive/) opens the Enhanced session from the host as the
+server does: the harness profile's `ACPCommand` over its `ACPArgs` and
+`Env` (`claude-agent-acp` 0.86.0 with `CLAUDE_CODE_EXECUTABLE` = the pinned
+`claude`, `codex-acp` 2.1.1 with `CODEX_PATH` = the pinned `codex`), an
+`acphost.Start` session with auto-allow, then the profile's `ACPMode`. The
+adapter runs in the VM under `ssh -T` or in the container under `docker
+exec -i`; acp-keeper is not in the path. Untuned VM: memory `shared=off`,
+no reclaim. Tuned VM: memory `shared=on`, `page_reporting_order=0`, the
+guest writes `8G` to its root `memory.reclaim` 60 s after the turn (the
+session going idle). Sampled every 5 s for 180 s after. MiB per session,
+average.
+
+| Session | Booted | Idle 60 s after the turn | 5 s after reclaim | 30 s | 180 s (steady) |
+| --- | --- | --- | --- | --- | --- |
+| VM, Enhanced Claude Code, untuned | 103 | 692 | (no reclaim) 693 | 693 | 677 |
+| VM, Enhanced Claude Code, tuned | 99 | 676 | 341 | 343 | 343 |
+| Container, Enhanced Claude Code | - | 162 | - | 162 | 143 |
+| VM, Enhanced Codex, untuned | 104 | 706 | (no reclaim) 707 | 706 | 701 |
+| VM, Enhanced Codex, tuned | 99 | 692 | 325 | 331 | 331 |
+| VM, Enhanced Codex, tuned, home already used once | 98 | 684 | 320 | 326 | 328 |
+| Container, Enhanced Codex | - | 80 + 97 cache | - | 80 + 97 | 78 + 98 |
+| Container, Enhanced Codex, home already used once | - | 87 + 190 cache | - | 86 + 191 | 86 + 192 |
+| VM, no agent, tuned (10 VMs) | 98 | 103 | 105 | 106 | 111 |
+
+- **The tuned VM settles at once:** within 5-10 s of the reclaim, then
+  stays within 3% for the next 3 minutes. VM vs container, tuned: 2.4x for
+  Claude Code (343 vs 143), 4.2x for Codex (331 vs 78).
+- **Where the tuned VM's 343 MiB goes** (one VM probed after the reclaim,
+  guest `/proc/meminfo` and `smaps_rollup`): agent private memory 160 MiB
+  (`claude` 111, `claude-agent-acp` 49, the same as the container's 162),
+  guest page cache still in use 85 MiB (the agents' code, read back after
+  the reclaim), guest kernel slab, page tables and stacks ~22 MiB, the init
+  stand-in and sshd ~20 MiB, and 54 MiB the guest kernel reserves at boot
+  (its image and the page metadata for 2 GiB) that never appears in the
+  guest's `MemTotal`. In a container the code pages are host page cache
+  shared by every session; in a VM each session holds its own copy.
+- **Fixed VM cost** (guest kernel plus the init stand-in, no agent): 106 MiB
+  at 2 GiB guest RAM, 198 MiB at 4 GiB. The guest kernel's reservation grows
+  from 54 to 154 MiB: page metadata is 16 MiB per GiB, and the rest of the
+  jump is consistent with a 64 MiB swiotlb buffer once RAM crosses 4 GiB
+  (not verified). The host kernel adds 0.3 MiB of KVM page tables
+  (`SecPageTables`) and 0.3 MiB of page tables per VM. The stand-in for
+  item 3's helper (bash init, sshd) is 17 MB of guest process RSS.
+- **Codex's 1320 MiB (Q1) is a Standard-mode cost.** Enhanced Codex runs
+  `codex app-server` from the image and copies nothing: `~/.codex` is 29 MB
+  after a session, and a session on a used home costs the same (328 vs 331
+  MiB). The Standard Codex TUI copies its 426 MiB release into the home;
+  in a container that copy is host page cache (521 MiB in Q1, droppable),
+  in a VM it is guest page cache the host holds, 500 MiB after a reclaim
+  (Q1).
+
 ## Other findings
 
 - **Codex copies its release into the home.** On first start Codex 0.164.0
@@ -341,8 +397,12 @@ stays one round trip per entry.
 
 ## Not measured
 
-- **Enhanced (ACP) sessions.** Only the CLIs in tmux (Standard mode) ran;
-  the ACP adapters add a Node process each.
+- **acp-keeper.** Q8 runs the adapter without Aether's keeper process in
+  front of it; the keeper is one more small Go process per session.
+- **Ways to shrink the tuned VM further**, untested: a read-only base on
+  virtio-pmem with DAX (one host copy of the agents' code for all VMs),
+  virtio-mem so page metadata covers only plugged memory, and turning the
+  swiotlb buffer off for guests above 4 GiB.
 - **Real model traffic and logins.** The mock answers in microseconds, and
   no logins may reach the host; agents talking to real APIs hold more
   context in memory.

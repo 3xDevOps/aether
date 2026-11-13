@@ -1,0 +1,5 @@
+session 01a1d32b-cb48-7913-9be9-f07e807dc172 open ('/bin/sh' '-c' 'if [ -z "${CODEX_PATH:-}" ] && cli=$(command -v "$1") && timeout 10 "$cli" --version </dev/null 2>/dev/null | awk -v min="$2" '\''
+NR == 1 { for (f = 1; f < NF && $f !~ /^[0-9]+\./; f++); split($f, have, "."); split(min, want, "."); ok = 1
+	for (n = 1; n <= 3; n++) { if (have[n] + 0 > want[n] + 0) break; if (have[n] + 0 < want[n] + 0) { ok = 0; break } } }
+END { exit !ok }'\'' 2>/dev/null; then export CODEX_PATH="$cli"; fi; shift 2; exec "$@"' 'sh' 'codex' '0.159.3' 'codex-acp')
+turn turn done in 103ms: "aether-turn-done"

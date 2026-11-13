@@ -1,0 +1,12 @@
+phase           own     file
+booted            0        0
+idle             80       97
+settle5          80       97
+settle10         80       97
+settle20         80       97
+settle30         80       97
+settle60         79       97
+settle90         79       98
+settle120        79       98
+settle180        78       98
+settled after 5 s at 78 MiB; ept 0.0 MiB/session

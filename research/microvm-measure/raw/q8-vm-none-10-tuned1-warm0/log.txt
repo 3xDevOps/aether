@@ -1,0 +1,123 @@
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+session 31 ps:  9240 sshd: root@notty
+session 31 ps:  4448 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 31 ps:  4156 ps -eo rss=,args= --sort=-rss
+session 31 ps:  3528 /bin/bash /sbin/a1-init
+session 31 ps:  3460 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 31 ps:  1972 head -6
+session 32 ps:  9244 sshd: root@notty
+session 32 ps:  4372 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 32 ps:  4152 ps -eo rss=,args= --sort=-rss
+session 32 ps:  3540 /bin/bash /sbin/a1-init
+session 32 ps:  3464 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 32 ps:  1968 head -6
+session 33 ps:  9252 sshd: root@notty
+session 33 ps:  4448 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 33 ps:  4156 ps -eo rss=,args= --sort=-rss
+session 33 ps:  3592 /bin/bash /sbin/a1-init
+session 33 ps:  3460 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 33 ps:  1972 head -6
+session 34 ps:  9236 sshd: root@notty
+session 34 ps:  4440 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 34 ps:  4136 ps -eo rss=,args= --sort=-rss
+session 34 ps:  3564 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 34 ps:  3528 /bin/bash /sbin/a1-init
+session 34 ps:  1972 head -6
+session 35 ps:  9252 sshd: root@notty
+session 35 ps:  4404 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 35 ps:  4156 ps -eo rss=,args= --sort=-rss
+session 35 ps:  3552 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 35 ps:  3492 /bin/bash /sbin/a1-init
+session 35 ps:  1976 head -6
+session 36 ps:  9244 sshd: root@notty
+session 36 ps:  4444 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 36 ps:  4152 ps -eo rss=,args= --sort=-rss
+session 36 ps:  3592 /bin/bash /sbin/a1-init
+session 36 ps:  3460 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 36 ps:  1972 head -6
+session 37 ps:  9228 sshd: root@notty
+session 37 ps:  4444 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 37 ps:  4152 ps -eo rss=,args= --sort=-rss
+session 37 ps:  3560 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 37 ps:  3548 /bin/bash /sbin/a1-init
+session 37 ps:  1968 head -6
+session 38 ps:  9240 sshd: root@notty
+session 38 ps:  4436 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 38 ps:  4160 ps -eo rss=,args= --sort=-rss
+session 38 ps:  3580 /bin/bash /sbin/a1-init
+session 38 ps:  3532 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 38 ps:  1968 head -6
+session 39 ps:  9156 sshd: root@notty
+session 39 ps:  4376 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 39 ps:  4136 ps -eo rss=,args= --sort=-rss
+session 39 ps:  3508 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 39 ps:  3488 /bin/bash /sbin/a1-init
+session 39 ps:  1972 head -6
+session 40 ps:  9212 sshd: root@notty
+session 40 ps:  4380 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 40 ps:  4156 ps -eo rss=,args= --sort=-rss
+session 40 ps:  3560 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 40 ps:  3540 /bin/bash /sbin/a1-init
+session 40 ps:  1972 head -6
+session 31 guest before reclaim: Mem:         2043264      119488     1985784           8       26968     1923776
+session 32 guest before reclaim: Mem:         2043264      123760     1981528           8       26940     1919504
+session 33 guest before reclaim: Mem:         2043264      124792     1980492           8       26948     1918472
+session 34 guest before reclaim: Mem:         2043264      119504     1985772           8       26960     1923760
+session 35 guest before reclaim: Mem:         2043264      122508     1982776           8       26948     1920756
+session 36 guest before reclaim: Mem:         2043264      121956     1983328           8       26948     1921308
+session 37 guest before reclaim: Mem:         2043264      118480     1986808           8       26936     1924784
+session 38 guest before reclaim: Mem:         2043264      119164     1986112           8       26960     1924100
+session 39 guest before reclaim: Mem:         2043264      122452     1982820           8       26968     1920812
+session 40 guest before reclaim: Mem:         2043264      119220     1986052           8       26972     1924044
+session 31 guest end: Mem:         2043264      135164     1973400           8       20388     1908100
+session 31 guest end: MemTotal: 2043264 kB Slab: 10232 kB KernelStack: 1008 kB PageTables: 1168 kB Percpu: 352 kB 
+session 32 guest end: Mem:         2043264      135364     1973204           8       20376     1907900
+session 32 guest end: MemTotal: 2043264 kB Slab: 10292 kB KernelStack: 1008 kB PageTables: 1152 kB Percpu: 352 kB 
+session 33 guest end: Mem:         2043264      135176     1973432           8       20384     1908088
+session 33 guest end: MemTotal: 2043264 kB Slab: 10136 kB KernelStack: 992 kB PageTables: 1128 kB Percpu: 352 kB 
+session 34 guest end: Mem:         2043264      128652     1979924           8       20360     1914612
+session 34 guest end: MemTotal: 2043264 kB Slab: 10132 kB KernelStack: 992 kB PageTables: 1180 kB Percpu: 352 kB 
+session 35 guest end: Mem:         2043264      126396     1982176           8       20372     1916868
+session 35 guest end: MemTotal: 2043264 kB Slab: 10248 kB KernelStack: 992 kB PageTables: 1232 kB Percpu: 352 kB 
+session 36 guest end: Mem:         2043264      135224     1973348           8       20368     1908040
+session 36 guest end: MemTotal: 2043264 kB Slab: 10256 kB KernelStack: 976 kB PageTables: 1132 kB Percpu: 352 kB 
+session 37 guest end: Mem:         2043264      135268     1973308           8       20364     1907996
+session 37 guest end: MemTotal: 2043264 kB Slab: 10232 kB KernelStack: 1008 kB PageTables: 1160 kB Percpu: 352 kB 
+session 38 guest end: Mem:         2043264      134404     1974164           8       20376     1908860
+session 38 guest end: MemTotal: 2043264 kB Slab: 10212 kB KernelStack: 992 kB PageTables: 1164 kB Percpu: 352 kB 
+session 39 guest end: Mem:         2043264      131932     1976628           8       20392     1911332
+session 39 guest end: MemTotal: 2043264 kB Slab: 10188 kB KernelStack: 992 kB PageTables: 1136 kB Percpu: 352 kB 
+session 40 guest end: Mem:         2043264      134992     1973608           4       20400     1908272
+session 40 guest end: MemTotal: 2043264 kB Slab: 10232 kB KernelStack: 976 kB PageTables: 1084 kB Percpu: 352 kB 
+phase           own     file
+before            0        0
+booted           98        0
+idle            103        0
+settle5         105        0
+settle10        105        0
+settle20        106        0
+settle30        106        0
+settle60        108        0
+settle90        109        0
+settle120       110        0
+settle180       111        0
+settled after 65 s at 111 MiB; ept 0.3 MiB/session
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,49 @@
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+turn turn done in 188ms: "aether-turn-done"
+turn turn done in 202ms: "aether-turn-done"
+turn turn done in 177ms: "aether-turn-done"
+session 31 ps: 239840 /usr/local/bin/claude --output-format stream-json --verbose --input-format stream-json --permission-pro
+session 31 ps: 100680 node /usr/local/bin/claude-agent-acp
+session 31 ps:  9304 sshd: root@notty
+session 31 ps:  9240 sshd: root@notty
+session 31 ps:  4440 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 31 ps:  4156 ps -eo rss=,args= --sort=-rss
+session 32 ps: 240396 /usr/local/bin/claude --output-format stream-json --verbose --input-format stream-json --permission-pro
+session 32 ps: 99472 node /usr/local/bin/claude-agent-acp
+session 32 ps:  9296 sshd: root@notty
+session 32 ps:  9224 sshd: root@notty
+session 32 ps:  4380 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 32 ps:  4156 ps -eo rss=,args= --sort=-rss
+session 33 ps: 241468 /usr/local/bin/claude --output-format stream-json --verbose --input-format stream-json --permission-pro
+session 33 ps: 100264 node /usr/local/bin/claude-agent-acp
+session 33 ps:  9300 sshd: root@notty
+session 33 ps:  9204 sshd: root@notty
+session 33 ps:  4372 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 33 ps:  4144 ps -eo rss=,args= --sort=-rss
+session 31 guest before reclaim: Mem:         2043264      373244     1384304           8      419304     1670020
+session 32 guest before reclaim: Mem:         2043264      369688     1387900           8      419264     1673576
+session 33 guest before reclaim: Mem:         2043264      362112     1395440           8      419312     1681152
+session 31 guest end: Mem:         2043264      345784     1411724           8      419348     1697480
+session 31 guest end: MemTotal: 2043264 kB Slab: 13176 kB KernelStack: 1296 kB PageTables: 3684 kB Percpu: 352 kB 
+session 32 guest end: Mem:         2043264      350184     1407336           8      419336     1693080
+session 32 guest end: MemTotal: 2043264 kB Slab: 13272 kB KernelStack: 1296 kB PageTables: 3564 kB Percpu: 352 kB 
+session 33 guest end: Mem:         2043264      343708     1413808           4      419344     1699556
+session 33 guest end: MemTotal: 2043264 kB Slab: 13288 kB KernelStack: 1264 kB PageTables: 3656 kB Percpu: 352 kB 
+phase           own     file
+before            0        0
+booted          103        0
+idle            692        0
+settle5         693        0
+settle10        693        0
+settle20        692        0
+settle30        693        0
+settle60        692        0
+settle90        678        0
+settle120       678        0
+settle180       677        0
+settled after 5 s at 677 MiB; ept 0.1 MiB/session
+
+
+

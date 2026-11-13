@@ -1,3 +1,5 @@
 mockmodel/mockmodel.go
 mockmodel/mockmodel.bin
 image/a1.pub
+acpdrive/acpdrive.bin
+fusevsock/fusevsock.bin

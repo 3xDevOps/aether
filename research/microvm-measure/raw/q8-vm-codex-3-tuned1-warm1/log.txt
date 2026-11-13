@@ -1,0 +1,53 @@
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+awk: fatal: cannot open file `/proc/0/status' for reading: No such file or directory
+29M	/root/.codex 8.0K	/root/.claude 
+29M	/root/.codex 8.0K	/root/.claude 
+29M	/root/.codex 8.0K	/root/.claude 
+turn turn done in 190ms: "aether-turn-done"
+turn turn done in 231ms: "aether-turn-done"
+turn turn done in 214ms: "aether-turn-done"
+session 31 ps: 157940 /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-li
+session 31 ps: 77908 node /usr/local/bin/codex-acp
+session 31 ps: 50348 node /usr/local/bin/codex app-server
+session 31 ps:  9304 sshd: root@notty
+session 31 ps:  9224 sshd: root@notty
+session 31 ps:  4444 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 32 ps: 157996 /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-li
+session 32 ps: 77868 node /usr/local/bin/codex-acp
+session 32 ps: 50328 node /usr/local/bin/codex app-server
+session 32 ps:  9284 sshd: root@notty
+session 32 ps:  9228 sshd: root@notty
+session 32 ps:  4440 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 33 ps: 158364 /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-li
+session 33 ps: 77712 node /usr/local/bin/codex-acp
+session 33 ps: 50328 node /usr/local/bin/codex app-server
+session 33 ps:  9276 sshd: root@notty
+session 33 ps:  9236 sshd: root@notty
+session 33 ps:  4416 sshd: /usr/sbin/sshd -E /var/log/sshd.log [listener] 0 of 10-100 startups
+session 31 guest before reclaim: Mem:         2043264      274744     1380940           8      528672     1768520
+session 32 guest before reclaim: Mem:         2043264      264320     1391424           8      528432     1778944
+session 33 guest before reclaim: Mem:         2043264      270968     1384824           4      528500     1772296
+session 31 guest end: Mem:         2043264      258056     1747708           8      175244     1785208
+session 31 guest end: MemTotal: 2043264 kB Slab: 22020 kB KernelStack: 1616 kB PageTables: 3268 kB Percpu: 352 kB 
+session 32 guest end: Mem:         2043264      259304     1746392           8      175220     1783960
+session 32 guest end: MemTotal: 2043264 kB Slab: 21988 kB KernelStack: 1600 kB PageTables: 3340 kB Percpu: 352 kB 
+session 33 guest end: Mem:         2043264      258516     1747032           8      175324     1784748
+session 33 guest end: MemTotal: 2043264 kB Slab: 22104 kB KernelStack: 1632 kB PageTables: 3276 kB Percpu: 352 kB 
+phase           own     file
+before            0        0
+booted           98        0
+warmed          126        0
+idle            684        0
+settle5         320        0
+settle10        324        0
+settle20        325        0
+settle30        326        0
+settle60        327        0
+settle90        328        0
+settle120       328        0
+settle180       328        0
+settled after 5 s at 328 MiB; ept 0.3 MiB/session
+
+
+

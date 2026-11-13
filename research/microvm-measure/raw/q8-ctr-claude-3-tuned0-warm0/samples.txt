@@ -1,0 +1,153 @@
+phase=before t=1794543710 host AnonPages:=175688 Shmem:=3252 PageTables:=6792 SecPageTables:=0 
+phase=booted t=1794543711 host AnonPages:=276540 Shmem:=3540 PageTables:=8648 SecPageTables:=0 
+phase=booted t=1794543711 ctr31 current=420 anon=96 file=0 kernel=324 shmem=0 
+phase=booted t=1794543711 ctr32 current=1060 anon=96 file=0 kernel=328 shmem=0 
+phase=booted t=1794543711 ctr33 current=1876 anon=96 file=0 kernel=328 shmem=0 
+phase=idle t=1794543772 host AnonPages:=736352 Shmem:=204796 PageTables:=15536 SecPageTables:=480 
+phase=idle t=1794543772 ctr31 current=166272 anon=161976 file=180 kernel=4120 shmem=0 
+phase=idle t=1794543772 ctr32 current=166808 anon=162508 file=192 kernel=4112 shmem=0 
+phase=idle t=1794543772 ctr33 current=166048 anon=161776 file=192 kernel=4080 shmem=0 
+phase=settle5 t=1794543777 host AnonPages:=761896 Shmem:=205888 PageTables:=16248 SecPageTables:=488 
+phase=settle5 t=1794543777 ctr31 current=166456 anon=161976 file=180 kernel=4168 shmem=0 
+phase=settle5 t=1794543777 ctr32 current=166860 anon=162504 file=192 kernel=4160 shmem=0 
+phase=settle5 t=1794543777 ctr33 current=166352 anon=161776 file=192 kernel=4128 shmem=0 
+phase=settle10 t=1794543782 host AnonPages:=766440 Shmem:=191444 PageTables:=16444 SecPageTables:=488 
+phase=settle10 t=1794543782 ctr31 current=166320 anon=161972 file=180 kernel=4168 shmem=0 
+phase=settle10 t=1794543782 ctr32 current=166856 anon=162504 file=192 kernel=4160 shmem=0 
+phase=settle10 t=1794543782 ctr33 current=166096 anon=161776 file=192 kernel=4128 shmem=0 
+phase=settle15 t=1794543787 host AnonPages:=792144 Shmem:=418324 PageTables:=17640 SecPageTables:=1068 
+phase=settle15 t=1794543787 ctr31 current=166292 anon=161972 file=180 kernel=4140 shmem=0 
+phase=settle15 t=1794543787 ctr32 current=166828 anon=162504 file=192 kernel=4132 shmem=0 
+phase=settle15 t=1794543787 ctr33 current=166068 anon=161776 file=192 kernel=4100 shmem=0 
+phase=settle20 t=1794543792 host AnonPages:=782116 Shmem:=109368 PageTables:=16296 SecPageTables:=272 
+phase=settle20 t=1794543792 ctr31 current=166292 anon=161972 file=180 kernel=4140 shmem=0 
+phase=settle20 t=1794543792 ctr32 current=166828 anon=162504 file=192 kernel=4132 shmem=0 
+phase=settle20 t=1794543792 ctr33 current=166068 anon=161776 file=192 kernel=4100 shmem=0 
+phase=settle25 t=1794543797 host AnonPages:=770216 Shmem:=370096 PageTables:=17168 SecPageTables:=852 
+phase=settle25 t=1794543797 ctr31 current=166292 anon=161972 file=180 kernel=4140 shmem=0 
+phase=settle25 t=1794543797 ctr32 current=166828 anon=162504 file=192 kernel=4132 shmem=0 
+phase=settle25 t=1794543797 ctr33 current=166068 anon=161776 file=192 kernel=4100 shmem=0 
+phase=settle30 t=1794543802 host AnonPages:=764580 Shmem:=986288 PageTables:=18524 SecPageTables:=2032 
+phase=settle30 t=1794543802 ctr31 current=166292 anon=161972 file=180 kernel=4140 shmem=0 
+phase=settle30 t=1794543802 ctr32 current=166828 anon=162504 file=192 kernel=4132 shmem=0 
+phase=settle30 t=1794543802 ctr33 current=166068 anon=161776 file=192 kernel=4100 shmem=0 
+phase=settle35 t=1794543807 host AnonPages:=751068 Shmem:=115448 PageTables:=15792 SecPageTables:=288 
+phase=settle35 t=1794543807 ctr31 current=166548 anon=161972 file=180 kernel=4168 shmem=0 
+phase=settle35 t=1794543807 ctr32 current=166844 anon=162500 file=192 kernel=4152 shmem=0 
+phase=settle35 t=1794543808 ctr33 current=166324 anon=161776 file=192 kernel=4128 shmem=0 
+phase=settle40 t=1794543813 host AnonPages:=745640 Shmem:=115448 PageTables:=15568 SecPageTables:=288 
+phase=settle40 t=1794543813 ctr31 current=166548 anon=161972 file=180 kernel=4168 shmem=0 
+phase=settle40 t=1794543813 ctr32 current=165804 anon=161460 file=192 kernel=4152 shmem=0 
+phase=settle40 t=1794543813 ctr33 current=166324 anon=161776 file=192 kernel=4128 shmem=0 
+phase=settle45 t=1794543818 host AnonPages:=743468 Shmem:=115448 PageTables:=15596 SecPageTables:=288 
+phase=settle45 t=1794543818 ctr31 current=165212 anon=160636 file=180 kernel=4136 shmem=0 
+phase=settle45 t=1794543818 ctr32 current=165464 anon=161460 file=192 kernel=4124 shmem=0 
+phase=settle45 t=1794543818 ctr33 current=165324 anon=160776 file=192 kernel=4096 shmem=0 
+phase=settle50 t=1794543823 host AnonPages:=742932 Shmem:=115476 PageTables:=15540 SecPageTables:=288 
+phase=settle50 t=1794543823 ctr31 current=165212 anon=160636 file=180 kernel=4136 shmem=0 
+phase=settle50 t=1794543823 ctr32 current=165464 anon=161120 file=192 kernel=4124 shmem=0 
+phase=settle50 t=1794543823 ctr33 current=164984 anon=160436 file=192 kernel=4096 shmem=0 
+phase=settle55 t=1794543828 host AnonPages:=743252 Shmem:=115484 PageTables:=15596 SecPageTables:=288 
+phase=settle55 t=1794543828 ctr31 current=165212 anon=160636 file=180 kernel=4136 shmem=0 
+phase=settle55 t=1794543828 ctr32 current=165464 anon=161120 file=192 kernel=4124 shmem=0 
+phase=settle55 t=1794543828 ctr33 current=164984 anon=160436 file=192 kernel=4096 shmem=0 
+phase=settle60 t=1794543833 host AnonPages:=744652 Shmem:=115484 PageTables:=15544 SecPageTables:=288 
+phase=settle60 t=1794543833 ctr31 current=165212 anon=160636 file=180 kernel=4136 shmem=0 
+phase=settle60 t=1794543833 ctr32 current=165464 anon=161120 file=192 kernel=4124 shmem=0 
+phase=settle60 t=1794543833 ctr33 current=164952 anon=160436 file=192 kernel=4096 shmem=0 
+phase=settle65 t=1794543838 host AnonPages:=691900 Shmem:=115484 PageTables:=15548 SecPageTables:=288 
+phase=settle65 t=1794543838 ctr31 current=147680 anon=143228 file=180 kernel=4196 shmem=0 
+phase=settle65 t=1794543838 ctr32 current=147804 anon=143336 file=192 kernel=4184 shmem=0 
+phase=settle65 t=1794543838 ctr33 current=147340 anon=142760 file=192 kernel=4160 shmem=0 
+phase=settle70 t=1794543843 host AnonPages:=691892 Shmem:=115484 PageTables:=15544 SecPageTables:=288 
+phase=settle70 t=1794543843 ctr31 current=147676 anon=143228 file=180 kernel=4196 shmem=0 
+phase=settle70 t=1794543843 ctr32 current=147804 anon=143336 file=192 kernel=4184 shmem=0 
+phase=settle70 t=1794543843 ctr33 current=147340 anon=142760 file=192 kernel=4160 shmem=0 
+phase=settle75 t=1794543848 host AnonPages:=689328 Shmem:=115484 PageTables:=15556 SecPageTables:=288 
+phase=settle75 t=1794543848 ctr31 current=146784 anon=142364 file=180 kernel=4136 shmem=0 
+phase=settle75 t=1794543848 ctr32 current=146924 anon=142464 file=192 kernel=4124 shmem=0 
+phase=settle75 t=1794543848 ctr33 current=146472 anon=141900 file=192 kernel=4100 shmem=0 
+phase=settle80 t=1794543853 host AnonPages:=676356 Shmem:=3584 PageTables:=14660 SecPageTables:=0 
+phase=settle80 t=1794543853 ctr31 current=146680 anon=142364 file=180 kernel=4136 shmem=0 
+phase=settle80 t=1794543853 ctr32 current=146780 anon=142464 file=192 kernel=4124 shmem=0 
+phase=settle80 t=1794543853 ctr33 current=146192 anon=141900 file=192 kernel=4100 shmem=0 
+phase=settle85 t=1794543858 host AnonPages:=676368 Shmem:=3584 PageTables:=14660 SecPageTables:=0 
+phase=settle85 t=1794543858 ctr31 current=146680 anon=142364 file=180 kernel=4136 shmem=0 
+phase=settle85 t=1794543858 ctr32 current=146780 anon=142464 file=192 kernel=4124 shmem=0 
+phase=settle85 t=1794543858 ctr33 current=146192 anon=141900 file=192 kernel=4100 shmem=0 
+phase=settle90 t=1794543863 host AnonPages:=677824 Shmem:=3584 PageTables:=14684 SecPageTables:=0 
+phase=settle90 t=1794543863 ctr31 current=146680 anon=142364 file=180 kernel=4136 shmem=0 
+phase=settle90 t=1794543863 ctr32 current=146780 anon=142464 file=192 kernel=4124 shmem=0 
+phase=settle90 t=1794543863 ctr33 current=146192 anon=141900 file=192 kernel=4100 shmem=0 
+phase=settle95 t=1794543868 host AnonPages:=681648 Shmem:=3596 PageTables:=15288 SecPageTables:=0 
+phase=settle95 t=1794543868 ctr31 current=146612 anon=142268 file=180 kernel=4164 shmem=0 
+phase=settle95 t=1794543868 ctr32 current=146940 anon=142368 file=192 kernel=4152 shmem=0 
+phase=settle95 t=1794543868 ctr33 current=146124 anon=141804 file=192 kernel=4128 shmem=0 
+phase=settle100 t=1794543873 host AnonPages:=690228 Shmem:=115512 PageTables:=15756 SecPageTables:=284 
+phase=settle100 t=1794543873 ctr31 current=146612 anon=142268 file=180 kernel=4164 shmem=0 
+phase=settle100 t=1794543873 ctr32 current=146712 anon=142368 file=192 kernel=4152 shmem=0 
+phase=settle100 t=1794543873 ctr33 current=146124 anon=141804 file=192 kernel=4128 shmem=0 
+phase=settle105 t=1794543878 host AnonPages:=689924 Shmem:=115524 PageTables:=15688 SecPageTables:=284 
+phase=settle105 t=1794543878 ctr31 current=146612 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle105 t=1794543878 ctr32 current=146712 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle105 t=1794543878 ctr33 current=146124 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle110 t=1794543883 host AnonPages:=690104 Shmem:=115524 PageTables:=15708 SecPageTables:=284 
+phase=settle110 t=1794543883 ctr31 current=146612 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle110 t=1794543883 ctr32 current=146712 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle110 t=1794543883 ctr33 current=146124 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle115 t=1794543888 host AnonPages:=689992 Shmem:=115524 PageTables:=15688 SecPageTables:=284 
+phase=settle115 t=1794543888 ctr31 current=146612 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle115 t=1794543888 ctr32 current=146712 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle115 t=1794543888 ctr33 current=146124 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle120 t=1794543893 host AnonPages:=678036 Shmem:=3584 PageTables:=14796 SecPageTables:=0 
+phase=settle120 t=1794543893 ctr31 current=146840 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle120 t=1794543893 ctr32 current=146940 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle120 t=1794543893 ctr33 current=146348 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle125 t=1794543898 host AnonPages:=677680 Shmem:=3584 PageTables:=14736 SecPageTables:=0 
+phase=settle125 t=1794543898 ctr31 current=146612 anon=142268 file=180 kernel=4164 shmem=0 
+phase=settle125 t=1794543898 ctr32 current=146712 anon=142368 file=192 kernel=4152 shmem=0 
+phase=settle125 t=1794543898 ctr33 current=146124 anon=141804 file=192 kernel=4128 shmem=0 
+phase=settle130 t=1794543903 host AnonPages:=677580 Shmem:=3584 PageTables:=14804 SecPageTables:=0 
+phase=settle130 t=1794543903 ctr31 current=146612 anon=142268 file=180 kernel=4164 shmem=0 
+phase=settle130 t=1794543903 ctr32 current=146712 anon=142368 file=192 kernel=4152 shmem=0 
+phase=settle130 t=1794543903 ctr33 current=146124 anon=141804 file=192 kernel=4128 shmem=0 
+phase=settle135 t=1794543908 host AnonPages:=677712 Shmem:=3584 PageTables:=14684 SecPageTables:=0 
+phase=settle135 t=1794543908 ctr31 current=146612 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle135 t=1794543908 ctr32 current=146712 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle135 t=1794543908 ctr33 current=146124 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle140 t=1794543913 host AnonPages:=682256 Shmem:=3584 PageTables:=14816 SecPageTables:=0 
+phase=settle140 t=1794543913 ctr31 current=146584 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle140 t=1794543913 ctr32 current=146684 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle140 t=1794543914 ctr33 current=146092 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle145 t=1794543919 host AnonPages:=677724 Shmem:=3584 PageTables:=14688 SecPageTables:=0 
+phase=settle145 t=1794543919 ctr31 current=146584 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle145 t=1794543919 ctr32 current=146684 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle145 t=1794543919 ctr33 current=146092 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle150 t=1794543924 host AnonPages:=677556 Shmem:=3584 PageTables:=14680 SecPageTables:=0 
+phase=settle150 t=1794543924 ctr31 current=146840 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle150 t=1794543924 ctr32 current=146940 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle150 t=1794543924 ctr33 current=146348 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle155 t=1794543929 host AnonPages:=677672 Shmem:=3584 PageTables:=14688 SecPageTables:=0 
+phase=settle155 t=1794543929 ctr31 current=146840 anon=142268 file=180 kernel=4164 shmem=0 
+phase=settle155 t=1794543929 ctr32 current=146940 anon=142368 file=192 kernel=4152 shmem=0 
+phase=settle155 t=1794543929 ctr33 current=146348 anon=141804 file=192 kernel=4128 shmem=0 
+phase=settle160 t=1794543934 host AnonPages:=677668 Shmem:=3584 PageTables:=14692 SecPageTables:=0 
+phase=settle160 t=1794543934 ctr31 current=146840 anon=142268 file=180 kernel=4164 shmem=0 
+phase=settle160 t=1794543934 ctr32 current=146940 anon=142368 file=192 kernel=4152 shmem=0 
+phase=settle160 t=1794543934 ctr33 current=146348 anon=141804 file=192 kernel=4128 shmem=0 
+phase=settle165 t=1794543939 host AnonPages:=677556 Shmem:=3584 PageTables:=14800 SecPageTables:=0 
+phase=settle165 t=1794543939 ctr31 current=146840 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle165 t=1794543939 ctr32 current=146940 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle165 t=1794543939 ctr33 current=146348 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle170 t=1794543944 host AnonPages:=682760 Shmem:=3584 PageTables:=15932 SecPageTables:=0 
+phase=settle170 t=1794543944 ctr31 current=146812 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle170 t=1794543944 ctr32 current=146940 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle170 t=1794543944 ctr33 current=146348 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle175 t=1794543949 host AnonPages:=694524 Shmem:=20528 PageTables:=15524 SecPageTables:=0 
+phase=settle175 t=1794543949 ctr31 current=146584 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle175 t=1794543949 ctr32 current=146684 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle175 t=1794543949 ctr33 current=146092 anon=141804 file=192 kernel=4096 shmem=0 
+phase=settle180 t=1794543954 host AnonPages:=684776 Shmem:=20528 PageTables:=15392 SecPageTables:=0 
+phase=settle180 t=1794543954 ctr31 current=146840 anon=142268 file=180 kernel=4136 shmem=0 
+phase=settle180 t=1794543954 ctr32 current=146940 anon=142368 file=192 kernel=4124 shmem=0 
+phase=settle180 t=1794543954 ctr33 current=146348 anon=141804 file=192 kernel=4096 shmem=0 

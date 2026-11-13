@@ -1,0 +1,33 @@
+turn turn done in 113ms: "aether-turn-done"
+turn turn done in 107ms: "aether-turn-done"
+turn turn done in 106ms: "aether-turn-done"
+session 31 ps: 161552 /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-li
+session 31 ps: 77736 node /usr/local/bin/codex-acp
+session 31 ps: 50232 node /usr/local/bin/codex app-server
+session 31 ps:  3932 ps -eo rss=,args= --sort=-rss
+session 31 ps:  3344 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 31 ps:  1712 cut -c1-110
+session 32 ps: 162136 /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-li
+session 32 ps: 77692 node /usr/local/bin/codex-acp
+session 32 ps: 50116 node /usr/local/bin/codex app-server
+session 32 ps:  3896 ps -eo rss=,args= --sort=-rss
+session 32 ps:  3344 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 32 ps:  1712 head -6
+session 33 ps: 161840 /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-li
+session 33 ps: 77624 node /usr/local/bin/codex-acp
+session 33 ps: 50152 node /usr/local/bin/codex app-server
+session 33 ps:  3976 ps -eo rss=,args= --sort=-rss
+session 33 ps:  3576 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 33 ps:  1680 sleep infinity
+phase           own     file
+booted            0        0
+idle             80       97
+settle5          80       97
+settle10         80       97
+settle20         80       97
+settle30         80       97
+settle60         79       97
+settle90         79       98
+settle120        79       98
+settle180        78       98
+settled after 5 s at 78 MiB; ept 0.0 MiB/session

@@ -1,0 +1,156 @@
+phase=before t=1794542146 host AnonPages:=175356 Shmem:=3172 PageTables:=6880 SecPageTables:=0 
+phase=before t=1794542146 vm31 virtiofsd_anon=0
+phase=before t=1794542146 vm32 virtiofsd_anon=0
+phase=before t=1794542146 vm33 virtiofsd_anon=0
+phase=booted t=1794542150 host AnonPages:=494328 Shmem:=3232 PageTables:=6940 SecPageTables:=212 
+phase=booted t=1794542150 vm31 VmRSS=109676 RssAnon=104580 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=booted t=1794542150 vm32 VmRSS=110384 RssAnon=105288 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=booted t=1794542151 vm33 VmRSS=112584 RssAnon=107488 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=idle t=1794542213 host AnonPages:=2318316 Shmem:=3244 PageTables:=11344 SecPageTables:=1612 
+phase=idle t=1794542213 vm31 VmRSS=718756 RssAnon=713660 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=idle t=1794542213 vm32 VmRSS=714284 RssAnon=709188 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=idle t=1794542213 vm33 VmRSS=708280 RssAnon=703184 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle5 t=1794542219 host AnonPages:=2321008 Shmem:=3244 PageTables:=11368 SecPageTables:=1640 
+phase=settle5 t=1794542219 vm31 VmRSS=719092 RssAnon=713996 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle5 t=1794542219 vm32 VmRSS=714560 RssAnon=709464 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle5 t=1794542219 vm33 VmRSS=710328 RssAnon=705232 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle10 t=1794542224 host AnonPages:=2320108 Shmem:=3244 PageTables:=11380 SecPageTables:=1644 
+phase=settle10 t=1794542224 vm31 VmRSS=718636 RssAnon=713540 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle10 t=1794542224 vm32 VmRSS=714120 RssAnon=709024 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle10 t=1794542224 vm33 VmRSS=710328 RssAnon=705232 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle15 t=1794542229 host AnonPages:=2319056 Shmem:=3244 PageTables:=11372 SecPageTables:=1668 
+phase=settle15 t=1794542229 vm31 VmRSS=718192 RssAnon=713096 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle15 t=1794542229 vm32 VmRSS=713504 RssAnon=708408 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle15 t=1794542229 vm33 VmRSS=710328 RssAnon=705232 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle20 t=1794542234 host AnonPages:=2318820 Shmem:=3244 PageTables:=11372 SecPageTables:=1680 
+phase=settle20 t=1794542234 vm31 VmRSS=717856 RssAnon=712760 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle20 t=1794542234 vm32 VmRSS=713652 RssAnon=708556 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle20 t=1794542234 vm33 VmRSS=710328 RssAnon=705232 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle25 t=1794542239 host AnonPages:=2319976 Shmem:=3244 PageTables:=11368 SecPageTables:=1688 
+phase=settle25 t=1794542239 vm31 VmRSS=719064 RssAnon=713968 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle25 t=1794542239 vm32 VmRSS=713448 RssAnon=708352 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle25 t=1794542239 vm33 VmRSS=710328 RssAnon=705232 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle30 t=1794542244 host AnonPages:=2320960 Shmem:=3244 PageTables:=11380 SecPageTables:=1772 
+phase=settle30 t=1794542244 vm31 VmRSS=718728 RssAnon=713632 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle30 t=1794542244 vm32 VmRSS=712820 RssAnon=707724 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle30 t=1794542244 vm33 VmRSS=712376 RssAnon=707280 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle35 t=1794542249 host AnonPages:=2320708 Shmem:=3244 PageTables:=11368 SecPageTables:=1784 
+phase=settle35 t=1794542249 vm31 VmRSS=718508 RssAnon=713412 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle35 t=1794542249 vm32 VmRSS=712788 RssAnon=707692 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle35 t=1794542249 vm33 VmRSS=712376 RssAnon=707280 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle40 t=1794542254 host AnonPages:=2320036 Shmem:=3244 PageTables:=11376 SecPageTables:=1848 
+phase=settle40 t=1794542254 vm31 VmRSS=718280 RssAnon=713184 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle40 t=1794542254 vm32 VmRSS=712384 RssAnon=707288 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle40 t=1794542254 vm33 VmRSS=712376 RssAnon=707280 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle45 t=1794542259 host AnonPages:=2319872 Shmem:=3244 PageTables:=11380 SecPageTables:=1852 
+phase=settle45 t=1794542259 vm31 VmRSS=717800 RssAnon=712704 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle45 t=1794542259 vm32 VmRSS=712364 RssAnon=707268 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle45 t=1794542259 vm33 VmRSS=712376 RssAnon=707280 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle50 t=1794542264 host AnonPages:=2319376 Shmem:=3244 PageTables:=11380 SecPageTables:=1852 
+phase=settle50 t=1794542264 vm31 VmRSS=717828 RssAnon=712732 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle50 t=1794542264 vm32 VmRSS=711968 RssAnon=706872 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle50 t=1794542264 vm33 VmRSS=712376 RssAnon=707280 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle55 t=1794542269 host AnonPages:=2318616 Shmem:=3244 PageTables:=11380 SecPageTables:=1856 
+phase=settle55 t=1794542269 vm31 VmRSS=717624 RssAnon=712528 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle55 t=1794542269 vm32 VmRSS=711512 RssAnon=706416 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle55 t=1794542269 vm33 VmRSS=712376 RssAnon=707280 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle60 t=1794542274 host AnonPages:=2319828 Shmem:=3244 PageTables:=11452 SecPageTables:=1900 
+phase=settle60 t=1794542274 vm31 VmRSS=717184 RssAnon=712088 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle60 t=1794542274 vm32 VmRSS=711560 RssAnon=706464 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle60 t=1794542275 vm33 VmRSS=712376 RssAnon=707280 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle65 t=1794542280 host AnonPages:=2291288 Shmem:=3244 PageTables:=11456 SecPageTables:=2004 
+phase=settle65 t=1794542280 vm31 VmRSS=704276 RssAnon=699180 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle65 t=1794542280 vm32 VmRSS=705948 RssAnon=700852 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle65 t=1794542280 vm33 VmRSS=702244 RssAnon=697148 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle70 t=1794542285 host AnonPages:=2282260 Shmem:=3244 PageTables:=11392 SecPageTables:=2028 
+phase=settle70 t=1794542285 vm31 VmRSS=699524 RssAnon=694428 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle70 t=1794542285 vm32 VmRSS=706768 RssAnon=701672 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle70 t=1794542285 vm33 VmRSS=697312 RssAnon=692216 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle75 t=1794542290 host AnonPages:=2277696 Shmem:=3244 PageTables:=11396 SecPageTables:=2044 
+phase=settle75 t=1794542290 vm31 VmRSS=698852 RssAnon=693756 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle75 t=1794542290 vm32 VmRSS=702908 RssAnon=697812 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle75 t=1794542290 vm33 VmRSS=697312 RssAnon=692216 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle80 t=1794542295 host AnonPages:=2275700 Shmem:=3244 PageTables:=11412 SecPageTables:=2052 
+phase=settle80 t=1794542295 vm31 VmRSS=698612 RssAnon=693516 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle80 t=1794542295 vm32 VmRSS=704180 RssAnon=699084 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle80 t=1794542295 vm33 VmRSS=694264 RssAnon=689168 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle85 t=1794542300 host AnonPages:=2277032 Shmem:=3244 PageTables:=11424 SecPageTables:=2080 
+phase=settle85 t=1794542300 vm31 VmRSS=698408 RssAnon=693312 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle85 t=1794542300 vm32 VmRSS=705756 RssAnon=700660 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle85 t=1794542300 vm33 VmRSS=694264 RssAnon=689168 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle90 t=1794542305 host AnonPages:=2277468 Shmem:=3244 PageTables:=11432 SecPageTables:=2100 
+phase=settle90 t=1794542305 vm31 VmRSS=697624 RssAnon=692528 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle90 t=1794542305 vm32 VmRSS=707348 RssAnon=702252 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle90 t=1794542305 vm33 VmRSS=693748 RssAnon=688652 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle95 t=1794542310 host AnonPages:=2278156 Shmem:=3244 PageTables:=11436 SecPageTables:=2100 
+phase=settle95 t=1794542310 vm31 VmRSS=697320 RssAnon=692224 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle95 t=1794542310 vm32 VmRSS=706924 RssAnon=701828 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle95 t=1794542310 vm33 VmRSS=695292 RssAnon=690196 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle100 t=1794542315 host AnonPages:=2275616 Shmem:=3244 PageTables:=11432 SecPageTables:=2104 
+phase=settle100 t=1794542315 vm31 VmRSS=697268 RssAnon=692172 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle100 t=1794542315 vm32 VmRSS=706484 RssAnon=701388 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle100 t=1794542315 vm33 VmRSS=693244 RssAnon=688148 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle105 t=1794542320 host AnonPages:=2297636 Shmem:=3252 PageTables:=12132 SecPageTables:=2108 
+phase=settle105 t=1794542320 vm31 VmRSS=697072 RssAnon=691976 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle105 t=1794542320 vm32 VmRSS=706060 RssAnon=700964 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle105 t=1794542320 vm33 VmRSS=692980 RssAnon=687884 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle110 t=1794542325 host AnonPages:=2301272 Shmem:=3252 PageTables:=12152 SecPageTables:=2108 
+phase=settle110 t=1794542325 vm31 VmRSS=696584 RssAnon=691488 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle110 t=1794542325 vm32 VmRSS=707548 RssAnon=702452 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle110 t=1794542325 vm33 VmRSS=692728 RssAnon=687632 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle115 t=1794542330 host AnonPages:=2311052 Shmem:=3252 PageTables:=12164 SecPageTables:=2116 
+phase=settle115 t=1794542330 vm31 VmRSS=696312 RssAnon=691216 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle115 t=1794542330 vm32 VmRSS=709264 RssAnon=704168 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle115 t=1794542330 vm33 VmRSS=692224 RssAnon=687128 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle120 t=1794542335 host AnonPages:=2311084 Shmem:=3252 PageTables:=12300 SecPageTables:=2124 
+phase=settle120 t=1794542335 vm31 VmRSS=696104 RssAnon=691008 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle120 t=1794542335 vm32 VmRSS=711176 RssAnon=706080 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle120 t=1794542335 vm33 VmRSS=691960 RssAnon=686864 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle125 t=1794542340 host AnonPages:=2310640 Shmem:=500736 PageTables:=13588 SecPageTables:=3160 
+phase=settle125 t=1794542340 vm31 VmRSS=695880 RssAnon=690784 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle125 t=1794542340 vm32 VmRSS=709116 RssAnon=704020 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle125 t=1794542340 vm33 VmRSS=691960 RssAnon=686864 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle130 t=1794542345 host AnonPages:=2293416 Shmem:=986644 PageTables:=14508 SecPageTables:=4128 
+phase=settle130 t=1794542345 vm31 VmRSS=695152 RssAnon=690056 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle130 t=1794542345 vm32 VmRSS=708652 RssAnon=703556 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle130 t=1794542345 vm33 VmRSS=693504 RssAnon=688408 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle135 t=1794542350 host AnonPages:=2274764 Shmem:=3244 PageTables:=11596 SecPageTables:=2144 
+phase=settle135 t=1794542350 vm31 VmRSS=694928 RssAnon=689832 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle135 t=1794542350 vm32 VmRSS=710408 RssAnon=705312 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle135 t=1794542350 vm33 VmRSS=691520 RssAnon=686424 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle140 t=1794542355 host AnonPages:=2273796 Shmem:=3244 PageTables:=11472 SecPageTables:=2148 
+phase=settle140 t=1794542355 vm31 VmRSS=694704 RssAnon=689608 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle140 t=1794542355 vm32 VmRSS=708348 RssAnon=703252 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle140 t=1794542355 vm33 VmRSS=693240 RssAnon=688144 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle145 t=1794542360 host AnonPages:=2270460 Shmem:=3244 PageTables:=11476 SecPageTables:=2156 
+phase=settle145 t=1794542360 vm31 VmRSS=694228 RssAnon=689132 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle145 t=1794542360 vm32 VmRSS=708040 RssAnon=702944 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle145 t=1794542360 vm33 VmRSS=690700 RssAnon=685604 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle150 t=1794542365 host AnonPages:=2270712 Shmem:=3244 PageTables:=11552 SecPageTables:=2164 
+phase=settle150 t=1794542365 vm31 VmRSS=694432 RssAnon=689336 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle150 t=1794542365 vm32 VmRSS=707832 RssAnon=702736 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle150 t=1794542365 vm33 VmRSS=690764 RssAnon=685668 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle155 t=1794542370 host AnonPages:=2271712 Shmem:=3244 PageTables:=11488 SecPageTables:=2172 
+phase=settle155 t=1794542370 vm31 VmRSS=694096 RssAnon=689000 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle155 t=1794542371 vm32 VmRSS=707580 RssAnon=702484 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle155 t=1794542371 vm33 VmRSS=692528 RssAnon=687432 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle160 t=1794542376 host AnonPages:=2272468 Shmem:=3244 PageTables:=11500 SecPageTables:=2172 
+phase=settle160 t=1794542376 vm31 VmRSS=695992 RssAnon=690896 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle160 t=1794542376 vm32 VmRSS=706824 RssAnon=701728 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle160 t=1794542376 vm33 VmRSS=692260 RssAnon=687164 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle165 t=1794542381 host AnonPages:=2272444 Shmem:=3244 PageTables:=11520 SecPageTables:=2184 
+phase=settle165 t=1794542381 vm31 VmRSS=695820 RssAnon=690724 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle165 t=1794542381 vm32 VmRSS=707064 RssAnon=701968 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle165 t=1794542381 vm33 VmRSS=692056 RssAnon=686960 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle170 t=1794542386 host AnonPages:=2275556 Shmem:=3244 PageTables:=11524 SecPageTables:=2188 
+phase=settle170 t=1794542386 vm31 VmRSS=697776 RssAnon=692680 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle170 t=1794542386 vm32 VmRSS=706560 RssAnon=701464 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle170 t=1794542386 vm33 VmRSS=693712 RssAnon=688616 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle175 t=1794542391 host AnonPages:=2274108 Shmem:=3244 PageTables:=11524 SecPageTables:=2192 
+phase=settle175 t=1794542391 vm31 VmRSS=695224 RssAnon=690128 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle175 t=1794542391 vm32 VmRSS=708356 RssAnon=703260 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle175 t=1794542391 vm33 VmRSS=693020 RssAnon=687924 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle180 t=1794542396 host AnonPages:=2272040 Shmem:=3244 PageTables:=11540 SecPageTables:=2212 
+phase=settle180 t=1794542396 vm31 VmRSS=695212 RssAnon=690116 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle180 t=1794542396 vm32 VmRSS=706296 RssAnon=701200 RssFile=5092 RssShmem=4 virtiofsd_anon=0
+phase=settle180 t=1794542396 vm33 VmRSS=692776 RssAnon=687680 RssFile=5092 RssShmem=4 virtiofsd_anon=0

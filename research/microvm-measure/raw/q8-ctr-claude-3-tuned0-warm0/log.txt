@@ -1,0 +1,33 @@
+turn turn done in 144ms: "aether-turn-done"
+turn turn done in 170ms: "aether-turn-done"
+turn turn done in 163ms: "aether-turn-done"
+session 31 ps: 242152 /usr/local/bin/claude --output-format stream-json --verbose --input-format stream-json --permission-pro
+session 31 ps: 99816 node /usr/local/bin/claude-agent-acp
+session 31 ps:  3928 ps -eo rss=,args= --sort=-rss
+session 31 ps:  3352 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 31 ps:  1704 cut -c1-110
+session 31 ps:  1648 head -6
+session 32 ps: 242492 /usr/local/bin/claude --output-format stream-json --verbose --input-format stream-json --permission-pro
+session 32 ps: 100320 node /usr/local/bin/claude-agent-acp
+session 32 ps:  3980 ps -eo rss=,args= --sort=-rss
+session 32 ps:  3404 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 32 ps:  1640 cut -c1-110
+session 32 ps:  1636 head -6
+session 33 ps: 242196 /usr/local/bin/claude --output-format stream-json --verbose --input-format stream-json --permission-pro
+session 33 ps: 99844 node /usr/local/bin/claude-agent-acp
+session 33 ps:  3924 ps -eo rss=,args= --sort=-rss
+session 33 ps:  3568 bash -c ps -eo rss=,args= --sort=-rss | head -6 | cut -c1-110
+session 33 ps:  1620 cut -c1-110
+session 33 ps:  1616 sleep infinity
+phase           own     file
+booted            0        0
+idle            162        0
+settle5         162        0
+settle10        162        0
+settle20        162        0
+settle30        162        0
+settle60        161        0
+settle90        143        0
+settle120       143        0
+settle180       143        0
+settled after 65 s at 143 MiB; ept 0.0 MiB/session

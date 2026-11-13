@@ -1,0 +1,9 @@
+session 6412a6a7-40c2-4c99-a7f4-6903b3192ff2 open ('/bin/sh' '-c' 'if [ -z "${CLAUDE_CODE_EXECUTABLE:-}" ] && cli=$(command -v "$1") && timeout 10 "$cli" --version </dev/null 2>/dev/null | awk -v min="$2" '\''
+NR == 1 { for (f = 1; f < NF && $f !~ /^[0-9]+\./; f++); split($f, have, "."); split(min, want, "."); ok = 1
+	for (n = 1; n <= 3; n++) { if (have[n] + 0 > want[n] + 0) break; if (have[n] + 0 < want[n] + 0) { ok = 0; break } } }
+END { exit !ok }'\'' 2>/dev/null; then export CLAUDE_CODE_EXECUTABLE="$cli"; fi; shift 2; exec "$@"' 'sh' 'claude' '2.1.287' 'claude-agent-acp')
+turn turn done in 177ms: "aether-turn-done"
+alMs=352
+[session/create] sessionId=6412a6a7-40c2-4c99-a7f4-6903b3192ff2 phase=modes durationMs=1 totalMs=353
+[session/create] sessionId=6412a6a7-40c2-4c99-a7f4-6903b3192ff2 phase=agents durationMs=0 totalMs=353
+[session/create] sessionId=6412a6a7-40c2-4c99-a7f4-6903b3192ff2 phase=register durationMs=2 totalMs=355

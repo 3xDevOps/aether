@@ -1,0 +1,14 @@
+phase           own     file
+before            0        0
+booted           98        0
+warmed          126        0
+idle            684        0
+settle5         320        0
+settle10        324        0
+settle20        325        0
+settle30        326        0
+settle60        327        0
+settle90        328        0
+settle120       328        0
+settle180       328        0
+settled after 5 s at 328 MiB; ept 0.3 MiB/session
