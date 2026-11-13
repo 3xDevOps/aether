@@ -591,6 +591,9 @@ func (s *Scheduler) leaveIfRevoked(ctx context.Context, entry *supervised, run *
 }
 
 func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, profile harness.Profile) (*EnvironmentPlan, error) {
+	if err := s.checkVMSingle(ctx, run, profile); err != nil {
+		return nil, err
+	}
 	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, actor, profile, EnvironmentPurposeRun)
 	if err != nil {
 		return nil, err

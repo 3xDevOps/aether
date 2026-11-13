@@ -101,7 +101,9 @@ mounted. It is package `internal/guest/home`, API
   at the host's end of the file.
 - `flock` and `fcntl` locks hold only within one VM, and memory maps are not
   shared across VMs. A SQLite database or a lock file in the home is not
-  protected against the member's other sessions, as it is under Docker.
+  protected against the member's other sessions, as it is under Docker;
+  [harnesses.md](harnesses.md#agents-in-session-vms) says how each agent's
+  databases are kept apart.
 - A VM can hold at most 128 requests in flight, each no larger than one
   1 MiB write, and the unit's `MemoryMax` bounds the rest.
 

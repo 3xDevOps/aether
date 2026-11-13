@@ -105,11 +105,26 @@ func TestKVMHomeIsLiveAcrossVMsAndASave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	took := kvmUserSession(t, e, "run-vmhome-a", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login,
+	// An agent's databases are each session's own, mounted over a
+	// directory in the home from the data disk.
+	if err := os.MkdirAll(filepath.Join(owner, ".codex/vm-sqlite"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := runtime.Mount{HostPath: filepath.Join(src, "scratch"), ContainerPath: "/root/.codex/vm-sqlite", Kind: runtime.MountScratch}
+	took := kvmUserSession(t, e, "run-vmhome-a", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login, state,
 		runtime.Mount{HostPath: signing, ContainerPath: "/run/aether-signing", ReadOnly: true},
 		runtime.Mount{HostPath: coord, ContainerPath: "/run/aether", ReadOnly: true})
 	t.Logf("create and start with the home took %s", took)
-	kvmUserSession(t, e, "run-vmhome-b", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login)
+	kvmUserSession(t, e, "run-vmhome-b", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login, state)
+	if out, code := vmRun(t, e, "run-vmhome-a", "echo a > /root/.codex/vm-sqlite/state_5.sqlite && stat -c '%u %a' /root/.codex/vm-sqlite"); code != 0 || !strings.Contains(out, "1000 700") {
+		t.Errorf("the session's own database directory: %d %q", code, out)
+	}
+	if out, _ := vmRun(t, e, "run-vmhome-b", "ls -A /root/.codex/vm-sqlite | wc -l"); strings.TrimSpace(out) != "0" {
+		t.Errorf("another session sees the first one's databases: %q", out)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(owner, ".codex/vm-sqlite")); len(entries) != 0 {
+		t.Errorf("a session's databases reached the home: %v", entries)
+	}
 	kvmUserSession(t, e, "run-vmhome-c", runtime.Mount{HostPath: recipient, ContainerPath: "/root"}, login)
 
 	if out, code := vmRun(t, e, "run-vmhome-a", "id -u; stat -c '%u %a' /root; echo hello > /root/notes.txt && stat -c %u /root/notes.txt"); code != 0 || !strings.Contains(out, "1000\n1000 755\n1000") {

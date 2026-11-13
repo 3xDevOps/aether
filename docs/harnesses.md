@@ -627,6 +627,38 @@ The task is optional in Standard and Enhanced mode. Launch without one and you
 land in the agent's terminal with an empty prompt, or an Enhanced session waits for
 your first message. Background mode requires a task.
 
+### Agents in session VMs
+
+With `session-runtime` set to `vm` ([environments.md](environments.md#sessions-in-virtual-machines)),
+each session runs in its own VM, and the member home reaches it through a
+file service. SQLite databases in WAL mode work only among processes of one
+kernel, so a database two VMs open at once can be corrupted. In Docker
+sessions nothing below applies: every container of a member shares the home's
+databases as before.
+
+Agents whose shared databases can move get a copy of their own in each
+session, on the session's data disk, kept across its restarts. Their logins
+and other files stay shared:
+
+| Agent | Session's own | How |
+| --- | --- | --- |
+| `codex` | `~/.codex/vm-sqlite`, every `*.sqlite` | `CODEX_SQLITE_HOME` |
+| `opencode` | `~/.local/share/opencode/vm-db/opencode.db` | `OPENCODE_DB` |
+| `cursor` | `~/.cursor/ai-tracking` and `~/.local/state/cursor/agent-stores` | `CURSOR_AGENT_STORE_DIR` for the second |
+
+A variable the workspace already sets is kept. The agent's history and
+indexes in those databases then belong to that session only.
+
+`omp`, `copilot` and `antigravity` keep such databases where no setting moves
+them (oh-my-pi's logins, Copilot's session index beside its login,
+Antigravity's conversations). Only one VM session at a time runs each of them
+on a home: the launcher's home or, on a shared account, the account owner's.
+Every live session counts, sleeping ones too, and a second launch fails with:
+
+```text
+scheduler: oh-my-pi keeps its logins in a SQLite database that two session VMs cannot share, and session run-k3v9q2m7xd already runs it on the same home; close or kill that session first
+```
+
 ### Choose a model
 
 `aether session --model <model>` or the **Model** field in the dashboard passes the

@@ -228,6 +228,13 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			return nil, err
 		}
 		plan.Mounts = append(plan.Mounts, pins...)
+		if purpose == EnvironmentPurposeRun && run != nil && s.sessionVMs() {
+			state, stateErr := s.vmStateMounts(run.ID, member.ID, profile, home, env)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			plan.Mounts = append(plan.Mounts, state...)
+		}
 		nestings = make(map[string]string, len(plan.Mounts)-1)
 		for _, m := range plan.Mounts[1:] {
 			nestings[m.ContainerPath] = home
