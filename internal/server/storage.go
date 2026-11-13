@@ -213,9 +213,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		case "vm-cache":
 			e.Reason = "Package cache new session VMs start from; rebuildable"
 		case "vm", "vm-state", "vm-db":
-			if member, ok := strings.CutPrefix(e.Key, "terminal-"); ok {
-				e.OwnerKind, e.OwnerID = "member", member
-				e.Reason = "Environment VM disks, with what the member installed; deleted when the environment is removed"
+			if attributeMemberVM(ctx, d.Store, e) {
 				continue
 			}
 			run, err := d.Store.GetRun(ctx, domain.RunID(e.Key))
@@ -322,6 +320,49 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		}
 	}
 	attributeEvidence(ctx, d.Store, u, now)
+}
+
+// memberVMs are the VMs that run for a member rather than a session, by the
+// prefix of their name; the member's ID follows, then, for the agent
+// updater, "-<agent>".
+var memberVMs = []struct{ prefix, reason string }{
+	{"terminal-", "Environment VM disks, with what the member installed; deleted when the environment is removed"},
+	{"assistant-install-", "VM that installs the assistant's agent; deleted when the install ends"},
+	{"assistant-", "Assistant VM disks; deleted when the member's assistant is removed"},
+	{"harness-update-", "Agent updater VM disks; deleted when the update ends"},
+}
+
+// attributeMemberVM gives a member VM's entry its member, reporting whether
+// the key names one. Member IDs may hold dashes, so the updater's member is
+// the longest prefix of the rest that is a member.
+func attributeMemberVM(ctx context.Context, db store.Store, e *disk.Entry) bool {
+	for _, kind := range memberVMs {
+		rest, ok := strings.CutPrefix(e.Key, kind.prefix)
+		if !ok {
+			continue
+		}
+		candidates := []string{rest}
+		if kind.prefix == "harness-update-" {
+			candidates = nil
+			for i := strings.LastIndex(rest, "-"); i > 0; i = strings.LastIndex(rest[:i], "-") {
+				candidates = append(candidates, rest[:i])
+			}
+		}
+		err := store.ErrNotFound
+		for _, id := range candidates {
+			var member *domain.Member
+			if member, err = db.GetMember(ctx, domain.MemberID(id)); err == nil {
+				e.OwnerKind, e.OwnerID, e.Reason = "member", string(member.ID), kind.reason
+				return true
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				break
+			}
+		}
+		unknownStorageOwner(e, err)
+		return true
+	}
+	return false
 }
 
 func nonemptyStorageErrors(values ...string) []string {
