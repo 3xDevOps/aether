@@ -58,8 +58,8 @@ func newCheckoutHost(t *testing.T) *checkoutHost {
 	h.diffs = sub.Events()
 	h.e = newEngine(Config{
 		DataDir: dir, Images: images, Monitor: []string{server, MonitorCommand}, Helper: server,
-		CheckoutDisks: func(ctx context.Context, path string, uid, gid int) (string, guest.Checkout, bool, error) {
-			return h.git.VMCheckoutDisk(ctx, path, uid, gid)
+		CheckoutDisks: func(ctx context.Context, path, target string, uid, gid int) (string, guest.Checkout, bool, error) {
+			return h.git.VMCheckoutDisk(ctx, path, target, uid, gid)
 		},
 	}, systemdUnits{}, dialHelper)
 	vms := &Runtime{vms: h.e}
@@ -207,17 +207,68 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	h.sh(t, key, "echo after > after-commit.txt")
-	if err = h.e.stop(t.Context(), key, time.Second); err != nil {
+	ctx := t.Context()
+	entries, err := h.git.FilesTree(ctx, ws, run, "", "")
+	if err != nil || !hasEntry(entries, "new.txt") || !hasEntry(entries, "src") {
+		t.Fatalf("files tree = %+v, %v", entries, err)
+	}
+	read, err := h.git.FilesRead(ctx, ws, run, "", "new.txt", 0)
+	if err != nil || string(read.Content) != "one\n" {
+		t.Fatalf("files read = %+v, %v", read, err)
+	}
+	upload := []byte{0, 1, 2, 'x', '\n'}
+	if _, err = h.git.FilesWrite(ctx, ws, run, "", "uploads/blob.bin", upload, "", domain.GitIdentity{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if published, publishErr := h.git.PublishRunBranch(t.Context(), run); publishErr != nil || published != head {
-		t.Fatalf("publish after the main process exited = %s, %v", published, publishErr)
+	if got := h.sh(t, key, "od -An -tx1 uploads/blob.bin | tr -d ' \n'; stat -c ' %u' uploads/blob.bin"); got != "000102780a 1000" {
+		t.Fatalf("uploaded file in the VM: %q", got)
+	}
+	diff, err := h.git.FileDiff(ctx, run, "src/0/f0.txt")
+	if err != nil || !strings.Contains(diff.Text, "+two") {
+		t.Fatalf("file diff = %+v, %v", diff, err)
+	}
+	child := t.TempDir()
+	hostGit(t, h.repos, "clone", "--quiet", repo, child)
+	hostGit(t, child, "commit", "--quiet", "--allow-empty", "-m", "subsession work")
+	hostGit(t, child, "push", "--quiet", "origin", "HEAD:refs/heads/aether/run-vmco-child-"+prefix)
+	childHead := hostGit(t, child, "rev-parse", "HEAD")
+	fetched, err := h.git.FetchRunBranch(ctx, ws, "aether/run-vmco-child-"+prefix, run, "refs/remotes/children/c1")
+	if err != nil || fetched != childHead {
+		t.Fatalf("subsession fetch = %s, %v", fetched, err)
+	}
+	if got := h.sh(t, key, "git rev-parse refs/remotes/children/c1"); got != childHead {
+		t.Fatalf("the VM's children ref is %s, want %s", got, childHead)
+	}
+
+	// Finalize's order: the main process exits, then the last snapshot, the
+	// commit, publication and evidence, then the VM goes.
+	h.sh(t, key, "echo after > after-commit.txt")
+	if err = h.e.stop(ctx, key, time.Second); err != nil {
+		t.Fatal(err)
 	}
 	h.git.StopDiffWatch(run)
 	store := filepath.Join(filepath.Dir(h.repos), "checkouts", key+".diffsnap")
 	if got := hostGit(t, store, "ls-tree", "--name-only", "refs/aether/published", "after-commit.txt"); got != "after-commit.txt" {
 		t.Fatalf("the last snapshot, taken after the main process exited, lacks the last file: %q", got)
+	}
+	member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
+	final, err := h.git.CommitAll(ctx, run, "aether: a task", member, nil)
+	if err != nil || final == "" {
+		t.Fatalf("final commit = %q, %v", final, err)
+	}
+	published, err := h.git.PublishRunBranch(ctx, run)
+	if err != nil || published != final {
+		t.Fatalf("publish after the final commit = %s, %v", published, err)
+	}
+	if author := hostGit(t, repo, "log", "-1", "--format=%an <%ae>|%cn|%P", "refs/heads/"+branch); author != "Member <member@localhost>|Aether|"+head {
+		t.Fatalf("published final commit: %s", author)
+	}
+	if files := hostGit(t, repo, "show", "--name-only", "--format=", final); !strings.Contains(files, "after-commit.txt") || !strings.Contains(files, "uploads/blob.bin") {
+		t.Fatalf("final commit holds %q", files)
+	}
+	revision, err := h.git.CaptureEvidence(ctx, run, "packet-"+prefix)
+	if err != nil || revision.Tree != hostGit(t, repo, "rev-parse", final+"^{tree}") {
+		t.Fatalf("evidence = %+v, %v", revision, err)
 	}
 	if err = h.e.destroy(t.Context(), key); err != nil {
 		t.Fatal(err)
@@ -244,4 +295,13 @@ func waitDiff(t *testing.T, diffs <-chan events.Event, path string) {
 			t.Fatalf("no run.diff with %s", path)
 		}
 	}
+}
+
+func hasEntry(entries []gitengine.TreeEntry, name string) bool {
+	for _, e := range entries {
+		if e.Name == name {
+			return true
+		}
+	}
+	return false
 }

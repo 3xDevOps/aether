@@ -20,6 +20,13 @@ type GitTransport interface {
 	ReceivePack(ctx context.Context, ws domain.WorkspaceID, stdin io.Reader, stdout, stderr io.Writer) (exitCode int, err error)
 }
 
+// VMSync serves the live overlay of a checkout that lives in its session's
+// VM. A GitTransport that has no such checkouts does not implement it.
+type VMSync interface {
+	VMSyncRoot(run domain.RunID) (string, bool)
+	ServeVMSync(ctx context.Context, run domain.RunID, stream io.ReadWriteCloser) error
+}
+
 // PTYAttacher is the SSH server's view of the PTY host (*ptyhost.Host).
 type PTYAttacher interface {
 	Attach(ctx context.Context, key ptyhost.SessionKey, client ptyhost.AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error

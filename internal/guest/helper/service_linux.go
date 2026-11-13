@@ -44,14 +44,14 @@ func newService(procs *processes, cgroup *sessionCgroup, bootID, bootError strin
 // newServer bounds requests and drops a server whose connection died
 // silently, such as one cut off by a save and restore.
 func newServer(s *service) *grpc.Server {
-	server := newGRPCServer()
+	server := newGRPCServer(8 << 20)
 	guestpb.RegisterGuestServer(server, s)
 	return server
 }
 
-func newGRPCServer() *grpc.Server {
+func newGRPCServer(maxRecv int) *grpc.Server {
 	return grpc.NewServer(
-		grpc.MaxRecvMsgSize(8<<20),
+		grpc.MaxRecvMsgSize(maxRecv),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 30 * time.Second, Timeout: 10 * time.Second}),
 	)
 }

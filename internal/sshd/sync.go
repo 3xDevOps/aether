@@ -208,11 +208,17 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 	// closes the channel and unblocks ServeEndpoint's reads.
 	stop := context.AfterFunc(ctx, func() { _ = ch.Close() })
 	defer stop()
+	root, vmSync := run.Worktree, VMSync(nil)
+	if v, ok := s.cfg.Git.(VMSync); ok {
+		if vmRoot, inVM := v.VMSyncRoot(run.ID); inVM {
+			root, vmSync = vmRoot, v
+		}
+	}
 	stream := &rootPinningStream{
 		r:       r,
 		ch:      ch,
 		algo:    algo,
-		root:    run.Worktree,
+		root:    root,
 		session: session,
 		onInit:  func() { handshake.Stop() },
 	}
@@ -220,7 +226,13 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 	defer stopAuth()
 	s.spawn(func() { s.revokeSyncOnPolicyChange(authCtx, member, run.ID, run.Worktree, stream) })
 
-	if serr := remote.ServeEndpoint(logging.NewLogger(logging.LevelError, io.Discard), stream); serr != nil {
+	var served error
+	if vmSync != nil {
+		served = vmSync.ServeVMSync(authCtx, run.ID, stream)
+	} else {
+		served = remote.ServeEndpoint(logging.NewLogger(logging.LevelError, io.Discard), stream)
+	}
+	if served != nil {
 		sendExitStatus(ch, 1)
 		return
 	}

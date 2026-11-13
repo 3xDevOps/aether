@@ -12,13 +12,14 @@ service Git {
   // to the session user, records its identity and starts its diff watch. It is called before the session's
   // first process starts, and again after every server restart.
   rpc Setup(SetupRequest) returns (SetupReply);
-  // Watch streams one checkout's diff watch. The first acknowledgement
-  // names the checkout; a later Watch of the same checkout replaces this
-  // one. A diff or head event counts as delivered only once the server
-  // acknowledges its sequence number.
+  // Watch streams one checkout's diff watch, starting it when it does not
+  // run. The first acknowledgement names the checkout; a later Watch of the
+  // same checkout replaces this one. A diff or head event counts as
+  // delivered only once the server acknowledges its sequence number; while
+  // no Watch is open, snapshots fail and are retried as history gaps.
   rpc Watch(stream WatchAck) returns (stream WatchEvent);
-  // Flush takes a snapshot of the checkout now and returns once Watch
-  // delivered it.
+  // Flush takes a last snapshot of the checkout, returns once Watch
+  // delivered it, and stops the checkout's diff watch until the next Watch.
   rpc Flush(FlushRequest) returns (FlushReply);
   // Objects streams a pack of every object reachable from wants and from
   // none of the haves the checkout holds.
@@ -28,6 +29,25 @@ service Git {
   rpc Patch(PatchRequest) returns (PatchReply);
   // Head returns the commit the checkout's HEAD names.
   rpc Head(HeadRequest) returns (HeadReply);
+  // Stage writes a tree of the whole checkout, as a snapshot does: for
+  // evidence within its bound, or for the server's final commit over a copy
+  // of the checkout's own index, which Install can then make the
+  // checkout's.
+  rpc Stage(StageRequest) returns (StageReply);
+  // Install adds a pack's objects to the checkout and moves its refs, as
+  // the checkout's owner. The first message names what to do, every
+  // message carries pack data.
+  rpc Install(stream InstallChunk) returns (InstallReply);
+  // Tree, ReadFile, WriteFile and FileDiff are the Files view's calls on
+  // the checkout, as the server's engine answers them for a checkout on its
+  // own disk.
+  rpc Tree(TreeRequest) returns (TreeReply);
+  rpc ReadFile(ReadFileRequest) returns (FileReply);
+  rpc WriteFile(WriteFileRequest) returns (FileReply);
+  rpc FileDiff(FileDiffRequest) returns (PatchReply);
+  // Sync serves a live overlay's endpoint at the checkout; the first chunk
+  // names the checkout and every chunk carries the overlay's stream.
+  rpc Sync(stream SyncChunk) returns (stream SyncChunk);
 }
 
 // GitFailure is the status detail of a call that failed for a reason the
@@ -103,6 +123,84 @@ message HeadRequest {
 
 message HeadReply {
   string commit = 1;
+}
+
+message StageRequest {
+  string key = 1;
+  enum Purpose {
+    PURPOSE_UNSPECIFIED = 0;
+    PURPOSE_COMMIT = 1;
+    PURPOSE_EVIDENCE = 2;
+  }
+  Purpose purpose = 2;
+}
+
+message StageReply {
+  string tree = 1;
+  string head = 2;
+}
+
+message RefUpdate {
+  string ref = 1;
+  string new = 2;
+  // old, when set, must be the ref's value for the update to happen.
+  string old = 3;
+}
+
+message InstallChunk {
+  string key = 1;
+  repeated RefUpdate updates = 2;
+  string reflog_message = 3;
+  // index, when set, makes the index Stage last wrote for a commit the
+  // checkout's, provided its tree is this one.
+  string index = 4;
+  bytes data = 5;
+}
+
+message InstallReply {}
+
+message TreeRequest {
+  string key = 1;
+  string dir = 2;
+}
+
+message TreeEntry {
+  string name = 1;
+  string kind = 2;
+  int64 size = 3;
+}
+
+message TreeReply {
+  repeated TreeEntry entries = 1;
+}
+
+message ReadFileRequest {
+  string key = 1;
+  string path = 2;
+  uint32 max_bytes = 3;
+}
+
+message WriteFileRequest {
+  string key = 1;
+  string path = 2;
+  bytes content = 3;
+  string revision = 4;
+}
+
+message FileReply {
+  bytes content = 1;
+  bool truncated = 2;
+  int64 size = 3;
+}
+
+message FileDiffRequest {
+  string key = 1;
+  string path = 2;
+}
+
+message SyncChunk {
+  string key = 1;
+  bytes data = 2;
 }
 
 message PatchRequest {

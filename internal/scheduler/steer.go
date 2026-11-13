@@ -949,15 +949,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 		s.cfg.Git.StopDiffWatch(run)
 		_ = s.entryDriver(entry).Stop(context.WithoutCancel(ctx), run)
 		s.cfg.PTY.StopSessionsWithPrefix(context.WithoutCancel(ctx), string(ptyhost.RunShellSession(run, "")))
-		paused := alreadyPaused
-		if !paused {
-			if err := s.cfg.Runtime.Pause(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
-				slog.Warn("scheduler: pause closed TUI run", "run", run, "error", err)
-			} else if err == nil {
-				paused = true
-			}
-		}
-		if paused {
+		commitClosed := func() (committed, published string) {
 			msg := "wip: "
 			if outcome == domain.RunMerged || outcome == domain.RunCompleted {
 				msg = "aether: "
@@ -969,6 +961,26 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 			published, perr := s.cfg.Git.PublishRunBranch(ctx, run)
 			if perr != nil {
 				slog.Warn("scheduler: publish closed TUI run", "run", run, "error", perr)
+			}
+			return committed, published
+		}
+		// A paused VM runs no git, so a checkout in one is committed first.
+		var committed, published string
+		vmCheckout := s.cfg.Git.IsVMCheckout(run)
+		if vmCheckout {
+			committed, published = commitClosed()
+		}
+		paused := alreadyPaused
+		if !paused {
+			if err := s.cfg.Runtime.Pause(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+				slog.Warn("scheduler: pause closed TUI run", "run", run, "error", err)
+			} else if err == nil {
+				paused = true
+			}
+		}
+		if paused {
+			if !vmCheckout {
+				committed, published = commitClosed()
 			}
 			identity := finishCaptureIdentity(entry.evidenceIdentity, published, committed, 0)
 			s.mu.Lock()

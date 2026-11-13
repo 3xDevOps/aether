@@ -82,6 +82,10 @@ func serveGit() error {
 	if err != nil {
 		return err
 	}
+	// A live overlay's endpoint keeps its staging there.
+	if err = os.Setenv("MUTAGEN_DATA_DIRECTORY", filepath.Join(gitDir, "mutagen")); err != nil {
+		return err
+	}
 	svc, err := newGitService(gitengine.Config{ReposDir: filepath.Join(gitDir, "repos"), CheckoutsDir: gitDir}, cfg.Checkouts)
 	if err != nil {
 		return err
@@ -90,7 +94,8 @@ func serveGit() error {
 	if err != nil {
 		return fmt.Errorf("listen on vsock port %d: %w", guest.GitPort, err)
 	}
-	server := newGRPCServer()
+	// A Files write carries the whole file.
+	server := newGRPCServer(guest.MaxFileBytes + 1<<20)
 	guestpb.RegisterGitServer(server, svc)
 	return server.Serve(hostOnly{listener})
 }
@@ -169,7 +174,6 @@ type gitService struct {
 	mu         sync.Mutex
 	watches    map[string]*gitWatch
 	workspaces map[string]domain.WorkspaceID
-	attached   chan struct{}
 	seq        atomic.Uint64
 }
 
@@ -186,7 +190,7 @@ type gitWatch struct {
 func newGitService(cfg gitengine.Config, mounts []guest.CheckoutMount) (*gitService, error) {
 	s := &gitService{
 		dir: cfg.CheckoutsDir, targets: map[string]string{},
-		watches: map[string]*gitWatch{}, workspaces: map[string]domain.WorkspaceID{}, attached: make(chan struct{}),
+		watches: map[string]*gitWatch{}, workspaces: map[string]domain.WorkspaceID{},
 	}
 	for _, m := range mounts {
 		s.targets[m.Key] = m.Target
@@ -238,7 +242,7 @@ func (s *gitService) setup(ctx context.Context, checkouts []*guestpb.Checkout) e
 		if err := s.engine.AdoptCheckout(id); err != nil {
 			return err
 		}
-		if err := s.engine.StartDiffWatch(ctx, domain.WorkspaceID(id.Workspace), domain.RunID(id.Key)); err != nil {
+		if err := s.engine.WatchCheckout(ctx, domain.WorkspaceID(id.Workspace), domain.RunID(id.Key)); err != nil {
 			return fmt.Errorf("checkout %s: %w", id.Key, err)
 		}
 		s.mu.Lock()
@@ -320,8 +324,12 @@ func (s *gitService) Watch(stream grpc.BidiStreamingServer[guestpb.WatchAck, gue
 		return err
 	}
 	key := first.GetKey()
-	if _, err := s.workspace(key); err != nil {
+	ws, err := s.workspace(key)
+	if err != nil {
 		return err
+	}
+	if err := s.engine.WatchCheckout(stream.Context(), ws, domain.RunID(key)); err != nil {
+		return gitStatus(err)
 	}
 	w := &gitWatch{stream: stream, acks: map[uint64]chan string{}, done: make(chan struct{})}
 	s.mu.Lock()
@@ -329,8 +337,6 @@ func (s *gitService) Watch(stream grpc.BidiStreamingServer[guestpb.WatchAck, gue
 		old.close()
 	}
 	s.watches[key] = w
-	close(s.attached)
-	s.attached = make(chan struct{})
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -407,24 +413,21 @@ func (s *gitService) reportChanges(ctx context.Context, key string, w *gitWatch)
 	}
 }
 
-// deliver sends ev on key's watch and waits for the server's answer.
+// deliver sends ev on key's watch and waits for the server's answer. It
+// fails at once while no server watches: the engine holds the checkout's
+// snapshot lock meanwhile, and records a gap that it retries.
 func (s *gitService) deliver(ctx context.Context, key domain.RunID, ev *guestpb.WatchEvent) error {
-	for {
-		s.mu.Lock()
-		w, attached := s.watches[string(key)], s.attached
-		s.mu.Unlock()
-		if w != nil {
-			if err := s.deliverTo(ctx, w, ev); !errors.Is(err, errWatchGone) {
-				return err
-			}
-			continue
-		}
-		select {
-		case <-attached:
-		case <-ctx.Done():
-			return fmt.Errorf("no server watches checkout %s: %w", key, ctx.Err())
-		}
+	s.mu.Lock()
+	w := s.watches[string(key)]
+	s.mu.Unlock()
+	if w == nil {
+		return fmt.Errorf("no server watches checkout %s", key)
 	}
+	err := s.deliverTo(ctx, w, ev)
+	if errors.Is(err, errWatchGone) {
+		return fmt.Errorf("checkout %s: %w", key, err)
+	}
+	return err
 }
 
 var errWatchGone = errors.New("the server's watch ended")
@@ -471,14 +474,11 @@ func (s *gitService) BranchMoved(ctx context.Context, key domain.RunID, head str
 	return s.deliver(ctx, key, &guestpb.WatchEvent{Kind: &guestpb.WatchEvent_Head{Head: head}})
 }
 
-func (s *gitService) Flush(ctx context.Context, req *guestpb.FlushRequest) (*guestpb.FlushReply, error) {
-	ws, err := s.workspace(req.GetKey())
-	if err != nil {
+func (s *gitService) Flush(_ context.Context, req *guestpb.FlushRequest) (*guestpb.FlushReply, error) {
+	if _, err := s.workspace(req.GetKey()); err != nil {
 		return nil, err
 	}
-	if err := s.engine.FlushDiffWatch(ctx, ws, domain.RunID(req.GetKey())); err != nil {
-		return nil, gitStatus(err)
-	}
+	s.engine.FinishWatch(domain.RunID(req.GetKey()))
 	return &guestpb.FlushReply{}, nil
 }
 

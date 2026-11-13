@@ -23,12 +23,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Git_Setup_FullMethodName   = "/aether.guest.v1.Git/Setup"
-	Git_Watch_FullMethodName   = "/aether.guest.v1.Git/Watch"
-	Git_Flush_FullMethodName   = "/aether.guest.v1.Git/Flush"
-	Git_Objects_FullMethodName = "/aether.guest.v1.Git/Objects"
-	Git_Patch_FullMethodName   = "/aether.guest.v1.Git/Patch"
-	Git_Head_FullMethodName    = "/aether.guest.v1.Git/Head"
+	Git_Setup_FullMethodName     = "/aether.guest.v1.Git/Setup"
+	Git_Watch_FullMethodName     = "/aether.guest.v1.Git/Watch"
+	Git_Flush_FullMethodName     = "/aether.guest.v1.Git/Flush"
+	Git_Objects_FullMethodName   = "/aether.guest.v1.Git/Objects"
+	Git_Patch_FullMethodName     = "/aether.guest.v1.Git/Patch"
+	Git_Head_FullMethodName      = "/aether.guest.v1.Git/Head"
+	Git_Stage_FullMethodName     = "/aether.guest.v1.Git/Stage"
+	Git_Install_FullMethodName   = "/aether.guest.v1.Git/Install"
+	Git_Tree_FullMethodName      = "/aether.guest.v1.Git/Tree"
+	Git_ReadFile_FullMethodName  = "/aether.guest.v1.Git/ReadFile"
+	Git_WriteFile_FullMethodName = "/aether.guest.v1.Git/WriteFile"
+	Git_FileDiff_FullMethodName  = "/aether.guest.v1.Git/FileDiff"
+	Git_Sync_FullMethodName      = "/aether.guest.v1.Git/Sync"
 )
 
 // GitClient is the client API for Git service.
@@ -39,13 +46,14 @@ type GitClient interface {
 	// to the session user, records its identity and starts its diff watch. It is called before the session's
 	// first process starts, and again after every server restart.
 	Setup(ctx context.Context, in *SetupRequest, opts ...grpc.CallOption) (*SetupReply, error)
-	// Watch streams one checkout's diff watch. The first acknowledgement
-	// names the checkout; a later Watch of the same checkout replaces this
-	// one. A diff or head event counts as delivered only once the server
-	// acknowledges its sequence number.
+	// Watch streams one checkout's diff watch, starting it when it does not
+	// run. The first acknowledgement names the checkout; a later Watch of the
+	// same checkout replaces this one. A diff or head event counts as
+	// delivered only once the server acknowledges its sequence number; while
+	// no Watch is open, snapshots fail and are retried as history gaps.
 	Watch(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WatchAck, WatchEvent], error)
-	// Flush takes a snapshot of the checkout now and returns once Watch
-	// delivered it.
+	// Flush takes a last snapshot of the checkout, returns once Watch
+	// delivered it, and stops the checkout's diff watch until the next Watch.
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushReply, error)
 	// Objects streams a pack of every object reachable from wants and from
 	// none of the haves the checkout holds.
@@ -55,6 +63,25 @@ type GitClient interface {
 	Patch(ctx context.Context, in *PatchRequest, opts ...grpc.CallOption) (*PatchReply, error)
 	// Head returns the commit the checkout's HEAD names.
 	Head(ctx context.Context, in *HeadRequest, opts ...grpc.CallOption) (*HeadReply, error)
+	// Stage writes a tree of the whole checkout, as a snapshot does: for
+	// evidence within its bound, or for the server's final commit over a copy
+	// of the checkout's own index, which Install can then make the
+	// checkout's.
+	Stage(ctx context.Context, in *StageRequest, opts ...grpc.CallOption) (*StageReply, error)
+	// Install adds a pack's objects to the checkout and moves its refs, as
+	// the checkout's owner. The first message names what to do, every
+	// message carries pack data.
+	Install(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[InstallChunk, InstallReply], error)
+	// Tree, ReadFile, WriteFile and FileDiff are the Files view's calls on
+	// the checkout, as the server's engine answers them for a checkout on its
+	// own disk.
+	Tree(ctx context.Context, in *TreeRequest, opts ...grpc.CallOption) (*TreeReply, error)
+	ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (*FileReply, error)
+	WriteFile(ctx context.Context, in *WriteFileRequest, opts ...grpc.CallOption) (*FileReply, error)
+	FileDiff(ctx context.Context, in *FileDiffRequest, opts ...grpc.CallOption) (*PatchReply, error)
+	// Sync serves a live overlay's endpoint at the checkout; the first chunk
+	// names the checkout and every chunk carries the overlay's stream.
+	Sync(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SyncChunk, SyncChunk], error)
 }
 
 type gitClient struct {
@@ -137,6 +164,82 @@ func (c *gitClient) Head(ctx context.Context, in *HeadRequest, opts ...grpc.Call
 	return out, nil
 }
 
+func (c *gitClient) Stage(ctx context.Context, in *StageRequest, opts ...grpc.CallOption) (*StageReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StageReply)
+	err := c.cc.Invoke(ctx, Git_Stage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitClient) Install(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[InstallChunk, InstallReply], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Git_ServiceDesc.Streams[2], Git_Install_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[InstallChunk, InstallReply]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_InstallClient = grpc.ClientStreamingClient[InstallChunk, InstallReply]
+
+func (c *gitClient) Tree(ctx context.Context, in *TreeRequest, opts ...grpc.CallOption) (*TreeReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TreeReply)
+	err := c.cc.Invoke(ctx, Git_Tree_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitClient) ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (*FileReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FileReply)
+	err := c.cc.Invoke(ctx, Git_ReadFile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitClient) WriteFile(ctx context.Context, in *WriteFileRequest, opts ...grpc.CallOption) (*FileReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FileReply)
+	err := c.cc.Invoke(ctx, Git_WriteFile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitClient) FileDiff(ctx context.Context, in *FileDiffRequest, opts ...grpc.CallOption) (*PatchReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PatchReply)
+	err := c.cc.Invoke(ctx, Git_FileDiff_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitClient) Sync(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SyncChunk, SyncChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Git_ServiceDesc.Streams[3], Git_Sync_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SyncChunk, SyncChunk]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_SyncClient = grpc.BidiStreamingClient[SyncChunk, SyncChunk]
+
 // GitServer is the server API for Git service.
 // All implementations must embed UnimplementedGitServer
 // for forward compatibility.
@@ -145,13 +248,14 @@ type GitServer interface {
 	// to the session user, records its identity and starts its diff watch. It is called before the session's
 	// first process starts, and again after every server restart.
 	Setup(context.Context, *SetupRequest) (*SetupReply, error)
-	// Watch streams one checkout's diff watch. The first acknowledgement
-	// names the checkout; a later Watch of the same checkout replaces this
-	// one. A diff or head event counts as delivered only once the server
-	// acknowledges its sequence number.
+	// Watch streams one checkout's diff watch, starting it when it does not
+	// run. The first acknowledgement names the checkout; a later Watch of the
+	// same checkout replaces this one. A diff or head event counts as
+	// delivered only once the server acknowledges its sequence number; while
+	// no Watch is open, snapshots fail and are retried as history gaps.
 	Watch(grpc.BidiStreamingServer[WatchAck, WatchEvent]) error
-	// Flush takes a snapshot of the checkout now and returns once Watch
-	// delivered it.
+	// Flush takes a last snapshot of the checkout, returns once Watch
+	// delivered it, and stops the checkout's diff watch until the next Watch.
 	Flush(context.Context, *FlushRequest) (*FlushReply, error)
 	// Objects streams a pack of every object reachable from wants and from
 	// none of the haves the checkout holds.
@@ -161,6 +265,25 @@ type GitServer interface {
 	Patch(context.Context, *PatchRequest) (*PatchReply, error)
 	// Head returns the commit the checkout's HEAD names.
 	Head(context.Context, *HeadRequest) (*HeadReply, error)
+	// Stage writes a tree of the whole checkout, as a snapshot does: for
+	// evidence within its bound, or for the server's final commit over a copy
+	// of the checkout's own index, which Install can then make the
+	// checkout's.
+	Stage(context.Context, *StageRequest) (*StageReply, error)
+	// Install adds a pack's objects to the checkout and moves its refs, as
+	// the checkout's owner. The first message names what to do, every
+	// message carries pack data.
+	Install(grpc.ClientStreamingServer[InstallChunk, InstallReply]) error
+	// Tree, ReadFile, WriteFile and FileDiff are the Files view's calls on
+	// the checkout, as the server's engine answers them for a checkout on its
+	// own disk.
+	Tree(context.Context, *TreeRequest) (*TreeReply, error)
+	ReadFile(context.Context, *ReadFileRequest) (*FileReply, error)
+	WriteFile(context.Context, *WriteFileRequest) (*FileReply, error)
+	FileDiff(context.Context, *FileDiffRequest) (*PatchReply, error)
+	// Sync serves a live overlay's endpoint at the checkout; the first chunk
+	// names the checkout and every chunk carries the overlay's stream.
+	Sync(grpc.BidiStreamingServer[SyncChunk, SyncChunk]) error
 	mustEmbedUnimplementedGitServer()
 }
 
@@ -188,6 +311,27 @@ func (UnimplementedGitServer) Patch(context.Context, *PatchRequest) (*PatchReply
 }
 func (UnimplementedGitServer) Head(context.Context, *HeadRequest) (*HeadReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Head not implemented")
+}
+func (UnimplementedGitServer) Stage(context.Context, *StageRequest) (*StageReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Stage not implemented")
+}
+func (UnimplementedGitServer) Install(grpc.ClientStreamingServer[InstallChunk, InstallReply]) error {
+	return status.Error(codes.Unimplemented, "method Install not implemented")
+}
+func (UnimplementedGitServer) Tree(context.Context, *TreeRequest) (*TreeReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Tree not implemented")
+}
+func (UnimplementedGitServer) ReadFile(context.Context, *ReadFileRequest) (*FileReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReadFile not implemented")
+}
+func (UnimplementedGitServer) WriteFile(context.Context, *WriteFileRequest) (*FileReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method WriteFile not implemented")
+}
+func (UnimplementedGitServer) FileDiff(context.Context, *FileDiffRequest) (*PatchReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method FileDiff not implemented")
+}
+func (UnimplementedGitServer) Sync(grpc.BidiStreamingServer[SyncChunk, SyncChunk]) error {
+	return status.Error(codes.Unimplemented, "method Sync not implemented")
 }
 func (UnimplementedGitServer) mustEmbedUnimplementedGitServer() {}
 func (UnimplementedGitServer) testEmbeddedByValue()             {}
@@ -300,6 +444,110 @@ func _Git_Head_Handler(srv interface{}, ctx context.Context, dec func(interface{
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Git_Stage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitServer).Stage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Git_Stage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitServer).Stage(ctx, req.(*StageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Git_Install_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(GitServer).Install(&grpc.GenericServerStream[InstallChunk, InstallReply]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_InstallServer = grpc.ClientStreamingServer[InstallChunk, InstallReply]
+
+func _Git_Tree_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TreeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitServer).Tree(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Git_Tree_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitServer).Tree(ctx, req.(*TreeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Git_ReadFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadFileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitServer).ReadFile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Git_ReadFile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitServer).ReadFile(ctx, req.(*ReadFileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Git_WriteFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WriteFileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitServer).WriteFile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Git_WriteFile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitServer).WriteFile(ctx, req.(*WriteFileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Git_FileDiff_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FileDiffRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitServer).FileDiff(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Git_FileDiff_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitServer).FileDiff(ctx, req.(*FileDiffRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Git_Sync_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(GitServer).Sync(&grpc.GenericServerStream[SyncChunk, SyncChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_SyncServer = grpc.BidiStreamingServer[SyncChunk, SyncChunk]
+
 // Git_ServiceDesc is the grpc.ServiceDesc for Git service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -323,6 +571,26 @@ var Git_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Head",
 			Handler:    _Git_Head_Handler,
 		},
+		{
+			MethodName: "Stage",
+			Handler:    _Git_Stage_Handler,
+		},
+		{
+			MethodName: "Tree",
+			Handler:    _Git_Tree_Handler,
+		},
+		{
+			MethodName: "ReadFile",
+			Handler:    _Git_ReadFile_Handler,
+		},
+		{
+			MethodName: "WriteFile",
+			Handler:    _Git_WriteFile_Handler,
+		},
+		{
+			MethodName: "FileDiff",
+			Handler:    _Git_FileDiff_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -335,6 +603,17 @@ var Git_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "Objects",
 			Handler:       _Git_Objects_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "Install",
+			Handler:       _Git_Install_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Sync",
+			Handler:       _Git_Sync_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "git.proto",

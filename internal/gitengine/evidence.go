@@ -94,9 +94,6 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	if err != nil {
 		return EvidenceRevision{}, err
 	}
-	if meta.VM {
-		return EvidenceRevision{}, vmUnsupported(run)
-	}
 	repo, err := e.existingRepoPath(meta.Workspace)
 	if err != nil {
 		return EvidenceRevision{}, err
@@ -118,7 +115,22 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 		}
 		return EvidenceRevision{}, fmt.Errorf("gitengine: evidence base for session %s is unavailable: %w", run, err)
 	}
-	if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
+	store, err := e.snapshotStorePath(run)
+	if err != nil {
+		return EvidenceRevision{}, err
+	}
+	var tree string
+	if meta.VM {
+		// Staged before the lock below: the VM's watch may hold its own
+		// snapshot lock while it waits on the server's.
+		if _, err = e.vmStore(ctx, run, meta); err != nil {
+			return EvidenceRevision{}, err
+		}
+		if tree, err = e.vmEvidenceTree(ctx, run, meta, store); err != nil {
+			return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
+		}
+		checkout = ""
+	} else if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
 		return EvidenceRevision{}, boundsErr
 	}
 	// Keep the source objects pinned until fetch has copied them into the
@@ -126,16 +138,13 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	lock := e.snapshotLock(run)
 	lock.Lock()
 	defer lock.Unlock()
-	tree, err := e.writeSnapshotTreeLocked(ctx, run, checkout)
-	if err != nil {
-		return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
-	}
-	if boundsErr := e.checkEvidenceSnapshotBounds(ctx, run, checkout, tree); boundsErr != nil {
-		return EvidenceRevision{}, boundsErr
-	}
-	store, err := e.snapshotStorePath(run)
-	if err != nil {
-		return EvidenceRevision{}, err
+	if !meta.VM {
+		if tree, err = e.writeSnapshotTreeLocked(ctx, run, checkout); err != nil {
+			return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
+		}
+		if boundsErr := e.checkEvidenceSnapshotBounds(ctx, run, checkout, tree); boundsErr != nil {
+			return EvidenceRevision{}, boundsErr
+		}
 	}
 	staging, err := os.MkdirTemp("", "aether-evidence-")
 	if err != nil {
@@ -501,7 +510,10 @@ func writeEvidenceAlternates(repo, store, checkout string) error {
 	if err := os.MkdirAll(filepath.Join(objects, "info"), 0o700); err != nil {
 		return fmt.Errorf("gitengine: stage evidence alternates: %w", err)
 	}
-	alternates := []byte(filepath.Join(store, "objects") + "\n" + filepath.Join(checkout, ".git", "objects") + "\n")
+	alternates := []byte(filepath.Join(store, "objects") + "\n")
+	if checkout != "" {
+		alternates = append(alternates, filepath.Join(checkout, ".git", "objects")+"\n"...)
+	}
 	if err := os.WriteFile(filepath.Join(objects, "info", "alternates"), alternates, 0o600); err != nil {
 		return fmt.Errorf("gitengine: stage evidence alternates: %w", err)
 	}

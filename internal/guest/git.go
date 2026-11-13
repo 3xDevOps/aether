@@ -19,6 +19,11 @@ const (
 	MaxPatchBytes = 64 << 20
 	// ObjectsChunk is how much of a pack one Objects message carries.
 	ObjectsChunk = 256 << 10
+	// MaxFileBytes bounds a file the Files view reads or writes, as the
+	// server's own.
+	MaxFileBytes = 64 << 20
+	// maxTreeReply bounds one directory listing.
+	maxTreeReply = 16 << 20
 )
 
 // GitReason names a failure of the server's git engine across the API, so
@@ -29,7 +34,11 @@ const (
 	ReasonSnapshotTreeMissing  GitReason = "snapshot-tree-missing"
 	ReasonInvalidObjectID      GitReason = "invalid-object-id"
 	ReasonSnapshotStorageLimit GitReason = "snapshot-storage-limit"
+	ReasonEvidenceStorageLimit GitReason = "evidence-storage-limit"
 	ReasonCheckoutNotFound     GitReason = "checkout-not-found"
+	ReasonInvalidPath          GitReason = "invalid-path"
+	ReasonRevisionConflict     GitReason = "revision-conflict"
+	ReasonFileNotFound         GitReason = "file-not-found"
 )
 
 // GitError is a git service call that failed for Reason.
@@ -157,8 +166,8 @@ func (w *Watch) Ack(seq uint64, failure error) error {
 	return w.stream.Send(ack)
 }
 
-// Flush snapshots the checkout now and returns once its Watch delivered the
-// snapshot.
+// Flush takes the checkout's last snapshot, returns once its Watch
+// delivered it, and stops the checkout's diff watch until the next Watch.
 func (g *Git) Flush(ctx context.Context, key string) error {
 	if _, err := g.api.Flush(ctx, &guestpb.FlushRequest{Key: key}); err != nil {
 		return gitErr("flush", key, err)
@@ -225,6 +234,167 @@ func (g *Git) Patch(ctx context.Context, key, from string, maxBytes int) (Patch,
 		return Patch{}, fmt.Errorf("guest: patch %s: helper sent %d bytes for a %d-byte limit", key, len(reply.GetText()), maxBytes)
 	}
 	return Patch{Base: truncate(reply.GetBase()), Text: reply.GetText(), Truncated: reply.GetTruncated(), ForkTree: truncate(reply.GetForkTree())}, nil
+}
+
+// Stage writes a tree of the whole checkout for the server's final commit,
+// or within the evidence bound when evidence is set, and returns it with
+// the commit HEAD names.
+func (g *Git) Stage(ctx context.Context, key string, evidence bool) (tree, head string, err error) {
+	purpose := guestpb.StageRequest_PURPOSE_COMMIT
+	if evidence {
+		purpose = guestpb.StageRequest_PURPOSE_EVIDENCE
+	}
+	reply, err := g.api.Stage(ctx, &guestpb.StageRequest{Key: key, Purpose: purpose})
+	if err != nil {
+		return "", "", gitErr("stage", key, err)
+	}
+	return truncate(reply.GetTree()), truncate(reply.GetHead()), nil
+}
+
+// RefUpdate moves Ref to New, only from Old when Old is set.
+type RefUpdate struct {
+	Ref, New, Old string
+}
+
+// Install adds pack's objects to the checkout and applies updates with
+// reflogMessage. A non-empty index makes the index Stage wrote for a
+// commit the checkout's, when its tree is index.
+func (g *Git) Install(ctx context.Context, key string, updates []RefUpdate, reflogMessage, index string, pack io.Reader) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := g.api.Install(ctx)
+	if err != nil {
+		return gitErr("install", key, err)
+	}
+	first := &guestpb.InstallChunk{Key: key, ReflogMessage: reflogMessage, Index: index}
+	for _, u := range updates {
+		first.Updates = append(first.Updates, &guestpb.RefUpdate{Ref: u.Ref, New: u.New, Old: u.Old})
+	}
+	buf := make([]byte, ObjectsChunk)
+	chunk := first
+	for {
+		n, readErr := io.ReadFull(pack, buf)
+		chunk.Data = buf[:n]
+		// A failed send means the call ended; its status comes below.
+		if err := stream.Send(chunk); err != nil {
+			break
+		}
+		if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("guest: install %s: %w", key, readErr)
+		}
+		chunk = &guestpb.InstallChunk{}
+	}
+	if _, err := stream.CloseAndRecv(); err != nil {
+		return gitErr("install", key, err)
+	}
+	return nil
+}
+
+// TreeEntry is one child of a checkout directory.
+type TreeEntry struct {
+	Name string
+	Kind string
+	Size int64
+}
+
+// Tree lists the children of dir in the checkout.
+func (g *Git) Tree(ctx context.Context, key, dir string) ([]TreeEntry, error) {
+	reply, err := g.api.Tree(ctx, &guestpb.TreeRequest{Key: key, Dir: dir}, grpc.MaxCallRecvMsgSize(maxTreeReply))
+	if err != nil {
+		return nil, gitErr("tree", key, err)
+	}
+	out := make([]TreeEntry, len(reply.GetEntries()))
+	for i, e := range reply.GetEntries() {
+		out[i] = TreeEntry{Name: truncate(e.GetName()), Kind: truncate(e.GetKind()), Size: e.GetSize()}
+	}
+	return out, nil
+}
+
+// ReadFile reads at most maxBytes of path in the checkout, and reports
+// whether it read all of the file and how large the file is.
+func (g *Git) ReadFile(ctx context.Context, key, path string, maxBytes int) ([]byte, bool, int64, error) {
+	maxBytes = min(max(maxBytes, 1), MaxFileBytes)
+	reply, err := g.api.ReadFile(ctx, &guestpb.ReadFileRequest{Key: key, Path: path, MaxBytes: uint32(maxBytes)},
+		grpc.MaxCallRecvMsgSize(maxBytes+64<<10))
+	if err != nil {
+		return nil, false, 0, gitErr("read", key, err)
+	}
+	if len(reply.GetContent()) > maxBytes {
+		return nil, false, 0, fmt.Errorf("guest: read %s: helper sent %d bytes for a %d-byte limit", key, len(reply.GetContent()), maxBytes)
+	}
+	return reply.GetContent(), reply.GetTruncated(), reply.GetSize(), nil
+}
+
+// WriteFile writes content to path in the checkout, when revision is empty
+// or the file's current one.
+func (g *Git) WriteFile(ctx context.Context, key, path string, content []byte, revision string) error {
+	if _, err := g.api.WriteFile(ctx, &guestpb.WriteFileRequest{Key: key, Path: path, Content: content, Revision: revision}); err != nil {
+		return gitErr("write", key, err)
+	}
+	return nil
+}
+
+// FileDiff renders path in the checkout against the checkout's base.
+func (g *Git) FileDiff(ctx context.Context, key, path string) (Patch, error) {
+	reply, err := g.api.FileDiff(ctx, &guestpb.FileDiffRequest{Key: key, Path: path}, grpc.MaxCallRecvMsgSize(MaxPatchBytes+64<<10))
+	if err != nil {
+		return Patch{}, gitErr("file diff", key, err)
+	}
+	return Patch{Base: truncate(reply.GetBase()), Text: reply.GetText(), Truncated: reply.GetTruncated(), ForkTree: truncate(reply.GetForkTree())}, nil
+}
+
+// Sync opens a live overlay's endpoint at the checkout. The stream it
+// returns carries the overlay's protocol both ways until it is closed or
+// ctx ends.
+func (g *Git) Sync(ctx context.Context, key string) (io.ReadWriteCloser, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	stream, err := g.api.Sync(ctx)
+	if err == nil {
+		err = stream.Send(&guestpb.SyncChunk{Key: key})
+	}
+	if err != nil {
+		cancel()
+		return nil, gitErr("sync", key, err)
+	}
+	return &syncStream{stream: stream, cancel: cancel}, nil
+}
+
+type syncStream struct {
+	stream  grpc.BidiStreamingClient[guestpb.SyncChunk, guestpb.SyncChunk]
+	cancel  context.CancelFunc
+	pending []byte
+}
+
+func (s *syncStream) Read(p []byte) (int, error) {
+	for len(s.pending) == 0 {
+		chunk, err := s.stream.Recv()
+		if err != nil {
+			return 0, err
+		}
+		s.pending = chunk.GetData()
+	}
+	n := copy(p, s.pending)
+	s.pending = s.pending[n:]
+	return n, nil
+}
+
+func (s *syncStream) Write(p []byte) (int, error) {
+	for sent := 0; sent < len(p); {
+		n := min(len(p)-sent, ObjectsChunk)
+		if err := s.stream.Send(&guestpb.SyncChunk{Data: p[sent : sent+n]}); err != nil {
+			return sent, err
+		}
+		sent += n
+	}
+	return len(p), nil
+}
+
+func (s *syncStream) Close() error {
+	s.cancel()
+	return nil
 }
 
 // GitStatus is the status the git service returns for err: a GitError

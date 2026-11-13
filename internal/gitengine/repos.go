@@ -157,12 +157,12 @@ func (e *Engine) FetchRunBranch(ctx context.Context, ws domain.WorkspaceID, bran
 	if dst.Workspace != ws {
 		return "", fmt.Errorf("gitengine: session %s is not in workspace %s", into, ws)
 	}
-	if dst.VM {
-		return "", vmUnsupported(into)
-	}
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
 		return "", err
+	}
+	if dst.VM {
+		return e.vmFetchBranch(ctx, repo, branch, into, dst, ref)
 	}
 	checkout, err := e.existingCheckoutPath(into)
 	if err != nil {

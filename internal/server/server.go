@@ -339,8 +339,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 			for i, m := range members {
 				ids[i] = string(m.ID)
 			}
-			checkouts := func(ctx context.Context, path string, uid, gid int) (string, guest.Checkout, bool, error) {
-				return s.git.VMCheckoutDisk(ctx, path, uid, gid)
+			checkouts := func(ctx context.Context, path, target string, uid, gid int) (string, guest.Checkout, bool, error) {
+				return s.git.VMCheckoutDisk(ctx, path, target, uid, gid)
 			}
 			vms, images, vmErr := newVMRuntime(ctx, cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), ids, s.docker, checkouts)
 			if vmErr != nil {

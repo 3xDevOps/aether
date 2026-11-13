@@ -14,9 +14,10 @@ import (
 )
 
 // CheckoutDisks gives the disk of the session checkout whose server path a
-// worktree mount names, its files owned by uid:gid. ok is false for a
-// checkout the VM shares from the server instead.
-type CheckoutDisks func(ctx context.Context, path string, uid, gid int) (qcow2 string, checkout guest.Checkout, ok bool, err error)
+// worktree mount names, which the VM mounts at target, its files owned by
+// uid:gid. ok is false for a checkout the VM shares from the server
+// instead.
+type CheckoutDisks func(ctx context.Context, path, target string, uid, gid int) (qcow2 string, checkout guest.Checkout, ok bool, err error)
 
 // checkoutDisk is a worktree mount whose checkout lives on its own disk.
 type checkoutDisk struct {
@@ -37,7 +38,7 @@ func (e *engine) checkoutDisks(ctx context.Context, spec runtime.Spec) (disks []
 		return nil, nil, err
 	}
 	for _, m := range all {
-		disk, checkout, ok, err := e.cfg.CheckoutDisks(ctx, m.HostPath, uid, gid)
+		disk, checkout, ok, err := e.cfg.CheckoutDisks(ctx, m.HostPath, m.ContainerPath, uid, gid)
 		if err != nil {
 			return nil, nil, fmt.Errorf("vm runtime: checkout disk for %s: %w", m.ContainerPath, err)
 		}

@@ -281,11 +281,15 @@ engine's own wait. It serves `internal/guest/guestpb/git.proto` on vsock port
 | Call | What it does |
 | --- | --- |
 | `Setup` | Called before `Boot` on every boot and server restart. When the checkout's top directory belongs to someone other than the session user, as when a session starts again from an image with another user, it hands every file of the checkout to that user. On a checkout's first boot it sets `aether.base`, `aether.branch`, `aether.workspace` and the origin remote, and renames `aether-prepared` to the run branch, running git as the checkout's owner so the session can keep writing everything git wrote. Then it starts the checkout's diff watch. |
-| `Watch` | Streams the checkout's diff watch: each snapshot's `run.diff` payload, each moved HEAD, and at most one file change report a second. A snapshot or HEAD counts as delivered only once the server acknowledges it; a refusal is a history gap the watch retries, as a failed publication on the server is. |
-| `Flush` | Takes a snapshot now and returns once `Watch` delivered it. |
+| `Watch` | Streams the checkout's diff watch, starting it if it does not run: each snapshot's `run.diff` payload, each moved HEAD, and at most one file change report a second. A snapshot or HEAD counts as delivered only once the server acknowledges it; a refusal, or no `Watch` open at all, is a history gap the watch retries, as a failed publication on the server is. |
+| `Flush` | Takes the last snapshot, returns once `Watch` delivered it, and stops the diff watch until the next `Watch`. |
 | `Objects` | Streams a pack of what `wants` reach and no `haves` do. |
 | `Patch` | Renders the live diff. |
 | `Head` | Returns the commit HEAD names. |
+| `Stage` | Writes a tree of the whole checkout: within the evidence bound for evidence, or over a copy of the checkout's own index for the final commit, as the server stages a checkout on its disk. |
+| `Install` | Indexes a pack the server sends into the checkout with `index-pack --strict`, applies ref updates in one transaction, and for a commit makes the staged index the checkout's. It runs git as the checkout's owner. |
+| `Tree`, `ReadFile`, `WriteFile`, `FileDiff` | The Files view on the checkout, including uploads. |
+| `Sync` | Serves a live overlay's endpoint (`aether sync --live`) at the checkout. |
 
 The server treats every reply as data from the session. It copies a
 snapshot's tree and HEAD into the session's `<run-id>.diffsnap/` store with
@@ -298,6 +302,28 @@ fork point. A moved HEAD is published by fetching it from that store into
 the workspace repository, as for a checkout on the server's disk. While the
 VM is not running, the session's patch is its last recorded snapshot, also on
 a server switched back to `session-runtime docker`.
+
+The final commit is built on the server, so the member's signing key never
+enters the VM. The VM stages the checkout; the server copies the tree,
+checks it, and writes the commit with `git commit-tree`, authored by the
+member, committed by Aether, the message cleaned as `git commit -m` cleans
+it, and signed. `Install` then moves the staged objects into the checkout,
+adds the commit object, the only one the server sends, and makes it HEAD,
+moving HEAD only from the commit it was staged on. As on the server's disk,
+the commit has no bound on the checkout's size; its new objects, like a
+moved HEAD's, may take up to 4 GiB, and the server keeps 128 MiB of disk
+free. The server records the committed tree; while the VM does not run,
+evidence retains that tree, and without one capture fails and cleanup keeps
+the checkout's disk, since only the VM can read it. On Close, a checkout in
+a VM is committed before the VM pauses, as a paused VM runs no git. A subsession's branch reaches a parent in a
+VM the same way: the server packs what the parent lacks and `Install` sets
+`refs/remotes/children/<id>`.
+
+A live overlay is pinned by the server as for a checkout on its disk, then
+relayed to the VM, whose endpoint pins the root to the checkout again, gives
+what it creates to the checkout's owner, and keeps its staging under
+`/run/aether-guest/data/git/mutagen`. Files and live
+sync need the VM to run.
 
 ## Versions
 
