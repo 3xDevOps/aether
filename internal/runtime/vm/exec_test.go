@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"strings"
 	"testing"
@@ -96,7 +97,7 @@ func TestAnOldWaitLeavesANewBootRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.guest("run-a").procs[guest.MainID].exit(9)
-	code, ok := h.engine.waitMain(t.Context(), "run-a", 1)
+	code, ok := h.engine.waitMain(t.Context(), "run-a", 1, "b1")
 	if !ok || code != 143 {
 		t.Errorf("a wait on boot 1 = %d, %v; want boot 1's exit 143", code, ok)
 	}
@@ -155,5 +156,67 @@ func TestPausedVMsAreNotAskedForStats(t *testing.T) {
 	}
 	if _, err := h.engine.memoryEvents(t.Context(), "run-b"); err == nil || errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("memory events of an unknown VM = %v", err)
+	}
+}
+
+func TestStopKillsAVMWhoseHelperStoppedAnswering(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	g := h.guest("run-a")
+	g.unresponsive = true
+	g.procs[guest.MainID].unresponsive = true
+	start := time.Now()
+	if err := h.engine.stop(context.Background(), "run-a", 50*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Errorf("stop took %s on an unresponsive guest", time.Since(start))
+	}
+	if h.units.vmm("run-a") != nil {
+		t.Error("the VM still runs after stop")
+	}
+	if info, _ := h.engine.inspect(t.Context(), "run-a"); !info.Exited || info.ExitCode != killedExitCode {
+		t.Errorf("inspect after stop = %+v", info)
+	}
+}
+
+func TestWaitEndsAVMWhoseGuestRebootedOnItsOwn(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	if rec, _ := h.engine.load("run-a"); rec.BootID != "b1" {
+		t.Fatalf("boot ID recorded as %q", rec.BootID)
+	}
+	g := h.guest("run-a")
+	g.mu.Lock()
+	g.bootID = "b2"
+	delete(g.procs, guest.MainID)
+	g.mu.Unlock()
+	st, err := h.engine.wait(t.Context(), "run-a")
+	if err != nil || st.Code != lostExitCode {
+		t.Errorf("wait after the guest rebooted = %+v, %v", st, err)
+	}
+	if h.units.vmm("run-a") != nil {
+		t.Error("a guest that rebooted on its own kept running")
+	}
+}
+
+func TestExecAttachedEndsWithItsContextOnASilentGuest(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	h.guest("run-a").output = map[string]string{"/usr/local/bin/aether-internal": "hang"}
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.engine.execAttached(ctx, "run-a", runtime.AttachedExec{Argv: []string{"true"}, Stdout: io.Discard, Stderr: io.Discard})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("execAttached on a silent guest = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("execAttached outlived its context on a silent guest")
 	}
 }

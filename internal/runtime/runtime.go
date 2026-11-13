@@ -68,7 +68,9 @@ type MemoryEvents struct {
 
 // SaveRuntime optionally writes a running container's memory and device
 // state to disk and ends it, then later restores it with every process
-// where it was. A container that was saved and not restored is stopped.
+// where it was. A container that was saved and not restored is stopped:
+// Inspect reports it exited and Wait returns; Stop or Start discards the
+// saved state.
 type SaveRuntime interface {
 	Save(context.Context, ID) error
 	Restore(context.Context, ID) error

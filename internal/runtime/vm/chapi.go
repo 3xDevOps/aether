@@ -9,14 +9,19 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type chAPI struct {
 	client *http.Client
 }
 
+// chAPITimeout backstops a monitor that stops answering; a snapshot of a
+// large guest takes seconds, not minutes.
+const chAPITimeout = 2 * time.Minute
+
 func newCHAPI(socket string) chAPI {
-	return chAPI{client: &http.Client{Transport: &http.Transport{
+	return chAPI{client: &http.Client{Timeout: chAPITimeout, Transport: &http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer

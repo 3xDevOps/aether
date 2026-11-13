@@ -14,7 +14,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const virtiofsdReadyTimeout = 10 * time.Second
+const (
+	cloudHypervisor       = "cloud-hypervisor"
+	virtiofsd             = "/usr/libexec/virtiofsd"
+	virtiofsdReadyTimeout = 10 * time.Second
+)
 
 // Monitor runs in a VM's unit, whose private mount namespace keeps every
 // bind it makes off the host: it composes the share, starts virtiofsd on
@@ -38,12 +42,12 @@ func Monitor(args []string) error {
 		if err = composeShare(root, l.Shares); err != nil {
 			return err
 		}
-		if err = startVirtiofsd(l.Virtiofsd, filepath.Join(dir, fsSocket), root); err != nil {
+		if err = startVirtiofsd(filepath.Join(dir, fsSocket), root); err != nil {
 			return err
 		}
 	}
-	argv := append([]string{l.CloudHypervisor}, l.Args...)
-	path, err := exec.LookPath(l.CloudHypervisor)
+	argv := append([]string{cloudHypervisor}, l.Args...)
+	path, err := exec.LookPath(cloudHypervisor)
 	if err != nil {
 		return fmt.Errorf("vm monitor: %w", err)
 	}
@@ -123,8 +127,8 @@ func bindShare(target string, s share) error {
 
 // startVirtiofsd leaves virtiofsd as a child that outlives the exec into
 // Cloud Hypervisor; the unit stops it with the VM.
-func startVirtiofsd(binary, socket, root string) error {
-	cmd := exec.Command(binary, "--socket-path="+socket, "--shared-dir="+root,
+func startVirtiofsd(socket, root string) error {
+	cmd := exec.Command(virtiofsd, "--socket-path="+socket, "--shared-dir="+root,
 		"--announce-submounts", "--xattr", "--inode-file-handles=prefer", "--sandbox=namespace")
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Start(); err != nil {

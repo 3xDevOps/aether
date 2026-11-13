@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,7 +50,7 @@ func newHarness(t *testing.T) *harness {
 
 // newEngine is a second engine process over the same data directory.
 func (h *harness) newEngine(dir string) *engine {
-	cfg := Config{DataDir: dir, Images: h.images, Monitor: []string{"/srv/aether-server", MonitorCommand}, Helper: "/srv/aether-server", CloudHypervisor: "cloud-hypervisor", Virtiofsd: "virtiofsd"}
+	cfg := Config{DataDir: dir, Images: h.images, Monitor: []string{"/srv/aether-server", MonitorCommand}, Helper: "/srv/aether-server"}
 	e := newEngine(cfg, h.units, func(vsock string) (helper, error) {
 		return h.guest(filepath.Base(filepath.Dir(vsock))), nil
 	})
@@ -288,7 +289,11 @@ type fakeHelper struct {
 	output   map[string]string
 	ignoreTE bool
 	clock    time.Time
-	stats    guest.Stats
+	clockErr error
+	bootID   string
+	// unresponsive makes calls fail as a guest that stopped answering does.
+	unresponsive bool
+	stats        guest.Stats
 	// finals are dev-exec's own exit records, which outlive the helper's.
 	finals map[string]int
 }
@@ -298,7 +303,9 @@ func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
 		<-ctx.Done()
 		return guest.Info{}, g.pingErr
 	}
-	return guest.Info{BootID: "b1", Protocol: 1}, nil
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return guest.Info{BootID: cmp.Or(g.bootID, "b1"), Protocol: 1}, nil
 }
 
 func (g *fakeHelper) Boot(_ context.Context, spec guest.BootSpec) error {
@@ -385,27 +392,31 @@ func (g *fakeHelper) Stats(context.Context) (guest.Stats, error) { return g.stat
 
 func (g *fakeHelper) SyncClock(_ context.Context, t time.Time) error {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.clock = t
-	g.mu.Unlock()
-	return nil
+	return g.clockErr
 }
 
 // PowerOff ends the VM the way a guest poweroff ends Cloud Hypervisor.
 func (g *fakeHelper) PowerOff(ctx context.Context) error {
+	if g.unresponsive {
+		return context.DeadlineExceeded
+	}
 	return g.units.Stop(ctx, unitName(g.key))
 }
 
 func (g *fakeHelper) Close() error { return nil }
 
 type fakeProc struct {
-	spec     guest.ProcessSpec
-	out      string
-	ignoreTE bool
-	mu       sync.Mutex
-	signals  []syscall.Signal
-	done     chan struct{}
-	code     int
-	stdin    bool
+	unresponsive bool
+	spec         guest.ProcessSpec
+	out          string
+	ignoreTE     bool
+	mu           sync.Mutex
+	signals      []syscall.Signal
+	done         chan struct{}
+	code         int
+	stdin        bool
 }
 
 func newFakeProc(spec guest.ProcessSpec, out string, code int, ignoreTerm bool) *fakeProc {
@@ -461,6 +472,9 @@ func (p *fakeProc) CloseStdin(context.Context) error {
 func (p *fakeProc) Resize(context.Context, guest.Size) error { return nil }
 
 func (p *fakeProc) Signal(_ context.Context, sig syscall.Signal) error {
+	if p.unresponsive {
+		return context.DeadlineExceeded
+	}
 	p.mu.Lock()
 	p.signals = append(p.signals, sig)
 	ignore := p.ignoreTE && sig == syscall.SIGTERM

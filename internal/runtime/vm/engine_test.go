@@ -118,7 +118,7 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 			t.Errorf("launch args lack %q:\n%s", want, args)
 		}
 	}
-	if len(call.launch.Shares) != 1 || call.launch.Shares[0].Source != home || call.launch.Virtiofsd != "virtiofsd" {
+	if len(call.launch.Shares) != 1 || call.launch.Shares[0].Source != home {
 		t.Errorf("shares = %+v", call.launch)
 	}
 	g := h.guest("run-a")
@@ -379,20 +379,18 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	if err := h.engine.save(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(vmm.called(), []string{"vm.pause", "vm.snapshot", "vmm.shutdown"}) {
+	if !slices.Equal(vmm.called(), []string{"vm.info", "vm.pause", "vm.snapshot", "vmm.shutdown"}) {
 		t.Errorf("save calls = %v", vmm.called())
 	}
 	if _, err := os.Stat(h.engine.path("run-a", snapshotDir+"/state.json")); err != nil {
 		t.Errorf("no saved state: %v", err)
 	}
-	if info, _ := h.engine.inspect(t.Context(), "run-a"); info.Exited {
-		t.Errorf("a saved VM reports exited")
+	if info, _ := h.engine.inspect(t.Context(), "run-a"); !info.Exited || info.ExitCode != killedExitCode {
+		t.Errorf("a saved VM inspects as %+v, want stopped", info)
 	}
-	waited := make(chan struct{})
-	go func() {
-		_, _ = h.engine.wait(context.WithoutCancel(t.Context()), "run-a")
-		close(waited)
-	}()
+	if st, err := h.engine.wait(t.Context(), "run-a"); err != nil || st.Code != killedExitCode {
+		t.Errorf("wait on a saved VM = %+v, %v", st, err)
+	}
 	if err := h.engine.restore(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -403,32 +401,57 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	if _, err := os.Stat(h.engine.path("run-a", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("snapshot kept after restore: %v", err)
 	}
-	select {
-	case <-waited:
-		t.Fatal("wait returned across a save and restore")
-	case <-time.After(300 * time.Millisecond):
+	if info, _ := h.engine.inspect(t.Context(), "run-a"); info.Exited {
+		t.Errorf("a restored VM inspects as %+v", info)
 	}
+	waited := make(chan runtime.ExitStatus, 1)
+	go func() {
+		st, _ := h.engine.wait(context.WithoutCancel(t.Context()), "run-a")
+		waited <- st
+	}()
 	h.guest("run-a").procs[guest.MainID].exit(0)
-	<-waited
+	if st := <-waited; st.Code != 0 {
+		t.Errorf("wait after restore = %+v", st)
+	}
 	if err := h.engine.restore(t.Context(), "run-a"); err == nil || !strings.Contains(err.Error(), "no saved state") {
 		t.Errorf("restore without state = %v", err)
 	}
+
 	h.createStarted("run-b", sessionSpec("run-b"))
 	if err := h.engine.save(t.Context(), "run-b"); err != nil {
 		t.Fatal(err)
 	}
-	h.guest("run-b").pingErr = errors.New("helper gone")
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	if err := h.engine.restore(ctx, "run-b"); err == nil {
-		t.Fatal("restore with a dead helper succeeded")
+	h.guest("run-b").clockErr = errors.New("clock refused")
+	if err := h.engine.restore(t.Context(), "run-b"); err == nil {
+		t.Fatal("restore with a failing clock succeeded")
 	}
 	rec, _ := h.engine.load("run-b")
-	if rec.Saved || h.units.vmm("run-b") != nil {
-		t.Errorf("a restore that failed after resume left saved=%v, running=%v", rec.Saved, h.units.vmm("run-b") != nil)
+	if rec.Saved || h.units.vmm("run-b") == nil {
+		t.Errorf("a restore that failed after resume left saved=%v, running=%v; want the live VM kept", rec.Saved, h.units.vmm("run-b") != nil)
 	}
 	if _, err := os.Stat(h.engine.path("run-b", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a resumed snapshot was kept: %v", err)
+	}
+
+	h.createStarted("run-c", sessionSpec("run-c"))
+	if err := h.engine.pause(t.Context(), "run-c"); err != nil {
+		t.Fatal(err)
+	}
+	paused := h.units.vmm("run-c")
+	if err := h.engine.save(t.Context(), "run-c"); err != nil {
+		t.Fatalf("save of a paused VM = %v", err)
+	}
+	if slices.Contains(paused.called()[1:], "vm.pause") {
+		t.Errorf("save paused a paused VM again: %v", paused.called())
+	}
+	if err := h.engine.stop(t.Context(), "run-c", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ := h.engine.load("run-c"); rec.Saved || !rec.Exited {
+		t.Errorf("stop of a saved VM left %+v", rec)
+	}
+	if _, err := os.Stat(h.engine.path("run-c", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stop kept a saved VM's state: %v", err)
 	}
 }
 

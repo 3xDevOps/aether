@@ -17,6 +17,9 @@ const (
 	defaultStopGrace = 10 * time.Second
 	killGrace        = 5 * time.Second
 	powerOffTimeout  = 15 * time.Second
+	// helperCallTimeout bounds one short call to the helper, whose client
+	// otherwise waits for a guest that may never answer again.
+	helperCallTimeout = 5 * time.Second
 	// lostExitCode reports a VM that ended without its helper reporting
 	// Main's exit: the host killed it, the guest crashed or the host
 	// rebooted.
@@ -47,7 +50,9 @@ func (e *engine) requireRunning(ctx context.Context, key, action string) (*recor
 	return rec, nil
 }
 
-// stop ends Main as docker stop ends a container's main process.
+// stop ends Main as docker stop ends a container's main process, and a
+// saved VM's saved state with it. Every helper call is bounded, so a guest
+// that stopped answering is killed instead of holding the VM's lock.
 func (e *engine) stop(ctx context.Context, key string, grace time.Duration) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -56,8 +61,18 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		return err
 	}
 	up, err := e.running(ctx, key)
-	if err != nil || !up {
+	if err != nil {
 		return err
+	}
+	if !up {
+		if !rec.Saved {
+			return nil
+		}
+		if err = os.RemoveAll(e.path(key, snapshotDir)); err != nil {
+			return fmt.Errorf("vm runtime: discard saved state: %w", err)
+		}
+		rec.Saved = false
+		return e.store(rec)
 	}
 	api := newCHAPI(e.path(key, apiSocket))
 	if state, stateErr := api.state(ctx); stateErr == nil && state == "Paused" {
@@ -72,13 +87,14 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 	if err != nil {
 		return err
 	}
-	code := e.endMain(ctx, h.Process(guest.MainID), grace)
-	return e.finish(ctx, rec, code)
+	return e.finish(ctx, rec, endMain(ctx, h.Process(guest.MainID), grace))
 }
 
-func (e *engine) endMain(ctx context.Context, main process, grace time.Duration) int {
-	if err := main.Signal(ctx, syscall.SIGTERM); errors.Is(err, guest.ErrNotFound) {
-		return 0
+func endMain(ctx context.Context, main process, grace time.Duration) int {
+	signal := func(sig syscall.Signal) error {
+		sigCtx, cancel := context.WithTimeout(ctx, helperCallTimeout)
+		defer cancel()
+		return main.Signal(sigCtx, sig)
 	}
 	waitFor := func(d time.Duration) (int, bool) {
 		waitCtx, cancel := context.WithTimeout(ctx, d)
@@ -86,12 +102,20 @@ func (e *engine) endMain(ctx context.Context, main process, grace time.Duration)
 		code, err := main.Wait(waitCtx)
 		return code, err == nil
 	}
+	err := signal(syscall.SIGTERM)
+	if errors.Is(err, guest.ErrNotFound) {
+		return 0
+	}
+	if err != nil {
+		return killedExitCode
+	}
 	if code, ok := waitFor(grace); ok {
 		return code
 	}
-	_ = main.Signal(ctx, syscall.SIGKILL)
-	if code, ok := waitFor(killGrace); ok {
-		return code
+	if signal(syscall.SIGKILL) == nil {
+		if code, ok := waitFor(killGrace); ok {
+			return code
+		}
 	}
 	return killedExitCode
 }
@@ -104,10 +128,16 @@ func (e *engine) finish(ctx context.Context, rec *record, code int) error {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), powerOffTimeout)
 	defer cancel()
-	if h, err := e.helper(rec.Key); err == nil {
-		_ = h.PowerOff(ctx)
+	h, err := e.helper(rec.Key)
+	if err == nil {
+		offCtx, offCancel := context.WithTimeout(ctx, helperCallTimeout)
+		err = h.PowerOff(offCtx)
+		offCancel()
 	}
 	e.forgetHelper(rec.Key)
+	if err != nil {
+		return e.units.Stop(context.WithoutCancel(ctx), unitName(rec.Key))
+	}
 	for {
 		up, err := e.running(ctx, rec.Key)
 		if err == nil && !up {
@@ -126,9 +156,8 @@ func (e *engine) kill(ctx context.Context, key string) {
 	_ = e.units.Stop(ctx, unitName(key))
 }
 
-// wait blocks until Main of the current boot exits; a later boot means it
-// did. On a VM that never booted it waits for the first boot, and on a saved
-// VM until it is restored, so a save is not mistaken for an exit.
+// wait blocks until Main of the current boot exits, the VM is saved, or a
+// later boot starts. On a VM that never booted it waits for the first boot.
 func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, error) {
 	boot := -1
 	for {
@@ -142,7 +171,7 @@ func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, erro
 		if rec.Exited || (boot >= 0 && rec.Boots != boot) {
 			return runtime.ExitStatus{Code: rec.ExitCode}, nil
 		}
-		if rec.Booted && !rec.Saved && !e.flag(e.booting, key) {
+		if rec.Booted && !e.flag(e.booting, key) {
 			up, err := e.running(ctx, key)
 			if err != nil {
 				return runtime.ExitStatus{}, err
@@ -153,7 +182,7 @@ func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, erro
 				}
 				continue
 			}
-			if code, ok := e.waitMain(ctx, key, boot); ok {
+			if code, ok := e.waitMain(ctx, key, boot, rec.BootID); ok {
 				return runtime.ExitStatus{Code: code}, nil
 			}
 		}
@@ -169,7 +198,7 @@ func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, erro
 // false means the wait ended first and the caller looks again. The helper's
 // client retries a VM that died until its context ends, so the wait also
 // ends when the unit does.
-func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool) {
+func (e *engine) waitMain(ctx context.Context, key string, boot int, bootID string) (int, bool) {
 	h, err := e.helper(key)
 	if err != nil {
 		return 0, false
@@ -192,7 +221,14 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 		}
 	}()
 	code, err := h.Process(guest.MainID).Wait(waitCtx)
-	if err != nil {
+	rebooted := false
+	if errors.Is(err, guest.ErrNotFound) {
+		pingCtx, pingCancel := context.WithTimeout(waitCtx, helperCallTimeout)
+		info, pingErr := h.Ping(pingCtx)
+		pingCancel()
+		rebooted = pingErr == nil && bootID != "" && info.BootID != bootID
+	}
+	if err != nil && !rebooted {
 		return 0, false
 	}
 	unlock := e.lock(key)
@@ -204,6 +240,11 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 	if rec.Exited || rec.Boots != boot {
 		return rec.ExitCode, true
 	}
+	if rebooted {
+		e.kill(context.WithoutCancel(ctx), key)
+		rec.Exited, rec.ExitCode = true, lostExitCode
+		return lostExitCode, e.store(rec) == nil
+	}
 	if err := e.finish(ctx, rec, code); err != nil {
 		return 0, false
 	}
@@ -211,7 +252,7 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 }
 
 // lost records a booted VM whose unit is gone without an exit, and returns
-// -1 when it turns out to have been stopped or saved properly meanwhile.
+// -1 when the VM turns out to run again.
 func (e *engine) lost(ctx context.Context, key string) (int, error) {
 	unlock := e.lock(key)
 	defer unlock()
@@ -221,9 +262,6 @@ func (e *engine) lost(ctx context.Context, key string) (int, error) {
 	}
 	if rec.Exited {
 		return rec.ExitCode, nil
-	}
-	if rec.Saved {
-		return -1, nil
 	}
 	up, err := e.running(ctx, key)
 	if err != nil || up {
@@ -235,7 +273,7 @@ func (e *engine) lost(ctx context.Context, key string) (int, error) {
 }
 
 // destroy removes the VM and every file it had; a missing VM is not an
-// error.
+// error. The key's lock stays: a caller may be waiting on it.
 func (e *engine) destroy(ctx context.Context, key string) error {
 	if checkKey(key) != nil {
 		return nil
@@ -252,6 +290,10 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	if err := os.RemoveAll(e.dir(key)); err != nil {
 		return fmt.Errorf("vm runtime: remove VM %s: %w", key, err)
 	}
+	e.mu.Lock()
+	delete(e.fresh, key)
+	delete(e.events, key)
+	e.mu.Unlock()
 	return nil
 }
 
@@ -283,7 +325,7 @@ func (e *engine) inspect(ctx context.Context, key string) (runtime.ContainerInfo
 	if err != nil {
 		return runtime.ContainerInfo{}, err
 	}
-	if rec.Booted && !rec.Exited && !rec.Saved && !e.flag(e.booting, key) {
+	if rec.Booted && !rec.Exited && !e.flag(e.booting, key) {
 		up, err := e.running(ctx, key)
 		if err != nil {
 			return runtime.ContainerInfo{}, err

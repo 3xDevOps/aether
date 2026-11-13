@@ -48,18 +48,17 @@ func TestAllocateNetSkipsRecordedAndReserved(t *testing.T) {
 	}
 }
 
-func TestEnsureNATAddsOnlyMissingRules(t *testing.T) {
+func TestEnsureNATIsolatesVMs(t *testing.T) {
 	h := newHarness(t)
 	e := h.engine
 	e.natReady = false
 	var calls []string
 	e.run = func(_ context.Context, name string, args ...string) error {
-		calls = append(calls, strings.Join(append([]string{name}, args...), " "))
-		if slices.Contains(args, "-C") && slices.Contains(args, "MASQUERADE") {
-			return nil
-		}
-		if slices.Contains(args, "-C") {
-			return errors.New("no such rule")
+		call := strings.Join(append([]string{name}, args...), " ")
+		calls = append(calls, call)
+		switch {
+		case strings.Contains(call, "-F AETHER-VM"), strings.Contains(call, "-C FORWARD"):
+			return errors.New("no such chain or rule")
 		}
 		return nil
 	}
@@ -68,11 +67,17 @@ func TestEnsureNATAddsOnlyMissingRules(t *testing.T) {
 	}
 	want := []string{
 		"sysctl -q -w net.ipv4.ip_forward=1",
+		"iptables -t filter -F AETHER-VM",
+		"iptables -t filter -N AETHER-VM",
+		"iptables -t filter -A AETHER-VM -i aethervm+ -o aethervm+ -j DROP",
+		"iptables -t filter -A AETHER-VM -i aethervm+ -o docker0 -j DROP",
+		"iptables -t filter -A AETHER-VM -i aethervm+ -o br-+ -j DROP",
+		"iptables -t filter -A AETHER-VM -i aethervm+ -j ACCEPT",
+		"iptables -t filter -A AETHER-VM -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"iptables -t filter -A AETHER-VM -o aethervm+ -j DROP",
+		"iptables -t filter -C FORWARD -j AETHER-VM",
+		"iptables -t filter -I FORWARD -j AETHER-VM",
 		"iptables -t nat -C POSTROUTING -s 10.200.0.0/16 ! -d 10.200.0.0/16 -j MASQUERADE",
-		"iptables -t filter -C FORWARD -i aethervm+ -j ACCEPT",
-		"iptables -t filter -I FORWARD -i aethervm+ -j ACCEPT",
-		"iptables -t filter -C FORWARD -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-		"iptables -t filter -I FORWARD -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
 	}
 	if !slices.Equal(calls, want) {
 		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))

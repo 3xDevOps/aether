@@ -350,9 +350,13 @@ What changes:
 - Starting a stopped session builds a fresh root disk from its image and runs
   the setup script again: packages installed outside the mounts are gone.
   Docker images inside the session stay on its data disk.
+- VMs reach the internet, but not each other or Docker's containers.
 - Not yet supported, refused at launch with an error naming the work item:
   the Isolated tier and egress control, and the development browser beside a
   session.
+- Close or kill every session that runs in a VM before you set
+  `session-runtime` back to `docker`: a Docker server does not manage VMs,
+  so their units would keep running unattended.
 
 ## After a session closes
 

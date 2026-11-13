@@ -37,8 +37,7 @@ func kvmEngine(t *testing.T) *engine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newEngine(Config{DataDir: dir, Images: images, Monitor: []string{server, MonitorCommand}, Helper: server,
-		CloudHypervisor: "cloud-hypervisor", Virtiofsd: "/usr/libexec/virtiofsd"}, systemdUnits{}, dialHelper)
+	return newEngine(Config{DataDir: dir, Images: images, Monitor: []string{server, MonitorCommand}, Helper: server}, systemdUnits{}, dialHelper)
 }
 
 func vmRun(t *testing.T, e *engine, key, script string) (string, int) {

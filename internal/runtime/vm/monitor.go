@@ -11,10 +11,8 @@ import (
 const MonitorCommand = "vm-monitor"
 
 type launch struct {
-	Shares          []share  `json:"shares,omitempty"`
-	Virtiofsd       string   `json:"virtiofsd,omitempty"`
-	CloudHypervisor string   `json:"cloud_hypervisor"`
-	Args            []string `json:"args"`
+	Shares []share  `json:"shares,omitempty"`
+	Args   []string `json:"args"`
 }
 
 func readLaunch(dir string) (launch, error) {

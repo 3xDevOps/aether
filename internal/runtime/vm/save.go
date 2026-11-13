@@ -34,23 +34,38 @@ func (e *engine) save(ctx context.Context, key string) error {
 		return fmt.Errorf("vm runtime: cannot save VM %s: its virtio-fs mounts (%s) would come back unusable after a restore; work items 6 and 7 move them off virtio-fs", key, strings.Join(targets, ", "))
 	}
 	api := newCHAPI(e.path(key, apiSocket))
-	if err := api.pause(ctx); err != nil {
+	state, err := api.state(ctx)
+	if err != nil {
 		return fmt.Errorf("vm runtime: save VM %s: %w", key, err)
 	}
+	// Cloud Hypervisor refuses to pause a paused VM; one the caller paused
+	// stays paused if the save fails.
+	paused := state == "Paused"
+	if !paused {
+		if err = api.pause(ctx); err != nil {
+			return fmt.Errorf("vm runtime: save VM %s: %w", key, err)
+		}
+	}
+	resumeAfter := func(cause error) error {
+		if paused {
+			return fmt.Errorf("vm runtime: save VM %s: %w", key, cause)
+		}
+		return e.resumeAfter(ctx, api, key, cause)
+	}
 	dir := e.path(key, snapshotDir)
-	if err := os.RemoveAll(dir); err != nil {
-		return e.resumeAfter(ctx, api, key, err)
+	if err = os.RemoveAll(dir); err != nil {
+		return resumeAfter(err)
 	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		return e.resumeAfter(ctx, api, key, err)
+	if err = os.Mkdir(dir, 0o700); err != nil {
+		return resumeAfter(err)
 	}
-	if err := api.snapshot(ctx, dir); err != nil {
+	if err = api.snapshot(ctx, dir); err != nil {
 		_ = os.RemoveAll(dir)
-		return e.resumeAfter(ctx, api, key, err)
+		return resumeAfter(err)
 	}
-	rec.Saved = true
-	if err := e.store(rec); err != nil {
-		return e.resumeAfter(ctx, api, key, err)
+	rec.Saved, rec.Exited, rec.ExitCode = true, true, killedExitCode
+	if err = e.store(rec); err != nil {
+		return resumeAfter(err)
 	}
 	e.forgetHelper(key)
 	if err := api.shutdownVMM(ctx); err != nil {
@@ -86,7 +101,8 @@ func (e *engine) awaitStopped(ctx context.Context, key string) error {
 // its clock. Once the guest runs, its disks move past the snapshot, so the
 // snapshot is dropped durably before the guest resumes: a second restore of
 // it would pair old memory with newer disks. Cloud Hypervisor has read all
-// of it by then.
+// of it by then. With no snapshot left, a resumed guest is never killed for
+// a later error or the caller's ctx ending.
 func (e *engine) restore(ctx context.Context, key string) (err error) {
 	unlock := e.lock(key)
 	defer unlock()
@@ -101,7 +117,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 		return errors.Join(upErr, fmt.Errorf("vm runtime: restore VM %s: it is already running", key))
 	}
 	dir := e.path(key, snapshotDir)
-	l := launch{CloudHypervisor: e.cfg.CloudHypervisor, Args: []string{
+	l := launch{Args: []string{
 		"--api-socket", "path=" + e.path(key, apiSocket), "--restore", "source_url=file://" + dir,
 	}}
 	if err = e.ensureNAT(ctx); err != nil {
@@ -110,8 +126,9 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err = e.launch(ctx, rec, l); err != nil {
 		return err
 	}
+	resumed := false
 	defer func() {
-		if err != nil {
+		if err != nil && !resumed {
 			e.kill(context.WithoutCancel(ctx), key)
 		}
 	}()
@@ -119,7 +136,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err = e.awaitRestored(ctx, key, api); err != nil {
 		return err
 	}
-	rec.Saved = false
+	rec.Saved, rec.Exited = false, false
 	if err = e.store(rec); err != nil {
 		return err
 	}
@@ -129,14 +146,17 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err = api.resume(ctx); err != nil {
 		return fmt.Errorf("vm runtime: resume restored VM %s: %w", key, err)
 	}
+	resumed = true
+	live, cancel := context.WithTimeout(context.WithoutCancel(ctx), bootTimeout)
+	defer cancel()
 	h, err := e.helper(key)
 	if err != nil {
 		return err
 	}
-	if err = e.waitHelper(ctx, key, h); err != nil {
+	if _, err = e.waitHelper(live, key, h); err != nil {
 		return err
 	}
-	if err = h.SyncClock(ctx, time.Now()); err != nil {
+	if err = h.SyncClock(live, time.Now()); err != nil {
 		return fmt.Errorf("vm runtime: set the clock of restored VM %s: %w", key, err)
 	}
 	return nil

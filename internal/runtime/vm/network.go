@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/netip"
 	"os"
 	"strings"
@@ -64,7 +65,8 @@ func (e *engine) allocateNet() (int, error) {
 	for _, key := range keys {
 		rec, err := e.load(key)
 		if err != nil {
-			return 0, err
+			slog.Warn("vm runtime: skip an unreadable VM record when allocating a network", "vm", key, "error", err)
+			continue
 		}
 		used[rec.Net] = true
 	}
@@ -83,7 +85,13 @@ func (e *engine) releaseNet(index int) {
 	e.netMu.Unlock()
 }
 
-// ensureNAT runs once per process; a failure is retried at the next start.
+// vmChain holds the VMs' forwarding rules, rebuilt whole once per process.
+const vmChain = "AETHER-VM"
+
+// ensureNAT lets VMs reach the internet through the host and nothing else
+// forwarded: not each other, not Docker's containers, and no connection
+// starts from outside into a VM. It runs once per process; a failure is
+// retried at the next start.
 func (e *engine) ensureNAT(ctx context.Context) error {
 	e.netMu.Lock()
 	defer e.netMu.Unlock()
@@ -93,11 +101,28 @@ func (e *engine) ensureNAT(ctx context.Context) error {
 	if err := e.run(ctx, "sysctl", "-q", "-w", "net.ipv4.ip_forward=1"); err != nil {
 		return err
 	}
-	subnet, taps := vmSubnet.String(), tapPrefix+"+"
+	if e.run(ctx, "iptables", "-t", "filter", "-F", vmChain) != nil {
+		if err := e.run(ctx, "iptables", "-t", "filter", "-N", vmChain); err != nil {
+			return err
+		}
+	}
+	taps := tapPrefix + "+"
 	for _, rule := range [][]string{
+		{"-i", taps, "-o", taps, "-j", "DROP"},
+		{"-i", taps, "-o", "docker0", "-j", "DROP"},
+		{"-i", taps, "-o", "br-+", "-j", "DROP"},
+		{"-i", taps, "-j", "ACCEPT"},
+		{"-o", taps, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		{"-o", taps, "-j", "DROP"},
+	} {
+		if err := e.run(ctx, "iptables", append([]string{"-t", "filter", "-A", vmChain}, rule...)...); err != nil {
+			return err
+		}
+	}
+	subnet := vmSubnet.String()
+	for _, rule := range [][]string{
+		{"-t", "filter", "FORWARD", "-j", vmChain},
 		{"-t", "nat", "POSTROUTING", "-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"},
-		{"-t", "filter", "FORWARD", "-i", taps, "-j", "ACCEPT"},
-		{"-t", "filter", "FORWARD", "-o", taps, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
 	} {
 		table, chain, match := rule[:2], rule[2], rule[3:]
 		check := append(append(append([]string{}, table...), "-C", chain), match...)

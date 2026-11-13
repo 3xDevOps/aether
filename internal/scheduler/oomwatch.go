@@ -89,7 +89,7 @@ func (s *Scheduler) checkOOMKills(ctx context.Context) {
 			s.publishTimeline(ctx, t.workspace, t.run, "", events.TimelineNote, oomMessage(stats))
 		}
 	}
-	for id := range s.oom.paths {
+	for id := range s.oom.kills {
 		if !seen[id] {
 			s.oom.forget(id)
 		}

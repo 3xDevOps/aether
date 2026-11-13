@@ -39,25 +39,17 @@ var (
 // Monitor inside each VM's systemd unit: the server binary and its
 // vm-monitor subcommand.
 type Config struct {
-	Docker          *runtime.Docker
-	DataDir         string
-	Images          Images
-	Monitor         []string
-	Helper          string
-	CloudHypervisor string
-	Virtiofsd       string
+	Docker  *runtime.Docker
+	DataDir string
+	Images  Images
+	Monitor []string
+	Helper  string
 }
 
 // New returns a Runtime that keeps its VMs under DataDir/vm.
 func New(cfg Config) (*Runtime, error) {
 	if cfg.Docker == nil || cfg.Images == nil || len(cfg.Monitor) == 0 || cfg.Helper == "" {
 		return nil, errors.New("vm runtime: Docker, the image store, the monitor command and the helper binary are required")
-	}
-	if cfg.CloudHypervisor == "" {
-		cfg.CloudHypervisor = "cloud-hypervisor"
-	}
-	if cfg.Virtiofsd == "" {
-		cfg.Virtiofsd = "/usr/libexec/virtiofsd"
 	}
 	return &Runtime{Docker: cfg.Docker, vms: newEngine(cfg, systemdUnits{}, dialHelper)}, nil
 }

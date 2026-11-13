@@ -135,7 +135,7 @@ func readLimited(ctx context.Context, att runtime.Attachment) (string, string, e
 			return into.Write(p)
 		})
 	}
-	err := copyStreams(ctx, att, limited(&out), limited(&errOut), func() { _ = att.Close() })
+	err := copyStreams(ctx, att, limited(&out), limited(&errOut), func() {})
 	return out.String(), errOut.String(), err
 }
 
@@ -143,11 +143,14 @@ type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
-// copyStreams copies stdout and stderr at once; the first failure, or the
-// end of ctx, calls abort so the other copy is not left blocked on a stream
-// the command keeps open.
-func copyStreams(ctx context.Context, att runtime.Attachment, stdout, stderr io.Writer, abort func()) error {
-	abort = sync.OnceFunc(abort)
+// copyStreams copies stdout and stderr at once. The first failure, or the
+// end of ctx, calls abort and closes the attachment, so neither copy is left
+// blocked on a guest that sends nothing.
+func copyStreams(ctx context.Context, att runtime.Attachment, stdout, stderr io.Writer, onFail func()) error {
+	abort := sync.OnceFunc(func() {
+		onFail()
+		_ = att.Close()
+	})
 	stop := context.AfterFunc(ctx, abort)
 	defer stop()
 	errs := make(chan error, 2)
