@@ -107,6 +107,18 @@ processes, the engine and model mounted read-only, and runs as uid 65534
 (`nobody`), or as the server's own uid when the server is not root. `--gpu`
 adds every GPU to it.
 
+With `session-runtime vm` ([Sessions in virtual
+machines](environments.md#sessions-in-virtual-machines)), the engine runs in
+a VM with no network device instead, in the systemd unit
+`aether-vm-dictation-<owner>.service`, with the same user, mounts, memory cap
+and process limit. Its socket stays inside the VM, on a directory its user
+owns; the server listens on `<data-dir>/dictation/sock/engine.sock` itself
+once the engine accepts, and relays each connection through the VM's helper.
+`aether-server dictation install` then pulls nothing into Docker: the first
+clip builds the VM disk from the engine's image. `--gpu` is refused, since
+the VM has no GPU. A server switched to `vm` removes an engine container
+Docker still has at its start.
+
 ## How a clip is transcribed
 
 The dashboard calls `dictation.transcribe` (`POST /api/v1/dictation.transcribe`

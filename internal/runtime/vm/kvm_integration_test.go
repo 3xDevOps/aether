@@ -6,12 +6,15 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -751,5 +754,139 @@ func TestKVMPermissionTiers(t *testing.T) {
 				t.Errorf("sudoers drop-in %q, want %q", sudoers, tc.sudoersHas)
 			}
 		})
+	}
+}
+
+// TestKVMEngineNow is the stand-in dictation engine TestKVMDictationVM runs
+// in the guest, as nobody: it answers every connection to its socket. With
+// an argument after --, it exits with that status instead.
+func TestKVMEngineNow(t *testing.T) {
+	if os.Getuid() != 65534 {
+		t.Skip("runs inside a guest only")
+	}
+	if args := flag.Args(); len(args) > 0 {
+		code, _ := strconv.Atoi(args[0])
+		os.Exit(code)
+	}
+	fmt.Println("engine loading")
+	l, err := net.Listen("unix", "/run/dictation/engine.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprintln(c, "engine says hi")
+		_ = c.Close()
+	}
+}
+
+type outputBuffer struct {
+	mu     sync.Mutex
+	buf    strings.Builder
+	closed bool
+}
+
+func (b *outputBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *outputBuffer) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = true
+	return nil
+}
+
+func (b *outputBuffer) String() (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String(), b.closed
+}
+
+// TestKVMDictationVM runs a stand-in engine the way the dictation service
+// runs the real one, through the full runtime with Docker beside it.
+func TestKVMDictationVM(t *testing.T) {
+	e := kvmEngine(t)
+	docker, err := runtime.NewDocker()
+	if err != nil {
+		t.Skipf("needs Docker: %v", err)
+	}
+	r := &Runtime{Docker: docker, vms: e}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(e.root, "..", "dictation-sock")
+	if err = os.MkdirAll(sock, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sock) })
+	start := func(args ...string) (runtime.ID, *outputBuffer) {
+		t.Helper()
+		out := &outputBuffer{}
+		id, startErr := r.StartDictation(t.Context(), runtime.DictationSpec{
+			Owner: "i9test", Image: "docker.io/library/ubuntu:24.04", User: "65534:65534",
+			Entrypoint: append([]string{"/aether-dictation", "-test.run", "^TestKVMEngineNow$", "--"}, args...),
+			ReadOnly:   map[string]string{self: "/aether-dictation"},
+			Writable:   map[string]string{sock: "/run/dictation"}, Socket: "engine.sock",
+			CPUs: 1, MemoryBytes: 1 << 30, Output: out,
+		})
+		if startErr != nil {
+			t.Fatal(startErr)
+		}
+		return id, out
+	}
+	t.Cleanup(func() { _ = r.RemoveDictation(context.Background(), "i9test") })
+	began := time.Now()
+	id, out := start()
+	var line string
+	for deadline := time.Now().Add(30 * time.Second); line == "" && time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if c, dialErr := net.Dial("unix", filepath.Join(sock, "engine.sock")); dialErr == nil {
+			line, _ = bufio.NewReader(c).ReadString('\n')
+			_ = c.Close()
+		}
+	}
+	if line != "engine says hi\n" {
+		t.Fatalf("the host socket answered %q", line)
+	}
+	t.Logf("the engine answered on the host socket %s after start", time.Since(began))
+	if st, stateErr := r.DictationState(t.Context(), id); stateErr != nil || !st.Running {
+		t.Errorf("state of a running engine = %+v, %v", st, stateErr)
+	}
+	if got, _ := out.String(); !strings.Contains(got, "engine loading") {
+		t.Errorf("output = %q", got)
+	}
+	if links, _ := vmRun(t, e, dictationVM("i9test"), "ls /sys/class/net"); strings.TrimSpace(links) != "lo" {
+		t.Errorf("the engine's VM has network links %q, want only lo", links)
+	}
+	if err = r.RemoveDictation(t.Context(), "i9test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(filepath.Join(sock, "engine.sock")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the host socket outlived the engine: %v", err)
+	}
+
+	id, out = start("3")
+	var st runtime.DictationState
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if st, err = r.DictationState(t.Context(), id); err != nil || !st.Running {
+			break
+		}
+	}
+	if err != nil || st.Running || st.ExitCode != 3 || st.OOMKilled {
+		t.Errorf("state of an engine that exited 3 = %+v, %v", st, err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if _, closed := out.String(); closed {
+			break
+		}
+	}
+	if _, closed := out.String(); !closed {
+		t.Error("the output stayed open after the engine exited")
 	}
 }

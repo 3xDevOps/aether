@@ -320,8 +320,9 @@ thresholds and what to do.
 `vm`, each new session runs in its own [Cloud
 Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) virtual
 machine instead of a container, and so do each member's environment
-terminal, assistant and agent updater. The development browser stays on
-Docker.
+terminal, assistant and agent updater, and the
+[dictation](dictation.md#the-engine-container) engine. The development
+browser stays on Docker.
 This is work in progress; [the plan](plans/2026-11-13-microvm-sessions.md)
 lists what is still to come.
 
