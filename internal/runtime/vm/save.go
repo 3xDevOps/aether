@@ -84,8 +84,9 @@ func (e *engine) awaitStopped(ctx context.Context, key string) error {
 
 // restore starts the monitor on the saved state, resumes the guest and sets
 // its clock. Once the guest runs, its disks move past the snapshot, so the
-// snapshot is dropped before anything else can fail: a second restore of it
-// would pair old memory with newer disks.
+// snapshot is dropped durably before the guest resumes: a second restore of
+// it would pair old memory with newer disks. Cloud Hypervisor has read all
+// of it by then.
 func (e *engine) restore(ctx context.Context, key string) (err error) {
 	unlock := e.lock(key)
 	defer unlock()
@@ -118,15 +119,15 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err = e.awaitRestored(ctx, key, api); err != nil {
 		return err
 	}
-	if err = api.resume(ctx); err != nil {
-		return fmt.Errorf("vm runtime: resume restored VM %s: %w", key, err)
-	}
 	rec.Saved = false
 	if err = e.store(rec); err != nil {
 		return err
 	}
 	if err = os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("vm runtime: remove the saved state of VM %s: %w", key, err)
+	}
+	if err = api.resume(ctx); err != nil {
+		return fmt.Errorf("vm runtime: resume restored VM %s: %w", key, err)
 	}
 	h, err := e.helper(key)
 	if err != nil {

@@ -20,13 +20,23 @@ const (
 )
 
 // memoryEvents reports a stopped VM as fs.ErrNotExist, as the OOM watcher
-// treats a stopped container's missing cgroup.
+// treats a stopped container's missing cgroup. A paused guest cannot answer
+// and kills nothing, so it reports what it last did.
 func (e *engine) memoryEvents(ctx context.Context, key string) (runtime.MemoryEvents, error) {
 	if _, err := e.load(key); err != nil {
 		return runtime.MemoryEvents{}, err
 	}
 	if up, err := e.running(ctx, key); err != nil || !up {
 		return runtime.MemoryEvents{}, errors.Join(err, fmt.Errorf("vm runtime: VM %s is not running: %w", key, fs.ErrNotExist))
+	}
+	if e.paused(ctx, key) {
+		e.mu.Lock()
+		events, known := e.events[key]
+		e.mu.Unlock()
+		if !known {
+			return events, fmt.Errorf("vm runtime: VM %s is paused: %w", key, fs.ErrNotExist)
+		}
+		return events, nil
 	}
 	h, err := e.helper(key)
 	if err != nil {
@@ -36,7 +46,16 @@ func (e *engine) memoryEvents(ctx context.Context, key string) (runtime.MemoryEv
 	if err != nil {
 		return runtime.MemoryEvents{}, fmt.Errorf("vm runtime: memory events of VM %s: %w", key, err)
 	}
-	return runtime.MemoryEvents{OOMKills: st.OOMKills, LimitBytes: st.MemoryLimitBytes}, nil
+	events := runtime.MemoryEvents{OOMKills: st.OOMKills, LimitBytes: st.MemoryLimitBytes}
+	e.mu.Lock()
+	e.events[key] = events
+	e.mu.Unlock()
+	return events, nil
+}
+
+func (e *engine) paused(ctx context.Context, key string) bool {
+	state, err := newCHAPI(e.path(key, apiSocket)).state(ctx)
+	return err == nil && state == "Paused"
 }
 
 // CPU, memory and processes come from the helper, network and disk bytes
@@ -73,7 +92,7 @@ func (e *engine) sample(ctx context.Context, key string) (*runtime.ContainerStat
 	if err != nil {
 		return nil, err
 	}
-	if up, upErr := e.running(ctx, key); upErr != nil || !up {
+	if up, upErr := e.running(ctx, key); upErr != nil || !up || e.paused(ctx, key) {
 		return nil, upErr
 	}
 	h, err := e.helper(key)

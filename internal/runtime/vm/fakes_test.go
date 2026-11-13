@@ -122,6 +122,7 @@ type fakeUnits struct {
 	active   map[string]*fakeVMM
 	started  []startCall
 	failNext bool
+	stateErr error
 }
 
 type startCall struct {
@@ -175,6 +176,9 @@ func (u *fakeUnits) Stop(_ context.Context, name string) error {
 func (u *fakeUnits) State(_ context.Context, name string) (unitState, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	if u.stateErr != nil {
+		return unitState{}, u.stateErr
+	}
 	if u.active[name] != nil {
 		return unitState{Active: true, MainPID: 4242}, nil
 	}
@@ -285,6 +289,8 @@ type fakeHelper struct {
 	ignoreTE bool
 	clock    time.Time
 	stats    guest.Stats
+	// finals are dev-exec's own exit records, which outlive the helper's.
+	finals map[string]int
 }
 
 func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
@@ -333,7 +339,9 @@ func (g *fakeHelper) Spawn(_ context.Context, spec guest.ProcessSpec) (process, 
 func (g *fakeHelper) control(key, execID, claim, action string) string {
 	state := devexec.State{CreationKey: key, ExecID: execID, ClaimToken: claim}
 	supervisor := g.procs[execID]
-	if supervisor == nil {
+	if code, ok := g.finals[execID]; ok && supervisor == nil {
+		state.Exited, state.ExitCode = true, &code
+	} else if supervisor == nil {
 		state.Error = "no such execution"
 	} else {
 		if action == "stop" {
@@ -342,6 +350,10 @@ func (g *fakeHelper) control(key, execID, claim, action string) string {
 		if st, _ := supervisor.Status(context.Background()); st.Exited {
 			code := st.ExitCode
 			state.Exited, state.ExitCode = true, &code
+			if g.finals == nil {
+				g.finals = map[string]int{}
+			}
+			g.finals[execID] = code
 		} else {
 			state.Running = true
 		}
@@ -420,8 +432,23 @@ func (p *fakeProc) exit(code int) {
 	}
 }
 
+// Attach serves the programmed output. "hang" never ends stdout, and
+// "errflood:" sends stderr past the exec output limit first; both end only
+// when the attachment closes.
 func (p *fakeProc) Attach(bool) runtime.Attachment {
-	return &fakeAttachment{stdout: strings.NewReader(p.out), stderr: strings.NewReader("")}
+	stdout, held := io.Pipe()
+	a := &fakeAttachment{stdout: stdout, stderr: strings.NewReader(""), closed: func() { _ = held.CloseWithError(io.ErrClosedPipe) }}
+	switch p.out {
+	case "hang":
+	case "errflood:":
+		a.stderr = strings.NewReader(strings.Repeat("e", runtime.ExecOutputLimit+1))
+	default:
+		go func() {
+			_, _ = io.WriteString(held, p.out)
+			_ = held.Close()
+		}()
+	}
+	return a
 }
 
 func (p *fakeProc) CloseStdin(context.Context) error {
@@ -475,13 +502,19 @@ func (missingProc) Wait(context.Context) (int, error) { return 0, guest.ErrNotFo
 
 type fakeAttachment struct {
 	stdout, stderr io.Reader
+	closed         func()
 }
 
 func (a *fakeAttachment) Stdin() io.WriteCloser                    { return nopWriteCloser{} }
 func (a *fakeAttachment) Stdout() io.Reader                        { return a.stdout }
 func (a *fakeAttachment) Stderr() io.Reader                        { return a.stderr }
 func (a *fakeAttachment) Resize(context.Context, uint, uint) error { return nil }
-func (a *fakeAttachment) Close() error                             { return nil }
+func (a *fakeAttachment) Close() error {
+	if a.closed != nil {
+		a.closed()
+	}
+	return nil
+}
 
 type nopWriteCloser struct{}
 

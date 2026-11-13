@@ -1025,8 +1025,8 @@ type dockerAttachment struct {
 	id        string
 	tty       bool
 	resp      client.HijackedResponse
-	stdout    *streamBuffer
-	stderr    *streamBuffer
+	stdout    *StreamBuffer
+	stderr    *StreamBuffer
 	closeOnce sync.Once
 }
 
@@ -1036,8 +1036,8 @@ func newDockerAttachment(cli *client.Client, id string, tty bool, resp client.Hi
 		id:     id,
 		tty:    tty,
 		resp:   resp,
-		stdout: newStreamBuffer(),
-		stderr: newStreamBuffer(),
+		stdout: NewStreamBuffer(),
+		stderr: NewStreamBuffer(),
 	}
 	go func() {
 		var err error
@@ -1111,84 +1111,3 @@ func (h hijackStdin) WriteContext(ctx context.Context, p []byte) (int, error) {
 }
 
 func (h hijackStdin) Close() error { return h.resp.CloseWrite() }
-
-const maxStreamBuffer = 8 << 20
-
-// streamBuffer writes never block, since blocking the demux goroutine would
-// stall the sibling stream; past maxStreamBuffer the oldest bytes are
-// dropped. A lossless buffer blocks at the cap instead, for protocol streams
-// that cannot lose a byte.
-type streamBuffer struct {
-	mu       sync.Mutex
-	cond     *sync.Cond
-	buf      bytes.Buffer
-	lossless bool
-	// limit is where a lossless buffer blocks its writer.
-	limit  int
-	closed bool
-	err    error
-}
-
-func newStreamBuffer() *streamBuffer {
-	b := &streamBuffer{limit: maxStreamBuffer}
-	b.cond = sync.NewCond(&b.mu)
-	return b
-}
-
-func newLosslessStreamBuffer() *streamBuffer {
-	b := newStreamBuffer()
-	b.lossless = true
-	return b
-}
-
-func (b *streamBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for b.lossless && !b.closed && b.buf.Len() >= b.limit {
-		b.cond.Wait()
-	}
-	if b.closed {
-		return 0, io.ErrClosedPipe
-	}
-	n, _ := b.buf.Write(p) // bytes.Buffer.Write cannot fail
-	if b.lossless {
-		b.cond.Broadcast()
-		return n, nil
-	}
-	if over := b.buf.Len() - maxStreamBuffer; over > 0 {
-		b.buf.Next(over)
-	}
-	b.cond.Broadcast()
-	return n, nil
-}
-
-func (b *streamBuffer) Read(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for b.buf.Len() == 0 && !b.closed {
-		b.cond.Wait()
-	}
-	if b.buf.Len() > 0 {
-		if b.lossless {
-			b.cond.Broadcast()
-		}
-		return b.buf.Read(p)
-	}
-	if b.err != nil {
-		return 0, b.err
-	}
-	return 0, io.EOF
-}
-
-// CloseWithError leaves buffered data readable first. Only the first close
-// takes effect.
-func (b *streamBuffer) CloseWithError(err error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closed {
-		return
-	}
-	b.closed = true
-	b.err = err
-	b.cond.Broadcast()
-}

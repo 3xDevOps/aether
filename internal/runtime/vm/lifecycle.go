@@ -126,16 +126,20 @@ func (e *engine) kill(ctx context.Context, key string) {
 	_ = e.units.Stop(ctx, unitName(key))
 }
 
-// wait blocks until Main exits. On a VM that never booted it waits for the
-// first boot, and on a saved VM until it is restored, so a save is not
-// mistaken for an exit.
+// wait blocks until Main of the current boot exits; a later boot means it
+// did. On a VM that never booted it waits for the first boot, and on a saved
+// VM until it is restored, so a save is not mistaken for an exit.
 func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, error) {
+	boot := -1
 	for {
 		rec, err := e.load(key)
 		if err != nil {
 			return runtime.ExitStatus{}, err
 		}
-		if rec.Exited {
+		if boot < 0 && rec.Booted {
+			boot = rec.Boots
+		}
+		if rec.Exited || (boot >= 0 && rec.Boots != boot) {
 			return runtime.ExitStatus{Code: rec.ExitCode}, nil
 		}
 		if rec.Booted && !rec.Saved && !e.flag(e.booting, key) {
@@ -149,7 +153,7 @@ func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, erro
 				}
 				continue
 			}
-			if code, ok := e.waitMain(ctx, key); ok {
+			if code, ok := e.waitMain(ctx, key, boot); ok {
 				return runtime.ExitStatus{Code: code}, nil
 			}
 		}
@@ -161,14 +165,33 @@ func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, erro
 	}
 }
 
-// waitMain waits for Main through the helper and finishes the VM; false
-// means the helper went away first and the caller looks again.
-func (e *engine) waitMain(ctx context.Context, key string) (int, bool) {
+// waitMain waits for Main of boot through the helper and finishes the VM;
+// false means the wait ended first and the caller looks again. The helper's
+// client retries a VM that died until its context ends, so the wait also
+// ends when the unit does.
+func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool) {
 	h, err := e.helper(key)
 	if err != nil {
 		return 0, false
 	}
-	code, err := h.Process(guest.MainID).Wait(ctx)
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-waitCtx.Done():
+				return
+			case <-tick.C:
+				if up, upErr := e.running(waitCtx, key); upErr == nil && !up {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	code, err := h.Process(guest.MainID).Wait(waitCtx)
 	if err != nil {
 		return 0, false
 	}
@@ -178,7 +201,7 @@ func (e *engine) waitMain(ctx context.Context, key string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if rec.Exited {
+	if rec.Exited || rec.Boots != boot {
 		return rec.ExitCode, true
 	}
 	if err := e.finish(ctx, rec, code); err != nil {
@@ -277,10 +300,14 @@ func (e *engine) inspect(ctx context.Context, key string) (runtime.ContainerInfo
 	for i, m := range rec.Mounts {
 		targets[i] = m.ContainerPath
 	}
-	return runtime.ContainerInfo{
+	info := runtime.ContainerInfo{
 		Image: rec.Image, User: rec.User, Env: append([]string(nil), rec.Env...), MountTargets: targets,
-		Fingerprint: rec.Fingerprint, Exited: rec.Exited, ExitCode: rec.ExitCode,
-	}, nil
+		Fingerprint: rec.Fingerprint, Exited: rec.Exited,
+	}
+	if rec.Exited {
+		info.ExitCode = rec.ExitCode
+	}
+	return info, nil
 }
 
 func (e *engine) find(key string) (runtime.ID, error) {

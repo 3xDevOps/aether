@@ -52,6 +52,7 @@ type engine struct {
 	helpers map[string]helper
 	booting map[string]bool
 	fresh   map[string]bool
+	events  map[string]runtime.MemoryEvents
 
 	netMu    sync.Mutex
 	reserved map[int]bool
@@ -62,7 +63,7 @@ func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 	return &engine{
 		cfg: cfg, root: filepath.Join(cfg.DataDir, "vm"), units: u, dial: dial, run: runCommand,
 		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, booting: map[string]bool{},
-		fresh: map[string]bool{}, reserved: map[int]bool{},
+		fresh: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, reserved: map[int]bool{},
 	}
 }
 
@@ -269,7 +270,8 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 	if err = e.ensureNAT(ctx); err != nil {
 		return err
 	}
-	rec.Booted, rec.Exited, rec.ExitCode = true, false, 0
+	rec.Booted, rec.Exited = true, false
+	rec.Boots++
 	if err = e.store(rec); err != nil {
 		return err
 	}

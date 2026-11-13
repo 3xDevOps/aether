@@ -433,7 +433,7 @@ func TestNanoCPUs(t *testing.T) {
 }
 
 func TestStreamBufferWriteNeverBlocks(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -452,7 +452,7 @@ func TestStreamBufferWriteNeverBlocks(t *testing.T) {
 }
 
 func TestStreamBufferDropsOldestPastCap(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	chunk := bytes.Repeat([]byte("a"), 4096)
 	for range 4 * maxStreamBuffer / len(chunk) {
 		if _, err := b.Write(chunk); err != nil {
@@ -477,7 +477,7 @@ func TestStreamBufferDropsOldestPastCap(t *testing.T) {
 }
 
 func TestStreamBufferReadBlocksUntilData(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	got := make(chan string, 1)
 	go func() {
 		p := make([]byte, 16)
@@ -502,7 +502,7 @@ func TestStreamBufferReadBlocksUntilData(t *testing.T) {
 }
 
 func TestStreamBufferCloseDrainsThenEOF(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	if _, err := b.Write([]byte("tail")); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestStreamBufferCloseDrainsThenEOF(t *testing.T) {
 }
 
 func TestStreamBufferCloseWithError(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	want := errors.New("boom")
 	b.CloseWithError(want)
 	b.CloseWithError(nil) // only the first close takes effect
@@ -530,7 +530,7 @@ func TestStreamBufferCloseWithError(t *testing.T) {
 }
 
 func TestStreamBufferConcurrent(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	const writers, lines = 8, 200
 	var wg sync.WaitGroup
 	for range writers {

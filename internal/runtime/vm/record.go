@@ -59,11 +59,14 @@ type record struct {
 	Mounts       []runtime.Mount `json:"mounts,omitempty"`
 	Net          int             `json:"net"`
 	// Booted is set once a boot was launched: the next cold start builds a
-	// fresh root disk.
+	// fresh root disk. Boots counts them, so a wait on one boot can tell it
+	// from the next.
 	Booted bool `json:"booted,omitempty"`
+	Boots  int  `json:"boots,omitempty"`
 	// Saved means the snapshot directory holds the VM's state and the VM is
 	// stopped until Restore.
-	Saved    bool `json:"saved,omitempty"`
+	Saved bool `json:"saved,omitempty"`
+	// ExitCode is the last boot's until the next boot exits.
 	Exited   bool `json:"exited,omitempty"`
 	ExitCode int  `json:"exit_code,omitempty"`
 }

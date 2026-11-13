@@ -74,7 +74,7 @@ func (e *engine) spawn(ctx context.Context, key string, spec guest.ProcessSpec) 
 		return nil, nil, err
 	}
 	// A paused guest would hold the exec until ctx ends; Docker refuses it.
-	if state, stateErr := newCHAPI(e.path(key, apiSocket)).state(ctx); stateErr == nil && state == "Paused" {
+	if e.paused(ctx, key) {
 		return nil, nil, fmt.Errorf("vm runtime: exec in VM %s: it is paused", key)
 	}
 	h, err := e.helper(key)
@@ -108,7 +108,7 @@ func (e *engine) exec(ctx context.Context, key string, argv []string, workDir st
 	if err = p.CloseStdin(ctx); err != nil {
 		return 0, "", "", fmt.Errorf("vm runtime: exec input: %w", err)
 	}
-	stdout, stderr, err := readLimited(att)
+	stdout, stderr, err := readLimited(ctx, att)
 	if err != nil {
 		return 0, stdout, stderr, fmt.Errorf("vm runtime: exec output: %w", err)
 	}
@@ -121,40 +121,53 @@ func (e *engine) exec(ctx context.Context, key string, argv []string, workDir st
 
 // readLimited reads both streams to their end and refuses output past
 // runtime.ExecOutputLimit, which the two share.
-func readLimited(att runtime.Attachment) (string, string, error) {
+func readLimited(ctx context.Context, att runtime.Attachment) (string, string, error) {
 	var mu sync.Mutex
 	total := 0
 	var out, errOut bytes.Buffer
-	read := func(r io.Reader, into *bytes.Buffer) error {
-		buf := make([]byte, 32<<10)
-		for {
-			n, err := r.Read(buf)
+	limited := func(into *bytes.Buffer) io.Writer {
+		return writerFunc(func(p []byte) (int, error) {
 			mu.Lock()
-			total += n
-			over := total > runtime.ExecOutputLimit
-			if !over {
-				into.Write(buf[:n])
+			defer mu.Unlock()
+			if total += len(p); total > runtime.ExecOutputLimit {
+				return 0, fmt.Errorf("output passed the %d byte limit", runtime.ExecOutputLimit)
 			}
-			mu.Unlock()
-			if over {
-				return fmt.Errorf("output passed the %d byte limit", runtime.ExecOutputLimit)
-			}
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
+			return into.Write(p)
+		})
+	}
+	err := copyStreams(ctx, att, limited(&out), limited(&errOut), func() { _ = att.Close() })
+	return out.String(), errOut.String(), err
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// copyStreams copies stdout and stderr at once; the first failure, or the
+// end of ctx, calls abort so the other copy is not left blocked on a stream
+// the command keeps open.
+func copyStreams(ctx context.Context, att runtime.Attachment, stdout, stderr io.Writer, abort func()) error {
+	abort = sync.OnceFunc(abort)
+	stop := context.AfterFunc(ctx, abort)
+	defer stop()
+	errs := make(chan error, 2)
+	for _, pair := range [...]struct {
+		w io.Writer
+		r io.Reader
+	}{{stdout, att.Stdout()}, {stderr, att.Stderr()}} {
+		go func() {
+			_, err := io.Copy(pair.w, pair.r)
 			if err != nil {
-				return err
+				abort()
 			}
-		}
+			errs <- err
+		}()
 	}
-	errc := make(chan error, 1)
-	go func() { errc <- read(att.Stderr(), &errOut) }()
-	outErr := read(att.Stdout(), &out)
-	if outErr != nil {
-		_ = att.Close()
+	err := errors.Join(<-errs, <-errs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
-	errErr := <-errc
-	return out.String(), errOut.String(), errors.Join(outErr, errErr)
+	return err
 }
 
 func (e *engine) execTTY(ctx context.Context, key string, argv []string, workDir string, cols, rows uint) (runtime.Attachment, error) {
@@ -195,20 +208,7 @@ func (e *engine) execAttached(ctx context.Context, key string, spec runtime.Atta
 			return 0, fmt.Errorf("vm runtime: exec input: %w", err)
 		}
 	}
-	copied := make(chan error, 1)
-	go func() {
-		_, copyErr := io.Copy(spec.Stderr, att.Stderr())
-		copied <- copyErr
-	}()
-	_, outErr := io.Copy(spec.Stdout, att.Stdout())
-	if outErr != nil {
-		closeStdin()
-	}
-	errErr := <-copied
-	if err = ctx.Err(); err != nil {
-		return 0, err
-	}
-	if err = errors.Join(outErr, errErr); err != nil {
+	if err = copyStreams(ctx, att, spec.Stdout, spec.Stderr, closeStdin); err != nil {
 		return 0, fmt.Errorf("vm runtime: exec output: %w", err)
 	}
 	code, err := p.Wait(ctx)
@@ -228,7 +228,7 @@ func (e *engine) runAsRoot(ctx context.Context, h helper, argv []string) (int, s
 	if err = p.CloseStdin(ctx); err != nil {
 		return 0, "", err
 	}
-	stdout, stderr, err := readLimited(att)
+	stdout, stderr, err := readLimited(ctx, att)
 	if err != nil {
 		return 0, "", err
 	}

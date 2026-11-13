@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"sync"
@@ -60,9 +61,12 @@ func (e *engine) startManagedExec(ctx context.Context, key string, spec runtime.
 	}
 	execID := processID("managed")
 	argv := append([]string{coordtransport.CLIPath, devexec.Command, mode, spec.CreationKey, claim}, spec.Argv...)
-	p, att, err := e.spawn(ctx, key, guest.ProcessSpec{ID: execID, Argv: argv, Env: env, User: spec.User, Dir: spec.WorkingDir, TTY: size, Lossless: spec.Lossless})
+	p, att, err := e.spawn(ctx, key, guest.ProcessSpec{ID: execID, Argv: argv, Env: env, User: spec.User, Dir: spec.WorkingDir, TTY: size, Lossless: spec.Lossless || !tty})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: create managed execution: %w", err)
+	}
+	if !tty {
+		att = newPipeAttachment(p, att, spec.Lossless)
 	}
 	m := &managedExec{engine: e, key: key, tty: tty, proc: p, attachment: att, identity: runtime.ExecIdentity{
 		ContainerID: runtime.ID(idPrefix + key), ExecID: execID, CreationKey: spec.CreationKey, ClaimToken: claim, User: spec.User,
@@ -100,11 +104,15 @@ func (e *engine) recoverExec(ctx context.Context, key string, identity runtime.E
 	if identity.ExecID == "" || identity.CreationKey == "" || identity.ClaimToken == "" {
 		return nil, fmt.Errorf("%w: incomplete identity", runtime.ErrExecUnavailable)
 	}
-	if _, err := e.requireRunning(ctx, key, "recover an execution in"); err != nil {
-		if errors.Is(err, runtime.ErrNotFound) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%w: %w: %w", runtime.ErrExecUnavailable, runtime.ErrNotFound, err)
+	if _, err := e.load(key); err != nil {
+		return nil, err
+	}
+	up, err := e.running(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", runtime.ErrExecUnavailable, err)
+	}
+	if !up {
+		return nil, fmt.Errorf("%w: %w: VM %s is not running", runtime.ErrExecUnavailable, runtime.ErrNotFound, key)
 	}
 	h, err := e.helper(key)
 	if err != nil {
@@ -114,7 +122,10 @@ func (e *engine) recoverExec(ctx context.Context, key string, identity runtime.E
 	m := &managedExec{engine: e, key: key, proc: p, identity: identity}
 	_, err = p.Status(ctx)
 	if errors.Is(err, guest.ErrNotFound) {
-		return nil, fmt.Errorf("%w: %w: execution %s", runtime.ErrExecUnavailable, runtime.ErrNotFound, identity.ExecID)
+		if _, err = m.final(ctx); err != nil {
+			return nil, fmt.Errorf("%w: execution %s: %w", runtime.ErrNotFound, identity.ExecID, err)
+		}
+		return m, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", runtime.ErrExecUnavailable, err)
@@ -155,7 +166,7 @@ func (m *managedExec) control(ctx context.Context, action string, grace time.Dur
 	if err = p.CloseStdin(ctx); err != nil {
 		return devexec.State{}, fmt.Errorf("%w: helper %s: %w", runtime.ErrExecUnavailable, action, err)
 	}
-	stdout, stderr, err := readLimited(att)
+	stdout, stderr, err := readLimited(ctx, att)
 	if err != nil {
 		return devexec.State{}, fmt.Errorf("%w: helper %s output: %w", runtime.ErrExecUnavailable, action, err)
 	}
@@ -166,23 +177,38 @@ func (m *managedExec) control(ctx context.Context, action string, grace time.Dur
 	return runtime.ExecControlState(m.identity, action, code, stdout, stderr)
 }
 
-// Status asks the helper whether the supervisor runs; once it has ended, the
-// supervisor's own record holds the command's exit.
+// Status asks the helper whether the supervisor runs. Once it has ended, the
+// supervisor's own record holds the command's exit; it outlives the helper,
+// which forgets exited processes.
 func (m *managedExec) Status(ctx context.Context) (runtime.ExecState, error) {
 	st, err := m.proc.Status(ctx)
 	if errors.Is(err, guest.ErrNotFound) {
-		return runtime.ExecState{}, fmt.Errorf("%w: %w: execution %s", runtime.ErrExecUnavailable, runtime.ErrNotFound, m.identity.ExecID)
+		state, finalErr := m.final(ctx)
+		if finalErr != nil {
+			return state, fmt.Errorf("%w: %w: execution %s: %w", runtime.ErrExecUnavailable, runtime.ErrNotFound, m.identity.ExecID, finalErr)
+		}
+		return state, nil
 	}
 	if err != nil {
 		return runtime.ExecState{}, fmt.Errorf("%w: %w", runtime.ErrExecUnavailable, err)
 	}
-	state := runtime.ExecState{Running: !st.Exited, Attached: m.Attachment() != nil}
+	if st.Exited {
+		return m.final(ctx)
+	}
+	return m.state(), nil
+}
+
+func (m *managedExec) state() runtime.ExecState {
+	state := runtime.ExecState{Running: true, Attached: m.Attachment() != nil}
 	if !state.Attached {
 		state.UnavailableReason = "attachment is unavailable; the execution was detached"
 	}
-	if !st.Exited {
-		return state, nil
-	}
+	return state
+}
+
+func (m *managedExec) final(ctx context.Context) (runtime.ExecState, error) {
+	state := m.state()
+	state.Running = false
 	final, err := m.control(ctx, "status", 0)
 	if err != nil {
 		return state, fmt.Errorf("%w: command exit record unavailable: %w", runtime.ErrExecUnavailable, err)
@@ -190,7 +216,7 @@ func (m *managedExec) Status(ctx context.Context) (runtime.ExecState, error) {
 	if !final.Exited || final.ExitCode == nil {
 		return state, fmt.Errorf("%w: helper ended without a command exit record", runtime.ErrExecUnavailable)
 	}
-	state.Running, state.Exited, state.ExitCode = false, true, final.ExitCode
+	state.Exited, state.ExitCode = true, final.ExitCode
 	return state, nil
 }
 
@@ -256,4 +282,49 @@ func (m *managedExec) Detach() error {
 		return attachment.Close()
 	}
 	return nil
+}
+
+// pipeAttachment gives a pipe execution Docker's semantics: closing its input
+// ends the command's stdin, and unless the caller asked for every stream to
+// be lossless, stderr drains into a buffer that drops its oldest bytes, so an
+// unread stderr never stalls the lossless stdout.
+type pipeAttachment struct {
+	runtime.Attachment
+	stdin  pipeInput
+	stderr io.Reader
+}
+
+func newPipeAttachment(p process, att runtime.Attachment, lossless bool) *pipeAttachment {
+	a := &pipeAttachment{Attachment: att, stdin: pipeInput{WriteCloser: att.Stdin(), proc: p}, stderr: att.Stderr()}
+	if !lossless {
+		drained := runtime.NewStreamBuffer()
+		go func() {
+			_, err := io.Copy(drained, att.Stderr())
+			drained.CloseWithError(err)
+		}()
+		a.stderr = drained
+	}
+	return a
+}
+
+func (a *pipeAttachment) Stdin() io.WriteCloser { return a.stdin }
+func (a *pipeAttachment) Stderr() io.Reader     { return a.stderr }
+
+type pipeInput struct {
+	io.WriteCloser
+	proc process
+}
+
+func (in pipeInput) WriteContext(ctx context.Context, b []byte) (int, error) {
+	if w, ok := in.WriteCloser.(runtime.ContextWriter); ok {
+		return w.WriteContext(ctx, b)
+	}
+	return in.Write(b)
+}
+
+func (in pipeInput) Close() error {
+	_ = in.WriteCloser.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), stdinCloseTimeout)
+	defer cancel()
+	return in.proc.CloseStdin(ctx)
 }
