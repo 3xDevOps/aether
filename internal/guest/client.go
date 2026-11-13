@@ -32,7 +32,7 @@ const (
 	// readChunk and writeChunk bound one Read and one Write call.
 	readChunk  = 64 << 10
 	writeChunk = 256 << 10
-	// infoLimit bounds each string Info returns.
+	// infoLimit bounds each string the helper sends that the server shows.
 	infoLimit = 4 << 10
 )
 
@@ -212,9 +212,9 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 	}
 	info := Info{
 		Protocol:  int(reply.GetProtocol()),
-		Version:   truncate(reply.GetVersion(), infoLimit),
-		BootID:    truncate(reply.GetBootId(), infoLimit),
-		BootError: truncate(reply.GetBootError(), infoLimit),
+		Version:   truncate(reply.GetVersion()),
+		BootID:    truncate(reply.GetBootId()),
+		BootError: truncate(reply.GetBootError()),
 	}
 	if info.Protocol != Protocol {
 		return info, fmt.Errorf("%w: helper %s speaks protocol %d, this server %d", ErrIncompatible, info.Version, info.Protocol, Protocol)
@@ -255,7 +255,7 @@ func (c *Client) Spawn(ctx context.Context, spec ProcessSpec) (*Process, error) 
 	if err != nil {
 		for _, detail := range status.Convert(err).Details() {
 			if failure, ok := detail.(*guestpb.SpawnFailure); ok && (failure.GetExitCode() == 126 || failure.GetExitCode() == 127) {
-				return nil, &StartError{Code: int(failure.GetExitCode()), Err: fmt.Errorf("guest: spawn %s: %s", spec.ID, truncate(status.Convert(err).Message(), infoLimit))}
+				return nil, &StartError{Code: int(failure.GetExitCode()), Err: fmt.Errorf("guest: spawn %s: %s", spec.ID, truncate(status.Convert(err).Message()))}
 			}
 		}
 		return nil, fmt.Errorf("guest: spawn %s: %w", spec.ID, err)
@@ -417,9 +417,10 @@ func (s Size) proto() *guestpb.Size {
 	return &guestpb.Size{Cols: uint32(s.Cols), Rows: uint32(s.Rows)}
 }
 
-func truncate(s string, limit int) string {
-	if len(s) <= limit {
+// truncate caps a string the helper sent.
+func truncate(s string) string {
+	if len(s) <= infoLimit {
 		return s
 	}
-	return strings.ToValidUTF8(s[:limit], "") + "...(" + strconv.Itoa(len(s)-limit) + " more bytes)"
+	return strings.ToValidUTF8(s[:infoLimit], "") + "...(" + strconv.Itoa(len(s)-infoLimit) + " more bytes)"
 }
