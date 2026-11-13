@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 import { enhancedSupported, label, loginFor, ready, setupMode, signedOutState } from '@/components/agents/agent-copy'
 import { ModeComparison, type SetupMode } from '@/components/agents/mode-comparison'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { copyText } from '@/lib/clipboard'
 import type { AgentInfo, AgentInstallResult } from '@/lib/types'
 import { TerminalDock } from '@/routes/environment/terminal-dock'
 import { useStore } from '@/store'
@@ -51,6 +52,7 @@ export function AgentSetup({
   /** Pins Enhanced for a caller that cannot work without its adapter, so the mode choice is skipped. */
   requireEnhanced?: boolean
 }) {
+  const commandSource = useRef<HTMLElement>(null)
   const caps = useCapability()
   const [agent, setAgent] = useState(initial)
   const [mode, setMode] = useState<SetupMode>(() => requireEnhanced ? 'acp' : setupMode(initial, useStore.getState().launchDefaults[initial.name]?.mode))
@@ -69,6 +71,7 @@ export function AgentSetup({
   const hasTerminal = caps.hasWS('terminal')
   const login = loginFor(agent)
   const typedInstall = enhanced ? agent.enhanced_install_script ?? agent.install_script : agent.install_script
+  const setupCommand = canInstall ? login?.command : typedInstall
 
   const check = async () => {
     setChecking(true)
@@ -148,7 +151,7 @@ export function AgentSetup({
         ) : (
           <p className="text-ui text-text">
             {typedInstall
-              ? 'The install command is typed into your Environment terminal below. Press Enter to run it.'
+              ? <>Run <Code ref={commandSource}>{typedInstall}</Code> in your Environment terminal below.</>
               : `Install the ${agent.executable ?? agent.name} executable into ~/.local/bin from your Environment terminal below.`}
           </p>
         )}
@@ -172,10 +175,22 @@ export function AgentSetup({
             <>
               {login && (
                 <p className="text-ui text-text">
-                  Log in once: <Code>{login.command}</Code> is typed into your environment terminal. {login.hint}
+                  Log in once by running <Code ref={canInstall ? commandSource : undefined}>{login.command}</Code> in your environment terminal. {login.hint}
                 </p>
               )}
-              <TerminalDock client={client} openOnMount initialLine={canInstall ? login?.command : typedInstall} />
+              {setupCommand && (
+                <>
+                  <p className="text-ui text-text">Paste the command at a shell prompt, review it, then press Enter.</p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void copyText(setupCommand, commandSource.current)}
+                  >
+                    {canInstall ? 'Copy login command' : 'Copy install command'}
+                  </Button>
+                </>
+              )}
+              <TerminalDock client={client} openOnMount />
             </>
           ) : (
             <>

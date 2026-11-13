@@ -803,6 +803,16 @@ describe('environment terminal dock', () => {
     expect(useStore.getState().envTerminal.collapsed).toBe(true)
   })
 
+  it('keeps a newly opened tab selected when mounted open', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock openOnMount />)
+    await waitFor(() => expect(useStore.getState().envTerminal.activeTab).toBe('main'))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.activeTab).toBe('t2'))
+  })
+
   it('opens the dock when a collapsed strip is asked for a tab', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     useStore.setState({ envTerminal: initialEnvTerminal })
