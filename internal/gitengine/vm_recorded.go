@@ -55,7 +55,7 @@ func (e *Engine) recordedFilesTree(ctx context.Context, run domain.RunID, dir st
 	if err != nil {
 		return nil, err
 	}
-	return e.listTreeAt(ctx, store, tree, dir)
+	return e.listTreeAt(ctx, store, tree, dir, true)
 }
 
 func (e *Engine) recordedFilesRead(ctx context.Context, run domain.RunID, path string, maxBytes int) (FileRead, error) {

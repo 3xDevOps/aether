@@ -99,11 +99,13 @@ func (e *Engine) listBare(ctx context.Context, repoPath, ref, dir string) ([]Tre
 	if strings.TrimSpace(ref) == "" {
 		return nil, errors.New("gitengine: repository ref is required")
 	}
-	return e.listTreeAt(ctx, repoPath, "refs/heads/"+ref, dir)
+	return e.listTreeAt(ctx, repoPath, "refs/heads/"+ref, dir, false)
 }
 
-// listTreeAt lists the children of dir in rev, a ref or a tree.
-func (e *Engine) listTreeAt(ctx context.Context, repoPath, rev, dir string) ([]TreeEntry, error) {
+// listTreeAt lists the children of dir in rev, a ref or a tree. regular
+// leaves out file entries that are not regular files, as a checkout's
+// listing does.
+func (e *Engine) listTreeAt(ctx context.Context, repoPath, rev, dir string, regular bool) ([]TreeEntry, error) {
 	args := []string{"ls-tree", "-z", "-l", rev, "--"}
 	if dir != "" {
 		args = append(args, strings.TrimSuffix(dir, "/")+"/")
@@ -130,7 +132,7 @@ func (e *Engine) listTreeAt(ctx context.Context, repoPath, rev, dir string) ([]T
 			return nil, errors.New("gitengine: malformed ls-tree metadata")
 		}
 		kind := meta[1]
-		if kind != "blob" && kind != "tree" {
+		if kind != "blob" && kind != "tree" || regular && kind == "blob" && meta[0] != "100644" && meta[0] != "100755" {
 			continue
 		}
 		name := string(fields[1])

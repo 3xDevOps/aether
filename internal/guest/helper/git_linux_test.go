@@ -523,6 +523,9 @@ func TestStoppedVMSessionIsShownFromItsLastSnapshot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("new\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink("README", filepath.Join(p.checkout, "link")); err != nil {
+		t.Fatal(err)
+	}
 	p.host.StopDiffWatch(testRun)
 	p.down.Store(true)
 
