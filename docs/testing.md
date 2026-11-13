@@ -759,9 +759,20 @@ SHA-256; compare them after changing either file. The build fails, naming
 the options, when a line of the config does not reach the kernel's
 `.config` because something it depends on is off.
 
-On a host with `/dev/kvm` and `cloud-hypervisor`, check that a change still
-boots an image and runs Docker in it: build a base disk with
-`internal/vmimage`, boot it with the kernel, and run `docker run` inside.
+On a host with `/dev/kvm`, `cloud-hypervisor` and `qemu-img`, check that a
+change still boots an image and runs Docker in it. `TestKVMStandardImageRunsDocker`
+builds the image's disks with `internal/vmimage`, boots them with the kernel,
+starts dockerd, runs a container and a `-p` port mapping, and refuses to save
+the root disk while the VM runs. The static test binary is the VM's `/init`,
+so build it without cgo; it needs root:
+
+```sh
+CGO_ENABLED=0 go test -c -tags kvm -o vmimage-kvm.test ./internal/vmimage
+sudo AETHER_TEST_KERNEL=dist/aether-vmlinux-x86_64 \
+  AETHER_TEST_IMAGE=ghcr.io/3xdevops/aether-standard:<release> \
+  ./vmimage-kvm.test -test.run TestKVM -test.v
+```
+
 Docker's `contrib/check-config.sh` from the moby repository, pointed at the
 config (`/proc/config.gz` in the guest), must report every
 `Generally Necessary` option enabled.
