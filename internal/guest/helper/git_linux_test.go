@@ -18,7 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
-	"github.com/3xDevOps/Aether/internal/overlay"
+	livesync "github.com/3xDevOps/Aether/internal/overlay"
 	"google.golang.org/grpc"
 )
 
@@ -465,7 +465,7 @@ func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = client.Close() })
-		sess, err := overlay.NewSession(overlay.Options{LocalDir: local, DataDir: t.TempDir(), Dial: func(ctx context.Context) (io.ReadWriteCloser, error) {
+		sess, err := livesync.NewSession(livesync.Options{LocalDir: local, DataDir: t.TempDir(), Dial: func(ctx context.Context) (io.ReadWriteCloser, error) {
 			return client.Sync(ctx, string(testRun))
 		}})
 		if err != nil {
