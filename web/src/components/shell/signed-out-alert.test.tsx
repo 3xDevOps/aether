@@ -24,7 +24,6 @@ describe('SignedOutAlert', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('Claude Code is signed out')
     expect(alert.textContent).toContain(fileProblem)
-    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in on Agents' }))
     expect(useStore.getState().route.name).toBe('agents')
   })
@@ -38,7 +37,19 @@ describe('SignedOutAlert', () => {
       `Claude Code is signed out${fileProblem}`,
       `Codex's sign-in was refused${refusal}`,
     ])
-    expect(within(alert).getAllByRole('button')).toHaveLength(1)
+    expect(within(alert).getAllByRole('button').map((button) => button.getAttribute('aria-label') || button.textContent)).toEqual(['Sign in on Agents', 'Dismiss notification'])
+  })
+
+  it('hides the alert until the shell is mounted again', async () => {
+    vi.spyOn(api, 'agentList').mockResolvedValue([claude({ login_problem: fileProblem })])
+    const { unmount } = render(<SignedOutAlert />)
+    const alert = await screen.findByRole('alert')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Dismiss notification' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    unmount()
+    render(<SignedOutAlert />)
+    expect(await screen.findByRole('alert')).toBeDefined()
   })
 
   it('stays out of the way where the finding already shows beside its own sign-in action', async () => {
