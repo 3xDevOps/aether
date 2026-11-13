@@ -86,6 +86,9 @@ func (e *shareEnv) assertLoginMounts(t *testing.T, spec runtime.Spec, pool strin
 		HostPath:      filepath.Join(e.cfg.Homes.CacheRoot(), string(e.member.ID), pool, "data"),
 		ContainerPath: "/aether-cache",
 	}
+	if pool == "runs" {
+		cache.Kind = runtime.MountCache
+	}
 	if got, ok := mountFor(spec, cache.ContainerPath); !ok || got != cache {
 		t.Fatalf("launcher cache = %+v, want %+v", got, cache)
 	}

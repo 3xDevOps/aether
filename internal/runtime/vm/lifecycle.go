@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
+	"slices"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -128,6 +129,14 @@ func (e *engine) finish(ctx context.Context, rec *record, code int) error {
 	if err := e.store(rec); err != nil {
 		return err
 	}
+	if err := e.powerOff(ctx, rec); err != nil {
+		return err
+	}
+	e.promoteCache(ctx, rec)
+	return nil
+}
+
+func (e *engine) powerOff(ctx context.Context, rec *record) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), powerOffTimeout)
 	defer cancel()
 	h, err := e.helper(rec.Key)
@@ -288,7 +297,11 @@ func (e *engine) lost(ctx context.Context, key string) (int, error) {
 	}
 	rec.Exited, rec.ExitCode = true, lostExitCode
 	e.forgetHelper(key)
-	return lostExitCode, e.store(rec)
+	if err = e.store(rec); err != nil {
+		return 0, err
+	}
+	e.promoteCache(ctx, rec)
+	return lostExitCode, nil
 }
 
 // destroy removes the VM and every file it had; a missing VM is not an
@@ -305,6 +318,9 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	e.forgetHelper(key)
 	if err := e.units.Stop(ctx, unitName(key)); err != nil {
 		return err
+	}
+	if rec, err := e.load(key); err == nil {
+		e.promoteCache(ctx, rec)
 	}
 	if err := os.RemoveAll(e.dir(key)); err != nil {
 		return fmt.Errorf("vm runtime: remove VM %s: %w", key, err)
@@ -357,9 +373,9 @@ func (e *engine) inspect(ctx context.Context, key string) (runtime.ContainerInfo
 			}
 		}
 	}
-	targets := make([]string, len(rec.Mounts))
-	for i, m := range rec.Mounts {
-		targets[i] = m.ContainerPath
+	var targets []string
+	for _, m := range append(slices.Clone(rec.Checkouts), rec.Mounts...) {
+		targets = append(targets, m.ContainerPath)
 	}
 	info := runtime.ContainerInfo{
 		Image: rec.Image, User: rec.User, Env: append([]string(nil), rec.Env...), MountTargets: targets,

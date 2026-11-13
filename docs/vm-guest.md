@@ -21,8 +21,8 @@ In order, as PID 1:
    switches root to it. The helper stays PID 1; nothing is executed.
 2. Mounts `/dev/pts`, `/dev/shm`, the cgroup v2 hierarchy on `/sys/fs/cgroup`
    and a tmpfs on `/run`.
-3. Reads its configuration from `/proc/cmdline` (below), mounts the share and
-   the data disk and binds what the configuration names.
+3. Reads its configuration from `/proc/cmdline` (below), mounts the volumes
+   it names and binds what it names from them.
 4. Brings up `lo` and the VM's network device, sets the hostname, and writes
    `/etc/hostname`, `/etc/hosts` and, when DNS servers are given,
    `/etc/resolv.conf`.
@@ -49,27 +49,67 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.hostname=<name>` | Host name of the VM. |
 | `aether.net=<address>/<prefix>,<gateway>` | IPv4 address of the VM's one network device and its default route. |
 | `aether.dns=<server>[,<server>...]` | Name servers for `/etc/resolv.conf`. Without it the image's file stays. |
-| `aether.mount=<volume>,<source>,<target>[,ro]` | Bind `<source>` of a volume at `<target>`, in command-line order. |
+| `aether.mount=<volume>,<source>,<target>[,ro\|,overlay]` | Bind `<source>` of a volume at `<target>`, in command-line order. |
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |
 
 Paths are escaped per segment as in a URL, so a space or a comma in a path
 does not split an argument.
 
-Two volumes exist. `share` is the virtio-fs share tagged `aether`, mounted on
-`/run/aether-guest/share`; its binds are `nosuid,nodev`. `data` is the disk
-with serial `data`, mounted on `/run/aether-guest/data`; a missing source
-directory is created with the mode and owner its target has in the image, so
-`/tmp` keeps its sticky bit. A source is opened beneath its volume and never
-through a symlink that leaves it, and a target is created as a directory or
-an empty file to match the source.
+The volumes:
+
+| Volume | What it is | Source |
+| --- | --- | --- |
+| `share` | The virtio-fs share tagged `aether`, on `/run/aether-guest/share`. Binds are `nosuid,nodev`. Only checkouts use it. | A path in the share |
+| `home` | The [file service](#the-file-service), on `/run/aether-guest/home`. Binds are `nosuid,nodev`. | The index of a shared host file |
+| `data` | The disk with serial `data`, on `/run/aether-guest/data`. A missing source directory is created with the mode and owner its target has in the image, so `/tmp` keeps its sticky bit. | A path on the disk |
+| `cache` | The disk with serial `cache`, on `/run/aether-guest/cache`: the session's copy of the member's tool caches. Its root is mode `1777` and has no `lost+found`. | `.` |
+| `helper` | The helper's own executable, the server binary the VM booted with, bound read-only. | `.` |
+
+A source is opened beneath its volume and never through a symlink that
+leaves it, and a target is created as a directory or an empty file to match
+the source. `overlay`, on a `home` mount, mounts the source read-only below
+a writable layer at `overlay/<source>` on the data disk, whose root takes the
+source's owner and mode: the guest's writes stay in the VM.
+
+## The file service
+
+The member home, its login files, the coordination directory and every other
+host file a session mounts, except the checkouts, reach the VM through the
+file service, not virtio-fs, so a VM can be saved and restored with them
+mounted. It is package `internal/guest/home`, API
+`internal/guest/guestpb/home.proto`.
+
+- The host serves it from the VM's monitor (`aether-server vm-monitor`), in
+  the VM's systemd unit, on `<vm dir>/home.sock`, which Cloud Hypervisor
+  reaches as vsock port 1023. It keeps running through a server restart, and
+  the VM ends if it stops. `launch.json` lists what it shares.
+- The helper mounts it with FUSE and forwards each operation by path. It
+  keeps every inode, so a restored VM keeps its open files and working
+  directories. The service keeps nothing a restore needs: a handle it does
+  not know, as after a restore, is opened again by path, and is stale
+  (`ESTALE`) when the file is gone.
+- Every file shows as owned by the session user, and every file the guest
+  creates on the host gets that owner, its mode without set-user-ID and
+  set-group-ID bits, and no device nodes; `chown` changes nothing. A session
+  needs no ownership pass over the home.
+- The service trusts nothing from the VM, which any process in it can
+  reach: paths are resolved beneath their share without following a
+  symlink, only regular files and directories are opened, and a read-only
+  or overlaid share is never written.
+- The guest trusts what it learned of a name or a file for one second, so a
+  change from another session shows within it. An `O_APPEND` write appends
+  at the host's end of the file.
+- `flock` and `fcntl` locks hold only within one VM, and memory maps are not
+  shared across VMs.
 
 ## Forwarded sockets
 
-The server's Unix sockets cannot cross virtio-fs, so the helper listens on
-the path the session expects, such as `/run/aether/coord3.sock` or
-`/run/aether-signing/agent.sock`, and relays each connection to vsock CID 2.
-Cloud Hypervisor delivers a connection to port `N` to the host socket
-`<vsock socket>_<N>`, which the server points at the real socket.
+The server's Unix sockets cannot cross virtio-fs or the file service, so the
+helper listens on the path the session expects, such as
+`/run/aether/coord3.sock` or `/run/aether-signing/agent.sock`, and relays each
+connection to vsock CID 2. Cloud Hypervisor delivers a connection to port `N`
+to the host socket `<vsock socket>_<N>`, which the server points at the real
+socket.
 
 While the host socket does not answer, as during a server restart, the
 helper stops listening on the path, so a connection there is refused exactly
@@ -81,8 +121,8 @@ its request never reaches the server.
 
 When the path is an entry in a read-only share, as the coordination socket in
 the run's shared directory is, the helper binds its own socket over the
-entry. The server re-creates that socket on every restart, and virtio-fs then
-drops the bind; the helper watches the mount table and binds again. The first
+entry. The server re-creates that socket on every restart, and the guest
+then drops the bind; the helper watches the mount table and binds again. The first
 connection after that can be refused once, which the coordination client
 retries.
 

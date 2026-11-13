@@ -359,8 +359,9 @@ func (s *Store) Tags(repo string) ([]string, error) {
 	return out, nil
 }
 
-// Sweep deletes base disks that have no tag and no root disk, and helper
-// disks no session links to.
+// Sweep deletes base disks that have no tag and no root disk, helper disks
+// no session links to, and caches that are neither a pool's newest nor
+// linked to by a session.
 func (s *Store) Sweep() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -396,6 +397,13 @@ func (s *Store) sweepLocked() error {
 				errs = append(errs, os.RemoveAll(dir))
 			}
 		}
+	}
+	pools, poolsErr := os.ReadDir(s.cachesDir())
+	if poolsErr != nil && !errors.Is(poolsErr, fs.ErrNotExist) {
+		errs = append(errs, poolsErr)
+	}
+	for _, pool := range pools {
+		errs = append(errs, s.sweepCachesLocked(filepath.Join(s.cachesDir(), pool.Name())))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("vmimage: sweep: %w", err)

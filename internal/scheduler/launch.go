@@ -602,6 +602,13 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 	if reserveErr := s.reserveRunUser(ctx, entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return nil, reserveErr
 	}
+	if s.sessionVMs() {
+		// A VM's file service serves every file as the session user's.
+		if ownErr := s.applyRunOwnership(ws, run, entry.memberID, nil, plan.User); ownErr != nil {
+			return nil, fmt.Errorf("apply session ownership: %w", ownErr)
+		}
+		return plan, nil
+	}
 	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
 		return nil, fmt.Errorf("apply session ownership: %w", ownErr)
 	}

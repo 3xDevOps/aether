@@ -12,9 +12,9 @@ import (
 const restoreTimeout = 60 * time.Second
 
 // save pauses the VM, writes its memory and device state to the snapshot
-// directory and ends the monitor. A VM with a virtio-fs share is refused: a
-// fresh virtiofsd after restore knows none of the guest's open files, so
-// every access to the share fails with EBADF.
+// directory and ends the monitor. A VM with a checkout is refused: its
+// checkouts are virtio-fs shares, and a fresh virtiofsd after restore knows
+// none of the guest's open files, so every access to them fails with EBADF.
 func (e *engine) save(ctx context.Context, key string) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -22,16 +22,12 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	p, err := planMounts(rec.Mounts, false, e.path(key, vsockSocket), rootOnly)
-	if err != nil {
-		return err
-	}
-	if len(p.shares) > 0 {
-		targets := make([]string, len(p.mounts))
-		for i, m := range p.mounts {
-			targets[i] = m.Target
+	if len(rec.Checkouts) > 0 {
+		targets := make([]string, len(rec.Checkouts))
+		for i, m := range rec.Checkouts {
+			targets[i] = m.ContainerPath
 		}
-		return fmt.Errorf("vm runtime: cannot save VM %s: its virtio-fs mounts (%s) would come back unusable after a restore; work items 6 and 7 move them off virtio-fs", key, strings.Join(targets, ", "))
+		return fmt.Errorf("vm runtime: cannot save VM %s: its checkouts (%s) are virtio-fs mounts, which would come back unusable after a restore; work item 6 moves them onto the VM's disk", key, strings.Join(targets, ", "))
 	}
 	api := newCHAPI(e.path(key, apiSocket))
 	state, err := api.state(ctx)
@@ -68,10 +64,15 @@ func (e *engine) save(ctx context.Context, key string) error {
 		return resumeAfter(err)
 	}
 	e.forgetHelper(key)
-	if err := api.shutdownVMM(ctx); err != nil {
-		return e.units.Stop(context.WithoutCancel(ctx), unitName(key))
+	if err = api.shutdownVMM(ctx); err != nil {
+		err = e.units.Stop(context.WithoutCancel(ctx), unitName(key))
+	} else {
+		err = e.awaitStopped(ctx, key)
 	}
-	return e.awaitStopped(ctx, key)
+	if err == nil {
+		e.promoteCache(ctx, rec)
+	}
+	return err
 }
 
 func (e *engine) resumeAfter(ctx context.Context, api chAPI, key string, cause error) error {
@@ -116,8 +117,12 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if up, upErr := e.running(ctx, key); upErr != nil || up {
 		return errors.Join(upErr, fmt.Errorf("vm runtime: restore VM %s: it is already running", key))
 	}
+	p, err := e.plan(rec)
+	if err != nil {
+		return err
+	}
 	dir := e.path(key, snapshotDir)
-	l := launch{Args: []string{
+	l := launch{Home: p.homeConfig(rec.User), Args: []string{
 		"--api-socket", "path=" + e.path(key, apiSocket), "--event-monitor", "path=" + e.path(key, eventsFile),
 		"--restore", "source_url=file://" + dir,
 	}}
@@ -138,6 +143,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 		return err
 	}
 	rec.Saved, rec.Exited = false, false
+	rec.CacheRan = rec.Cache.Path != ""
 	if err = e.store(rec); err != nil {
 		return err
 	}

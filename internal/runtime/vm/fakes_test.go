@@ -80,6 +80,7 @@ func sessionSpec(key string) runtime.Spec {
 type fakeImages struct {
 	mu        sync.Mutex
 	rootDisks int
+	promoted  chan string
 }
 
 func (f *fakeImages) Kernel() (string, error) { return "/k/vmlinux", nil }
@@ -106,6 +107,24 @@ func (f *fakeImages) NewRootDisk(_ context.Context, _ vmimage.Base, path string)
 
 func (f *fakeImages) NewDataDisk(_ context.Context, path string, _ int64) (vmimage.Disk, error) {
 	return vmimage.Disk{Path: path, Format: "raw"}, os.WriteFile(path, nil, 0o600)
+}
+
+func (f *fakeImages) NewCacheDisk(_ context.Context, _, path string) (vmimage.Disk, error) {
+	return vmimage.Disk{Path: path, Format: "qcow2"}, os.WriteFile(path, nil, 0o600)
+}
+
+func (f *fakeImages) SnapshotCache(_ context.Context, disk string) (string, error) {
+	return disk + ".snapshot", nil
+}
+
+func (f *fakeImages) PromoteCache(_ context.Context, pool, snapshot string) error {
+	f.mu.Lock()
+	promoted := f.promoted
+	f.mu.Unlock()
+	if promoted != nil {
+		promoted <- pool + " " + filepath.Base(snapshot)
+	}
+	return nil
 }
 
 func (f *fakeImages) roots() int {

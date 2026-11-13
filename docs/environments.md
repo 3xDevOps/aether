@@ -344,9 +344,20 @@ What changes:
 - The VM gets the CPU limit rounded up to whole vCPUs, held to the exact
   limit by the unit's `CPUQuota`, and the memory limit as its memory. The
   process limit applies inside the guest.
-- The checkout, the home and the other mounts reach the VM over one virtio-fs
-  share; read-only mounts stay read-only. Each VM has its own address in
-  `10.200.0.0/16` and reaches the internet through the host.
+- The checkout reaches the VM over virtio-fs. The home, the login files and
+  the other host files a session mounts go through the VM's file service
+  ([vm-guest.md](vm-guest.md#the-file-service)): writes show in the
+  member's other sessions within a second, and read-only mounts stay
+  read-only. Each VM has its own address in `10.200.0.0/16` and reaches the
+  internet through the host.
+- `/tmp` is on the session's data disk. `/aether-cache` is the session's own
+  copy of the member's caches, made when the session is created from the
+  caches of the member's session that last stopped or was saved. When a
+  session's VM stops or is saved, its caches become the member's newest; one
+  over 20 GiB is dropped, and the next session starts empty. An Isolated
+  session's caches never go back.
+- No ownership pass runs over the home: every file in it shows as the
+  session user's.
 - Starting a stopped session builds a fresh root disk from its image and runs
   the setup script again: packages installed outside the mounts are gone.
   Docker images inside the session stay on its data disk.

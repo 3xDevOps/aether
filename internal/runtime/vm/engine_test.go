@@ -74,11 +74,6 @@ func TestCreateRefusesWhatLaterItemsAdd(t *testing.T) {
 	if _, err := h.engine.create(t.Context(), egress); err == nil || !strings.Contains(err.Error(), "work item 5") {
 		t.Errorf("egress create = %v", err)
 	}
-	overlay := sessionSpec("run-o")
-	overlay.Mounts = []runtime.Mount{{HostPath: "/h", ContainerPath: "/root", Overlay: "/scratch"}}
-	if _, err := h.engine.create(t.Context(), overlay); err == nil || !strings.Contains(err.Error(), "work item 7") {
-		t.Errorf("overlay create = %v", err)
-	}
 	missing := sessionSpec("run-m")
 	missing.Image = "missing:1"
 	if _, err := h.engine.create(t.Context(), missing); err == nil || !strings.Contains(err.Error(), "manifest unknown") {
@@ -110,7 +105,7 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 	args := strings.Join(call.launch.Args, " ")
 	for _, want := range []string{
 		"--cpus boot=2", "--memory size=2048M,shared=on", "--balloon size=0,free_page_reporting=on",
-		"--kernel /k/vmlinux", "page_reporting.page_reporting_order=0", "--fs tag=aether,socket=",
+		"--kernel /k/vmlinux", "page_reporting.page_reporting_order=0", "aether.mount=home,0,/root",
 		"helper.img,image_type=raw,id=helper,serial=helper,readonly=on", "root.img,image_type=qcow2,id=root,serial=root,backing_files=on",
 		"--net id=net0,tap=aethervm0,ip=10.200.0.1,mask=255.255.255.252",
 	} {
@@ -118,8 +113,11 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 			t.Errorf("launch args lack %q:\n%s", want, args)
 		}
 	}
-	if len(call.launch.Shares) != 1 || call.launch.Shares[0].Source != home {
-		t.Errorf("shares = %+v", call.launch)
+	if strings.Contains(args, "--fs") || len(call.launch.Shares) != 0 {
+		t.Errorf("the home went over virtio-fs: %+v", call.launch)
+	}
+	if l := call.launch.Home; l == nil || len(l.Shares) != 1 || l.Shares[0].Source != home || l.UID != 1000 || l.GID != 1000 {
+		t.Errorf("file service = %+v", call.launch.Home)
 	}
 	g := h.guest("run-a")
 	if len(g.boots) != 1 {
@@ -178,6 +176,53 @@ func TestStartFailsWithTheLogWhenTheVMDiesWhileBooting(t *testing.T) {
 	err := h.engine.start(t.Context(), "run-a")
 	if err == nil || !strings.Contains(err.Error(), "stopped while booting") || !strings.Contains(err.Error(), "KvmNotAvailable") {
 		t.Fatalf("start = %v", err)
+	}
+}
+
+func TestAStoppedOrSavedVMPromotesItsCache(t *testing.T) {
+	h := newHarness(t)
+	h.images.promoted = make(chan string, 4)
+	cache := runtime.Mount{HostPath: "/data/cache/m1/runs", ContainerPath: "/aether-cache", Kind: runtime.MountCache}
+	spec := sessionSpec("run-a")
+	spec.Mounts = []runtime.Mount{cache}
+	h.createStarted("run-a", spec)
+	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "cache.qcow2,image_type=qcow2,id=cache,serial=cache") {
+		t.Errorf("launch args lack the cache disk:\n%s", args)
+	}
+	if err := h.engine.save(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	want := cachePool(cache) + " cache.qcow2.snapshot"
+	if got := <-h.images.promoted; got != want {
+		t.Errorf("promoted %q, want %q", got, want)
+	}
+	if err := h.engine.restore(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.stop(t.Context(), "run-a", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-h.images.promoted; got != want {
+		t.Errorf("promoted %q after stop, want %q", got, want)
+	}
+	if err := h.engine.destroy(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	isolated := sessionSpec("run-i")
+	cache.Overlay = "/scratch/run-i/cache"
+	isolated.Mounts = []runtime.Mount{cache}
+	h.createStarted("run-i", isolated)
+	if err := h.engine.stop(t.Context(), "run-i", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.destroy(t.Context(), "run-i"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-h.images.promoted:
+		t.Errorf("an extra or Isolated cache was promoted: %q", got)
+	default:
 	}
 }
 

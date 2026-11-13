@@ -209,13 +209,14 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 			}
 		}
 	}()
+	cliMount.Kind = runtime.MountServerBinary
 	mounts = []runtime.Mount{
-		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
+		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true, Kind: runtime.MountServerBinary},
 		cliMount,
 		{HostPath: dir, ContainerPath: coordtransport.MountDir, ReadOnly: true},
 	}
 	if run.Permission != domain.PermissionRoot {
-		mounts = append(mounts, runtime.Mount{HostPath: bin, ContainerPath: coordtransport.SudoPath, ReadOnly: true})
+		mounts = append(mounts, runtime.Mount{HostPath: bin, ContainerPath: coordtransport.SudoPath, ReadOnly: true, Kind: runtime.MountServerBinary})
 	}
 	for _, id := range slices.Sorted(maps.Keys(native.DiscoveryFiles)) {
 		mounts = append(mounts, runtime.Mount{

@@ -20,10 +20,12 @@ const (
 	apiSocket   = "api.sock"
 	vsockSocket = "vsock.sock"
 	fsSocket    = "fs.sock"
+	homeSocket  = "home.sock"
 	shareDir    = "share"
 	helperImage = "helper.img"
 	rootDisk    = "root.img"
 	dataDisk    = "data.img"
+	cacheDisk   = "cache.qcow2"
 	consoleLog  = "console.log"
 	eventsFile  = "events.json"
 	monitorLog  = "monitor.log"
@@ -44,6 +46,7 @@ type record struct {
 	Base         vmimage.Base    `json:"base"`
 	Root         vmimage.Disk    `json:"root"`
 	Data         vmimage.Disk    `json:"data"`
+	Cache        vmimage.Disk    `json:"cache,omitzero"`
 	User         string          `json:"user,omitempty"`
 	Env          []string        `json:"env"`
 	WorkingDir   string          `json:"working_dir,omitempty"`
@@ -57,6 +60,7 @@ type record struct {
 	CPULimit     float64         `json:"cpu_limit,omitempty"`
 	MemoryMiB    int64           `json:"memory_mib"`
 	PidsLimit    int64           `json:"pids_limit,omitempty"`
+	Checkouts    []runtime.Mount `json:"checkouts,omitempty"`
 	Mounts       []runtime.Mount `json:"mounts,omitempty"`
 	Net          int             `json:"net"`
 	// Booted is set once a boot was launched: the next cold start builds a
@@ -67,6 +71,9 @@ type record struct {
 	// Saved means the snapshot directory holds the VM's state; the VM reads
 	// as exited until Restore.
 	Saved bool `json:"saved,omitempty"`
+	// CacheRan means the VM ran on its cache disk since the disk last
+	// became its pool's newest cache.
+	CacheRan bool `json:"cache_ran,omitempty"`
 	// ExitCode is the last boot's until the next boot exits.
 	Exited   bool `json:"exited,omitempty"`
 	ExitCode int  `json:"exit_code,omitempty"`

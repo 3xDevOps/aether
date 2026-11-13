@@ -241,6 +241,9 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			return nil, fmt.Errorf("scheduler: resolve member cache: %w", cacheErr)
 		}
 		cacheMount := runtime.Mount{HostPath: cachePath, ContainerPath: "/aether-cache"}
+		if purpose == EnvironmentPurposeRun {
+			cacheMount.Kind = runtime.MountCache
+		}
 		if isolated {
 			var overlayErr error
 			if cacheMount.Overlay, overlayErr = s.ensureOverlay(run.ID, "cache"); overlayErr != nil {
@@ -262,7 +265,11 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			if scratchErr != nil {
 				return nil, scratchErr
 			}
-			plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: scratchPath, ContainerPath: "/tmp"})
+			scratchMount := runtime.Mount{HostPath: scratchPath, ContainerPath: "/tmp"}
+			if purpose == EnvironmentPurposeRun {
+				scratchMount.Kind = runtime.MountScratch
+			}
+			plan.Mounts = append(plan.Mounts, scratchMount)
 		}
 		if resolver, ok := s.cfg.Runtime.(imageCacheEnvironmentResolver); ok {
 			inherited, err := resolver.ImageCacheEnvironment(ctx, image)

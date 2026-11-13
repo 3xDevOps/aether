@@ -97,7 +97,23 @@ type Mount struct {
 	// overlay whose writes land in Overlay/upper, so they never reach
 	// HostPath. Overlay is a directory the caller owns and removes.
 	Overlay string
+	// Kind tells the VM runtime, which keeps a session on disks of its own,
+	// what the mount holds; Docker binds every kind alike.
+	Kind MountKind `json:",omitempty"`
 }
+
+// MountKind names what a mount holds.
+type MountKind string
+
+const (
+	// MountScratch is space only this container uses, such as /tmp.
+	MountScratch MountKind = "scratch"
+	// MountCache is a pool of tool caches the member's containers share;
+	// HostPath names the pool.
+	MountCache MountKind = "cache"
+	// MountServerBinary is the server's own executable.
+	MountServerBinary MountKind = "server-binary"
+)
 
 // ContainerInfo is immutable metadata captured from a live or stopped
 // container. Env contains the container's configured environment in
