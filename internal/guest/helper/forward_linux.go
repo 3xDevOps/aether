@@ -36,10 +36,12 @@ type forward struct {
 // entry, as the server does on every restart.
 func forwardSockets(sockets []guest.Socket) error {
 	var overlaid []*forward
+	var errs []error
 	for _, s := range sockets {
 		f := &forward{Socket: s}
 		if err := f.listen(); err != nil {
-			return fmt.Errorf("socket %s: %w", s.Path, err)
+			errs = append(errs, fmt.Errorf("socket %s: %w", s.Path, err))
+			continue
 		}
 		if f.overlay != "" {
 			overlaid = append(overlaid, f)
@@ -49,7 +51,7 @@ func forwardSockets(sockets []guest.Socket) error {
 	if len(overlaid) > 0 {
 		go keepBound(overlaid)
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (f *forward) listen() error {

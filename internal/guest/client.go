@@ -233,7 +233,11 @@ func (c *Client) Boot(ctx context.Context, spec BootSpec) error {
 	if err != nil {
 		return fmt.Errorf("guest: boot: %w", err)
 	}
-	if code := reply.GetSetupExitCode(); code != 0 {
+	code := reply.GetSetupExitCode()
+	if code < 0 || code > 255 {
+		return fmt.Errorf("guest: boot: helper reports setup exit code %d", code)
+	}
+	if code != 0 {
 		output, cut := reply.GetSetupOutput(), reply.GetSetupOutputCut()
 		if len(output) > SetupOutputLimit {
 			output, cut = output[len(output)-SetupOutputLimit:], true
@@ -251,7 +255,7 @@ func (c *Client) Spawn(ctx context.Context, spec ProcessSpec) (*Process, error) 
 	if err != nil {
 		for _, detail := range status.Convert(err).Details() {
 			if failure, ok := detail.(*guestpb.SpawnFailure); ok && (failure.GetExitCode() == 126 || failure.GetExitCode() == 127) {
-				return nil, &StartError{Code: int(failure.GetExitCode()), Err: fmt.Errorf("guest: spawn %s: %s", spec.ID, status.Convert(err).Message())}
+				return nil, &StartError{Code: int(failure.GetExitCode()), Err: fmt.Errorf("guest: spawn %s: %s", spec.ID, truncate(status.Convert(err).Message(), infoLimit))}
 			}
 		}
 		return nil, fmt.Errorf("guest: spawn %s: %w", spec.ID, err)

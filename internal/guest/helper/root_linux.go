@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -163,35 +164,41 @@ func diskBySerial(serial string) (string, uint64, error) {
 }
 
 // mountVolumes binds each configured mount from the share or the data disk.
+// A mount that fails does not keep the others from being made.
 func mountVolumes(mounts []guest.Mount) error {
 	roots := map[guest.Volume]string{}
-	for _, m := range mounts {
-		if _, ok := roots[m.Volume]; ok {
+	var errs []error
+	for v, root := range map[guest.Volume]string{guest.VolumeShare: shareRoot, guest.VolumeData: dataRoot} {
+		if !slices.ContainsFunc(mounts, func(m guest.Mount) bool { return m.Volume == v }) {
 			continue
 		}
-		switch m.Volume {
-		case guest.VolumeShare:
-			if err := mountOnce(mountSpec{guest.ShareTag, shareRoot, "virtiofs", unix.MS_NOSUID | unix.MS_NODEV, ""}); err != nil {
-				return err
-			}
-			roots[m.Volume] = shareRoot
-		case guest.VolumeData:
-			device, _, err := diskBySerial("data")
-			if err != nil {
-				return err
-			}
-			if err := mountOnce(mountSpec{device, dataRoot, "ext4", 0, ""}); err != nil {
-				return err
-			}
-			roots[m.Volume] = dataRoot
+		if err := mountVolume(v, root); err != nil {
+			errs = append(errs, fmt.Errorf("mount the %s volume: %w", v, err))
+			continue
 		}
+		roots[v] = root
 	}
 	for _, m := range mounts {
-		if err := bind(roots[m.Volume], m); err != nil {
-			return fmt.Errorf("mount %s %s at %s: %w", m.Volume, m.Source, m.Target, err)
+		root, ok := roots[m.Volume]
+		if !ok {
+			continue
+		}
+		if err := bind(root, m); err != nil {
+			errs = append(errs, fmt.Errorf("mount %s %s at %s: %w", m.Volume, m.Source, m.Target, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+func mountVolume(v guest.Volume, root string) error {
+	if v == guest.VolumeShare {
+		return mountOnce(mountSpec{guest.ShareTag, root, "virtiofs", unix.MS_NOSUID | unix.MS_NODEV, ""})
+	}
+	device, _, err := diskBySerial("data")
+	if err != nil {
+		return err
+	}
+	return mountOnce(mountSpec{device, root, "ext4", 0, ""})
 }
 
 // bind opens the source beneath its volume, so a symlink planted in a
