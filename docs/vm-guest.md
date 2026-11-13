@@ -53,6 +53,7 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.mount=<volume>,<source>,<target>[,ro\|,overlay]` | Bind `<source>` of a volume at `<target>`, in command-line order. |
 | `aether.checkout=<serial>,<key>,<target>` | Mount the checkout disk with virtio serial `<serial>` for the git service under `<key>` and bind its checkout at `<target>`. |
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |
+| `aether.serve=<port>,<path>` | Listen on vsock port `<port>` for the host and relay each connection to `<path>` (below). |
 
 Paths are escaped per segment as in a URL, so a space or a comma in a path
 does not split an argument.
@@ -133,6 +134,17 @@ entry. The server re-creates that socket on every restart, and the guest
 then drops the bind; the helper watches the mount table and binds again. The first
 connection after that can be refused once, which the coordination client
 retries.
+
+## Served sockets
+
+The other way round, `aether.serve=<port>,<path>` makes the helper listen on
+vsock port `<port>` for the host, which reaches it through Cloud
+Hypervisor's vsock socket with `CONNECT <port>`, and relay each connection
+to the Unix socket `<path>` in the VM. Once that socket accepts, the helper
+sends one zero byte and then relays; a socket that is not there yet gets
+the connection closed. `guest.DialServed` does the host's side and waits for
+the byte, so a server can tell a socket that is up from one that is not.
+The dictation engine's VM serves its engine's socket this way.
 
 ## Sessions and processes
 

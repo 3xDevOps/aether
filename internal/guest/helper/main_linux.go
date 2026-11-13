@@ -140,6 +140,7 @@ func serve() error {
 	}
 	go forwardSignals(procs)
 	record("forward sockets", forwardSockets(cfg.Sockets))
+	record("serve sockets", serveSockets(cfg.Serves))
 
 	bootError := ""
 	if len(failures) > 0 {
