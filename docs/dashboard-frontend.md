@@ -2658,6 +2658,21 @@ installed in your environment." with a **Set up an agent** button in place of
 **Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
+On desktop, clicking outside the form or pressing **Escape** slides it away
+and leaves an arrow at the sidebar edge (the window edge when the sidebar is
+hidden). The outside click still reaches the view behind it. The arrow and
+**New session** restore the task and launch settings. **X** and **Cancel**
+discard this draft; they do not reset saved launch defaults. A picker handles
+its own Escape first.
+
+The task and launch settings save on change in browser-local storage, scoped
+to the server and signed-in member. Refreshing or reopening the dashboard in
+the same browser profile restores a collapsed draft; another device, browser
+profile or the desktop app has separate storage. Clearing site data removes
+it. A successful launch clears the draft; a failed launch keeps it. Collapsing
+during launch keeps the pending request, so reopening does not launch twice.
+Shared text waits while a draft exists rather than replacing it.
+
 Below 768px the same form is a bottom sheet (`phone-launch.tsx`): **Task**
 first, focused, with one-word help; then the **Repository** chip, the base
 branch as muted text ("from main"; sessions always start from it) and the

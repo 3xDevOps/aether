@@ -38,7 +38,7 @@ function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, prefer
  * `fallback` comes right after the saved agent.
  * The first pick waits for `saved`, the server's saved choices, or uses this
  * browser's when the server keeps none or cannot be read. */
-export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, preferredEffort, fallback, hold = false, pick = 0, client = api }: {
+export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, preferredEffort, fallback, initial, open = true, hold = false, pick = 0, client = api }: {
   account: string
   ownAccountID: string
   saved: LaunchDefaultsRead
@@ -46,6 +46,8 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   preferredModel?: string
   preferredEffort?: string
   fallback?: string
+  open?: boolean
+  initial?: { harness: string; mode: LaunchMode; model: string; effort: string }
   /** Holds the first pick while the caller may still switch `account`. */
   hold?: boolean
   /** A change picks again from the saved choices, replacing the current agent. */
@@ -56,10 +58,10 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   const [listed, setListed] = useState<{ account: string; agents: AgentInfo[]; current: boolean } | null>(null)
   const agents = listed?.current && listed.account === account ? listed.agents : null
   const [agentError, setAgentError] = useState<string | null>(null)
-  const [harness, setHarness] = useState('')
-  const [mode, setMode] = useState<LaunchMode>('tui')
-  const [model, setModel] = useState('')
-  const [effort, setEffort] = useState('')
+  const [harness, setHarness] = useState(initial?.harness ?? '')
+  const [mode, setMode] = useState<LaunchMode>(initial?.mode ?? 'tui')
+  const [model, setModel] = useState(initial?.model ?? '')
+  const [effort, setEffort] = useState(initial?.effort ?? '')
   const [attempt, setAttempt] = useState(0)
   const savedReady = saved.fresh
   const choice = useRef({ harness, mode, preferred, preferredModel, preferredEffort, fallback, saved: saved.result, pick })
@@ -75,6 +77,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   }, [])
 
   useEffect(() => {
+    if (!open) return
     let live = true
     setListed((last) => last && { ...last, current: false })
     setAgentError(null)
@@ -86,7 +89,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
       setAgentError(message(err))
     })
     return () => { live = false }
-  }, [account, ownAccountID, client, attempt])
+  }, [account, ownAccountID, client, attempt, open])
 
   useEffect(() => {
     if (!agents || agentError !== null || !savedReady || hold) return

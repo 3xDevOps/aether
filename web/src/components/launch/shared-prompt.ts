@@ -16,7 +16,7 @@ const sharedLimit = 8000
 export function useSharedPrompt() {
   // A saved snapshot hydrates before the server answers; its role may be out of date.
   const hydrated = useStore((s) => s.hydrated && s.staleSince === null)
-  const free = useStore((s) => s.paletteDialog === null)
+  const free = useStore((s) => s.paletteDialog === null && s.launchDraft === null)
   const role = useSelfRole()
   const cap = useCapability()
   const ready = hydrated && role !== null && free

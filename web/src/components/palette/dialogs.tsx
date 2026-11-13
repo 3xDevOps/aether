@@ -8,23 +8,44 @@ import { ForwardDialog } from '@/components/palette/forward-dialog'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { InjectDialog } from '@/components/palette/inject-dialog'
 import { WatchDialog } from '@/components/palette/watch-dialog'
-import { useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { ChevronRight } from '@/components/icons'
+import { Button } from '@/components/ui/button'
+import { useIsMobile } from '@/lib/breakpoints'
 import { useLingering } from '@/components/ui/slide-out'
 import { useStore } from '@/store'
 
 export function PaletteDialogs() {
   const dialog = useStore((s) => s.paletteDialog)
   const identity = useStore((s) => s.identityKey)
+  const draft = useStore((s) => s.launchDraft)
+  const collapsed = useStore((s) => s.sidebarCollapsed)
+  const [sidebar, setSidebar] = useState(() => document.getElementById('sidebar'))
+  useLayoutEffect(() => setSidebar(document.getElementById('sidebar')), [collapsed])
+  const phone = useIsMobile()
+  const active = dialog === 'launch' || draft !== null
+  const retained = useLingering(active)
   const launchOpen = dialog === 'launch'
   const launchShown = useLingering(launchOpen)
-  // Opening again while the last panel is still sliding out starts a fresh form, not the old one mid-launch.
+  // Discarding starts a fresh form even if its closing slide has not finished.
   const opened = useRef({ open: false, count: 0 })
-  if (launchOpen && !opened.current.open) opened.current.count++
-  opened.current.open = launchOpen
+  if (active && !opened.current.open) opened.current.count++
+  opened.current.open = active
   return (
     <>
       {/* A different member's launch starts over from their own accounts and saved choices. */}
-      {launchShown && <LaunchDialog key={`${identity ?? ''}:${opened.current.count}`} open={launchOpen} />}
+      {retained && <LaunchDialog key={`${identity ?? ''}:${opened.current.count}`} open={launchOpen} visible={launchShown} />}
+      {!phone && !launchShown && draft && createPortal(
+        <Button
+          variant="secondary"
+          size="icon"
+          label="Resume new session draft"
+          className={`top-16 z-40 h-11 w-8 rounded-l-none border-l-0 shadow-overlay ${sidebar ? 'absolute left-full' : 'fixed left-0'}`}
+          onClick={() => useStore.getState().openPaletteDialog('launch')}
+        ><ChevronRight /></Button>,
+        sidebar ?? document.body,
+      )}
       {dialog === 'inject' && <InjectDialog />}
       {dialog === 'forward' && <ForwardDialog />}
       {dialog === 'close' && <CloseDialog />}
