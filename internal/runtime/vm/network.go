@@ -12,24 +12,43 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"text/template"
 
+	"github.com/3xDevOps/Aether/internal/egress"
 	"github.com/3xDevOps/Aether/internal/guest"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 // vmSubnet holds one /30 per VM: .1 is the host end of its tap, .2 the
-// guest. It sits outside Docker's default address pools.
+// guest. It sits outside Docker's default address pools. The first /30 is
+// no VM's: its .1 is proxyAddr.
 var vmSubnet = netip.MustParsePrefix("10.200.0.0/16")
 
+// proxyAddr is where every VM reaches the egress proxy, held by proxyLink.
+var proxyAddr, _ = netAddrs(0)
+
 const (
-	tapPrefix = "aethervm"
-	maxNets   = 1 << 14
+	// tapPrefix starts every VM tap's name and egressTapPrefix the taps of
+	// VMs with egress control, so the firewall tells them apart by a name
+	// the guest cannot change.
+	tapPrefix       = "aethervm"
+	egressTapPrefix = tapPrefix + "e"
+	maxNets         = 1 << 14
+	proxyLink       = "aether-vmproxy"
+	firewallTable   = "aether_vm"
+	firewallFile    = "firewall.nft"
 )
 
 // dockerDNS is what Docker gives a container when the host resolver is
 // loopback only.
 var dockerDNS = []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("8.8.4.4")}
 
-func tapName(index int) string { return fmt.Sprintf("%s%d", tapPrefix, index) }
+func tapName(index int, egressOnly bool) string {
+	if egressOnly {
+		return fmt.Sprintf("%s%d", egressTapPrefix, index)
+	}
+	return fmt.Sprintf("%s%d", tapPrefix, index)
+}
 
 func netAddrs(index int) (host, guestAddr netip.Addr) {
 	base := vmSubnet.Addr().As4()
@@ -39,11 +58,24 @@ func netAddrs(index int) (host, guestAddr netip.Addr) {
 	return host, host.Next()
 }
 
+// guestIndex is the network whose guest address is ip.
+func guestIndex(ip netip.Addr) (int, bool) {
+	if !ip.Is4() || !vmSubnet.Contains(ip) {
+		return 0, false
+	}
+	b := ip.As4()
+	n := int(b[2])<<8 | int(b[3])
+	if n%4 != 2 || n < 4 {
+		return 0, false
+	}
+	return n / 4, true
+}
+
 // chNetArg lets Cloud Hypervisor create the tap and give its host end an
 // address; the tap goes away with the VM.
-func chNetArg(index int) string {
+func chNetArg(index int, egressOnly bool) string {
 	host, _ := netAddrs(index)
-	return fmt.Sprintf("tap=%s,ip=%s,mask=255.255.255.252,mac=02:ae:00:00:%02x:%02x", tapName(index), host, byte(index>>8), byte(index))
+	return fmt.Sprintf("tap=%s,ip=%s,mask=255.255.255.252,mac=02:ae:00:00:%02x:%02x", tapName(index, egressOnly), host, byte(index>>8), byte(index))
 }
 
 func guestNetwork(index int, dns []netip.Addr) *guest.Network {
@@ -72,13 +104,13 @@ func (e *engine) allocateNet() (int, error) {
 		}
 		used[rec.Net] = true
 	}
-	for index := range maxNets {
+	for index := 1; index < maxNets; index++ {
 		if !used[index] {
 			e.reserved[index] = true
 			return index, nil
 		}
 	}
-	return 0, fmt.Errorf("vm runtime: all %d VM networks in %s are in use", maxNets, vmSubnet)
+	return 0, fmt.Errorf("vm runtime: all %d VM networks in %s are in use", maxNets-1, vmSubnet)
 }
 
 func (e *engine) releaseNet(index int) {
@@ -87,80 +119,119 @@ func (e *engine) releaseNet(index int) {
 	e.netMu.Unlock()
 }
 
-// vmChain holds the VMs' forwarding rules, rebuilt whole once per process
-// from firewallFile beside the VMs.
-const (
-	vmChain      = "AETHER-VM"
-	firewallFile = "firewall.rules"
-)
+// egressKey names the VM with egress control whose guest address is ip.
+// The firewall drops a packet whose source is not its own tap's guest, so
+// the address names the VM it came from.
+func (e *engine) egressKey(ip netip.Addr) (string, error) {
+	if index, ok := guestIndex(ip); ok {
+		keys, err := e.keys()
+		if err != nil {
+			return "", err
+		}
+		for _, key := range keys {
+			if rec, loadErr := e.load(key); loadErr == nil && rec.Net == index && rec.Egress {
+				return key, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("vm runtime: no session VM with egress control has %s: %w", ip, runtime.ErrNotFound)
+}
 
-// ensureNAT lets VMs out only through the host's default-route interfaces,
-// so they reach the internet but not each other or any bridge of Docker's,
-// whatever it is named, and no connection starts from outside into a VM.
-// The DNS servers guests are given stay reachable on port 53 wherever they
-// route, as a VPN's resolver does. It runs once per process; a failure is
-// retried at the next start.
-func (e *engine) ensureNAT(ctx context.Context) error {
+// firewall is one nft transaction that replaces the table whole. Its drops
+// hold whatever other tables accept; an accept here only passes the packet
+// on to them.
+var firewall = template.Must(template.New("firewall").Parse(`table inet {{.Table}}
+delete table inet {{.Table}}
+table inet {{.Table}} {
+	chain prerouting {
+		type filter hook prerouting priority raw; policy accept;
+		iifname "{{.Taps}}*" meta nfproto ipv6 drop
+		iifname "{{.Taps}}*" fib saddr . iif oif missing drop
+		iifname "{{.Taps}}*" ip daddr 169.254.169.254 drop
+	}
+	chain input {
+		type filter hook input priority filter; policy accept;
+		iifname "{{.EgressTaps}}*" ct state established,related accept
+		iifname "{{.EgressTaps}}*" ip daddr {{.Proxy}} tcp dport {{.ProxyPort}} accept
+		iifname "{{.EgressTaps}}*" reject
+	}
+	chain forward {
+		type filter hook forward priority filter; policy accept;
+		iifname "{{.EgressTaps}}*" reject with icmpx admin-prohibited
+{{- if .Uplinks}}
+		iifname "{{.Taps}}*" oifname { {{range $i, $u := .Uplinks}}{{if $i}}, {{end}}"{{$u}}"{{end}} } accept
+{{- end}}
+{{- if .DNS}}
+		iifname "{{.Taps}}*" ip daddr { {{range $i, $a := .DNS}}{{if $i}}, {{end}}{{$a}}{{end}} } meta l4proto { tcp, udp } th dport 53 accept
+{{- end}}
+		iifname "{{.Taps}}*" reject with icmpx admin-prohibited
+		oifname "{{.Taps}}*" ct state established,related accept
+		oifname "{{.Taps}}*" drop
+	}
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+		ip saddr {{.Subnet}} ip daddr != {{.Subnet}} masquerade
+	}
+}
+`))
+
+// ensureNetwork sets up the host side of every VM's network. VMs leave the
+// host only through its default-route interfaces, so they miss every bridge
+// of Docker's, whatever it is named, and the DNS servers guests are given
+// stay reachable wherever they route, as a VPN's resolver does. It runs at
+// every start: the firewall is replaced in one transaction, so a changed
+// default route or resolver applies to the next VM that boots.
+func (e *engine) ensureNetwork(ctx context.Context) error {
 	e.netMu.Lock()
 	defer e.netMu.Unlock()
-	if e.natReady {
-		return nil
-	}
 	if err := e.run(ctx, "sysctl", "-q", "-w", "net.ipv4.ip_forward=1"); err != nil {
 		return err
 	}
-	taps := tapPrefix + "+"
+	if e.run(ctx, "ip", "link", "show", "dev", proxyLink) != nil {
+		if err := e.run(ctx, "ip", "link", "add", proxyLink, "type", "dummy"); err != nil {
+			return err
+		}
+	}
+	for _, args := range [][]string{
+		{"addr", "replace", netip.PrefixFrom(proxyAddr, 32).String(), "dev", proxyLink},
+		{"link", "set", proxyLink, "up"},
+	} {
+		if err := e.run(ctx, "ip", args...); err != nil {
+			return err
+		}
+	}
 	uplinks, err := defaultRoutes()
 	if err != nil {
 		return err
 	}
-	var rules [][]string
-	for _, uplink := range uplinks {
-		rules = append(rules, []string{"-i", taps, "-o", uplink, "-j", "ACCEPT"})
+	var rules strings.Builder
+	if err = firewall.Execute(&rules, map[string]any{
+		"Table": firewallTable, "Taps": tapPrefix, "EgressTaps": egressTapPrefix,
+		"Proxy": proxyAddr, "ProxyPort": egress.Port, "Subnet": vmSubnet,
+		"Uplinks": uplinks, "DNS": hostDNS(),
+	}); err != nil {
+		return fmt.Errorf("vm runtime: write the VM firewall: %w", err)
 	}
-	for _, dns := range hostDNS() {
-		for _, proto := range []string{"udp", "tcp"} {
-			rules = append(rules, []string{"-i", taps, "-d", dns.String(), "-p", proto, "--dport", "53", "-j", "ACCEPT"})
-		}
-	}
-	rules = append(rules,
-		[]string{"-i", taps, "-j", "DROP"},
-		[]string{"-o", taps, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		[]string{"-o", taps, "-j", "DROP"},
-	)
-	// iptables-restore swaps the chain's rules in one commit, so VMs that
-	// already run are never left without them.
-	restore := "*filter\n:" + vmChain + " - [0:0]\n"
-	for _, rule := range rules {
-		restore += "-A " + vmChain + " " + strings.Join(rule, " ") + "\n"
-	}
-	restore += "COMMIT\n"
-	if err := os.MkdirAll(e.root, 0o700); err != nil {
+	if err = os.MkdirAll(e.root, 0o700); err != nil {
 		return fmt.Errorf("vm runtime: %w", err)
 	}
 	path := filepath.Join(e.root, firewallFile)
-	if err := writeFileAtomic(path, []byte(restore)); err != nil {
+	if err = writeFileAtomic(path, []byte(rules.String())); err != nil {
 		return err
 	}
-	if err := e.run(ctx, "iptables-restore", "--noflush", path); err != nil {
+	if err = e.run(ctx, "nft", "-f", path); err != nil {
 		return err
 	}
-	subnet := vmSubnet.String()
-	for _, rule := range [][]string{
-		{"-t", "filter", "FORWARD", "-j", vmChain},
-		{"-t", "nat", "POSTROUTING", "-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"},
-	} {
-		table, chain, match := rule[:2], rule[2], rule[3:]
-		check := append(append(append([]string{}, table...), "-C", chain), match...)
-		if e.run(ctx, "iptables", check...) == nil {
+	// A FORWARD policy of DROP, as Docker and ufw set, would drop what the
+	// table lets through.
+	for _, rule := range [][]string{{"-i", tapPrefix + "+", "-j", "ACCEPT"}, {"-o", tapPrefix + "+", "-j", "ACCEPT"}} {
+		if e.run(ctx, "iptables", append([]string{"-t", "filter", "-C", "FORWARD"}, rule...)...) == nil {
 			continue
 		}
-		insert := append(append(append([]string{}, table...), "-I", chain), match...)
-		if err := e.run(ctx, "iptables", insert...); err != nil {
+		if err = e.run(ctx, "iptables", append([]string{"-t", "filter", "-I", "FORWARD"}, rule...)...); err != nil {
 			return err
 		}
 	}
-	e.natReady = true
 	return nil
 }
 

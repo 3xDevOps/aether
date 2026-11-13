@@ -136,7 +136,7 @@ func (p *Proxy) listen(gateway netip.Addr) (netip.AddrPort, error) {
 	}
 	ln, err := net.Listen("tcp", addr.String())
 	if err != nil {
-		return netip.AddrPort{}, fmt.Errorf("egress: listen on the %s gateway: %w", runtime.EgressNetwork, err)
+		return netip.AddrPort{}, fmt.Errorf("egress: listen on %s: %w", addr, err)
 	}
 	if p.server != nil {
 		// The network was recreated on another subnet, which only happens

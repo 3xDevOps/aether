@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,7 +68,6 @@ type engine struct {
 	reserved map[int]bool
 
 	promotions sync.WaitGroup
-	natReady   bool
 }
 
 func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
@@ -148,9 +148,6 @@ func (e *engine) create(ctx context.Context, spec runtime.Spec) (_ runtime.ID, e
 	if err = checkKey(key); err != nil {
 		return "", err
 	}
-	if spec.Egress {
-		return "", errors.New("vm runtime: egress control (the Isolated tier) is not supported in session VMs until work item 5")
-	}
 	memMiB, err := memoryMiB(spec.MemoryLimitBytes)
 	if err != nil {
 		return "", err
@@ -198,7 +195,7 @@ func (e *engine) create(ctx context.Context, spec runtime.Spec) (_ runtime.ID, e
 		Env:        overrideEnv(base.Config.Env, runtime.EnvList(runtime.TrustCheckouts(spec.Env, spec.WorktreeMountPath, spec.ExtraWorktrees))),
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
-		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: checkouts(spec), Mounts: spec.Mounts, Net: index,
+		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: checkouts(spec), Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
 	}
 	if err = e.store(rec); err != nil {
 		return "", err
@@ -279,7 +276,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err = e.ensureNAT(ctx); err != nil {
+	if err = e.ensureNetwork(ctx); err != nil {
 		return err
 	}
 	rec.Booted, rec.Exited = true, false
@@ -319,8 +316,12 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: helper disk: %w", err)
 	}
+	var dns []netip.Addr
+	if !rec.Egress {
+		dns = hostDNS()
+	}
 	cmdline, err := guest.Config{
-		Hostname: rec.Key, Network: guestNetwork(rec.Net, hostDNS()), Mounts: p.mounts, Sockets: p.sockets,
+		Hostname: rec.Key, Network: guestNetwork(rec.Net, dns), Mounts: p.mounts, Sockets: p.sockets,
 	}.KernelArgs(cmdlineBase)
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: kernel command line: %w", err)
@@ -340,7 +341,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		"--cpus", fmt.Sprintf("boot=%d", rec.CPUs),
 		"--memory", fmt.Sprintf("size=%dM,shared=on", rec.MemoryMiB),
 		"--balloon", "size=0,free_page_reporting=on",
-		"--net", "id=net0,"+chNetArg(rec.Net),
+		"--net", "id=net0,"+chNetArg(rec.Net, rec.Egress),
 	)
 	l := launch{Args: args, Shares: p.shares, Home: p.homeConfig(rec.User)}
 	if len(p.shares) > 0 {

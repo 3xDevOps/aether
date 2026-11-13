@@ -63,6 +63,7 @@ type record struct {
 	Checkouts    []runtime.Mount `json:"checkouts,omitempty"`
 	Mounts       []runtime.Mount `json:"mounts,omitempty"`
 	Net          int             `json:"net"`
+	Egress       bool            `json:"egress,omitempty"`
 	// Booted is set once a boot was launched: the next cold start builds a
 	// fresh root disk. Boots counts them, so a wait on one boot can tell it
 	// from the next.

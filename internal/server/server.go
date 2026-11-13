@@ -38,6 +38,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/runtime/vm"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/servergw"
@@ -214,7 +215,7 @@ type Server struct {
 	bus       *events.InProc
 	rt        runtime.Runtime
 	docker    *runtime.Docker // set only when the server constructed it
-	egress    *egress.Proxy   // set with docker
+	egress    []*egress.Proxy // set with docker: Docker's, then the VM runtime's
 	git       *gitengine.Engine
 	pty       *ptyhost.Host
 	sched     *scheduler.Scheduler
@@ -412,8 +413,13 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 	var egressProxy scheduler.EgressProxy
 	if s.docker != nil {
-		s.egress = egress.New(s.docker, s.db, s.bus)
-		egressProxy = s.egress
+		s.egress = []*egress.Proxy{egress.New(s.docker, s.db, s.bus)}
+		// Docker's proxy keeps serving the sessions started on Docker before
+		// session-runtime was vm.
+		if vms, ok := s.rt.(*vm.Runtime); ok {
+			s.egress = append(s.egress, egress.New(vms, s.db, s.bus))
+		}
+		egressProxy = s.egress[len(s.egress)-1]
 	}
 	var waitConditions scheduler.WaitConditions = storeWaitConditions{s.db}
 	if cfg.WaitConditions != nil {
@@ -731,10 +737,10 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.assistant.Resume(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
-	if s.egress != nil {
-		// Not fatal: only egress-limited runs need the proxy, and the next
-		// launch of one tries again.
-		if err := s.egress.Resume(ctx); err != nil {
+	// Not fatal: only egress-limited runs need the proxy, and the next
+	// launch of one tries again.
+	for _, proxy := range s.egress {
+		if err := proxy.Resume(ctx); err != nil {
 			slog.Warn("server: resume the egress proxy", "error", err)
 		}
 	}
@@ -820,8 +826,8 @@ func (s *Server) Close() error {
 		}
 		// Registered services publish events, so they stop before the bus.
 		closeAll = append(closeAll, s.closeServices()...)
-		if s.egress != nil {
-			closeAll = append(closeAll, s.egress.Close)
+		for _, proxy := range s.egress {
+			closeAll = append(closeAll, proxy.Close)
 		}
 		if s.git != nil {
 			closeAll = append(closeAll, s.git.Close)

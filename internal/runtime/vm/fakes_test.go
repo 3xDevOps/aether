@@ -54,7 +54,6 @@ func (h *harness) newEngine(dir string) *engine {
 		return h.guest(filepath.Base(filepath.Dir(vsock))), nil
 	})
 	e.run = func(context.Context, string, ...string) error { return nil }
-	e.natReady = true
 	return e
 }
 
