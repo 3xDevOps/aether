@@ -376,12 +376,13 @@ What changes:
   `10.200.0.1:3128`. That address is on the dummy link `aether-vmproxy`; the
   proxy knows the session by its VM's address. Sessions with egress control
   started on Docker before the switch keep their proxy on `aether-egress`.
-- The server keeps these rules in the nftables table `inet aether_vm` and
-  rebuilds it whole at every start and VM boot; two `iptables` rules at the
-  top of `FORWARD` let VM traffic past a `DROP` policy such as Docker's.
-  It loads them from `<data dir>/vm/firewall.nft`;
-  `sudo nft list table inet aether_vm` shows them live. A change of default route
-  applies when the next VM boots.
+- The server keeps these rules in the nftables table `inet aether_vm`,
+  loaded from `<data dir>/vm/firewall.nft` and rebuilt whole at every start
+  and VM boot; `sudo nft list table inet aether_vm` shows them live. One
+  `iptables` rule at the top of `FORWARD` lets what the table allows, marked
+  `0x1000000`, past a `DROP` policy such as Docker's, which drops all
+  traffic VMs send through the host while the table is gone. A change of
+  default route applies when the next VM boots.
 - Not yet supported, refused at launch with an error naming the work item:
   the development browser beside a session.
 - Close or kill every session that runs in a VM before you set

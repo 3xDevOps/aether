@@ -37,6 +37,9 @@ const (
 	proxyLink       = "aether-vmproxy"
 	firewallTable   = "aether_vm"
 	firewallFile    = "firewall.nft"
+	// allowedMark is the packet mark bit the firewall sets on the VM traffic
+	// it forwards, clear of the bits Tailscale and Kubernetes use.
+	allowedMark = 0x01000000
 )
 
 // dockerDNS is what Docker gives a container when the host resolver is
@@ -139,7 +142,8 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 
 // firewall is one nft transaction that replaces the table whole. Its drops
 // hold whatever other tables accept; an accept here only passes the packet
-// on to them.
+// on to them. Its forward chain runs just before iptables' FORWARD, which
+// takes only what the chain marked.
 var firewall = template.Must(template.New("firewall").Parse(`table inet {{.Table}}
 delete table inet {{.Table}}
 table inet {{.Table}} {
@@ -156,16 +160,16 @@ table inet {{.Table}} {
 		iifname "{{.EgressTaps}}*" reject
 	}
 	chain forward {
-		type filter hook forward priority filter; policy accept;
+		type filter hook forward priority filter - 1; policy accept;
 		iifname "{{.EgressTaps}}*" reject with icmpx admin-prohibited
 {{- if .Uplinks}}
-		iifname "{{.Taps}}*" oifname { {{range $i, $u := .Uplinks}}{{if $i}}, {{end}}"{{$u}}"{{end}} } accept
+		iifname "{{.Taps}}*" oifname { {{range $i, $u := .Uplinks}}{{if $i}}, {{end}}"{{$u}}"{{end}} } meta mark set meta mark | {{.Mark}} accept
 {{- end}}
 {{- if .DNS}}
-		iifname "{{.Taps}}*" ip daddr { {{range $i, $a := .DNS}}{{if $i}}, {{end}}{{$a}}{{end}} } meta l4proto { tcp, udp } th dport 53 accept
+		iifname "{{.Taps}}*" ip daddr { {{range $i, $a := .DNS}}{{if $i}}, {{end}}{{$a}}{{end}} } meta l4proto { tcp, udp } th dport 53 meta mark set meta mark | {{.Mark}} accept
 {{- end}}
 		iifname "{{.Taps}}*" reject with icmpx admin-prohibited
-		oifname "{{.Taps}}*" ct state established,related accept
+		oifname "{{.Taps}}*" ct state established,related meta mark set meta mark | {{.Mark}} accept
 		oifname "{{.Taps}}*" drop
 	}
 	chain postrouting {
@@ -208,7 +212,7 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	if err = firewall.Execute(&rules, map[string]any{
 		"Table": firewallTable, "Taps": tapPrefix, "EgressTaps": egressTapPrefix,
 		"Proxy": proxyAddr, "ProxyPort": egress.Port, "Subnet": vmSubnet,
-		"Uplinks": uplinks, "DNS": hostDNS(),
+		"Uplinks": uplinks, "DNS": hostDNS(), "Mark": fmt.Sprintf("%#x", allowedMark),
 	}); err != nil {
 		return fmt.Errorf("vm runtime: write the VM firewall: %w", err)
 	}
@@ -223,12 +227,10 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 		return err
 	}
 	// A FORWARD policy of DROP, as Docker and ufw set, would drop what the
-	// table lets through.
-	for _, rule := range [][]string{{"-i", tapPrefix + "+", "-j", "ACCEPT"}, {"-o", tapPrefix + "+", "-j", "ACCEPT"}} {
-		if e.run(ctx, "iptables", append([]string{"-t", "filter", "-C", "FORWARD"}, rule...)...) == nil {
-			continue
-		}
-		if err = e.run(ctx, "iptables", append([]string{"-t", "filter", "-I", "FORWARD"}, rule...)...); err != nil {
+	// table lets through; without the table it drops all VM traffic.
+	rule := []string{"FORWARD", "-m", "mark", "--mark", fmt.Sprintf("%#x/%#x", allowedMark, allowedMark), "-j", "ACCEPT"}
+	if e.run(ctx, "iptables", append([]string{"-t", "filter", "-C"}, rule...)...) != nil {
+		if err = e.run(ctx, "iptables", append([]string{"-t", "filter", "-I"}, rule...)...); err != nil {
 			return err
 		}
 	}

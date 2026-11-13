@@ -104,7 +104,7 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 			linked = true
 		case strings.Contains(call, " -C FORWARD ") && !inserted[strings.Replace(call, " -C ", " -I ", 1)]:
 			return errors.New("Bad rule")
-		case strings.Contains(call, " -I FORWARD "):
+		case strings.HasPrefix(call, "iptables -t filter -I FORWARD -m mark --mark 0x1000000/0x1000000 -j ACCEPT"):
 			inserted[call] = true
 		}
 		return nil
@@ -122,7 +122,7 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 		}
 		return n
 	}
-	if count("ip link add aether-vmproxy") != 1 || count("iptables -t filter -I FORWARD") != 2 || count("nft -f "+filepath.Join(e.root, firewallFile)) != 2 {
+	if count("ip link add aether-vmproxy") != 1 || count("iptables -t filter -I FORWARD") != 1 || count("nft -f "+filepath.Join(e.root, firewallFile)) != 2 {
 		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))
 	}
 	if count("ip addr replace 10.200.0.1/32 dev aether-vmproxy") != 2 {

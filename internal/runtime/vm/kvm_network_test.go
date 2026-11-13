@@ -168,9 +168,7 @@ func TestKVMNetwork(t *testing.T) {
 	t.Cleanup(func() {
 		_ = exec.Command("nft", "delete", "table", "inet", firewallTable).Run()
 		_ = exec.Command("ip", "link", "del", proxyLink).Run()
-		for _, dir := range []string{"-i", "-o"} {
-			_ = exec.Command("iptables", "-D", "FORWARD", dir, tapPrefix+"+", "-j", "ACCEPT").Run()
-		}
+		_ = exec.Command("iptables", "-D", "FORWARD", "-m", "mark", "--mark", "0x1000000/0x1000000", "-j", "ACCEPT").Run()
 	})
 	ws := func(id, host string) *domain.Workspace {
 		return &domain.Workspace{ID: domain.WorkspaceID(id), Environment: domain.WorkspaceEnvironment{Egress: domain.EgressPolicy{On: true, Hosts: []string{host}}}}
@@ -212,8 +210,12 @@ func TestKVMNetwork(t *testing.T) {
 
 	expect := func(what, got string, want bool) {
 		t.Helper()
-		if strings.HasPrefix(got, "connected:") != want {
-			t.Errorf("%s: %s", what, got)
+		prefix := "error:"
+		if want {
+			prefix = "connected:"
+		}
+		if !strings.HasPrefix(got, prefix) {
+			t.Errorf("%s: %q", what, got)
 		} else {
 			t.Logf("%s: %s", what, got)
 		}
@@ -296,6 +298,14 @@ func TestKVMNetwork(t *testing.T) {
 	if err = exec.Command("nft", "delete", "table", "inet", firewallTable).Run(); err != nil {
 		t.Fatal(err)
 	}
+	// Fail-closed holds where FORWARD drops by default and no other rule
+	// accepts VM traffic.
+	if filter, _ := exec.Command("iptables", "-S").Output(); strings.Contains(string(filter), "-P FORWARD DROP") && !strings.Contains(string(filter), tapPrefix) {
+		expect("without the firewall an open VM reaches another VM", probe(t, e, "run-vmnet-a", "dial "+b+":8080"), false)
+		expect("without the firewall an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial 1.1.1.1:443"), false)
+	} else {
+		t.Log("FORWARD does not drop by default or another rule accepts VM traffic: fail-closed not checked")
+	}
 	restarted := &Runtime{vms: kvmEngine(t)}
 	for range 2 {
 		if _, err = restarted.EgressGateway(t.Context(), false); err != nil {
@@ -307,7 +317,7 @@ func TestKVMNetwork(t *testing.T) {
 		t.Errorf("after a new engine the proxy refused run-vmnet-c: %s", got)
 	}
 	rules, _ := exec.Command("iptables", "-S", "FORWARD").Output()
-	if n := strings.Count(string(rules), "-i "+tapPrefix+"+ -j ACCEPT"); n != 1 {
+	if n := strings.Count(string(rules), "--mark 0x1000000/0x1000000 -j ACCEPT"); n != 1 {
 		t.Errorf("FORWARD holds the VM rule %d times:\n%s", n, rules)
 	}
 }
