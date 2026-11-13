@@ -91,8 +91,10 @@ const vmChain = "AETHER-VM"
 
 // ensureNAT lets VMs out only through the host's default-route interfaces,
 // so they reach the internet but not each other or any bridge of Docker's,
-// whatever it is named, and no connection starts from outside into a VM. It
-// runs once per process; a failure is retried at the next start.
+// whatever it is named, and no connection starts from outside into a VM.
+// The DNS servers guests are given stay reachable on port 53 wherever they
+// route, as a VPN's resolver does. It runs once per process; a failure is
+// retried at the next start.
 func (e *engine) ensureNAT(ctx context.Context) error {
 	e.netMu.Lock()
 	defer e.netMu.Unlock()
@@ -115,6 +117,11 @@ func (e *engine) ensureNAT(ctx context.Context) error {
 	var rules [][]string
 	for _, uplink := range uplinks {
 		rules = append(rules, []string{"-i", taps, "-o", uplink, "-j", "ACCEPT"})
+	}
+	for _, dns := range hostDNS() {
+		for _, proto := range []string{"udp", "tcp"} {
+			rules = append(rules, []string{"-i", taps, "-d", dns.String(), "-p", proto, "--dport", "53", "-j", "ACCEPT"})
+		}
 	}
 	rules = append(rules,
 		[]string{"-i", taps, "-j", "DROP"},

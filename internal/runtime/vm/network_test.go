@@ -73,6 +73,11 @@ func TestEnsureNATIsolatesVMs(t *testing.T) {
 	for _, uplink := range uplinks {
 		want = append(want, "iptables -t filter -A AETHER-VM -i aethervm+ -o "+uplink+" -j ACCEPT")
 	}
+	for _, dns := range hostDNS() {
+		want = append(want,
+			"iptables -t filter -A AETHER-VM -i aethervm+ -d "+dns.String()+" -p udp --dport 53 -j ACCEPT",
+			"iptables -t filter -A AETHER-VM -i aethervm+ -d "+dns.String()+" -p tcp --dport 53 -j ACCEPT")
+	}
 	want = append(want,
 		"iptables -t filter -A AETHER-VM -i aethervm+ -j DROP",
 		"iptables -t filter -A AETHER-VM -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
