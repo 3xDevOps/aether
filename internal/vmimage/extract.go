@@ -2,7 +2,7 @@ package vmimage
 
 import (
 	"archive/tar"
-	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +28,7 @@ const (
 // entry, symlink or hard link reaches outside it. Device files are dropped
 // under /dev, where the guest mounts devtmpfs, and refused elsewhere.
 // Ownership needs the caller to be root unless every entry is its own.
-func extract(r io.Reader, root *os.Root) error {
+func extract(ctx context.Context, r io.Reader, root *os.Root) error {
 	tr := tar.NewReader(r)
 	var dirs, links []*tar.Header
 	var entries, size int64
@@ -40,6 +40,9 @@ func extract(r io.Reader, root *os.Root) error {
 		}
 		if err != nil {
 			return fmt.Errorf("vmimage: read image filesystem: %w", err)
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("vmimage: read image filesystem: %w", ctx.Err())
 		}
 		if hdr.Typeflag == tar.TypeXGlobalHeader {
 			continue
@@ -101,28 +104,31 @@ func extract(r io.Reader, root *os.Root) error {
 	return nil
 }
 
-// makeLinks creates hard links once their targets exist. A flattened image
-// lists upper layers first, so a link, or a chain of links across layers,
-// can come before its target.
+// makeLinks creates hard links. A flattened image lists upper layers first,
+// so a link, or a chain of links across layers, can come before its target;
+// each chain is made from its far end back, so the work stays linear.
 func makeLinks(root *os.Root, links []*tar.Header) error {
-	for len(links) > 0 {
-		var waiting []*tar.Header
-		var firstErr error
-		for _, hdr := range links {
-			err := root.Link(hdr.Linkname, hdr.Name)
-			if errors.Is(err, fs.ErrNotExist) {
-				waiting = append(waiting, hdr)
-				firstErr = cmp.Or(firstErr, err)
-				continue
-			}
-			if err != nil {
-				return fmt.Errorf("vmimage: image entry %s: %w", hdr.Name, err)
-			}
+	pending := make(map[string]*tar.Header, len(links))
+	for _, hdr := range links {
+		if _, dup := pending[hdr.Name]; dup {
+			return fmt.Errorf("vmimage: image entry %s is listed twice", hdr.Name)
 		}
-		if len(waiting) == len(links) {
-			return fmt.Errorf("vmimage: image entry %s: %w", waiting[0].Name, firstErr)
+		pending[hdr.Name] = hdr
+	}
+	for _, hdr := range links {
+		var chain []*tar.Header
+		for h := pending[hdr.Name]; h != nil; h = pending[h.Linkname] {
+			if len(chain) == len(pending) {
+				return fmt.Errorf("vmimage: image entry %s: hard links form a loop", hdr.Name)
+			}
+			chain = append(chain, h)
 		}
-		links = waiting
+		for _, h := range slices.Backward(chain) {
+			if err := root.Link(h.Linkname, h.Name); err != nil {
+				return fmt.Errorf("vmimage: image entry %s: %w", h.Name, err)
+			}
+			delete(pending, h.Name)
+		}
 	}
 	return nil
 }

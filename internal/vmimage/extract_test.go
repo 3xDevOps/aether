@@ -3,7 +3,9 @@ package vmimage
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -99,7 +101,7 @@ func extractInto(t *testing.T, entries ...entry) (string, error) {
 		t.Fatal(err)
 	}
 	defer func() { _ = root.Close() }()
-	return dir, extract(tarOf(t, entries...), root)
+	return dir, extract(context.Background(), tarOf(t, entries...), root)
 }
 
 func TestExtractRefusesEscapes(t *testing.T) {
@@ -192,6 +194,9 @@ func TestExtractRefusesConflictsAndBadEntries(t *testing.T) {
 		{"file then directory", []entry{{name: "a", body: "1"}, {name: "a", typ: tar.TypeDir, mode: 0o755}}, "listed twice"},
 		{"symlink then directory", []entry{{name: "a", typ: tar.TypeSymlink, link: "b"}, {name: "a", typ: tar.TypeDir, mode: 0o755}}, "listed twice"},
 		{"missing hard link target", []entry{{name: "a", typ: tar.TypeLink, link: "nowhere"}}, "no such file"},
+		{"hard link loop", []entry{{name: "a", typ: tar.TypeLink, link: "b"}, {name: "b", typ: tar.TypeLink, link: "a"}}, "form a loop"},
+		{"hard link to itself", []entry{{name: "a", typ: tar.TypeLink, link: "a"}}, "form a loop"},
+		{"duplicate hard link", []entry{{name: "a", typ: tar.TypeLink, link: "x"}, {name: "a", typ: tar.TypeLink, link: "y"}}, "listed twice"},
 		{"owner out of range", []entry{{name: "a", body: "1", uid: 1 << 33, gid: 1}}, "has owner"},
 		{"unsupported type", []entry{{name: "a", typ: 'V'}}, "unsupported type"},
 		{"image too large", []entry{{name: "big", size: maxImageBytes + 1}}, "larger than"},
@@ -280,6 +285,37 @@ func TestExtractHardLinkChainAcrossLayers(t *testing.T) {
 	}
 	if got := nlink(t, filepath.Join(dir, "a")); got != 3 {
 		t.Errorf("a has %d links, want 3", got)
+	}
+}
+
+// A crafted image can list a long chain of links target last; extraction
+// must stay linear, not retry the whole chain once per link it makes.
+func TestExtractLongHardLinkChainListedBackwards(t *testing.T) {
+	const n = 20000
+	entries := make([]entry, 0, n+1)
+	for i := n; i > 0; i-- {
+		entries = append(entries, entry{name: fmt.Sprintf("l%d", i), typ: tar.TypeLink, link: fmt.Sprintf("l%d", i-1)})
+	}
+	entries = append(entries, entry{name: "l0", body: "end"})
+	dir, err := extractInto(t, entries...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := nlink(t, filepath.Join(dir, "l0")); got != n+1 {
+		t.Errorf("l0 has %d links, want %d", got, n+1)
+	}
+}
+
+func TestExtractStopsWhenCancelled(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := extract(ctx, tarOf(t, entry{name: "a", body: "x"}), root); !errors.Is(err, context.Canceled) {
+		t.Fatalf("extract() with a cancelled context = %v", err)
 	}
 }
 

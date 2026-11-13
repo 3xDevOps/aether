@@ -85,7 +85,7 @@ func (s *Store) build(ctx context.Context, img v1.Image, id, ref string) error {
 	if err = os.Mkdir(stage, 0o755); err != nil {
 		return err
 	}
-	if err = extractImage(img, stage); err != nil {
+	if err = extractImage(ctx, img, stage); err != nil {
 		return err
 	}
 	if err = mkfs(ctx, filepath.Join(work, "disk.raw"), rootSize, "aether-root", stage); err != nil {
@@ -117,14 +117,14 @@ func (s *Store) tagIfExists(ref, id string) (bool, error) {
 	return true, s.tagLocked(ref, id)
 }
 
-func extractImage(img v1.Image, dir string) error {
+func extractImage(ctx context.Context, img v1.Image, dir string) error {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = root.Close() }()
 	rc := mutate.Extract(img)
-	err = extract(rc, root)
+	err = extract(ctx, rc, root)
 	if err == nil {
 		// mutate.Extract ends the tar cleanly even when a layer fails and
 		// reports the failure after it, so read on to the end.
