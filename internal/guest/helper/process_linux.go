@@ -32,8 +32,8 @@ const startupTimeout = 10 * time.Second
 
 // maxExited is how many exited processes keep their record and output for
 // a late reader, besides the main process, which always does. A record
-// whose exit or output a caller has not read yet stays past it, up to
-// maxKept.
+// whose exit or output a caller has not read yet stays until maxKept later
+// exits.
 const (
 	maxExited = 32
 	maxKept   = 4 * maxExited
@@ -68,6 +68,7 @@ type process struct {
 	code     int
 	// reported is set once a caller has been told the exit.
 	reported atomic.Bool
+	exit     uint64
 }
 
 // settled reports that no caller has more to read of p: its exit was
@@ -85,6 +86,8 @@ type processes struct {
 	byID   map[string]*process
 	byPID  map[int]*process
 	exited []string
+	// exits counts the exits retire saw; a process's exit is its count then.
+	exits uint64
 	// cgroup is the directory every spawned process starts in, nil for none.
 	cgroup *os.File
 }
@@ -427,31 +430,40 @@ func (t *processes) reap() {
 }
 
 // retire lists p as exited and keeps the newest maxExited exited processes.
-// Of the older ones it forgets those no caller still reads, oldest first,
-// or past maxKept the oldest of all. The main process is never forgotten.
+// An older one is forgotten once no caller still reads it, or once maxKept
+// processes exited after it, read or not; the output of an older one that
+// was read to its end is dropped at once. The main process is never
+// forgotten.
 func (t *processes) retire(p *process) {
 	if p.id == guest.MainID {
 		return
 	}
+	t.exits++
+	p.exit = t.exits
 	t.exited = append(t.exited, p.id)
-	for len(t.exited) > maxExited {
-		older := t.exited[:len(t.exited)-maxExited]
-		i := slices.IndexFunc(older, func(id string) bool { return t.byID[id] == nil || t.byID[id].settled() })
-		if i < 0 {
-			if len(t.exited) <= maxKept {
-				return
-			}
-			i = 0
-		}
-		// Closing the output also ends a pump still waiting for a reader of
-		// lossless output, which no one can attach to any more.
-		if old := t.byID[t.exited[i]]; old != nil {
+	older := len(t.exited) - maxExited
+	kept := t.exited[:0]
+	for i, id := range t.exited {
+		old := t.byID[id]
+		switch {
+		case i >= older:
+		case old == nil:
+			continue
+		case old.settled() || t.exits-old.exit >= maxKept:
+			// Closing the output also ends a pump still waiting for a
+			// reader of lossless output, which no one can attach to any
+			// more, and so the writer behind it.
 			old.stdout.close()
 			old.stderr.close()
+			delete(t.byID, id)
+			continue
+		default:
+			old.stdout.release()
+			old.stderr.release()
 		}
-		delete(t.byID, t.exited[i])
-		t.exited = slices.Delete(t.exited, i, i+1)
+		kept = append(kept, id)
 	}
+	t.exited = kept
 }
 
 func (t *processes) get(id string) (*process, error) {
