@@ -133,8 +133,9 @@ exit code and powers the VM off.
 ## Output and input
 
 The helper keeps each output stream under offsets that count its bytes from
-the process start. `Read` names an offset, or a negative one for the current
-end, and waits for bytes there. Reading at an offset also acknowledges the
+the process start. `Read` names an offset and waits for bytes there; a negative
+offset returns the current end at once, so a reader that starts from now has
+a known place to ask from again. Reading at an offset also acknowledges the
 bytes before it. A lossy stream keeps its newest 256 KiB, and a reply whose
 offset is past the requested one says what was dropped. A `lossless` process
 blocks once 256 KiB of its output are unacknowledged. A stream ends once its

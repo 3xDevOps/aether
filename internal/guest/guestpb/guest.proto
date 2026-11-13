@@ -100,8 +100,9 @@ message ReadRequest {
   string id = 1;
   Stream stream = 2;
   // offset counts the stream's bytes from the process start; a negative
-  // offset reads from the current end. It also acknowledges every byte
-  // before it, which frees a lossless process to write more.
+  // offset returns the current end at once, without data. It also
+  // acknowledges every byte before it, which frees a lossless process to
+  // write more.
   int64 offset = 3;
   uint32 max_bytes = 4;
 }

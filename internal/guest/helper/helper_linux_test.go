@@ -291,6 +291,19 @@ func TestNoNewPrivileges(t *testing.T) {
 			t.Errorf("NoNewPrivileges %v: a descendant reports %q", nnp, out)
 		}
 	}
+	// A program that passes the lookup but cannot be executed fails the
+	// spawn either way, also behind the helper binary.
+	script := filepath.Join(t.TempDir(), "script")
+	if err := os.WriteFile(script, []byte("#!/no/such/interpreter\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, nnp := range []bool{false, true} {
+		var startErr *guest.StartError
+		_, err := client.Spawn(testContext(t), guest.ProcessSpec{ID: t.Name() + "/bad-interpreter-" + fmt.Sprint(nnp), User: self, Argv: []string{script}, NoNewPrivileges: nnp})
+		if !errors.As(err, &startErr) || startErr.Code != 127 {
+			t.Errorf("NoNewPrivileges %v, a missing interpreter: %v", nnp, err)
+		}
+	}
 }
 
 func TestSpawnFailures(t *testing.T) {

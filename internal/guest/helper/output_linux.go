@@ -85,13 +85,17 @@ func (o *output) close() {
 	}
 }
 
-// readAt waits for bytes at or after offset, a negative offset meaning the
-// current end, and returns where they start. Reading at offset acknowledges
-// every byte before it: a lossless stream drops them and takes more.
+// readAt waits for bytes at or after offset and returns where they start.
+// A negative offset returns the current end at once, without bytes, so a
+// reader that loses that reply asks again from a known place, not from a
+// later end. Reading at offset acknowledges every byte before it: a lossless
+// stream drops them and takes more.
 func (o *output) readAt(ctx context.Context, offset int64, limit int) (int64, []byte, bool, error) {
 	o.mu.Lock()
 	if offset < 0 {
-		offset = o.end()
+		end, closed := o.end(), o.closed
+		o.mu.Unlock()
+		return end, nil, closed, nil
 	}
 	if offset > o.end() {
 		o.mu.Unlock()

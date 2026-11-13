@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/user"
@@ -23,6 +24,10 @@ import (
 
 // defaultPath is the PATH Docker gives a container whose image sets none.
 const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+// startupTimeout bounds how long a process started through the helper
+// binary may take to execute its program.
+const startupTimeout = 10 * time.Second
 
 // maxExited is how many exited processes keep their record and output for
 // a late reader, besides the main process, which always does.
@@ -185,15 +190,26 @@ func (t *processes) start(p *process, spec spawnSpec, program, dir string, env [
 			return err
 		}
 	}
+	path, argv := program, spec.Argv
+	var execStatus *os.File
+	if spec.NoNewPrivileges {
+		r, w, err := os.Pipe()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = r.Close() }()
+		execStatus, child = r, append(child, w)
+		path, argv = "/proc/self/exe", append([]string{"aether-internal", "guest", noNewPrivsArg, program}, spec.Argv...)
+	}
 	fds := make([]uintptr, len(child))
 	for i, f := range child {
 		fds[i] = f.Fd()
 	}
-	path, argv := program, spec.Argv
-	if spec.NoNewPrivileges {
-		path, argv = "/proc/self/exe", append([]string{"aether-internal", "guest", noNewPrivsArg, program}, spec.Argv...)
-	}
 	pid, err := syscall.ForkExec(path, argv, &syscall.ProcAttr{Dir: dir, Env: env, Files: fds, Sys: attr})
+	if err == nil && execStatus != nil {
+		_ = child[len(child)-1].Close()
+		err = trampolineResult(execStatus)
+	}
 	if err != nil {
 		for _, f := range []*os.File{p.stdin, stdoutR, stderrR} {
 			if f != nil {
@@ -215,6 +231,28 @@ func (t *processes) start(p *process, spec spawnSpec, program, dir string, env [
 		p.stderr.close()
 	}
 	return nil
+}
+
+// trampolineResult is how the helper binary's exec of the program ended,
+// which ForkExec reports for a direct start: its status pipe closes on a
+// successful exec and carries the errno of a failed one.
+func trampolineResult(status *os.File) error {
+	if err := status.SetReadDeadline(time.Now().Add(startupTimeout)); err != nil {
+		return err
+	}
+	buf := make([]byte, 16)
+	n, err := status.Read(buf)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("wait for the program to start: %w", err)
+	}
+	errno, err := strconv.Atoi(string(buf[:n]))
+	if err != nil {
+		return fmt.Errorf("the program's start reported %q", buf[:n])
+	}
+	return syscall.Errno(errno)
 }
 
 func checkSpec(spec guest.ProcessSpec) error {

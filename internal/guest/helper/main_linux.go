@@ -12,6 +12,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/guest"
@@ -48,12 +50,22 @@ func Main(args []string) int {
 	select {}
 }
 
+// execNoNewPrivs runs with the spawning helper's status pipe on fd 3, which
+// closes when the exec succeeds and otherwise gets its errno. no_new_privs
+// belongs to one thread, so the exec stays on the thread that set it.
 func execNoNewPrivs(program string, argv []string) int {
+	runtime.LockOSThread()
+	status := os.NewFile(3, "exec status")
+	syscall.CloseOnExec(3)
 	err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
 	if err == nil {
 		err = unix.Exec(program, argv, os.Environ())
 	}
-	fmt.Fprintf(os.Stderr, "aether-internal guest: %s: %v\n", program, err)
+	errno, ok := err.(unix.Errno)
+	if !ok {
+		errno = unix.EINVAL
+	}
+	_, _ = fmt.Fprint(status, int(errno))
 	return 126
 }
 

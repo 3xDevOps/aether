@@ -604,8 +604,9 @@ type ReadRequest struct {
 	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Stream Stream                 `protobuf:"varint,2,opt,name=stream,proto3,enum=aether.guest.v1.Stream" json:"stream,omitempty"`
 	// offset counts the stream's bytes from the process start; a negative
-	// offset reads from the current end. It also acknowledges every byte
-	// before it, which frees a lossless process to write more.
+	// offset returns the current end at once, without data. It also
+	// acknowledges every byte before it, which frees a lossless process to
+	// write more.
 	Offset        int64  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
 	MaxBytes      uint32 `protobuf:"varint,4,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
