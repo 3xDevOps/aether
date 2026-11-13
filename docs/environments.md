@@ -378,12 +378,13 @@ What changes:
   started on Docker before the switch keep their proxy on `aether-egress`.
 - The server keeps these rules in the nftables table `inet aether_vm`,
   loaded from `<data dir>/vm/firewall.nft` and rebuilt whole at every start
-  and VM boot; `sudo nft list table inet aether_vm` shows them live. One
-  `iptables` rule at the top of `FORWARD` lets what the table allows, marked
-  `0x1000000`, past a `DROP` policy such as Docker's, which drops all
-  traffic VMs send through the host while the table is gone; what they send
-  to the host itself is then unfiltered. A change of default route applies
-  when the next VM boots.
+  and VM boot; `sudo nft list table inet aether_vm` shows them live. An
+  `iptables` rule at the top of `FORWARD` and of `INPUT` lets what the table
+  allows, marked `0x1000000`, past a `DROP` policy such as Docker's on
+  `FORWARD` or ufw's on `INPUT`, so egress-controlled VMs reach the proxy
+  behind ufw. While the table is gone, the `FORWARD` policy drops all
+  traffic VMs send through the host, and what they send to the host itself
+  is unfiltered. A change of default route applies when the next VM boots.
 - Not yet supported, refused at launch with an error naming the work item:
   the development browser beside a session.
 - Close or kill every session that runs in a VM before you set

@@ -55,8 +55,13 @@ func TestKVMNetProbe(t *testing.T) {
 			fmt.Println("error:", err)
 			return
 		}
+		_ = c.SetDeadline(time.Now().Add(10 * time.Second))
 		_, _ = fmt.Fprintf(c, "CONNECT %[1]s HTTP/1.1\r\nHost: %[1]s\r\n\r\n", args[2])
-		status, _ := bufio.NewReader(c).ReadString('\n')
+		status, err := bufio.NewReader(c).ReadString('\n')
+		if err != nil {
+			fmt.Println("error:", err)
+			return
+		}
 		fmt.Println("status:", strings.TrimSpace(status))
 	case "udp":
 		// IP_TRANSPARENT lets root send from an address the guest does not hold.
@@ -180,7 +185,9 @@ func TestKVMNetwork(t *testing.T) {
 	t.Cleanup(func() {
 		_ = exec.Command("nft", "delete", "table", "inet", firewallTable).Run()
 		_ = exec.Command("ip", "link", "del", proxyLink).Run()
-		_ = exec.Command("iptables", "-D", "FORWARD", "-m", "mark", "--mark", "0x1000000/0x1000000", "-j", "ACCEPT").Run()
+		for _, chain := range []string{"INPUT", "FORWARD"} {
+			_ = exec.Command("iptables", "-D", chain, "-m", "mark", "--mark", "0x1000000/0x1000000", "-j", "ACCEPT").Run()
+		}
 	})
 	ws := func(id, host string) *domain.Workspace {
 		return &domain.Workspace{ID: domain.WorkspaceID(id), Environment: domain.WorkspaceEnvironment{Egress: domain.EgressPolicy{On: true, Hosts: []string{host}}}}
@@ -283,6 +290,20 @@ func TestKVMNetwork(t *testing.T) {
 	}
 	t.Logf("run-vmnet-d through the proxy: %s", got)
 
+	// A default-deny INPUT, as ufw sets, still lets egress VMs reach the proxy.
+	deny := []string{"INPUT", "-i", tapPrefix + "+", "-j", "DROP"}
+	if out, denyErr := exec.Command("iptables", append([]string{"-A"}, deny...)...).CombinedOutput(); denyErr != nil {
+		t.Fatalf("iptables -A %v: %v: %s", deny, denyErr, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("iptables", append([]string{"-D"}, deny...)...).Run() })
+	if got = probe(t, e, "run-vmnet-c", "connect "+proxyAddr.String()+":3128 example.com:443"); !strings.Contains(got, " 200 ") {
+		t.Errorf("behind a default-deny INPUT the proxy refused run-vmnet-c: %s", got)
+	}
+	expect("behind a default-deny INPUT an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), false)
+	if out, denyErr := exec.Command("iptables", append([]string{"-D"}, deny...)...).CombinedOutput(); denyErr != nil {
+		t.Fatalf("iptables -D %v: %v: %s", deny, denyErr, out)
+	}
+
 	// sources sends a datagram as each address from run-vmnet-a and returns
 	// the sources the host took them from.
 	sources := func(as ...string) []string {
@@ -355,9 +376,11 @@ func TestKVMNetwork(t *testing.T) {
 	if got = probe(t, restarted.vms, "run-vmnet-c", "connect "+proxyAddr.String()+":3128 example.com:443"); !strings.Contains(got, " 200 ") {
 		t.Errorf("after a new engine the proxy refused run-vmnet-c: %s", got)
 	}
-	rules, _ := exec.Command("iptables", "-S", "FORWARD").Output()
-	if n := strings.Count(string(rules), "--mark 0x1000000/0x1000000 -j ACCEPT"); n != 1 {
-		t.Errorf("FORWARD holds the VM rule %d times:\n%s", n, rules)
+	for _, chain := range []string{"INPUT", "FORWARD"} {
+		rules, _ := exec.Command("iptables", "-S", chain).Output()
+		if n := strings.Count(string(rules), "--mark 0x1000000/0x1000000 -j ACCEPT"); n != 1 {
+			t.Errorf("%s holds the VM rule %d times:\n%s", chain, n, rules)
+		}
 	}
 }
 
@@ -401,6 +424,7 @@ func relayDial(t *testing.T, e *engine, key, addr string) string {
 	}
 	go ssh.DiscardRequests(chReqs)
 	defer func() { _ = ch.Close() }()
+	time.AfterFunc(10*time.Second, func() { _ = ch.Close() })
 	line, _ := bufio.NewReader(ch).ReadString('\n')
 	return "connected: " + strings.TrimSpace(line)
 }

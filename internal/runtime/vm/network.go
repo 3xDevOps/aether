@@ -142,8 +142,8 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 
 // firewall is one nft transaction that replaces the table whole. Its drops
 // hold whatever other tables accept; an accept here only passes the packet
-// on to them. Its forward chain runs just before iptables' FORWARD, which
-// takes only what the chain marked.
+// on to them. Its input and forward chains run just before iptables', whose
+// INPUT and FORWARD take only what they marked.
 var firewall = template.Must(template.New("firewall").Parse(`table inet {{.Table}}
 delete table inet {{.Table}}
 table inet {{.Table}} {
@@ -154,9 +154,9 @@ table inet {{.Table}} {
 		iifname "{{.Taps}}*" ip daddr { 169.254.169.254, 100.100.100.200 } drop
 	}
 	chain input {
-		type filter hook input priority filter; policy accept;
-		iifname "{{.EgressTaps}}*" ct state established,related accept
-		iifname "{{.EgressTaps}}*" ip daddr {{.Proxy}} tcp dport {{.ProxyPort}} accept
+		type filter hook input priority filter - 1; policy accept;
+		iifname "{{.EgressTaps}}*" ct state established,related meta mark set meta mark | {{.Mark}} accept
+		iifname "{{.EgressTaps}}*" ip daddr {{.Proxy}} tcp dport {{.ProxyPort}} meta mark set meta mark | {{.Mark}} accept
 		iifname "{{.EgressTaps}}*" reject
 	}
 	chain forward {
@@ -226,10 +226,13 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	if err = e.run(ctx, "nft", "-f", path); err != nil {
 		return err
 	}
-	// A FORWARD policy of DROP, as Docker and ufw set, would drop what the
-	// table lets through; without the table it drops all VM traffic.
-	rule := []string{"FORWARD", "-m", "mark", "--mark", fmt.Sprintf("%#x/%#x", allowedMark, allowedMark), "-j", "ACCEPT"}
-	if e.run(ctx, "iptables", append([]string{"-w", "-t", "filter", "-C"}, rule...)...) != nil {
+	// A DROP policy, as Docker sets on FORWARD and ufw on INPUT, would drop
+	// what the table lets through; without the table it drops VM traffic.
+	for _, chain := range []string{"INPUT", "FORWARD"} {
+		rule := []string{chain, "-m", "mark", "--mark", fmt.Sprintf("%#x/%#x", allowedMark, allowedMark), "-j", "ACCEPT"}
+		if e.run(ctx, "iptables", append([]string{"-w", "-t", "filter", "-C"}, rule...)...) == nil {
+			continue
+		}
 		if err = e.run(ctx, "iptables", append([]string{"-w", "-t", "filter", "-I"}, rule...)...); err != nil {
 			return err
 		}
