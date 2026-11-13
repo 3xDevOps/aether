@@ -214,6 +214,9 @@ jobs:
       - uses: ./.github/actions/bun-cache
         with:
           mode: restore
+      # internal/vmimage's store tests make qcow2 disks.
+      - name: Install qemu-img
+        run: command -v qemu-img || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends qemu-utils; }
       - name: Unit tests
         env:
           TEST_RACE: ${{ github.event_name != 'pull_request' && '-race' || '' }}

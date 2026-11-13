@@ -194,7 +194,7 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 }
 
 func (d *Docker) pull(ctx context.Context, ref string) error {
-	if localOnlyImage(ref) {
+	if LocalOnlyImage(ref) {
 		return fmt.Errorf("runtime: image %s is built locally and is missing from the daemon", ref)
 	}
 	rc, err := d.cli.ImagePull(ctx, ref, client.ImagePullOptions{})

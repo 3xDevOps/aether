@@ -556,6 +556,31 @@ jobs:
           overwrite: true
           retention-days: 7
 
+  # The guest kernel session VMs boot, from the pinned container `make kernel`
+  # builds in.
+  kernel:
+    needs: release-policy
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-policy.outputs.sha }}
+          persist-credentials: false
+      - name: Build the guest kernel
+        run: |
+          make kernel
+          test -s dist/aether-vmlinux-x86_64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binaries-kernel
+          path: dist/aether-vmlinux-x86_64
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   # Each architecture packages and launches on a native Windows runner.
   desktop-windows:
     needs: release-policy
@@ -852,7 +877,7 @@ jobs:
   # published only after the draft is downloaded back and matches the
   # signed manifest, so installers never see a release without its assets.
   release:
-    needs: [release-policy, release-binaries, desktop-windows, windows-defender, android, browser-manifest, edge-manifest, edge-qualify, standard-manifest]
+    needs: [release-policy, release-binaries, kernel, desktop-windows, windows-defender, android, browser-manifest, edge-manifest, edge-qualify, standard-manifest]
     environment: release
     permissions:
       contents: write
@@ -879,6 +904,10 @@ jobs:
           path: dist
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: binaries-kernel
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           pattern: binaries-desktop-windows-*
           merge-multiple: true
           path: dist
@@ -897,7 +926,7 @@ jobs:
           go run ./internal/edge/cmd/release-edge -tag "$GITHUB_REF_NAME" \
             -image "aether-browser=$BROWSER" -image "aether-edge=$EDGE" -image "aether-standard=$STANDARD" \
             > "$RUNNER_TEMP/images.json"
-      - name: Require all fourteen release assets, write checksums and sign the manifest
+      - name: Require all fifteen release assets, write checksums and sign the manifest
         working-directory: dist
         env:
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
@@ -912,6 +941,7 @@ jobs:
             aether-windows-amd64.exe aether-windows-arm64.exe
             aether-desktop-windows-amd64.zip aether-desktop-windows-arm64.zip
             aether-android.apk aether-android.aab
+            aether-vmlinux-x86_64
           )
           # Reject unsigned Android names, unexpected files/directories and
           # missing assets rather than globbing a partial build into a release.

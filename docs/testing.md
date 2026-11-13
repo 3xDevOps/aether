@@ -25,6 +25,8 @@ pull request sessions are in
 | The edge store or `scripts/edge-update.sh` | `make test-edge-upgrade` | root, Docker with Compose and buildx, jq, curl |
 | `images/browser/` | `make browser-image && make browser-smoke` | Docker |
 | `android/` | `make android` | Docker |
+| `internal/vmimage` | `go test ./internal/vmimage` | e2fsprogs, qemu-utils; root for the owner test |
+| `images/kernel/` | [The guest kernel](#the-guest-kernel) | Docker; a KVM host to boot it |
 | Only `docs/` or root `*.md` | `make public-audit` | sh |
 
 ## Unit tests
@@ -746,6 +748,28 @@ without the tests. Building, signing and installing are in
 `scripts/android-version-code-test.sh` and
 `scripts/android-verify-signature-test.sh`, both in `make test-scripts`,
 cover the version code and the signature check with the SDK tools stubbed.
+
+## The guest kernel
+
+`make kernel` builds `dist/aether-vmlinux-x86_64`, the kernel session VMs
+boot, from the version and checksum in `images/kernel/build.sh` and the
+options in `images/kernel/config-x86_64`. It runs in a Debian container pinned
+by digest, with packages from a dated snapshot, so two builds give the same
+SHA-256; compare them after changing either file. The build fails, naming
+the options, when a line of the config does not reach the kernel's
+`.config` because something it depends on is off.
+
+On a host with `/dev/kvm` and `cloud-hypervisor`, check that a change still
+boots an image and runs Docker in it: build a base disk with
+`internal/vmimage`, boot it with the kernel, and run `docker run` inside.
+Docker's `contrib/check-config.sh` from the moby repository, pointed at the
+config (`/proc/config.gz` in the guest), must report every
+`Generally Necessary` option enabled.
+
+`go test ./internal/vmimage` covers layer extraction and the image store
+with real `mkfs.ext4`, `debugfs` and `qemu-img`; it skips the tests whose
+tools are missing. Run it once as root too: only root can keep other owners,
+set-user-ID bits and file capabilities, as the server does.
 
 ## Windows
 
