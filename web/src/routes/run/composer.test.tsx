@@ -17,7 +17,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
 const every: GatewayCapabilities = { gateway: 'remote', methods: ['*'], ws: [] }
 const closed = { id: 'run_1', status: 'merged', reason: 'closed; retained container', finished_at: '2026-08-14T10:30:00Z', container_retained_until: '2026-08-21T10:30:00Z' } as const
 
-function mount(over: Partial<ReturnType<typeof run>>, methods = every) {
+function mount(over: Partial<ReturnType<typeof run>>, methods = every, onDropStatus?: Parameters<typeof Composer>[0]['onDropStatus']) {
   const record = toRecord(run({ ...over }))
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
@@ -30,12 +30,28 @@ function mount(over: Partial<ReturnType<typeof run>>, methods = every) {
   })
   const Live = () => {
     const current = useStore((s) => s.runs[record.id]!)
-    return <Composer run={current} agent={{} as never} room={{} as never} textarea={{ current: null } as React.RefObject<HTMLTextAreaElement | null>} onFocusChange={() => {}} onEscape={() => {}} />
+    return <Composer run={current} agent={{} as never} room={{} as never} textarea={{ current: null } as React.RefObject<HTMLTextAreaElement | null>} onFocusChange={() => {}} onEscape={() => {}} onDropStatus={onDropStatus} />
   }
   return render(<Live />)
 }
 
 beforeEach(() => vi.clearAllMocks())
+
+describe('session drop target status', () => {
+  it('reports the available attachment room to the session pane', async () => {
+    const onDropStatus = vi.fn()
+    mount({ mode: 'tui', acp: false }, every, onDropStatus)
+
+    await waitFor(() => expect(onDropStatus).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 8, upload: expect.any(Function) })))
+  })
+
+  it('blocks pane drops when file upload is unavailable', async () => {
+    const onDropStatus = vi.fn()
+    mount({ mode: 'tui', acp: false }, { gateway: 'remote', methods: ['run.get'], ws: [] }, onDropStatus)
+
+    await waitFor(() => expect(onDropStatus).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 0, blocked: 'Files cannot be attached now', upload: expect.any(Function) })))
+  })
+})
 
 describe.each([{ mode: 'tui', acp: false }, { mode: 'acp', acp: true }] as const)('finished $mode session', (kind) => {
   it('offers Relaunch inside the retention grace and returns to a live run', async () => {

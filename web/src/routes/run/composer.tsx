@@ -20,7 +20,7 @@ import { notFinishedYet } from '@/lib/status'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { AttachmentChips } from '@/routes/run/composer-attachments'
 import { AttachButton, DropOverlay, dropRoom } from '@/routes/run/composer-dropzone'
-import { hasImages, useComposerFileDrop, useComposerImages, type ComposerImageState } from '@/routes/run/composer-images'
+import { hasImages, useComposerImages, type ComposerImageState } from '@/routes/run/composer-images'
 import { ContextWindow } from '@/routes/run/context-window'
 import { usePromptHistory } from '@/routes/run/composer-history'
 import { commandSuggestions, currentChoice, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
@@ -47,6 +47,7 @@ interface ComposerProps {
   autoFocus?: boolean
   dock?: React.ReactNode
   onEscape: () => void
+  onDropStatus?: (status: { limit: number; blocked?: string; upload?: (files: File[]) => Promise<void> }) => void
 }
 
 function ComposerFrame({ children }: { children: React.ReactNode }) {
@@ -261,7 +262,7 @@ function SendActions({ pill, label, hint, description, disabled, onClick, onCanc
   )
 }
 
-function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange, onEscape }: ComposerProps) {
+function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange, onEscape, onDropStatus }: ComposerProps) {
   const self = useSelf(run.workspace_id)
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
@@ -276,8 +277,9 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
   const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.file'))
-  useComposerFileDrop(images.upload)
   const attachOff = busy || !cap.hasMethod('terminal.file')
+  const drop = dropRoom(images, Boolean(block) || attachOff)
+  useEffect(() => onDropStatus?.({ ...drop, upload: images.upload }), [drop.blocked, drop.limit, images.upload, onDropStatus])
   const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
   const hint = !control.waits
@@ -372,7 +374,7 @@ function useQueueHeld(active: boolean): boolean {
   return held
 }
 
-function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock, onEscape }: ComposerProps) {
+function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock, onEscape, onDropStatus }: ComposerProps) {
   const mobile = useIsMobile()
   const self = useSelf(run.workspace_id)
   const cap = useCapability()
@@ -413,8 +415,9 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   // A sleeping session's agent reports its prompt types once a wake starts it.
   const supportsImages = state?.prompt_images === true || Boolean(run.asleep_since)
   const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.file'))
-  useComposerFileDrop(images.upload)
   const attachOff = busy || !cap.hasMethod('terminal.file')
+  const drop = dropRoom(images, Boolean(gate) || attachOff)
+  useEffect(() => onDropStatus?.({ ...drop, upload: images.upload }), [drop.blocked, drop.limit, images.upload, onDropStatus])
   const refusedImages = !supportsImages && hasImages(images.previews)
   const hasContent = Boolean(body.trim()) || images.previews.length > 0
   const pill = moderated ? 'send' : pillFor({ paused, turnRunning, backgroundWait: waiting, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
@@ -657,6 +660,9 @@ export function Composer(props: ComposerProps) {
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const canReopen = maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run)
+  useEffect(() => {
+    if (canReopen) props.onDropStatus?.({ limit: 0, blocked: 'Files cannot be attached now' })
+  }, [canReopen, props.onDropStatus])
   if (canReopen) return <ClosedRun key={run.id} run={run} reason={composerBlock(run, maySteer, true)!} dock={dock} />
   return props.run.acp ? <EnhancedComposer key={props.run.id} {...props} /> : <StandardComposer key={props.run.id} {...props} />
 }

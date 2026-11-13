@@ -6,18 +6,6 @@ import { clipboardFiles } from '@/lib/term-clipboard'
 import { beginDraftRequest, composerDraft, saveComposerDraft, useComposerDraft, type ComposerImage } from '@/routes/run/composer-state'
 
 export const maxAttachments = 8
-export const composerFilesDropEvent = 'aether:composer-files-drop'
-
-export function useComposerFileDrop(upload: (files: File[]) => Promise<void>): void {
-  useEffect(() => {
-    const receive = (event: Event) => {
-      const files = (event as CustomEvent<File[]>).detail
-      if (Array.isArray(files)) void upload(files)
-    }
-    window.addEventListener(composerFilesDropEvent, receive)
-    return () => window.removeEventListener(composerFilesDropEvent, receive)
-  }, [upload])
-}
 
 /** Images go to the agent as images; every other file goes as a file path. */
 export function isImage(attachment: ComposerImage): boolean {
