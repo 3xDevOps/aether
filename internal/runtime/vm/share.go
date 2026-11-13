@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -46,8 +47,10 @@ func specMounts(spec runtime.Spec) []runtime.Mount {
 // planMounts reads the host once per boot. A unix socket cannot cross
 // virtio-fs, so sockets at the top of a shared directory are forwarded, and
 // a directory holding nothing but sockets is not shared at all: the helper
-// makes it on the guest's /run.
-func planMounts(mounts []runtime.Mount, nestedDocker bool, vsock string) (plan, error) {
+// makes it on the guest's /run. Only a directory only root can write is
+// trusted: Cloud Hypervisor connects by path as root, so a socket a guest
+// could replace with a symlink would reach any host socket.
+func planMounts(mounts []runtime.Mount, nestedDocker bool, vsock string, trusted func(dir string) bool) (plan, error) {
 	p := plan{links: map[string]string{}}
 	forward := func(host, target string) {
 		port := firstSocketPort + len(p.sockets)
@@ -60,11 +63,11 @@ func planMounts(mounts []runtime.Mount, nestedDocker bool, vsock string) (plan, 
 			if err != nil {
 				return plan{}, fmt.Errorf("vm runtime: mount %s at %s: %w", m.HostPath, m.ContainerPath, err)
 			}
-			if info.Mode()&fs.ModeSocket != 0 {
+			if info.Mode()&fs.ModeSocket != 0 && trusted(filepath.Dir(m.HostPath)) {
 				forward(m.HostPath, m.ContainerPath)
 				continue
 			}
-			if info.IsDir() {
+			if info.IsDir() && trusted(m.HostPath) {
 				sockets, others, err := topSockets(m.HostPath)
 				if err != nil {
 					return plan{}, err
@@ -84,6 +87,15 @@ func planMounts(mounts []runtime.Mount, nestedDocker bool, vsock string) (plan, 
 		p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeData, Source: "docker", Target: "/var/lib/docker"})
 	}
 	return p, nil
+}
+
+func rootOnly(dir string) bool {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == 0 && info.Mode().Perm()&0o022 == 0
 }
 
 func topSockets(dir string) (sockets []string, others bool, err error) {

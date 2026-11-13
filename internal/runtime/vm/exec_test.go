@@ -220,3 +220,41 @@ func TestExecAttachedEndsWithItsContextOnASilentGuest(t *testing.T) {
 		t.Fatal("execAttached outlived its context on a silent guest")
 	}
 }
+
+func TestExecResolvesNamedUsersInTheGuest(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	g := h.guest("run-a")
+	g.output = map[string]string{"/bin/sh": "70\n71\n"}
+	if _, err := h.engine.execAttached(t.Context(), "run-a", runtime.AttachedExec{Argv: []string{"psql"}, User: "postgres", Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	var user string
+	for _, p := range g.spawned() {
+		if p.Argv[len(p.Argv)-1] == "psql" {
+			user = p.User
+		}
+	}
+	if user != "70:71" {
+		t.Errorf("a sudo -u postgres command ran as %q", user)
+	}
+	g.output["/bin/sh"] = ""
+	if _, err := h.engine.execAttached(t.Context(), "run-a", runtime.AttachedExec{Argv: []string{"psql"}, User: "nobody-here", Stdout: io.Discard, Stderr: io.Discard}); err == nil || !strings.Contains(err.Error(), "unknown in the VM") {
+		t.Errorf("an unknown user = %v", err)
+	}
+}
+
+func TestRestoreKeepsTheGuestWhenTheResumeReplyIsLost(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	if err := h.engine.save(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	h.units.failResume = true
+	if err := h.engine.restore(t.Context(), "run-a"); err == nil {
+		t.Fatal("restore with a lost resume reply succeeded")
+	}
+	if h.units.vmm("run-a") == nil {
+		t.Error("a restore whose resume reply was lost killed the only copy of the guest")
+	}
+}

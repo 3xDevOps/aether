@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,6 +84,9 @@ func (e *engine) spawn(ctx context.Context, key string, spec guest.ProcessSpec) 
 	}
 	if spec.User == "" {
 		spec.User = rec.User
+	}
+	if spec.User, err = e.numericUser(ctx, h, rec, spec.User); err != nil {
+		return nil, nil, err
 	}
 	// Docker's no-new-privileges covers every process of a session without
 	// sudo, so the image's own setuid sudo cannot skip the approval shim.
@@ -209,7 +213,12 @@ func (e *engine) execAttached(ctx context.Context, key string, spec runtime.Atta
 	stop := context.AfterFunc(ctx, closeStdin)
 	defer stop()
 	if len(spec.Stdin) > 0 {
-		if _, err = att.Stdin().Write(spec.Stdin); err != nil {
+		if w, ok := att.Stdin().(runtime.ContextWriter); ok {
+			_, err = w.WriteContext(ctx, spec.Stdin)
+		} else {
+			_, err = att.Stdin().Write(spec.Stdin)
+		}
+		if err != nil {
 			closeStdin()
 			return 0, fmt.Errorf("vm runtime: exec input: %w", err)
 		}
@@ -222,6 +231,24 @@ func (e *engine) execAttached(ctx context.Context, key string, spec runtime.Atta
 		return 0, fmt.Errorf("vm runtime: exec wait: %w", err)
 	}
 	return code, nil
+}
+
+var numericUser = regexp.MustCompile(`^[0-9]+(:[0-9]+)?$`)
+
+// numericUser resolves a user name, as docker exec accepts one, to the
+// uid:gid the helper takes, from the guest's own user database.
+func (e *engine) numericUser(ctx context.Context, h helper, rec *record, user string) (string, error) {
+	if user == "" || numericUser.MatchString(user) {
+		return user, nil
+	}
+	name, group, _ := strings.Cut(user, ":")
+	script := `id -u -- "$1" && if [ -n "$2" ]; then getent group -- "$2" | cut -d: -f3; else id -g -- "$1"; fi`
+	code, out, err := e.runAsRoot(ctx, h, rec, []string{"/bin/sh", "-c", script, "aether-user", name, group})
+	ids := strings.Fields(out)
+	if err != nil || code != 0 || len(ids) != 2 || !numericUser.MatchString(ids[0]+":"+ids[1]) {
+		return "", errors.Join(err, fmt.Errorf("vm runtime: user %q is unknown in the VM: %s", user, strings.TrimSpace(out)))
+	}
+	return ids[0] + ":" + ids[1], nil
 }
 
 func (e *engine) runAsRoot(ctx context.Context, h helper, rec *record, argv []string) (int, string, error) {

@@ -293,7 +293,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 }
 
 func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
-	p, err := planMounts(rec.Mounts, rec.NestedDocker, e.path(rec.Key, vsockSocket))
+	p, err := planMounts(rec.Mounts, rec.NestedDocker, e.path(rec.Key, vsockSocket), rootOnly)
 	if err != nil {
 		return launch{}, err
 	}

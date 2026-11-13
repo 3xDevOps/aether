@@ -50,7 +50,8 @@ func TestPlanMountsSharesFilesAndForwardsSockets(t *testing.T) {
 		{HostPath: home, Subpath: ".claude", ContainerPath: "/root/.claude", ReadOnly: true},
 	}
 	vsock := filepath.Join(dir, vsockSocket)
-	p, err := planMounts(mounts, true, vsock)
+	trusted := func(d string) bool { return d == coord || d == signing }
+	p, err := planMounts(mounts, true, vsock, trusted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,19 +73,24 @@ func TestPlanMountsSharesFilesAndForwardsSockets(t *testing.T) {
 	if !slices.Equal(p.sockets, wantSockets) {
 		t.Errorf("sockets = %+v", p.sockets)
 	}
-	if err := linkSockets(dir, p.links); err != nil {
+	if err = linkSockets(dir, p.links); err != nil {
 		t.Fatal(err)
 	}
-	if target, err := os.Readlink(vsock + "_1026"); err != nil || target != filepath.Join(signing, "agent.sock") {
-		t.Errorf("link = %q, %v", target, err)
+	if target, linkErr := os.Readlink(vsock + "_1026"); linkErr != nil || target != filepath.Join(signing, "agent.sock") {
+		t.Errorf("link = %q, %v", target, linkErr)
 	}
-	if err := linkSockets(dir, map[string]string{}); err != nil {
+	if err = linkSockets(dir, map[string]string{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(vsock + "_1026"); !os.IsNotExist(err) {
+	if _, err = os.Lstat(vsock + "_1026"); !os.IsNotExist(err) {
 		t.Errorf("stale link kept: %v", err)
 	}
-	if _, err := planMounts([]runtime.Mount{{HostPath: filepath.Join(dir, "gone"), ContainerPath: "/x"}}, false, vsock); err == nil {
+	listen(t, filepath.Join(home, "agent.sock"))
+	untrusted, err := planMounts(mounts[:1], false, vsock, trusted)
+	if err != nil || len(untrusted.sockets) != 0 || len(untrusted.shares) != 1 {
+		t.Errorf("a socket in a directory a guest can write was forwarded: %+v, %v", untrusted, err)
+	}
+	if _, err := planMounts([]runtime.Mount{{HostPath: filepath.Join(dir, "gone"), ContainerPath: "/x"}}, false, vsock, trusted); err == nil {
 		t.Error("a missing mount source was planned")
 	}
 }

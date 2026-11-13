@@ -22,7 +22,7 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	p, err := planMounts(rec.Mounts, false, e.path(key, vsockSocket))
+	p, err := planMounts(rec.Mounts, false, e.path(key, vsockSocket), rootOnly)
 	if err != nil {
 		return err
 	}
@@ -101,8 +101,8 @@ func (e *engine) awaitStopped(ctx context.Context, key string) error {
 // its clock. Once the guest runs, its disks move past the snapshot, so the
 // snapshot is dropped durably before the guest resumes: a second restore of
 // it would pair old memory with newer disks. Cloud Hypervisor has read all
-// of it by then. With no snapshot left, a resumed guest is never killed for
-// a later error or the caller's ctx ending.
+// of it by then. With no snapshot left, the guest is never killed for a
+// later error or the caller's ctx ending.
 func (e *engine) restore(ctx context.Context, key string) (err error) {
 	unlock := e.lock(key)
 	defer unlock()
@@ -126,9 +126,9 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err = e.launch(ctx, rec, l); err != nil {
 		return err
 	}
-	resumed := false
+	committed := false
 	defer func() {
-		if err != nil && !resumed {
+		if err != nil && !committed {
 			e.kill(context.WithoutCancel(ctx), key)
 		}
 	}()
@@ -140,13 +140,15 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err = e.store(rec); err != nil {
 		return err
 	}
+	// From here the monitor holds the only copy of the guest: a failed or
+	// lost resume leaves it for the caller to resume or stop.
+	committed = true
 	if err = os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("vm runtime: remove the saved state of VM %s: %w", key, err)
 	}
 	if err = api.resume(ctx); err != nil {
 		return fmt.Errorf("vm runtime: resume restored VM %s: %w", key, err)
 	}
-	resumed = true
 	live, cancel := context.WithTimeout(context.WithoutCancel(ctx), bootTimeout)
 	defer cancel()
 	h, err := e.helper(key)

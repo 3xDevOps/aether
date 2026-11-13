@@ -65,25 +65,39 @@ func TestEnsureNATIsolatesVMs(t *testing.T) {
 	if err := e.ensureNAT(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{
-		"sysctl -q -w net.ipv4.ip_forward=1",
-		"iptables -t filter -F AETHER-VM",
-		"iptables -t filter -N AETHER-VM",
-		"iptables -t filter -A AETHER-VM -i aethervm+ -o aethervm+ -j DROP",
-		"iptables -t filter -A AETHER-VM -i aethervm+ -o docker0 -j DROP",
-		"iptables -t filter -A AETHER-VM -i aethervm+ -o br-+ -j DROP",
-		"iptables -t filter -A AETHER-VM -i aethervm+ -j ACCEPT",
+	uplinks, err := defaultRoutes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"sysctl -q -w net.ipv4.ip_forward=1", "iptables -t filter -F AETHER-VM", "iptables -t filter -N AETHER-VM"}
+	for _, uplink := range uplinks {
+		want = append(want, "iptables -t filter -A AETHER-VM -i aethervm+ -o "+uplink+" -j ACCEPT")
+	}
+	want = append(want,
+		"iptables -t filter -A AETHER-VM -i aethervm+ -j DROP",
 		"iptables -t filter -A AETHER-VM -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
 		"iptables -t filter -A AETHER-VM -o aethervm+ -j DROP",
 		"iptables -t filter -C FORWARD -j AETHER-VM",
 		"iptables -t filter -I FORWARD -j AETHER-VM",
 		"iptables -t nat -C POSTROUTING -s 10.200.0.0/16 ! -d 10.200.0.0/16 -j MASQUERADE",
-	}
+	)
 	if !slices.Equal(calls, want) {
 		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))
 	}
 	calls = nil
 	if err := e.ensureNAT(t.Context()); err != nil || calls != nil {
 		t.Errorf("second ensureNAT ran %v, %v", calls, err)
+	}
+}
+
+func TestRouteUplinksAreTheDefaultRoutes(t *testing.T) {
+	table := `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
+ens5	00000000	01001FAC	0003	0	0	100	00000000	0	0	0
+ens5	00001FAC	00000000	0001	0	0	100	00F0FFFF	0	0	0
+docker0	000011AC	00000000	0001	0	0	0	0000FFFF	0	0	0
+wg0	00000000	00000000	0001	0	0	200	00000000	0	0	0
+`
+	if got := routeUplinks(strings.NewReader(table)); !slices.Equal(got, []string{"ens5", "wg0"}) {
+		t.Errorf("uplinks = %v", got)
 	}
 }

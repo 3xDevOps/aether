@@ -118,12 +118,13 @@ func (f *fakeImages) roots() int {
 // fakeUnits starts a fake VMM per unit: it reads the launch the engine
 // wrote and serves Cloud Hypervisor's API on the API socket it names.
 type fakeUnits struct {
-	t        *testing.T
-	mu       sync.Mutex
-	active   map[string]*fakeVMM
-	started  []startCall
-	failNext bool
-	stateErr error
+	t          *testing.T
+	mu         sync.Mutex
+	active     map[string]*fakeVMM
+	started    []startCall
+	failNext   bool
+	stateErr   error
+	failResume bool
 }
 
 type startCall struct {
@@ -156,6 +157,9 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 		}
 	}
 	vmm, err := startVMM(socket, l.Args, func() { go func() { _ = u.Stop(context.Background(), name) }() })
+	if vmm != nil {
+		vmm.failResume = u.failResume
+	}
 	if err != nil {
 		return err
 	}
@@ -213,11 +217,12 @@ func (u *fakeUnits) last() startCall {
 // fakeVMM is Cloud Hypervisor's REST API with the state transitions the
 // engine relies on.
 type fakeVMM struct {
-	mu       sync.Mutex
-	state    string
-	calls    []string
-	restored bool
-	srv      *http.Server
+	mu         sync.Mutex
+	failResume bool
+	state      string
+	calls      []string
+	restored   bool
+	srv        *http.Server
 }
 
 func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
@@ -246,6 +251,9 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 			v.state = "Paused"
 		case "vm.resume":
 			v.state = "Running"
+			if v.failResume {
+				http.Error(w, "reply lost", http.StatusGatewayTimeout)
+			}
 		case "vm.snapshot":
 			var req struct {
 				Destination string `json:"destination_url"`
@@ -336,7 +344,7 @@ func (g *fakeHelper) Spawn(_ context.Context, spec guest.ProcessSpec) (process, 
 	}
 	p := newFakeProc(spec, out, 0, false)
 	g.procs[spec.ID] = p
-	if !strings.Contains(strings.Join(spec.Argv, " "), "dev-exec run") {
+	if supervisor := len(spec.Argv) > 2 && spec.Argv[1] == devexec.Command && (spec.Argv[2] == "run" || spec.Argv[2] == "run-pipe"); !supervisor {
 		p.exit(0)
 	}
 	return p, nil
