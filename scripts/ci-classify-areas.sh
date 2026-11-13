@@ -12,7 +12,8 @@
 # file the cached browser and standard image builds copy in, and .github/
 # itself, which names the keys; any other path is outside it. vm covers
 # what make test-kvm builds, boots or runs: the VM packages, the guest
-# kernel, the runtime helpers the VM engine shares with Docker, the
+# kernel, the terminal code the helper runs in the guest, the runtime
+# helpers the VM engine shares with Docker, the
 # dependencies and the VM files other packages name vm*.go or *_vm.go; any
 # other path is outside it, so the nightly run alone catches a change to
 # the job or its make targets. false only when at least one path is present and every path is in
@@ -76,7 +77,7 @@ caches() {
 
 vm() {
 	case $1 in
-	internal/runtime/vm/* | internal/guest/* | internal/vmimage/* | images/kernel/* | \
+	internal/runtime/vm/* | internal/guest/* | internal/vmimage/* | images/kernel/* | internal/acpkeeper/* | \
 		internal/runtime/session.go | internal/runtime/stream.go | internal/runtime/managed_exec.go | \
 		internal/*/vm*.go | internal/*/*_vm.go | internal/*/*_vm_test.go | go.mod | go.sum)
 		return 0

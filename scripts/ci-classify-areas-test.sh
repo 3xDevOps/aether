@@ -66,6 +66,7 @@ expect vm true internal/scheduler/vm_sessions.go
 expect vm true internal/server/vmruntime.go
 expect vm true internal/sshd/sync_vm.go
 expect vm true internal/runtime/managed_exec.go
+expect vm true internal/acpkeeper/term_linux.go
 expect vm true internal/gitengine/checkout_vm.go
 expect vm true internal/egress/proxy_vm_test.go
 expect vm true docs/testing.md go.sum

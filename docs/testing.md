@@ -945,7 +945,7 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 | `go` | `lint`, `build-and-test` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
 | `web` | `dashboard` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
 | `caches` | The full suite on a push to `main` | `go.mod`, `go.sum`, `.golangci.yml`, `.github/`, `images/`, the fonts the browser image copies from `web/public/fonts/`, the web and desktop package manifests and lockfiles, `web/.bun-version`, the Gradle files |
-| `vm` | `kvm` in the merge queue and on a push to `main` | `internal/runtime/vm/`, `internal/guest/`, `internal/vmimage/`, `images/kernel/`, the runtime helpers the VM engine shares (`session.go`, `stream.go` and `managed_exec.go` in `internal/runtime/`), files named `vm*.go` or `*_vm.go` (and their tests) anywhere under `internal/`, `go.mod`, `go.sum` |
+| `vm` | `kvm` in the merge queue and on a push to `main` | `internal/runtime/vm/`, `internal/guest/`, `internal/vmimage/`, `images/kernel/`, `internal/acpkeeper/` (the helper's terminals), the runtime helpers the VM engine shares (`session.go`, `stream.go` and `managed_exec.go` in `internal/runtime/`), files named `vm*.go` or `*_vm.go` (and their tests) anywhere under `internal/`, `go.mod`, `go.sum` |
 
 VM code outside the VM packages goes in files named for the `vm` mode, so the
 merge queue still runs `kvm` for it. A change to the `kvm` job or the make
