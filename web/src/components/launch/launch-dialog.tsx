@@ -3,7 +3,7 @@ import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } fr
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 import { useDictating } from '@/components/dictation/state'
-import type { LaunchDraft } from '@/components/launch/draft'
+import { launchDraftLinkStatusPending, type LaunchDraft } from '@/components/launch/draft'
 import { RefusalNotes, SignedOutNote } from '@/components/launch/agent-picker'
 import { AccountPicker, readiness, useAccountStatus } from '@/components/launch/account-picker'
 import { agentLabel } from '@/components/launch/modes'
@@ -46,7 +46,12 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(restored?.workspace ?? null)
   const [last] = useState(() => (window.matchMedia(mobileScreen).matches ? lastSession(useStore.getState()) : undefined))
   const activeWorkspace = useStore((s) => s.activeWorkspace)
-  const workspaceID = pickedWorkspace ?? (last?.workspace_id || activeWorkspace)
+  const workspaces = useStore((s) => s.workspaces)
+  const linkStatus = useStore((s) => s.linkStatus)
+  const suggestedWorkspace = last?.workspace_id && workspaces[last.workspace_id] ? last.workspace_id : activeWorkspace
+  const workspaceID = pickedWorkspace
+    ? workspaces[pickedWorkspace] ? pickedWorkspace : activeWorkspace
+    : suggestedWorkspace
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
@@ -54,7 +59,6 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   const self = useStore((s) => s.info?.member)
   const features = useStore((s) => s.info?.features)
   const cap = useCapability()
-  const workspaces = useStore((s) => s.workspaces)
   const allWorkspaces = useMemo(() => Object.values(workspaces).sort((a, b) => a.name.localeCompare(b.name)), [workspaces])
   const extraOptions = useMemo(() => allWorkspaces.filter((item) => item.id !== workspaceID), [allWorkspaces, workspaceID])
   const [extras, setExtras] = useState<string[]>(restored?.extras ?? [])
@@ -83,6 +87,8 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
   const childReadError = useChildSettings((s) => s.error)
+  const launchDraftError = useStore((s) => s.launchDraftError)
+  const clearLaunchDraftError = useStore((s) => s.clearLaunchDraftError)
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>(restored?.childRuns ?? '')
   const limitsOffered = cap.hasMethod('server.run_limits')
   const serverLimits = useServerRunLimits(api, limitsOffered)
@@ -122,13 +128,18 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
     let live = true
     api.accountList().then((access) => {
       if (!live) return
-      setAccounts(access.accounts)
+      setAccounts(access.accounts.some((member) => member.id === ownAccountID) || !self ? access.accounts : [self, ...access.accounts])
       setAccount((current) => current || access.accounts[0]?.id || '')
     }).catch(() => {}).finally(() => {
       if (live) setAccountsRead(true)
     })
     return () => { live = false }
-  }, [open])
+  }, [open, ownAccountID, self])
+
+  useEffect(() => {
+    if (!accountsRead || accountPicked.current || accounts.some((member) => member.id === account)) return
+    setAccount(accounts.find((member) => member.id === ownAccountID)?.id ?? accounts[0]?.id ?? '')
+  }, [account, accounts, accountsRead, ownAccountID])
 
   useEffect(() => {
     if (preset === 'done' || !savedRead.fresh || !accountsRead) return
@@ -146,7 +157,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
 
   useEffect(() => {
     const state = useStore.getState()
-    if (ended.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
+    if (launchDraftError || ended.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
     const draft: LaunchDraft = {
       version: 1, id: draftID, workspace: workspaceID, extras, account, fallback,
       permission, childRuns, limits, harness, mode, model, effort, task,
@@ -154,7 +165,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
     const failure = state.setLaunchDraft(draft)
     if (failure && !storageFailed.current) toast.error(`Draft could not be saved in this browser: ${failure}`)
     storageFailed.current = failure !== null
-  }, [identityKey, draftID, open, workspaceID, extras, account, fallback, permission, childRuns, limits, harness, mode, model, effort, task])
+  }, [identityKey, draftID, open, workspaceID, extras, account, fallback, permission, childRuns, limits, harness, mode, model, effort, task, launchDraftError, linkStatus])
 
   const collapse = () => {
     setPickedWorkspace(workspaceID)
@@ -243,6 +254,19 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
 
   const notes = (
     <>
+      {launchDraftError && (
+        <Callout
+          tone="failed"
+          role="alert"
+          title={launchDraftError === launchDraftLinkStatusPending ? 'Draft recovery is waiting for the local gateway.' : 'Your saved launch draft could not be read or saved.'}
+          actions={<Button type="button" size="sm" variant="secondary" onClick={clearLaunchDraftError}>{launchDraftError === launchDraftLinkStatusPending ? 'Continue in memory' : 'Start a new draft'}</Button>}
+        >
+          {launchDraftError}
+          {launchDraftError === launchDraftLinkStatusPending
+            ? ' The current form stays in memory until the link check finishes.'
+            : ' Start a new draft to replace the unreadable saved data.'}
+        </Callout>
+      )}
       {workspaceID && !workspace && (
         <Callout tone="failed" role="alert" title="This workspace no longer exists.">
           {phone ? 'Choose another repository; your task is kept.' : 'Pick another workspace in the sidebar; your task is kept.'}

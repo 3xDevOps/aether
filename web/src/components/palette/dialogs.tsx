@@ -21,9 +21,9 @@ export function PaletteDialogs() {
   const identity = useStore((s) => s.identityKey)
   const draft = useStore((s) => s.launchDraft)
   const collapsed = useStore((s) => s.sidebarCollapsed)
-  const [sidebar, setSidebar] = useState(() => document.getElementById('sidebar'))
-  useLayoutEffect(() => setSidebar(document.getElementById('sidebar')), [collapsed])
   const phone = useIsMobile()
+  const [sidebar, setSidebar] = useState(() => document.getElementById('sidebar'))
+  useLayoutEffect(() => setSidebar(document.getElementById('sidebar')), [collapsed, phone])
   const active = dialog === 'launch' || draft !== null
   const retained = useLingering(active)
   const launchOpen = dialog === 'launch'
