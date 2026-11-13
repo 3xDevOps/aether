@@ -25,6 +25,7 @@ type forward struct {
 	// overlay is the helper's own socket bound over Path, empty when the
 	// helper could create Path itself.
 	overlay string
+	failing bool
 }
 
 // forwardSockets listens on every configured socket and relays each
@@ -91,17 +92,19 @@ func (f *forward) bound() bool {
 }
 
 // keepBound rebinds a dropped socket on every mount table change, and
-// retries while the host's entry is missing.
+// retries while the host's entry is missing. A mount table change marks
+// mountinfo once per open file, so the file stays out of Go's poller, which
+// would take the mark first.
 func keepBound(forwards []*forward) {
-	mountinfo, err := os.Open("/proc/self/mountinfo")
+	mountinfo, err := unix.Open("/proc/self/mountinfo", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		slog.Error("guest: watch mounts", "error", err)
 		return
 	}
-	defer func() { _ = mountinfo.Close() }()
+	defer func() { _ = unix.Close(mountinfo) }()
 	timeout := -1
 	for {
-		fds := []unix.PollFd{{Fd: int32(mountinfo.Fd()), Events: unix.POLLPRI}}
+		fds := []unix.PollFd{{Fd: int32(mountinfo), Events: unix.POLLPRI}}
 		if _, err := unix.Poll(fds, timeout); err != nil && !errors.Is(err, unix.EINTR) {
 			slog.Error("guest: watch mounts", "error", err)
 			return
@@ -111,9 +114,14 @@ func keepBound(forwards []*forward) {
 			if f.bound() {
 				continue
 			}
-			if err := f.bind(); err != nil {
+			err := f.bind()
+			if err != nil {
 				timeout = int((100 * time.Millisecond).Milliseconds())
+				if !f.failing {
+					slog.Warn("guest: bind a socket again", "path", f.Path, "error", err)
+				}
 			}
+			f.failing = err != nil
 		}
 	}
 }
