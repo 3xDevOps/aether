@@ -118,7 +118,8 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	}
 	dir := e.path(key, snapshotDir)
 	l := launch{Args: []string{
-		"--api-socket", "path=" + e.path(key, apiSocket), "--restore", "source_url=file://" + dir,
+		"--api-socket", "path=" + e.path(key, apiSocket), "--event-monitor", "path=" + e.path(key, eventsFile),
+		"--restore", "source_url=file://" + dir,
 	}}
 	if err = e.ensureNAT(ctx); err != nil {
 		return err
@@ -155,7 +156,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err != nil {
 		return err
 	}
-	if _, err = e.waitHelper(live, key, h); err != nil {
+	if err = e.waitHelper(live, key, h); err != nil {
 		return err
 	}
 	if err = h.SyncClock(live, time.Now()); err != nil {

@@ -32,7 +32,7 @@ func Monitor(args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{apiSocket, vsockSocket, fsSocket} {
+	for _, name := range []string{apiSocket, vsockSocket, fsSocket, eventsFile} {
 		if err = os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("vm monitor: remove stale %s: %w", name, err)
 		}

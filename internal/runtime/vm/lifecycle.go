@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -182,7 +184,7 @@ func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, erro
 				}
 				continue
 			}
-			if code, ok := e.waitMain(ctx, key, boot, rec.BootID); ok {
+			if code, ok := e.waitMain(ctx, key, boot); ok {
 				return runtime.ExitStatus{Code: code}, nil
 			}
 		}
@@ -197,14 +199,16 @@ func (e *engine) wait(ctx context.Context, key string) (runtime.ExitStatus, erro
 // waitMain waits for Main of boot through the helper and finishes the VM;
 // false means the wait ended first and the caller looks again. The helper's
 // client retries a VM that died until its context ends, so the wait also
-// ends when the unit does.
-func (e *engine) waitMain(ctx context.Context, key string, boot int, bootID string) (int, bool) {
+// ends when the unit does, or when Cloud Hypervisor reports that the guest
+// rebooted on its own: its helper and Main are gone then.
+func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool) {
 	h, err := e.helper(key)
 	if err != nil {
 		return 0, false
 	}
 	waitCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var rebooted atomic.Bool
 	go func() {
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
@@ -213,6 +217,11 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int, bootID stri
 			case <-waitCtx.Done():
 				return
 			case <-tick.C:
+				if e.rebooted(key) {
+					rebooted.Store(true)
+					cancel()
+					return
+				}
 				if up, upErr := e.running(waitCtx, key); upErr == nil && !up {
 					cancel()
 					return
@@ -221,14 +230,7 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int, bootID stri
 		}
 	}()
 	code, err := h.Process(guest.MainID).Wait(waitCtx)
-	rebooted := false
-	if errors.Is(err, guest.ErrNotFound) {
-		pingCtx, pingCancel := context.WithTimeout(waitCtx, helperCallTimeout)
-		info, pingErr := h.Ping(pingCtx)
-		pingCancel()
-		rebooted = pingErr == nil && bootID != "" && info.BootID != bootID
-	}
-	if err != nil && !rebooted {
+	if err != nil && !rebooted.Load() {
 		return 0, false
 	}
 	unlock := e.lock(key)
@@ -240,7 +242,7 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int, bootID stri
 	if rec.Exited || rec.Boots != boot {
 		return rec.ExitCode, true
 	}
-	if rebooted {
+	if rebooted.Load() {
 		e.kill(context.WithoutCancel(ctx), key)
 		rec.Exited, rec.ExitCode = true, lostExitCode
 		return lostExitCode, e.store(rec) == nil
@@ -250,6 +252,14 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int, bootID stri
 	}
 	return code, true
 }
+
+// rebooted reads Cloud Hypervisor's event log for a guest reset.
+func (e *engine) rebooted(key string) bool {
+	data, err := os.ReadFile(e.path(key, eventsFile))
+	return err == nil && rebootEvent.Match(data)
+}
+
+var rebootEvent = regexp.MustCompile(`"event":\s*"rebooting"`)
 
 // lost records a booted VM whose unit is gone without an exit, and returns
 // -1 when the VM turns out to run again.

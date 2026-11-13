@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -298,7 +297,6 @@ type fakeHelper struct {
 	ignoreTE bool
 	clock    time.Time
 	clockErr error
-	bootID   string
 	// unresponsive makes calls fail as a guest that stopped answering does.
 	unresponsive bool
 	stats        guest.Stats
@@ -311,9 +309,7 @@ func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
 		<-ctx.Done()
 		return guest.Info{}, g.pingErr
 	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return guest.Info{BootID: cmp.Or(g.bootID, "b1"), Protocol: 1}, nil
+	return guest.Info{BootID: "b1", Protocol: 1}, nil
 }
 
 func (g *fakeHelper) Boot(_ context.Context, spec guest.BootSpec) error {

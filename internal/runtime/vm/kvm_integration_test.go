@@ -282,7 +282,7 @@ func TestKVMGuestRebootEndsTheSession(t *testing.T) {
 			t.Errorf("wait after the guest rebooted = %+v", st)
 		}
 		t.Logf("the session ended %s after the guest rebooted", time.Since(start))
-	case <-time.After(60 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("a guest that rebooted on its own still counts as running")
 	}
 	if up, _ := e.running(t.Context(), key); up {

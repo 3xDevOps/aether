@@ -38,7 +38,7 @@ const (
 	// Page reporting order 0 lets freed guest page cache back to the host;
 	// at the default order it stalls with most of it still held. Cloud
 	// Hypervisor never exits on a guest panic, so panic=-1 makes a dead
-	// helper reboot the guest, which a new boot ID gives away.
+	// helper reboot the guest, which its event log reports.
 	cmdlineBase = "root=/dev/vda ro rootfstype=ext4 init=/init console=ttyS0 quiet panic=-1 page_reporting.page_reporting_order=0"
 )
 
@@ -318,6 +318,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		"--api-socket", "path=" + e.path(rec.Key, apiSocket),
 		"--vsock", "cid=3,socket=" + e.path(rec.Key, vsockSocket),
 		"--serial", "file=" + e.path(rec.Key, consoleLog), "--console", "off",
+		"--event-monitor", "path=" + e.path(rec.Key, eventsFile),
 		"--kernel", kernel, "--cmdline", cmdline,
 		"--disk", diskArg(helperDisk, "helper") + ",readonly=on", diskArg(rec.Root, "root"), diskArg(rec.Data, "data"),
 		"--cpus", fmt.Sprintf("boot=%d", rec.CPUs),
@@ -369,15 +370,8 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	if err != nil {
 		return err
 	}
-	info, err := e.waitHelper(ctx, rec.Key, h)
-	if err != nil {
+	if err = e.waitHelper(ctx, rec.Key, h); err != nil {
 		return err
-	}
-	if info.BootID != rec.BootID {
-		rec.BootID = info.BootID
-		if err = e.store(rec); err != nil {
-			return err
-		}
 	}
 	if runtime.Unprivileged(rec.User) {
 		allow := ""
@@ -416,7 +410,7 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	return nil
 }
 
-func (e *engine) waitHelper(ctx context.Context, key string, h helper) (guest.Info, error) {
+func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 	ctx, cancel := context.WithTimeout(ctx, bootTimeout)
 	defer cancel()
 	answered := make(chan error, 1)
@@ -432,16 +426,16 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) (guest.In
 		select {
 		case err := <-answered:
 			if err != nil {
-				return info, fmt.Errorf("vm runtime: helper of VM %s did not answer: %w%s", key, err, e.logTail(key))
+				return fmt.Errorf("vm runtime: helper of VM %s did not answer: %w%s", key, err, e.logTail(key))
 			}
 			if info.BootError != "" {
-				return info, fmt.Errorf("vm runtime: VM %s failed to boot: %s", key, info.BootError)
+				return fmt.Errorf("vm runtime: VM %s failed to boot: %s", key, info.BootError)
 			}
-			return info, nil
+			return nil
 		case <-tick.C:
 			if st, err := e.units.State(ctx, unitName(key)); err == nil && !st.Active {
 				cancel()
-				return guest.Info{}, fmt.Errorf("vm runtime: VM %s stopped while booting%s", key, e.logTail(key))
+				return fmt.Errorf("vm runtime: VM %s stopped while booting%s", key, e.logTail(key))
 			}
 		}
 	}

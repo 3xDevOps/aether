@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -97,7 +98,7 @@ func TestAnOldWaitLeavesANewBootRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.guest("run-a").procs[guest.MainID].exit(9)
-	code, ok := h.engine.waitMain(t.Context(), "run-a", 1, "b1")
+	code, ok := h.engine.waitMain(t.Context(), "run-a", 1)
 	if !ok || code != 143 {
 		t.Errorf("a wait on boot 1 = %d, %v; want boot 1's exit 143", code, ok)
 	}
@@ -183,14 +184,9 @@ func TestStopKillsAVMWhoseHelperStoppedAnswering(t *testing.T) {
 func TestWaitEndsAVMWhoseGuestRebootedOnItsOwn(t *testing.T) {
 	h := newHarness(t)
 	h.createStarted("run-a", sessionSpec("run-a"))
-	if rec, _ := h.engine.load("run-a"); rec.BootID != "b1" {
-		t.Fatalf("boot ID recorded as %q", rec.BootID)
+	if err := os.WriteFile(h.engine.path("run-a", eventsFile), []byte(`{"source": "vm", "event": "rebooting"}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	g := h.guest("run-a")
-	g.mu.Lock()
-	g.bootID = "b2"
-	delete(g.procs, guest.MainID)
-	g.mu.Unlock()
 	st, err := h.engine.wait(t.Context(), "run-a")
 	if err != nil || st.Code != lostExitCode {
 		t.Errorf("wait after the guest rebooted = %+v, %v", st, err)

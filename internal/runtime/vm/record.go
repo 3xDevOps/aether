@@ -25,6 +25,7 @@ const (
 	rootDisk    = "root.img"
 	dataDisk    = "data.img"
 	consoleLog  = "console.log"
+	eventsFile  = "events.json"
 	monitorLog  = "monitor.log"
 	snapshotDir = "snapshot"
 )
@@ -63,9 +64,6 @@ type record struct {
 	// from the next.
 	Booted bool `json:"booted,omitempty"`
 	Boots  int  `json:"boots,omitempty"`
-	// BootID is the guest kernel's for the current boot; another one means
-	// the guest rebooted on its own.
-	BootID string `json:"boot_id,omitempty"`
 	// Saved means the snapshot directory holds the VM's state; the VM reads
 	// as exited until Restore.
 	Saved bool `json:"saved,omitempty"`
