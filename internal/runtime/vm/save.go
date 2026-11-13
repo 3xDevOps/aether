@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	restoreTimeout = 60 * time.Second
-	syncTimeout    = 30 * time.Second
+	restoreTimeout     = 60 * time.Second
+	syncTimeout        = 30 * time.Second
+	destroySyncTimeout = 5 * time.Second
 )
 
 // save pauses the VM, writes its memory and device state to the snapshot
