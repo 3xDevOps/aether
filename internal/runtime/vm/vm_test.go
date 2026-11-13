@@ -29,6 +29,28 @@ func TestIsSessionNeedsTheRunIDTwice(t *testing.T) {
 	}
 }
 
+func TestVMForRoutesEachKindToItsOwnVM(t *testing.T) {
+	for key, want := range map[string]string{
+		"terminal:m1":              "terminal-m1",
+		"assistant:m1":             "assistant-m1",
+		"assistant-install:m1":     "assistant-install-m1",
+		"harness-update-m1-claude": "harness-update-m1-claude",
+		"run-a":                    "",
+		"aether-agent-update-x":    "",
+	} {
+		name, opts, ok := vmFor(runtime.Spec{CreationKey: key})
+		if ok != (want != "") || name != want && ok {
+			t.Errorf("vmFor(%q) = %q, %v", key, name, ok)
+		}
+		if opts.KeepRoot != (key == "terminal:m1") {
+			t.Errorf("vmFor(%q) keeps its root disk: %v", key, opts.KeepRoot)
+		}
+		if (opts.Lifetime > 0) != strings.HasPrefix(key, "harness-update-") {
+			t.Errorf("vmFor(%q) has a lifetime of %s", key, opts.Lifetime)
+		}
+	}
+}
+
 // dockerOnly takes IDs that only Docker ever hands out.
 var dockerOnly = []string{"DictationState", "InspectBrowser"}
 
@@ -77,16 +99,18 @@ func TestEveryContainerMethodIsRouted(t *testing.T) {
 	}
 }
 
-func TestMemberKindMatchesOnlyTheseMembersTerminals(t *testing.T) {
+func TestMemberKindMatchesOnlyTheseMembersKinds(t *testing.T) {
 	members := []string{"mem-a", "01m2w6cky0mwwgxmr2sdgev2gs"}
 	for key, want := range map[string]bool{
 		"terminal:mem-a":                      true,
 		"terminal:01m2w6cky0mwwgxmr2sdgev2gs": true,
+		"assistant:mem-a":                     true,
+		"assistant-install:mem-a":             true,
+		"harness-update-mem-a-claude":         true,
 		"terminal:mem-b":                      false,
-		"terminal:mem-a-x":                    false,
+		"harness-update-mem-b-claude":         false,
 		"mem-a":                               false,
 		"run-mem-a":                           false,
-		"assistant:mem-a":                     false,
 	} {
 		if got := memberKind(key, members); got != want {
 			t.Errorf("memberKind(%q) = %v, want %v", key, got, want)
