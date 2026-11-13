@@ -130,6 +130,12 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
     let live = true
     setAccountsRead(false)
     setAccountsReadError(null)
+    if (!cap.hasMethod('account.list')) {
+      setAccounts(self ? [self] : [])
+      setAccount(self?.id ?? ownAccountID)
+      setAccountsRead(true)
+      return () => { live = false }
+    }
     api.accountList().then((access) => {
       if (!live) return
       setAccounts(access.accounts.some((member) => member.id === ownAccountID) || !self ? access.accounts : [self, ...access.accounts])
@@ -141,7 +147,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
       setAccountsRead(true)
     })
     return () => { live = false }
-  }, [open, ownAccountID, self, accountAttempt])
+  }, [open, ownAccountID, self, accountAttempt, cap])
 
   useEffect(() => {
     if (!accountsRead || accountsReadError || accounts.some((member) => member.id === account)) return
