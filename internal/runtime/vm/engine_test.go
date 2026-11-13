@@ -126,7 +126,7 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 		t.Fatalf("boots = %d", len(g.boots))
 	}
 	boot := g.boots[0]
-	if boot.SetupScript != "make deps" || !boot.NestedDocker || boot.PidsLimit != 4096 || boot.Main.ID != guest.MainID ||
+	if boot.SetupScript != "make deps" || !boot.NestedDocker || boot.PidsLimit != 4096 || boot.Main.ID != guest.MainID || boot.Main.NoNewPrivileges ||
 		boot.Main.User != "1000:1000" || boot.Main.Dir != "/srv" || boot.Main.TTY == nil || !slices.Equal(boot.Main.Argv, spec.Command) {
 		t.Errorf("boot = %+v", boot)
 	}
@@ -309,8 +309,11 @@ func TestExecRunsAsTheVMsUserWithItsEnvironment(t *testing.T) {
 			ran = p
 		}
 	}
-	if ran.User != "1000:1000" || ran.Dir != "/workspace" || !slices.Contains(ran.Env, "TOKEN=s3cret") || !slices.Contains(ran.Env, "PATH=/usr/bin:/bin") {
+	if ran.User != "1000:1000" || ran.Dir != "/workspace" || !slices.Contains(ran.Env, "TOKEN=s3cret") || !slices.Contains(ran.Env, "PATH=/usr/bin:/bin") || !ran.NoNewPrivileges {
 		t.Errorf("exec spawned %+v", ran)
+	}
+	if !g.boots[0].Main.NoNewPrivileges {
+		t.Error("Main of a session without sudo may gain privileges")
 	}
 	if code, _, _, err := h.engine.exec(t.Context(), "run-a", []string{"nope"}, ""); err != nil || code != 127 {
 		t.Errorf("exec of a missing command = %d, %v", code, err)

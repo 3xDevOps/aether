@@ -385,7 +385,7 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 			allow = "sudo"
 		}
 		home := cmp.Or(runtime.EnvValue(rec.Env, "HOME"), "/")
-		code, out, prepErr := e.runAsRoot(ctx, h, []string{"/bin/sh", "-c", runtime.UserScript, "aether-user", rec.User, home, allow})
+		code, out, prepErr := e.runAsRoot(ctx, h, rec, []string{"/bin/sh", "-c", runtime.UserScript, "aether-user", rec.User, home, allow})
 		if prepErr != nil {
 			return fmt.Errorf("vm runtime: prepare user %s: %w", rec.User, prepErr)
 		}
@@ -399,7 +399,10 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	}
 	e.setFlag(e.booting, rec.Key, true)
 	err = h.Boot(ctx, guest.BootSpec{
-		Main:        guest.ProcessSpec{ID: guest.MainID, Argv: rec.Command, Env: rec.Env, User: rec.User, Dir: rec.WorkingDir, TTY: tty},
+		Main: guest.ProcessSpec{
+			ID: guest.MainID, Argv: rec.Command, Env: rec.Env, User: rec.User, Dir: rec.WorkingDir, TTY: tty,
+			NoNewPrivileges: !rec.Sudo,
+		},
 		SetupScript: rec.SetupScript, NestedDocker: rec.NestedDocker, PidsLimit: rec.PidsLimit,
 	})
 	e.setFlag(e.booting, rec.Key, false)

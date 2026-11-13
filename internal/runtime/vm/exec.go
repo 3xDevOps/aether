@@ -84,6 +84,9 @@ func (e *engine) spawn(ctx context.Context, key string, spec guest.ProcessSpec) 
 	if spec.User == "" {
 		spec.User = rec.User
 	}
+	// Docker's no-new-privileges covers every process of a session without
+	// sudo, so the image's own setuid sudo cannot skip the approval shim.
+	spec.NoNewPrivileges = !rec.Sudo
 	spec.Env = execEnv(rec, spec.User, spec.Env)
 	if spec.Dir == "" {
 		spec.Dir = rec.WorkingDir
@@ -221,8 +224,11 @@ func (e *engine) execAttached(ctx context.Context, key string, spec runtime.Atta
 	return code, nil
 }
 
-func (e *engine) runAsRoot(ctx context.Context, h helper, argv []string) (int, string, error) {
-	p, err := h.Spawn(ctx, guest.ProcessSpec{ID: processID("prepare"), Argv: argv, User: "0:0", Env: []string{runtime.RootPath}, Dir: "/", Lossless: true})
+func (e *engine) runAsRoot(ctx context.Context, h helper, rec *record, argv []string) (int, string, error) {
+	p, err := h.Spawn(ctx, guest.ProcessSpec{
+		ID: processID("prepare"), Argv: argv, User: "0:0", Env: []string{runtime.RootPath}, Dir: "/", Lossless: true,
+		NoNewPrivileges: !rec.Sudo,
+	})
 	if err != nil {
 		return 0, "", err
 	}

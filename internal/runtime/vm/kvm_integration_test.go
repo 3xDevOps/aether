@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/vmimage"
 )
@@ -138,9 +140,10 @@ func TestKVMSessionLifecycle(t *testing.T) {
 		"cat /var/tmp/setup-log":            "setup-ran",
 		"echo x >> /opt/ro || echo refused": "refused",
 		"nproc":                             "2",
-		"cat /proc/self/cgroup":             "session",
-		"test -S /run/aether/coord3.sock && echo socket":       "socket",
-		"getent hosts example.com >/dev/null && echo resolved": "resolved",
+		"awk '/NoNewPrivs/{print \"nnp=\" $2}' /proc/self/status": "nnp=1",
+		"cat /proc/self/cgroup":                                   "session",
+		"test -S /run/aether/coord3.sock && echo socket":          "socket",
+		"getent hosts example.com >/dev/null && echo resolved":    "resolved",
 	} {
 		if out, _ := vmRun(t, e, key, script); !strings.Contains(out, want) {
 			t.Errorf("%s: %q, want %q", script, out, want)
@@ -212,4 +215,77 @@ func TestKVMSaveRestoreKeepsProcesses(t *testing.T) {
 		t.Errorf("processes or boot changed across save and restore:\n%s\nvs\n%s", before, after)
 	}
 	t.Logf("same processes and boot after restore: %s", strings.TrimSpace(after))
+}
+
+func kvmSession(t *testing.T, e *engine, key string, mounts ...runtime.Mount) {
+	t.Helper()
+	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
+		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 512 << 20, Mounts: mounts,
+	}
+	if _, err := e.create(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestKVMVMsCannotReachEachOther(t *testing.T) {
+	e := kvmEngine(t)
+	kvmSession(t, e, "run-vmtest-c")
+	kvmSession(t, e, "run-vmtest-d")
+	other, err := e.containerIP(t.Context(), "run-vmtest-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A refused connect means the packet arrived; a timeout means it was dropped.
+	out, code := vmRun(t, e, "run-vmtest-c", "timeout 3 bash -c '</dev/tcp/"+other+"/22'; echo exit=$?")
+	if !strings.Contains(out, "exit=124") {
+		t.Errorf("a VM reached another VM at %s: %q (code %d)", other, out, code)
+	}
+	if out, _ := vmRun(t, e, "run-vmtest-c", "getent hosts example.com >/dev/null && echo resolved"); !strings.Contains(out, "resolved") {
+		t.Errorf("the VM lost the internet: %q", out)
+	}
+}
+
+// TestKVMRebootNow is what TestKVMGuestRebootEndsTheSession runs inside the
+// guest, from its own binary: the guest kernel has no SysRq.
+func TestKVMRebootNow(t *testing.T) {
+	if os.Getenv("AETHER_VM_TEST_REBOOT_NOW") == "" {
+		t.Skip("runs inside a guest only")
+	}
+	t.Fatal(unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART))
+}
+
+func TestKVMGuestRebootEndsTheSession(t *testing.T) {
+	e := kvmEngine(t)
+	key := "run-vmtest-e"
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kvmSession(t, e, key, runtime.Mount{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true})
+	waited := make(chan runtime.ExitStatus, 1)
+	go func() {
+		st, _ := e.wait(context.Background(), key)
+		waited <- st
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, _, _, _ = e.exec(ctx, key, []string{"/bin/sh", "-c", "AETHER_VM_TEST_REBOOT_NOW=1 /opt/aether-vmtest -test.run '^TestKVMRebootNow$'"}, "")
+	select {
+	case st := <-waited:
+		if st.Code != lostExitCode {
+			t.Errorf("wait after the guest rebooted = %+v", st)
+		}
+		t.Logf("the session ended %s after the guest rebooted", time.Since(start))
+	case <-time.After(60 * time.Second):
+		t.Fatal("a guest that rebooted on its own still counts as running")
+	}
+	if up, _ := e.running(t.Context(), key); up {
+		t.Error("the rebooted VM still runs")
+	}
 }
