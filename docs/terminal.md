@@ -127,6 +127,10 @@ text size** (on a phone, **Fit to width** in its place), **Copy selection**, **C
 image…**. Sessions add **Captures…**. **Copy screen** copies the visible rows, which
 is how to copy on a touch screen.
 
+During agent sign-in, resize the Environment terminal by dragging its visible
+top grip or using its expand/shrink button. It stops at the height available
+to it.
+
 ### Messages and notes
 
 Talk to the agent in the **Chat** view's composer. Press **Enter** or
@@ -310,9 +314,9 @@ by UNKNOWN port 65535`:
 
 ## Sign in to agents and set up GitHub
 
-The Agents page and onboarding embed the environment terminal with the agent's
-login command typed in. Press Enter to run it. Login state lives in your home,
-so you do not save the environment. See
+The Agents page and onboarding show the login or install command above the
+terminal. Use its Run button when the main terminal is ready.
+Login state lives in your home, so you do not save the environment. See
 [environment-home.md](environment-home.md#set-up-an-agent) and
 [GitHub](environment-home.md#connect-github).
 

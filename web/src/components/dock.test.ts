@@ -36,7 +36,56 @@ describe('Dock controls', () => {
     expect(screen.getByRole('status')).toHaveProperty('textContent', 'At most 2 tabs')
   })
 
-  it('trades the drag separator for half and full heights on a touch screen', () => {
+  it('shows desktop resize affordances and sizes within the available height', () => {
+    atViewport(1440, { height: 900, pointer: 'fine' })
+    const onHeightChange = vi.fn()
+    const props = (height: number) => ({
+      tabs: [{ id: 't1', label: 't1' }],
+      activeTab: 't1',
+      onSelectTab: vi.fn(),
+      maxTabs: 1,
+      height,
+      onHeightChange,
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      children: createElement('div'),
+    })
+
+    const view = render(createElement(Dock, props(240)))
+    screen.getByRole('separator', { name: 'Resize terminal' })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Expand terminal to its available height' }),
+    )
+    expect(onHeightChange).toHaveBeenLastCalledWith(700)
+
+    view.rerender(createElement(Dock, props(700)))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Shrink terminal to half its available height' }),
+    )
+    expect(onHeightChange).toHaveBeenLastCalledWith(350)
+  })
+
+  it('keeps fill docks free of resize and collapse controls', () => {
+    atViewport(1440, { height: 900, pointer: 'fine' })
+    render(createElement(Dock, {
+      tabs: [{ id: 't1', label: 't1' }],
+      activeTab: 't1',
+      onSelectTab: vi.fn(),
+      maxTabs: 1,
+      height: 240,
+      onHeightChange: vi.fn(),
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      containment: 'fill',
+      children: createElement('div'),
+    }))
+
+    expect(screen.queryByRole('separator')).toBeNull()
+    expect(screen.queryByRole('button', { name: /available height/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collapse terminal' })).toBeNull()
+  })
+
+  it('trades the drag separator for half and maximum heights on a touch screen', () => {
     // A phone: the separator is a drag, and a finger has no drag to give it.
     atViewport(390, { height: 844, pointer: 'coarse' })
     const onHeightChange = vi.fn()
@@ -55,13 +104,13 @@ describe('Dock controls', () => {
     const view = render(createElement(Dock, props(240)))
     expect(screen.queryByRole('separator')).toBeNull()
 
-    // Half and full are measured from the room the dock has, which here is
+    // Half and maximum are measured from the room the dock has, which here is
     // the viewport less the shell's own chrome.
-    fireEvent.click(screen.getByRole('button', { name: /full screen/ }))
+    fireEvent.click(screen.getByRole('button', { name: /available height/ }))
     expect(onHeightChange).toHaveBeenLastCalledWith(644)
 
     view.rerender(createElement(Dock, props(644)))
-    fireEvent.click(screen.getByRole('button', { name: /half the screen/ }))
+    fireEvent.click(screen.getByRole('button', { name: /half its available height/ }))
     expect(onHeightChange).toHaveBeenLastCalledWith(322)
   })
 

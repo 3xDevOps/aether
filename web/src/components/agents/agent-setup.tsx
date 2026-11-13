@@ -148,7 +148,7 @@ export function AgentSetup({
         ) : (
           <p className="text-ui text-text">
             {typedInstall
-              ? 'The install command is typed into your Environment terminal below. Press Enter to run it.'
+              ? <>Run <Code>{typedInstall}</Code> in your Environment terminal below.</>
               : `Install the ${agent.executable ?? agent.name} executable into ~/.local/bin from your Environment terminal below.`}
           </p>
         )}
@@ -172,10 +172,16 @@ export function AgentSetup({
             <>
               {login && (
                 <p className="text-ui text-text">
-                  Log in once: <Code>{login.command}</Code> is typed into your environment terminal. {login.hint}
+                  Log in once by running <Code>{login.command}</Code> in your environment terminal. {login.hint}
                 </p>
               )}
-              <TerminalDock client={client} openOnMount initialLine={canInstall ? login?.command : typedInstall} />
+              <TerminalDock
+                client={client}
+                openOnMount
+                runCommand={canInstall
+                  ? login?.command ? { label: 'Run login command', command: login.command } : undefined
+                  : typedInstall ? { label: 'Run install command', command: typedInstall } : undefined}
+              />
             </>
           ) : (
             <>

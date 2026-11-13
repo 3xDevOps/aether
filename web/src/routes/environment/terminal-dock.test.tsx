@@ -803,6 +803,50 @@ describe('environment terminal dock', () => {
     expect(useStore.getState().envTerminal.collapsed).toBe(true)
   })
 
+  it('keeps a newly opened tab selected when mounted open', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock openOnMount />)
+    await waitFor(() => expect(useStore.getState().envTerminal.activeTab).toBe('main'))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.activeTab).toBe('t2'))
+  })
+
+  it('waits for replay and runs setup commands only on request', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock openOnMount runCommand={{ label: 'Run login command', command: 'claude' }} />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const run = await screen.findByRole('button', { name: 'Run login command' })
+
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
+    expect((run as HTMLButtonElement).disabled).toBe(true)
+    expect(attach.send).not.toHaveBeenCalled()
+
+    act(() => {
+      attach.handlers?.onReplayStart?.(0, true)
+    })
+    await waitFor(() => expect((run as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(run)
+    expect(attach.send).toHaveBeenCalledWith('claude\n')
+    expect(xterm.focusTerminal).toHaveBeenCalled()
+  })
+
+  it('enables setup commands after a resumed delta replay settles', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock openOnMount runCommand={{ label: 'Run login command', command: 'claude' }} />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const run = await screen.findByRole('button', { name: 'Run login command' })
+
+    act(() => attach.handlers?.onAttached(true, standardGeometry, true))
+    expect((run as HTMLButtonElement).disabled).toBe(true)
+    act(() => attach.handlers?.onReplayStart?.(0, false))
+
+    await waitFor(() => expect((run as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(run)
+    expect(attach.send).toHaveBeenCalledWith('claude\n')
+  })
+
   it('opens the dock when a collapsed strip is asked for a tab', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     useStore.setState({ envTerminal: initialEnvTerminal })
