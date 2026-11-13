@@ -426,16 +426,17 @@ func (t *processes) reap() {
 	}
 }
 
-// retire lists p as exited and, past maxExited, forgets the oldest exited
-// processes no caller still reads, or past maxKept the oldest of all. The
-// main process is never forgotten.
+// retire lists p as exited and keeps the newest maxExited exited processes.
+// Of the older ones it forgets those no caller still reads, oldest first,
+// or past maxKept the oldest of all. The main process is never forgotten.
 func (t *processes) retire(p *process) {
 	if p.id == guest.MainID {
 		return
 	}
 	t.exited = append(t.exited, p.id)
 	for len(t.exited) > maxExited {
-		i := slices.IndexFunc(t.exited, func(id string) bool { return t.byID[id] == nil || t.byID[id].settled() })
+		older := t.exited[:len(t.exited)-maxExited]
+		i := slices.IndexFunc(older, func(id string) bool { return t.byID[id] == nil || t.byID[id].settled() })
 		if i < 0 {
 			if len(t.exited) <= maxKept {
 				return

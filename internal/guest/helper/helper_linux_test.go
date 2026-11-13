@@ -502,19 +502,22 @@ func TestRecordsStayUntilTheirCallersAreDone(t *testing.T) {
 	ctx := testContext(t)
 	unread := spawn(t, client, guest.ProcessSpec{ID: "unread", Argv: []string{"sh", "-c", "echo late output"}, Lossless: true})
 	unwaited := spawn(t, client, guest.ProcessSpec{ID: "unwaited", Argv: []string{"sh", "-c", "exit 7"}, Lossless: true})
-	// Watch the table, not Status: a Status that sees the exit reports it.
-	for _, id := range []string{unread.ID(), unwaited.ID()} {
-		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-			p, err := testProcs.get(id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if p.exited() {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%s did not exit", id)
-			}
+	// The unread one's exit is reported, its output left unread; the
+	// unwaited one's exit is watched in the table, since a Status that sees
+	// an exit reports it.
+	if code, err := unread.Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		p, err := testProcs.get(unwaited.ID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.exited() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the unwaited process did not exit")
 		}
 	}
 	a := unwaited.Attach(true)
@@ -541,5 +544,28 @@ func TestRecordsStayUntilTheirCallersAreDone(t *testing.T) {
 	testProcs.mu.Unlock()
 	if kept > maxKept {
 		t.Errorf("%d exited records kept, over %d", kept, maxKept)
+	}
+}
+
+func TestNewestRecordsStayWhileOlderOnesAreUnread(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	for i := range maxExited + 1 {
+		p := spawn(t, client, guest.ProcessSpec{ID: fmt.Sprintf("unread-%d", i), Argv: []string{"sh", "-c", "echo unread"}, Lossless: true})
+		if _, err := p.Wait(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recent := spawn(t, client, guest.ProcessSpec{ID: "recent", Argv: []string{"sh", "-c", "exit 5"}})
+	if code, err := recent.Wait(ctx); err != nil || code != 5 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+	next := spawn(t, client, guest.ProcessSpec{ID: "next", Argv: []string{"true"}})
+	if _, err := next.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A Wait retried after a lost reply still finds the recent exit.
+	if code, err := recent.Wait(ctx); err != nil || code != 5 {
+		t.Fatalf("a retried wait on one of the newest records = %d, %v", code, err)
 	}
 }
