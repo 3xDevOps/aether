@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -18,8 +19,16 @@ import (
 // dictationPort is the vsock port the helper serves the engine's socket on.
 const dictationPort = 2000
 
-// dictationPids matches the Docker engine container's process limit.
-const dictationPids = 256
+const (
+	// dictationPids matches the Docker engine container's process limit.
+	dictationPids = 256
+	// dictationGuest is what the guest kernel and helper take, on top of
+	// the engine's own memory cap.
+	dictationGuest = 256 << 20
+	// dictationStart bounds pulling the engine's image, building its disk
+	// and booting its VM.
+	dictationStart = 10 * time.Minute
+)
 
 func dictationVM(owner string) string { return "dictation-" + owner }
 
@@ -38,6 +47,10 @@ func (r *Runtime) StartDictation(ctx context.Context, spec runtime.DictationSpec
 	if err = r.RemoveDictation(ctx, spec.Owner); err != nil {
 		return "", err
 	}
+	// A clip that gives up while the first start pulls the image or boots
+	// leaves the engine starting for the next, as a container's start does.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dictationStart)
+	defer cancel()
 	var hostDir, guestDir string
 	for host, vm := range spec.Writable {
 		hostDir, guestDir = host, vm
@@ -49,7 +62,7 @@ func (r *Runtime) StartDictation(ctx context.Context, spec runtime.DictationSpec
 	key := dictationVM(spec.Owner)
 	vmSpec := runtime.Spec{
 		Image: spec.Image, Command: spec.Entrypoint, User: spec.User, Mounts: mounts,
-		CPULimit: spec.CPUs, MemoryLimitBytes: spec.MemoryBytes, PidsLimit: dictationPids,
+		CPULimit: spec.CPUs, MemoryLimitBytes: spec.MemoryBytes + dictationGuest, PidsLimit: dictationPids,
 	}
 	opts := options{
 		Offline: true, OwnedDirs: []string{guestDir},

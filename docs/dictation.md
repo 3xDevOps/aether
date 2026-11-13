@@ -110,8 +110,8 @@ adds every GPU to it.
 With `session-runtime vm` ([Sessions in virtual
 machines](environments.md#sessions-in-virtual-machines)), the engine runs in
 a VM with no network device instead, in the systemd unit
-`aether-vm-dictation-<owner>.service`, with the same user, mounts, memory cap
-and process limit. Its socket stays inside the VM, on a directory its user
+`aether-vm-dictation-<owner>.service`, with the same user, mounts and process
+limit, and the memory cap plus 256 MiB for the guest kernel and helper. Its socket stays inside the VM, on a directory its user
 owns; the server listens on `<data-dir>/dictation/sock/engine.sock` itself
 once the engine accepts, and relays each connection through the VM's helper.
 `aether-server dictation install` then pulls nothing into Docker: the first
