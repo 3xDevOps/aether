@@ -279,6 +279,13 @@ func TestSpawnFailures(t *testing.T) {
 	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/dir", User: self, Argv: []string{"/"}}); !errors.As(err, &startErr) || startErr.Code != 126 {
 		t.Fatalf("a directory: %v", err)
 	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "noexec"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/noexec", User: self, Argv: []string{"noexec"}, Env: []string{"PATH=" + bin}}); !errors.As(err, &startErr) || startErr.Code != 126 {
+		t.Fatalf("a program on PATH that cannot run: %v", err)
+	}
 	p := spawn(t, client, guest.ProcessSpec{ID: "once", Argv: []string{"true"}})
 	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: p.ID(), User: self, Argv: []string{"true"}}); err == nil {
 		t.Fatal("an ID must not start a second process")

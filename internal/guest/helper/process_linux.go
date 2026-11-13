@@ -302,14 +302,24 @@ func lookPath(name, path, dir string) (string, error) {
 		}
 		return name, executable(name)
 	}
+	// A match that cannot run is the answer when nothing later on PATH can.
+	var denied error
 	for _, d := range filepath.SplitList(path) {
 		candidate := filepath.Join(cmp.Or(d, "."), name)
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(dir, candidate)
 		}
-		if err := executable(candidate); err == nil {
+		err := executable(candidate)
+		if err == nil {
 			return candidate, nil
 		}
+		var failed *execError
+		if denied == nil && errors.As(err, &failed) && failed.code == 126 {
+			denied = err
+		}
+	}
+	if denied != nil {
+		return "", denied
 	}
 	return "", &execError{code: 127, err: fmt.Errorf("%s: executable file not found in $PATH", name)}
 }
@@ -416,16 +426,25 @@ func (p *process) exited() bool {
 func (p *process) write(ctx context.Context, b []byte) (int, error) {
 	p.stdinMu.Lock()
 	defer p.stdinMu.Unlock()
-	if p.stdin == nil {
+	stdin := p.stdin
+	if stdin == nil {
 		return 0, errNoInput
 	}
 	deadline, _ := ctx.Deadline()
-	if err := p.stdin.SetWriteDeadline(deadline); err != nil {
+	if err := stdin.SetWriteDeadline(deadline); err != nil {
 		return 0, err
 	}
-	stop := context.AfterFunc(ctx, func() { _ = p.stdin.SetWriteDeadline(time.Now()) })
-	defer stop()
-	n, err := p.stdin.Write(b)
+	// A cancellation that already started must end before the next write
+	// sets its own deadline.
+	cancelled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = stdin.SetWriteDeadline(time.Now())
+		close(cancelled)
+	})
+	n, err := stdin.Write(b)
+	if !stop() {
+		<-cancelled
+	}
 	if err != nil && ctx.Err() != nil {
 		err = ctx.Err()
 	}
