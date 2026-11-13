@@ -344,7 +344,7 @@ describe('saved launch draft', () => {
     vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
     await userEvent.click(within(alert).getByRole('button', { name: 'Retry account read' }))
     await waitFor(() => expect(launchButton().disabled).toBe(false))
-    fireEvent.click(launchButton())
+    await userEvent.click(launchButton())
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ task: 'keep account and task' })))
     expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
   })
