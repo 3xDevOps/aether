@@ -126,6 +126,14 @@ may take several. Items in a wave run in parallel.
 | 12 | 3 | Dashboard, CLI and docs wording | `web/`, `cmd/aether`, `docs/` |
 | 13 | 3 | Security review, cutover, removal of Docker and Sysbox | everything Docker-specific |
 
+The pull requests form one stack, each based on the one before it, and
+merge bottom-up: this plan, then item 4, item 3, item 2, then the wave 2
+and wave 3 items in the order their dependencies need. Each pull request
+passes the merge gate on its own diff: an adversarial review by a separate
+session, every real Greptile finding fixed and the rest answered, and a
+green `CI gate`. Dashboard changes reuse the existing surfaces and change
+wording before they add anything.
+
 Items 2, 3 and 4 meet at two Go interfaces. Item 3 owns the helper API
 definition and its client; item 4 owns the image store (base disk for an
 image, new root disk for a session, kernel path). Item 2 builds on both.
