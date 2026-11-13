@@ -18,7 +18,9 @@ import (
 
 const localImageRepo = "aether/"
 
-func localOnlyImage(ref string) bool {
+// LocalOnlyImage reports whether ref names an image Aether built on this
+// host, which no registry has.
+func LocalOnlyImage(ref string) bool {
 	return strings.HasPrefix(ref, localImageRepo)
 }
 
@@ -87,6 +89,15 @@ func (d *Docker) TagImage(ctx context.Context, source, target string) error {
 		return fmt.Errorf("runtime: tag image %s as %s: %w", source, target, err)
 	}
 	return nil
+}
+
+// SaveImage streams `docker save` of a local image.
+func (d *Docker) SaveImage(ctx context.Context, ref string) (io.ReadCloser, error) {
+	rc, err := d.cli.ImageSave(ctx, []string{ref})
+	if err != nil {
+		return nil, fmt.Errorf("runtime: save image %s: %w", ref, err)
+	}
+	return rc, nil
 }
 
 // ImageLabels returns the labels of a local image; a missing image is

@@ -21,8 +21,8 @@ func TestLocalOnlyImage(t *testing.T) {
 		{"", false},
 	}
 	for _, tt := range tests {
-		if got := localOnlyImage(tt.ref); got != tt.want {
-			t.Errorf("localOnlyImage(%q) = %v, want %v", tt.ref, got, tt.want)
+		if got := LocalOnlyImage(tt.ref); got != tt.want {
+			t.Errorf("LocalOnlyImage(%q) = %v, want %v", tt.ref, got, tt.want)
 		}
 	}
 }

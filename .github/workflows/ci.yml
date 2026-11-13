@@ -214,10 +214,19 @@ jobs:
       - uses: ./.github/actions/bun-cache
         with:
           mode: restore
+      # internal/vmimage's store tests make qcow2 disks.
+      - name: Install qemu-img
+        run: command -v qemu-img || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends qemu-utils; }
       - name: Unit tests
         env:
           TEST_RACE: ${{ github.event_name != 'pull_request' && '-race' || '' }}
         run: make test
+      # Only root keeps other owners, set-user-ID bits and file capabilities
+      # when it extracts an image, as the server does.
+      - name: Image store tests as root
+        run: |
+          go test -c -o "$RUNNER_TEMP/vmimage.test" ./internal/vmimage
+          sudo env "PATH=$PATH" "$RUNNER_TEMP/vmimage.test" -test.run '^Test(Extract|Store)' -test.count=1 -test.v
       - name: Build binaries
         run: make build
       # Own the Linux amd64 module and native compiler archives, plus bun.

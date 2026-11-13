@@ -99,6 +99,14 @@ WIN_MAJOR   = $(word 1,$(subst ., ,$(WIN_VERSION)))
 WIN_MINOR   = $(word 2,$(subst ., ,$(WIN_VERSION)))
 WIN_PATCH   = $(word 3,$(subst ., ,$(WIN_VERSION)))
 
+# The guest kernel session VMs boot (images/kernel). It builds in a Debian
+# pinned by digest whose packages come from a dated snapshot, so a rebuild
+# gives the same bytes. The kernel source tarball is cached outside the tree.
+KERNEL_IMAGE    := debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+KERNEL_SNAPSHOT := 20261110T000000Z
+KERNEL_CACHE    ?= $(HOME)/.cache/aether/kernel
+KERNEL_PACKAGES := bc bison ca-certificates curl flex gcc libc6-dev libelf-dev make xz-utils
+
 # The Android shell. No runner has an Android SDK and none should install one,
 # so the APK is built in a container pinned by digest - the same one a
 # contributor builds in. Gradle's dependency cache lives outside the tree and
@@ -178,7 +186,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
+.PHONY: all build chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug kernel release release-binaries deploy clean
 
 all: build
 
@@ -351,6 +359,21 @@ android-debug: android-cli
 	$(ANDROID_RUN) $(ANDROID_IMAGE) ./gradlew --console=plain assembleDebug
 	cp android/app/build/outputs/apk/debug/app-debug.apk $(DIST)/aether-android-debug.apk
 	@echo 'built $(DIST)/aether-android-debug.apk; install it with: adb install -r $(DIST)/aether-android-debug.apk'
+
+# apt runs as root in the container; the outputs are handed back to the
+# invoking user.
+kernel:
+	@mkdir -p $(DIST) '$(KERNEL_CACHE)'
+	docker run --rm \
+		-v '$(CURDIR)/images/kernel':/src:ro -v '$(CURDIR)/$(DIST)':/out -v '$(KERNEL_CACHE)':/cache \
+		-e KERNEL_CACHE=/cache $(KERNEL_IMAGE) sh -euc '\
+		printf "Types: deb\nURIs: http://snapshot.debian.org/archive/debian/$(KERNEL_SNAPSHOT)\nSuites: trixie\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\nCheck-Valid-Until: no\n" \
+			> /etc/apt/sources.list.d/debian.sources; \
+		apt-get update -qq; \
+		DEBIAN_FRONTEND=noninteractive apt-get install -qq --no-install-recommends $(KERNEL_PACKAGES) >/dev/null; \
+		sh /src/build.sh /out/aether-vmlinux-x86_64; \
+		chown $(shell id -u):$(shell id -g) /out/aether-vmlinux-x86_64 /cache/*'
+	@echo 'built $(DIST)/aether-vmlinux-x86_64'
 
 android-cli:
 	@[ 'go$(ANDROID_GO_VERSION)' = '$(GO_TOOLCHAIN)' ] || { \

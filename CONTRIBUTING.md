@@ -481,16 +481,17 @@ Push tags one at a time: GitHub starts no workflow when more than three are
 pushed at once. Do not create the GitHub release yourself.
 `.github/workflows/release.yml` runs only when the tag's pusher is a
 repository admin and `AETHER_RELEASE_SIGNING_KEY` is set. It builds every
-binary, the Windows desktop zips, the signed Android app and the browser,
-edge and standard images from the tag's commit, runs the edge upgrade
-qualification and a Defender scan, and uploads the assets to a draft. After
+binary, the Windows desktop zips, the signed Android app, the guest kernel
+for session VMs and the browser, edge and standard images from the tag's
+commit, runs the edge upgrade qualification and a Defender scan, and uploads
+the assets to a draft. After
 checking them against the signed manifest it publishes a normal release,
 never a GitHub prerelease, because the installers and update checks read
 `/releases/latest`, which skips prereleases. The highest published version
 becomes Latest.
 
-Besides the binaries, the Windows desktop zips and the Android APK and AAB,
-a release carries `checksums.txt` and a manifest signed with Ed25519
+Besides the binaries, the guest kernel (`aether-vmlinux-x86_64`), the
+Windows desktop zips and the Android APK and AAB, a release carries `checksums.txt` and a manifest signed with Ed25519
 (`aether-release.json` and `.sig`) that both update commands verify, and the
 installer too when OpenSSL 3 is present. Images carry Sigstore build
 attestations. Windows and macOS binaries are not code-signed.

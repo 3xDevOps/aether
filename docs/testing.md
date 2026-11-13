@@ -25,6 +25,8 @@ pull request sessions are in
 | The edge store or `scripts/edge-update.sh` | `make test-edge-upgrade` | root, Docker with Compose and buildx, jq, curl |
 | `images/browser/` | `make browser-image && make browser-smoke` | Docker |
 | `android/` | `make android` | Docker |
+| `internal/vmimage` | `go test ./internal/vmimage` | e2fsprogs, qemu-utils; root for the owner test |
+| `images/kernel/` | [The guest kernel](#the-guest-kernel) | Docker; a KVM host to boot it |
 | Only `docs/` or root `*.md` | `make public-audit` | sh |
 
 ## Unit tests
@@ -746,6 +748,40 @@ without the tests. Building, signing and installing are in
 `scripts/android-version-code-test.sh` and
 `scripts/android-verify-signature-test.sh`, both in `make test-scripts`,
 cover the version code and the signature check with the SDK tools stubbed.
+
+## The guest kernel
+
+`make kernel` builds `dist/aether-vmlinux-x86_64`, the kernel session VMs
+boot, from the version and checksum in `images/kernel/build.sh` and the
+options in `images/kernel/config-x86_64`. It runs in a Debian container pinned
+by digest, with packages from a dated snapshot, so two builds give the same
+SHA-256; compare them after changing either file. The build fails, naming
+the options, when a line of the config does not reach the kernel's
+`.config` because something it depends on is off.
+
+On a host with `/dev/kvm`, `cloud-hypervisor` and `qemu-img`, check that a
+change still boots an image and runs Docker in it. `TestKVMStandardImageRunsDocker`
+builds the image's disks with `internal/vmimage`, boots them with the kernel,
+starts dockerd, runs a container and a `-p` port mapping, and refuses to save
+the root disk while the VM runs. The static test binary is the VM's `/init`,
+so build it without cgo; it needs root:
+
+```sh
+CGO_ENABLED=0 go test -c -tags kvm -o vmimage-kvm.test ./internal/vmimage
+sudo AETHER_TEST_KERNEL=dist/aether-vmlinux-x86_64 \
+  AETHER_TEST_IMAGE=ghcr.io/3xdevops/aether-standard:<release> \
+  ./vmimage-kvm.test -test.run TestKVM -test.v
+```
+
+Docker's `contrib/check-config.sh` from the moby repository, pointed at the
+config (`/proc/config.gz` in the guest), must report every
+`Generally Necessary` option enabled.
+
+`go test ./internal/vmimage` covers layer extraction and the image store
+with real `mkfs.ext4`, `debugfs` and `qemu-img`; it skips the tests whose
+tools are missing. Run it once as root too, as CI's `build-and-test` does:
+only root can keep other owners, set-user-ID bits and file capabilities, as
+the server does.
 
 ## Windows
 
