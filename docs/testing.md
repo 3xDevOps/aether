@@ -794,7 +794,8 @@ in a VM does (switching root, mounts, the network, socket forwarding, the
 process limit, an out-of-memory kill) needs a KVM host. `TestKVMHelper` boots
 an image from `internal/vmimage` disks with the test binary as the helper and
 drives it through the client; it also needs `virtiofsd` at
-`/usr/libexec/virtiofsd` and root:
+`/usr/libexec/virtiofsd` and root. Run it alone: the unit tests' reaper
+collects every child of the test binary, including the VM monitor's.
 
 ```sh
 CGO_ENABLED=0 go test -c -tags kvm -o helper-kvm.test ./internal/guest/helper

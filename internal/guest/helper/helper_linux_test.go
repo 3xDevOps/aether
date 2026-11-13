@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -20,8 +21,13 @@ import (
 )
 
 // testProcs is the one table of the test binary: its reaper collects every
-// child, so two tables would steal each other's exits.
-var testProcs = newProcesses(nil)
+// child, so two tables would steal each other's exits. The reaper starts
+// with the first helper a test serves, so TestKVMHelper, run alone, keeps
+// os/exec's own waits for the VM monitor and the disk tools.
+var (
+	testProcs   = newProcesses(nil)
+	startReaper sync.Once
+)
 
 func TestMain(m *testing.M) {
 	// A process spawned with NoNewPrivileges starts as this binary.
@@ -34,7 +40,6 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	go reapForever(testProcs)
 	os.Exit(m.Run())
 }
 
@@ -71,6 +76,7 @@ func (l hybridVsock) Accept() (net.Conn, error) {
 // and a client of it.
 func startHelper(t *testing.T) (string, *guest.Client) {
 	t.Helper()
+	startReaper.Do(func() { go reapForever(testProcs) })
 	socket := filepath.Join(t.TempDir(), "vsock.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -270,6 +276,18 @@ func TestWorkingDirectory(t *testing.T) {
 	_, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/nodir", User: self, Argv: []string{"true"}, Env: []string{"PATH=" + os.Getenv("PATH")}, Dir: filepath.Join(dir, "missing")})
 	if !errors.As(err, &startErr) || startErr.Code != 126 || !strings.Contains(err.Error(), "working directory") {
 		t.Fatalf("a missing working directory: %v", err)
+	}
+}
+
+// A given gid replaces the passwd entry's groups, supplementary ones too,
+// as runc does: an explicit identity must not reach group-protected files.
+func TestCredentialGroups(t *testing.T) {
+	cred, _, err := credential("0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cred == nil || len(cred.Groups) != 0 {
+		t.Fatalf("an explicit uid:gid got supplementary groups: %+v", cred)
 	}
 }
 

@@ -279,10 +279,11 @@ func checkSpec(spec guest.ProcessSpec) error {
 	return nil
 }
 
-// credential resolves "uid:gid", "uid" or "" (root) the way Docker does:
-// supplementary groups and the home come from the uid's passwd entry, when
-// it has one. A helper that is not root, as in tests, runs a process as
-// itself without changing its credentials.
+// credential resolves "uid:gid", "uid" or "" (root) the way runc does: the
+// home comes from the uid's passwd entry, when it has one, and so do the
+// primary and supplementary groups unless the gid is given. A helper that
+// is not root, as in tests, runs a process as itself without changing its
+// credentials.
 func credential(spec string) (*syscall.Credential, string, error) {
 	uidText, gidText, hasGID := strings.Cut(cmp.Or(spec, "0"), ":")
 	uid, err := strconv.ParseUint(uidText, 10, 32)
@@ -295,7 +296,7 @@ func credential(spec string) (*syscall.Credential, string, error) {
 		gid, _ = strconv.ParseUint(u.Gid, 10, 32)
 		ids, _ := u.GroupIds()
 		for _, id := range ids {
-			if g, parseErr := strconv.ParseUint(id, 10, 32); parseErr == nil {
+			if g, parseErr := strconv.ParseUint(id, 10, 32); parseErr == nil && !hasGID {
 				groups = append(groups, uint32(g))
 			}
 		}
