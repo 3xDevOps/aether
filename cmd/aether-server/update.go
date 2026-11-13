@@ -86,7 +86,7 @@ func updateCmd(args []string) error {
 	// The trial runs in the process the unit starts, which reads the swap
 	// record under its own data directory and runs its own binary, so the
 	// update takes both from the unit.
-	unitExe, o, err := unitServe()
+	unitExe, serveArgs, o, err := unitServe()
 	if err != nil {
 		return err
 	}
@@ -105,12 +105,14 @@ func updateCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	vmKernel := ""
+	// The binary at self installs its session VM files with the unit's
+	// serve arguments, so it reads the same config file and vm-kernel.
+	var prepareVMs func(context.Context) error
 	if *o.sessionRuntime == server.SessionRuntimeVM {
-		vmKernel = *o.vmKernel
+		prepareVMs = func(ctx context.Context) error { return installVMFiles(ctx, self, serveArgs) }
 	}
 	if target == version.Version {
-		return restartIfStale(self, *o.addr, database, vmKernel)
+		return restartIfStale(self, *o.addr, database, prepareVMs)
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
 
@@ -137,18 +139,18 @@ func updateCmd(args []string) error {
 	// After an undo the previous binary is back, and may still be running:
 	// it puts back its own files, which the failed step may have replaced.
 	restoreVMFiles := func(err error) error {
-		if vmKernel == "" {
+		if prepareVMs == nil {
 			return err
 		}
 		restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		return errors.Join(err, installVMFiles(restoreCtx, self, vmKernel))
+		return errors.Join(err, prepareVMs(restoreCtx))
 	}
-	if vmKernel != "" {
+	if prepareVMs != nil {
 		// Interrupted, the step returns here so the update is undone rather
 		// than left staged.
 		vmCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-		err := installVMFiles(vmCtx, self, vmKernel)
+		err := prepareVMs(vmCtx)
 		stop()
 		if err != nil {
 			return restoreVMFiles(errors.Join(err, staged.Undo()))
@@ -164,9 +166,9 @@ func updateCmd(args []string) error {
 // installVMFiles has the binary at self install the Cloud Hypervisor and
 // guest kernel it was released with, before a restart onto it, so the VMs
 // it boots get them. A running VM keeps the files it started with.
-func installVMFiles(ctx context.Context, self, kernel string) error {
+func installVMFiles(ctx context.Context, self string, serveArgs []string) error {
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, self, "vm", "install", "--vm-kernel", kernel)
+	cmd := exec.CommandContext(ctx, self, append([]string{"vm", "install"}, serveArgs...)...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s vm install: %w: %s", self, err, strings.TrimSpace(stderr.String()))
@@ -299,10 +301,10 @@ func unitProperty(name string) string {
 
 func unitPID() string { return unitProperty("MainPID") }
 
-// unitServe is the executable and serve options the unit's ExecStart runs.
-// systemctl prints ExecStart as `{ path=<exe> ; argv[]=<args> ; ... }`
-// with the arguments joined by spaces.
-func unitServe() (string, *serveOptions, error) {
+// unitServe is the executable, serve arguments and serve options the
+// unit's ExecStart runs. systemctl prints ExecStart as
+// `{ path=<exe> ; argv[]=<args> ; ... }` with the arguments joined by spaces.
+func unitServe() (string, []string, *serveOptions, error) {
 	line := unitProperty("ExecStart")
 	_, path, _ := strings.Cut(line, "path=")
 	path, _, _ = strings.Cut(path, " ;")
@@ -310,25 +312,25 @@ func unitServe() (string, *serveOptions, error) {
 	argv, _, _ = strings.Cut(argv, " ;")
 	args := strings.Fields(argv)
 	if path == "" || len(args) < 2 || args[1] != "serve" {
-		return "", nil, fmt.Errorf("the %s unit's ExecStart does not run `aether-server serve`: %q", updateUnit, line)
+		return "", nil, nil, fmt.Errorf("the %s unit's ExecStart does not run `aether-server serve`: %q", updateUnit, line)
 	}
 	o, _, rest, err := loadOptions("serve", args[2:], nil)
 	if err != nil {
-		return "", nil, fmt.Errorf("read the %s unit's serve options %q: %w", updateUnit, argv, err)
+		return "", nil, nil, fmt.Errorf("read the %s unit's serve options %q: %w", updateUnit, argv, err)
 	}
 	if len(rest) != 0 {
-		return "", nil, fmt.Errorf("the %s unit's ExecStart has arguments serve does not take: %q", updateUnit, argv)
+		return "", nil, nil, fmt.Errorf("the %s unit's ExecStart has arguments serve does not take: %q", updateUnit, argv)
 	}
-	return path, o, nil
+	return path, args[2:], o, nil
 }
 
 // restartIfStale restarts the unit when it still runs an earlier file than
 // the binary installed at self, as after `aether update` replaced it, and
-// starts it when it runs nothing. With vmKernel set, that binary installs
-// its session VM files first. The unit is Type=simple, so a new PID only
-// means the process started; it serves once it accepts connections on
-// addr, within 2 minutes of migrating database.
-func restartIfStale(self, addr, database, vmKernel string) error {
+// starts it when it runs nothing; prepareVMs, when set, runs first. The
+// unit is Type=simple, so a new PID only means the process started; it
+// serves once it accepts connections on addr, within 2 minutes of migrating
+// database.
+func restartIfStale(self, addr, database string, prepareVMs func(context.Context) error) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("--addr %q: %w", addr, err)
@@ -354,9 +356,9 @@ func restartIfStale(self, addr, database, vmKernel string) error {
 		}
 		verb = "restart"
 	}
-	if vmKernel != "" {
+	if prepareVMs != nil {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		err = installVMFiles(ctx, self, vmKernel)
+		err = prepareVMs(ctx)
 		stop()
 		if err != nil {
 			return err
