@@ -209,6 +209,11 @@ func (s *Scheduler) touchCache(member domain.MemberID, pool string) {
 	}
 }
 
+// vmImageSweeper is a runtime that keeps the disks VMs boot from.
+type vmImageSweeper interface {
+	SweepImages() error
+}
+
 // sweepCaches is shared by startup, the existing hourly maintenance and one
 // pressure retry. It never waits for a busy owner, kills idle work or prunes
 // unrelated runtime resources. Lock order is terminal -> cache -> short mu.
@@ -217,6 +222,11 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 		return
 	}
 	s.sweepUnusedImages(ctx)
+	if vms, ok := s.cfg.Runtime.(vmImageSweeper); ok {
+		if err := vms.SweepImages(); err != nil {
+			slog.Warn("scheduler: delete unused VM disks", "error", err)
+		}
+	}
 	owners, err := s.cacheOwnershipSnapshot(ctx)
 	if err != nil {
 		slog.Warn("scheduler: cache cleanup ownership unavailable", "error", err)

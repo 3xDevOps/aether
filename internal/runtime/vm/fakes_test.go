@@ -126,6 +126,8 @@ func (f *fakeImages) PromoteCache(_ context.Context, pool, snapshot string) erro
 	return nil
 }
 
+func (f *fakeImages) Sweep() error { return nil }
+
 func (f *fakeImages) roots() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

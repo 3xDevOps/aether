@@ -5,13 +5,15 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 )
 
-// Usage separates filesystem headroom from apparent regular-file sizes.
-// SnapshotBytes is included in WorktreeBytes. Entries attribute the component
+// Usage separates filesystem headroom from apparent regular-file sizes; a
+// VM's sparse disks count only what they hold. SnapshotBytes is included in
+// WorktreeBytes and VMStateBytes in VMBytes. Entries attribute the component
 // sizes, not additional usage or a promise that deletion reclaims those bytes.
 type Usage struct {
 	FreeBytes       uint64
@@ -27,6 +29,8 @@ type Usage struct {
 	ScratchBytes    uint64
 	OtherBytes      uint64
 	SnapshotBytes   uint64
+	VMBytes         uint64
+	VMStateBytes    uint64
 	Warnings        []string
 	Entries         []Entry
 	Truncated       bool
@@ -80,6 +84,10 @@ const (
 	transcriptsDir = "transcripts"
 	reposDir       = "repos"
 	databaseFile   = "aether.db"
+	vmDir          = "vm"
+	// vmImagesDir holds the disks VMs and checkout disks share through hard
+	// links, so it is measured before anything that links them.
+	vmImagesDir = vmDir + "/images"
 )
 
 func Measure(dataDir string) (Usage, error) {
@@ -115,15 +123,28 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 	// Repositories own hard-linked clone objects even when another tree is
 	// encountered first lexically. Every other category shares the same set.
 	sort.SliceStable(top, func(i, j int) bool { return top[i].Name() == reposDir && top[j].Name() != reposDir })
-	entries := make(map[[2]string]*Entry)
-	warnings := make(map[string]bool)
+	var roots []string
 	for _, dir := range top {
 		// WalkDir stats its root and would follow even an in-tree symlink.
 		// ReadDir metadata does not follow links, so skip them before walking.
 		if dir.Type()&fs.ModeSymlink != 0 {
 			continue
 		}
-		walkErr := fs.WalkDir(tree, dir.Name(), func(name string, d fs.DirEntry, err error) error {
+		roots = append(roots, dir.Name())
+		if dir.Name() == vmDir && dir.IsDir() {
+			inner, _ := fs.ReadDir(tree, vmDir)
+			if slices.ContainsFunc(inner, func(e fs.DirEntry) bool { return e.Name() == "images" && e.IsDir() }) {
+				roots = slices.Insert(roots, 0, vmImagesDir)
+			}
+		}
+	}
+	entries := make(map[[2]string]*Entry)
+	warnings := make(map[string]bool)
+	for _, root := range roots {
+		walkErr := fs.WalkDir(tree, root, func(name string, d fs.DirEntry, err error) error {
+			if name == vmImagesDir && root != vmImagesDir {
+				return fs.SkipDir
+			}
 			kind, key := owner(name)
 			index := [2]string{kind, key}
 			e := entries[index]
@@ -135,11 +156,17 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 				var info fs.FileInfo
 				info, err = d.Info()
 				var claimed bool
-				if err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+				var n uint64
+				if err == nil && info.Mode().IsRegular() {
+					n = uint64(info.Size())
+					if strings.HasPrefix(kind, "vm") {
+						n = stored(info)
+					}
+				}
+				if n > 0 {
 					claimed, err = counted.claim(name, info)
 				}
 				if err == nil && claimed {
-					n := uint64(info.Size())
 					e.Bytes += n
 					switch kind {
 					case "repo":
@@ -161,6 +188,11 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 						u.EvidenceBytes += n
 					case "scratch":
 						u.ScratchBytes += n
+					case "vm-image", "vm-cache", "vm":
+						u.VMBytes += n
+					case "vm-state":
+						u.VMBytes += n
+						u.VMStateBytes += n
 					default:
 						u.OtherBytes += n
 					}
@@ -223,11 +255,30 @@ func componentOwner(name string) (kind, key string) {
 		return "coord", key
 	case "scratch":
 		return "scratch", key
+	case vmDir:
+		return vmOwner(rest)
 	case databaseFile, databaseFile + "-wal", databaseFile + "-shm":
 		return "database", ""
 	default:
 		return "other", ""
 	}
+}
+
+// vmOwner sorts <data dir>/vm: the image store's base, helper and cache
+// disks, and each VM's own disks and saved state, by VM key.
+func vmOwner(rest string) (kind, key string) {
+	key, inner, _ := strings.Cut(rest, "/")
+	if key == "images" {
+		if pool, ok := strings.CutPrefix(inner, "caches/"); ok {
+			pool, _, _ = strings.Cut(pool, "/")
+			return "vm-cache", pool
+		}
+		return "vm-image", ""
+	}
+	if inner == "snapshot" || strings.HasPrefix(inner, "snapshot/") {
+		return "vm-state", key
+	}
+	return "vm", key
 }
 
 // MeasureCachePools measures only the managed cache root, sharing one inode

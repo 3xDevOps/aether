@@ -32,6 +32,7 @@ function categories(disk: DiskUsage): { name: string; bytes?: number }[] {
     { name: 'Caches', bytes: disk.cache_bytes },
     { name: 'Evidence', bytes: disk.evidence_bytes },
     { name: 'Scratch', bytes: disk.scratch_bytes },
+    ...(disk.vm_bytes ? [{ name: 'VMs', bytes: disk.vm_bytes }] : []),
     { name: 'Other', bytes: disk.other_bytes },
   ].sort((a, b) => (b.bytes ?? -1) - (a.bytes ?? -1))
 }
@@ -194,7 +195,7 @@ export function StorageSection() {
         <Block title="Aether data">
           <BarList items={categories(disk)} />
           <p className="text-ui-sm text-muted">
-            Snapshots {known(disk.snapshot_bytes)} (included in worktrees). These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space. Session and terminal pools
+            Snapshots {known(disk.snapshot_bytes)} (included in worktrees).{disk.vm_bytes ? ` Saved VM memory ${formatBytes(disk.vm_state_bytes ?? 0)} (included in VMs).` : ''} These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space. Session and terminal pools
             belong to the launching member. Automatic cleanup protects active, retained and uncertain owners.
           </p>
           {disk.warnings && disk.warnings.length > 0 && (

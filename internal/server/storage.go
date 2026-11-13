@@ -208,6 +208,50 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			}
 			e.OwnerKind, e.OwnerID = "workspace", string(workspace.ID)
 			e.Reason = "Persistent repository, session branches and shared clone objects; no automatic expiry"
+		case "vm-image":
+			e.Reason = "Base and helper disks session VMs boot from, one copy for every VM; cleanup deletes those no image and no VM uses"
+		case "vm-cache":
+			e.Reason = "Package cache new session VMs start from; rebuildable"
+		case "vm", "vm-state":
+			run, err := d.Store.GetRun(ctx, domain.RunID(e.Key))
+			if errors.Is(err, store.ErrNotFound) {
+				switch {
+				case strings.HasPrefix(e.Key, "terminal-"):
+					e.OwnerKind, e.OwnerID = "member", strings.TrimPrefix(e.Key, "terminal-")
+					e.Reason = "Environment VM disks, with what the member installed; deleted with the environment"
+					continue
+				case strings.HasPrefix(e.Key, "assistant-install-"), strings.HasPrefix(e.Key, "assistant-"):
+					e.OwnerKind = "member"
+					e.OwnerID = strings.TrimPrefix(strings.TrimPrefix(e.Key, "assistant-install-"), "assistant-")
+					e.Reason = "Assistant VM disks; deleted with the assistant's VM"
+					continue
+				case strings.HasPrefix(e.Key, "harness-update-"), strings.HasPrefix(e.Key, "dictation-"), strings.HasPrefix(e.Key, "check-"):
+					e.Reason = "Disks of a VM the server runs for itself: the agent updater, dictation or an environment save check"
+					continue
+				}
+			}
+			if err != nil {
+				unknownStorageOwner(e, err)
+				continue
+			}
+			e.OwnerKind, e.OwnerID = "run", string(run.ID)
+			if e.Kind == "vm-state" {
+				e.Reason = "Saved memory of a sleeping session VM; deleted when it wakes or its VM is deleted"
+				continue
+			}
+			e.Reason = "Session VM disks; deleted with the session's VM"
+			if d.Runs == nil {
+				continue
+			}
+			until, reason, err := d.Runs.StorageRetention(ctx, run.ID)
+			if err != nil {
+				e.Error = "Session retention lookup failed"
+				continue
+			}
+			e.RetainedUntil = until
+			if reason != "" {
+				e.Reason = reason
+			}
 		case "checkout", "snapshot", "transcript", "coord":
 			owner, _ := domain.ParentRun(domain.RunID(e.Key))
 			run, err := d.Store.GetRun(ctx, owner)

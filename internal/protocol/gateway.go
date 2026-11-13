@@ -45,7 +45,8 @@ type RunPatchResult struct {
 }
 
 // ServerDiskResult keeps whole-filesystem headroom separate from Aether's
-// de-duplicated file sizes. SnapshotBytes is a subset of WorktreeBytes.
+// de-duplicated file sizes. SnapshotBytes is a subset of WorktreeBytes, and
+// VMStateBytes, the saved memory of sleeping session VMs, of VMBytes.
 type ServerDiskResult struct {
 	UsedBytes       uint64            `json:"used_bytes"`
 	TotalBytes      uint64            `json:"total_bytes"`
@@ -60,6 +61,8 @@ type ServerDiskResult struct {
 	ScratchBytes    uint64            `json:"scratch_bytes"`
 	OtherBytes      uint64            `json:"other_bytes"`
 	SnapshotBytes   uint64            `json:"snapshot_bytes"`
+	VMBytes         uint64            `json:"vm_bytes,omitempty"`
+	VMStateBytes    uint64            `json:"vm_state_bytes,omitempty"`
 	Warnings        []string          `json:"warnings,omitempty"`
 	Docker          *ServerDockerDisk `json:"docker,omitempty"`
 	Entries         []ServerDiskEntry `json:"entries,omitempty"`
