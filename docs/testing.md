@@ -779,8 +779,9 @@ config (`/proc/config.gz` in the guest), must report every
 
 `go test ./internal/vmimage` covers layer extraction and the image store
 with real `mkfs.ext4`, `debugfs` and `qemu-img`; it skips the tests whose
-tools are missing. Run it once as root too: only root can keep other owners,
-set-user-ID bits and file capabilities, as the server does.
+tools are missing. Run it once as root too, as CI's `build-and-test` does:
+only root can keep other owners, set-user-ID bits and file capabilities, as
+the server does.
 
 ## Windows
 
