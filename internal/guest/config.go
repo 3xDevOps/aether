@@ -41,6 +41,16 @@ const (
 	// helper creates a missing Source directory with the mode and owner of
 	// its Target in the image.
 	VolumeData Volume = "data"
+	// VolumeHome is the host's file service (package guest/home), whose
+	// root lists one entry per shared host file; Source is the entry's
+	// index.
+	VolumeHome Volume = "home"
+	// VolumeCache is the block device whose virtio serial is "cache", the
+	// session's copy of the member's tool caches; Source is ".".
+	VolumeCache Volume = "cache"
+	// VolumeHelper is the helper's own executable, the server binary the VM
+	// booted with; Source is ".".
+	VolumeHelper Volume = "helper"
 )
 
 // Config is what the helper needs before it can serve: everything on it is
@@ -63,12 +73,14 @@ type Network struct {
 }
 
 // Mount binds Source, a relative path in Volume ("." for its root), at
-// Target. Share mounts are nosuid and nodev.
+// Target. Share and home mounts are nosuid and nodev. Overlay, for a home
+// mount, keeps the guest's writes in a layer on the data disk instead.
 type Mount struct {
 	Volume   Volume
 	Source   string
 	Target   string
 	ReadOnly bool
+	Overlay  bool
 }
 
 // Socket makes the helper listen on Path in the VM and relay every
@@ -101,8 +113,11 @@ func (c Config) KernelArgs(base string) (string, error) {
 	}
 	for _, m := range c.Mounts {
 		arg := "aether.mount=" + string(m.Volume) + "," + escapePath(m.Source) + "," + escapePath(m.Target)
-		if m.ReadOnly {
+		switch {
+		case m.ReadOnly:
 			arg += ",ro"
+		case m.Overlay:
+			arg += ",overlay"
 		}
 		args = append(args, arg)
 	}
@@ -170,8 +185,8 @@ func (c *Config) parseArg(key, value string) error {
 		}
 		c.Network.DNS = dns
 	case "aether.mount":
-		if len(fields) != 3 && (len(fields) != 4 || fields[3] != "ro") {
-			return errors.New("want <volume>,<source>,<target>[,ro]")
+		if len(fields) != 3 && (len(fields) != 4 || (fields[3] != "ro" && fields[3] != "overlay")) {
+			return errors.New("want <volume>,<source>,<target>[,ro|,overlay]")
 		}
 		source, err := url.PathUnescape(fields[1])
 		if err != nil {
@@ -181,7 +196,11 @@ func (c *Config) parseArg(key, value string) error {
 		if err != nil {
 			return err
 		}
-		c.Mounts = append(c.Mounts, Mount{Volume: Volume(fields[0]), Source: source, Target: target, ReadOnly: len(fields) == 4})
+		option := ""
+		if len(fields) == 4 {
+			option = fields[3]
+		}
+		c.Mounts = append(c.Mounts, Mount{Volume: Volume(fields[0]), Source: source, Target: target, ReadOnly: option == "ro", Overlay: option == "overlay"})
 	case "aether.sock":
 		if len(fields) != 2 {
 			return errors.New("want <port>,<path>")
@@ -225,8 +244,21 @@ func (c Config) Validate() error {
 		}
 	}
 	for i, m := range c.Mounts {
-		if m.Volume != VolumeShare && m.Volume != VolumeData {
+		switch m.Volume {
+		case VolumeShare, VolumeData:
+		case VolumeHome:
+			if n, err := strconv.Atoi(m.Source); err != nil || n < 0 || strconv.Itoa(n) != m.Source {
+				errs = append(errs, fmt.Errorf("mount %d: home source %q must be an entry index", i, m.Source))
+			}
+		case VolumeCache, VolumeHelper:
+			if m.Source != "." {
+				errs = append(errs, fmt.Errorf("mount %d: %s source must be \".\"", i, m.Volume))
+			}
+		default:
 			errs = append(errs, fmt.Errorf("mount %d: unknown volume %q", i, m.Volume))
+		}
+		if m.Overlay && (m.Volume != VolumeHome || m.ReadOnly) {
+			errs = append(errs, fmt.Errorf("mount %d: only a writable home mount can be an overlay", i))
 		}
 		if !filepath.IsLocal(m.Source) || path.Clean(m.Source) != m.Source {
 			errs = append(errs, fmt.Errorf("mount %d: source %q must be a clean relative path", i, m.Source))

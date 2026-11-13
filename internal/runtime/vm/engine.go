@@ -26,6 +26,9 @@ type Images interface {
 	BaseDisk(ctx context.Context, ref string) (vmimage.Base, error)
 	NewRootDisk(ctx context.Context, base vmimage.Base, path string) (vmimage.Disk, error)
 	NewDataDisk(ctx context.Context, path string, size int64) (vmimage.Disk, error)
+	NewCacheDisk(ctx context.Context, pool, path string) (vmimage.Disk, error)
+	SnapshotCache(ctx context.Context, disk string) (string, error)
+	PromoteCache(ctx context.Context, pool, snapshot string) error
 }
 
 const (
@@ -34,6 +37,10 @@ const (
 	minMemoryMiB  = 256
 	bootTimeout   = 90 * time.Second
 	agentOOMScore = 500
+	// unitOverheadMiB is what a VM's unit may hold beyond the guest's
+	// memory: Cloud Hypervisor, virtiofsd, and the monitor with the file
+	// service, whose requests a guest can fill.
+	unitOverheadMiB = 512
 	// cmdlineBase boots the read-only helper disk, whose /init is the helper.
 	// Page reporting order 0 lets freed guest page cache back to the host;
 	// at the default order it stalls with most of it still held. Cloud
@@ -58,7 +65,9 @@ type engine struct {
 
 	netMu    sync.Mutex
 	reserved map[int]bool
-	natReady bool
+
+	promotions sync.WaitGroup
+	natReady   bool
 }
 
 func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
@@ -142,11 +151,6 @@ func (e *engine) create(ctx context.Context, spec runtime.Spec) (_ runtime.ID, e
 	if spec.Egress {
 		return "", errors.New("vm runtime: egress control (the Isolated tier) is not supported in session VMs until work item 5")
 	}
-	for _, m := range spec.Mounts {
-		if m.Overlay != "" {
-			return "", fmt.Errorf("vm runtime: the overlay mount at %s (the Isolated tier) is not supported in session VMs until work item 7", m.ContainerPath)
-		}
-	}
 	memMiB, err := memoryMiB(spec.MemoryLimitBytes)
 	if err != nil {
 		return "", err
@@ -181,14 +185,20 @@ func (e *engine) create(ctx context.Context, spec runtime.Spec) (_ runtime.ID, e
 	if err != nil {
 		return "", fmt.Errorf("vm runtime: data disk: %w", err)
 	}
+	var cache vmimage.Disk
+	if m, ok := cacheMount(spec.Mounts); ok {
+		if cache, err = e.cfg.Images.NewCacheDisk(ctx, cachePool(m), e.path(key, cacheDisk)); err != nil {
+			return "", fmt.Errorf("vm runtime: cache disk: %w", err)
+		}
+	}
 	cpus, limit := vcpus(spec.CPULimit)
 	rec := &record{
-		Key: key, Fingerprint: spec.Fingerprint, Image: spec.Image, Base: base, Root: root, Data: data,
+		Key: key, Fingerprint: spec.Fingerprint, Image: spec.Image, Base: base, Root: root, Data: data, Cache: cache,
 		User:       spec.User,
 		Env:        overrideEnv(base.Config.Env, runtime.EnvList(runtime.TrustCheckouts(spec.Env, spec.WorktreeMountPath, spec.ExtraWorktrees))),
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
-		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Mounts: specMounts(spec), Net: index,
+		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: checkouts(spec), Mounts: spec.Mounts, Net: index,
 	}
 	if err = e.store(rec); err != nil {
 		return "", err
@@ -273,6 +283,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 		return err
 	}
 	rec.Booted, rec.Exited = true, false
+	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 	rec.Boots++
 	if err = e.store(rec); err != nil {
 		return err
@@ -293,7 +304,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 }
 
 func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
-	p, err := planMounts(rec.Mounts, rec.NestedDocker, e.path(rec.Key, vsockSocket), rootOnly)
+	p, err := e.plan(rec)
 	if err != nil {
 		return launch{}, err
 	}
@@ -321,12 +332,17 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		"--event-monitor", "path=" + e.path(rec.Key, eventsFile),
 		"--kernel", kernel, "--cmdline", cmdline,
 		"--disk", diskArg(helperDisk, "helper") + ",readonly=on", diskArg(rec.Root, "root"), diskArg(rec.Data, "data"),
+	}
+	if rec.Cache.Path != "" {
+		args = append(args, diskArg(rec.Cache, "cache"))
+	}
+	args = append(args,
 		"--cpus", fmt.Sprintf("boot=%d", rec.CPUs),
 		"--memory", fmt.Sprintf("size=%dM,shared=on", rec.MemoryMiB),
 		"--balloon", "size=0,free_page_reporting=on",
-		"--net", "id=net0," + chNetArg(rec.Net),
-	}
-	l := launch{Args: args, Shares: p.shares}
+		"--net", "id=net0,"+chNetArg(rec.Net),
+	)
+	l := launch{Args: args, Shares: p.shares, Home: p.homeConfig(rec.User)}
 	if len(p.shares) > 0 {
 		l.Args = append(l.Args, "--fs", "tag="+guest.ShareTag+",socket="+e.path(rec.Key, fsSocket))
 	}
@@ -352,7 +368,7 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	logPath := e.path(rec.Key, monitorLog)
 	properties := []string{
 		"Type=exec", "PrivateMounts=yes", "KillMode=control-group", "TimeoutStopSec=15",
-		fmt.Sprintf("OOMScoreAdjust=%d", agentOOMScore),
+		fmt.Sprintf("OOMScoreAdjust=%d", agentOOMScore), fmt.Sprintf("MemoryMax=%dM", rec.MemoryMiB+unitOverheadMiB),
 		"StandardOutput=append:" + logPath, "StandardError=append:" + logPath,
 	}
 	if rec.CPULimit > 0 {

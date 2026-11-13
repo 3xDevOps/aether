@@ -4,14 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/3xDevOps/Aether/internal/guest/home"
 )
 
 const (
@@ -21,8 +25,10 @@ const (
 )
 
 // Monitor runs in a VM's unit, whose private mount namespace keeps every
-// bind it makes off the host: it composes the share, starts virtiofsd on
-// it, then becomes Cloud Hypervisor, so the unit ends with the VM.
+// bind it makes off the host: it composes the share and starts virtiofsd on
+// it, serves the file service, and runs Cloud Hypervisor until the VM ends,
+// which ends the unit. The file service is the monitor itself, so a failure
+// of it ends the VM rather than leave it without its home.
 func Monitor(args []string) error {
 	if len(args) != 1 || !filepath.IsAbs(args[0]) {
 		return errors.New("usage: aether-server vm-monitor <vm directory>")
@@ -32,7 +38,7 @@ func Monitor(args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{apiSocket, vsockSocket, fsSocket, eventsFile} {
+	for _, name := range []string{apiSocket, vsockSocket, fsSocket, eventsFile, homeSocket} {
 		if err = os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("vm monitor: remove stale %s: %w", name, err)
 		}
@@ -46,12 +52,43 @@ func Monitor(args []string) error {
 			return err
 		}
 	}
-	argv := append([]string{cloudHypervisor}, l.Args...)
-	path, err := exec.LookPath(cloudHypervisor)
-	if err != nil {
+	served := make(chan error, 1)
+	if l.Home != nil {
+		listener, listenErr := net.Listen("unix", filepath.Join(dir, homeSocket))
+		if listenErr != nil {
+			return fmt.Errorf("vm monitor: listen for the file service: %w", listenErr)
+		}
+		go func() { served <- home.Serve(listener, *l.Home) }()
+	}
+	return runHypervisor(l.Args, served)
+}
+
+// runHypervisor runs Cloud Hypervisor and exits as it does. The unit's stop
+// signals every process in it, so the monitor only waits for its child.
+func runHypervisor(args []string, served <-chan error) error {
+	signal.Notify(make(chan os.Signal, 1), unix.SIGTERM, unix.SIGINT, unix.SIGHUP)
+	cmd := exec.Command(cloudHypervisor, args...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("vm monitor: %w", err)
 	}
-	return syscall.Exec(path, argv, os.Environ())
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	select {
+	case err := <-served:
+		_ = cmd.Process.Kill()
+		<-exited
+		return fmt.Errorf("vm monitor: the file service stopped: %w", err)
+	case err := <-exited:
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+				os.Exit(128 + int(status.Signal()))
+			}
+			os.Exit(exit.ExitCode())
+		}
+		return err
+	}
 }
 
 // composeShare mounts a small tmpfs at root and binds every share at

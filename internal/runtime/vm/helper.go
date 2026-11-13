@@ -17,6 +17,7 @@ type helper interface {
 	Stats(context.Context) (guest.Stats, error)
 	SyncClock(context.Context, time.Time) error
 	PowerOff(context.Context) error
+	Sync(context.Context) error
 	Close() error
 }
 

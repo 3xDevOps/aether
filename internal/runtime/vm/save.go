@@ -4,17 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 )
 
-const restoreTimeout = 60 * time.Second
+const (
+	restoreTimeout = 60 * time.Second
+	syncTimeout    = 30 * time.Second
+)
 
 // save pauses the VM, writes its memory and device state to the snapshot
-// directory and ends the monitor. A VM with a virtio-fs share is refused: a
-// fresh virtiofsd after restore knows none of the guest's open files, so
-// every access to the share fails with EBADF.
+// directory and ends the monitor. A VM with a checkout is refused: its
+// checkouts are virtio-fs shares, and a fresh virtiofsd after restore knows
+// none of the guest's open files, so every access to them fails with EBADF.
 func (e *engine) save(ctx context.Context, key string) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -22,16 +26,16 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	p, err := planMounts(rec.Mounts, false, e.path(key, vsockSocket), rootOnly)
+	booted, err := readLaunch(e.dir(key))
 	if err != nil {
 		return err
 	}
-	if len(p.shares) > 0 {
-		targets := make([]string, len(p.mounts))
-		for i, m := range p.mounts {
-			targets[i] = m.Target
+	if len(booted.Shares) > 0 {
+		sources := make([]string, len(booted.Shares))
+		for i, s := range booted.Shares {
+			sources[i] = s.Source
 		}
-		return fmt.Errorf("vm runtime: cannot save VM %s: its virtio-fs mounts (%s) would come back unusable after a restore; work items 6 and 7 move them off virtio-fs", key, strings.Join(targets, ", "))
+		return fmt.Errorf("vm runtime: cannot save VM %s: it shares %s over virtio-fs, which would come back unusable after a restore; work item 6 moves checkouts onto the VM's disk", key, strings.Join(sources, ", "))
 	}
 	api := newCHAPI(e.path(key, apiSocket))
 	state, err := api.state(ctx)
@@ -39,8 +43,9 @@ func (e *engine) save(ctx context.Context, key string) error {
 		return fmt.Errorf("vm runtime: save VM %s: %w", key, err)
 	}
 	// Cloud Hypervisor refuses to pause a paused VM; one the caller paused
-	// stays paused if the save fails.
+	// stays paused if the save fails, and cannot sync first.
 	paused := state == "Paused"
+	synced := !paused && e.syncGuest(ctx, key)
 	if !paused {
 		if err = api.pause(ctx); err != nil {
 			return fmt.Errorf("vm runtime: save VM %s: %w", key, err)
@@ -64,6 +69,7 @@ func (e *engine) save(ctx context.Context, key string) error {
 		return resumeAfter(err)
 	}
 	rec.Saved, rec.Exited, rec.ExitCode = true, true, killedExitCode
+	rec.CacheSynced = synced
 	if err = e.store(rec); err != nil {
 		return resumeAfter(err)
 	}
@@ -72,6 +78,22 @@ func (e *engine) save(ctx context.Context, key string) error {
 		return e.units.Stop(context.WithoutCancel(ctx), unitName(key))
 	}
 	return e.awaitStopped(ctx, key)
+}
+
+// syncGuest writes the guest's dirty data to the VM's disks, so a saved
+// cache disk that is never restored still holds what the session wrote.
+func (e *engine) syncGuest(ctx context.Context, key string) bool {
+	h, err := e.helper(key)
+	if err == nil {
+		syncCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+		err = h.Sync(syncCtx)
+		cancel()
+	}
+	if err != nil {
+		slog.Warn("vm runtime: sync the guest before a save; its cache will not be promoted", "vm", key, "error", err)
+		return false
+	}
+	return true
 }
 
 func (e *engine) resumeAfter(ctx context.Context, api chAPI, key string, cause error) error {
@@ -116,8 +138,14 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if up, upErr := e.running(ctx, key); upErr != nil || up {
 		return errors.Join(upErr, fmt.Errorf("vm runtime: restore VM %s: it is already running", key))
 	}
+	// The guest's mounts were made at boot: the shares keep the indexes they
+	// had then, whatever the host holds now.
+	booted, err := readLaunch(e.dir(key))
+	if err != nil {
+		return err
+	}
 	dir := e.path(key, snapshotDir)
-	l := launch{Args: []string{
+	l := launch{Home: booted.Home, Args: []string{
 		"--api-socket", "path=" + e.path(key, apiSocket), "--event-monitor", "path=" + e.path(key, eventsFile),
 		"--restore", "source_url=file://" + dir,
 	}}
@@ -138,6 +166,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 		return err
 	}
 	rec.Saved, rec.Exited = false, false
+	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 	if err = e.store(rec); err != nil {
 		return err
 	}

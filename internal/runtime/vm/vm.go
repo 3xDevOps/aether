@@ -260,3 +260,7 @@ func (r *Runtime) Restore(ctx context.Context, id runtime.ID) error {
 	}
 	return r.vms.restore(ctx, key)
 }
+
+// SessionVMs tells the scheduler that sessions run in VMs, whose host files
+// need no ownership pass.
+func (r *Runtime) SessionVMs() {}

@@ -23,6 +23,8 @@ service Guest {
   rpc Stats(StatsRequest) returns (StatsReply);
   rpc SetClock(SetClockRequest) returns (SetClockReply);
   rpc PowerOff(PowerOffRequest) returns (PowerOffReply);
+  // Sync writes every filesystem's dirty data to its disk.
+  rpc Sync(SyncRequest) returns (SyncReply);
 }
 
 message InfoRequest {}
@@ -174,3 +176,7 @@ message SetClockReply {}
 message PowerOffRequest {}
 
 message PowerOffReply {}
+
+message SyncRequest {}
+
+message SyncReply {}

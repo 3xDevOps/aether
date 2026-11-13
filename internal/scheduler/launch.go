@@ -316,6 +316,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err = s.checkLogin(ctx, workspace, account, harness, profile, mode); err != nil {
 		return nil, err
 	}
+	if err = s.vmSingleConflict(ctx, profile, harness, member, account, ""); err != nil {
+		return nil, err
+	}
 	release, err := s.reserveCapacity(ctx)
 	if err != nil {
 		return nil, err
@@ -591,6 +594,9 @@ func (s *Scheduler) leaveIfRevoked(ctx context.Context, entry *supervised, run *
 }
 
 func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, profile harness.Profile) (*EnvironmentPlan, error) {
+	if err := s.vmSingleConflict(ctx, profile, run.Harness, run.HomeMember(), run.AccountMember(), run.ID); err != nil {
+		return nil, err
+	}
 	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, actor, profile, EnvironmentPurposeRun)
 	if err != nil {
 		return nil, err
@@ -601,6 +607,13 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 	s.mu.Unlock()
 	if reserveErr := s.reserveRunUser(ctx, entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return nil, reserveErr
+	}
+	if s.sessionVMs() {
+		// A VM's file service serves every file as the session user's.
+		if ownErr := s.applyRunOwnership(ws, run, entry.memberID, nil, plan.User); ownErr != nil {
+			return nil, fmt.Errorf("apply session ownership: %w", ownErr)
+		}
+		return plan, nil
 	}
 	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
 		return nil, fmt.Errorf("apply session ownership: %w", ownErr)
@@ -690,6 +703,11 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	}
 	if serr := s.cfg.Runtime.Start(ctx, cid); serr != nil {
 		return nil, s.failContainer(ctx, entry, cid, "start container", serr)
+	}
+	// Only now can the agent have opened the databases a closed session's VM
+	// still holds.
+	if rerr := s.recordVMSingleLaunch(profile, run); rerr != nil {
+		return nil, s.failContainer(ctx, entry, cid, "record the launch", rerr)
 	}
 	s.mu.Lock()
 	if entry.loginMember != "" && !slices.Contains(entry.verifiedLogins, entry.loginMember) {

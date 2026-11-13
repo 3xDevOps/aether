@@ -342,11 +342,27 @@ What changes:
   Its disks and logs are in `<data dir>/vm/<run id>/`: `monitor.log` holds the
   VM monitor's output and `console.log` the guest kernel's.
 - The VM gets the CPU limit rounded up to whole vCPUs, held to the exact
-  limit by the unit's `CPUQuota`, and the memory limit as its memory. The
-  process limit applies inside the guest.
-- The checkout, the home and the other mounts reach the VM over one virtio-fs
-  share; read-only mounts stay read-only. Each VM has its own address in
-  `10.200.0.0/16` and reaches the internet through the host.
+  limit by the unit's `CPUQuota`, and the memory limit as its memory; the
+  unit's `MemoryMax` allows 512 MiB more for the VM monitor and the file
+  service. The process limit applies inside the guest.
+- The checkout reaches the VM over virtio-fs. The home, the login files and
+  the other host files a session mounts go through the VM's file service
+  ([vm-guest.md](vm-guest.md#the-file-service)): writes show in the
+  member's other sessions within a second, and read-only mounts stay
+  read-only. Each VM has its own address in `10.200.0.0/16` and reaches the
+  internet through the host.
+- `/tmp` is on the session's data disk. `/aether-cache` is the session's own
+  copy of the member's newest caches, made when the session is created. A
+  session's caches become the member's newest when its VM stops for good:
+  it is stopped, or deleted while stopped or saved. An idle sleep does not
+  promote them. Caches over 20 GiB are dropped, and the next session starts
+  empty. An Isolated session's caches never go back.
+- No ownership pass runs over the home: every file in it shows as the
+  session user's.
+- Agents' SQLite databases cannot be shared between VMs. Codex, OpenCode and
+  Cursor get their own per session; oh-my-pi, Copilot and Antigravity run in
+  one VM session at a time per home
+  ([harnesses.md](harnesses.md#agents-in-session-vms)).
 - Starting a stopped session builds a fresh root disk from its image and runs
   the setup script again: packages installed outside the mounts are gone.
   Docker images inside the session stay on its data disk.

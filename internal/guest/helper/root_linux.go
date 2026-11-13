@@ -3,9 +3,11 @@ package helper
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +16,8 @@ import (
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/guest"
+	"github.com/3xDevOps/Aether/internal/guest/home"
+	"github.com/mdlayher/vsock"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,6 +26,11 @@ const (
 	privateDir = "/run/aether-guest"
 	shareRoot  = privateDir + "/share"
 	dataRoot   = privateDir + "/data"
+	homeRoot   = privateDir + "/home"
+	cacheRoot  = privateDir + "/cache"
+	// selfExe is the helper's executable, on the helper disk, which stays
+	// mounted beneath the root the helper switched to.
+	selfExe = "/proc/self/exe"
 )
 
 type mountSpec struct {
@@ -163,13 +172,15 @@ func diskBySerial(serial string) (string, uint64, error) {
 	return "", 0, fmt.Errorf("no disk has serial %q", serial)
 }
 
-// mountVolumes binds each configured mount from the share or the data disk.
-// A mount that fails does not keep the others from being made.
+// mountVolumes binds each configured mount from its volume. A mount that
+// fails does not keep the others from being made.
 func mountVolumes(mounts []guest.Mount) error {
-	roots := map[guest.Volume]string{}
+	roots := map[guest.Volume]string{guest.VolumeHelper: selfExe}
 	var errs []error
-	for v, root := range map[guest.Volume]string{guest.VolumeShare: shareRoot, guest.VolumeData: dataRoot} {
-		if !slices.ContainsFunc(mounts, func(m guest.Mount) bool { return m.Volume == v }) {
+	for v, root := range map[guest.Volume]string{
+		guest.VolumeShare: shareRoot, guest.VolumeData: dataRoot, guest.VolumeHome: homeRoot, guest.VolumeCache: cacheRoot,
+	} {
+		if !slices.ContainsFunc(mounts, func(m guest.Mount) bool { return m.Volume == v || (v == guest.VolumeData && m.Overlay) }) {
 			continue
 		}
 		if err := mountVolume(v, root); err != nil {
@@ -191,23 +202,40 @@ func mountVolumes(mounts []guest.Mount) error {
 }
 
 func mountVolume(v guest.Volume, root string) error {
-	if v == guest.VolumeShare {
+	switch v {
+	case guest.VolumeShare:
 		return mountOnce(mountSpec{guest.ShareTag, root, "virtiofs", unix.MS_NOSUID | unix.MS_NODEV, ""})
+	case guest.VolumeHome:
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return err
+		}
+		return home.Mount(root, func(context.Context) (net.Conn, error) { return vsock.Dial(vsock.Host, home.Port, nil) })
 	}
-	device, _, err := diskBySerial("data")
+	device, _, err := diskBySerial(string(v))
 	if err != nil {
 		return err
 	}
-	return mountOnce(mountSpec{device, root, "ext4", 0, ""})
+	if err = mountOnce(mountSpec{device, root, "ext4", 0, ""}); err != nil || v != guest.VolumeCache {
+		return err
+	}
+	// Any user of the session writes the caches, as any writes /tmp, and
+	// finds no lost+found it cannot read, as in a container's.
+	if err = os.Remove(filepath.Join(root, "lost+found")); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, unix.ENOTEMPTY) {
+		return err
+	}
+	return os.Chmod(root, os.ModeSticky|0o777)
 }
 
 // bind opens the source beneath its volume, so a symlink planted in a
 // persistent data disk cannot point a mount anywhere else.
 func bind(root string, m guest.Mount) error {
-	if m.Volume == guest.VolumeData {
+	switch m.Volume {
+	case guest.VolumeData:
 		if err := createLike(root, m.Source, m.Target); err != nil {
 			return err
 		}
+	case guest.VolumeHelper:
+		return bindSelf(m.Target)
 	}
 	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -226,11 +254,14 @@ func bind(root string, m guest.Mount) error {
 	if err := ensureTarget(m.Target, st.Mode&unix.S_IFMT == unix.S_IFDIR); err != nil {
 		return err
 	}
+	if m.Overlay {
+		return overlay(fd, &st, m)
+	}
 	if err := unix.Mount("/proc/self/fd/"+strconv.Itoa(fd), m.Target, "", unix.MS_BIND, ""); err != nil {
 		return err
 	}
 	var flags uintptr
-	if m.Volume == guest.VolumeShare {
+	if m.Volume == guest.VolumeShare || m.Volume == guest.VolumeHome {
 		flags |= unix.MS_NOSUID | unix.MS_NODEV
 	}
 	if m.ReadOnly {
@@ -280,4 +311,56 @@ func ensureTarget(target string, dir bool) error {
 		return err
 	}
 	return f.Close()
+}
+
+// bindSelf binds the helper's executable read-only at target: the server
+// binary a session runs as aether-internal, the same one the VM booted with
+// even after the host's was replaced by an update.
+func bindSelf(target string) error {
+	if err := ensureTarget(target, false); err != nil {
+		return err
+	}
+	if err := unix.Mount(selfExe, target, "", unix.MS_BIND, ""); err != nil {
+		return err
+	}
+	return unix.Mount("", target, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_NODEV, "")
+}
+
+// overlay mounts lower, a home entry, read-only beneath a writable layer
+// at overlay/<source> on the data disk, as the Isolated tier's home is in a
+// container. The layer's root takes lower's owner and mode, which the
+// merged root shows.
+func overlay(lower int, st *unix.Stat_t, m guest.Mount) error {
+	data, err := os.OpenRoot(dataRoot)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = data.Close() }()
+	dir := "overlay/" + m.Source
+	for _, sub := range []string{"upper", "work"} {
+		if err = data.MkdirAll(dir+"/"+sub, 0o700); err != nil {
+			return err
+		}
+	}
+	if err = errors.Join(data.Chown(dir+"/upper", int(st.Uid), int(st.Gid)), data.Chmod(dir+"/upper", os.FileMode(st.Mode&0o7777))); err != nil {
+		return err
+	}
+	dataFD, err := unix.Open(dataRoot, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(dataFD) }()
+	layers := make([]int, 2)
+	for i, sub := range []string{"upper", "work"} {
+		fd, err := unix.Openat2(dataFD, dir+"/"+sub, &unix.OpenHow{
+			Flags: unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
+		})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unix.Close(fd) }()
+		layers[i] = fd
+	}
+	options := fmt.Sprintf("lowerdir=/proc/self/fd/%d,upperdir=/proc/self/fd/%d,workdir=/proc/self/fd/%d", lower, layers[0], layers[1])
+	return unix.Mount("overlay", m.Target, "overlay", unix.MS_NOSUID|unix.MS_NODEV, options)
 }

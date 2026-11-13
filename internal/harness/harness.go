@@ -224,6 +224,15 @@ func isPathWithin(candidate, root string) bool {
 	return candidate == root || strings.HasPrefix(candidate, root+"/")
 }
 
+// VMState is a home-relative directory that holds nothing but a CLI's
+// databases. Env, when set, is the variable that points the CLI at it, or
+// at File in it.
+type VMState struct {
+	Dir  string
+	Env  string
+	File string
+}
+
 // Profile converts a generic definition to a launch profile. The registry
 // entry of the same name still supplies what is not part of the argv:
 // EnvPassthrough, Env, PermissionEnv, ACPMode, ModelArgs, ModelEnv and the
@@ -243,6 +252,8 @@ func (d Definition) Profile() Profile {
 		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
+		p.VMState = append([]VMState(nil), registered.VMState...)
+		p.VMSingle = registered.VMSingle
 		if p.ACPMode == "" {
 			p.ACPMode = registered.ACPMode
 		}
@@ -313,6 +324,13 @@ type Profile struct {
 	// mounted in place in the owner's own containers too; the rename then
 	// fails with EBUSY and the CLI falls back to rewriting the shared inode.
 	PinnedLogins []string
+	// VMState is where the CLI keeps SQLite databases in WAL mode that its
+	// sessions share. Sessions in separate VMs cannot share one, so in a
+	// session VM each directory is the session's own.
+	VMState []VMState
+	// VMSingle, when set, says why only one session VM at a time may run the
+	// CLI on a home: it keeps such databases where no setting moves them.
+	VMSingle string
 	// LocalRoot is the home-relative profile directory (e.g. ".claude");
 	// empty means no profile sync.
 	LocalRoot string
@@ -505,6 +523,7 @@ var profiles = map[string]Profile{
 		ResumeArgs:      []string{"codex", "resume", SessionPlaceholder},
 		EnvPassthrough:  []string{"CODEX_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".codex/auth.json"},
+		VMState:         []VMState{{Dir: ".codex/vm-sqlite", Env: "CODEX_SQLITE_HOME"}},
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
 		// developer_instructions adds to Codex's instructions;
@@ -564,6 +583,7 @@ var profiles = map[string]Profile{
 		// omp keeps its login in a SQLite WAL database beside its config,
 		// and a WAL database cannot be shared file by file.
 		CredentialPaths: []string{".omp/agent"},
+		VMSingle:        "keeps its logins in a SQLite database that two session VMs cannot share",
 		LocalRoot:       ".omp",
 		// The WAL and shm files hold provider keys too.
 		DenyNames:       []string{"agent.db", "agent.db-wal", "agent.db-shm"},
@@ -585,6 +605,7 @@ var profiles = map[string]Profile{
 		PermissionEnv:   map[string]string{"OPENCODE_CONFIG_CONTENT": `{"permission":"allow"}`},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL"},
 		CredentialPaths: []string{".local/share/opencode/auth.json"},
+		VMState:         []VMState{{Dir: ".local/share/opencode/vm-db", Env: "OPENCODE_DB", File: "opencode.db"}},
 		LocalRoot:       ".config/opencode",
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
 		ModelArgs:       []string{"--model", ModelPlaceholder},
@@ -637,6 +658,7 @@ var profiles = map[string]Profile{
 		// the token in config.json. Copilot replaces it by rename, but it is
 		// not pinned: whether Copilot can write it as a mount is unverified.
 		CredentialPaths: []string{".copilot/config.json"},
+		VMSingle:        "keeps its session index in a SQLite database beside its login, which two session VMs cannot share",
 		DenyNames:       []string{"config.json"},
 		InstallScript:   "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @github/copilot; else echo \"npm is not in this environment's PATH, and copilot installs through npm\" >&2; false; fi",
 		// Not DeviceLogin: with no keychain, copilot login asks y/N before
@@ -680,6 +702,10 @@ var profiles = map[string]Profile{
 		ModelArgs:       []string{"--model", ModelPlaceholder},
 		EnvPassthrough:  []string{"CURSOR_API_KEY"},
 		CredentialPaths: []string{".config/cursor/auth.json"},
+		VMState: []VMState{
+			{Dir: ".cursor/ai-tracking"},
+			{Dir: ".local/state/cursor/agent-stores", Env: "CURSOR_AGENT_STORE_DIR"},
+		},
 		// The installer links ~/.local/bin/agent, by absolute path, to
 		// ~/.local/share/cursor-agent/versions/<version>.
 		InstallPaths:  []string{".local/share/cursor-agent"},
@@ -698,6 +724,7 @@ var profiles = map[string]Profile{
 		// ~/.gemini/antigravity-cli/settings.json.
 		EnvPassthrough:  []string{"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
 		CredentialPaths: []string{".gemini/antigravity-cli/antigravity-oauth-token"},
+		VMSingle:        "keeps its conversations in SQLite databases that two session VMs cannot share",
 		DenyNames:       []string{"antigravity-oauth-token"},
 		InstallScript:   "curl -fsSL https://antigravity.google/cli/install.sh | bash",
 		LoginCommand:    "agy",

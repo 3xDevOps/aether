@@ -1,0 +1,183 @@
+// The file service of a session VM: the host serves the member home and
+// the other host files the VM mounts, and the helper's FUSE filesystem calls
+// it over the VM's vsock. The helper keeps every inode and names each file
+// by its path, so the service holds no state a save and restore could lose.
+// docs/vm-guest.md describes it.
+syntax = "proto3";
+
+package aether.guest.v1;
+
+option go_package = "github.com/3xDevOps/Aether/internal/guest/guestpb";
+
+service Home {
+  rpc Lookup(HomeNodeRequest) returns (HomeEntryReply);
+  rpc Getattr(HomeNodeRequest) returns (HomeEntryReply);
+  rpc Setattr(HomeSetattrRequest) returns (HomeEntryReply);
+  rpc Readlink(HomeNodeRequest) returns (HomeReadlinkReply);
+  rpc Readdir(HomeNodeRequest) returns (HomeReaddirReply);
+  rpc Mknod(HomeMknodRequest) returns (HomeEntryReply);
+  rpc Symlink(HomeSymlinkRequest) returns (HomeEntryReply);
+  rpc Link(HomeLinkRequest) returns (HomeEntryReply);
+  rpc Remove(HomeRemoveRequest) returns (HomeErrnoReply);
+  rpc Rename(HomeRenameRequest) returns (HomeErrnoReply);
+  rpc Open(HomeOpenRequest) returns (HomeEntryReply);
+  rpc Read(HomeReadRequest) returns (HomeReadReply);
+  rpc Write(HomeWriteRequest) returns (HomeWriteReply);
+  rpc Fsync(HomeHandleRequest) returns (HomeErrnoReply);
+  rpc Release(HomeHandleRequest) returns (HomeErrnoReply);
+  rpc Statfs(HomeNodeRequest) returns (HomeStatfsReply);
+}
+
+// A path names a file from the root of the service: "" is the root, which
+// lists one directory or file per share, named by its index; "2/a/b" is a/b
+// in share 2. Every errno is a Linux error number, 0 for success.
+
+// HomeHandle is an open file. The helper picks id, unique for the VM's
+// boot, and sends the flags it was opened with, so a service that does not
+// know the id, such as a new one after a restore, opens the path again.
+message HomeHandle {
+  uint64 id = 1;
+  uint32 flags = 2;
+  // node is the file's when it was opened: a path that now names another
+  // file is stale.
+  uint64 node = 3;
+}
+
+message HomeAttr {
+  // node is the same for every path to one host file and differs between
+  // host files, even ones that reuse an inode number.
+  uint64 node = 1;
+  // mode holds the file type and permission bits, as st_mode.
+  uint32 mode = 2;
+  uint64 size = 3;
+  uint64 blocks = 4;
+  uint32 nlink = 5;
+  uint32 uid = 6;
+  uint32 gid = 7;
+  int64 atime_ns = 8;
+  int64 mtime_ns = 9;
+  int64 ctime_ns = 10;
+}
+
+message HomeNodeRequest {
+  string path = 1;
+  // handle, when set, is used in place of the path.
+  HomeHandle handle = 2;
+}
+
+message HomeEntryReply {
+  int32 errno = 1;
+  HomeAttr attr = 2;
+}
+
+message HomeErrnoReply {
+  int32 errno = 1;
+}
+
+message HomeSetattrRequest {
+  string path = 1;
+  HomeHandle handle = 2;
+  optional uint32 mode = 3;
+  optional uint64 size = 4;
+  optional int64 atime_ns = 5;
+  optional int64 mtime_ns = 6;
+  bool atime_now = 7;
+  bool mtime_now = 8;
+}
+
+message HomeReadlinkReply {
+  int32 errno = 1;
+  bytes target = 2;
+}
+
+message HomeDirEntry {
+  string name = 1;
+  // mode holds the file type bits only.
+  uint32 mode = 2;
+  uint64 node = 3;
+}
+
+message HomeReaddirReply {
+  int32 errno = 1;
+  repeated HomeDirEntry entries = 2;
+}
+
+// HomeMknodRequest creates a directory, a regular file, a FIFO or a socket
+// at path; device nodes are refused.
+message HomeMknodRequest {
+  string path = 1;
+  uint32 mode = 2;
+}
+
+message HomeSymlinkRequest {
+  string path = 1;
+  bytes target = 2;
+}
+
+message HomeLinkRequest {
+  string path = 1;
+  string new_path = 2;
+}
+
+message HomeRemoveRequest {
+  string path = 1;
+  bool dir = 2;
+}
+
+message HomeRenameRequest {
+  string path = 1;
+  string new_path = 2;
+  // flags are renameat2's RENAME_NOREPLACE and RENAME_EXCHANGE.
+  uint32 flags = 3;
+}
+
+// HomeOpenRequest opens path as handle; with create it creates the file
+// with mode first, failing when one exists only if the flags hold O_EXCL.
+message HomeOpenRequest {
+  string path = 1;
+  HomeHandle handle = 2;
+  bool create = 3;
+  uint32 mode = 4;
+}
+
+message HomeReadRequest {
+  string path = 1;
+  HomeHandle handle = 2;
+  int64 offset = 3;
+  uint32 size = 4;
+}
+
+message HomeReadReply {
+  int32 errno = 1;
+  bytes data = 2;
+}
+
+message HomeWriteRequest {
+  string path = 1;
+  HomeHandle handle = 2;
+  int64 offset = 3;
+  bytes data = 4;
+}
+
+message HomeWriteReply {
+  int32 errno = 1;
+  uint32 written = 2;
+}
+
+message HomeHandleRequest {
+  string path = 1;
+  HomeHandle handle = 2;
+  bool datasync = 3;
+}
+
+message HomeStatfsReply {
+  int32 errno = 1;
+  uint64 blocks = 2;
+  uint64 bfree = 3;
+  uint64 bavail = 4;
+  uint64 files = 5;
+  uint64 ffree = 6;
+  uint32 bsize = 7;
+  uint32 namelen = 8;
+  uint32 frsize = 9;
+}

@@ -7,25 +7,27 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/guest"
+	"github.com/3xDevOps/Aether/internal/guest/home"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// share is one host path the monitor binds into the VM's share directory,
-// at share/<index>.
-type share struct {
-	Source   string `json:"source"`
-	Subpath  string `json:"subpath,omitempty"`
-	ReadOnly bool   `json:"read_only,omitempty"`
-}
+// share is one host path the monitor binds into the VM's virtio-fs share
+// directory, at share/<index>.
+type share = home.Share
 
 // firstSocketPort leaves 1024 to the helper's own API.
 const firstSocketPort = 1025
 
 type plan struct {
-	shares  []share
+	// shares go over virtio-fs: only the checkouts, until they move onto
+	// the VM's own disk.
+	shares []share
+	// home is every other host path, served by the file service.
+	home    []home.Share
 	mounts  []guest.Mount
 	sockets []guest.Socket
 	// links maps each vsock.sock_<port> to the host socket Cloud Hypervisor
@@ -33,31 +35,39 @@ type plan struct {
 	links map[string]string
 }
 
-// specMounts lists a spec's mounts in Docker's order: the checkout, extra
-// worktrees, then the rest.
-func specMounts(spec runtime.Spec) []runtime.Mount {
-	var out []runtime.Mount
-	if spec.WorktreeHostPath != "" {
-		out = append(out, runtime.Mount{HostPath: spec.WorktreeHostPath, ContainerPath: spec.WorktreeMountPath})
-	}
-	out = append(out, spec.ExtraWorktrees...)
-	return append(out, spec.Mounts...)
-}
-
-// planMounts reads the host once per boot. A unix socket cannot cross
-// virtio-fs, so sockets at the top of a shared directory are forwarded, and
-// a directory holding nothing but sockets is not shared at all: the helper
+// planMounts reads the host once per boot. Checkouts go over virtio-fs;
+// scratch space and caches live on the VM's own disks; the server binary
+// is the helper's own; every other host path goes through the file
+// service, so it survives a save and restore. A unix socket cannot cross
+// either, so sockets at the top of a shared directory are forwarded, and a
+// directory holding nothing but sockets is not shared at all: the helper
 // makes it on the guest's /run. Only a directory only root can write is
 // trusted: Cloud Hypervisor connects by path as root, so a socket a guest
 // could replace with a symlink would reach any host socket.
-func planMounts(mounts []runtime.Mount, nestedDocker bool, vsock string, trusted func(dir string) bool) (plan, error) {
+func planMounts(checkouts, mounts []runtime.Mount, nestedDocker bool, dir string, trusted func(dir string) bool) (plan, error) {
 	p := plan{links: map[string]string{}}
+	vsock := filepath.Join(dir, vsockSocket)
 	forward := func(host, target string) {
 		port := firstSocketPort + len(p.sockets)
 		p.sockets = append(p.sockets, guest.Socket{Port: uint32(port), Path: target})
 		p.links[vsock+"_"+strconv.Itoa(port)] = host
 	}
+	for _, m := range checkouts {
+		p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeShare, Source: strconv.Itoa(len(p.shares)), Target: m.ContainerPath, ReadOnly: m.ReadOnly})
+		p.shares = append(p.shares, share{Source: m.HostPath, Subpath: m.Subpath, ReadOnly: m.ReadOnly})
+	}
 	for _, m := range mounts {
+		switch m.Kind {
+		case runtime.MountScratch:
+			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeData, Source: strings.TrimPrefix(m.ContainerPath, "/"), Target: m.ContainerPath})
+			continue
+		case runtime.MountCache:
+			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeCache, Source: ".", Target: m.ContainerPath})
+			continue
+		case runtime.MountServerBinary:
+			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeHelper, Source: ".", Target: m.ContainerPath, ReadOnly: true})
+			continue
+		}
 		if m.Subpath == "" {
 			info, err := os.Stat(m.HostPath)
 			if err != nil {
@@ -80,8 +90,12 @@ func planMounts(mounts []runtime.Mount, nestedDocker bool, vsock string, trusted
 				}
 			}
 		}
-		p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeShare, Source: strconv.Itoa(len(p.shares)), Target: m.ContainerPath, ReadOnly: m.ReadOnly})
-		p.shares = append(p.shares, share{Source: m.HostPath, Subpath: m.Subpath, ReadOnly: m.ReadOnly})
+		overlay := m.Overlay != ""
+		p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeHome, Source: strconv.Itoa(len(p.home)), Target: m.ContainerPath, ReadOnly: m.ReadOnly, Overlay: overlay})
+		p.home = append(p.home, home.Share{Source: m.HostPath, Subpath: m.Subpath, ReadOnly: m.ReadOnly || overlay})
+	}
+	if len(p.home) > 0 {
+		p.links[vsock+"_"+strconv.Itoa(home.Port)] = filepath.Join(dir, homeSocket)
 	}
 	if nestedDocker {
 		p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeData, Source: "docker", Target: "/var/lib/docker"})

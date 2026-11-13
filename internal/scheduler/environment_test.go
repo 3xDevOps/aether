@@ -61,6 +61,9 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 			pool = "terminal"
 		}
 		cache := runtime.Mount{HostPath: filepath.Join(homes.CacheRoot(), string(member.ID), pool, "data"), ContainerPath: "/aether-cache"}
+		if purpose == EnvironmentPurposeRun {
+			cache.Kind = runtime.MountCache
+		}
 		if plan.Mounts[4] != cache {
 			t.Fatalf("purpose %q cache mount = %+v, want %+v", purpose, plan.Mounts[4], cache)
 		}

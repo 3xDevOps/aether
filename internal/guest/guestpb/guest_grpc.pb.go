@@ -34,6 +34,7 @@ const (
 	Guest_Stats_FullMethodName    = "/aether.guest.v1.Guest/Stats"
 	Guest_SetClock_FullMethodName = "/aether.guest.v1.Guest/SetClock"
 	Guest_PowerOff_FullMethodName = "/aether.guest.v1.Guest/PowerOff"
+	Guest_Sync_FullMethodName     = "/aether.guest.v1.Guest/Sync"
 )
 
 // GuestClient is the client API for Guest service.
@@ -55,6 +56,8 @@ type GuestClient interface {
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
 	SetClock(ctx context.Context, in *SetClockRequest, opts ...grpc.CallOption) (*SetClockReply, error)
 	PowerOff(ctx context.Context, in *PowerOffRequest, opts ...grpc.CallOption) (*PowerOffReply, error)
+	// Sync writes every filesystem's dirty data to its disk.
+	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error)
 }
 
 type guestClient struct {
@@ -175,6 +178,16 @@ func (c *guestClient) PowerOff(ctx context.Context, in *PowerOffRequest, opts ..
 	return out, nil
 }
 
+func (c *guestClient) Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncReply)
+	err := c.cc.Invoke(ctx, Guest_Sync_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GuestServer is the server API for Guest service.
 // All implementations must embed UnimplementedGuestServer
 // for forward compatibility.
@@ -194,6 +207,8 @@ type GuestServer interface {
 	Stats(context.Context, *StatsRequest) (*StatsReply, error)
 	SetClock(context.Context, *SetClockRequest) (*SetClockReply, error)
 	PowerOff(context.Context, *PowerOffRequest) (*PowerOffReply, error)
+	// Sync writes every filesystem's dirty data to its disk.
+	Sync(context.Context, *SyncRequest) (*SyncReply, error)
 	mustEmbedUnimplementedGuestServer()
 }
 
@@ -236,6 +251,9 @@ func (UnimplementedGuestServer) SetClock(context.Context, *SetClockRequest) (*Se
 }
 func (UnimplementedGuestServer) PowerOff(context.Context, *PowerOffRequest) (*PowerOffReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method PowerOff not implemented")
+}
+func (UnimplementedGuestServer) Sync(context.Context, *SyncRequest) (*SyncReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Sync not implemented")
 }
 func (UnimplementedGuestServer) mustEmbedUnimplementedGuestServer() {}
 func (UnimplementedGuestServer) testEmbeddedByValue()               {}
@@ -456,6 +474,24 @@ func _Guest_PowerOff_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Guest_Sync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SyncRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GuestServer).Sync(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Guest_Sync_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GuestServer).Sync(ctx, req.(*SyncRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Guest_ServiceDesc is the grpc.ServiceDesc for Guest service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -506,6 +542,10 @@ var Guest_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PowerOff",
 			Handler:    _Guest_PowerOff_Handler,
+		},
+		{
+			MethodName: "Sync",
+			Handler:    _Guest_Sync_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
