@@ -243,6 +243,48 @@ func TestKVMRebootNow(t *testing.T) {
 	t.Fatal(unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART))
 }
 
+// TestKVMRootSessionStartsFromTheFileService starts, in a Root session's
+// VM with one CPU, a program from the file service and a process whose
+// working directory is on it.
+func TestKVMRootSessionStartsFromTheFileService(t *testing.T) {
+	e := kvmEngine(t)
+	key := "run-vmtest-root"
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, User: "1000:1000", Sudo: true,
+		Command: []string{"/bin/sh", "-c", "exec sleep infinity"}, Env: map[string]string{"AETHER_RUN_ID": key},
+		CPULimit: 1, MemoryLimitBytes: 512 << 20,
+		Mounts: []runtime.Mount{
+			{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true},
+			{HostPath: t.TempDir(), ContainerPath: "/mnt/host"},
+		},
+	}
+	if _, err = e.create(t.Context(), key, spec, options{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		argv []string
+		dir  string
+	}{
+		{[]string{"/opt/aether-vmtest", "-test.run", "^$"}, ""},
+		{[]string{"/bin/true"}, "/mnt/host"},
+	} {
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		code, _, errOut, execErr := e.exec(ctx, key, tc.argv, tc.dir)
+		cancel()
+		if execErr != nil || code != 0 {
+			t.Errorf("%v in %q: %d, %v: %s", tc.argv, tc.dir, code, execErr, errOut)
+		}
+	}
+}
+
 func TestKVMGuestRebootEndsTheSession(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-vmtest-e"

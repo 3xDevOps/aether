@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -208,25 +209,28 @@ func (t *processes) start(p *process, spec spawnSpec, program, dir string, env [
 			return err
 		}
 	}
-	path, argv := program, spec.Argv
-	var execStatus *os.File
-	if spec.NoNewPrivileges {
-		r, w, err := os.Pipe()
-		if err != nil {
-			return err
+	var pid int
+	execStatus, statusW, err := os.Pipe()
+	if err == nil {
+		defer func() { _ = execStatus.Close() }()
+		var environ *os.File
+		if environ, err = environment(env); err == nil {
+			argv := append([]string{"aether-internal", "guest", startArg, strconv.FormatBool(spec.NoNewPrivileges), dir, program}, spec.Argv...)
+			fds := make([]uintptr, 0, len(child)+2)
+			for _, f := range append(child, statusW, environ) {
+				fds = append(fds, f.Fd())
+			}
+			pid, err = syscall.ForkExec("/proc/self/exe", argv, &syscall.ProcAttr{Dir: "/", Files: fds, Sys: attr})
+			_ = environ.Close()
 		}
-		defer func() { _ = r.Close() }()
-		execStatus, child = r, append(child, w)
-		path, argv = "/proc/self/exe", append([]string{"aether-internal", "guest", noNewPrivsArg, program}, spec.Argv...)
-	}
-	fds := make([]uintptr, len(child))
-	for i, f := range child {
-		fds[i] = f.Fd()
-	}
-	pid, err := syscall.ForkExec(path, argv, &syscall.ProcAttr{Dir: dir, Env: env, Files: fds, Sys: attr})
-	if err == nil && execStatus != nil {
-		_ = child[len(child)-1].Close()
-		err = trampolineResult(execStatus)
+		_ = statusW.Close()
+		if err == nil {
+			// The reaper needs t.mu, which spawn holds, so pid is still
+			// the child's: one that did not start in time must not start later.
+			if err = trampolineResult(execStatus); err != nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
 	}
 	if err != nil {
 		for _, f := range []*os.File{p.stdin, stdoutR, stderrR} {
@@ -251,26 +255,54 @@ func (t *processes) start(p *process, spec spawnSpec, program, dir string, env [
 	return nil
 }
 
-// trampolineResult is how the helper binary's exec of the program ended,
-// which ForkExec reports for a direct start: its status pipe closes on a
-// successful exec and carries the errno of a failed one.
+// startMarker is the first byte the helper binary writes to its status
+// pipe: an end without it means the helper binary died before it ran.
+const startMarker = '+'
+
+// trampolineResult is how the helper binary's exec of the program ended:
+// its status pipe gets startMarker, then closes on a successful exec and
+// carries the errno of a failed one.
 func trampolineResult(status *os.File) error {
 	if err := status.SetReadDeadline(time.Now().Add(startupTimeout)); err != nil {
 		return err
 	}
-	buf := make([]byte, 16)
-	n, err := status.Read(buf)
-	if errors.Is(err, io.EOF) {
-		return nil
+	out, err := io.ReadAll(io.LimitReader(status, 32))
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return fmt.Errorf("the program did not start within %s", startupTimeout)
 	}
 	if err != nil {
 		return fmt.Errorf("wait for the program to start: %w", err)
 	}
-	errno, err := strconv.Atoi(string(buf[:n]))
+	reply, ran := bytes.CutPrefix(out, []byte{startMarker})
+	if !ran {
+		return errors.New("the helper binary ended before it started the program")
+	}
+	if len(reply) == 0 {
+		return nil
+	}
+	errno, err := strconv.Atoi(string(reply))
 	if err != nil {
-		return fmt.Errorf("the program's start reported %q", buf[:n])
+		return fmt.Errorf("the program's start reported %q", reply)
 	}
 	return syscall.Errno(errno)
+}
+
+// environment is a memfd with env separated by NULs, which the helper
+// binary passes on to the program.
+func environment(env []string) (*os.File, error) {
+	fd, err := unix.MemfdCreate("environment", unix.MFD_CLOEXEC)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), "environment")
+	if _, err = f.WriteString(strings.Join(env, "\x00")); err == nil {
+		_, err = f.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 func checkSpec(spec guest.ProcessSpec) error {
