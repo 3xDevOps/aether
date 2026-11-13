@@ -26,6 +26,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/guest/helper"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/runtime/vm"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -49,6 +50,9 @@ func main() {
 	// A session VM's kernel starts the binary as /init with this argument.
 	if len(os.Args) > 1 && os.Args[1] == "guest" {
 		os.Exit(helper.Main(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == vm.MonitorCommand {
+		exitOn(vm.Monitor(os.Args[2:]))
 	}
 	if filepath.Base(os.Args[0]) == "aether-internal" {
 		os.Exit(coordcli.Main(os.Args[1:]))
@@ -251,6 +255,8 @@ type serveOptions struct {
 	runMemory            *runCountValue
 	runPids              *runCountValue
 	containerRuntime     *string
+	sessionRuntime       *string
+	vmKernel             *string
 }
 
 // serveFlags declares the server options on fs. It is the single definition
@@ -312,6 +318,10 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.containerRuntime = fs.String("container-runtime", server.DefaultContainerRuntime,
 		"OCI runtime for run and member environment containers: auto uses sysbox-runc when Docker has it registered "+
 			"(Docker inside sessions without --privileged), otherwise the daemon default; any other value is used as given, e.g. runc to opt out")
+	o.sessionRuntime = fs.String("session-runtime", server.SessionRuntimeDocker,
+		"where sessions run: docker, or vm for one Cloud Hypervisor VM per session (needs /dev/kvm, cloud-hypervisor and virtiofsd; "+
+			"every other container stays on Docker)")
+	o.vmKernel = fs.String("vm-kernel", server.DefaultVMKernel, "the guest kernel session VMs boot with -session-runtime vm")
 	return o
 }
 
@@ -393,6 +403,8 @@ func serve(args []string) error {
 		RunPidsLimit:     int64(*o.runPids),
 
 		ContainerRuntime: *o.containerRuntime,
+		SessionRuntime:   *o.sessionRuntime,
+		VMKernel:         *o.vmKernel,
 		SysboxInstaller:  true,
 	})
 	if err != nil {

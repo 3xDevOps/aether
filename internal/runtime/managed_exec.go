@@ -2,8 +2,15 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/devexec"
 )
 
 // ErrExecUnavailable means execution identity or its terminal cannot be proved.
@@ -82,4 +89,36 @@ type ManagedExec interface {
 	Stop(context.Context, time.Duration) (ExitStatus, error)
 	Resize(context.Context, uint, uint) error
 	Detach() error
+}
+
+// ExecControlArgv is the staged helper's control command for one action on
+// the execution identity names.
+func ExecControlArgv(identity ExecIdentity, action string, grace time.Duration) []string {
+	return []string{coordtransport.CLIPath, devexec.Command, "control", identity.CreationKey, identity.ExecID, identity.ClaimToken, action, strconv.FormatInt(grace.Milliseconds(), 10)}
+}
+
+// ExecControlState reads the staged helper's reply to a control command that
+// exited with code and printed stdout and stderr.
+func ExecControlState(identity ExecIdentity, action string, code int, stdout, stderr string) (devexec.State, error) {
+	var state devexec.State
+	decodeErr := json.Unmarshal([]byte(stdout), &state)
+	if decodeErr == nil && state.ExecID == identity.ExecID && state.CreationKey == identity.CreationKey && state.ClaimToken == identity.ClaimToken {
+		if state.Error != "" {
+			if state.Exited && state.ExitCode != nil && (*state.ExitCode == 126 || *state.ExitCode == 127) {
+				if action == "start" {
+					return state, &ExecExitError{Code: *state.ExitCode}
+				}
+				return state, nil
+			}
+			return state, errors.New(state.Error)
+		}
+		if code == 0 {
+			return state, nil
+		}
+	}
+	failed := fmt.Errorf("%w: helper %s failed (status %d): %s", ErrExecUnavailable, action, code, strings.TrimSpace(stderr))
+	if strings.Contains(stderr, devexec.ErrNoSupervisor.Error()) {
+		return state, fmt.Errorf("%w: %w", devexec.ErrNoSupervisor, failed)
+	}
+	return state, failed
 }

@@ -1,0 +1,84 @@
+package vm
+
+import (
+	"context"
+	"errors"
+	"net/netip"
+	"slices"
+	"strings"
+	"testing"
+)
+
+func TestNetworkAddressing(t *testing.T) {
+	host, guestAddr := netAddrs(65)
+	if host.String() != "10.200.1.5" || guestAddr.String() != "10.200.1.6" {
+		t.Errorf("addresses of 65 = %s, %s", host, guestAddr)
+	}
+	if got := chNetArg(65); got != "tap=aethervm65,ip=10.200.1.5,mask=255.255.255.252,mac=02:ae:00:00:00:41" {
+		t.Errorf("net arg = %s", got)
+	}
+	last, _ := netAddrs(maxNets - 1)
+	if !vmSubnet.Contains(last) {
+		t.Errorf("last network %s leaves %s", last, vmSubnet)
+	}
+	n := guestNetwork(0, dockerDNS)
+	if n.Address != netip.MustParsePrefix("10.200.0.2/30") || n.Gateway.String() != "10.200.0.1" {
+		t.Errorf("guest network = %+v", n)
+	}
+	servers := nameservers(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1\nsearch ec2.internal\n"))
+	if !slices.Equal(servers, []netip.Addr{netip.MustParseAddr("10.0.0.2")}) {
+		t.Errorf("nameservers = %v", servers)
+	}
+}
+
+func TestAllocateNetSkipsRecordedAndReserved(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	first, err := h.engine.allocateNet()
+	if err != nil || first != 1 {
+		t.Fatalf("allocate = %d, %v", first, err)
+	}
+	second, err := h.engine.allocateNet()
+	if err != nil || second != 2 {
+		t.Fatalf("allocate while 1 is reserved = %d, %v", second, err)
+	}
+	h.engine.releaseNet(first)
+	if again, _ := h.engine.allocateNet(); again != 1 {
+		t.Errorf("allocate after release = %d", again)
+	}
+}
+
+func TestEnsureNATAddsOnlyMissingRules(t *testing.T) {
+	h := newHarness(t)
+	e := h.engine
+	e.natReady = false
+	var calls []string
+	e.run = func(_ context.Context, name string, args ...string) error {
+		calls = append(calls, strings.Join(append([]string{name}, args...), " "))
+		if slices.Contains(args, "-C") && slices.Contains(args, "MASQUERADE") {
+			return nil
+		}
+		if slices.Contains(args, "-C") {
+			return errors.New("no such rule")
+		}
+		return nil
+	}
+	if err := e.ensureNAT(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"sysctl -q -w net.ipv4.ip_forward=1",
+		"iptables -t nat -C POSTROUTING -s 10.200.0.0/16 ! -d 10.200.0.0/16 -j MASQUERADE",
+		"iptables -t filter -C FORWARD -i aethervm+ -j ACCEPT",
+		"iptables -t filter -I FORWARD -i aethervm+ -j ACCEPT",
+		"iptables -t filter -C FORWARD -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"iptables -t filter -I FORWARD -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+	}
+	if !slices.Equal(calls, want) {
+		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))
+	}
+	calls = nil
+	if err := e.ensureNAT(t.Context()); err != nil || calls != nil {
+		t.Errorf("second ensureNAT ran %v, %v", calls, err)
+	}
+}

@@ -343,7 +343,7 @@ func TestDockerSetupFailure(t *testing.T) {
 }
 
 // TestDockerSetupOutputPastTheBuffer verifies a setup script may print more
-// than execOutputLimit: a passing one still starts the container, and a
+// than ExecOutputLimit: a passing one still starts the container, and a
 // failing one reports the end of what it printed.
 func TestDockerSetupOutputPastTheBuffer(t *testing.T) {
 	t.Parallel()
