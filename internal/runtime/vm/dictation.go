@@ -74,9 +74,9 @@ func (r *Runtime) StartDictation(ctx context.Context, spec runtime.DictationSpec
 		return "", err
 	}
 	go copyOutput(att, spec.Output)
-	// Waiting records the engine's exit and powers its VM off.
-	go func() { _, _ = r.vms.wait(context.Background(), key) }()
-	r.vms.relay(key, dictationPort, filepath.Join(hostDir, spec.Socket))
+	if err = r.vms.relay(key, dictationPort, filepath.Join(hostDir, spec.Socket)); err != nil {
+		return "", err
+	}
 	return id, nil
 }
 
@@ -92,18 +92,40 @@ func copyOutput(att runtime.Attachment, out io.WriteCloser) {
 	_ = out.Close()
 }
 
-// DictationState reads the engine's VM. Only the guest kernel's OOM killer
-// kills the engine in its VM, so a SIGKILL exit is an out-of-memory kill.
+// DictationState asks the engine VM's helper. The VM stays up after the
+// engine exits, until the dictation service removes it, so its exit code,
+// its last output and the guest's out-of-memory kills, which hit the engine
+// the wrapper runs as well, can all be read.
 func (r *Runtime) DictationState(ctx context.Context, id runtime.ID) (runtime.DictationState, error) {
 	key, ok := vmKey(id)
 	if !ok {
 		return r.Docker.DictationState(ctx, id)
 	}
+	if err := r.vms.relayErr(key); err != nil {
+		return runtime.DictationState{}, err
+	}
 	info, err := r.vms.inspect(ctx, key)
 	if err != nil {
 		return runtime.DictationState{}, err
 	}
-	return runtime.DictationState{Running: !info.Exited, ExitCode: info.ExitCode, OOMKilled: info.Exited && info.ExitCode == killedExitCode}, nil
+	if info.Exited {
+		return runtime.DictationState{ExitCode: info.ExitCode}, nil
+	}
+	h, err := r.vms.helper(key)
+	if err != nil {
+		return runtime.DictationState{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, helperCallTimeout)
+	defer cancel()
+	st, err := h.Process(guest.MainID).Status(ctx)
+	if err != nil || !st.Exited {
+		return runtime.DictationState{Running: err == nil}, err
+	}
+	stats, err := h.Stats(ctx)
+	if err != nil {
+		return runtime.DictationState{}, fmt.Errorf("vm runtime: memory events of the dictation engine: %w", err)
+	}
+	return runtime.DictationState{ExitCode: st.ExitCode, OOMKilled: stats.OOMKills > 0}, nil
 }
 
 // RemoveDictation removes owner's engine VM and any engine container Docker

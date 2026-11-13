@@ -2,8 +2,8 @@ package vm
 
 import (
 	"context"
+	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -24,11 +24,21 @@ type relay struct {
 	done   chan struct{}
 	mu     sync.Mutex
 	ln     net.Listener
+	// err is why the host socket could not be made once the VM's was up.
+	err error
 }
 
 // relay replaces key's relay with one from hostPath to port; a VM has one.
-func (e *engine) relay(key string, port uint32, hostPath string) {
+// It tries the host socket at once, so a path that cannot take one fails the
+// caller rather than its wait.
+func (e *engine) relay(key string, port uint32, hostPath string) error {
 	e.stopRelay(key)
+	_ = os.Remove(hostPath)
+	probe, err := net.Listen("unix", hostPath)
+	if err != nil {
+		return fmt.Errorf("vm runtime: listen for the socket of VM %s: %w", key, err)
+	}
+	_ = probe.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &relay{cancel: cancel, done: make(chan struct{})}
 	e.mu.Lock()
@@ -42,13 +52,12 @@ func (e *engine) relay(key string, port uint32, hostPath string) {
 		}
 		_ = os.Remove(hostPath)
 		ln, err := net.Listen("unix", hostPath)
+		r.mu.Lock()
+		r.ln, r.err = ln, err
+		r.mu.Unlock()
 		if err != nil {
-			slog.Warn("vm runtime: listen for a socket in a VM", "vm", key, "path", hostPath, "error", err)
 			return
 		}
-		r.mu.Lock()
-		r.ln = ln
-		r.mu.Unlock()
 		if ctx.Err() != nil {
 			_ = ln.Close()
 			return
@@ -61,6 +70,23 @@ func (e *engine) relay(key string, port uint32, hostPath string) {
 			go relayConn(ctx, conn, vsock, port)
 		}
 	}()
+	return nil
+}
+
+// relayErr is why key's relay has no host socket, if it failed to make one.
+func (e *engine) relayErr(key string) error {
+	e.mu.Lock()
+	r := e.relays[key]
+	e.mu.Unlock()
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return fmt.Errorf("vm runtime: listen for the socket of VM %s: %w", key, r.err)
+	}
+	return nil
 }
 
 func awaitServed(ctx context.Context, vsock string, port uint32) bool {

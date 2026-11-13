@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -289,7 +290,8 @@ func TestKVMRootSessionStartsFromTheFileService(t *testing.T) {
 	}
 }
 
-// hogged keeps what TestKVMHogNow allocates until the kernel kills it.
+// hogged keeps what TestKVMHogNow and the stand-in dictation engine's
+// child allocate until the kernel kills them.
 var hogged [][]byte
 
 func TestKVMHogNow(t *testing.T) {
@@ -764,7 +766,21 @@ func TestKVMEngineNow(t *testing.T) {
 	if os.Getuid() != 65534 {
 		t.Skip("runs inside a guest only")
 	}
-	if args := flag.Args(); len(args) > 0 {
+	switch args := flag.Args(); {
+	case len(args) > 0 && args[0] == "hog":
+		for {
+			chunk := make([]byte, 64<<20)
+			for i := range chunk {
+				chunk[i] = 1
+			}
+			hogged = append(hogged, chunk)
+		}
+	case len(args) > 0 && args[0] == "oom":
+		// The real wrapper runs the engine as its child and exits 1 when
+		// the child dies.
+		_ = exec.Command(os.Args[0], "-test.run", "^TestKVMEngineNow$", "--", "hog").Run()
+		os.Exit(1)
+	case len(args) > 0:
 		code, _ := strconv.Atoi(args[0])
 		os.Exit(code)
 	}
@@ -888,5 +904,18 @@ func TestKVMDictationVM(t *testing.T) {
 	}
 	if _, closed := out.String(); !closed {
 		t.Error("the output stayed open after the engine exited")
+	}
+
+	if err = r.RemoveDictation(t.Context(), "i9test"); err != nil {
+		t.Fatal(err)
+	}
+	id, _ = start("oom")
+	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if st, err = r.DictationState(t.Context(), id); err != nil || !st.Running {
+			break
+		}
+	}
+	if err != nil || st.Running || !st.OOMKilled {
+		t.Errorf("state of an engine whose child ran out of memory = %+v, %v", st, err)
 	}
 }
