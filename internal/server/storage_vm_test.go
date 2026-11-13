@@ -8,8 +8,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// A session VM's disks and saved state belong to its session, an
-// environment VM's to its member, and the shared image store to the server.
+// A session VM's disks and saved state belong to its session, and the
+// shared image store to the server.
 func TestVMStorageOwners(t *testing.T) {
 	s, root, admin, workspace := newWorkspaceDeletionServer(t)
 	run := &domain.Run{WorkspaceID: workspace.ID, MemberID: admin.ID, Task: "vm", Harness: "fake", Mode: domain.LaunchHeadless, Status: domain.RunRunning}
@@ -18,8 +18,7 @@ func TestVMStorageOwners(t *testing.T) {
 	}
 	u := disk.Usage{}
 	for _, kindKey := range [][2]string{
-		{"vm", string(run.ID)}, {"vm-state", string(run.ID)}, {"vm", "terminal-" + string(admin.ID)},
-		{"vm", "dictation-" + string(admin.ID)}, {"vm", "run-gone"}, {"vm-image", ""}, {"vm-cache", "0123456789abcdef"},
+		{"vm", string(run.ID)}, {"vm-state", string(run.ID)}, {"vm", "run-gone"}, {"vm-image", ""}, {"vm-cache", "0123456789abcdef"},
 	} {
 		u.Entries = append(u.Entries, disk.Entry{Kind: kindKey[0], Key: kindKey[1], OwnerKind: "server"})
 	}
@@ -27,8 +26,6 @@ func TestVMStorageOwners(t *testing.T) {
 	want := []struct{ ownerKind, ownerID, reason string }{
 		{"run", string(run.ID), "Active session"},
 		{"run", string(run.ID), "Saved memory of a sleeping session VM; deleted when it wakes or its VM is deleted"},
-		{"member", string(admin.ID), "Environment VM disks, with what the member installed; deleted with the environment"},
-		{"server", "", "Disks of a VM the server runs for itself: the agent updater, dictation or an environment save check"},
 		{"server", "", "No durable owner found; cleanup eligibility unknown"},
 		{"server", "", "Base and helper disks session VMs boot from, one copy for every VM; cleanup deletes those no image and no VM uses"},
 		{"server", "", "Package cache new session VMs start from; rebuildable"},
