@@ -293,7 +293,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}
 	var roots []string
 	if s.cfg.Homes != nil {
-		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot(), s.accountConfigRoot()}
+		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot(), s.accountConfigRoot(), s.vmDatabasesRoot()}
 	}
 	if s.cfg.Signing != nil {
 		agentDir, err := s.cfg.Signing.Serve(member.ID)

@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// Usage separates filesystem headroom from apparent regular-file sizes; a
-// VM's sparse disks count only what they hold. SnapshotBytes is included in
+// Usage separates filesystem headroom from apparent regular-file sizes; VM
+// disks, sparse, count only what they hold. SnapshotBytes is included in
 // WorktreeBytes and VMStateBytes in VMBytes. Entries attribute the component
 // sizes, not additional usage or a promise that deletion reclaims those bytes.
 type Usage struct {
@@ -85,6 +85,8 @@ const (
 	reposDir       = "repos"
 	databaseFile   = "aether.db"
 	vmDir          = "vm"
+	schedulerDir   = "scheduler"
+	vmDatabasesDir = "vm-databases"
 	// vmImagesDir holds the disks VMs and checkout disks share through hard
 	// links, so it is measured before anything that links them.
 	vmImagesDir = vmDir + "/images"
@@ -188,7 +190,7 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 						u.EvidenceBytes += n
 					case "scratch":
 						u.ScratchBytes += n
-					case "vm-image", "vm-cache", "vm":
+					case "vm-image", "vm-cache", "vm", "vm-db":
 						u.VMBytes += n
 					case "vm-state":
 						u.VMBytes += n
@@ -257,6 +259,12 @@ func componentOwner(name string) (kind, key string) {
 		return "scratch", key
 	case vmDir:
 		return vmOwner(rest)
+	case schedulerDir:
+		if run, ok := strings.CutPrefix(rest, vmDatabasesDir+"/"); ok {
+			run, _, _ = strings.Cut(run, "/")
+			return "vm-db", run
+		}
+		return "other", ""
 	case databaseFile, databaseFile + "-wal", databaseFile + "-shm":
 		return "database", ""
 	default:

@@ -123,6 +123,10 @@ const (
 	MountCache MountKind = "cache"
 	// MountServerBinary is the server's own executable.
 	MountServerBinary MountKind = "server-binary"
+	// MountState is a directory, Subpath, on a disk of one session's own
+	// that outlives each VM the session runs in. HostPath is the session's
+	// directory the VM runtime keeps that disk in.
+	MountState MountKind = "state"
 )
 
 // ContainerInfo is immutable metadata captured from a live or stopped

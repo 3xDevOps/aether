@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	restoreTimeout = 60 * time.Second
-	syncTimeout    = 30 * time.Second
+	restoreTimeout     = 60 * time.Second
+	syncTimeout        = 30 * time.Second
+	destroySyncTimeout = 5 * time.Second
 )
 
 // save pauses the VM, writes its memory and device state to the snapshot
@@ -81,7 +82,8 @@ func (e *engine) save(ctx context.Context, key string) error {
 }
 
 // syncGuest writes the guest's dirty data to the VM's disks, so a saved
-// cache disk that is never restored still holds what the session wrote.
+// cache disk that is never restored, or a database disk the next VM takes
+// over, holds what the session wrote.
 func (e *engine) syncGuest(ctx context.Context, key string) bool {
 	h, err := e.helper(key)
 	if err == nil {
@@ -90,7 +92,7 @@ func (e *engine) syncGuest(ctx context.Context, key string) bool {
 		cancel()
 	}
 	if err != nil {
-		slog.Warn("vm runtime: sync the guest before a save; its cache will not be promoted", "vm", key, "error", err)
+		slog.Warn("vm runtime: sync the guest's disks; a cache saved now will not be promoted", "vm", key, "error", err)
 		return false
 	}
 	return true

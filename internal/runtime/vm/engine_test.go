@@ -259,6 +259,51 @@ func TestACacheIsPromotedOnlyWhenItsVMStopsForGood(t *testing.T) {
 	}
 }
 
+// An account move destroys a session's VM and makes another under the same
+// key: the session's database disk, outside the VM's directory, carries over.
+func TestASessionsDatabaseDiskOutlivesItsVM(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	spec := sessionSpec("run-a")
+	spec.Mounts = []runtime.Mount{
+		{HostPath: dir, Subpath: "0", ContainerPath: "/root/.codex/vm-sqlite", Kind: runtime.MountState},
+		{HostPath: dir, Subpath: "1", ContainerPath: "/root/.agent/index", Kind: runtime.MountState},
+	}
+	disk := filepath.Join(dir, stateDiskFile)
+	h.createStarted("run-a", spec)
+	args := strings.Join(h.units.last().launch.Args, " ")
+	for _, want := range []string{"path=" + disk + ",image_type=raw,id=state,serial=state", "aether.mount=state,0,/root/.codex/vm-sqlite", "aether.mount=state,1,/root/.agent/index"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("launch args lack %q:\n%s", want, args)
+		}
+	}
+	if err := os.WriteFile(disk, []byte("databases"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.destroy(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if g := h.guest("run-a"); g.syncs != 1 {
+		t.Errorf("the guest synced %d times before its VM was destroyed, want once", g.syncs)
+	}
+	h.createStarted("run-a", spec)
+	if got, err := os.ReadFile(disk); err != nil || string(got) != "databases" {
+		t.Errorf("the replacement VM's database disk holds %q, %v", got, err)
+	}
+	if args = strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "serial=state") {
+		t.Errorf("the replacement VM lacks the database disk:\n%s", args)
+	}
+
+	planted := sessionSpec("run-b")
+	planted.Mounts = []runtime.Mount{{HostPath: t.TempDir(), Subpath: "0", ContainerPath: "/root/.codex/vm-sqlite", Kind: runtime.MountState}}
+	if err := os.Symlink(disk, filepath.Join(planted.Mounts[0].HostPath, stateDiskFile)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.engine.create(t.Context(), "run-b", planted, options{}); err == nil || !strings.Contains(err.Error(), "is not a regular file") {
+		t.Errorf("create over a symlinked database disk = %v", err)
+	}
+}
+
 func TestRestoreServesTheSharesTheGuestMountedAtBoot(t *testing.T) {
 	h := newHarness(t)
 	memberHome, coord := t.TempDir(), t.TempDir()

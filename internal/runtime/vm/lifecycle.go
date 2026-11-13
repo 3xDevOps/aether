@@ -388,15 +388,28 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	if _, err := os.Stat(e.dir(key)); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	e.forgetHelper(key)
 	up, err := e.running(ctx, key)
 	if err != nil {
+		e.forgetHelper(key)
 		return err
 	}
+	rec, loadErr := e.load(key)
+	// The session's database disk outlives this VM, as when an account move
+	// replaces it: the guest's unwritten data goes to it first. A paused VM
+	// cannot sync, and is destroyed only with its session, and the disk; a
+	// wedged one gets destroySyncTimeout, not a kill held up behind it.
+	if up && loadErr == nil && rec.State.Path != "" {
+		syncCtx, cancel := context.WithTimeout(ctx, destroySyncTimeout)
+		if state, stateErr := newCHAPI(e.path(key, apiSocket)).state(syncCtx); stateErr == nil && state != "Paused" {
+			e.syncGuest(syncCtx, key)
+		}
+		cancel()
+	}
+	e.forgetHelper(key)
 	if err = e.units.Stop(ctx, unitName(key)); err != nil {
 		return err
 	}
-	if rec, loadErr := e.load(key); loadErr == nil && !up {
+	if loadErr == nil && !up {
 		e.promoteCache(ctx, rec)
 	}
 	if err = os.RemoveAll(e.dir(key)); err != nil {

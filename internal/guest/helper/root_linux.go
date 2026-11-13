@@ -28,6 +28,7 @@ const (
 	dataRoot   = privateDir + "/data"
 	homeRoot   = privateDir + "/home"
 	cacheRoot  = privateDir + "/cache"
+	stateRoot  = privateDir + "/state"
 	// selfExe is the helper's executable, on the helper disk, which stays
 	// mounted beneath the root the helper switched to.
 	selfExe = "/proc/self/exe"
@@ -179,6 +180,7 @@ func mountVolumes(mounts []guest.Mount) error {
 	var errs []error
 	for v, root := range map[guest.Volume]string{
 		guest.VolumeShare: shareRoot, guest.VolumeData: dataRoot, guest.VolumeHome: homeRoot, guest.VolumeCache: cacheRoot,
+		guest.VolumeState: stateRoot,
 	} {
 		if !slices.ContainsFunc(mounts, func(m guest.Mount) bool { return m.Volume == v || (v == guest.VolumeData && m.Overlay) }) {
 			continue
@@ -230,7 +232,7 @@ func mountVolume(v guest.Volume, root string) error {
 // persistent data disk cannot point a mount anywhere else.
 func bind(root string, m guest.Mount) error {
 	switch m.Volume {
-	case guest.VolumeData:
+	case guest.VolumeData, guest.VolumeState:
 		if err := createLike(root, m.Source, m.Target); err != nil {
 			return err
 		}
