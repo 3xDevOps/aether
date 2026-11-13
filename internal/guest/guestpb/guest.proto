@@ -28,7 +28,8 @@ service Guest {
   // Freeze while frozen moves the deadline.
   rpc Freeze(FreezeRequest) returns (FreezeReply);
   rpc Thaw(ThawRequest) returns (ThawReply);
-  // Sync writes every filesystem's dirty data to its disk.
+  // Sync writes every filesystem's dirty data to its disk, then drops the
+  // page cache, before a save.
   rpc Sync(SyncRequest) returns (SyncReply);
 }
 

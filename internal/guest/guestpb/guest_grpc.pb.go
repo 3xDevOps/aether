@@ -63,7 +63,8 @@ type GuestClient interface {
 	// Freeze while frozen moves the deadline.
 	Freeze(ctx context.Context, in *FreezeRequest, opts ...grpc.CallOption) (*FreezeReply, error)
 	Thaw(ctx context.Context, in *ThawRequest, opts ...grpc.CallOption) (*ThawReply, error)
-	// Sync writes every filesystem's dirty data to its disk.
+	// Sync writes every filesystem's dirty data to its disk, then drops the
+	// page cache, before a save.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error)
 }
 
@@ -239,7 +240,8 @@ type GuestServer interface {
 	// Freeze while frozen moves the deadline.
 	Freeze(context.Context, *FreezeRequest) (*FreezeReply, error)
 	Thaw(context.Context, *ThawRequest) (*ThawReply, error)
-	// Sync writes every filesystem's dirty data to its disk.
+	// Sync writes every filesystem's dirty data to its disk, then drops the
+	// page cache, before a save.
 	Sync(context.Context, *SyncRequest) (*SyncReply, error)
 	mustEmbedUnimplementedGuestServer()
 }

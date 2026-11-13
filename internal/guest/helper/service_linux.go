@@ -29,6 +29,7 @@ type service struct {
 	bootError string
 	powerOff  func() error
 	setClock  func(time.Time) error
+	reclaim   func()
 	freezer   *freezer
 
 	bootOnce  sync.Once
@@ -201,6 +202,9 @@ func (s *service) SetClock(_ context.Context, req *guestpb.SetClockRequest) (*gu
 
 func (s *service) Sync(context.Context, *guestpb.SyncRequest) (*guestpb.SyncReply, error) {
 	syscall.Sync()
+	if s.reclaim != nil {
+		s.reclaim()
+	}
 	return &guestpb.SyncReply{}, nil
 }
 

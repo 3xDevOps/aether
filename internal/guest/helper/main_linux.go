@@ -147,6 +147,10 @@ func serve() error {
 	}
 	svc := newService(procs, cgroup, rand.Text(), bootError)
 	svc.powerOff = func() error { return unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF) }
+	svc.reclaim = func() {
+		dropCaches()
+		time.Sleep(pageReportingDelay)
+	}
 	svc.setClock = func(t time.Time) error {
 		ts := unix.NsecToTimespec(t.UnixNano())
 		return unix.ClockSettime(unix.CLOCK_REALTIME, &ts)
@@ -159,6 +163,11 @@ func serve() error {
 	slog.Info("guest: serving", "port", guest.APIPort, "boot_error", bootError)
 	return newServer(svc).Serve(hostOnly{listener})
 }
+
+// pageReportingDelay outlasts the 2 s free page reporting waits before it
+// hands freed guest pages to the host (the kernel's PAGE_REPORTING_DELAY),
+// so a save made at once would still write them.
+const pageReportingDelay = 3 * time.Second
 
 // hostOnly accepts only the host: through vsock loopback a process in the
 // VM could otherwise reach the helper and start processes as root.
