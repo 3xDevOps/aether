@@ -28,7 +28,11 @@ func (s *Store) NewCacheDisk(ctx context.Context, pool, path string) (Disk, erro
 	if !validPool(pool) {
 		return Disk{}, fmt.Errorf("vmimage: cache pool %q is not a plain name", pool)
 	}
-	base, err := s.newestCache(ctx, pool)
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return Disk{}, fmt.Errorf("vmimage: cache disk: %w", err)
+	}
+	base, err := s.pinNewestCache(ctx, pool, path)
 	if err != nil {
 		return Disk{}, err
 	}
@@ -39,9 +43,25 @@ func validPool(pool string) bool {
 	return pool != "" && filepath.Base(pool) == pool && !strings.HasPrefix(pool, ".")
 }
 
-func (s *Store) newestCache(ctx context.Context, pool string) (Base, error) {
+// pinNewestCache pins pool's newest cache for the disk at path under the
+// store lock, so a promotion's sweep cannot delete it before the disk backs
+// onto it. A pool without one gets an empty cache first.
+func (s *Store) pinNewestCache(ctx context.Context, pool, path string) (Base, error) {
 	dir := filepath.Join(s.cachesDir(), pool)
-	if base, err := s.readNewest(dir); err == nil || !errors.Is(err, fs.ErrNotExist) {
+	pinned := func() (Base, bool, error) {
+		base, err := s.readNewest(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			return Base{}, false, nil
+		}
+		if err == nil {
+			err = s.pinLocked(base.Path, rootPin(path, base.ID))
+		}
+		return base, err == nil, err
+	}
+	s.mu.Lock()
+	base, ok, err := pinned()
+	s.mu.Unlock()
+	if ok || err != nil {
 		return base, err
 	}
 	work, err := os.MkdirTemp(s.tmpDir(), "cache-")
@@ -55,10 +75,13 @@ func (s *Store) newestCache(ctx context.Context, pool string) (Base, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if base, err := s.readNewest(dir); err == nil || !errors.Is(err, fs.ErrNotExist) {
+	if base, ok, err = pinned(); ok || err != nil {
 		return base, err
 	}
-	return s.publishCacheLocked(dir, disk)
+	if base, err = s.publishCacheLocked(dir, disk); err != nil {
+		return Base{}, err
+	}
+	return base, s.pinLocked(base.Path, rootPin(path, base.ID))
 }
 
 func (s *Store) readNewest(dir string) (Base, error) {
@@ -149,7 +172,8 @@ func (s *Store) PromoteCache(ctx context.Context, pool, snapshot string) error {
 	} else {
 		_, err = s.publishCacheLocked(dir, disk)
 	}
-	return errors.Join(err, s.sweepCachesLocked(dir))
+	// The snapshot pins the cache it was made over until it is gone.
+	return errors.Join(err, os.RemoveAll(snapshot), s.sweepCachesLocked(dir))
 }
 
 // sweepCachesLocked deletes a pool's caches that are not its newest and

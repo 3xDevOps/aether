@@ -46,10 +46,47 @@ func (s *server) Open(_ context.Context, req *guestpb.HomeOpenRequest) (*guestpb
 		_ = f.Close()
 		return &guestpb.HomeEntryReply{Errno: int32(errno)}, nil
 	}
-	if errno = s.keep(h.GetId(), f); errno != 0 {
+	if errno = s.keep(h.GetId(), &openFile{File: f, share: e.share}); errno != 0 {
 		return &guestpb.HomeEntryReply{Errno: int32(errno)}, nil
 	}
 	return &guestpb.HomeEntryReply{Attr: s.attr(&st)}, nil
+}
+
+// openFile is a handle's file and the share it was opened in, whose
+// read-only flag it keeps.
+type openFile struct {
+	*os.File
+	share *share
+}
+
+// setattr changes the open file itself, which may have been renamed over
+// or removed since it was opened.
+func (f *openFile) setattr(req *guestpb.HomeSetattrRequest) (unix.Statx_t, syscall.Errno) {
+	if f.share.ReadOnly {
+		return unix.Statx_t{}, unix.EROFS
+	}
+	var st unix.Statx_t
+	errno := withFD(f.File, func(fd int) syscall.Errno {
+		if req.Size != nil {
+			if err := unix.Ftruncate(fd, int64(req.GetSize())); err != nil {
+				return errnoOf(err)
+			}
+		}
+		if req.Mode != nil {
+			if err := unix.Fchmod(fd, req.GetMode()&0o1777); err != nil {
+				return errnoOf(err)
+			}
+		}
+		if ts := times(req); ts != nil {
+			if err := unix.UtimesNanoAt(unix.AT_FDCWD, procPath(fd), ts, 0); err != nil {
+				return errnoOf(err)
+			}
+		}
+		var errno syscall.Errno
+		st, errno = statFD(fd)
+		return errno
+	})
+	return st, errno
 }
 
 func (s *server) open(e *entry, flags int, create bool, mode uint32) (*os.File, syscall.Errno) {
@@ -75,7 +112,17 @@ func (s *server) open(e *entry, flags int, create bool, mode uint32) (*os.File, 
 	return reopen(obj, flags&^unix.O_EXCL|unix.O_NONBLOCK)
 }
 
-func (s *server) keep(id uint64, f *os.File) syscall.Errno {
+// known returns the file h names when the service opened it.
+func (s *server) known(h *guestpb.HomeHandle) *openFile {
+	if h == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handles[h.GetId()]
+}
+
+func (s *server) keep(id uint64, f *openFile) syscall.Errno {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if old := s.handles[id]; old != nil {
@@ -91,11 +138,8 @@ func (s *server) keep(id uint64, f *os.File) syscall.Errno {
 // handle returns the file h names, opening p again when the service does
 // not know h, as after a restore; a file gone since then is stale.
 func (s *server) handle(p string, h *guestpb.HomeHandle) (*os.File, syscall.Errno) {
-	s.mu.Lock()
-	f := s.handles[h.GetId()]
-	s.mu.Unlock()
-	if f != nil {
-		return f, 0
+	if f := s.known(h); f != nil {
+		return f.File, 0
 	}
 	e, errno := s.resolve(p)
 	if errno != 0 {
@@ -108,7 +152,7 @@ func (s *server) handle(p string, h *guestpb.HomeHandle) (*os.File, syscall.Errn
 			return nil, errno
 		}
 	}
-	f, errno = s.open(e, flags, false, 0)
+	f, errno := s.open(e, flags, false, 0)
 	if errno != 0 {
 		return nil, stale(errno)
 	}
@@ -116,13 +160,13 @@ func (s *server) handle(p string, h *guestpb.HomeHandle) (*os.File, syscall.Errn
 	defer s.mu.Unlock()
 	if kept := s.handles[h.GetId()]; kept != nil {
 		_ = f.Close()
-		return kept, 0
+		return kept.File, 0
 	}
 	if len(s.handles) >= maxHandles {
 		_ = f.Close()
 		return nil, unix.ENFILE
 	}
-	s.handles[h.GetId()] = f
+	s.handles[h.GetId()] = &openFile{File: f, share: e.share}
 	return f, 0
 }
 

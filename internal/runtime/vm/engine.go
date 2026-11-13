@@ -37,6 +37,10 @@ const (
 	minMemoryMiB  = 256
 	bootTimeout   = 90 * time.Second
 	agentOOMScore = 500
+	// unitOverheadMiB is what a VM's unit may hold beyond the guest's
+	// memory: Cloud Hypervisor, virtiofsd, and the monitor with the file
+	// service, whose requests a guest can fill.
+	unitOverheadMiB = 512
 	// cmdlineBase boots the read-only helper disk, whose /init is the helper.
 	// Page reporting order 0 lets freed guest page cache back to the host;
 	// at the default order it stalls with most of it still held. Cloud
@@ -61,7 +65,9 @@ type engine struct {
 
 	netMu    sync.Mutex
 	reserved map[int]bool
-	natReady bool
+
+	promotions sync.WaitGroup
+	natReady   bool
 }
 
 func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
@@ -277,7 +283,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 		return err
 	}
 	rec.Booted, rec.Exited = true, false
-	rec.CacheRan = rec.Cache.Path != ""
+	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 	rec.Boots++
 	if err = e.store(rec); err != nil {
 		return err
@@ -362,7 +368,7 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	logPath := e.path(rec.Key, monitorLog)
 	properties := []string{
 		"Type=exec", "PrivateMounts=yes", "KillMode=control-group", "TimeoutStopSec=15",
-		fmt.Sprintf("OOMScoreAdjust=%d", agentOOMScore),
+		fmt.Sprintf("OOMScoreAdjust=%d", agentOOMScore), fmt.Sprintf("MemoryMax=%dM", rec.MemoryMiB+unitOverheadMiB),
 		"StandardOutput=append:" + logPath, "StandardError=append:" + logPath,
 	}
 	if rec.CPULimit > 0 {

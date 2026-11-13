@@ -193,7 +193,7 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (disk D
 			err = pruneErr
 		}
 	}()
-	pin := path + "." + dirName(base.ID) + ".base"
+	pin := rootPin(path, base.ID)
 	if err = s.pin(base.Path, pin); err != nil {
 		return Disk{}, err
 	}
@@ -209,6 +209,9 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (disk D
 	}
 	return Disk{Path: path, Format: FormatQcow2}, nil
 }
+
+// rootPin is the hard link to base id that the disk at path backs onto.
+func rootPin(path, id string) string { return path + "." + dirName(id) + ".base" }
 
 // prunePins removes the base links next to the root disk at path that it
 // does not back onto.

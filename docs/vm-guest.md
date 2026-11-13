@@ -100,7 +100,10 @@ mounted. It is package `internal/guest/home`, API
   change from another session shows within it. An `O_APPEND` write appends
   at the host's end of the file.
 - `flock` and `fcntl` locks hold only within one VM, and memory maps are not
-  shared across VMs.
+  shared across VMs. A SQLite database or a lock file in the home is not
+  protected against the member's other sessions, as it is under Docker.
+- A VM can hold at most 128 requests in flight, each no larger than one
+  1 MiB write, and the unit's `MemoryMax` bounds the rest.
 
 ## Forwarded sockets
 
@@ -206,7 +209,10 @@ I/O wait from `/proc/stat`, memory in use as `MemTotal - MemAvailable`, the
 kernel's OOM kill counter, and the session cgroup's task count.
 
 A restored VM's clock stopped while it was saved. The server calls
-`SetClock`, through `guest.Client.SyncClock`, after every restore.
+`SetClock`, through `guest.Client.SyncClock`, after every restore. Before a
+save it calls `Sync`, which writes every filesystem's dirty data to its
+disk, so the cache disk of a saved VM that is deleted without a restore
+holds what the session wrote.
 
 ## Versions
 

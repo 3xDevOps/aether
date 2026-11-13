@@ -213,3 +213,33 @@ func TestServeAnswersOverASocket(t *testing.T) {
 		t.Errorf("lookup over the socket = %+v, %v", r, err)
 	}
 }
+
+func TestServerSetsAttributesOfTheOpenFileNotItsPath(t *testing.T) {
+	dir, s := fixture(t)
+	ctx := t.Context()
+	h := handle(5, unix.O_RDWR)
+	if r, _ := s.Open(ctx, &guestpb.HomeOpenRequest{Path: "0/a.txt", Handle: h}); r.GetErrno() != 0 {
+		t.Fatalf("open = %v", syscall.Errno(r.GetErrno()))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "home/b.txt"), []byte("a newer, longer file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "home/b.txt"), filepath.Join(dir, "home/a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	size, mode := uint64(2), uint32(0o640)
+	r, _ := s.Setattr(ctx, &guestpb.HomeSetattrRequest{Path: ".go-fuse.1/deleted", Handle: h, Size: &size, Mode: &mode})
+	if r.GetErrno() != 0 || r.GetAttr().GetSize() != 2 || r.GetAttr().GetMode()&0o777 != 0o640 {
+		t.Errorf("setattr through the open handle = %+v", r)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "home/a.txt")); string(data) != "a newer, longer file" {
+		t.Errorf("the file renamed over the open one was changed: %q", data)
+	}
+	ro := handle(6, unix.O_RDONLY)
+	if r, _ := s.Open(ctx, &guestpb.HomeOpenRequest{Path: "2/a.txt", Handle: ro}); r.GetErrno() != 0 {
+		t.Fatalf("read-only open = %v", syscall.Errno(r.GetErrno()))
+	}
+	if r, _ := s.Setattr(ctx, &guestpb.HomeSetattrRequest{Handle: ro, Mode: &mode}); syscall.Errno(r.GetErrno()) != unix.EROFS {
+		t.Errorf("setattr through a handle of a read-only share = %v, want EROFS", syscall.Errno(r.GetErrno()))
+	}
+}

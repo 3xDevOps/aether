@@ -97,7 +97,7 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 	if call.name != "aether-vm-run-a.service" || call.argv[1] != MonitorCommand || call.argv[2] != h.engine.dir("run-a") {
 		t.Fatalf("unit start = %+v", call)
 	}
-	for _, want := range []string{"PrivateMounts=yes", "CPUQuota=150%", "OOMScoreAdjust=500"} {
+	for _, want := range []string{"PrivateMounts=yes", "CPUQuota=150%", "OOMScoreAdjust=500", "MemoryMax=2560M"} {
 		if !slices.Contains(call.properties, want) {
 			t.Errorf("properties %v lack %s", call.properties, want)
 		}
@@ -179,22 +179,35 @@ func TestStartFailsWithTheLogWhenTheVMDiesWhileBooting(t *testing.T) {
 	}
 }
 
-func TestAStoppedOrSavedVMPromotesItsCache(t *testing.T) {
+func TestACacheIsPromotedOnlyWhenItsVMStopsForGood(t *testing.T) {
 	h := newHarness(t)
 	h.images.promoted = make(chan string, 4)
 	cache := runtime.Mount{HostPath: "/data/cache/m1/runs", ContainerPath: "/aether-cache", Kind: runtime.MountCache}
-	spec := sessionSpec("run-a")
-	spec.Mounts = []runtime.Mount{cache}
-	h.createStarted("run-a", spec)
+	want := cachePool(cache) + " cache.qcow2.snapshot"
+	promoted := func() string {
+		h.engine.promotions.Wait()
+		select {
+		case got := <-h.images.promoted:
+			return got
+		default:
+			return ""
+		}
+	}
+	session := func(key string, m runtime.Mount) {
+		spec := sessionSpec(key)
+		spec.Mounts = []runtime.Mount{m}
+		h.createStarted(key, spec)
+	}
+
+	session("run-a", cache)
 	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "cache.qcow2,image_type=qcow2,id=cache,serial=cache") {
 		t.Errorf("launch args lack the cache disk:\n%s", args)
 	}
 	if err := h.engine.save(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
-	want := cachePool(cache) + " cache.qcow2.snapshot"
-	if got := <-h.images.promoted; got != want {
-		t.Errorf("promoted %q, want %q", got, want)
+	if got := promoted(); got != "" {
+		t.Errorf("a save promoted %q", got)
 	}
 	if err := h.engine.restore(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
@@ -202,27 +215,73 @@ func TestAStoppedOrSavedVMPromotesItsCache(t *testing.T) {
 	if err := h.engine.stop(t.Context(), "run-a", time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-h.images.promoted; got != want {
-		t.Errorf("promoted %q after stop, want %q", got, want)
+	if got := promoted(); got != want {
+		t.Errorf("promoted %q after a clean stop, want %q", got, want)
 	}
 	if err := h.engine.destroy(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
+	if got := promoted(); got != "" {
+		t.Errorf("a deletion promoted the stopped VM's cache again: %q", got)
+	}
 
-	isolated := sessionSpec("run-i")
-	cache.Overlay = "/scratch/run-i/cache"
-	isolated.Mounts = []runtime.Mount{cache}
-	h.createStarted("run-i", isolated)
+	session("run-b", cache)
+	if err := h.engine.save(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.destroy(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	if got := promoted(); got != want {
+		t.Errorf("promoted %q when a saved VM was deleted, want %q", got, want)
+	}
+
+	session("run-c", cache)
+	h.guest("run-c").syncErr = errors.New("sync refused")
+	if err := h.engine.save(t.Context(), "run-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.stop(t.Context(), "run-c", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	session("run-d", cache)
+	h.guest("run-d").unresponsive = true
+	if err := h.engine.stop(t.Context(), "run-d", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	session("run-e", cache)
+	if err := h.engine.destroy(t.Context(), "run-e"); err != nil {
+		t.Fatal(err)
+	}
+	isolated := cache
+	isolated.Overlay = "/scratch/run-i/cache"
+	session("run-i", isolated)
 	if err := h.engine.stop(t.Context(), "run-i", time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.engine.destroy(t.Context(), "run-i"); err != nil {
+	if got := promoted(); got != "" {
+		t.Errorf("promoted %q from an unsynced, killed or Isolated cache", got)
+	}
+}
+
+func TestRestoreServesTheSharesTheGuestMountedAtBoot(t *testing.T) {
+	h := newHarness(t)
+	memberHome, coord := t.TempDir(), t.TempDir()
+	spec := sessionSpec("run-a")
+	spec.Mounts = []runtime.Mount{{HostPath: memberHome, ContainerPath: "/root"}, {HostPath: coord, ContainerPath: "/run/aether", ReadOnly: true}}
+	h.createStarted("run-a", spec)
+	booted := h.units.last().launch.Home
+	if err := h.engine.save(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case got := <-h.images.promoted:
-		t.Errorf("an extra or Isolated cache was promoted: %q", got)
-	default:
+	if err := os.RemoveAll(memberHome); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.restore(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.units.last().launch.Home; got == nil || !slices.Equal(got.Shares, booted.Shares) {
+		t.Errorf("restore serves %+v, the guest mounted %+v", got, booted)
 	}
 }
 

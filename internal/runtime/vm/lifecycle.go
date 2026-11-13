@@ -75,7 +75,11 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 			return fmt.Errorf("vm runtime: discard saved state: %w", err)
 		}
 		rec.Saved = false
-		return e.store(rec)
+		if err = e.store(rec); err != nil {
+			return err
+		}
+		e.promoteCache(ctx, rec)
+		return nil
 	}
 	api := newCHAPI(e.path(key, apiSocket))
 	if state, stateErr := api.state(ctx); stateErr == nil && state == "Paused" {
@@ -129,14 +133,21 @@ func (e *engine) finish(ctx context.Context, rec *record, code int) error {
 	if err := e.store(rec); err != nil {
 		return err
 	}
-	if err := e.powerOff(ctx, rec); err != nil {
+	clean, err := e.powerOff(ctx, rec)
+	if err != nil || !clean {
+		return err
+	}
+	rec.CacheSynced = true
+	if err = e.store(rec); err != nil {
 		return err
 	}
 	e.promoteCache(ctx, rec)
 	return nil
 }
 
-func (e *engine) powerOff(ctx context.Context, rec *record) error {
+// powerOff reports a VM that powered itself off, which flushes its disks,
+// as clean; one the unit's stop had to kill is not.
+func (e *engine) powerOff(ctx context.Context, rec *record) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), powerOffTimeout)
 	defer cancel()
 	h, err := e.helper(rec.Key)
@@ -147,16 +158,16 @@ func (e *engine) powerOff(ctx context.Context, rec *record) error {
 	}
 	e.forgetHelper(rec.Key)
 	if err != nil {
-		return e.units.Stop(context.WithoutCancel(ctx), unitName(rec.Key))
+		return false, e.units.Stop(context.WithoutCancel(ctx), unitName(rec.Key))
 	}
 	for {
 		up, err := e.running(ctx, rec.Key)
 		if err == nil && !up {
-			return nil
+			return true, nil
 		}
 		select {
 		case <-ctx.Done():
-			return e.units.Stop(context.WithoutCancel(ctx), unitName(rec.Key))
+			return false, e.units.Stop(context.WithoutCancel(ctx), unitName(rec.Key))
 		case <-time.After(waitPoll):
 		}
 	}
@@ -297,11 +308,7 @@ func (e *engine) lost(ctx context.Context, key string) (int, error) {
 	}
 	rec.Exited, rec.ExitCode = true, lostExitCode
 	e.forgetHelper(key)
-	if err = e.store(rec); err != nil {
-		return 0, err
-	}
-	e.promoteCache(ctx, rec)
-	return lostExitCode, nil
+	return lostExitCode, e.store(rec)
 }
 
 // destroy removes the VM and every file it had; a missing VM is not an
@@ -316,13 +323,17 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 		return nil
 	}
 	e.forgetHelper(key)
-	if err := e.units.Stop(ctx, unitName(key)); err != nil {
+	up, err := e.running(ctx, key)
+	if err != nil {
 		return err
 	}
-	if rec, err := e.load(key); err == nil {
+	if err = e.units.Stop(ctx, unitName(key)); err != nil {
+		return err
+	}
+	if rec, loadErr := e.load(key); loadErr == nil && !up {
 		e.promoteCache(ctx, rec)
 	}
-	if err := os.RemoveAll(e.dir(key)); err != nil {
+	if err = os.RemoveAll(e.dir(key)); err != nil {
 		return fmt.Errorf("vm runtime: remove VM %s: %w", key, err)
 	}
 	e.mu.Lock()
@@ -394,7 +405,7 @@ func (e *engine) find(key string) (runtime.ID, error) {
 	return runtime.ID(idPrefix + key), nil
 }
 
-// initPID is Cloud Hypervisor's PID, whose cgroup is the VM's unit.
+// initPID is the VM monitor's PID, whose cgroup is the VM's unit.
 func (e *engine) initPID(ctx context.Context, key string) (int, error) {
 	if _, err := e.load(key); err != nil {
 		return 0, err

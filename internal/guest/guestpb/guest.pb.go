@@ -1394,6 +1394,78 @@ func (*PowerOffReply) Descriptor() ([]byte, []int) {
 	return file_guest_proto_rawDescGZIP(), []int{24}
 }
 
+type SyncRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncRequest) Reset() {
+	*x = SyncRequest{}
+	mi := &file_guest_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncRequest) ProtoMessage() {}
+
+func (x *SyncRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
+func (*SyncRequest) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{25}
+}
+
+type SyncReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncReply) Reset() {
+	*x = SyncReply{}
+	mi := &file_guest_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncReply) ProtoMessage() {}
+
+func (x *SyncReply) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncReply.ProtoReflect.Descriptor instead.
+func (*SyncReply) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{26}
+}
+
 var File_guest_proto protoreflect.FileDescriptor
 
 const file_guest_proto_rawDesc = "" +
@@ -1479,11 +1551,13 @@ const file_guest_proto_rawDesc = "" +
 	"unix_nanos\x18\x01 \x01(\x03R\tunixNanos\"\x0f\n" +
 	"\rSetClockReply\"\x11\n" +
 	"\x0fPowerOffRequest\"\x0f\n" +
-	"\rPowerOffReply*F\n" +
+	"\rPowerOffReply\"\r\n" +
+	"\vSyncRequest\"\v\n" +
+	"\tSyncReply*F\n" +
 	"\x06Stream\x12\x16\n" +
 	"\x12STREAM_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTREAM_STDOUT\x10\x01\x12\x11\n" +
-	"\rSTREAM_STDERR\x10\x022\x90\x06\n" +
+	"\rSTREAM_STDERR\x10\x022\xd2\x06\n" +
 	"\x05Guest\x12@\n" +
 	"\x04Info\x12\x1c.aether.guest.v1.InfoRequest\x1a\x1a.aether.guest.v1.InfoReply\x12@\n" +
 	"\x04Boot\x12\x1c.aether.guest.v1.BootRequest\x1a\x1a.aether.guest.v1.BootReply\x12C\n" +
@@ -1495,7 +1569,8 @@ const file_guest_proto_rawDesc = "" +
 	"\x06Status\x12\x1e.aether.guest.v1.StatusRequest\x1a\x1c.aether.guest.v1.StatusReply\x12C\n" +
 	"\x05Stats\x12\x1d.aether.guest.v1.StatsRequest\x1a\x1b.aether.guest.v1.StatsReply\x12L\n" +
 	"\bSetClock\x12 .aether.guest.v1.SetClockRequest\x1a\x1e.aether.guest.v1.SetClockReply\x12L\n" +
-	"\bPowerOff\x12 .aether.guest.v1.PowerOffRequest\x1a\x1e.aether.guest.v1.PowerOffReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
+	"\bPowerOff\x12 .aether.guest.v1.PowerOffRequest\x1a\x1e.aether.guest.v1.PowerOffReply\x12@\n" +
+	"\x04Sync\x12\x1c.aether.guest.v1.SyncRequest\x1a\x1a.aether.guest.v1.SyncReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
 
 var (
 	file_guest_proto_rawDescOnce sync.Once
@@ -1510,7 +1585,7 @@ func file_guest_proto_rawDescGZIP() []byte {
 }
 
 var file_guest_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_guest_proto_goTypes = []any{
 	(Stream)(0),             // 0: aether.guest.v1.Stream
 	(*InfoRequest)(nil),     // 1: aether.guest.v1.InfoRequest
@@ -1538,6 +1613,8 @@ var file_guest_proto_goTypes = []any{
 	(*SetClockReply)(nil),   // 23: aether.guest.v1.SetClockReply
 	(*PowerOffRequest)(nil), // 24: aether.guest.v1.PowerOffRequest
 	(*PowerOffReply)(nil),   // 25: aether.guest.v1.PowerOffReply
+	(*SyncRequest)(nil),     // 26: aether.guest.v1.SyncRequest
+	(*SyncReply)(nil),       // 27: aether.guest.v1.SyncReply
 }
 var file_guest_proto_depIdxs = []int32{
 	3,  // 0: aether.guest.v1.Process.terminal:type_name -> aether.guest.v1.Size
@@ -1556,19 +1633,21 @@ var file_guest_proto_depIdxs = []int32{
 	20, // 13: aether.guest.v1.Guest.Stats:input_type -> aether.guest.v1.StatsRequest
 	22, // 14: aether.guest.v1.Guest.SetClock:input_type -> aether.guest.v1.SetClockRequest
 	24, // 15: aether.guest.v1.Guest.PowerOff:input_type -> aether.guest.v1.PowerOffRequest
-	2,  // 16: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
-	6,  // 17: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
-	8,  // 18: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
-	11, // 19: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
-	13, // 20: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
-	15, // 21: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
-	17, // 22: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
-	19, // 23: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
-	21, // 24: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
-	23, // 25: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
-	25, // 26: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
-	16, // [16:27] is the sub-list for method output_type
-	5,  // [5:16] is the sub-list for method input_type
+	26, // 16: aether.guest.v1.Guest.Sync:input_type -> aether.guest.v1.SyncRequest
+	2,  // 17: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
+	6,  // 18: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
+	8,  // 19: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
+	11, // 20: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
+	13, // 21: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
+	15, // 22: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
+	17, // 23: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
+	19, // 24: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
+	21, // 25: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
+	23, // 26: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
+	25, // 27: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
+	27, // 28: aether.guest.v1.Guest.Sync:output_type -> aether.guest.v1.SyncReply
+	17, // [17:29] is the sub-list for method output_type
+	5,  // [5:17] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -1585,7 +1664,7 @@ func file_guest_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_guest_proto_rawDesc), len(file_guest_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

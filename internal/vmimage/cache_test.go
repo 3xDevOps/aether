@@ -25,8 +25,12 @@ func TestCachePoolPromotesAStoppedVMsCache(t *testing.T) {
 	if err != nil || disk.Format != FormatQcow2 {
 		t.Fatalf("new cache disk %+v over %+v, %v", disk, first, err)
 	}
-	if again, againErr := s.newestCache(t.Context(), "pool1"); againErr != nil || again.Path != first.Path {
-		t.Errorf("a second session got %+v, %v; want the same empty cache %+v", again, againErr, first)
+	second, err := s.NewCacheDisk(t.Context(), "pool1", filepath.Join(vm, "second.qcow2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin, pinErr := backingFile(second.Path); pinErr != nil || !sameFile(pin, first.Path) {
+		t.Errorf("a second session's cache backs onto %q, %v; want the same empty cache %s", pin, pinErr, first.Path)
 	}
 	snapshot, err := s.SnapshotCache(t.Context(), disk.Path)
 	if err != nil {

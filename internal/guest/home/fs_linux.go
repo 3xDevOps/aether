@@ -46,7 +46,7 @@ func Mount(dir string, dial func(context.Context) (net.Conn, error)) error {
 			MinConnectTimeout: 5 * time.Second,
 		}),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 10 * time.Second, Timeout: 5 * time.Second, PermitWithoutStream: true}),
-		grpc.WithDefaultCallOptions(grpc.WaitForReady(true), grpc.MaxCallRecvMsgSize(maxMessage), grpc.MaxCallSendMsgSize(maxMessage)),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true), grpc.MaxCallRecvMsgSize(maxMessage), grpc.MaxCallSendMsgSize(maxRequest)),
 	)
 	if err != nil {
 		return err

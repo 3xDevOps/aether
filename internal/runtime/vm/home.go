@@ -57,13 +57,16 @@ func cachePool(m runtime.Mount) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// promoteCache makes the cache a stopped VM ran on its pool's newest, so the
-// member's next session starts from it. It holds the key's lock only for a
-// copy, a clone where the filesystem can, and converts in the background.
-// An Isolated session's cache, an overlay in a container, never goes back.
+// promoteCache makes the cache of a VM that stopped for good, by a clean
+// stop or a deletion while stopped or saved, its pool's newest, so the
+// member's next session starts from it. A save alone never promotes, and a
+// disk that may lack the guest's last writes never does. It holds the key's
+// lock only for a copy, a clone where the filesystem can, and converts in
+// the background. An Isolated session's cache, an overlay in a container,
+// never goes back.
 func (e *engine) promoteCache(ctx context.Context, rec *record) {
 	m, ok := cacheMount(rec.Mounts)
-	if !ok || !rec.CacheRan || m.Overlay != "" {
+	if !ok || !rec.CacheRan || !rec.CacheSynced || m.Overlay != "" {
 		return
 	}
 	snapshot, err := e.cfg.Images.SnapshotCache(ctx, rec.Cache.Path)
@@ -75,11 +78,11 @@ func (e *engine) promoteCache(ctx context.Context, rec *record) {
 	if err := e.store(rec); err != nil {
 		slog.Warn("vm runtime: record the cache promotion", "vm", rec.Key, "error", err)
 	}
-	go func() {
+	e.promotions.Go(func() {
 		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), promoteTimeout)
 		defer cancel()
 		if err := e.cfg.Images.PromoteCache(bg, cachePool(m), snapshot); err != nil {
 			slog.Warn("vm runtime: promote the cache of a stopped VM", "vm", rec.Key, "error", err)
 		}
-	}()
+	})
 }

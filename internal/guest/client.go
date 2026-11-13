@@ -297,6 +297,16 @@ func (c *Client) SyncClock(ctx context.Context, now time.Time) error {
 	return nil
 }
 
+// Sync writes the guest's dirty data to the VM's disks.
+func (c *Client) Sync(ctx context.Context) error {
+	if _, err := retry(ctx, func() (*guestpb.SyncReply, error) {
+		return c.api.Sync(ctx, &guestpb.SyncRequest{})
+	}); err != nil {
+		return fmt.Errorf("guest: sync: %w", err)
+	}
+	return nil
+}
+
 // PowerOff flushes the VM's disks and powers it off. It returns once the
 // disks are flushed.
 func (c *Client) PowerOff(ctx context.Context) error {

@@ -94,7 +94,20 @@ func TestKVMHomeIsLiveAcrossVMsAndASave(t *testing.T) {
 	login := runtime.Mount{HostPath: owner, Subpath: ".claude/.credentials.json", ContainerPath: "/root/.claude/.credentials.json"}
 	loginInode := inode(t, filepath.Join(owner, login.Subpath))
 
-	took := kvmUserSession(t, e, "run-vmhome-a", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login)
+	// A directory of nothing but sockets is forwarded, not shared; one
+	// that loses its socket before a restore must not shift the shares.
+	signing, coord := filepath.Join(src, "signing"), filepath.Join(src, "coord")
+	writeHome(t, coord, map[string]string{"instructions.md": "coord-instructions"})
+	if err := os.MkdirAll(signing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := net.Listen("unix", filepath.Join(signing, "agent.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	took := kvmUserSession(t, e, "run-vmhome-a", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login,
+		runtime.Mount{HostPath: signing, ContainerPath: "/run/aether-signing", ReadOnly: true},
+		runtime.Mount{HostPath: coord, ContainerPath: "/run/aether", ReadOnly: true})
 	t.Logf("create and start with the home took %s", took)
 	kvmUserSession(t, e, "run-vmhome-b", runtime.Mount{HostPath: owner, ContainerPath: "/root"}, login)
 	kvmUserSession(t, e, "run-vmhome-c", runtime.Mount{HostPath: recipient, ContainerPath: "/root"}, login)
@@ -125,6 +138,7 @@ func TestKVMHomeIsLiveAcrossVMsAndASave(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("save with the home mounted took %s", time.Since(start))
+	_ = agent.Close()
 	size := func() int64 {
 		info, err := os.Stat(filepath.Join(owner, "held.log"))
 		if err != nil {
@@ -146,7 +160,7 @@ func TestKVMHomeIsLiveAcrossVMsAndASave(t *testing.T) {
 	if size() <= saved {
 		t.Error("the process that held a home file open stopped writing after the restore")
 	}
-	if out, code := vmRun(t, e, "run-vmhome-a", "readlink /proc/"+pid+"/cwd && ls /proc/"+pid+"/cwd/ >/dev/null && cat /root/notes.txt && echo again >> /root/notes.txt"); code != 0 || !strings.Contains(out, "/root/work\nhello") {
+	if out, code := vmRun(t, e, "run-vmhome-a", "readlink /proc/"+pid+"/cwd && ls /proc/"+pid+"/cwd/ >/dev/null && cat /root/notes.txt /run/aether/instructions.md && echo again >> /root/notes.txt"); code != 0 || !strings.Contains(out, "/root/work\nhello\ncoord-instructions") {
 		t.Errorf("the home after the restore: %d %q", code, out)
 	}
 	eventually(t, e, "run-vmhome-b", "cat /root/notes.txt", "again")
@@ -276,6 +290,29 @@ func TestKVMCacheStartsFromTheMembersLastSession(t *testing.T) {
 	}
 
 	promoted := newest()
+	kvmUserSession(t, e, "run-vmcache-s", pool)
+	vmRun(t, e, "run-vmcache-s", "head -c 1048576 /dev/urandom > /aether-cache/saved && echo marker > /aether-cache/saved-marker")
+	if err := e.save(t.Context(), "run-vmcache-s"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	if newest() != promoted {
+		t.Fatal("a save promoted the cache")
+	}
+	if err := e.destroy(t.Context(), "run-vmcache-s"); err != nil {
+		t.Fatal(err)
+	}
+	for start = time.Now(); newest() == promoted; time.Sleep(100 * time.Millisecond) {
+		if time.Since(start) > 2*time.Minute {
+			t.Fatal("deleting a saved session never promoted its cache")
+		}
+	}
+	kvmUserSession(t, e, "run-vmcache-c", pool)
+	if out, _ := vmRun(t, e, "run-vmcache-c", "wc -c < /aether-cache/saved; cat /aether-cache/saved-marker"); !strings.Contains(out, "1048576\nmarker") {
+		t.Errorf("the cache of a session deleted while saved lacks what it wrote just before the save: %q", out)
+	}
+
+	promoted = newest()
 	isolated := pool
 	isolated.Overlay = filepath.Join(src, "overlay")
 	kvmUserSession(t, e, "run-vmcache-i", isolated)

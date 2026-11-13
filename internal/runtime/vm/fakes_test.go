@@ -318,6 +318,7 @@ type fakeHelper struct {
 	clockErr error
 	// bootHangs makes Boot wait for its context, as a dead guest does.
 	bootHangs bool
+	syncErr   error
 	// unresponsive makes calls fail as a guest that stopped answering does.
 	unresponsive bool
 	stats        guest.Stats
@@ -432,6 +433,13 @@ func (g *fakeHelper) PowerOff(ctx context.Context) error {
 		return context.DeadlineExceeded
 	}
 	return g.units.Stop(ctx, unitName(g.key))
+}
+
+func (g *fakeHelper) Sync(context.Context) error {
+	if g.unresponsive {
+		return context.DeadlineExceeded
+	}
+	return g.syncErr
 }
 
 func (g *fakeHelper) Close() error { return nil }

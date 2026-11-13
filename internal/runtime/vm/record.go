@@ -72,8 +72,11 @@ type record struct {
 	// as exited until Restore.
 	Saved bool `json:"saved,omitempty"`
 	// CacheRan means the VM ran on its cache disk since the disk last
-	// became its pool's newest cache.
-	CacheRan bool `json:"cache_ran,omitempty"`
+	// became its pool's newest cache. CacheSynced means the disk holds every
+	// write the guest made: the VM powered off cleanly, or was saved after
+	// the guest synced.
+	CacheRan    bool `json:"cache_ran,omitempty"`
+	CacheSynced bool `json:"cache_synced,omitempty"`
 	// ExitCode is the last boot's until the next boot exits.
 	Exited   bool `json:"exited,omitempty"`
 	ExitCode int  `json:"exit_code,omitempty"`

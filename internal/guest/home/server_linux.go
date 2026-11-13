@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/fnv"
+	"io"
 	"net"
 	"os"
 	"path"
@@ -20,15 +21,21 @@ import (
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
 )
 
+// Every bound keeps a VM, any process of which can call the service, from
+// growing the host's memory: requests are no larger than one write, at most
+// maxStreams are in flight, and a listing is read a batch at a time.
 const (
 	// maxHandles bounds the files one VM keeps open on the host.
 	maxHandles = 16384
 	// maxIO bounds one read or write; the kernel sends at most 1 MiB.
-	maxIO = 1 << 20
-	// maxMessage bounds every message either side sends; a directory
-	// listing past maxListing fails with EOVERFLOW.
-	maxMessage = 16 << 20
-	maxListing = 12 << 20
+	maxIO      = 1 << 20
+	maxRequest = maxIO + 64<<10
+	maxStreams = 128
+	// maxMessage bounds a reply; a directory listing past maxListing fails
+	// with EOVERFLOW.
+	maxMessage   = 16 << 20
+	maxListing   = 12 << 20
+	readdirBatch = 1024
 )
 
 // Serve answers the service for one VM on l until l is closed. It runs as
@@ -40,7 +47,7 @@ func Serve(l net.Listener, cfg Config) error {
 	s := newServer(cfg)
 	defer s.close()
 	g := grpc.NewServer(
-		grpc.MaxRecvMsgSize(maxMessage), grpc.MaxSendMsgSize(maxMessage),
+		grpc.MaxRecvMsgSize(maxRequest), grpc.MaxSendMsgSize(maxMessage), grpc.MaxConcurrentStreams(maxStreams),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 5 * time.Second, PermitWithoutStream: true}),
 	)
 	guestpb.RegisterHomeServer(g, s)
@@ -54,7 +61,7 @@ type server struct {
 	started  time.Time
 
 	mu      sync.Mutex
-	handles map[uint64]*os.File
+	handles map[uint64]*openFile
 }
 
 // share holds its source open from the start, as a bind mount would. A
@@ -66,7 +73,7 @@ type share struct {
 }
 
 func newServer(cfg Config) *server {
-	s := &server{uid: int(cfg.UID), gid: int(cfg.GID), started: time.Now(), handles: map[uint64]*os.File{}}
+	s := &server{uid: int(cfg.UID), gid: int(cfg.GID), started: time.Now(), handles: map[uint64]*openFile{}}
 	for _, sh := range cfg.Shares {
 		fd, err := unix.Open(sh.Source, unix.O_PATH|unix.O_CLOEXEC, 0)
 		s.shares = append(s.shares, share{Share: sh, fd: fd, errno: errnoOf(err)})
@@ -303,6 +310,9 @@ func (s *server) writable(e *entry) syscall.Errno {
 }
 
 func (s *server) Setattr(_ context.Context, req *guestpb.HomeSetattrRequest) (*guestpb.HomeEntryReply, error) {
+	if f := s.known(req.GetHandle()); f != nil {
+		return s.entryReply(f.setattr(req)), nil
+	}
 	if req.GetPath() == "" {
 		return &guestpb.HomeEntryReply{Errno: int32(unix.EPERM)}, nil
 	}
@@ -314,7 +324,7 @@ func (s *server) Setattr(_ context.Context, req *guestpb.HomeSetattrRequest) (*g
 	if errno = s.writable(e); errno != 0 {
 		return &guestpb.HomeEntryReply{Errno: int32(errno)}, nil
 	}
-	return s.entryReply(e.statAfter(s.setattr(e, req))), nil
+	return s.entryReply(e.statAfter(e.setattr(req))), nil
 }
 
 // statAfter returns e's attributes after an operation that ended in errno.
@@ -325,29 +335,10 @@ func (e *entry) statAfter(errno syscall.Errno) (unix.Statx_t, syscall.Errno) {
 	return e.stat()
 }
 
-func (s *server) setattr(e *entry, req *guestpb.HomeSetattrRequest) syscall.Errno {
-	obj, errno := e.object()
-	if errno != 0 {
-		return errno
-	}
-	defer func() { _ = unix.Close(obj) }()
-	st, errno := statFD(obj)
-	if errno != 0 {
-		return errno
-	}
-	link := st.Mode&unix.S_IFMT == unix.S_IFLNK
-	if req.Size != nil {
-		if errno = s.truncate(obj, req); errno != 0 {
-			return errno
-		}
-	}
-	if req.Mode != nil && !link {
-		if err := unix.Fchmodat(unix.AT_FDCWD, procPath(obj), req.GetMode()&0o1777, 0); err != nil {
-			return errnoOf(err)
-		}
-	}
+// times is a setattr's new access and modification times, nil for none.
+func times(req *guestpb.HomeSetattrRequest) []unix.Timespec {
 	if req.AtimeNs == nil && req.MtimeNs == nil && !req.GetAtimeNow() && !req.GetMtimeNow() {
-		return 0
+		return nil
 	}
 	ts := []unix.Timespec{{Nsec: unix.UTIME_OMIT}, {Nsec: unix.UTIME_OMIT}}
 	for i, set := range []struct {
@@ -361,26 +352,44 @@ func (s *server) setattr(e *entry, req *guestpb.HomeSetattrRequest) syscall.Errn
 			ts[i] = unix.NsecToTimespec(*set.value)
 		}
 	}
-	if link {
-		return errnoOf(unix.UtimesNanoAt(e.dir, e.name, ts, unix.AT_SYMLINK_NOFOLLOW))
-	}
-	return errnoOf(unix.UtimesNanoAt(unix.AT_FDCWD, procPath(obj), ts, 0))
+	return ts
 }
 
-func (s *server) truncate(obj int, req *guestpb.HomeSetattrRequest) syscall.Errno {
-	if h := req.GetHandle(); h != nil && h.GetFlags()&unix.O_ACCMODE != unix.O_RDONLY {
-		f, errno := s.handle(req.GetPath(), h)
-		if errno != 0 {
-			return errno
-		}
-		return withFD(f, func(fd int) syscall.Errno { return errnoOf(unix.Ftruncate(fd, int64(req.GetSize()))) })
-	}
-	f, errno := reopen(obj, unix.O_WRONLY|unix.O_NONBLOCK)
+func (e *entry) setattr(req *guestpb.HomeSetattrRequest) syscall.Errno {
+	obj, errno := e.object()
 	if errno != 0 {
 		return errno
 	}
-	defer func() { _ = f.Close() }()
-	return errnoOf(f.Truncate(int64(req.GetSize())))
+	defer func() { _ = unix.Close(obj) }()
+	st, errno := statFD(obj)
+	if errno != 0 {
+		return errno
+	}
+	link := st.Mode&unix.S_IFMT == unix.S_IFLNK
+	if req.Size != nil {
+		f, errno := reopen(obj, unix.O_WRONLY|unix.O_NONBLOCK)
+		if errno != 0 {
+			return errno
+		}
+		err := f.Truncate(int64(req.GetSize()))
+		_ = f.Close()
+		if err != nil {
+			return errnoOf(err)
+		}
+	}
+	if req.Mode != nil && !link {
+		if err := unix.Fchmodat(unix.AT_FDCWD, procPath(obj), req.GetMode()&0o1777, 0); err != nil {
+			return errnoOf(err)
+		}
+	}
+	ts := times(req)
+	switch {
+	case ts == nil:
+		return 0
+	case link:
+		return errnoOf(unix.UtimesNanoAt(e.dir, e.name, ts, unix.AT_SYMLINK_NOFOLLOW))
+	}
+	return errnoOf(unix.UtimesNanoAt(unix.AT_FDCWD, procPath(obj), ts, 0))
 }
 
 func (s *server) Readlink(_ context.Context, req *guestpb.HomeNodeRequest) (*guestpb.HomeReadlinkReply, error) {
@@ -427,29 +436,33 @@ func (s *server) Readdir(_ context.Context, req *guestpb.HomeNodeRequest) (*gues
 		return &guestpb.HomeReaddirReply{Errno: int32(errno)}, nil
 	}
 	defer func() { _ = dir.Close() }()
-	names, err := dir.Readdirnames(-1)
-	if err != nil {
-		return &guestpb.HomeReaddirReply{Errno: int32(errnoOf(err))}, nil
-	}
 	reply := &guestpb.HomeReaddirReply{}
 	size := 0
-	errno = withFD(dir, func(fd int) syscall.Errno {
-		for _, name := range names {
-			var st unix.Statx_t
-			if err := unix.Statx(fd, name, unix.AT_SYMLINK_NOFOLLOW, unix.STATX_TYPE|unix.STATX_INO|unix.STATX_BTIME, &st); err != nil {
-				continue
-			}
-			if size += len(name) + 32; size > maxListing {
-				return unix.EOVERFLOW
-			}
-			reply.Entries = append(reply.Entries, &guestpb.HomeDirEntry{Name: name, Mode: uint32(st.Mode) & unix.S_IFMT, Node: nodeID(&st)})
+	for {
+		names, err := dir.Readdirnames(readdirBatch)
+		if errors.Is(err, io.EOF) {
+			return reply, nil
 		}
-		return 0
-	})
-	if errno != 0 {
-		return &guestpb.HomeReaddirReply{Errno: int32(errno)}, nil
+		if err != nil {
+			return &guestpb.HomeReaddirReply{Errno: int32(errnoOf(err))}, nil
+		}
+		errno = withFD(dir, func(fd int) syscall.Errno {
+			for _, name := range names {
+				var st unix.Statx_t
+				if err := unix.Statx(fd, name, unix.AT_SYMLINK_NOFOLLOW, unix.STATX_TYPE|unix.STATX_INO|unix.STATX_BTIME, &st); err != nil {
+					continue
+				}
+				if size += len(name) + 32; size > maxListing {
+					return unix.EOVERFLOW
+				}
+				reply.Entries = append(reply.Entries, &guestpb.HomeDirEntry{Name: name, Mode: uint32(st.Mode) & unix.S_IFMT, Node: nodeID(&st)})
+			}
+			return 0
+		})
+		if errno != 0 {
+			return &guestpb.HomeReaddirReply{Errno: int32(errno)}, nil
+		}
 	}
-	return reply, nil
 }
 
 // created gives a new file the configured owner and the mode the guest

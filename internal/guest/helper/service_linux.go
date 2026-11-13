@@ -194,6 +194,11 @@ func (s *service) SetClock(_ context.Context, req *guestpb.SetClockRequest) (*gu
 	return &guestpb.SetClockReply{}, nil
 }
 
+func (s *service) Sync(context.Context, *guestpb.SyncRequest) (*guestpb.SyncReply, error) {
+	syscall.Sync()
+	return &guestpb.SyncReply{}, nil
+}
+
 func (s *service) PowerOff(context.Context, *guestpb.PowerOffRequest) (*guestpb.PowerOffReply, error) {
 	if s.powerOff == nil {
 		return nil, status.Error(codes.FailedPrecondition, "the helper is not PID 1")
