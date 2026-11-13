@@ -283,6 +283,9 @@ func TestASessionsDatabaseDiskOutlivesItsVM(t *testing.T) {
 	if err := h.engine.destroy(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
+	if g := h.guest("run-a"); g.syncs != 1 {
+		t.Errorf("the guest synced %d times before its VM was destroyed, want once", g.syncs)
+	}
 	h.createStarted("run-a", spec)
 	if got, err := os.ReadFile(disk); err != nil || string(got) != "databases" {
 		t.Errorf("the replacement VM's database disk holds %q, %v", got, err)
