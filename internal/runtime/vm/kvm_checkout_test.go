@@ -5,6 +5,7 @@ package vm
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -240,6 +241,22 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 		t.Fatalf("the VM's children ref is %s, want %s", got, childHead)
 	}
 
+	// A paused VM runs no git: calls into it fail at once and reads come
+	// from the recorded snapshot.
+	if err = h.e.pause(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	paused := time.Now()
+	if _, err = h.git.CommitAll(ctx, run, "wip: paused", domain.GitIdentity{}, nil); !errors.Is(err, guest.ErrVMNotRunning) || time.Since(paused) > 5*time.Second {
+		t.Fatalf("commit into a paused VM = %v after %s", err, time.Since(paused))
+	}
+	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{}); err != nil || !patch.Recorded {
+		t.Fatalf("patch of a paused VM = %+v, %v", patch, err)
+	}
+	if err = h.e.resume(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+
 	// Finalize's order: the main process exits, then the last snapshot, the
 	// commit, publication and evidence, then the VM goes.
 	h.sh(t, key, "echo after > after-commit.txt")
@@ -276,6 +293,18 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	patch, err = h.git.RunPatch(t.Context(), run, gitengine.PatchRequest{})
 	if err != nil || !patch.Recorded || !strings.Contains(patch.Text, "after-commit.txt") {
 		t.Fatalf("patch of an ended session = %+v, %v", patch, err)
+	}
+	if read, err = h.git.FilesRead(ctx, ws, run, "", "after-commit.txt", 0); err != nil || string(read.Content) != "after\n" {
+		t.Fatalf("files read of an ended session = %+v, %v", read, err)
+	}
+	if err := h.git.RemoveRunCheckout(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store, "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("removed checkout's history still borrows the workspace's objects: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(h.repos), "checkouts", key, "disk.qcow2")); !os.IsNotExist(err) {
+		t.Fatalf("removed checkout's disk remains: %v", err)
 	}
 }
 
