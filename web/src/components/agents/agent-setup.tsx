@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 import { enhancedSupported, label, loginFor, ready, setupMode, signedOutState } from '@/components/agents/agent-copy'
 import { ModeComparison, type SetupMode } from '@/components/agents/mode-comparison'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -52,6 +52,7 @@ export function AgentSetup({
   /** Pins Enhanced for a caller that cannot work without its adapter, so the mode choice is skipped. */
   requireEnhanced?: boolean
 }) {
+  const commandSource = useRef<HTMLElement>(null)
   const caps = useCapability()
   const [agent, setAgent] = useState(initial)
   const [mode, setMode] = useState<SetupMode>(() => requireEnhanced ? 'acp' : setupMode(initial, useStore.getState().launchDefaults[initial.name]?.mode))
@@ -150,7 +151,7 @@ export function AgentSetup({
         ) : (
           <p className="text-ui text-text">
             {typedInstall
-              ? <>Run <Code>{typedInstall}</Code> in your Environment terminal below.</>
+              ? <>Run <Code ref={commandSource}>{typedInstall}</Code> in your Environment terminal below.</>
               : `Install the ${agent.executable ?? agent.name} executable into ~/.local/bin from your Environment terminal below.`}
           </p>
         )}
@@ -174,7 +175,7 @@ export function AgentSetup({
             <>
               {login && (
                 <p className="text-ui text-text">
-                  Log in once by running <Code>{login.command}</Code> in your environment terminal. {login.hint}
+                  Log in once by running <Code ref={canInstall ? commandSource : undefined}>{login.command}</Code> in your environment terminal. {login.hint}
                 </p>
               )}
               {setupCommand && (
@@ -183,7 +184,7 @@ export function AgentSetup({
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => void copyText(setupCommand, null)}
+                    onClick={() => void copyText(setupCommand, commandSource.current)}
                   >
                     {canInstall ? 'Copy login command' : 'Copy install command'}
                   </Button>
