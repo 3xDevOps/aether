@@ -25,6 +25,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type StageRequest_Purpose int32
+
+const (
+	StageRequest_PURPOSE_UNSPECIFIED StageRequest_Purpose = 0
+	StageRequest_PURPOSE_COMMIT      StageRequest_Purpose = 1
+	StageRequest_PURPOSE_EVIDENCE    StageRequest_Purpose = 2
+)
+
+// Enum value maps for StageRequest_Purpose.
+var (
+	StageRequest_Purpose_name = map[int32]string{
+		0: "PURPOSE_UNSPECIFIED",
+		1: "PURPOSE_COMMIT",
+		2: "PURPOSE_EVIDENCE",
+	}
+	StageRequest_Purpose_value = map[string]int32{
+		"PURPOSE_UNSPECIFIED": 0,
+		"PURPOSE_COMMIT":      1,
+		"PURPOSE_EVIDENCE":    2,
+	}
+)
+
+func (x StageRequest_Purpose) Enum() *StageRequest_Purpose {
+	p := new(StageRequest_Purpose)
+	*p = x
+	return p
+}
+
+func (x StageRequest_Purpose) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StageRequest_Purpose) Descriptor() protoreflect.EnumDescriptor {
+	return file_git_proto_enumTypes[0].Descriptor()
+}
+
+func (StageRequest_Purpose) Type() protoreflect.EnumType {
+	return &file_git_proto_enumTypes[0]
+}
+
+func (x StageRequest_Purpose) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StageRequest_Purpose.Descriptor instead.
+func (StageRequest_Purpose) EnumDescriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{12, 0}
+}
+
 // GitFailure is the status detail of a call that failed for a reason the
 // server's git engine names, such as a snapshot tree the guest no longer
 // holds.
@@ -702,6 +751,733 @@ func (x *HeadReply) GetCommit() string {
 	return ""
 }
 
+type StageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Purpose       StageRequest_Purpose   `protobuf:"varint,2,opt,name=purpose,proto3,enum=aether.guest.v1.StageRequest_Purpose" json:"purpose,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StageRequest) Reset() {
+	*x = StageRequest{}
+	mi := &file_git_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StageRequest) ProtoMessage() {}
+
+func (x *StageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StageRequest.ProtoReflect.Descriptor instead.
+func (*StageRequest) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *StageRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *StageRequest) GetPurpose() StageRequest_Purpose {
+	if x != nil {
+		return x.Purpose
+	}
+	return StageRequest_PURPOSE_UNSPECIFIED
+}
+
+type StageReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tree          string                 `protobuf:"bytes,1,opt,name=tree,proto3" json:"tree,omitempty"`
+	Head          string                 `protobuf:"bytes,2,opt,name=head,proto3" json:"head,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StageReply) Reset() {
+	*x = StageReply{}
+	mi := &file_git_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StageReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StageReply) ProtoMessage() {}
+
+func (x *StageReply) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StageReply.ProtoReflect.Descriptor instead.
+func (*StageReply) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *StageReply) GetTree() string {
+	if x != nil {
+		return x.Tree
+	}
+	return ""
+}
+
+func (x *StageReply) GetHead() string {
+	if x != nil {
+		return x.Head
+	}
+	return ""
+}
+
+type RefUpdate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Ref   string                 `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
+	New   string                 `protobuf:"bytes,2,opt,name=new,proto3" json:"new,omitempty"`
+	// old, when set, must be the ref's value for the update to happen.
+	Old           string `protobuf:"bytes,3,opt,name=old,proto3" json:"old,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefUpdate) Reset() {
+	*x = RefUpdate{}
+	mi := &file_git_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefUpdate) ProtoMessage() {}
+
+func (x *RefUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefUpdate.ProtoReflect.Descriptor instead.
+func (*RefUpdate) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RefUpdate) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *RefUpdate) GetNew() string {
+	if x != nil {
+		return x.New
+	}
+	return ""
+}
+
+func (x *RefUpdate) GetOld() string {
+	if x != nil {
+		return x.Old
+	}
+	return ""
+}
+
+type InstallChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Updates       []*RefUpdate           `protobuf:"bytes,2,rep,name=updates,proto3" json:"updates,omitempty"`
+	ReflogMessage string                 `protobuf:"bytes,3,opt,name=reflog_message,json=reflogMessage,proto3" json:"reflog_message,omitempty"`
+	// index, when set, makes the index Stage last wrote for a commit the
+	// checkout's, provided its tree is this one.
+	Index         string `protobuf:"bytes,4,opt,name=index,proto3" json:"index,omitempty"`
+	Data          []byte `protobuf:"bytes,5,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallChunk) Reset() {
+	*x = InstallChunk{}
+	mi := &file_git_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallChunk) ProtoMessage() {}
+
+func (x *InstallChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallChunk.ProtoReflect.Descriptor instead.
+func (*InstallChunk) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *InstallChunk) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *InstallChunk) GetUpdates() []*RefUpdate {
+	if x != nil {
+		return x.Updates
+	}
+	return nil
+}
+
+func (x *InstallChunk) GetReflogMessage() string {
+	if x != nil {
+		return x.ReflogMessage
+	}
+	return ""
+}
+
+func (x *InstallChunk) GetIndex() string {
+	if x != nil {
+		return x.Index
+	}
+	return ""
+}
+
+func (x *InstallChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type InstallReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallReply) Reset() {
+	*x = InstallReply{}
+	mi := &file_git_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallReply) ProtoMessage() {}
+
+func (x *InstallReply) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallReply.ProtoReflect.Descriptor instead.
+func (*InstallReply) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{16}
+}
+
+type TreeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Dir           string                 `protobuf:"bytes,2,opt,name=dir,proto3" json:"dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TreeRequest) Reset() {
+	*x = TreeRequest{}
+	mi := &file_git_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TreeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TreeRequest) ProtoMessage() {}
+
+func (x *TreeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TreeRequest.ProtoReflect.Descriptor instead.
+func (*TreeRequest) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *TreeRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *TreeRequest) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+type TreeEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TreeEntry) Reset() {
+	*x = TreeEntry{}
+	mi := &file_git_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TreeEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TreeEntry) ProtoMessage() {}
+
+func (x *TreeEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TreeEntry.ProtoReflect.Descriptor instead.
+func (*TreeEntry) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *TreeEntry) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TreeEntry) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *TreeEntry) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+type TreeReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       []*TreeEntry           `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TreeReply) Reset() {
+	*x = TreeReply{}
+	mi := &file_git_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TreeReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TreeReply) ProtoMessage() {}
+
+func (x *TreeReply) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TreeReply.ProtoReflect.Descriptor instead.
+func (*TreeReply) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *TreeReply) GetEntries() []*TreeEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type ReadFileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	MaxBytes      uint32                 `protobuf:"varint,3,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadFileRequest) Reset() {
+	*x = ReadFileRequest{}
+	mi := &file_git_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadFileRequest) ProtoMessage() {}
+
+func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadFileRequest.ProtoReflect.Descriptor instead.
+func (*ReadFileRequest) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ReadFileRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *ReadFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ReadFileRequest) GetMaxBytes() uint32 {
+	if x != nil {
+		return x.MaxBytes
+	}
+	return 0
+}
+
+type WriteFileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Content       []byte                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
+	Revision      string                 `protobuf:"bytes,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteFileRequest) Reset() {
+	*x = WriteFileRequest{}
+	mi := &file_git_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteFileRequest) ProtoMessage() {}
+
+func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteFileRequest.ProtoReflect.Descriptor instead.
+func (*WriteFileRequest) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *WriteFileRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *WriteFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *WriteFileRequest) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *WriteFileRequest) GetRevision() string {
+	if x != nil {
+		return x.Revision
+	}
+	return ""
+}
+
+type FileReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Content       []byte                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	Truncated     bool                   `protobuf:"varint,2,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileReply) Reset() {
+	*x = FileReply{}
+	mi := &file_git_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileReply) ProtoMessage() {}
+
+func (x *FileReply) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileReply.ProtoReflect.Descriptor instead.
+func (*FileReply) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *FileReply) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *FileReply) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+func (x *FileReply) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+type FileDiffRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileDiffRequest) Reset() {
+	*x = FileDiffRequest{}
+	mi := &file_git_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileDiffRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileDiffRequest) ProtoMessage() {}
+
+func (x *FileDiffRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileDiffRequest.ProtoReflect.Descriptor instead.
+func (*FileDiffRequest) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *FileDiffRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *FileDiffRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type SyncChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncChunk) Reset() {
+	*x = SyncChunk{}
+	mi := &file_git_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncChunk) ProtoMessage() {}
+
+func (x *SyncChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncChunk.ProtoReflect.Descriptor instead.
+func (*SyncChunk) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *SyncChunk) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *SyncChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 type PatchRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Key   string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
@@ -715,7 +1491,7 @@ type PatchRequest struct {
 
 func (x *PatchRequest) Reset() {
 	*x = PatchRequest{}
-	mi := &file_git_proto_msgTypes[12]
+	mi := &file_git_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -727,7 +1503,7 @@ func (x *PatchRequest) String() string {
 func (*PatchRequest) ProtoMessage() {}
 
 func (x *PatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_git_proto_msgTypes[12]
+	mi := &file_git_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -740,7 +1516,7 @@ func (x *PatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PatchRequest.ProtoReflect.Descriptor instead.
 func (*PatchRequest) Descriptor() ([]byte, []int) {
-	return file_git_proto_rawDescGZIP(), []int{12}
+	return file_git_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PatchRequest) GetKey() string {
@@ -776,7 +1552,7 @@ type PatchReply struct {
 
 func (x *PatchReply) Reset() {
 	*x = PatchReply{}
-	mi := &file_git_proto_msgTypes[13]
+	mi := &file_git_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -788,7 +1564,7 @@ func (x *PatchReply) String() string {
 func (*PatchReply) ProtoMessage() {}
 
 func (x *PatchReply) ProtoReflect() protoreflect.Message {
-	mi := &file_git_proto_msgTypes[13]
+	mi := &file_git_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -801,7 +1577,7 @@ func (x *PatchReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PatchReply.ProtoReflect.Descriptor instead.
 func (*PatchReply) Descriptor() ([]byte, []int) {
-	return file_git_proto_rawDescGZIP(), []int{13}
+	return file_git_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PatchReply) GetBase() string {
@@ -878,7 +1654,57 @@ const file_git_proto_rawDesc = "" +
 	"\vHeadRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\"#\n" +
 	"\tHeadReply\x12\x16\n" +
-	"\x06commit\x18\x01 \x01(\tR\x06commit\"Q\n" +
+	"\x06commit\x18\x01 \x01(\tR\x06commit\"\xaf\x01\n" +
+	"\fStageRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12?\n" +
+	"\apurpose\x18\x02 \x01(\x0e2%.aether.guest.v1.StageRequest.PurposeR\apurpose\"L\n" +
+	"\aPurpose\x12\x17\n" +
+	"\x13PURPOSE_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0ePURPOSE_COMMIT\x10\x01\x12\x14\n" +
+	"\x10PURPOSE_EVIDENCE\x10\x02\"4\n" +
+	"\n" +
+	"StageReply\x12\x12\n" +
+	"\x04tree\x18\x01 \x01(\tR\x04tree\x12\x12\n" +
+	"\x04head\x18\x02 \x01(\tR\x04head\"A\n" +
+	"\tRefUpdate\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x10\n" +
+	"\x03new\x18\x02 \x01(\tR\x03new\x12\x10\n" +
+	"\x03old\x18\x03 \x01(\tR\x03old\"\xa7\x01\n" +
+	"\fInstallChunk\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x124\n" +
+	"\aupdates\x18\x02 \x03(\v2\x1a.aether.guest.v1.RefUpdateR\aupdates\x12%\n" +
+	"\x0ereflog_message\x18\x03 \x01(\tR\rreflogMessage\x12\x14\n" +
+	"\x05index\x18\x04 \x01(\tR\x05index\x12\x12\n" +
+	"\x04data\x18\x05 \x01(\fR\x04data\"\x0e\n" +
+	"\fInstallReply\"1\n" +
+	"\vTreeRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x10\n" +
+	"\x03dir\x18\x02 \x01(\tR\x03dir\"G\n" +
+	"\tTreeEntry\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
+	"\x04size\x18\x03 \x01(\x03R\x04size\"A\n" +
+	"\tTreeReply\x124\n" +
+	"\aentries\x18\x01 \x03(\v2\x1a.aether.guest.v1.TreeEntryR\aentries\"T\n" +
+	"\x0fReadFileRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1b\n" +
+	"\tmax_bytes\x18\x03 \x01(\rR\bmaxBytes\"n\n" +
+	"\x10WriteFileRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x03 \x01(\fR\acontent\x12\x1a\n" +
+	"\brevision\x18\x04 \x01(\tR\brevision\"W\n" +
+	"\tFileReply\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\fR\acontent\x12\x1c\n" +
+	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x12\n" +
+	"\x04size\x18\x03 \x01(\x03R\x04size\"7\n" +
+	"\x0fFileDiffRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\"1\n" +
+	"\tSyncChunk\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"Q\n" +
 	"\fPatchRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
 	"\x04from\x18\x02 \x01(\tR\x04from\x12\x1b\n" +
@@ -888,14 +1714,21 @@ const file_git_proto_rawDesc = "" +
 	"\x04base\x18\x01 \x01(\tR\x04base\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x1c\n" +
 	"\ttruncated\x18\x03 \x01(\bR\ttruncated\x12\x1b\n" +
-	"\tfork_tree\x18\x04 \x01(\tR\bforkTree2\xa1\x03\n" +
+	"\tfork_tree\x18\x04 \x01(\tR\bforkTree2\x98\a\n" +
 	"\x03Git\x12C\n" +
 	"\x05Setup\x12\x1d.aether.guest.v1.SetupRequest\x1a\x1b.aether.guest.v1.SetupReply\x12C\n" +
 	"\x05Watch\x12\x19.aether.guest.v1.WatchAck\x1a\x1b.aether.guest.v1.WatchEvent(\x010\x01\x12C\n" +
 	"\x05Flush\x12\x1d.aether.guest.v1.FlushRequest\x1a\x1b.aether.guest.v1.FlushReply\x12D\n" +
 	"\aObjects\x12\x1f.aether.guest.v1.ObjectsRequest\x1a\x16.aether.guest.v1.Chunk0\x01\x12C\n" +
 	"\x05Patch\x12\x1d.aether.guest.v1.PatchRequest\x1a\x1b.aether.guest.v1.PatchReply\x12@\n" +
-	"\x04Head\x12\x1c.aether.guest.v1.HeadRequest\x1a\x1a.aether.guest.v1.HeadReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
+	"\x04Head\x12\x1c.aether.guest.v1.HeadRequest\x1a\x1a.aether.guest.v1.HeadReply\x12C\n" +
+	"\x05Stage\x12\x1d.aether.guest.v1.StageRequest\x1a\x1b.aether.guest.v1.StageReply\x12I\n" +
+	"\aInstall\x12\x1d.aether.guest.v1.InstallChunk\x1a\x1d.aether.guest.v1.InstallReply(\x01\x12@\n" +
+	"\x04Tree\x12\x1c.aether.guest.v1.TreeRequest\x1a\x1a.aether.guest.v1.TreeReply\x12H\n" +
+	"\bReadFile\x12 .aether.guest.v1.ReadFileRequest\x1a\x1a.aether.guest.v1.FileReply\x12J\n" +
+	"\tWriteFile\x12!.aether.guest.v1.WriteFileRequest\x1a\x1a.aether.guest.v1.FileReply\x12I\n" +
+	"\bFileDiff\x12 .aether.guest.v1.FileDiffRequest\x1a\x1b.aether.guest.v1.PatchReply\x12B\n" +
+	"\x04Sync\x12\x1a.aether.guest.v1.SyncChunk\x1a\x1a.aether.guest.v1.SyncChunk(\x010\x01B3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
 
 var (
 	file_git_proto_rawDescOnce sync.Once
@@ -909,42 +1742,74 @@ func file_git_proto_rawDescGZIP() []byte {
 	return file_git_proto_rawDescData
 }
 
-var file_git_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_git_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_git_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_git_proto_goTypes = []any{
-	(*GitFailure)(nil),     // 0: aether.guest.v1.GitFailure
-	(*SetupRequest)(nil),   // 1: aether.guest.v1.SetupRequest
-	(*Checkout)(nil),       // 2: aether.guest.v1.Checkout
-	(*SetupReply)(nil),     // 3: aether.guest.v1.SetupReply
-	(*WatchAck)(nil),       // 4: aether.guest.v1.WatchAck
-	(*WatchEvent)(nil),     // 5: aether.guest.v1.WatchEvent
-	(*FlushRequest)(nil),   // 6: aether.guest.v1.FlushRequest
-	(*FlushReply)(nil),     // 7: aether.guest.v1.FlushReply
-	(*ObjectsRequest)(nil), // 8: aether.guest.v1.ObjectsRequest
-	(*Chunk)(nil),          // 9: aether.guest.v1.Chunk
-	(*HeadRequest)(nil),    // 10: aether.guest.v1.HeadRequest
-	(*HeadReply)(nil),      // 11: aether.guest.v1.HeadReply
-	(*PatchRequest)(nil),   // 12: aether.guest.v1.PatchRequest
-	(*PatchReply)(nil),     // 13: aether.guest.v1.PatchReply
+	(StageRequest_Purpose)(0), // 0: aether.guest.v1.StageRequest.Purpose
+	(*GitFailure)(nil),        // 1: aether.guest.v1.GitFailure
+	(*SetupRequest)(nil),      // 2: aether.guest.v1.SetupRequest
+	(*Checkout)(nil),          // 3: aether.guest.v1.Checkout
+	(*SetupReply)(nil),        // 4: aether.guest.v1.SetupReply
+	(*WatchAck)(nil),          // 5: aether.guest.v1.WatchAck
+	(*WatchEvent)(nil),        // 6: aether.guest.v1.WatchEvent
+	(*FlushRequest)(nil),      // 7: aether.guest.v1.FlushRequest
+	(*FlushReply)(nil),        // 8: aether.guest.v1.FlushReply
+	(*ObjectsRequest)(nil),    // 9: aether.guest.v1.ObjectsRequest
+	(*Chunk)(nil),             // 10: aether.guest.v1.Chunk
+	(*HeadRequest)(nil),       // 11: aether.guest.v1.HeadRequest
+	(*HeadReply)(nil),         // 12: aether.guest.v1.HeadReply
+	(*StageRequest)(nil),      // 13: aether.guest.v1.StageRequest
+	(*StageReply)(nil),        // 14: aether.guest.v1.StageReply
+	(*RefUpdate)(nil),         // 15: aether.guest.v1.RefUpdate
+	(*InstallChunk)(nil),      // 16: aether.guest.v1.InstallChunk
+	(*InstallReply)(nil),      // 17: aether.guest.v1.InstallReply
+	(*TreeRequest)(nil),       // 18: aether.guest.v1.TreeRequest
+	(*TreeEntry)(nil),         // 19: aether.guest.v1.TreeEntry
+	(*TreeReply)(nil),         // 20: aether.guest.v1.TreeReply
+	(*ReadFileRequest)(nil),   // 21: aether.guest.v1.ReadFileRequest
+	(*WriteFileRequest)(nil),  // 22: aether.guest.v1.WriteFileRequest
+	(*FileReply)(nil),         // 23: aether.guest.v1.FileReply
+	(*FileDiffRequest)(nil),   // 24: aether.guest.v1.FileDiffRequest
+	(*SyncChunk)(nil),         // 25: aether.guest.v1.SyncChunk
+	(*PatchRequest)(nil),      // 26: aether.guest.v1.PatchRequest
+	(*PatchReply)(nil),        // 27: aether.guest.v1.PatchReply
 }
 var file_git_proto_depIdxs = []int32{
-	2,  // 0: aether.guest.v1.SetupRequest.checkouts:type_name -> aether.guest.v1.Checkout
-	1,  // 1: aether.guest.v1.Git.Setup:input_type -> aether.guest.v1.SetupRequest
-	4,  // 2: aether.guest.v1.Git.Watch:input_type -> aether.guest.v1.WatchAck
-	6,  // 3: aether.guest.v1.Git.Flush:input_type -> aether.guest.v1.FlushRequest
-	8,  // 4: aether.guest.v1.Git.Objects:input_type -> aether.guest.v1.ObjectsRequest
-	12, // 5: aether.guest.v1.Git.Patch:input_type -> aether.guest.v1.PatchRequest
-	10, // 6: aether.guest.v1.Git.Head:input_type -> aether.guest.v1.HeadRequest
-	3,  // 7: aether.guest.v1.Git.Setup:output_type -> aether.guest.v1.SetupReply
-	5,  // 8: aether.guest.v1.Git.Watch:output_type -> aether.guest.v1.WatchEvent
-	7,  // 9: aether.guest.v1.Git.Flush:output_type -> aether.guest.v1.FlushReply
-	9,  // 10: aether.guest.v1.Git.Objects:output_type -> aether.guest.v1.Chunk
-	13, // 11: aether.guest.v1.Git.Patch:output_type -> aether.guest.v1.PatchReply
-	11, // 12: aether.guest.v1.Git.Head:output_type -> aether.guest.v1.HeadReply
-	7,  // [7:13] is the sub-list for method output_type
-	1,  // [1:7] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	3,  // 0: aether.guest.v1.SetupRequest.checkouts:type_name -> aether.guest.v1.Checkout
+	0,  // 1: aether.guest.v1.StageRequest.purpose:type_name -> aether.guest.v1.StageRequest.Purpose
+	15, // 2: aether.guest.v1.InstallChunk.updates:type_name -> aether.guest.v1.RefUpdate
+	19, // 3: aether.guest.v1.TreeReply.entries:type_name -> aether.guest.v1.TreeEntry
+	2,  // 4: aether.guest.v1.Git.Setup:input_type -> aether.guest.v1.SetupRequest
+	5,  // 5: aether.guest.v1.Git.Watch:input_type -> aether.guest.v1.WatchAck
+	7,  // 6: aether.guest.v1.Git.Flush:input_type -> aether.guest.v1.FlushRequest
+	9,  // 7: aether.guest.v1.Git.Objects:input_type -> aether.guest.v1.ObjectsRequest
+	26, // 8: aether.guest.v1.Git.Patch:input_type -> aether.guest.v1.PatchRequest
+	11, // 9: aether.guest.v1.Git.Head:input_type -> aether.guest.v1.HeadRequest
+	13, // 10: aether.guest.v1.Git.Stage:input_type -> aether.guest.v1.StageRequest
+	16, // 11: aether.guest.v1.Git.Install:input_type -> aether.guest.v1.InstallChunk
+	18, // 12: aether.guest.v1.Git.Tree:input_type -> aether.guest.v1.TreeRequest
+	21, // 13: aether.guest.v1.Git.ReadFile:input_type -> aether.guest.v1.ReadFileRequest
+	22, // 14: aether.guest.v1.Git.WriteFile:input_type -> aether.guest.v1.WriteFileRequest
+	24, // 15: aether.guest.v1.Git.FileDiff:input_type -> aether.guest.v1.FileDiffRequest
+	25, // 16: aether.guest.v1.Git.Sync:input_type -> aether.guest.v1.SyncChunk
+	4,  // 17: aether.guest.v1.Git.Setup:output_type -> aether.guest.v1.SetupReply
+	6,  // 18: aether.guest.v1.Git.Watch:output_type -> aether.guest.v1.WatchEvent
+	8,  // 19: aether.guest.v1.Git.Flush:output_type -> aether.guest.v1.FlushReply
+	10, // 20: aether.guest.v1.Git.Objects:output_type -> aether.guest.v1.Chunk
+	27, // 21: aether.guest.v1.Git.Patch:output_type -> aether.guest.v1.PatchReply
+	12, // 22: aether.guest.v1.Git.Head:output_type -> aether.guest.v1.HeadReply
+	14, // 23: aether.guest.v1.Git.Stage:output_type -> aether.guest.v1.StageReply
+	17, // 24: aether.guest.v1.Git.Install:output_type -> aether.guest.v1.InstallReply
+	20, // 25: aether.guest.v1.Git.Tree:output_type -> aether.guest.v1.TreeReply
+	23, // 26: aether.guest.v1.Git.ReadFile:output_type -> aether.guest.v1.FileReply
+	23, // 27: aether.guest.v1.Git.WriteFile:output_type -> aether.guest.v1.FileReply
+	27, // 28: aether.guest.v1.Git.FileDiff:output_type -> aether.guest.v1.PatchReply
+	25, // 29: aether.guest.v1.Git.Sync:output_type -> aether.guest.v1.SyncChunk
+	17, // [17:30] is the sub-list for method output_type
+	4,  // [4:17] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_git_proto_init() }
@@ -962,13 +1827,14 @@ func file_git_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_git_proto_rawDesc), len(file_git_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   14,
+			NumEnums:      1,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_git_proto_goTypes,
 		DependencyIndexes: file_git_proto_depIdxs,
+		EnumInfos:         file_git_proto_enumTypes,
 		MessageInfos:      file_git_proto_msgTypes,
 	}.Build()
 	File_git_proto = out.File

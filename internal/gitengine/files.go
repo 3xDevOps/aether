@@ -522,7 +522,7 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 			return FileRead{}, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
 		}
 		if meta.VM {
-			return FileRead{}, vmUnsupported(run)
+			return e.vmFilesWrite(ctx, run, name, content, revision)
 		}
 		return writeCheckoutFile(e, checkout, name, content, revision)
 	}
@@ -758,7 +758,7 @@ func (e *Engine) FileDiff(ctx context.Context, run domain.RunID, path string) (P
 		return Patch{}, err
 	}
 	if meta.VM {
-		return Patch{}, vmUnsupported(run)
+		return e.vmFileDiff(ctx, run, path)
 	}
 	ctx, cancel := context.WithTimeout(ctx, snapshotTimeout)
 	defer cancel()
@@ -877,7 +877,7 @@ func (e *Engine) FilesTree(ctx context.Context, workspace domain.WorkspaceID, ru
 			return nil, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
 		}
 		if meta.VM {
-			return nil, vmUnsupported(run)
+			return e.vmFilesTree(ctx, run, dir)
 		}
 		return e.ListTree(ctx, checkout, "", dir)
 	}
@@ -904,7 +904,7 @@ func (e *Engine) FilesRead(ctx context.Context, workspace domain.WorkspaceID, ru
 			return FileRead{}, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
 		}
 		if meta.VM {
-			return FileRead{}, vmUnsupported(run)
+			return e.vmFilesRead(ctx, run, path, maxBytes)
 		}
 		return e.ReadFileMeta(ctx, checkout, "", path, maxBytes)
 	}

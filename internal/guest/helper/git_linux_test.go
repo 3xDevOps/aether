@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
+	"github.com/3xDevOps/Aether/internal/overlay"
 	"google.golang.org/grpc"
 )
 
@@ -34,6 +36,7 @@ type gitPair struct {
 	base     string
 	branch   string
 	checkout string
+	socket   string
 	diffs    <-chan events.Event
 }
 
@@ -76,6 +79,7 @@ func newGitPair(t *testing.T, server func(*gitService) guestpb.GitServer) *gitPa
 	p.git = git
 	t.Cleanup(func() { _ = git.engine.Close() })
 	socket := filepath.Join(t.TempDir(), "vsock.sock")
+	p.socket = socket
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -330,4 +334,141 @@ func TestServerRefusesWhatAHostileVMSends(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
+	p := newGitPair(t, nil)
+	ctx := testContext(t)
+	if err := os.WriteFile(filepath.Join(p.checkout, "work.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("files", func(t *testing.T) {
+		entries, err := p.host.FilesTree(ctx, testWorkspace, testRun, "", "")
+		if err != nil || len(entries) != 2 || entries[0].Name != "README" || entries[1].Name != "work.txt" {
+			t.Fatalf("tree = %+v, %v", entries, err)
+		}
+		read, err := p.host.FilesRead(ctx, testWorkspace, testRun, "", "README", 0)
+		if err != nil || string(read.Content) != "hello\n" || read.Revision == "" {
+			t.Fatalf("read = %+v, %v", read, err)
+		}
+		if _, err = p.host.FilesWrite(ctx, testWorkspace, testRun, "", "README", []byte("edited\n"), read.Revision, domain.GitIdentity{}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = p.host.FilesWrite(ctx, testWorkspace, testRun, "", "README", []byte("lost\n"), read.Revision, domain.GitIdentity{}, nil); !errors.Is(err, gitengine.ErrRevisionConflict) {
+			t.Fatalf("write over a changed file = %v, want a revision conflict", err)
+		}
+		if _, err = p.host.FilesRead(ctx, testWorkspace, testRun, "", "../etc/passwd", 0); !errors.Is(err, gitengine.ErrInvalidPath) {
+			t.Fatalf("read outside the checkout = %v", err)
+		}
+		diff, err := p.host.FileDiff(ctx, testRun, "README")
+		if err != nil || !strings.Contains(diff.Text, "+edited") {
+			t.Fatalf("file diff = %+v, %v", diff, err)
+		}
+	})
+
+	t.Run("evidence", func(t *testing.T) {
+		revision, err := p.host.CaptureEvidence(ctx, testRun, "packet1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := runGit(t, p.repo, "show", revision.Commit+":work.txt"); got != "work" {
+			t.Fatalf("evidence holds work.txt as %q", got)
+		}
+	})
+
+	t.Run("commit", func(t *testing.T) {
+		if _, err := exec.LookPath("ssh-keygen"); err != nil {
+			t.Skip("ssh-keygen is not on PATH")
+		}
+		keyPath := filepath.Join(t.TempDir(), "key")
+		if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", keyPath).CombinedOutput(); err != nil {
+			t.Fatalf("ssh-keygen: %v: %s", err, out)
+		}
+		key, err := os.ReadFile(keyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		head := runGit(t, p.checkout, "rev-parse", "HEAD")
+		member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
+		commit, err := p.host.CommitAll(ctx, testRun, "aether: a task  \n\n", member, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := runGit(t, p.checkout, "rev-parse", "HEAD"); got != commit {
+			t.Fatalf("checkout HEAD is %s, want the server's commit %s", got, commit)
+		}
+		if parent := runGit(t, p.checkout, "rev-parse", "HEAD^"); parent != head {
+			t.Fatalf("commit's parent is %s, want %s", parent, head)
+		}
+		object := runGit(t, p.checkout, "cat-file", "commit", commit)
+		for _, want := range []string{"author Member <member@localhost>", "committer Aether <aether@localhost>", "gpgsig -----BEGIN SSH SIGNATURE", "\n\naether: a task\n"} {
+			if !strings.Contains(object+"\n", want) {
+				t.Errorf("commit lacks %q:\n%s", want, object)
+			}
+		}
+		if status := runGit(t, p.checkout, "status", "--porcelain"); status != "" {
+			t.Errorf("checkout is not clean after the commit: %q", status)
+		}
+		if again, err := p.host.CommitAll(ctx, testRun, "aether: again", member, nil); err != nil || again != "" {
+			t.Errorf("committing a clean checkout = %q, %v", again, err)
+		}
+		if published, err := p.host.PublishRunBranch(ctx, testRun); err != nil || published != commit {
+			t.Errorf("publish = %s, %v", published, err)
+		}
+	})
+
+	t.Run("subsession fetch", func(t *testing.T) {
+		child := filepath.Join(t.TempDir(), "child")
+		runGit(t, filepath.Dir(child), "clone", "--quiet", p.repo, child)
+		if err := os.WriteFile(filepath.Join(child, "child.txt"), []byte("child\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, child, "add", "child.txt")
+		runGit(t, child, "commit", "--quiet", "-m", "child work")
+		runGit(t, child, "push", "--quiet", "origin", "HEAD:refs/heads/aether/run-child")
+		want := runGit(t, child, "rev-parse", "HEAD")
+		got, err := p.host.FetchRunBranch(ctx, testWorkspace, "aether/run-child", testRun, "refs/remotes/children/c1")
+		if err != nil || got != want {
+			t.Fatalf("fetch = %s, %v; want %s", got, err, want)
+		}
+		if ref := runGit(t, p.checkout, "rev-parse", "refs/remotes/children/c1"); ref != want {
+			t.Fatalf("checkout's children ref is %s, want %s", ref, want)
+		}
+	})
+
+	t.Run("live sync", func(t *testing.T) {
+		local := t.TempDir()
+		if err := os.WriteFile(filepath.Join(local, "local.txt"), []byte("from local"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		client, err := guest.DialGit(p.socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = client.Close() })
+		sess, err := overlay.NewSession(overlay.Options{LocalDir: local, DataDir: t.TempDir(), Dial: func(ctx context.Context) (io.ReadWriteCloser, error) {
+			return client.Sync(ctx, string(testRun))
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(sess.Close)
+		runCtx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		if err := sess.Start(runCtx, string(testRun)); err != nil {
+			t.Fatal(err)
+		}
+		go func() { _ = sess.Run(runCtx) }()
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			if data, err := os.ReadFile(filepath.Join(p.checkout, "local.txt")); err == nil && string(data) == "from local" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the overlay's file never reached the checkout")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 }

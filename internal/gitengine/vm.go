@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -73,10 +74,11 @@ func (e *Engine) IsVMCheckout(run domain.RunID) bool {
 }
 
 // VMCheckoutDisk returns the qcow2 disk of the checkout at path, a checkout
-// path CreateRunCheckoutAt returned, making it on first use: a copy-on-write
-// disk over the prepared disk of the checkout's workspace and base, whose
-// files belong to uid:gid. ok is false for a checkout on the server's disk.
-func (e *Engine) VMCheckoutDisk(ctx context.Context, path string, uid, gid int) (string, guest.Checkout, bool, error) {
+// path CreateRunCheckoutAt returned, which the VM mounts at target, making it
+// on first use: a copy-on-write disk over the prepared disk of the
+// checkout's workspace and base, whose files belong to uid:gid. ok is false
+// for a checkout on the server's disk.
+func (e *Engine) VMCheckoutDisk(ctx context.Context, path, target string, uid, gid int) (string, guest.Checkout, bool, error) {
 	key, err := e.checkoutRunID(filepath.Clean(path))
 	if err != nil {
 		return "", guest.Checkout{}, false, nil
@@ -101,6 +103,12 @@ func (e *Engine) VMCheckoutDisk(ctx context.Context, path string, uid, gid int) 
 	lock := e.snapshotLock(key)
 	lock.Lock()
 	defer lock.Unlock()
+	if meta.Target != target {
+		meta.Target = target
+		if err = e.writeRunMeta(key, meta); err != nil {
+			return "", guest.Checkout{}, false, err
+		}
+	}
 	disk := filepath.Join(path, vmCheckoutDisk)
 	if _, statErr := os.Stat(disk); statErr == nil {
 		return disk, id, true, nil
@@ -147,14 +155,6 @@ func ChownCheckout(dir string, uid, gid int) error {
 	})
 }
 
-// errVMCheckout reports an operation the server does not yet run inside a
-// session's VM.
-var errVMCheckout = errors.New("gitengine: not available for a session whose checkout is in a VM")
-
-func vmUnsupported(run domain.RunID) error {
-	return fmt.Errorf("%w: session %s", errVMCheckout, run)
-}
-
 // publishVM publishes the run branch at the HEAD of the checkout in the VM.
 func (e *Engine) publishVM(ctx context.Context, run domain.RunID, meta runMeta) (string, error) {
 	g, err := e.vmGit(ctx, run)
@@ -182,4 +182,40 @@ func (e *Engine) removeVMCheckout(ctx context.Context, run domain.RunID, checkou
 		return fmt.Errorf("gitengine: remove session metadata for %s: %w", run, err)
 	}
 	return nil
+}
+
+// VMSyncRoot is where a live overlay of run's checkout is served, when that
+// checkout lives in a VM.
+func (e *Engine) VMSyncRoot(run domain.RunID) (string, bool) {
+	meta, err := e.readRunMeta(run)
+	if err != nil || !meta.VM || meta.Target == "" {
+		return "", false
+	}
+	return meta.Target, true
+}
+
+// ServeVMSync relays a live overlay's stream, already pinned to the root
+// VMSyncRoot names, to the endpoint the VM serves at the checkout.
+func (e *Engine) ServeVMSync(ctx context.Context, run domain.RunID, stream io.ReadWriteCloser) error {
+	g, err := e.vmGit(ctx, run)
+	if err != nil {
+		return err
+	}
+	endpoint, err := g.Sync(ctx, string(run))
+	if err != nil {
+		return vmErr(err)
+	}
+	defer func() { _ = endpoint.Close() }()
+	done := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(endpoint, stream)
+		done <- copyErr
+	}()
+	_, err = io.Copy(stream, endpoint)
+	_ = stream.Close()
+	_ = endpoint.Close()
+	if upErr := <-done; err == nil {
+		err = upErr
+	}
+	return err
 }

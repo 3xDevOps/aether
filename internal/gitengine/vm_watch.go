@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -437,19 +438,28 @@ func (e *Engine) vmPatch(ctx context.Context, run domain.RunID, checkout string,
 	return Patch{Base: p.Base, Text: p.Text, Truncated: p.Truncated, ForkTree: p.ForkTree}, nil
 }
 
-var vmReasons = map[guest.GitReason]error{
-	guest.ReasonSnapshotTreeMissing:  ErrSnapshotTreeMissing,
-	guest.ReasonInvalidObjectID:      ErrInvalidObjectID,
-	guest.ReasonSnapshotStorageLimit: ErrSnapshotStorageLimit,
-	guest.ReasonCheckoutNotFound:     ErrCheckoutNotFound,
+var vmReasons = []struct {
+	reason guest.GitReason
+	err    error
+}{
+	{guest.ReasonSnapshotTreeMissing, ErrSnapshotTreeMissing},
+	{guest.ReasonInvalidObjectID, ErrInvalidObjectID},
+	{guest.ReasonSnapshotStorageLimit, ErrSnapshotStorageLimit},
+	{guest.ReasonEvidenceStorageLimit, ErrEvidenceStorageLimit},
+	{guest.ReasonCheckoutNotFound, ErrCheckoutNotFound},
+	{guest.ReasonInvalidPath, ErrInvalidPath},
+	{guest.ReasonRevisionConflict, ErrRevisionConflict},
+	{guest.ReasonFileNotFound, fs.ErrNotExist},
 }
 
 // vmErr gives a git service failure the engine's own error for its reason.
 func vmErr(err error) error {
 	var failure *guest.GitError
 	if errors.As(err, &failure) {
-		if sentinel, ok := vmReasons[failure.Reason]; ok {
-			return fmt.Errorf("%w: %s", sentinel, failure.Message)
+		for _, r := range vmReasons {
+			if r.reason == failure.Reason {
+				return fmt.Errorf("%w: %s", r.err, failure.Message)
+			}
 		}
 	}
 	return err
@@ -458,9 +468,9 @@ func vmErr(err error) error {
 // GitReason is the reason the git service reports err under, empty for a
 // failure the server has no error for.
 func GitReason(err error) guest.GitReason {
-	for reason, sentinel := range vmReasons {
-		if errors.Is(err, sentinel) {
-			return reason
+	for _, r := range vmReasons {
+		if errors.Is(err, r.err) {
+			return r.reason
 		}
 	}
 	return ""

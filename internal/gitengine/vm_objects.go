@@ -168,28 +168,18 @@ func (e *Engine) PackObjects(ctx context.Context, run domain.RunID, wants, haves
 	if _, err = os.Stat(filepath.Join(store, "HEAD")); err != nil {
 		return fmt.Errorf("%w: session %s has no snapshot store", ErrCheckoutNotFound, run)
 	}
-	var input strings.Builder
 	for _, id := range wants {
 		if !validObjectID(id) {
 			return fmt.Errorf("%w: %q", ErrInvalidObjectID, id)
 		}
-		input.WriteString(id + "\n")
 	}
+	var present []string
 	for _, id := range haves {
 		if validObjectID(id) && e.hasObject(ctx, store, id) {
-			input.WriteString("^" + id + "\n")
+			present = append(present, id)
 		}
 	}
-	cmd := exec.CommandContext(ctx, e.cfg.GitPath, "-C", store, "-c", "safe.directory=*", "pack-objects", "--revs", "--stdout", "-q")
-	cmd.Env = gitEnv()
-	cmd.Stdin = strings.NewReader(input.String())
-	cmd.Stdout = w
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gitengine: pack objects of session %s: %w: %s", run, err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
+	return e.packObjects(ctx, store, wants, present, w)
 }
 
 // vmOf names the VM a checkout lives in: its run's, for an extra

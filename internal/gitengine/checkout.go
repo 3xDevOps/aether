@@ -42,6 +42,8 @@ type runMeta struct {
 	// origin remote the VM sets on its first boot.
 	VM     bool   `json:"vm,omitempty"`
 	Origin string `json:"origin,omitempty"`
+	// Target is where the session sees a checkout in a VM.
+	Target string `json:"target,omitempty"`
 }
 
 func (e *Engine) runMetaPath(run domain.RunID) (string, error) {
@@ -308,7 +310,7 @@ func (e *Engine) commitAll(ctx context.Context, run domain.RunID, message string
 		return "", err
 	}
 	if e.IsVMCheckout(run) {
-		return "", vmUnsupported(run)
+		return e.vmCommit(ctx, run, message, author, signingKey)
 	}
 	if rmErr := os.Remove(filepath.Join(checkout, ".git", "info", "attributes")); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		return "", fmt.Errorf("gitengine: drop checkout attributes override: %w", rmErr)
