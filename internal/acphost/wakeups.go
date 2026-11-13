@@ -3,6 +3,7 @@ package acphost
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -14,14 +15,14 @@ import (
 type agentWakeups struct {
 	// at is the last one-shot wakeup's fire time.
 	at time.Time
-	// creates and deletes are the tool call IDs of recurring CronCreate and
-	// of CronDelete calls: a recurring job runs until it is deleted.
-	creates map[string]bool
-	deletes map[string]bool
+	// crons are the recurring CronCreate calls not deleted, by tool call
+	// ID, with the output that names the job: a recurring job runs until a
+	// CronDelete names it.
+	crons map[string]string
 }
 
 func newAgentWakeups() agentWakeups {
-	return agentWakeups{creates: map[string]bool{}, deletes: map[string]bool{}}
+	return agentWakeups{crons: map[string]string{}}
 }
 
 // note records a completed tool call that set or deleted a wakeup at time at.
@@ -33,6 +34,7 @@ func (w *agentWakeups) note(c *ToolCall, at time.Time) {
 		DelaySeconds float64 `json:"delaySeconds"`
 		Cron         string  `json:"cron"`
 		Recurring    *bool   `json:"recurring"`
+		ID           string  `json:"id"`
 	}
 	if json.Unmarshal(c.RawInput, &in) != nil {
 		return
@@ -42,12 +44,17 @@ func (w *agentWakeups) note(c *ToolCall, at time.Time) {
 		w.later(at.Add(time.Duration(in.DelaySeconds * float64(time.Second))))
 	case "CronCreate":
 		if in.Recurring == nil || *in.Recurring {
-			w.creates[c.ID] = true
+			w.crons[c.ID] = string(c.RawOutput) + c.Output
 		} else if schedule, err := cron.ParseStandard(in.Cron); err == nil {
 			w.later(schedule.Next(at))
 		}
 	case "CronDelete":
-		w.deletes[c.ID] = true
+		// A delete that names no job known here keeps the session awake.
+		for id, output := range w.crons {
+			if in.ID != "" && strings.Contains(output, in.ID) {
+				delete(w.crons, id)
+			}
+		}
 	}
 }
 
@@ -59,7 +66,7 @@ func (w *agentWakeups) later(at time.Time) {
 
 // pending reports a wakeup the agent still waits for at now.
 func (w *agentWakeups) pending(now time.Time) bool {
-	return w.at.After(now) || len(w.creates) > len(w.deletes)
+	return w.at.After(now) || len(w.crons) > 0
 }
 
 // scanAgentWakeups reads the wakeups the log records since its last reset.

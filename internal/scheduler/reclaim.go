@@ -156,15 +156,15 @@ func (s *Scheduler) savedByAge() []*supervised {
 // its disks, if it is still asleep and can start again from its disk, and
 // returns the timeline note that says so. A session that cannot, such as a
 // Standard one, keeps its state: without it the session could never wake.
-// A run whose lifecycle lock is held is left: a wake holds it while its
-// capacity reservation waits for this reclaim.
+// A run being woken is left, and so is one whose lifecycle lock is held: a
+// wake holds it while its capacity reservation waits for this reclaim.
 func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (string, error) {
 	if !entry.lifecycleMu.TryLock() {
 		return "", nil
 	}
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
-	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && entry.asleepSaved
+	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && entry.asleepSaved && entry.waking == nil
 	cid := entry.containerID
 	s.mu.Unlock()
 	if !asleep || s.coldStartRefusal(ctx, entry) != "" {

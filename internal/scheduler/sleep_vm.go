@@ -175,9 +175,12 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	if errors.Is(restoreErr, runtime.ErrNotFound) {
 		return woke{}, restoreErr
 	}
-	// A save that failed, or a restore that failed once the guest ran,
-	// left the VM running with every process: it is taken up as it is.
+	// A save that failed, or a restore that failed once the guest was
+	// restored, left the VM up with every process: it is taken up as it is.
+	// One the restore left paused runs again; resuming a running one fails,
+	// which is harmless, and the reattach that follows proves it runs.
 	if info, err := s.cfg.Runtime.Inspect(ctx, cid); err == nil && !info.Exited {
+		_ = s.cfg.Runtime.Resume(ctx, cid)
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
