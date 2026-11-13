@@ -548,14 +548,22 @@ func (s *Scheduler) launchedEnhanced(ctx context.Context, e *supervised) bool {
 // foregroundJobScript prints the command of a process that holds a
 // terminal's foreground, such as a dev server, an editor or a REPL started
 // in a shell tab. A shell waiting at its prompt holds its own terminal and
-// is not one. Fields after the command in /proc/<pid>/stat: state, ppid,
-// pgrp, session, tty_nr, tpgid.
-const foregroundJobScript = `for stat in /proc/[0-9]*/stat; do
+// is not one, nor is the agent the run supervisor (supervisor.go) runs in a
+// Standard session's terminal. The supervisor's name is split so this
+// script's own command line never matches it. Fields after the command in
+// /proc/<pid>/stat: state, ppid, pgrp, session, tty_nr, tpgid.
+const foregroundJobScript = `name=aether-run-; name=${name}supervisor; supervisors=" "
+for cmdline in /proc/[0-9]*/cmdline; do
+	grep -qa -- "$name" "$cmdline" 2>/dev/null || continue
+	pid=${cmdline#/proc/}; supervisors="$supervisors${pid%/cmdline} "
+done
+for stat in /proc/[0-9]*/stat; do
 	read -r line 2>/dev/null <"$stat" || continue
 	comm=${line#*(}
 	comm=${comm%)*}
 	set -- ${line##*) }
 	[ "$6" -gt 0 ] 2>/dev/null && [ "$3" = "$6" ] || continue
+	case $supervisors in *" $2 "*) continue ;; esac
 	case $comm in
 	bash | sh | dash | zsh | fish | ash | ksh | mksh) ;;
 	*) printf '%s\n' "$comm"; exit 0 ;;
