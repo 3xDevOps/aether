@@ -153,9 +153,11 @@ func (s *Scheduler) savedByAge() []*supervised {
 }
 
 // dropSavedState stops entry's saved VM, which deletes its memory and keeps
-// its disks, if it is still asleep, and returns the timeline note that says
-// what its next wake does. A run whose lifecycle lock is held is left: a
-// wake holds it while its capacity reservation waits for this reclaim.
+// its disks, if it is still asleep and can start again from its disk, and
+// returns the timeline note that says so. A session that cannot, such as a
+// Standard one, keeps its state: without it the session could never wake.
+// A run whose lifecycle lock is held is left: a wake holds it while its
+// capacity reservation waits for this reclaim.
 func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (string, error) {
 	if !entry.lifecycleMu.TryLock() {
 		return "", nil
@@ -165,7 +167,7 @@ func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (stri
 	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && entry.asleepSaved
 	cid := entry.containerID
 	s.mu.Unlock()
-	if !asleep {
+	if !asleep || s.coldStartRefusal(ctx, entry) != "" {
 		return "", nil
 	}
 	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
@@ -175,11 +177,7 @@ func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (stri
 		return "", err
 	}
 	s.publishSleep(entry)
-	const dropped = "Deleted this sleeping session's saved memory because disk space was low"
-	if reason := s.coldStartRefusal(ctx, entry); reason != "" {
-		return dropped + ", so it cannot wake: " + reason, nil
-	}
-	return dropped + "; it starts again from its disk when it next wakes, and restores its conversation", nil
+	return "Deleted this sleeping session's saved memory because disk space was low; it starts again from its disk when it next wakes, and restores its conversation", nil
 }
 
 // closedRetainedByAge returns closed runs that still hold a paused container,

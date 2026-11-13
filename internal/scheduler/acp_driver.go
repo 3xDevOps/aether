@@ -187,9 +187,11 @@ func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.A
 		return err
 	}
 	d.s.mu.Lock()
-	waking := entry.waking != nil
+	waking, reopening, cid := entry.waking != nil, entry.retained, entry.containerID
 	d.s.mu.Unlock()
-	if waking {
+	// A closed VM's close stopped its agent, so its Relaunch opens the
+	// conversation as one from a frozen container does.
+	if _, saved := d.s.saver(cid); waking && (!reopening || !saved) {
 		return d.openRestored(ctx, entry, openWake)
 	}
 	if !d.continuationOwed(entry) {

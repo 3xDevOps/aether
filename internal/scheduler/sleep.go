@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -483,7 +484,7 @@ func (s *Scheduler) sleepIdle(ctx context.Context) {
 			after = s.cfg.VMSleepAfter
 		}
 		sleeps := enhanced || saving && e.launchMode == domain.LaunchTUI
-		if after <= 0 || !sleeps || e.sleeping || !e.asleepSince.IsZero() || e.containerID == "" {
+		if after <= 0 || !sleeps || e.sleeping || !e.asleepSince.IsZero() || e.containerID == "" || now.Sub(e.saveFailedAt) < after {
 			continue
 		}
 		c := candidate{e: e, after: after, saving: saving, enhanced: enhanced}
@@ -573,6 +574,40 @@ func (s *Scheduler) foregroundJob(ctx context.Context, cid runtime.ID) (string, 
 	return strings.TrimSpace(stdout), nil
 }
 
+// guestCPUScript prints how much of the guest's CPU time, in percent, was
+// not idle over one second. /proc/stat's first line: cpu user nice system
+// idle iowait irq softirq steal.
+const guestCPUScript = `read -r _ u1 n1 s1 i1 w1 q1 f1 _ </proc/stat
+sleep 1
+read -r _ u2 n2 s2 i2 w2 q2 f2 _ </proc/stat
+busy=$(( u2 + n2 + s2 + q2 + f2 - u1 - n1 - s1 - q1 - f1 ))
+idle=$(( i2 + w2 - i1 - w1 ))
+echo $(( busy * 100 / (busy + idle + 1) ))`
+
+// guestBusyPercent is the CPU use above which a VM counts as working: an
+// idle agent, shell or dev server stays well below it, a build or a test
+// run above.
+const guestBusyPercent = 10
+
+// guestBusy reports whether the VM cid still works on something, such as a
+// build or a test run the agent or a terminal left running without output.
+func (s *Scheduler) guestBusy(ctx context.Context, cid runtime.ID) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", guestCPUScript}, "")
+	if err == nil && code != 0 {
+		err = fmt.Errorf("exit %d: %s", code, strings.TrimSpace(stderr))
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the session's CPU use: %w", err)
+	}
+	percent, err := strconv.Atoi(strings.TrimSpace(stdout))
+	if err != nil {
+		return false, fmt.Errorf("read the session's CPU use: %q: %w", stdout, err)
+	}
+	return percent > guestBusyPercent, nil
+}
+
 func (s *Scheduler) goSleep(entry *supervised, sleep func(context.Context, *supervised) error) {
 	s.wg.Add(1)
 	go func() {
@@ -616,15 +651,22 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 		s.endSleep(entry, false)
 		return errStayAwake
 	}
-	// A save keeps a terminal's foreground command running; a stop ends it.
-	if !saving {
-		if job, err := s.foregroundJob(ctx, cid); err != nil || job != "" {
+	// A stop ends a terminal's foreground command, and a save would freeze
+	// work that still runs.
+	if saving {
+		if busy, err := s.guestBusy(ctx, cid); err != nil || busy {
 			s.endSleep(entry, false)
 			if err != nil {
-				slog.Warn("scheduler: keep a session awake whose terminals could not be read", "run", run, "error", err)
+				slog.Warn("scheduler: keep a session awake whose CPU use could not be read", "run", run, "error", err)
 			}
 			return errStayAwake
 		}
+	} else if job, err := s.foregroundJob(ctx, cid); err != nil || job != "" {
+		s.endSleep(entry, false)
+		if err != nil {
+			slog.Warn("scheduler: keep a session awake whose terminals could not be read", "run", run, "error", err)
+		}
+		return errStayAwake
 	}
 	if err := s.markAsleep(entry); err != nil {
 		s.endSleep(entry, false)

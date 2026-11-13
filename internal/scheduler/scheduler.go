@@ -539,8 +539,10 @@ type supervised struct {
 	waking      chan struct{}
 	wakeErr     error
 	// asleepSaved is set while a sleeping VM holds its saved memory, which
-	// a wake restores with every process.
-	asleepSaved bool
+	// a wake restores with every process. saveFailedAt is the last failed
+	// save, which the sleep sweep waits a full sleep delay after.
+	asleepSaved  bool
+	saveFailedAt time.Time
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int

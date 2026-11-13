@@ -237,12 +237,13 @@ When free space
 drops below the reserve plus 4 GiB, Aether frees space on its own, on every
 poll and before refusing a launch, in this order, until it is back above:
 
-1. The saved memory of sleeping session VMs, the longest asleep first
+1. The saved memory of sleeping Enhanced session VMs whose agent restores
+   its conversation, the longest asleep first
    ([Sessions in VMs](#sessions-in-vms)). The timeline notes `Deleted this
    sleeping session's saved memory because disk space was low; it starts
-   again from its disk when it next wakes, and restores its conversation`,
-   or, for a session that cannot start again from its disk, `..., so it
-   cannot wake: <why>`.
+   again from its disk when it next wakes, and restores its conversation`.
+   Sessions that could not start again from their disk, Standard ones
+   among them, keep theirs.
 2. Containers of closed sessions, the soonest to expire first. The timeline notes
    `Removed this closed session's container early because disk space was low; the
    session can no longer be reopened, and its branch and history are kept`.
@@ -653,11 +654,16 @@ lost, so more sessions sleep, sooner:
   applies to VMs and containers alike.
 - Background shells the agent started, such as a dev server, and commands
   in the foreground of a terminal no longer keep a session awake: they are
-  saved with it. A running turn, a background task the agent waits on,
-  queued input, an open request and the other conditions above still do,
-  and so does activity in the window.
+  saved with it. A VM that uses more than a tenth of its CPU still does, so
+  a build or test run finishes first, and so do a running turn, a
+  background task the agent waits on, queued input, an open request, the
+  other conditions above and activity in the window. A save that fails
+  leaves the session running; Aether tries again after another
+  `--run-sleep-after`.
 - A closed session is saved as soon as the close finishes, instead of
-  staying paused in memory. **Relaunch** restores it.
+  staying paused in memory, unless `--run-sleep-after` is `0`. **Relaunch**
+  restores it. Closing or killing a sleeping session wakes it first, so its
+  work is committed as for a running one.
 
 A sleeping VM keeps everything: its processes, including dev servers,
 nested Docker containers such as a `docker compose` stack and the Browser
@@ -665,8 +671,7 @@ tab's browser; its terminals and shell tabs, which reconnect on the wake;
 the agent process and its conversation; its disks. Connections to outside
 the session, such as a database client's or a port forward's, can end while
 it sleeps, and the programs holding them see them fail after the wake, as
-after a network outage. The VM's
-clock is set right on the wake.
+after a network outage. The VM's clock is set right on the wake.
 
 The agent's own scheduled wakeups (`/loop`, `ScheduleWakeup`, `CronCreate`)
 live in the agent process and are frozen with it: a session left running
@@ -692,7 +697,8 @@ from its disk: processes that were running end, the conversation is
 restored, and the Chat view gives the restore's error. Any other session,
 a Standard one among them, stays asleep: the wake fails with the restore's
 error, and the VM keeps its disk and saved state. Launch a new session on
-its branch, or wake it again.
+its branch, or wake it again. A VM a failed save left running is taken up
+as it is on the next wake.
 
 A saved VM takes about as much disk as the memory its processes use, after
 the guest drops its page cache: 0.6 to 1.3 GB for those test sessions in
