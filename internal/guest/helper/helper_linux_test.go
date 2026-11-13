@@ -294,6 +294,22 @@ func TestCredentialGroups(t *testing.T) {
 	}
 }
 
+func TestStartLeavesGoSettingsToTheProgram(t *testing.T) {
+	_, client := startHelper(t)
+	for _, nnp := range []bool{false, true} {
+		p := spawn(t, client, guest.ProcessSpec{
+			ID: fmt.Sprint(t.Name(), nnp), Env: []string{"GOMEMLIMIT=2GB", "GODEBUG=inittrace=1"},
+			Argv: []string{"sh", "-c", `echo "$GOMEMLIMIT $GODEBUG"`}, NoNewPrivileges: nnp,
+		})
+		a := p.Attach(true)
+		out, _ := io.ReadAll(a.Stdout())
+		_ = a.Close()
+		if string(out) != "2GB inittrace=1\n" {
+			t.Errorf("NoNewPrivileges %v: the program saw %q", nnp, out)
+		}
+	}
+}
+
 func TestNoNewPrivileges(t *testing.T) {
 	_, client := startHelper(t)
 	// Without the option a process keeps the helper's own setting, which a
