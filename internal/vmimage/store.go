@@ -6,6 +6,7 @@ package vmimage
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/sys/unix"
@@ -29,6 +31,10 @@ import (
 // rootSize is the size of every root filesystem. Disks are sparse and the
 // root disk is thin, so only written data takes host space.
 const rootSize = 64 << 30
+
+// buildTimeout bounds a shared pull and build, which outlive the callers
+// that started them.
+const buildTimeout = time.Hour
 
 // Disk formats, as Cloud Hypervisor's --disk image_type names them.
 const (
@@ -113,29 +119,47 @@ func (s *Store) Kernel() (string, error) {
 // BaseDisk returns the base disk of ref, building it on first use. A tag
 // resolves locally once known, as in Docker. aether/ references are never
 // pulled from a registry: they are saved bases or come from Docker.
+// Concurrent first uses share one pull, which a cancelled caller leaves
+// running for the others.
 func (s *Store) BaseDisk(ctx context.Context, ref string) (Base, error) {
 	if base, err := s.LookupBase(ref); !errors.Is(err, runtime.ErrNotFound) {
 		return base, err
 	}
+	pulled := s.builds.DoChan("ref:"+ref, func() (any, error) {
+		pullCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), buildTimeout)
+		defer cancel()
+		return nil, s.pull(pullCtx, ref)
+	})
+	select {
+	case <-ctx.Done():
+		return Base{}, fmt.Errorf("vmimage: base disk for %s: %w", ref, ctx.Err())
+	case res := <-pulled:
+		if res.Err != nil {
+			return Base{}, res.Err
+		}
+	}
+	return s.LookupBase(ref)
+}
+
+// pull resolves ref, builds its base disk unless one with the same config
+// digest exists, and tags it ref.
+func (s *Store) pull(ctx context.Context, ref string) error {
 	img, cleanup, err := s.resolve(ctx, ref)
 	if err != nil {
-		return Base{}, err
+		return err
 	}
 	defer cleanup()
 	digest, err := img.ConfigName()
 	if err != nil {
-		return Base{}, fmt.Errorf("vmimage: image %s: %w", ref, err)
+		return fmt.Errorf("vmimage: image %s: %w", ref, err)
 	}
 	id := digest.String()
-	if _, err, _ := s.builds.Do(id, func() (any, error) { return nil, s.build(ctx, img, id, ref) }); err != nil {
-		return Base{}, fmt.Errorf("vmimage: base disk for %s: %w", ref, err)
+	if _, err, _ = s.builds.Do("id:"+id, func() (any, error) { return nil, s.build(ctx, img, id, ref) }); err != nil {
+		return fmt.Errorf("vmimage: base disk for %s: %w", ref, err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.tagLocked(ref, id); err != nil {
-		return Base{}, err
-	}
-	return s.load(id)
+	return s.tagLocked(ref, id)
 }
 
 // LookupBase returns the base disk ref is tagged to, without building one;
@@ -155,29 +179,83 @@ func (s *Store) LookupBase(ref string) (Base, error) {
 }
 
 // NewRootDisk creates a qcow2 root disk at path over base, replacing any
-// disk already there. It hard-links the base disk to path.base and names
-// that link as the backing file, so the base stays until the link is
-// deleted with the session's files; path must be on the store's filesystem.
-func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, error) {
-	pin := path + ".base"
-	if err := s.pin(base.Path, pin); err != nil {
-		return Disk{}, err
-	}
-	pin, err := filepath.Abs(pin)
+// disk already there. Its backing file is a hard link to the base disk named
+// path.<base id>.base, so the base stays until the link is deleted with the
+// session's files; path must be on the store's filesystem. A failed rebuild
+// leaves the previous root disk and its base as they were.
+func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (disk Disk, err error) {
+	path, err = filepath.Abs(path)
 	if err != nil {
-		return Disk{}, fmt.Errorf("vmimage: root disk %s: %w", path, err)
+		return Disk{}, fmt.Errorf("vmimage: root disk: %w", err)
+	}
+	defer func() {
+		if pruneErr := prunePins(path); err == nil && pruneErr != nil {
+			err = pruneErr
+		}
+	}()
+	pin := path + "." + dirName(base.ID) + ".base"
+	if err = s.pin(base.Path, pin); err != nil {
+		return Disk{}, err
 	}
 	tmp := path + ".tmp"
-	if err := removeIfExists(tmp); err != nil {
+	if err = removeIfExists(tmp); err != nil {
 		return Disk{}, err
 	}
-	if err := run(ctx, "qemu-img", "create", "-q", "-f", "qcow2", "-F", "raw", "-b", pin, tmp); err != nil {
+	if err = run(ctx, "qemu-img", "create", "-q", "-f", "qcow2", "-F", "raw", "-b", pin, tmp); err != nil {
 		return Disk{}, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err = os.Rename(tmp, path); err != nil {
 		return Disk{}, fmt.Errorf("vmimage: root disk %s: %w", path, err)
 	}
 	return Disk{Path: path, Format: FormatQcow2}, nil
+}
+
+// prunePins removes the base links next to the root disk at path that it
+// does not back onto.
+func prunePins(path string) error {
+	keep, err := backingFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("vmimage: root disk %s: %w", path, err)
+	}
+	prefix := filepath.Base(path) + "."
+	var errs []error
+	for _, e := range entries {
+		name := filepath.Join(filepath.Dir(path), e.Name())
+		pin := strings.HasSuffix(e.Name(), ".base") || strings.HasSuffix(e.Name(), ".base.tmp")
+		if strings.HasPrefix(e.Name(), prefix) && pin && name != keep {
+			errs = append(errs, removeIfExists(name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// backingFile reads the backing file name from a qcow2 header.
+func backingFile(disk string) (string, error) {
+	f, err := os.Open(disk)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	var hdr [20]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		return "", fmt.Errorf("vmimage: read %s: %w", disk, err)
+	}
+	if string(hdr[:4]) != "QFI\xfb" {
+		return "", fmt.Errorf("vmimage: %s is not a qcow2 disk", disk)
+	}
+	offset, size := binary.BigEndian.Uint64(hdr[8:16]), binary.BigEndian.Uint32(hdr[16:20])
+	if offset == 0 || size == 0 || size > 1023 {
+		return "", fmt.Errorf("vmimage: %s has no backing file", disk)
+	}
+	name := make([]byte, size)
+	if _, err := f.ReadAt(name, int64(offset)); err != nil {
+		return "", fmt.Errorf("vmimage: read %s: %w", disk, err)
+	}
+	return string(name), nil
 }
 
 // NewDataDisk creates an empty ext4 data disk of size bytes at path, labelled
@@ -201,7 +279,11 @@ func (s *Store) NewDataDisk(ctx context.Context, path string, size int64) (Disk,
 // the image configuration of the base the root disk was made from, with
 // labels replacing those of the same keys. The VM must be stopped.
 func (s *Store) SaveBase(ctx context.Context, rootDisk, ref string, labels map[string]string) (Base, error) {
-	parent, err := s.baseOf(rootDisk + ".base")
+	pin, err := backingFile(rootDisk)
+	if err != nil {
+		return Base{}, err
+	}
+	parent, err := s.baseOf(pin)
 	if err != nil {
 		return Base{}, err
 	}
@@ -329,16 +411,27 @@ func (s *Store) pin(target, link string) error {
 	return s.pinLocked(target, link)
 }
 
+// pinLocked replaces link with a hard link to target in one rename, so a
+// disk already backing onto link never sees it missing.
 func (s *Store) pinLocked(target, link string) error {
-	if err := removeIfExists(link); err != nil {
+	// rename(2) between two links of one file does nothing and leaves the
+	// temporary link behind.
+	if sameFile(target, link) {
+		return nil
+	}
+	tmp := link + ".tmp"
+	if err := removeIfExists(tmp); err != nil {
 		return err
 	}
-	if err := os.Link(target, link); err != nil {
+	if err := os.Link(target, tmp); err != nil {
 		var linkErr *os.LinkError
 		if errors.As(err, &linkErr) && errors.Is(linkErr.Err, unix.EXDEV) {
 			return fmt.Errorf("vmimage: %s must be on the same filesystem as the image store %s", link, s.dir)
 		}
 		return fmt.Errorf("vmimage: link %s: %w", link, err)
+	}
+	if err := os.Rename(tmp, link); err != nil {
+		return errors.Join(fmt.Errorf("vmimage: link %s: %w", link, err), removeIfExists(tmp))
 	}
 	return nil
 }
@@ -460,6 +553,15 @@ func newLocalID() (string, error) {
 		return "", fmt.Errorf("vmimage: new base id: %w", err)
 	}
 	return "local:" + hex.EncodeToString(b), nil
+}
+
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
 }
 
 // linkedElsewhere reports whether a session still hard-links file.

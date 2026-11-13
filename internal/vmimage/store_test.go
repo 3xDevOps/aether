@@ -116,13 +116,28 @@ type countingRegistry struct {
 	handler http.Handler
 	mu      sync.Mutex
 	gets    map[string]int
+	// gate, when set, holds every blob download until it is closed; started
+	// is closed at the first one.
+	gate, started chan struct{}
+	once          sync.Once
+}
+
+func (c *countingRegistry) hold(gate, started chan struct{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gate, c.started = gate, started
 }
 
 func (c *countingRegistry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		c.mu.Lock()
 		c.gets[r.URL.Path]++
+		gate, started := c.gate, c.started
 		c.mu.Unlock()
+		if gate != nil && strings.Contains(r.URL.Path, "/blobs/") {
+			c.once.Do(func() { close(started) })
+			<-gate
+		}
 	}
 	c.handler.ServeHTTP(w, r)
 }
@@ -189,13 +204,13 @@ func label(t *testing.T, disk string) string {
 	return ""
 }
 
-func nlink(t *testing.T, path string) uint64 {
+func nlink(t *testing.T, path string) int {
 	t.Helper()
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return info.Sys().(*syscall.Stat_t).Nlink
+	return int(info.Sys().(*syscall.Stat_t).Nlink)
 }
 
 func TestStoreBaseRootSaveSweep(t *testing.T) {
@@ -290,7 +305,8 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if err = json.Unmarshal(out, &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.Format != "qcow2" || info.VirtualSize != rootSize || info.Backing != rootPath+".base" {
+	basePin := rootPath + "." + dirName(base.ID) + ".base"
+	if info.Format != "qcow2" || info.VirtualSize != rootSize || info.Backing != basePin {
 		t.Errorf("qemu-img info = %+v", info)
 	}
 	if got := nlink(t, base.Path); got != 2 {
@@ -338,8 +354,28 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if got := debugfs(t, saved.Path, "cat /etc/hostname"); got != "upper" {
 		t.Errorf("saved /etc/hostname = %q", got)
 	}
-	if looked, err := s.LookupBase("aether/member-x:1"); err != nil || looked.ID != saved.ID {
-		t.Errorf("LookupBase(saved) = %+v, %v", looked, err)
+	if looked, lookErr := s.LookupBase("aether/member-x:1"); lookErr != nil || looked.ID != saved.ID {
+		t.Errorf("LookupBase(saved) = %+v, %v", looked, lookErr)
+	}
+
+	// A failed rebuild onto another base keeps the old pairing; a successful
+	// one drops the old base's link.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err = s.NewRootDisk(cancelled, saved, rootPath); err == nil {
+		t.Fatal("NewRootDisk with a cancelled context succeeded")
+	}
+	if got, readErr := backingFile(rootPath); readErr != nil || got != basePin {
+		t.Errorf("after a failed rebuild the root disk backs onto %q, %v; want %q", got, readErr, basePin)
+	}
+	if nlink(t, base.Path) != 2 || nlink(t, saved.Path) != 1 {
+		t.Errorf("after a failed rebuild: base has %d links, saved %d; want 2 and 1", nlink(t, base.Path), nlink(t, saved.Path))
+	}
+	if _, err = s.NewRootDisk(ctx, saved, rootPath); err != nil {
+		t.Fatal(err)
+	}
+	if nlink(t, base.Path) != 1 || nlink(t, saved.Path) != 2 {
+		t.Errorf("after a rebuild onto the saved base: base has %d links, saved %d; want 1 and 2", nlink(t, base.Path), nlink(t, saved.Path))
 	}
 
 	if err := s.Tag("aether/member-x:1", "aether/member-x:2"); err != nil {
@@ -358,11 +394,11 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 			t.Fatalf("Untag(%s): %v", tag, err)
 		}
 	}
-	if _, err := os.Stat(saved.Path); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("untagged, unlinked saved base survived: %v", err)
+	if _, err := os.Stat(base.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("untagged, unlinked base survived: %v", err)
 	}
-	if _, err := os.Stat(base.Path); err != nil {
-		t.Errorf("base disk a root disk links was swept: %v", err)
+	if _, err := os.Stat(saved.Path); err != nil {
+		t.Errorf("saved base a root disk links was swept: %v", err)
 	}
 	if _, err := s.LookupBase(ref); !errors.Is(err, runtime.ErrNotFound) {
 		t.Errorf("LookupBase after Untag = %v, want ErrNotFound", err)
@@ -373,8 +409,44 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if err := s.Sweep(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(base.Path); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("base disk outlived its last root disk and tag: %v", err)
+	if _, err := os.Stat(saved.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("saved base outlived its last root disk and tag: %v", err)
+	}
+}
+
+func TestStoreCancelledCallerLeavesThePullRunning(t *testing.T) {
+	needTools(t, "mkfs.ext4")
+	layers := standardLayers(t)
+	ref, reg, _ := push(t, testImage(t, goruntime.GOARCH, layers...))
+	gate, started := make(chan struct{}), make(chan struct{})
+	reg.hold(gate, started)
+	s := openStore(t, nil)
+
+	first, cancel := context.WithCancel(context.Background())
+	firstErr := make(chan error, 1)
+	go func() {
+		_, err := s.BaseDisk(first, ref)
+		firstErr <- err
+	}()
+	<-started
+	cancel()
+	if err := <-firstErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled BaseDisk = %v, want context.Canceled", err)
+	}
+	second := make(chan error, 1)
+	go func() {
+		_, err := s.BaseDisk(context.Background(), ref)
+		second <- err
+	}()
+	close(gate)
+	if err := <-second; err != nil {
+		t.Fatalf("BaseDisk after another caller gave up: %v", err)
+	}
+	for _, l := range layers {
+		digest, _ := l.Digest()
+		if got := reg.blobGets(digest); got != 1 {
+			t.Errorf("layer %s fetched %d times, want once", digest, got)
+		}
 	}
 }
 
