@@ -36,6 +36,7 @@ type Images interface {
 	NewCacheDisk(ctx context.Context, pool, path string) (vmimage.Disk, error)
 	SnapshotCache(ctx context.Context, disk string) (string, error)
 	PromoteCache(ctx context.Context, pool, snapshot string) error
+	Sweep() error
 }
 
 const (

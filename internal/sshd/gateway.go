@@ -109,6 +109,8 @@ func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.
 		ScratchBytes:    usage.ScratchBytes,
 		OtherBytes:      usage.OtherBytes,
 		SnapshotBytes:   usage.SnapshotBytes,
+		VMBytes:         usage.VMBytes,
+		VMStateBytes:    usage.VMStateBytes,
 		Warnings:        usage.Warnings,
 		Docker:          (*protocol.ServerDockerDisk)(usage.Docker),
 		ContainersError: usage.ContainersError,

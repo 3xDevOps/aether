@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -84,7 +86,7 @@ func updateCmd(args []string) error {
 	// The trial runs in the process the unit starts, which reads the swap
 	// record under its own data directory and runs its own binary, so the
 	// update takes both from the unit.
-	unitExe, o, err := unitServe()
+	unitExe, serveArgs, o, err := unitServe()
 	if err != nil {
 		return err
 	}
@@ -103,13 +105,19 @@ func updateCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The binary at self installs its session VM files with the unit's
+	// serve arguments, so it reads the same config file and vm-kernel.
+	var prepareVMs func(context.Context) error
+	if *o.sessionRuntime == server.SessionRuntimeVM {
+		prepareVMs = func(ctx context.Context) error { return installVMFiles(ctx, self, serveArgs) }
+	}
 	if target == version.Version {
-		return restartIfStale(self, *o.addr, database)
+		return restartIfStale(self, *o.addr, database, prepareVMs)
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
 
 	var staged *serverupdate.Staged
-	if err := step("checking and downloading the release", func() (err error) {
+	if err := step(os.Stdout, "checking and downloading the release", func() (err error) {
 		staged, err = serverupdate.Stage(ctx, serverupdate.Plan{
 			BaseURL:  baseURL,
 			Self:     self,
@@ -128,21 +136,54 @@ func updateCmd(args []string) error {
 	if out, err := exec.CommandContext(probeCtx, self, "version").CombinedOutput(); err != nil {
 		return errors.Join(fmt.Errorf("the new aether-server does not run: %w: %s", err, strings.TrimSpace(string(out))), staged.Undo())
 	}
+	// After an undo the previous binary is back, and may still be running:
+	// it puts back its own files, which the failed step may have replaced.
+	restoreVMFiles := func(err error) error {
+		if prepareVMs == nil {
+			return err
+		}
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		return errors.Join(err, prepareVMs(restoreCtx))
+	}
+	if prepareVMs != nil {
+		// Interrupted, the step returns here so the update is undone rather
+		// than left staged.
+		vmCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		err := prepareVMs(vmCtx)
+		stop()
+		if err != nil {
+			return restoreVMFiles(errors.Join(err, staged.Undo()))
+		}
+	}
 	before, began := unitPID(), time.Now()
 	if err := restartOnto(staged, database); err != nil {
-		return err
+		return restoreVMFiles(err)
 	}
 	return awaitUpdate(stateDir, database, target, staged, before, began)
 }
 
-func step(what string, do func() error) error {
-	fmt.Printf("%s ... ", what)
+// installVMFiles has the binary at self install the Cloud Hypervisor and
+// guest kernel it was released with, before a restart onto it, so the VMs
+// it boots get them. A running VM keeps the files it started with.
+func installVMFiles(ctx context.Context, self string, serveArgs []string) error {
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, self, append([]string{"vm", "install"}, serveArgs...)...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s vm install: %w: %s", self, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func step(w io.Writer, what string, do func() error) error {
+	_, _ = fmt.Fprintf(w, "%s ... ", what)
 	start := time.Now()
 	if err := do(); err != nil {
-		fmt.Println("failed")
+		_, _ = fmt.Fprintln(w, "failed")
 		return err
 	}
-	fmt.Printf("done in %s\n", time.Since(start).Round(10*time.Millisecond))
+	_, _ = fmt.Fprintf(w, "done in %s\n", time.Since(start).Round(10*time.Millisecond))
 	return nil
 }
 
@@ -171,7 +212,7 @@ func updateTarget(ctx context.Context, baseURL, tag string) (string, error) {
 // binary again instead. So does a start systemd refuses, which leaves no
 // process to count the trial and roll it back.
 func restartOnto(staged *serverupdate.Staged, database string) error {
-	if err := step("stopping aether-server; sessions keep running", func() error {
+	if err := step(os.Stdout, "stopping aether-server; sessions keep running", func() error {
 		if out, err := exec.Command("systemctl", "stop", updateUnit).CombinedOutput(); err != nil {
 			return fmt.Errorf("systemctl stop %s: %w: %s", updateUnit, err, out)
 		}
@@ -185,7 +226,7 @@ func restartOnto(staged *serverupdate.Staged, database string) error {
 		if info, err := os.Stat(database); err == nil {
 			size = uint64(info.Size())
 		}
-		if snapErr = step(fmt.Sprintf("copying the %s database to %s so a failed start can roll back", humanize.Bytes(size), snapshot), staged.Snapshot); snapErr != nil {
+		if snapErr = step(os.Stdout, fmt.Sprintf("copying the %s database to %s so a failed start can roll back", humanize.Bytes(size), snapshot), staged.Snapshot); snapErr != nil {
 			snapErr = errors.Join(snapErr, staged.Undo())
 		}
 	}
@@ -194,7 +235,7 @@ func restartOnto(staged *serverupdate.Staged, database string) error {
 		starting = "starting the previous aether-server " + version.Version + " again"
 	}
 	var out []byte
-	err := step(starting, func() (err error) {
+	err := step(os.Stdout, starting, func() (err error) {
 		out, err = exec.Command("systemctl", "start", updateUnit).CombinedOutput()
 		return err
 	})
@@ -260,10 +301,10 @@ func unitProperty(name string) string {
 
 func unitPID() string { return unitProperty("MainPID") }
 
-// unitServe is the executable and serve options the unit's ExecStart runs.
-// systemctl prints ExecStart as `{ path=<exe> ; argv[]=<args> ; ... }`
-// with the arguments joined by spaces.
-func unitServe() (string, *serveOptions, error) {
+// unitServe is the executable, serve arguments and serve options the
+// unit's ExecStart runs. systemctl prints ExecStart as
+// `{ path=<exe> ; argv[]=<args> ; ... }` with the arguments joined by spaces.
+func unitServe() (string, []string, *serveOptions, error) {
 	line := unitProperty("ExecStart")
 	_, path, _ := strings.Cut(line, "path=")
 	path, _, _ = strings.Cut(path, " ;")
@@ -271,24 +312,25 @@ func unitServe() (string, *serveOptions, error) {
 	argv, _, _ = strings.Cut(argv, " ;")
 	args := strings.Fields(argv)
 	if path == "" || len(args) < 2 || args[1] != "serve" {
-		return "", nil, fmt.Errorf("the %s unit's ExecStart does not run `aether-server serve`: %q", updateUnit, line)
+		return "", nil, nil, fmt.Errorf("the %s unit's ExecStart does not run `aether-server serve`: %q", updateUnit, line)
 	}
 	o, _, rest, err := loadOptions("serve", args[2:], nil)
 	if err != nil {
-		return "", nil, fmt.Errorf("read the %s unit's serve options %q: %w", updateUnit, argv, err)
+		return "", nil, nil, fmt.Errorf("read the %s unit's serve options %q: %w", updateUnit, argv, err)
 	}
 	if len(rest) != 0 {
-		return "", nil, fmt.Errorf("the %s unit's ExecStart has arguments serve does not take: %q", updateUnit, argv)
+		return "", nil, nil, fmt.Errorf("the %s unit's ExecStart has arguments serve does not take: %q", updateUnit, argv)
 	}
-	return path, o, nil
+	return path, args[2:], o, nil
 }
 
 // restartIfStale restarts the unit when it still runs an earlier file than
 // the binary installed at self, as after `aether update` replaced it, and
-// starts it when it runs nothing. The unit is Type=simple, so a new PID
-// only means the process started; it serves once it accepts connections on
-// addr, within 2 minutes of migrating database.
-func restartIfStale(self, addr, database string) error {
+// starts it when it runs nothing; prepareVMs, when set, runs first. The
+// unit is Type=simple, so a new PID only means the process started; it
+// serves once it accepts connections on addr, within 2 minutes of migrating
+// database.
+func restartIfStale(self, addr, database string, prepareVMs func(context.Context) error) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("--addr %q: %w", addr, err)
@@ -313,6 +355,14 @@ func restartIfStale(self, addr, database string) error {
 			return nil
 		}
 		verb = "restart"
+	}
+	if prepareVMs != nil {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		err = prepareVMs(ctx)
+		stop()
+		if err != nil {
+			return err
+		}
 	}
 	if out, rerr := exec.Command("systemctl", verb, updateUnit).CombinedOutput(); rerr != nil {
 		return fmt.Errorf("systemctl %s %s: %w: %s", verb, updateUnit, rerr, out)

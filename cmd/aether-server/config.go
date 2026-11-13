@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 )
 
@@ -113,7 +114,11 @@ func configSet(w io.Writer, path, key, value string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(w, "%s: %s = %s (was %s)\n", path, key, value, was)
-	_, _ = fmt.Fprintf(w, "apply it with:\n  %s\n", serversetup.RestartCommand)
+	apply := serversetup.RestartCommand
+	if key == "session-runtime" && value == server.SessionRuntimeVM {
+		apply = "aether-server vm install" + configFlag(path) + " && " + apply
+	}
+	_, _ = fmt.Fprintf(w, "apply it with:\n  %s\n", apply)
 	return nil
 }
 

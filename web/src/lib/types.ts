@@ -660,6 +660,10 @@ export interface DiskUsage {
   other_bytes?: number
   /** Included in worktree_bytes, not an additional category. */
   snapshot_bytes?: number
+  /** Session VM disks and saved states; absent on a server that runs no VMs. */
+  vm_bytes?: number
+  /** Saved memory of sleeping session VMs, included in vm_bytes. */
+  vm_state_bytes?: number
   warnings?: string[]
   docker?: DockerDiskUsage
   entries?: DiskEntry[]

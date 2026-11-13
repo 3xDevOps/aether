@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -19,6 +21,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/disk"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 	"golang.org/x/term"
@@ -91,9 +95,24 @@ func configFlag(configPath string) string {
 
 // writeInstall carries on when Docker does not answer, since automation
 // may install it next, but leaves Sysbox out: its installer needs Docker.
+// When sessions are to run in VMs it prepares the host for them first, so a
+// host without KVM gets nothing written.
 func writeInstall(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox bool) error {
+	vm, kernel, err := installsVMs(configPath, values, force)
+	if err != nil {
+		return err
+	}
+	if vm {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		err = prepareVMHost(ctx, w, selfupdate.DefaultChecker().BaseURL(), kernel)
+		stop()
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(w)
+	}
 	docker := checkDocker(w)
-	if err := writeAndReport(w, unitPath, configPath, values, force); err != nil {
+	if err = writeAndReport(w, unitPath, configPath, values, force); err != nil {
 		return err
 	}
 	if sysbox {
@@ -114,6 +133,21 @@ func writeInstall(w io.Writer, unitPath, configPath string, values map[string]st
 		return err
 	}
 	return printNextSteps(w, configPath, options, "", docker, "")
+}
+
+// installsVMs reports whether the config file install leaves behind, the
+// kept one or the one written from values, runs sessions in VMs, and which
+// guest kernel it names.
+func installsVMs(configPath string, values map[string]string, force bool) (bool, string, error) {
+	options := serveFlagSet()
+	if _, err := os.Stat(configPath); err == nil && !force {
+		if options, err = configuredOptions(configPath); err != nil {
+			return false, "", err
+		}
+	} else if _, err := serversetup.Apply(options, values); err != nil {
+		return false, "", err
+	}
+	return options.Lookup("session-runtime").Value.String() == server.SessionRuntimeVM, options.Lookup("vm-kernel").Value.String(), nil
 }
 
 // The least a run needs to start, from internal/scheduler/capacity.go: 2

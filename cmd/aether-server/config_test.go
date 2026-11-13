@@ -107,6 +107,19 @@ func TestConfigSetTakesConfigAfterTheKey(t *testing.T) {
 	}
 }
 
+// Turning VMs on names the step that installs what they need, against the
+// same config file.
+func TestConfigSetSessionRuntimeVMNamesVMInstall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	var out bytes.Buffer
+	if err := configSet(&out, path, "session-runtime", "vm"); err != nil {
+		t.Fatal(err)
+	}
+	if want := "apply it with:\n  aether-server vm install --config " + path + " && systemctl restart aether-server\n"; !strings.HasSuffix(out.String(), want) {
+		t.Errorf("config set session-runtime vm printed:\n%s\nwant it to end with:\n%s", out.String(), want)
+	}
+}
+
 func TestConfigSetPreservesOtherKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.conf")
 	if err := serversetup.WriteConfig(path, map[string]string{"addr": ":2300", "data-dir": "/srv/aether"}); err != nil {

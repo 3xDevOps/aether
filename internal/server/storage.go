@@ -208,6 +208,34 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			}
 			e.OwnerKind, e.OwnerID = "workspace", string(workspace.ID)
 			e.Reason = "Persistent repository, session branches and shared clone objects; no automatic expiry"
+		case "vm-image":
+			e.Reason = "Disks session VMs boot from, stored once and shared by every VM; cleanup deletes those no image tag or VM still uses"
+		case "vm-cache":
+			e.Reason = "Package cache new session VMs start from; rebuildable"
+		case "vm", "vm-state":
+			run, err := d.Store.GetRun(ctx, domain.RunID(e.Key))
+			if err != nil {
+				unknownStorageOwner(e, err)
+				continue
+			}
+			e.OwnerKind, e.OwnerID = "run", string(run.ID)
+			if e.Kind == "vm-state" {
+				e.Reason = "Saved memory of a sleeping session VM; deleted when it wakes or its VM is deleted"
+				continue
+			}
+			e.Reason = "Session VM disks; deleted with the session's VM"
+			if d.Runs == nil {
+				continue
+			}
+			until, reason, err := d.Runs.StorageRetention(ctx, run.ID)
+			if err != nil {
+				e.Error = "Session retention lookup failed"
+				continue
+			}
+			e.RetainedUntil = until
+			if reason != "" {
+				e.Reason = reason
+			}
 		case "checkout", "snapshot", "transcript", "coord":
 			owner, _ := domain.ParentRun(domain.RunID(e.Key))
 			run, err := d.Store.GetRun(ctx, owner)

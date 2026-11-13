@@ -4,6 +4,7 @@ package disk
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"syscall"
 )
@@ -35,4 +36,13 @@ func SameFilesystem(a, b string) (bool, error) {
 		return false, err
 	}
 	return first.Sys().(*syscall.Stat_t).Dev == second.Sys().(*syscall.Stat_t).Dev, nil
+}
+
+// stored is what a file holds on disk: a sparse one counts the blocks it
+// has written, not its length.
+func stored(info fs.FileInfo) uint64 {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return min(uint64(info.Size()), uint64(st.Blocks)*512)
+	}
+	return uint64(info.Size())
 }
