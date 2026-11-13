@@ -60,6 +60,12 @@ func execNoNewPrivs(program string, argv []string) int {
 	err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
 	if err == nil {
 		err = unix.Exec(program, argv, os.Environ())
+		// The runtime's preemption signal can interrupt an execve that reads
+		// the program from a FUSE file system such as virtio-fs; the process
+		// is unchanged then, so the exec is tried again.
+		for errors.Is(err, unix.EINTR) {
+			err = unix.Exec(program, argv, os.Environ())
+		}
 	}
 	errno, ok := err.(unix.Errno)
 	if !ok {
