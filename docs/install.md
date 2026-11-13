@@ -837,7 +837,7 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 | `workspace-secrets/` | Secret workspace variables in plain text, readable only by the server's user. |
 | `mirrors/`, `profiles/` | Source mirror settings and deploy keys, and agent profile snapshots. |
 | `server-update/` | Update state, and the database copy taken before an update that changes its schema. |
-| `home-caches/`, `scratch/` | Package caches and each container's `/tmp`; with `session-runtime vm`, each session's agent database disk in `scratch/<session id>/vm-state/`. No backup needed. |
+| `home-caches/`, `scratch/` | Package caches and each container's `/tmp`. Rebuildable; no backup needed. |
 | `vm/` | With `session-runtime vm`: each VM's disks, logs and saved memory in `<key>/`, and in `images/` the disks VMs boot from, package caches, and the environments members saved (`images/tags.json` and `images/bases/local-*/`). |
 | `dictation/` | The speech-to-text engine and model `aether-server dictation install` downloaded. Reinstallable; no backup needed. |
 

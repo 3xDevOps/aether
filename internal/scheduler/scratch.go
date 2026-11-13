@@ -66,8 +66,8 @@ func (s *Scheduler) removeScratch(name string) {
 	}
 }
 
-// sweepScratch removes scratch and account config directories whose run or
-// terminal no longer has a container to own them.
+// sweepScratch removes scratch, account config and VM database directories
+// whose run or terminal no longer has a container to own them.
 func (s *Scheduler) sweepScratch(ctx context.Context) {
 	scratch, err := readRoot(s.scratchRoot())
 	if err != nil {
@@ -79,7 +79,12 @@ func (s *Scheduler) sweepScratch(ctx context.Context) {
 		slog.Warn("scheduler: list account config directories", "error", err)
 		return
 	}
-	if len(scratch) == 0 && len(configs) == 0 {
+	databases, err := readRoot(s.vmDatabasesRoot())
+	if err != nil {
+		slog.Warn("scheduler: list VM database directories", "error", err)
+		return
+	}
+	if len(scratch) == 0 && len(configs) == 0 && len(databases) == 0 {
 		return
 	}
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
@@ -131,6 +136,15 @@ func (s *Scheduler) sweepScratch(ctx context.Context) {
 			continue
 		}
 		s.removeAccountConfig(domain.RunID(entry.Name()))
+	}
+	for _, entry := range databases {
+		if !orphan(entry) {
+			continue
+		}
+		if _, err := os.Stat(s.sidecarPath(domain.RunID(entry.Name()))); err == nil {
+			continue
+		}
+		s.removeVMDatabases(domain.RunID(entry.Name()))
 	}
 }
 

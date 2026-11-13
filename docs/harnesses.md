@@ -637,11 +637,12 @@ sessions nothing below applies: every container of a member shares the home's
 databases as before.
 
 Agents whose shared databases can move get a copy of their own in each
-session, mounted over the one in the home. The copy is on a disk of the
-session's own, `<data dir>/scratch/<session id>/vm-state/disk.img`, so
+session, mounted over the one in the home. The copy is on a 1 GiB disk of the
+session's own, `<data dir>/scheduler/vm-databases/<session id>/disk.img`, so
 SQLite runs on a local filesystem in the VM, not over the file service. The
-disk is kept until the session is deleted, also across a move to another
-account. Their logins and other files stay shared:
+disk is kept across a move to another account and removed with the session's
+VM. When it fills, the agent fails with SQLite's `database or disk is full`.
+Their logins and other files stay shared:
 
 | Agent | Session's own | How |
 | --- | --- | --- |

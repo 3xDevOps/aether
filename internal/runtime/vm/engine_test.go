@@ -290,6 +290,15 @@ func TestASessionsDatabaseDiskOutlivesItsVM(t *testing.T) {
 	if args = strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "serial=state") {
 		t.Errorf("the replacement VM lacks the database disk:\n%s", args)
 	}
+
+	planted := sessionSpec("run-b")
+	planted.Mounts = []runtime.Mount{{HostPath: t.TempDir(), Subpath: "0", ContainerPath: "/root/.codex/vm-sqlite", Kind: runtime.MountState}}
+	if err := os.Symlink(disk, filepath.Join(planted.Mounts[0].HostPath, stateDiskFile)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.engine.create(t.Context(), "run-b", planted, options{}); err == nil || !strings.Contains(err.Error(), "is not a regular file") {
+		t.Errorf("create over a symlinked database disk = %v", err)
+	}
 }
 
 func TestRestoreServesTheSharesTheGuestMountedAtBoot(t *testing.T) {

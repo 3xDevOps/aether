@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,20 +29,33 @@ func (s *Scheduler) sessionVMs() bool {
 	return ok
 }
 
-// vmStateDirName holds, in a session's scratch directory, the disk with the
-// session's own copy of each agent database directory.
-const vmStateDirName = "vm-state"
+// vmDatabasesDirName holds, in the scheduler's state directory, a directory
+// per session for the disk with its own copy of each agent database
+// directory. No container can write there: a disk path a guest could plant
+// a symlink in would let the VM monitor, which runs as root, open any host
+// file.
+const vmDatabasesDirName = "vm-databases"
+
+func (s *Scheduler) vmDatabasesRoot() string {
+	return filepath.Join(s.cfg.StateDir, vmDatabasesDirName)
+}
+
+func (s *Scheduler) removeVMDatabases(run domain.RunID) {
+	if err := os.RemoveAll(filepath.Join(s.vmDatabasesRoot(), string(run))); err != nil {
+		slog.Warn("scheduler: remove the session's agent database disk", "run", run, "error", err)
+	}
+}
 
 // vmStateMounts gives a session VM its own copy of each directory where the
 // agent keeps the databases its sessions share: a WAL database works only
 // among processes of one kernel, and only on a disk of the VM's, not over
 // the home's file service. The copies are on a disk of the session's, so
-// they outlive a VM replaced by an account move, and the directory in the
-// member's home is the mount point. A variable the workspace or profile
+// they outlive a VM replaced by an account move, until the session's VM is
+// removed, and the directory in the member's home is the mount point. A variable the workspace or profile
 // already sets is left alone.
 func (s *Scheduler) vmStateMounts(run domain.RunID, member domain.MemberID, profile harness.Profile, home string, env map[string]string) ([]runtime.Mount, error) {
 	var mounts []runtime.Mount
-	dir := filepath.Join(s.scratchRoot(), string(run), vmStateDirName)
+	dir := filepath.Join(s.vmDatabasesRoot(), string(run))
 	if len(profile.VMState) > 0 {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("scheduler: create the session's %s database disk: %w", profile.Name, err)

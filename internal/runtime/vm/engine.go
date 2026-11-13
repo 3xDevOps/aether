@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -425,21 +426,17 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 // made empty for its first VM; a VM that replaces that one, as an account
 // move does, finds it as the last one left it.
 func (e *engine) stateDisk(ctx context.Context, mounts []runtime.Mount) (vmimage.Disk, error) {
-	var path string
-	for _, m := range mounts {
-		if m.Kind != runtime.MountState {
-			continue
-		}
-		if path != "" && m.HostPath != path {
-			return vmimage.Disk{}, fmt.Errorf("vm runtime: state mounts name two disks, %s and %s", path, m.HostPath)
-		}
-		path = m.HostPath
-	}
-	if path == "" {
+	i := slices.IndexFunc(mounts, func(m runtime.Mount) bool { return m.Kind == runtime.MountState })
+	if i < 0 {
 		return vmimage.Disk{}, nil
 	}
-	path = filepath.Join(path, stateDiskFile)
-	if _, err := os.Stat(path); err == nil {
+	path := filepath.Join(mounts[i].HostPath, stateDiskFile)
+	// The monitor opens the disk as root: it must be the file itself, never
+	// a link to another.
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return vmimage.Disk{}, fmt.Errorf("vm runtime: state disk %s is not a regular file", path)
+		}
 		return vmimage.Disk{Path: path, Format: vmimage.FormatRaw}, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return vmimage.Disk{}, fmt.Errorf("vm runtime: state disk: %w", err)

@@ -212,15 +212,19 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			e.Reason = "Disks session VMs boot from, stored once and shared by every VM; cleanup deletes those no image tag or VM still uses"
 		case "vm-cache":
 			e.Reason = "Package cache new session VMs start from; rebuildable"
-		case "vm", "vm-state":
+		case "vm", "vm-state", "vm-db":
 			run, err := d.Store.GetRun(ctx, domain.RunID(e.Key))
 			if err != nil {
 				unknownStorageOwner(e, err)
 				continue
 			}
 			e.OwnerKind, e.OwnerID = "run", string(run.ID)
-			if e.Kind == "vm-state" {
+			switch e.Kind {
+			case "vm-state":
 				e.Reason = "Saved memory of a sleeping session VM; deleted when it wakes or its VM is deleted"
+				continue
+			case "vm-db":
+				e.Reason = "Agent databases of a session VM; deleted with the session's VM, kept across an account move"
 				continue
 			}
 			e.Reason = "Session VM disks; deleted with the session's VM"

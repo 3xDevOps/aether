@@ -47,7 +47,7 @@ func TestVMDisks(t *testing.T) {
 	write("vm/run-1/root.img", 50)
 	write("vm/run-1/snapshot/memory-ranges", 500)
 	data := write("vm/run-1/data.img", 4096)
-	state := write("scratch/run-1/vm-state/disk.img", 4096)
+	state := write("scheduler/vm-databases/run-1/disk.img", 4096)
 	for _, disk := range []string{data, state} {
 		if err := os.Truncate(disk, 16<<30); err != nil {
 			t.Fatal(err)
@@ -65,13 +65,14 @@ func TestVMDisks(t *testing.T) {
 	if own := got[[2]string{"vm", "run-1"}]; own <= 50 || own > 50+1<<20 {
 		t.Errorf("run-1's own disks count %d bytes, want its 50-byte root disk plus the few KiB its 16 GiB sparse data disk holds", own)
 	}
-	if scratch := got[[2]string{"scratch", "run-1"}]; scratch == 0 || scratch > 1<<20 {
-		t.Errorf("run-1's sparse database disk counts %d bytes, want the few KiB it holds", scratch)
+	db := got[[2]string{"vm-db", "run-1"}]
+	if db == 0 || db > 1<<20 {
+		t.Errorf("run-1's sparse database disk counts %d bytes, want the few KiB it holds", db)
 	}
 	if _, ok := got[[2]string{"vm", "assistant-m1"}]; ok || u.WorktreeBytes != 0 {
 		t.Errorf("a link into the image store was charged to its VM or checkout: %v, worktrees %d", got, u.WorktreeBytes)
 	}
-	if u.VMStateBytes != 500 || u.VMBytes != 2400+got[[2]string{"vm", "run-1"}] || u.OtherBytes != 7 || len(u.Warnings) != 0 {
+	if u.VMStateBytes != 500 || u.VMBytes != 2400+got[[2]string{"vm", "run-1"}]+db || u.OtherBytes != 7 || len(u.Warnings) != 0 {
 		t.Errorf("VM bytes %d, saved state %d, other %d, warnings %v", u.VMBytes, u.VMStateBytes, u.OtherBytes, u.Warnings)
 	}
 }

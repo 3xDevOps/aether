@@ -85,6 +85,8 @@ const (
 	reposDir       = "repos"
 	databaseFile   = "aether.db"
 	vmDir          = "vm"
+	schedulerDir   = "scheduler"
+	vmDatabasesDir = "vm-databases"
 	// vmImagesDir holds the disks VMs and checkout disks share through hard
 	// links, so it is measured before anything that links them.
 	vmImagesDir = vmDir + "/images"
@@ -159,9 +161,7 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 				var n uint64
 				if err == nil && info.Mode().IsRegular() {
 					n = uint64(info.Size())
-					// A session VM's agent databases are a sparse disk in
-					// its scratch directory.
-					if strings.HasPrefix(kind, "vm") || kind == "scratch" {
+					if strings.HasPrefix(kind, "vm") {
 						n = stored(info)
 					}
 				}
@@ -190,7 +190,7 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 						u.EvidenceBytes += n
 					case "scratch":
 						u.ScratchBytes += n
-					case "vm-image", "vm-cache", "vm":
+					case "vm-image", "vm-cache", "vm", "vm-db":
 						u.VMBytes += n
 					case "vm-state":
 						u.VMBytes += n
@@ -259,6 +259,12 @@ func componentOwner(name string) (kind, key string) {
 		return "scratch", key
 	case vmDir:
 		return vmOwner(rest)
+	case schedulerDir:
+		if run, ok := strings.CutPrefix(rest, vmDatabasesDir+"/"); ok {
+			run, _, _ = strings.Cut(run, "/")
+			return "vm-db", run
+		}
+		return "other", ""
 	case databaseFile, databaseFile + "-wal", databaseFile + "-shm":
 		return "database", ""
 	default:

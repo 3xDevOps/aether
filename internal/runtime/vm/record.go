@@ -28,8 +28,8 @@ const (
 	rootCopy    = "root-copy.img"
 	dataDisk    = "data.img"
 	cacheDisk   = "cache.qcow2"
-	// stateDiskFile is the session's state disk, in a directory of the
-	// session's beside the VM's.
+	// stateDiskFile is the session's state disk, in the directory its state
+	// mounts name.
 	stateDiskFile = "disk.img"
 	consoleLog    = "console.log"
 	eventsFile    = "events.json"

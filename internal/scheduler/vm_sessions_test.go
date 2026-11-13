@@ -54,7 +54,7 @@ func TestASessionVMGetsItsOwnAgentDatabases(t *testing.T) {
 			}
 			continue
 		}
-		disk := filepath.Join(s.scratchRoot(), "run-1", vmStateDirName)
+		disk := filepath.Join(s.vmDatabasesRoot(), "run-1")
 		if len(state) != 2 || state[0].HostPath != disk || state[1].HostPath != disk || state[0].Subpath != "0" || state[1].Subpath != "1" ||
 			state[0].Kind != runtime.MountState || plan.Env["AGENT_DB_HOME"] != "/root/.agent/db" {
 			t.Fatalf("VM state mounts %+v, AGENT_DB_HOME %q", state, plan.Env["AGENT_DB_HOME"])
