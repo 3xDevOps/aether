@@ -42,6 +42,7 @@ func TestVMDisks(t *testing.T) {
 	link(base, "vm/run-1/root.img.b1.base")
 	link(helper, "vm/run-1/helper.img")
 	link(prepared, "checkouts/run-1/disk.qcow2.prepared-p1.base")
+	write("vm/firewall.rules", 7)
 	write("vm/run-1/root.img", 50)
 	write("vm/run-1/snapshot/memory-ranges", 500)
 	data := write("vm/run-1/data.img", 4096)
@@ -63,7 +64,7 @@ func TestVMDisks(t *testing.T) {
 	if _, ok := got[[2]string{"vm", "assistant-m1"}]; ok || u.WorktreeBytes != 0 {
 		t.Errorf("a link into the image store was charged to its VM or checkout: %v, worktrees %d", got, u.WorktreeBytes)
 	}
-	if u.VMStateBytes != 500 || u.VMBytes != 2400+got[[2]string{"vm", "run-1"}] || len(u.Warnings) != 0 {
-		t.Errorf("VM bytes %d, saved state %d, warnings %v", u.VMBytes, u.VMStateBytes, u.Warnings)
+	if u.VMStateBytes != 500 || u.VMBytes != 2400+got[[2]string{"vm", "run-1"}] || u.OtherBytes != 7 || len(u.Warnings) != 0 {
+		t.Errorf("VM bytes %d, saved state %d, other %d, warnings %v", u.VMBytes, u.VMStateBytes, u.OtherBytes, u.Warnings)
 	}
 }

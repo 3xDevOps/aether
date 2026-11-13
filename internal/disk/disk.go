@@ -265,9 +265,13 @@ func componentOwner(name string) (kind, key string) {
 }
 
 // vmOwner sorts <data dir>/vm: the image store's base, helper and cache
-// disks, and each VM's own disks and saved state, by VM key.
+// disks, each VM's own disks and saved state by VM key, and the server's own
+// files beside them.
 func vmOwner(rest string) (kind, key string) {
-	key, inner, _ := strings.Cut(rest, "/")
+	key, inner, inDir := strings.Cut(rest, "/")
+	if !inDir {
+		return "other", ""
+	}
 	if key == "images" {
 		if pool, ok := strings.CutPrefix(inner, "caches/"); ok {
 			pool, _, _ = strings.Cut(pool, "/")
