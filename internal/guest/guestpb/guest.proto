@@ -1,0 +1,172 @@
+// The API of aether-internal guest, the helper that runs as PID 1 in every
+// session VM. The server is its only client and reaches it over the VM's
+// vsock; docs/vm-guest.md describes the protocol.
+syntax = "proto3";
+
+package aether.guest.v1;
+
+option go_package = "github.com/3xDevOps/Aether/internal/guest/guestpb";
+
+service Guest {
+  rpc Info(InfoRequest) returns (InfoReply);
+  // Boot starts the session: dockerd when asked, the setup script, then the
+  // main process. Every later call returns the first call's result.
+  rpc Boot(BootRequest) returns (BootReply);
+  rpc Spawn(SpawnRequest) returns (SpawnReply);
+  // Read blocks until the stream has bytes at or after offset, ends, or the
+  // call is cancelled.
+  rpc Read(ReadRequest) returns (ReadReply);
+  rpc Write(WriteRequest) returns (WriteReply);
+  rpc Resize(ResizeRequest) returns (ResizeReply);
+  rpc Signal(SignalRequest) returns (SignalReply);
+  rpc Status(StatusRequest) returns (StatusReply);
+  rpc Stats(StatsRequest) returns (StatsReply);
+  rpc SetClock(SetClockRequest) returns (SetClockReply);
+  rpc PowerOff(PowerOffRequest) returns (PowerOffReply);
+}
+
+message InfoRequest {}
+
+message InfoReply {
+  uint32 protocol = 1;
+  string version = 2;
+  // boot_id changes on every boot and survives a save and restore.
+  string boot_id = 3;
+  // boot_error is the first PID 1 duty that failed, empty when all succeeded.
+  string boot_error = 4;
+}
+
+message Size {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message Process {
+  // id is chosen by the caller and names the process for its whole life.
+  string id = 1;
+  repeated string argv = 2;
+  // env is the complete environment as KEY=VALUE entries.
+  repeated string env = 3;
+  // user is "uid:gid", "uid" or empty for root.
+  string user = 4;
+  string dir = 5;
+  // terminal, when set, runs the process on a new terminal of this size.
+  Size terminal = 6;
+  // lossless blocks the process when its output is not read, instead of
+  // dropping the oldest bytes.
+  bool lossless = 7;
+}
+
+message BootRequest {
+  Process main = 1;
+  string setup_script = 2;
+  bool nested_docker = 3;
+  // pids_limit caps the tasks of every process the helper starts; 0 is
+  // unlimited.
+  int64 pids_limit = 4;
+}
+
+message BootReply {
+  // A nonzero setup_exit_code means the main process never started.
+  int32 setup_exit_code = 1;
+  // setup_output is the end of the script's combined output.
+  bytes setup_output = 2;
+  // setup_output_cut reports that setup_output lost its beginning.
+  bool setup_output_cut = 3;
+}
+
+message SpawnRequest {
+  Process process = 1;
+}
+
+message SpawnReply {}
+
+// SpawnFailure is the status detail of a Spawn whose program could not be
+// executed: exit_code is 127 when it was not found, 126 otherwise.
+message SpawnFailure {
+  int32 exit_code = 1;
+}
+
+enum Stream {
+  STREAM_UNSPECIFIED = 0;
+  STREAM_STDOUT = 1;
+  STREAM_STDERR = 2;
+}
+
+message ReadRequest {
+  string id = 1;
+  Stream stream = 2;
+  // offset counts the stream's bytes from the process start; a negative
+  // offset reads from the current end. It also acknowledges every byte
+  // before it, which frees a lossless process to write more.
+  int64 offset = 3;
+  uint32 max_bytes = 4;
+}
+
+message ReadReply {
+  // offset is where data starts. It is past the requested offset when the
+  // bytes in between were dropped.
+  int64 offset = 1;
+  bytes data = 2;
+  // eof reports that the stream ended and every byte was read.
+  bool eof = 3;
+}
+
+message WriteRequest {
+  string id = 1;
+  bytes data = 2;
+  // close closes the process's input after data; terminals have none to
+  // close.
+  bool close = 3;
+}
+
+message WriteReply {
+  uint32 written = 1;
+}
+
+message ResizeRequest {
+  string id = 1;
+  Size size = 2;
+}
+
+message ResizeReply {}
+
+message SignalRequest {
+  string id = 1;
+  int32 signal = 2;
+}
+
+message SignalReply {}
+
+message StatusRequest {
+  string id = 1;
+  // wait blocks until the process exited.
+  bool wait = 2;
+}
+
+message StatusReply {
+  bool exited = 1;
+  // exit_code is 128 plus the signal number for a process a signal killed.
+  int32 exit_code = 2;
+}
+
+message StatsRequest {}
+
+message StatsReply {
+  uint64 cpu_usage_nanos = 1;
+  uint64 memory_bytes = 2;
+  uint64 memory_limit_bytes = 3;
+  uint64 pids = 4;
+  uint64 pids_limit = 5;
+  uint64 oom_kills = 6;
+}
+
+message SetClockRequest {
+  int64 unix_nanos = 1;
+}
+
+message SetClockReply {}
+
+message PowerOffRequest {}
+
+message PowerOffReply {}

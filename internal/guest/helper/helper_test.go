@@ -1,0 +1,383 @@
+package helper
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/guest"
+	"github.com/mdlayher/vsock"
+	"golang.org/x/sys/unix"
+)
+
+// testProcs is the one table of the test binary: its reaper collects every
+// child, so two tables would steal each other's exits.
+var testProcs = newProcesses(nil)
+
+func TestMain(m *testing.M) {
+	// Orphans of the tests' commands come to this process, as they come to
+	// PID 1 in a VM.
+	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	go reapForever(testProcs)
+	os.Exit(m.Run())
+}
+
+// hybridVsock answers Cloud Hypervisor's CONNECT handshake in front of the
+// helper's server, as the VM monitor does on the host.
+type hybridVsock struct{ net.Listener }
+
+func (l hybridVsock) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	line := make([]byte, 0, 32)
+	b := make([]byte, 1)
+	for {
+		if _, err := io.ReadFull(conn, b); err != nil {
+			return nil, err
+		}
+		if b[0] == '\n' {
+			break
+		}
+		line = append(line, b[0])
+	}
+	if string(line) != fmt.Sprintf("CONNECT %d", guest.APIPort) {
+		return nil, fmt.Errorf("handshake %q", line)
+	}
+	if _, err := conn.Write([]byte("OK 1073741824\n")); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+// startHelper serves a helper on a Unix socket and returns its socket path
+// and a client of it.
+func startHelper(t *testing.T) (string, *service, *guest.Client) {
+	t.Helper()
+	socket := filepath.Join(t.TempDir(), "vsock.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := newService(testProcs, nil, "boot-"+t.Name(), "")
+	server := newServer(svc)
+	go func() { _ = server.Serve(hybridVsock{listener}) }()
+	t.Cleanup(server.Stop)
+	return socket, svc, dial(t, socket)
+}
+
+func dial(t *testing.T, socket string) *guest.Client {
+	t.Helper()
+	client, err := guest.Dial(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+func testContext(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// self is the test's own user: tests do not run as root.
+var self = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+
+func spawn(t *testing.T, client *guest.Client, spec guest.ProcessSpec) *guest.Process {
+	t.Helper()
+	spec.ID = t.Name() + "/" + spec.ID
+	spec.User = self
+	spec.Env = append(spec.Env, "PATH="+os.Getenv("PATH"))
+	p, err := client.Spawn(testContext(t), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// forgetBoot lets the next test boot the shared table again.
+func forgetBoot(t *testing.T) {
+	t.Cleanup(func() {
+		testProcs.mu.Lock()
+		defer testProcs.mu.Unlock()
+		delete(testProcs.byID, guest.MainID)
+		delete(testProcs.byID, guest.SetupID)
+	})
+}
+
+func TestPipeProcess(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	if info, err := client.Ping(ctx); err != nil || info.Protocol != guest.Protocol || info.BootID == "" {
+		t.Fatalf("ping: %+v, %v", info, err)
+	}
+	p := spawn(t, client, guest.ProcessSpec{ID: "pipe", Argv: []string{"sh", "-c", `echo "out $HOME"; echo err >&2; read x; echo "got $x"; exit 3`}, Dir: "/"})
+	a := p.Attach(true)
+	defer func() { _ = a.Close() }()
+	if _, err := a.Stdin().Write([]byte("hello\n")); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _ := io.ReadAll(a.Stdout())
+	stderr, _ := io.ReadAll(a.Stderr())
+	if !strings.HasPrefix(string(stdout), "out /") || !strings.HasSuffix(string(stdout), "got hello\n") || string(stderr) != "err\n" {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
+	}
+	if code, err := p.Wait(ctx); err != nil || code != 3 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+}
+
+func TestTerminalProcess(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	p := spawn(t, client, guest.ProcessSpec{ID: "tty", Argv: []string{"sh", "-c", `stty size; read x; stty size; echo "term $TERM"`}, TTY: &guest.Size{Cols: 80, Rows: 24}})
+	a := p.Attach(true)
+	defer func() { _ = a.Close() }()
+	waitFor(t, a.Stdout(), "24 80")
+	if err := a.Resize(ctx, 100, 30); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Stdin().Write([]byte("\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, a.Stdout(), "30 100")
+	waitFor(t, a.Stdout(), "term xterm")
+	if err := p.CloseStdin(ctx); err == nil {
+		t.Fatal("a terminal process must have no input to close")
+	}
+	if code, err := p.Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+}
+
+// waitFor reads r until it has printed want.
+func waitFor(t *testing.T, r io.Reader, want string) {
+	t.Helper()
+	var seen bytes.Buffer
+	buf := make([]byte, 4096)
+	for !strings.Contains(seen.String(), want) {
+		n, err := r.Read(buf)
+		seen.Write(buf[:n])
+		if err != nil {
+			t.Fatalf("waiting for %q: read %q, then %v", want, seen.String(), err)
+		}
+	}
+}
+
+// A server restart is a new client: it finds the process by ID and reads
+// the output the helper kept, and the process never noticed.
+func TestReattachAfterClientRestart(t *testing.T) {
+	socket, _, first := startHelper(t)
+	ctx := testContext(t)
+	p := spawn(t, first, guest.ProcessSpec{ID: "kept", Argv: []string{"sh", "-c", `echo before; read x; echo "after $x"`}})
+	a := p.Attach(true)
+	waitFor(t, a.Stdout(), "before")
+	_ = a.Close()
+	_ = first.Close()
+
+	second := dial(t, socket)
+	again := second.Process(p.ID())
+	b := again.Attach(true)
+	defer func() { _ = b.Close() }()
+	waitFor(t, b.Stdout(), "before")
+	if _, err := b.Stdin().Write([]byte("restart\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b.Stdout(), "after restart")
+	if code, err := again.Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+	if _, err := second.Process("never spawned").Status(ctx); !errors.Is(err, guest.ErrNotFound) {
+		t.Fatalf("an unknown process: %v", err)
+	}
+}
+
+// A lossless process waits for its reader instead of losing output, also
+// past the helper's window.
+func TestLosslessOutput(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	const size = 4 * outputLimit
+	p := spawn(t, client, guest.ProcessSpec{ID: "lossless", Argv: []string{"head", "-c", fmt.Sprint(size), "/dev/zero"}, Lossless: true})
+	time.Sleep(200 * time.Millisecond)
+	if state, err := p.Status(ctx); err != nil || state.Exited {
+		t.Fatalf("an unread lossless process must wait: %+v, %v", state, err)
+	}
+	a := p.Attach(true)
+	defer func() { _ = a.Close() }()
+	data, err := io.ReadAll(a.Stdout())
+	if err != nil || len(data) != size {
+		t.Fatalf("read %d of %d bytes: %v", len(data), size, err)
+	}
+	if code, err := p.Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+}
+
+func TestSpawnFailures(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	var startErr *guest.StartError
+	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/missing", User: self, Argv: []string{"/no/such/program"}}); !errors.As(err, &startErr) || startErr.Code != 127 {
+		t.Fatalf("missing program: %v", err)
+	}
+	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/dir", User: self, Argv: []string{"/"}}); !errors.As(err, &startErr) || startErr.Code != 126 {
+		t.Fatalf("a directory: %v", err)
+	}
+	p := spawn(t, client, guest.ProcessSpec{ID: "once", Argv: []string{"true"}})
+	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: p.ID(), User: self, Argv: []string{"true"}}); err == nil {
+		t.Fatal("an ID must not start a second process")
+	}
+	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: guest.MainID, Argv: []string{"true"}}); err == nil {
+		t.Fatal("Spawn must not start the main process")
+	}
+}
+
+func TestSignalAndInput(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	p := spawn(t, client, guest.ProcessSpec{ID: "sleep", Argv: []string{"sleep", "60"}})
+	short, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	// sleep never reads: the pipe fills, and the deadline ends the write
+	// without closing the input.
+	n, err := p.Write(short, make([]byte, 4<<20))
+	if err == nil || n >= 4<<20 {
+		t.Fatalf("write to a process that does not read: %d, %v", n, err)
+	}
+	if err := p.Signal(ctx, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if code, err := p.Wait(ctx); err != nil || code != 128+int(syscall.SIGTERM) {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+	if err := p.Signal(ctx, syscall.SIGTERM); err == nil {
+		t.Fatal("signalling an exited process must fail")
+	}
+}
+
+// The helper reaps every orphan, as PID 1 must, so none stays a zombie.
+func TestOrphansAreReaped(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	p := spawn(t, client, guest.ProcessSpec{ID: "parent", Argv: []string{"sh", "-c", `sleep 0.2 & echo $!`}})
+	a := p.Attach(true)
+	out, _ := io.ReadAll(a.Stdout())
+	_ = a.Close()
+	if _, err := p.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	orphan := "/proc/" + strings.TrimSpace(string(out))
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(orphan); errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if time.Now().After(deadline) {
+			stat, _ := os.ReadFile(orphan + "/stat")
+			t.Fatalf("orphan %s was not reaped: %s", orphan, stat)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestBoot(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	marker := filepath.Join(t.TempDir(), "setup-ran")
+	forgetBoot(t)
+	main := guest.ProcessSpec{User: self, Argv: []string{"sh", "-c", `cat "$MARKER"; echo main; read x`}, Env: []string{"MARKER=" + marker, "PATH=" + os.Getenv("PATH")}}
+	spec := guest.BootSpec{Main: main, SetupScript: `echo setup > "$MARKER"`}
+	if err := client.Boot(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Boot(ctx, guest.BootSpec{Main: main, SetupScript: "exit 1"}); err != nil {
+		t.Fatalf("a second boot must return the first one's result: %v", err)
+	}
+	a := client.Process(guest.MainID).Attach(true)
+	defer func() { _ = a.Close() }()
+	waitFor(t, a.Stdout(), "setup\nmain\n")
+	_ = a.Stdin().Close()
+	if _, err := a.Stdin().Write([]byte("x")); err == nil {
+		t.Fatal("a closed attachment input must refuse writes")
+	}
+	if state, err := client.Process(guest.MainID).Status(ctx); err != nil || state.Exited {
+		t.Fatalf("closing an attachment's input must not end the main process: %+v, %v", state, err)
+	}
+	if _, err := client.Process(guest.MainID).Write(ctx, []byte("bye\n")); err != nil {
+		t.Fatal(err)
+	}
+	if code, err := client.Process(guest.MainID).Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("main: %d, %v", code, err)
+	}
+}
+
+func TestBootSetupFails(t *testing.T) {
+	_, _, client := startHelper(t)
+	ctx := testContext(t)
+	forgetBoot(t)
+	marker := filepath.Join(t.TempDir(), "main-ran")
+	err := client.Boot(ctx, guest.BootSpec{
+		Main:        guest.ProcessSpec{User: self, Argv: []string{"touch", marker}, Env: []string{"PATH=" + os.Getenv("PATH")}},
+		SetupScript: "echo installing; echo broken >&2; exit 7",
+	})
+	var setup *guest.SetupError
+	if !errors.As(err, &setup) || setup.ExitCode != 7 || setup.Output != "installing\nbroken\n" || setup.Cut {
+		t.Fatalf("boot: %v (%+v)", err, setup)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the main process ran after a failed setup: %v", err)
+	}
+}
+
+func TestStats(t *testing.T) {
+	_, _, client := startHelper(t)
+	stats, err := client.Stats(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.MemoryLimitBytes == 0 || stats.MemoryBytes == 0 || stats.MemoryBytes > stats.MemoryLimitBytes || stats.CPUUsageNanos == 0 {
+		t.Fatalf("stats: %+v", stats)
+	}
+}
+
+type fakeConn struct {
+	net.Conn
+	from net.Addr
+}
+
+func (c fakeConn) RemoteAddr() net.Addr { return c.from }
+func (c fakeConn) Close() error         { return nil }
+
+type fakeListener struct {
+	net.Listener
+	conns chan net.Conn
+}
+
+func (l fakeListener) Accept() (net.Conn, error) { return <-l.conns, nil }
+
+func TestHostOnly(t *testing.T) {
+	conns := make(chan net.Conn, 2)
+	conns <- fakeConn{from: &vsock.Addr{ContextID: 3, Port: 5000}}
+	conns <- fakeConn{from: &vsock.Addr{ContextID: vsock.Host, Port: 5001}}
+	conn, err := hostOnly{fakeListener{conns: conns}}.Accept()
+	if err != nil || conn.RemoteAddr().(*vsock.Addr).Port != 5001 {
+		t.Fatalf("accepted %v, %v; want only the host's connection", conn.RemoteAddr(), err)
+	}
+}
