@@ -20,7 +20,7 @@ import { notFinishedYet } from '@/lib/status'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { AttachmentChips } from '@/routes/run/composer-attachments'
 import { AttachButton, DropOverlay, dropRoom } from '@/routes/run/composer-dropzone'
-import { hasImages, useComposerImages, type ComposerImageState } from '@/routes/run/composer-images'
+import { hasImages, useComposerFileDrop, useComposerImages, type ComposerImageState } from '@/routes/run/composer-images'
 import { ContextWindow } from '@/routes/run/context-window'
 import { usePromptHistory } from '@/routes/run/composer-history'
 import { commandSuggestions, currentChoice, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
@@ -276,6 +276,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
   const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.file'))
+  useComposerFileDrop(images.upload)
   const attachOff = busy || !cap.hasMethod('terminal.file')
   const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
@@ -412,6 +413,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   // A sleeping session's agent reports its prompt types once a wake starts it.
   const supportsImages = state?.prompt_images === true || Boolean(run.asleep_since)
   const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.file'))
+  useComposerFileDrop(images.upload)
   const attachOff = busy || !cap.hasMethod('terminal.file')
   const refusedImages = !supportsImages && hasImages(images.previews)
   const hasContent = Boolean(body.trim()) || images.previews.length > 0

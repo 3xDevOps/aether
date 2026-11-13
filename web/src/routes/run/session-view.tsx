@@ -8,7 +8,7 @@ import { Callout } from '@/components/ui/callout'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
-import { useRefuseStrayFileDrops } from '@/lib/file-drag'
+import { useFileDrop, useRefuseStrayFileDrops } from '@/lib/file-drag'
 import { useDelayed } from '@/lib/hooks'
 import { memberName } from '@/lib/member-name'
 import { backgroundReason, liveStateOf, runLabel, stateTone } from '@/lib/status'
@@ -19,6 +19,8 @@ import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { ChangesBar } from '@/routes/run/changes-bar'
 import { CompletionPrompt } from '@/routes/run/completion-prompt'
 import { Composer } from '@/routes/run/composer'
+import { DropOverlay } from '@/routes/run/composer-dropzone'
+import { composerFilesDropEvent, maxAttachments } from '@/routes/run/composer-images'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
@@ -407,9 +409,14 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       className="max-md:max-h-[40dvh]"
     />
   )
+  const drop = useFileDrop({
+    limit: maxAttachments,
+    onFiles: (files) => window.dispatchEvent(new CustomEvent(composerFilesDropEvent, { detail: files })),
+  })
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col" {...drop.handlers}>
+      {drop.count !== null && <DropOverlay count={drop.count} refused={drop.refused} limit={maxAttachments} />}
       {session?.truncatedBefore && (
         <div className={cn(sessionColumn, 'shrink-0 pt-2')}>
           <Callout tone="needs-you" role="status">
