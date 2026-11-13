@@ -30,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/preference"
@@ -321,6 +322,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 
 	s.rt = cfg.Runtime
+	var vmCheckouts *gitengine.VM
 	if s.rt == nil {
 		if s.docker, err = runtime.NewDocker(runtime.WithContainerRuntime(cfg.ContainerRuntime)); err != nil {
 			return nil, err
@@ -337,9 +339,14 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 			for i, m := range members {
 				ids[i] = string(m.ID)
 			}
-			if s.rt, err = newVMRuntime(ctx, cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), ids, s.docker); err != nil {
-				return nil, err
+			checkouts := func(ctx context.Context, path string, uid, gid int) (string, guest.Checkout, bool, error) {
+				return s.git.VMCheckoutDisk(ctx, path, uid, gid)
 			}
+			vms, images, vmErr := newVMRuntime(ctx, cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), ids, s.docker, checkouts)
+			if vmErr != nil {
+				return nil, vmErr
+			}
+			s.rt, vmCheckouts = vms, &gitengine.VM{Disks: images, Guest: vms.Git}
 		default:
 			return nil, fmt.Errorf("server: session-runtime %q: use %s or %s", cfg.SessionRuntime, SessionRuntimeDocker, SessionRuntimeVM)
 		}
@@ -352,6 +359,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Bus:            s.bus,
 		EventLog:       s.log,
 		RemoveCheckout: removeAgentFiles,
+		VM:             vmCheckouts,
 		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
 			if s.sched == nil {
 				return

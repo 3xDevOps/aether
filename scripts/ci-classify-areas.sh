@@ -78,6 +78,7 @@ vm() {
 	case $1 in
 	internal/runtime/vm/* | internal/guest/* | internal/vmimage/* | images/kernel/* | \
 		internal/acpkeeper/* | internal/version/* | internal/devexec/* | internal/disk/* | internal/egress/* | \
+		internal/gitengine/* | internal/rootfs/* | \
 		internal/*/kvm*_test.go | internal/runtime/session.go | internal/runtime/stream.go | \
 		internal/runtime/managed_exec.go | internal/runtime/docker_image.go | internal/runtime/docker_cgroup.go | \
 		internal/*/vm*.go | internal/*/*_vm.go | internal/*/*_vm_test.go | go.mod | go.sum | \

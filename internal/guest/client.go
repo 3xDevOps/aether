@@ -144,10 +144,18 @@ type Client struct {
 // Cloud Hypervisor vsock device. It does not connect yet: the first call
 // does, and the client reconnects by itself after the VM is restored.
 func Dial(vsockPath string) (*Client, error) {
+	conn, err := dial(vsockPath, APIPort)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{conn: conn, api: guestpb.NewGuestClient(conn)}, nil
+}
+
+func dial(vsockPath string, port uint32) (*grpc.ClientConn, error) {
 	conn, err := grpc.NewClient("passthrough:///guest",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return dialVsock(ctx, vsockPath, APIPort)
+			return dialVsock(ctx, vsockPath, port)
 		}),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff:           backoff.Config{BaseDelay: 50 * time.Millisecond, Multiplier: 1.6, Jitter: 0.2, MaxDelay: time.Second},
@@ -158,7 +166,7 @@ func Dial(vsockPath string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("guest: %w", err)
 	}
-	return &Client{conn: conn, api: guestpb.NewGuestClient(conn)}, nil
+	return conn, nil
 }
 
 // dialVsock connects to port in the VM through Cloud Hypervisor's hybrid

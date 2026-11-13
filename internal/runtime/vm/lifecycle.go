@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"regexp"
 	"slices"
@@ -31,6 +32,10 @@ const (
 	// had to kill.
 	killedExitCode = 137
 	waitPoll       = 200 * time.Millisecond
+	// lingerTimeout bounds how long a VM stays up after its main process
+	// exited: long enough for the server to finish the session's checkout,
+	// which is on the VM's disk.
+	lingerTimeout = 10 * time.Minute
 )
 
 func (e *engine) running(ctx context.Context, key string) (bool, error) {
@@ -47,7 +52,7 @@ func (e *engine) requireRunning(ctx context.Context, key, action string) (*recor
 	if err != nil {
 		return nil, err
 	}
-	if !up {
+	if !up || rec.Exited {
 		return nil, fmt.Errorf("vm runtime: %s VM %s: it is not running", action, key)
 	}
 	return rec, nil
@@ -66,6 +71,9 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 	up, err := e.running(ctx, key)
 	if err != nil {
 		return err
+	}
+	if up && rec.Exited {
+		return nil
 	}
 	if !up {
 		if !rec.Saved {
@@ -94,10 +102,17 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 	if err != nil {
 		return err
 	}
-	return e.finish(ctx, rec, endMain(ctx, h.Process(guest.MainID), grace))
+	code, ended := endMain(ctx, h.Process(guest.MainID), grace)
+	if err = e.finish(ctx, rec, code); err != nil || ended || len(rec.CheckoutDisks) == 0 {
+		return err
+	}
+	// A guest that never confirmed Main's end serves no git work either.
+	return e.shutDown(ctx, rec)
 }
 
-func endMain(ctx context.Context, main process, grace time.Duration) int {
+// endMain ends Main and reports its exit code, and whether the helper
+// confirmed that it ended.
+func endMain(ctx context.Context, main process, grace time.Duration) (int, bool) {
 	signal := func(sig syscall.Signal) error {
 		sigCtx, cancel := context.WithTimeout(ctx, helperCallTimeout)
 		defer cancel()
@@ -111,28 +126,42 @@ func endMain(ctx context.Context, main process, grace time.Duration) int {
 	}
 	err := signal(syscall.SIGTERM)
 	if errors.Is(err, guest.ErrNotFound) {
-		return 0
+		return 0, true
 	}
 	if err != nil {
-		return killedExitCode
+		return killedExitCode, false
 	}
 	if code, ok := waitFor(grace); ok {
-		return code
+		return code, true
 	}
 	if signal(syscall.SIGKILL) == nil {
 		if code, ok := waitFor(killGrace); ok {
-			return code
+			return code, true
 		}
 	}
-	return killedExitCode
+	return killedExitCode, false
 }
 
-// finish records Main's exit and powers the VM off; it holds the key's lock.
+// finish records Main's exit and powers the VM off; it holds the key's
+// lock. A VM with checkouts on its disks lingers instead, with only the
+// helper and its git service up, which the server still needs for the
+// session's checkout, until Destroy, a new Start or lingerTimeout: the
+// helper ends every session process when Main exits.
 func (e *engine) finish(ctx context.Context, rec *record, code int) error {
-	rec.Exited, rec.ExitCode = true, code
+	rec.Exited, rec.ExitCode, rec.ExitedAt = true, code, time.Now()
 	if err := e.store(rec); err != nil {
 		return err
 	}
+	if len(rec.CheckoutDisks) == 0 {
+		return e.shutDown(ctx, rec)
+	}
+	e.endLinger(rec.Key, rec.Boots, lingerTimeout)
+	return nil
+}
+
+// shutDown powers the VM off and, when it went down clean, makes its cache
+// its pool's newest.
+func (e *engine) shutDown(ctx context.Context, rec *record) error {
 	clean, err := e.powerOff(ctx, rec)
 	if err != nil || !clean {
 		return err
@@ -143,6 +172,40 @@ func (e *engine) finish(ctx context.Context, rec *record, code int) error {
 	}
 	e.promoteCache(ctx, rec)
 	return nil
+}
+
+// endLinger powers the VM off after d unless a new boot started.
+func (e *engine) endLinger(key string, boot int, d time.Duration) {
+	time.AfterFunc(d, func() {
+		unlock := e.lock(key)
+		defer unlock()
+		rec, err := e.load(key)
+		if err != nil || !rec.Exited || rec.Boots != boot {
+			return
+		}
+		if err = e.shutDown(context.Background(), rec); err != nil {
+			slog.Warn("vm runtime: power off a VM whose session ended", "vm", key, "error", err)
+		}
+	})
+}
+
+// lingering schedules the end of every VM that was lingering when the
+// server stopped.
+func (e *engine) lingering(ctx context.Context) {
+	keys, err := e.keys()
+	if err != nil {
+		slog.Warn("vm runtime: list VMs", "error", err)
+		return
+	}
+	for _, key := range keys {
+		rec, err := e.load(key)
+		if err != nil || !rec.Exited || rec.Saved {
+			continue
+		}
+		if up, err := e.running(ctx, key); err == nil && up {
+			e.endLinger(key, rec.Boots, max(0, lingerTimeout-time.Since(rec.ExitedAt)))
+		}
+	}
 }
 
 // powerOff reports a VM that powered itself off, which flushes its disks,
@@ -390,6 +453,9 @@ func (e *engine) inspect(ctx context.Context, key string) (runtime.ContainerInfo
 	var targets []string
 	for _, m := range append(slices.Clone(rec.Checkouts), rec.Mounts...) {
 		targets = append(targets, m.ContainerPath)
+	}
+	for _, c := range rec.CheckoutDisks {
+		targets = append(targets, c.Target)
 	}
 	info := runtime.ContainerInfo{
 		Image: rec.Image, User: rec.User, Env: append([]string(nil), rec.Env...), MountTargets: targets,

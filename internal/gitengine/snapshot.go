@@ -329,6 +329,14 @@ func (e *Engine) lastSnapshotTree(run domain.RunID) string {
 // its tree is pinned with the interval and becomes refs/aether/upstream in
 // the same transaction that publishes the tree, so the two never split.
 func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, checkout, base string, publish func(string) error) (string, error) {
+	return e.recordWatchSnapshot(ctx, run, base, func() (string, error) {
+		return e.writeSnapshotTreeLocked(ctx, run, checkout)
+	}, publish)
+}
+
+// recordWatchSnapshot is writeWatchSnapshot with the tree of the interval
+// coming from stage, which runs under the run's snapshot lock.
+func (e *Engine) recordWatchSnapshot(ctx context.Context, run domain.RunID, base string, stage func() (string, error), publish func(string) error) (string, error) {
 	lock := e.snapshotLock(run)
 	lock.Lock()
 	defer lock.Unlock()
@@ -369,7 +377,7 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 		return "", err
 	}
 	if tree == "" {
-		tree, err = e.writeSnapshotTreeLocked(ctx, run, checkout)
+		tree, err = stage()
 		if err != nil {
 			return "", err
 		}
@@ -519,13 +527,18 @@ func (e *Engine) requireSnapshotTree(ctx context.Context, store, id string) erro
 // directories created here as the server user would leave the agent unable
 // to commit.
 func scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
+	return borrowObjects(dir, filepath.Join(checkout, ".git", "objects"), run)
+}
+
+// borrowObjects is scratchObjects for any object database to borrow from.
+func borrowObjects(dir, borrowed string, run domain.RunID) (string, error) {
 	// Repo discovery checks that the overriding object directory exists.
 	objects := filepath.Join(dir, "objects")
 	if err := os.MkdirAll(filepath.Join(objects, "info"), 0o700); err != nil {
 		return "", fmt.Errorf("gitengine: scratch objects for session %s: %w", run, err)
 	}
 	alternates := filepath.Join(objects, "info", "alternates")
-	want := []byte(filepath.Join(checkout, ".git", "objects") + "\n")
+	want := []byte(borrowed + "\n")
 	// Checked before writing, and installed by rename when it has to be
 	// written: a persistent store is read by patch requests while the watch
 	// goroutine is staging into it, and a git that opened the file mid

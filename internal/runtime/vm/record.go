@@ -70,6 +70,9 @@ type record struct {
 	PidsLimit    int64           `json:"pids_limit,omitempty"`
 	Checkouts    []runtime.Mount `json:"checkouts,omitempty"`
 	Mounts       []runtime.Mount `json:"mounts,omitempty"`
+	// CheckoutDisks are the Mounts whose checkouts live on disks of their
+	// own.
+	CheckoutDisks []checkoutDisk `json:"checkout_disks,omitempty"`
 	// Net is the VM's network index, or offline.
 	Net    int  `json:"net"`
 	Egress bool `json:"egress,omitempty"`
@@ -91,8 +94,9 @@ type record struct {
 	CacheRan    bool `json:"cache_ran,omitempty"`
 	CacheSynced bool `json:"cache_synced,omitempty"`
 	// ExitCode is the last boot's until the next boot exits.
-	Exited   bool `json:"exited,omitempty"`
-	ExitCode int  `json:"exit_code,omitempty"`
+	Exited   bool      `json:"exited,omitempty"`
+	ExitCode int       `json:"exit_code,omitempty"`
+	ExitedAt time.Time `json:"exited_at,omitzero"`
 }
 
 func (e *engine) dir(key string) string { return filepath.Join(e.root, key) }

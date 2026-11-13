@@ -24,11 +24,12 @@ const (
 // treats a stopped container's missing cgroup. A paused guest cannot answer
 // and kills nothing, so it reports what it last did.
 func (e *engine) memoryEvents(ctx context.Context, key string) (runtime.MemoryEvents, error) {
-	if _, err := e.load(key); err != nil {
+	rec, err := e.load(key)
+	if err != nil {
 		return runtime.MemoryEvents{}, err
 	}
-	if up, err := e.running(ctx, key); err != nil || !up {
-		return runtime.MemoryEvents{}, errors.Join(err, fmt.Errorf("vm runtime: VM %s is not running: %w", key, fs.ErrNotExist))
+	if up, upErr := e.running(ctx, key); upErr != nil || !up || rec.Exited {
+		return runtime.MemoryEvents{}, errors.Join(upErr, fmt.Errorf("vm runtime: VM %s is not running: %w", key, fs.ErrNotExist))
 	}
 	if e.paused(ctx, key) {
 		e.mu.Lock()

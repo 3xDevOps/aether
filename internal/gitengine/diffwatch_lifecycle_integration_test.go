@@ -58,7 +58,7 @@ func TestDiffWatchContinuesAfterBackendError(t *testing.T) {
 	watch := e.watches[run]
 	e.mu.Unlock()
 	select {
-	case watch.watcher.Errors <- fsnotify.ErrEventOverflow:
+	case watch.(*diffWatch).watcher.Errors <- fsnotify.ErrEventOverflow:
 	case <-time.After(time.Second):
 		t.Fatal("backend error delivery blocked the watcher")
 	}

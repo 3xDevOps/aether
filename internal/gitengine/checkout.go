@@ -38,6 +38,10 @@ type runMeta struct {
 	// created before it was recorded.
 	BaseBranch string             `json:"base_branch,omitempty"`
 	Workspace  domain.WorkspaceID `json:"workspace"`
+	// VM marks a checkout on a disk of its session's VM; Origin is the
+	// origin remote the VM sets on its first boot.
+	VM     bool   `json:"vm,omitempty"`
+	Origin string `json:"origin,omitempty"`
 }
 
 func (e *Engine) runMetaPath(run domain.RunID) (string, error) {
@@ -147,6 +151,9 @@ func (e *Engine) CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID,
 	}
 	if resolved != baseCommit {
 		return "", "", fmt.Errorf("gitengine: base commit %q for branch %q is not a commit", baseCommit, baseBranch)
+	}
+	if e.cfg.VM != nil {
+		return e.createVMCheckout(ctx, repo, ws, run, checkoutPath, baseCommit, baseBranch, task, origin)
 	}
 
 	if _, cloneErr := e.git(ctx, "", "clone", "--local", "--no-checkout", repo, checkoutPath); cloneErr != nil {
@@ -300,6 +307,9 @@ func (e *Engine) commitAll(ctx context.Context, run domain.RunID, message string
 	if err != nil {
 		return "", err
 	}
+	if e.IsVMCheckout(run) {
+		return "", vmUnsupported(run)
+	}
 	if rmErr := os.Remove(filepath.Join(checkout, ".git", "info", "attributes")); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		return "", fmt.Errorf("gitengine: drop checkout attributes override: %w", rmErr)
 	}
@@ -395,6 +405,9 @@ func (e *Engine) publishRunBranch(ctx context.Context, run domain.RunID) (commit
 	if err != nil {
 		return "", err
 	}
+	if meta.VM {
+		return e.publishVM(ctx, run, meta)
+	}
 	if nameErr := e.checkBranchName(ctx, meta.Branch); nameErr != nil {
 		return "", nameErr
 	}
@@ -438,6 +451,9 @@ func (e *Engine) removeRunCheckout(ctx context.Context, run domain.RunID) error 
 		return err
 	}
 	e.stopDiffWatch(run, true)
+	if e.IsVMCheckout(run) {
+		return e.removeVMCheckout(ctx, run, checkout, meta)
+	}
 	// Detach while source/evidence maintenance is excluded. Acquire this
 	// before the per-run snapshot lock, as CaptureEvidence does.
 	e.repoMaintenanceMu.Lock()

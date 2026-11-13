@@ -67,6 +67,7 @@ type engine struct {
 	mu      sync.Mutex
 	locks   map[string]*sync.Mutex
 	helpers map[string]helper
+	gits    map[string]*guest.Git
 	booting map[string]bool
 	fresh   map[string]bool
 	events  map[string]runtime.MemoryEvents
@@ -80,7 +81,7 @@ type engine struct {
 func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 	return &engine{
 		cfg: cfg, root: filepath.Join(cfg.DataDir, "vm"), units: u, dial: dial, run: runCommand,
-		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, booting: map[string]bool{},
+		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, gits: map[string]*guest.Git{}, booting: map[string]bool{},
 		fresh: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, reserved: map[int]bool{},
 	}
 }
@@ -121,13 +122,33 @@ func (e *engine) helper(key string) (helper, error) {
 	return h, nil
 }
 
+// gitClient returns the client of the key's git service, dialed once per
+// VM lifetime as helper's is.
+func (e *engine) gitClient(key string) (*guest.Git, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if g := e.gits[key]; g != nil {
+		return g, nil
+	}
+	g, err := guest.DialGit(e.path(key, vsockSocket))
+	if err != nil {
+		return nil, fmt.Errorf("vm runtime: connect to the git service of VM %s: %w", key, err)
+	}
+	e.gits[key] = g
+	return g, nil
+}
+
 func (e *engine) forgetHelper(key string) {
 	e.mu.Lock()
-	h := e.helpers[key]
+	h, g := e.helpers[key], e.gits[key]
 	delete(e.helpers, key)
+	delete(e.gits, key)
 	e.mu.Unlock()
 	if h != nil {
 		_ = h.Close()
+	}
+	if g != nil {
+		_ = g.Close()
 	}
 }
 
@@ -206,6 +227,10 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 			return "", fmt.Errorf("vm runtime: cache disk: %w", err)
 		}
 	}
+	disks, shared, err := e.checkoutDisks(ctx, spec)
+	if err != nil {
+		return "", err
+	}
 	cpus, limit := vcpus(spec.CPULimit)
 	rec := &record{
 		Key: key, CreationKey: spec.CreationKey, Fingerprint: spec.Fingerprint, Image: spec.Image, Base: base, Root: root, Data: data, Cache: cache,
@@ -213,7 +238,7 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 		Env:        overrideEnv(base.Config.Env, runtime.EnvList(runtime.TrustCheckouts(spec.Env, spec.WorktreeMountPath, spec.ExtraWorktrees))),
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
-		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: checkouts(spec), Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
+		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: shared, CheckoutDisks: disks, Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
 		KeepRoot: opts.KeepRoot, Lifetime: opts.Lifetime,
 	}
 	if err = e.store(rec); err != nil {
@@ -277,7 +302,11 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 	if err != nil {
 		return err
 	}
-	if st.Active {
+	if st.Active && rec.Exited {
+		if err = e.shutDown(ctx, rec); err != nil {
+			return err
+		}
+	} else if st.Active {
 		return e.boot(ctx, rec)
 	}
 	if rec.Saved {
@@ -337,7 +366,13 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: helper disk: %w", err)
 	}
-	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Sockets: p.sockets}
+	disks := []string{diskArg(helperDisk, "helper") + ",readonly=on", diskArg(rec.Root, "root"), diskArg(rec.Data, "data")}
+	checkouts := make([]guest.CheckoutMount, len(rec.CheckoutDisks))
+	for i, c := range rec.CheckoutDisks {
+		disks = append(disks, diskArg(c.Disk, checkoutSerial(i)))
+		checkouts[i] = guest.CheckoutMount{Serial: checkoutSerial(i), Key: c.Checkout.Key, Target: c.Target}
+	}
+	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets}
 	if rec.Net != offline {
 		var dns []netip.Addr
 		if !rec.Egress {
@@ -355,8 +390,9 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		"--serial", "file=" + e.path(rec.Key, consoleLog), "--console", "off",
 		"--event-monitor", "path=" + e.path(rec.Key, eventsFile),
 		"--kernel", kernel, "--cmdline", cmdline,
-		"--disk", diskArg(helperDisk, "helper") + ",readonly=on", diskArg(rec.Root, "root"), diskArg(rec.Data, "data"),
+		"--disk",
 	}
+	args = append(args, disks...)
 	if rec.Cache.Path != "" {
 		args = append(args, diskArg(rec.Cache, "cache"))
 	}
@@ -441,6 +477,17 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 		}
 		if code != 0 {
 			return fmt.Errorf("vm runtime: prepare user %s exited %d: %s: %w", rec.User, code, strings.TrimSpace(out), runtime.ErrUnstartableImage)
+		}
+	}
+	if len(rec.CheckoutDisks) > 0 {
+		g, gitErr := e.gitClient(rec.Key)
+		if gitErr == nil {
+			setupCtx, cancel := context.WithTimeout(ctx, bootTimeout)
+			gitErr = g.Setup(setupCtx, rec.checkoutIdentities())
+			cancel()
+		}
+		if gitErr != nil {
+			return fmt.Errorf("vm runtime: set up the checkouts of VM %s: %w", rec.Key, gitErr)
 		}
 	}
 	var tty *guest.Size

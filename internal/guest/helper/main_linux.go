@@ -46,6 +46,11 @@ func Main(args []string) int {
 	if len(args) > 4 && args[0] == startArg {
 		return execStart(args[1] == "true", args[2], args[3], args[4:])
 	}
+	if len(args) == 1 && args[0] == gitServiceArg {
+		err := serveGit()
+		slog.Error("guest: the git service stopped", "error", err)
+		return 1
+	}
 	if os.Getpid() != 1 {
 		fmt.Fprintln(os.Stderr, "aether-internal guest: runs only as PID 1 of a session VM")
 		return 2
@@ -116,6 +121,7 @@ func serve() error {
 	cfg, err := guest.ParseCmdline(string(cmdline))
 	record("read the configuration", err)
 	record("mount volumes", mountVolumes(cfg.Mounts))
+	record("mount checkouts", mountCheckouts(cfg.Checkouts))
 	record("configure the network", configureNetwork(cfg))
 	cgroup, err := newSessionCgroup("/sys/fs/cgroup")
 	record("create the session cgroup", err)
@@ -124,7 +130,14 @@ func serve() error {
 		procsDir = cgroup.procs
 	}
 	procs := newProcesses(procsDir)
+	procs.mainExited = func() {
+		endSession(cgroup)
+		dropCaches()
+	}
 	go reapForever(procs)
+	if len(cfg.Checkouts) > 0 {
+		go superviseGit(procs)
+	}
 	go forwardSignals(procs)
 	record("forward sockets", forwardSockets(cfg.Sockets))
 

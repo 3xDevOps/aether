@@ -26,6 +26,13 @@ var newWatcher = fsnotify.NewWatcher
 const snapshotTimeout = 30 * time.Second
 const diffWarnInterval = time.Minute
 
+// watcher is a running watch of one checkout: a diffWatch on the server's
+// disk, or a vmWatch of a checkout in a VM.
+type watcher interface {
+	stop(final bool)
+	changedAt() (time.Time, bool)
+}
+
 // diffWatch watches one run checkout for file changes and captures diff
 // snapshots on quiescence (§6.4 of the Wave 1 contract): a snapshot fires
 // QuietPeriod after the last change, at least MinInterval after the
@@ -111,6 +118,9 @@ func (e *Engine) startDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return err
 	}
+	if meta.VM {
+		return e.startVMWatch(ctx, workspace, run, meta)
+	}
 	head, err := e.checkoutHead(ctx, run, checkout)
 	if err != nil {
 		slog.Warn("gitengine: diff snapshot failed", "run", string(run), "error", err)
@@ -123,21 +133,9 @@ func (e *Engine) startDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		lastTree, _ = e.gitCheckout(ctx, run, checkout, "rev-parse", meta.Base+"^{tree}")
 	}
 
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return fmt.Errorf("gitengine: engine closed")
+	if active, err := e.registerWatch(workspace, run, meta); err != nil || active {
+		return err
 	}
-	info := runInfo{workspace: workspace, branch: meta.Branch}
-	if parent, extra := domain.ParentRun(run); extra {
-		info = runInfo{workspace: meta.Workspace, branch: meta.Branch, extra: parent, scope: workspace}
-	}
-	e.registry[run] = info
-	if _, active := e.watches[run]; active {
-		e.mu.Unlock()
-		return nil
-	}
-	e.mu.Unlock()
 
 	// Left empty when the published stats were measured against another
 	// base, so a restarted watch republishes them over an unchanged tree.
@@ -200,6 +198,23 @@ func (e *Engine) startDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	return nil
 }
 
+// registerWatch records the scope run's events publish under and reports
+// whether a watch of run is already active.
+func (e *Engine) registerWatch(workspace domain.WorkspaceID, run domain.RunID, meta runMeta) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return false, fmt.Errorf("gitengine: engine closed")
+	}
+	info := runInfo{workspace: workspace, branch: meta.Branch}
+	if parent, extra := domain.ParentRun(run); extra {
+		info = runInfo{workspace: meta.Workspace, branch: meta.Branch, extra: parent, scope: workspace}
+	}
+	e.registry[run] = info
+	_, active := e.watches[run]
+	return active, nil
+}
+
 // watchCheckout registers the checkout and its Git metadata with a new
 // fsnotify watcher, or switches the watch to polling when it cannot.
 func (w *diffWatch) watchCheckout(ctx context.Context, refDir string) error {
@@ -259,6 +274,10 @@ func (e *Engine) lastFileChange(run domain.RunID) (time.Time, bool) {
 	if w == nil {
 		return time.Time{}, false
 	}
+	return w.changedAt()
+}
+
+func (w *diffWatch) changedAt() (time.Time, bool) {
 	nanos := w.lastChange.Load()
 	if nanos == 0 {
 		return time.Time{}, false
@@ -820,21 +839,7 @@ func (w *diffWatch) snapshot() {
 		if w.polling {
 			w.lastChange.Store(time.Now().UnixNano())
 		}
-		if w.e.cfg.Bus == nil {
-			return nil
-		}
-		// The registry entry outlives the watch.
-		w.e.mu.Lock()
-		info := w.e.registry[w.run]
-		w.e.mu.Unlock()
-		run, scope, repo := info.events(w.run)
-		payload.Repo = repo
-		_, err := w.e.cfg.Bus.Publish(ctx, events.Event{
-			WorkspaceID: scope,
-			RunID:       run,
-			Payload:     payload,
-		})
-		return err
+		return w.e.publishRunDiff(ctx, w.run, payload)
 	}
 	attempted := false
 	tree, treeErr := w.e.writeWatchSnapshot(ctx, w.run, w.checkout, base, func(tree string) error {
@@ -886,6 +891,29 @@ func (w *diffWatch) snapshot() {
 	w.checkHead(ctx)
 }
 
+// publishRunDiff publishes run.diff for the checkout key under the scope
+// its watch registered.
+func (e *Engine) publishRunDiff(ctx context.Context, key domain.RunID, payload events.RunDiffPayload) error {
+	if e.cfg.Relay != nil {
+		return e.cfg.Relay.Snapshot(ctx, key, payload)
+	}
+	if e.cfg.Bus == nil {
+		return nil
+	}
+	// The registry entry outlives the watch.
+	e.mu.Lock()
+	info := e.registry[key]
+	e.mu.Unlock()
+	run, scope, repo := info.events(key)
+	payload.Repo = repo
+	_, err := e.cfg.Bus.Publish(ctx, events.Event{
+		WorkspaceID: scope,
+		RunID:       run,
+		Payload:     payload,
+	})
+	return err
+}
+
 // checkHead publishes a moved checkout HEAD. It returns true when checking
 // HEAD succeeded, including when it did not move.
 func (w *diffWatch) checkHead(ctx context.Context) bool {
@@ -897,7 +925,12 @@ func (w *diffWatch) checkHead(ctx context.Context) bool {
 	if head == w.lastHead {
 		return true
 	}
-	if _, err := w.e.publishRunBranch(ctx, w.run); err != nil {
+	if relay := w.e.cfg.Relay; relay != nil {
+		err = relay.BranchMoved(ctx, w.run, head)
+	} else {
+		_, err = w.e.publishRunBranch(ctx, w.run)
+	}
+	if err != nil {
 		w.warnPublish(err)
 		return false
 	}

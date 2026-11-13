@@ -68,6 +68,20 @@ type Config struct {
 	MirrorResolve MirrorResolveFunc
 	// RemoveCheckout deletes a run checkout tree; nil uses os.RemoveAll.
 	RemoveCheckout func(ctx context.Context, path string) error
+	// VM, when set, puts every new session checkout on a disk of the
+	// session's VM instead of a server directory.
+	VM *VM
+	// Relay, when set, receives every snapshot and moved checkout HEAD in
+	// place of the bus and the workspace repository: inside a VM, where the
+	// git service runs this engine, the server publishes them.
+	Relay Relay
+}
+
+// Relay passes on what the diff watch of a checkout reports, under the
+// checkout's key.
+type Relay interface {
+	Snapshot(ctx context.Context, key domain.RunID, payload events.RunDiffPayload) error
+	BranchMoved(ctx context.Context, key domain.RunID, head string) error
 }
 
 // runInfo is a watch-registry entry. Entries are created by StartDiffWatch
@@ -93,7 +107,7 @@ type Engine struct {
 	cfg           Config
 	checkoutsRoot *os.Root
 	mu            sync.Mutex
-	watches       map[domain.RunID]*diffWatch
+	watches       map[domain.RunID]watcher
 	registry      map[domain.RunID]runInfo
 	closed        bool
 	// repoInitMu serializes first-touch creation and configuration, including
@@ -153,7 +167,7 @@ func New(cfg Config) (*Engine, error) {
 	return &Engine{
 		cfg:                cfg,
 		checkoutsRoot:      checkoutsRoot,
-		watches:            make(map[domain.RunID]*diffWatch),
+		watches:            make(map[domain.RunID]watcher),
 		registry:           make(map[domain.RunID]runInfo),
 		snapshotLocks:      make(map[domain.RunID]*sync.Mutex),
 		evidencePrunes:     make(map[domain.WorkspaceID]*evidencePrune),
@@ -172,11 +186,11 @@ func (e *Engine) Close() error {
 		return nil
 	}
 	e.closed = true
-	watches := make([]*diffWatch, 0, len(e.watches))
+	watches := make([]watcher, 0, len(e.watches))
 	for _, w := range e.watches {
 		watches = append(watches, w)
 	}
-	e.watches = make(map[domain.RunID]*diffWatch)
+	e.watches = make(map[domain.RunID]watcher)
 	e.mu.Unlock()
 	e.cancelPrunes()
 	for _, w := range watches {

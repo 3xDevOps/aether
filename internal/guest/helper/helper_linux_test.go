@@ -63,7 +63,7 @@ func (l hybridVsock) Accept() (net.Conn, error) {
 		}
 		line = append(line, b[0])
 	}
-	if string(line) != fmt.Sprintf("CONNECT %d", guest.APIPort) {
+	if string(line) != fmt.Sprintf("CONNECT %d", guest.APIPort) && string(line) != fmt.Sprintf("CONNECT %d", guest.GitPort) {
 		return nil, fmt.Errorf("handshake %q", line)
 	}
 	if _, err := conn.Write([]byte("OK 1073741824\n")); err != nil {
