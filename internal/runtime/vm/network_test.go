@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 func TestNetworkAddressing(t *testing.T) {
@@ -16,15 +18,31 @@ func TestNetworkAddressing(t *testing.T) {
 	if host.String() != "10.200.1.5" || guestAddr.String() != "10.200.1.6" {
 		t.Errorf("addresses of 65 = %s, %s", host, guestAddr)
 	}
-	if got := chNetArg(65); got != "tap=aethervm65,ip=10.200.1.5,mask=255.255.255.252,mac=02:ae:00:00:00:41" {
+	if got := chNetArg(65, false); got != "tap=aethervm65,ip=10.200.1.5,mask=255.255.255.252,mac=02:ae:00:00:00:41" {
 		t.Errorf("net arg = %s", got)
+	}
+	if got := chNetArg(65, true); !strings.HasPrefix(got, "tap=aethervme65,") {
+		t.Errorf("egress net arg = %s", got)
 	}
 	last, _ := netAddrs(maxNets - 1)
 	if !vmSubnet.Contains(last) {
 		t.Errorf("last network %s leaves %s", last, vmSubnet)
 	}
-	n := guestNetwork(0, dockerDNS)
-	if n.Address != netip.MustParsePrefix("10.200.0.2/30") || n.Gateway.String() != "10.200.0.1" {
+	if proxyAddr.String() != "10.200.0.1" {
+		t.Errorf("proxy address = %s", proxyAddr)
+	}
+	for addr, want := range map[string]int{"10.200.1.6": 65, "10.200.0.6": 1, "10.200.255.254": maxNets - 1} {
+		if got, ok := guestIndex(netip.MustParseAddr(addr)); !ok || got != want {
+			t.Errorf("guest index of %s = %d, %v", addr, got, ok)
+		}
+	}
+	for _, addr := range []string{"10.200.0.2", "10.200.1.5", "10.200.1.7", "10.200.1.4", "10.201.0.6", "::ffff:10.200.1.6"} {
+		if index, ok := guestIndex(netip.MustParseAddr(addr)); ok {
+			t.Errorf("%s is no guest's but read as network %d", addr, index)
+		}
+	}
+	n := guestNetwork(1, dockerDNS)
+	if n.Address != netip.MustParsePrefix("10.200.0.6/30") || n.Gateway.String() != "10.200.0.5" {
 		t.Errorf("guest network = %+v", n)
 	}
 	servers := nameservers(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1\nsearch ec2.internal\n"))
@@ -37,70 +55,97 @@ func TestAllocateNetSkipsRecordedAndReserved(t *testing.T) {
 	h := newHarness(t)
 	h.createStarted("run-a", sessionSpec("run-a"))
 	first, err := h.engine.allocateNet()
-	if err != nil || first != 1 {
+	if err != nil || first != 2 {
 		t.Fatalf("allocate = %d, %v", first, err)
 	}
 	second, err := h.engine.allocateNet()
-	if err != nil || second != 2 {
-		t.Fatalf("allocate while 1 is reserved = %d, %v", second, err)
+	if err != nil || second != 3 {
+		t.Fatalf("allocate while 2 is reserved = %d, %v", second, err)
 	}
 	h.engine.releaseNet(first)
-	if again, _ := h.engine.allocateNet(); again != 1 {
+	if again, _ := h.engine.allocateNet(); again != 2 {
 		t.Errorf("allocate after release = %d", again)
 	}
 }
 
-func TestEnsureNATIsolatesVMs(t *testing.T) {
+func TestEgressVMsAreNamedByTheirAddress(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-open", sessionSpec("run-open"))
+	spec := sessionSpec("run-egress")
+	spec.Egress = true
+	h.createStarted("run-egress", spec)
+	args := strings.Join(h.units.last().launch.Args, " ")
+	if !strings.Contains(args, "tap=aethervme2,ip=10.200.0.9,") || strings.Contains(args, "aether.dns=") {
+		t.Errorf("an egress VM's launch names another tap or gets the host's resolvers:\n%s", args)
+	}
+	open, _ := netAddrs(1)
+	_, egressGuest := netAddrs(2)
+	if key, err := h.engine.egressKey(egressGuest); err != nil || key != "run-egress" {
+		t.Errorf("egress key of %s = %q, %v", egressGuest, key, err)
+	}
+	for _, addr := range []netip.Addr{open.Next(), open, proxyAddr} {
+		if key, err := h.engine.egressKey(addr); !errors.Is(err, runtime.ErrNotFound) {
+			t.Errorf("egress key of %s = %q, %v", addr, key, err)
+		}
+	}
+}
+
+func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 	h := newHarness(t)
 	e := h.engine
-	e.natReady = false
+	linked, inserted := false, map[string]bool{}
 	var calls []string
 	e.run = func(_ context.Context, name string, args ...string) error {
 		call := strings.Join(append([]string{name}, args...), " ")
-		if name == "iptables-restore" {
-			rules, err := os.ReadFile(args[len(args)-1])
-			if err != nil {
-				return err
-			}
-			call += "\n" + string(rules)
-		}
 		calls = append(calls, call)
-		if strings.Contains(call, "-C FORWARD") {
-			return errors.New("no such rule")
+		switch {
+		case call == "ip link show dev aether-vmproxy" && !linked:
+			return errors.New("Device does not exist")
+		case call == "ip link add aether-vmproxy type dummy":
+			linked = true
+		case strings.Contains(call, " -C ") && !inserted[strings.Replace(call, " -C ", " -I ", 1)]:
+			return errors.New("Bad rule")
+		case strings.HasPrefix(call, "iptables -w -t filter -I "):
+			inserted[call] = true
 		}
 		return nil
 	}
-	if err := e.ensureNAT(t.Context()); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := e.ensureNetwork(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 	}
-	uplinks, err := defaultRoutes()
+	count := func(prefix string) (n int) {
+		for _, c := range calls {
+			if strings.HasPrefix(c, prefix) {
+				n++
+			}
+		}
+		return n
+	}
+	if count("ip link add aether-vmproxy") != 1 || count("iptables -w -t filter -I FORWARD -m mark") != 1 || count("iptables -w -t filter -I INPUT -m mark") != 1 || count("nft -f "+filepath.Join(e.root, firewallFile)) != 2 {
+		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))
+	}
+	if count("ip addr replace 10.200.0.1/32 dev aether-vmproxy") != 2 {
+		t.Errorf("the proxy address is not kept on its link:\n%s", strings.Join(calls, "\n"))
+	}
+	rules, err := os.ReadFile(filepath.Join(e.root, firewallFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	restore := "iptables-restore --noflush " + filepath.Join(e.root, firewallFile) + "\n*filter\n:AETHER-VM - [0:0]\n"
-	for _, uplink := range uplinks {
-		restore += "-A AETHER-VM -i aethervm+ -o " + uplink + " -j ACCEPT\n"
-	}
-	for _, dns := range hostDNS() {
-		restore += "-A AETHER-VM -i aethervm+ -d " + dns.String() + " -p udp --dport 53 -j ACCEPT\n"
-		restore += "-A AETHER-VM -i aethervm+ -d " + dns.String() + " -p tcp --dport 53 -j ACCEPT\n"
-	}
-	restore += "-A AETHER-VM -i aethervm+ -j DROP\n" +
-		"-A AETHER-VM -o aethervm+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n" +
-		"-A AETHER-VM -o aethervm+ -j DROP\nCOMMIT\n"
-	want := []string{
-		"sysctl -q -w net.ipv4.ip_forward=1",
-		restore,
-		"iptables -t filter -C FORWARD -j AETHER-VM",
-		"iptables -t filter -I FORWARD -j AETHER-VM",
-		"iptables -t nat -C POSTROUTING -s 10.200.0.0/16 ! -d 10.200.0.0/16 -j MASQUERADE",
-	}
-	if !slices.Equal(calls, want) {
-		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))
-	}
-	calls = nil
-	if err := e.ensureNAT(t.Context()); err != nil || calls != nil {
-		t.Errorf("second ensureNAT ran %v, %v", calls, err)
+	for _, want := range []string{
+		`iifname "aethervm*" meta nfproto ipv6 drop`,
+		`iifname "aethervm*" fib saddr . iif oif missing drop`,
+		`iifname "aethervm*" ip daddr { 169.254.169.254, 100.100.100.200 } drop`,
+		`iifname "aethervme*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
+		`iifname "aethervme*" ip daddr 10.200.0.1 tcp dport 3128 meta mark set meta mark | 0x1000000 accept`,
+		`iifname "aethervme*" reject with icmpx admin-prohibited`,
+		`oifname "aethervm*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
+		`oifname "aethervm*" drop`,
+	} {
+		if !strings.Contains(string(rules), want) {
+			t.Errorf("the firewall lacks %q:\n%s", want, rules)
+		}
 	}
 }
 

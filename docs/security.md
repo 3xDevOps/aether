@@ -1069,7 +1069,8 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
   cannot connect at all.
 - The egress proxy tells sessions apart by source address. Root in a session with
   Docker inside can claim another egress-limited session's address and get that
-  workspace's host list.
+  workspace's host list. A session VM cannot: its tap drops what it sends from
+  any other address.
 - On Docker older than 26.0 (25.0.4 and 23.0.11 on older lines), an internal
   network still resolves names through the host (CVE-2024-29018), so an
   egress-limited session can send data out in DNS queries.

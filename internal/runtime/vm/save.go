@@ -149,7 +149,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 		"--api-socket", "path=" + e.path(key, apiSocket), "--event-monitor", "path=" + e.path(key, eventsFile),
 		"--restore", "source_url=file://" + dir,
 	}}
-	if err = e.ensureNAT(ctx); err != nil {
+	if err = e.ensureNetwork(ctx); err != nil {
 		return err
 	}
 	if err = e.launch(ctx, rec, l); err != nil {

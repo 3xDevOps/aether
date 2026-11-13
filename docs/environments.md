@@ -331,7 +331,7 @@ sudo systemctl restart aether-server
 ```
 
 The host needs `/dev/kvm`, `cloud-hypervisor`, `/usr/libexec/virtiofsd`,
-`qemu-img`, `mkfs.ext4`, `iptables` and systemd, besides Docker, and the
+`qemu-img`, `mkfs.ext4`, `nft`, `iptables`, `ip` and systemd, besides Docker, and the
 release's guest kernel `aether-vmlinux-x86_64` at `/usr/local/lib/aether/vmlinux`
 (`--vm-kernel`, config key `vm-kernel`, names another path).
 
@@ -349,8 +349,7 @@ What changes:
   the other host files a session mounts go through the VM's file service
   ([vm-guest.md](vm-guest.md#the-file-service)): writes show in the
   member's other sessions within a second, and read-only mounts stay
-  read-only. Each VM has its own address in `10.200.0.0/16` and reaches the
-  internet through the host.
+  read-only.
 - `/tmp` is on the session's data disk. `/aether-cache` is the session's own
   copy of the member's newest caches, made when the session is created. A
   session's caches become the member's newest when its VM stops for good:
@@ -366,10 +365,28 @@ What changes:
 - Starting a stopped session builds a fresh root disk from its image and runs
   the setup script again: packages installed outside the mounts are gone.
   Docker images inside the session stay on its data disk.
-- VMs reach the internet, but not each other or Docker's containers.
+- Each VM has its own address in `10.200.0.0/16` and a tap device
+  `aethervm<n>`. It reaches the server host, and the internet only through
+  the host's default-route interfaces and the DNS servers it was given. It
+  reaches no other VM, no Docker container, neither cloud metadata address
+  (`169.254.169.254`, `100.100.100.200`) and nothing over IPv6, and cannot
+  send from another address. Nothing outside starts a connection into it.
+- A session with [egress control](#egress-control) gets the tap
+  `aethervme<n>`, no DNS servers, and reaches only the egress proxy at
+  `10.200.0.1:3128`. That address is on the dummy link `aether-vmproxy`; the
+  proxy knows the session by its VM's address. Sessions with egress control
+  started on Docker before the switch keep their proxy on `aether-egress`.
+- The server keeps these rules in the nftables table `inet aether_vm`,
+  loaded from `<data dir>/vm/firewall.nft` and rebuilt whole at every start
+  and VM boot; `sudo nft list table inet aether_vm` shows them live. An
+  `iptables` rule at the top of `FORWARD` and of `INPUT` lets what the table
+  allows, marked `0x1000000`, past a `DROP` policy such as Docker's on
+  `FORWARD` or ufw's on `INPUT`, so egress-controlled VMs reach the proxy
+  behind ufw. While the table is gone, the `FORWARD` policy drops all
+  traffic VMs send through the host, and what they send to the host itself
+  is unfiltered. A change of default route applies when the next VM boots.
 - Not yet supported, refused at launch with an error naming the work item:
-  the Isolated tier and egress control, and the development browser beside a
-  session.
+  the development browser beside a session.
 - Close or kill every session that runs in a VM before you set
   `session-runtime` back to `docker`: a Docker server does not manage VMs,
   so their units would keep running unattended.

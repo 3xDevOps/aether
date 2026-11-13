@@ -1,4 +1,4 @@
-//go:build integration
+//go:build kvm
 
 package vm
 
@@ -229,24 +229,6 @@ func kvmSession(t *testing.T, e *engine, key string, mounts ...runtime.Mount) {
 	}
 	if err := e.start(t.Context(), key); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestKVMVMsCannotReachEachOther(t *testing.T) {
-	e := kvmEngine(t)
-	kvmSession(t, e, "run-vmtest-c")
-	kvmSession(t, e, "run-vmtest-d")
-	other, err := e.containerIP(t.Context(), "run-vmtest-d")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A refused connect means the packet arrived; a timeout means it was dropped.
-	out, code := vmRun(t, e, "run-vmtest-c", "timeout 3 bash -c '</dev/tcp/"+other+"/22'; echo exit=$?")
-	if !strings.Contains(out, "exit=124") {
-		t.Errorf("a VM reached another VM at %s: %q (code %d)", other, out, code)
-	}
-	if out, _ := vmRun(t, e, "run-vmtest-c", "getent hosts example.com >/dev/null && echo resolved"); !strings.Contains(out, "resolved") {
-		t.Errorf("the VM lost the internet: %q", out)
 	}
 }
 

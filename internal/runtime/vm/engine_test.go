@@ -67,13 +67,8 @@ func TestCreateRecordsWhatAContainerWouldReport(t *testing.T) {
 	}
 }
 
-func TestCreateRefusesWhatLaterItemsAdd(t *testing.T) {
+func TestCreateRefusesAMissingImage(t *testing.T) {
 	h := newHarness(t)
-	egress := sessionSpec("run-e")
-	egress.Egress = true
-	if _, err := h.engine.create(t.Context(), egress); err == nil || !strings.Contains(err.Error(), "work item 5") {
-		t.Errorf("egress create = %v", err)
-	}
 	missing := sessionSpec("run-m")
 	missing.Image = "missing:1"
 	if _, err := h.engine.create(t.Context(), missing); err == nil || !strings.Contains(err.Error(), "manifest unknown") {
@@ -107,7 +102,7 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 		"--cpus boot=2", "--memory size=2048M,shared=on", "--balloon size=0,free_page_reporting=on",
 		"--kernel /k/vmlinux", "page_reporting.page_reporting_order=0", "aether.mount=home,0,/root",
 		"helper.img,image_type=raw,id=helper,serial=helper,readonly=on", "root.img,image_type=qcow2,id=root,serial=root,backing_files=on",
-		"--net id=net0,tap=aethervm0,ip=10.200.0.1,mask=255.255.255.252",
+		"--net id=net0,tap=aethervm1,ip=10.200.0.5,mask=255.255.255.252",
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("launch args lack %q:\n%s", want, args)
@@ -375,7 +370,7 @@ func TestAnotherEngineFindsAndDrivesARunningVM(t *testing.T) {
 	if pid, pidErr := after.initPID(t.Context(), "run-a"); pidErr != nil || pid != 4242 {
 		t.Errorf("initPID = %d, %v", pid, pidErr)
 	}
-	if ip, ipErr := after.containerIP(t.Context(), "run-a"); ipErr != nil || ip != "10.200.0.2" {
+	if ip, ipErr := after.containerIP(t.Context(), "run-a"); ipErr != nil || ip != "10.200.0.6" {
 		t.Errorf("containerIP = %q, %v", ip, ipErr)
 	}
 	h.guest("run-a").output = map[string]string{"echo": "hi\n"}

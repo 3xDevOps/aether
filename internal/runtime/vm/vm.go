@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -157,6 +158,22 @@ func (r *Runtime) FindByCreationKey(ctx context.Context, key string) (runtime.ID
 		return id, err
 	}
 	return r.Docker.FindByCreationKey(ctx, key)
+}
+
+// EgressGateway is where session VMs reach the egress proxy. It sets up the
+// VMs' network whether or not create is set, so the server's start
+// rebuilds the firewall of VMs that outlived the last server.
+func (r *Runtime) EgressGateway(ctx context.Context, _ bool) (netip.Addr, error) {
+	if err := r.vms.ensureNetwork(ctx); err != nil {
+		return netip.Addr{}, err
+	}
+	return proxyAddr, nil
+}
+
+// EgressCreationKey answers only for VMs: Docker's egress containers have
+// no route to the VMs' proxy address.
+func (r *Runtime) EgressCreationKey(_ context.Context, ip netip.Addr) (string, error) {
+	return r.vms.egressKey(ip)
 }
 
 func (r *Runtime) Commit(ctx context.Context, id runtime.ID, tag string, labels map[string]string) error {
