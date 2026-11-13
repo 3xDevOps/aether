@@ -391,3 +391,169 @@ func kvmSessionFrom(t *testing.T, e *engine, key, image string) {
 		t.Fatal(err)
 	}
 }
+
+// TestKVMDialNow is what TestKVMAssistantVM runs inside the guest: it reads
+// a line from the unix socket AETHER_VM_TEST_DIAL names.
+func TestKVMDialNow(t *testing.T) {
+	path := os.Getenv("AETHER_VM_TEST_DIAL")
+	if path == "" {
+		t.Skip("runs inside a guest only")
+	}
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(c).ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Print("dialed: " + line)
+}
+
+// TestKVMAssistantVM boots a VM with the assistant's mounts: its home, the
+// read-only instructions, install and empty policy directories, the server
+// binary and the tool socket's directory, and runs its adapter the way the
+// assistant does, as a managed exec.
+func TestKVMAssistantVM(t *testing.T) {
+	e := kvmEngine(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, opts, _ := vmFor(runtime.Spec{CreationKey: "assistant:i9"})
+	opts.Offline = true
+	t.Cleanup(func() { _ = e.destroy(context.Background(), name) })
+	src := filepath.Join(e.root, "..", "src-"+name)
+	t.Cleanup(func() { _ = os.RemoveAll(src) })
+	dirs := map[string]string{}
+	for _, d := range []string{"home", "instructions", "install", "policy", "tools"} {
+		dirs[d] = filepath.Join(src, d)
+		if err = os.MkdirAll(dirs[d], 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = os.WriteFile(filepath.Join(dirs["instructions"], "AGENTS.md"), []byte("be helpful\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chown(dirs["home"], 1000, 1000); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", filepath.Join(dirs["tools"], "assistant.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	go func() {
+		for c, acceptErr := l.Accept(); acceptErr == nil; c, acceptErr = l.Accept() {
+			_, _ = fmt.Fprintln(c, "tool answered")
+			_ = c.Close()
+		}
+	}()
+	server := os.Getenv("AETHER_VM_TEST_SERVER")
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: "assistant:i9", User: "1000:1000",
+		Command: []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 3600 & wait $!; done"},
+		Env:     map[string]string{"HOME": "/home/aether"}, WorkingDir: "/var/lib/aether-assistant",
+		CPULimit: 1, MemoryLimitBytes: 1 << 30,
+		Mounts: []runtime.Mount{
+			{HostPath: dirs["home"], ContainerPath: "/home/aether"},
+			{HostPath: dirs["instructions"], ContainerPath: "/var/lib/aether-assistant", ReadOnly: true},
+			{HostPath: dirs["install"], ContainerPath: "/opt/aether-assistant", ReadOnly: true},
+			{HostPath: dirs["policy"], ContainerPath: "/etc/claude-code", ReadOnly: true},
+			{HostPath: dirs["policy"], ContainerPath: "/etc/codex", ReadOnly: true},
+			{HostPath: server, ContainerPath: "/usr/local/bin/aether-internal", ReadOnly: true},
+			{HostPath: dirs["tools"], ContainerPath: "/run/aether-assistant", ReadOnly: true},
+			{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true},
+		},
+	}
+	if _, err = e.create(t.Context(), name, spec, opts); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err = e.start(t.Context(), name); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the assistant VM started in %s", time.Since(start))
+	for script, want := range map[string]string{
+		"cat AGENTS.md": "be helpful",
+		"echo signed-in > /home/aether/.credentials && echo wrote":                                                 "wrote",
+		"touch /etc/claude-code/managed-settings.json 2>&1 || echo refused":                                        "refused",
+		"AETHER_VM_TEST_DIAL=/run/aether-assistant/assistant.sock /opt/aether-vmtest -test.run '^TestKVMDialNow$'": "dialed: tool answered",
+	} {
+		if out, _ := vmRun(t, e, name, script); !strings.Contains(out, want) {
+			t.Errorf("%s: %q, want %q", script, out, want)
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(dirs["home"], ".credentials")); string(data) != "signed-in\n" {
+		t.Errorf("the host home has %q", data)
+	}
+	m, err := e.startManagedExec(t.Context(), name, runtime.ExecSpec{
+		Argv: []string{"/bin/sh", "-c", "read line; echo adapter got $line; exit 3"}, CreationKey: "assistant-i9-exec", WorkingDir: "/var/lib/aether-assistant",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := m.Attachment()
+	if _, err = att.Stdin().Write([]byte("hello\n")); err != nil {
+		t.Fatal(err)
+	}
+	readUntil(t, att, "adapter got hello")
+	if st, err := m.Wait(t.Context()); err != nil || st.Code != 3 {
+		t.Errorf("the adapter's exit = %+v, %v", st, err)
+	}
+	_ = m.Detach()
+}
+
+// TestKVMUpdaterVM boots a VM with the agent updater's mounts: the member's
+// home writable, a sign-in hidden behind a read-only file inside it, and
+// runs an update there.
+func TestKVMUpdaterVM(t *testing.T) {
+	e := kvmEngine(t)
+	name, opts, _ := vmFor(runtime.Spec{CreationKey: "harness-update-i9-claude"})
+	opts.Offline = true
+	t.Cleanup(func() { _ = e.destroy(context.Background(), name) })
+	src := filepath.Join(e.root, "..", "src-"+name)
+	t.Cleanup(func() { _ = os.RemoveAll(src) })
+	home := filepath.Join(src, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".credentials.json"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(src, "no-login")
+	if err := os.WriteFile(empty, nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{home, filepath.Join(home, ".local"), filepath.Join(home, ".local", "bin"), filepath.Join(home, ".credentials.json")} {
+		if err := os.Chown(p, 1000, 1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: "harness-update-i9-claude", User: "1000:1000",
+		Command: []string{"/bin/sh", "-c", "sleep 900"}, Env: map[string]string{"HOME": "/root"}, WorkingDir: "/root",
+		CPULimit: 1, MemoryLimitBytes: 1 << 30,
+		Mounts: []runtime.Mount{
+			{HostPath: home, ContainerPath: "/root"},
+			{HostPath: empty, ContainerPath: "/root/.credentials.json", ReadOnly: true},
+		},
+	}
+	if _, err := e.create(t.Context(), name, spec, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), name); err != nil {
+		t.Fatal(err)
+	}
+	update := `printf '#!/bin/sh\necho 2.0.0\n' > ~/.local/bin/claude && chmod +x ~/.local/bin/claude && ~/.local/bin/claude --version; cat ~/.credentials.json | wc -c; echo x > ~/.credentials.json 2>&1 || echo hidden`
+	out, code := vmRun(t, e, name, update)
+	if code != 0 || !strings.Contains(out, "2.0.0") || !strings.Contains(out, "0\n") || !strings.Contains(out, "hidden") {
+		t.Errorf("update: %d %q", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(home, ".local", "bin", "claude")); !strings.Contains(string(data), "2.0.0") {
+		t.Errorf("the host home has the CLI %q", data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(home, ".credentials.json")); string(data) != "secret" {
+		t.Errorf("the sign-in changed to %q", data)
+	}
+}

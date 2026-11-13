@@ -319,9 +319,9 @@ thresholds and what to do.
 `--session-runtime` (config key `session-runtime`) defaults to `docker`. With
 `vm`, each new session runs in its own [Cloud
 Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) virtual
-machine instead of a container, and so does each member's environment
-terminal. The assistant, the agent updater and the development browser stay
-on Docker.
+machine instead of a container, and so do each member's environment
+terminal, assistant and agent updater. The development browser stays on
+Docker.
 This is work in progress; [the plan](plans/2026-11-13-microvm-sessions.md)
 lists what is still to come.
 
@@ -394,6 +394,11 @@ What changes:
   A terminal VM the host cannot start, as when its VM monitor fails, keeps
   its disk for the next open; one whose root disk no longer mounts is
   replaced, as a container that fails to start is.
+- The assistant runs in `aether-vm-assistant-<member id>.service`, its
+  install step in `aether-vm-assistant-install-<member id>.service` and the
+  agent updater in `aether-vm-harness-update-<member id>-<agent>.service`,
+  each from a fresh root disk. The server stops their containers still
+  running in Docker when it starts with `vm`, as it does the terminal's.
 - **Save environment** freezes the terminal's root filesystem while it
   copies the disk's changes, well under a second on a host whose filesystem
   can share blocks (XFS, Btrfs), then builds a new base disk from the copy

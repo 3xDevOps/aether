@@ -63,9 +63,24 @@ func New(cfg Config) (*Runtime, error) {
 	return &Runtime{Docker: cfg.Docker, vms: newEngine(cfg, systemdUnits{}, dialHelper)}, nil
 }
 
-// terminalKey prefixes the creation key of a member's environment
-// terminal, terminal:<member>; its VM is terminal-<member>.
-const terminalKey = "terminal:"
+// kinds are the containers besides sessions that run in VMs, by the prefix
+// of the creation key the scheduler gives them and of their VM's name: the
+// rest of the key is the member, and for the agent updater the agent too.
+// A terminal keeps its root disk across a stop and start, as a container
+// keeps its filesystem; every other VM gets a fresh one on a cold start.
+var kinds = []struct {
+	key, name string
+	opts      options
+}{
+	{"terminal:", "terminal-", options{KeepRoot: true}},
+	{"assistant:", "assistant-", options{}},
+	{"assistant-install:", "assistant-install-", options{}},
+	{"harness-update-", "harness-update-", options{Lifetime: updaterLifetime}},
+}
+
+// updaterLifetime ends an agent updater's VM that a server crash left
+// running: the container's own sleep 900 would have ended it.
+const updaterLifetime = 20 * time.Minute
 
 // isSession matches a session container, which carries its run ID both as
 // creation key and in AETHER_RUN_ID.
@@ -73,20 +88,23 @@ func isSession(spec runtime.Spec) bool {
 	return spec.CreationKey != "" && spec.Env[coordtransport.RunIDEnv] == spec.CreationKey
 }
 
-// vmFor is the routing rule: sessions and environment terminals run in VMs,
-// everything else in Docker. A terminal keeps its root disk across a stop
-// and start, as a container keeps its filesystem; a session gets a fresh one
-// on every cold start.
-func vmFor(spec runtime.Spec) (string, options, bool) {
-	if name, ok := terminalVM(spec.CreationKey); ok {
-		return name, options{KeepRoot: true}, true
+// kindVM is the VM name and options of a creation key of one of the kinds.
+func kindVM(key string) (string, options, bool) {
+	for _, k := range kinds {
+		if rest, ok := strings.CutPrefix(key, k.key); ok {
+			return k.name + rest, k.opts, true
+		}
 	}
-	return spec.CreationKey, options{}, isSession(spec)
+	return "", options{}, false
 }
 
-func terminalVM(key string) (string, bool) {
-	member, ok := strings.CutPrefix(key, terminalKey)
-	return "terminal-" + member, ok
+// vmFor is the routing rule: sessions and the kinds run in VMs, everything
+// else in Docker.
+func vmFor(spec runtime.Spec) (string, options, bool) {
+	if name, opts, ok := kindVM(spec.CreationKey); ok {
+		return name, opts, true
+	}
+	return spec.CreationKey, options{}, isSession(spec)
 }
 
 func vmKey(id runtime.ID) (string, bool) {
@@ -133,10 +151,16 @@ func (r *Runtime) StopDockerContainers(ctx context.Context, members []string) {
 }
 
 // memberKind reports whether key is the creation key of one of members'
-// containers of a kind that runs in a VM.
+// containers of a kind that runs in a VM: after the kind's prefix comes the
+// member, alone or followed by a dash and the agent.
 func memberKind(key string, members []string) bool {
-	member, ok := strings.CutPrefix(key, terminalKey)
-	return ok && slices.Contains(members, member)
+	for _, k := range kinds {
+		rest, ok := strings.CutPrefix(key, k.key)
+		if ok && slices.ContainsFunc(members, func(m string) bool { return rest == m || strings.HasPrefix(rest, m+"-") }) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runtime) Start(ctx context.Context, id runtime.ID) error {
@@ -219,10 +243,10 @@ func (r *Runtime) Inspect(ctx context.Context, id runtime.ID) (runtime.Container
 	return r.Docker.Inspect(ctx, id)
 }
 
-// FindByCreationKey finds a terminal only among VMs, and a session among VMs
+// FindByCreationKey finds the kinds only among VMs, and a session among VMs
 // first: its key names a VM only when it was created under this runtime.
 func (r *Runtime) FindByCreationKey(ctx context.Context, key string) (runtime.ID, error) {
-	if name, ok := terminalVM(key); ok {
+	if name, _, ok := kindVM(key); ok {
 		return r.vms.find(name)
 	}
 	id, err := r.vms.find(key)
