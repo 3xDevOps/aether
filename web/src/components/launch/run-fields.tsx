@@ -253,7 +253,7 @@ function TaskBox({ onTask, ...props }: React.ComponentProps<'textarea'> & { valu
   }, [resize])
   return (
     <div className="flex flex-col gap-1">
-      <Textarea rows={3} placeholder="What should the agent do?" onChange={(event) => onTask(event.target.value)} {...props} ref={textarea} />
+      <Textarea rows={3} placeholder="What should the agent do?" onChange={(event) => onTask(event.target.value)} {...props} className={cn(props.className, 'resize-none')} ref={textarea} />
       <DictationNotice textarea={textarea} />
       <div className="flex justify-end empty:hidden">
         <DictationButton textarea={textarea} onInsert={onTask} />

@@ -33,7 +33,7 @@ async function assertCappedAndScrollable(field: Locator): Promise<void> {
   await expect.poll(() => field.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
 }
 
-test('Task grows on native paste and typing, caps at 192px, and can be cleared', async ({ browser, aether }) => {
+test('Task grows on paste and typing, adjusts to width changes, and can be cleared', async ({ browser, aether }) => {
   const alice = await aether.member('alice')
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('shop'))
 
@@ -49,6 +49,7 @@ test('Task grows on native paste and typing, caps at 192px, and can be cleared',
     await page.goto(alice.url)
     await page.addStyleTag({ content: 'textarea[data-slot="textarea"] { field-sizing: fixed !important; }' })
     const field = await openLaunch(page, viewport.phone)
+    await expect(field).toHaveCSS('resize', 'none')
 
     const initialHeight = await fieldHeight(field)
     const multiline = Array.from({ length: 24 }, (_, index) => `line ${index + 1}`).join('\n')
@@ -87,6 +88,20 @@ test('Task grows on native paste and typing, caps at 192px, and can be cleared',
     await field.press('Backspace')
     await expect(field).toHaveValue('')
     await expect.poll(() => fieldHeight(field)).toBe(initialHeight)
+
+    const widthSensitive = 'prompt width response '.repeat(15)
+    await field.fill(widthSensitive)
+    const wideWidth = await field.evaluate((element) => element.getBoundingClientRect().width)
+    const wideHeight = await fieldHeight(field)
+    await page.setViewportSize({ width: 320, height: viewport.viewport.height })
+    await expect.poll(() => field.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(wideWidth)
+    await expect.poll(() => fieldHeight(field)).toBeGreaterThan(wideHeight)
+    const narrowWidth = await field.evaluate((element) => element.getBoundingClientRect().width)
+    const narrowHeight = await fieldHeight(field)
+    await page.setViewportSize(viewport.viewport)
+    await expect.poll(() => field.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(narrowWidth)
+    await expect.poll(() => fieldHeight(field)).toBeLessThan(narrowHeight)
+    await expect(field).toHaveValue(widthSensitive)
 
     const sharedURL = new URL(alice.url)
     sharedURL.searchParams.set('new', '1')
