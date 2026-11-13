@@ -94,8 +94,8 @@ You do this once per agent, per person.
    `--enhanced` to install the Enhanced adapter too (see
    [Enhanced adapters](#enhanced-adapters)). In the dashboard, **Set up** on the
    **Agents** page or onboarding's **Agent** step does the same: it lets you
-   pick Standard or Enhanced, installs the agent, and opens a terminal with the
-   login command typed.
+   pick Standard or Enhanced, installs the agent, and opens a terminal. Use
+   **Copy login command**, paste at a shell prompt, review it, then press Enter.
 
    The environment has no `aether` command (only `aether-internal`), so run
    `aether` commands on your computer, never in this shell.
