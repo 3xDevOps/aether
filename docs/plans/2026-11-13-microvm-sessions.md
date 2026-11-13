@@ -14,10 +14,14 @@ measurement (work item 1).
 - The VM monitor is [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor).
   It can share a host folder into a VM (virtio-fs), save and restore a
   running VM, and accept live migration from its two previous releases.
-- The member home stays one folder on the server, shared live into every
-  VM of the member. Logins, token refreshes and agent settings keep a
-  single copy, as today ([environment-home.md](../environment-home.md),
-  [teams.md](../teams.md#agent-accounts)).
+- The member home stays one folder on the server that every VM of the
+  member reads and writes live. Logins, token refreshes and agent settings
+  keep a single copy, as today ([environment-home.md](../environment-home.md),
+  [teams.md](../teams.md#agent-accounts)). The VM reaches it through the
+  in-VM helper, not virtio-fs: a restored VM's virtio-fs mounts return
+  `EBADF`, and remounting fails while any process holds a file or working
+  directory in the share (measured with Cloud Hypervisor v54.1 and
+  virtiofsd 1.10).
 - The checkout moves onto the VM's own disk. Git work on it runs inside
   the VM; the server keeps the bare repo, session branches, diff history,
   evidence and transcripts. The server never mounts a VM's disk.
@@ -30,10 +34,11 @@ measurement (work item 1).
 | Part | What it is | Lifetime |
 | --- | --- | --- |
 | Kernel | An Aether-built guest kernel shipped with each server release | Per release |
-| Base disk | The session's image (standard, a saved member environment) flattened to a read-only disk | Until the image is swept |
-| Root disk | A copy-on-write layer over the base disk | Disposable; rebuilt on a cold start |
+| Helper disk | A small read-only disk holding the in-VM helper, shipped with each server release | Per release; a saved VM keeps the one it booted with |
+| Base disk | The session's image (standard, a saved member environment) flattened to a read-only raw disk | Until the image is swept |
+| Root disk | A qcow2 copy-on-write layer over the base disk, so all sessions share one host cache of the base | Disposable; rebuilt on a cold start |
 | Data disk | `/workspace`, `/repos/<name>`, `/tmp`, `/var/lib/docker` | Until the session is deleted |
-| Home | The member's home folder, shared live from the server | The member's |
+| Home | The member's home folder on the server, reached through the helper's file service | The member's |
 | Saved state | The VM's memory and device state while it sleeps | Until the next wake |
 
 Processes inside the VM:
@@ -80,8 +85,9 @@ helper. The development browser runs inside the session VM.
 
 ## Checkout inside the VM
 
-Until work item 6 lands, the host checkout directory is shared into the VM
-the same way as the home, so the git engine works unchanged. Work item 6
+Until work items 6 and 7 land, the host checkout, home and caches are
+shared into the VM with virtio-fs, so the git engine works unchanged; a VM
+with such shares cannot be saved. Work item 6
 then moves the checkout onto the data disk:
 
 - A prepared disk per workspace and base commit; each session's checkout is
@@ -117,8 +123,8 @@ may take several. Items in a wave run in parallel.
 | 3 | 1 | In-VM helper and its API | `internal/guest`, `aether-internal guest` |
 | 4 | 1 | Kernel, base disks from images, copy-on-write root disks | `internal/vmimage`, kernel build |
 | 5 | 2 | Network: taps, isolation, egress, metadata block, port forwards | `internal/runtime/vm` network, `internal/egress` |
-| 6 | 2 | Checkout inside the VM | `internal/gitengine`, the helper's git service |
-| 7 | 2 | Home and caches shared live; Isolated tier | mounts, `internal/overlay`, ownership |
+| 6 | 2 | Checkout and live sync inside the VM | `internal/gitengine`, the helper's git service, `internal/sshd/sync.go`, `internal/overlay` |
+| 7 | 2 | Home through the helper's file service, caches on the VM disk, Isolated tier | mounts, `internal/scheduler/scratch.go`, ownership, the helper's file service |
 | 8 | 2 | Sleep and close save the VM; wake restores; fallback; agent wakeups held by the server | `internal/scheduler` sleep paths |
 | 9 | 2 | Environment terminal and Save environment, assistant, agent updater, dictation, browser, cleanup helper, sudo and tiers | their scheduler and runtime files |
 | 10 | 3 | Install, update, storage, backups, AWS host guide | `cmd/aether-server`, `internal/serversetup`, docs |
@@ -141,10 +147,5 @@ image, new root disk for a session, kernel path). Item 2 builds on both.
 ## Open
 
 - Host memory per awake session, with free page reporting on.
-- Whether Cloud Hypervisor saves and restores a VM with a virtio-fs share
-  attached. If it does not, the home and caches reach the VM through the
-  helper's file service instead.
 - Save and wake times on local NVMe, and whether nested Docker containers
   and a dev server survive a save.
-- The copy-on-write format for root and data disks (qcow2 backing files or
-  reflink copies) on the filesystems servers use.
