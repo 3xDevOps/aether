@@ -178,22 +178,23 @@ func TestAVMSleepsBySavingAndWakesWithItsAgentRunning(t *testing.T) {
 	waitItems(t, e.sched, run.ID, "the wake's notice", noticed("Woke from sleep", "carry on where they were"))
 }
 
-// A background shell such as a dev server kept a container awake, which a
-// stop would end; a save keeps it, unless it still uses the CPU.
-func TestAVMSleepsWithAnIdleDevServerButNotWithABusyOne(t *testing.T) {
+// Work that still runs keeps a VM awake as it keeps a container: an agent's
+// background task, and in a VM also a guest that uses the CPU.
+func TestRunningWorkKeepsAVMAwake(t *testing.T) {
 	t.Parallel()
 	e, _, sr := newSaveEnv(t, false)
-	run := e.launchClaudeACP(t, acpmock.PromptDevServer)
-	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
-	if tasks := e.sched.acp.session(run.ID).State().Tasks; len(tasks) != 1 {
-		t.Fatalf("live tasks after the turn = %+v, want the dev server", tasks)
-	}
+	task := e.launchClaudeACP(t, acpmock.PromptDevServer)
+	waitItems(t, e.sched, task.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.stayAwake(t, task.ID, "the agent's dev server ran")
+
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the turn", turnEnded("end_turn", 1))
 	e.onGuestCPU("60")
 	e.stayAwake(t, run.ID, "the guest was busy")
 	e.onGuestCPU("1")
 	e.sleepRun(t, run.ID)
 	if !sr.isSaved(e.cid(t, run.ID)) {
-		t.Fatal("the VM was not saved")
+		t.Fatal("the VM was not saved once idle")
 	}
 }
 
@@ -277,6 +278,14 @@ func TestKillingOrClosingASleepingVMWakesItFirst(t *testing.T) {
 			run := e.launchACP(t, "say pong")
 			waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 			e.sleepRun(t, run.ID)
+			c := e.container(t, run.ID)
+			var mu sync.Mutex
+			var committedUp []bool
+			e.git.commitHook = func(_ domain.RunID, _ string) {
+				mu.Lock()
+				defer mu.Unlock()
+				committedUp = append(committedUp, containerState(c) != "stopped" && !sr.isSaved(c.id))
+			}
 			var err error
 			if how == "kill" {
 				err = e.sched.Kill(t.Context(), run.ID, e.member.ID)
@@ -288,6 +297,14 @@ func TestKillingOrClosingASleepingVMWakesItFirst(t *testing.T) {
 			}
 			if sr.restores != 1 {
 				t.Fatalf("%s restored %d times, want once", how, sr.restores)
+			}
+			if how == "close" {
+				mu.Lock()
+				up := slices.Clone(committedUp)
+				mu.Unlock()
+				if len(up) == 0 || !up[0] || e.git.published[run.ID] == 0 {
+					t.Fatalf("the close committed %v (true: the VM ran) and published %d times; want a commit made in the running VM and a published branch", up, e.git.published[run.ID])
+				}
 			}
 			waitFor(t, "the session ended", func() bool {
 				got, _ := e.db.GetRun(t.Context(), run.ID)

@@ -652,14 +652,11 @@ lost, so more sessions sleep, sooner:
   do.
 - `--run-sleep-after` defaults to `5m` for session VMs. A value you set
   applies to VMs and containers alike.
-- Background shells the agent started, such as a dev server, and commands
-  in the foreground of a terminal no longer keep a session awake: they are
-  saved with it. A VM that uses more than a tenth of its CPU still does, so
-  a build or test run finishes first, and so do a running turn, a
-  background task the agent waits on, queued input, an open request, the
-  other conditions above and activity in the window. A save that fails
-  leaves the session running; Aether tries again after another
-  `--run-sleep-after`.
+- The conditions above keep a VM awake as they keep a container, and so
+  do two more: a VM using more than a tenth of its CPU, such as a build or
+  a test run left in the background, and a wakeup the agent set that has
+  yet to fire. A save that fails leaves the session running; Aether tries
+  again after another `--run-sleep-after`.
 - A closed session is saved as soon as the close finishes, instead of
   staying paused in memory, unless `--run-sleep-after` is `0`. **Relaunch**
   restores it. Closing or killing a sleeping session wakes it first, so its
@@ -673,12 +670,16 @@ the session, such as a database client's or a port forward's, can end while
 it sleeps, and the programs holding them see them fail after the wake, as
 after a network outage. The VM's clock is set right on the wake.
 
-The agent's own scheduled wakeups (`/loop`, `ScheduleWakeup`, `CronCreate`)
-live in the agent process and are frozen with it: a session left running
-`/loop` does not act while it sleeps. Its timers count only time awake, so
-a pending one fires that much later after the next wake. Aether's own wakes
-still wake a sleeping session: mail, `aether-internal report --until`
-conditions and watches reach it as any message does.
+Timers in a saved VM stop with it and count only time awake: on a test
+host, a 150-second `sleep` and a Node `setTimeout` started before a save
+fired 44 seconds after the wake, the time they still had left. So an
+Enhanced Claude Code session stays awake while a wakeup it set with
+`ScheduleWakeup` (as `/loop` does) or a one-shot `CronCreate` has yet to
+fire, and while a recurring `CronCreate` job runs, until `CronDelete`.
+Timers that Aether cannot see, such as a Standard session's or a `sleep`
+in a script, wait for the next wake. Aether's own wakes still wake a
+sleeping session, Standard or Enhanced: mail, `aether-internal report
+--until` conditions and watches reach it as any message does.
 
 A Standard session's Chat and Terminal views, and an Enhanced session's
 Chat view, show **Asleep since** with a **Wake** button while it sleeps.

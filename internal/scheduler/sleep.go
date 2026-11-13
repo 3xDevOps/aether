@@ -428,9 +428,8 @@ func (s *Scheduler) liveFactsLocked(e *supervised) idleFacts {
 }
 
 // sessionFacts adds what the agent session of an Enhanced run, the terminals
-// and the checkout recorded to f. A background task the agent does not wait
-// on, such as a dev server, keeps a container awake, which a stop would end,
-// but not a VM, which a save keeps.
+// and the checkout recorded to f. A wakeup the agent set keeps a VM awake:
+// its timer counts only time the VM runs, so a save would make it fire late.
 func (s *Scheduler) sessionFacts(run domain.RunID, enhanced, saving bool, f idleFacts) idleFacts {
 	if enhanced {
 		sess := s.acp.session(run)
@@ -439,8 +438,12 @@ func (s *Scheduler) sessionFacts(run domain.RunID, enhanced, saving bool, f idle
 			return f
 		}
 		st := sess.State()
-		if st.TurnInFlight || st.Background || !saving && len(st.Tasks) > 0 || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting {
+		if st.TurnInFlight || st.Background || len(st.Tasks) > 0 || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting {
 			f.busy = "the agent is working"
+			return f
+		}
+		if saving && st.WakeupPending {
+			f.busy = "a wakeup the agent set is pending"
 			return f
 		}
 		f.active = append(f.active, st.LastProgress, st.TurnStartedAt, st.OpenedAt)
@@ -651,8 +654,15 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 		s.endSleep(entry, false)
 		return errStayAwake
 	}
-	// A stop ends a terminal's foreground command, and a save would freeze
-	// work that still runs.
+	// Work that still runs keeps the session awake: a command in a
+	// terminal's foreground, and in a VM anything that uses the CPU.
+	if job, err := s.foregroundJob(ctx, cid); err != nil || job != "" {
+		s.endSleep(entry, false)
+		if err != nil {
+			slog.Warn("scheduler: keep a session awake whose terminals could not be read", "run", run, "error", err)
+		}
+		return errStayAwake
+	}
 	if saving {
 		if busy, err := s.guestBusy(ctx, cid); err != nil || busy {
 			s.endSleep(entry, false)
@@ -661,12 +671,6 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 			}
 			return errStayAwake
 		}
-	} else if job, err := s.foregroundJob(ctx, cid); err != nil || job != "" {
-		s.endSleep(entry, false)
-		if err != nil {
-			slog.Warn("scheduler: keep a session awake whose terminals could not be read", "run", run, "error", err)
-		}
-		return errStayAwake
 	}
 	if err := s.markAsleep(entry); err != nil {
 		s.endSleep(entry, false)
@@ -687,7 +691,7 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 	s.mu.Lock()
 	facts = s.liveFactsLocked(entry)
 	s.mu.Unlock()
-	if s.sessionFacts(run, enhanced, false, facts).busy != "" {
+	if s.sessionFacts(run, enhanced, saving, facts).busy != "" {
 		return undo(errStayAwake)
 	}
 	// A companion left paused would come back in the network namespace of
