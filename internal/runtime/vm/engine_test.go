@@ -581,3 +581,38 @@ func TestStatsAndMemoryEventsComeFromTheHelper(t *testing.T) {
 		t.Errorf("memory events of a stopped VM = %v, want not-exist", err)
 	}
 }
+
+func TestAVMWithACheckoutDiskLingersAfterMainExits(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	unlock := h.engine.lock("run-a")
+	rec, err := h.engine.load("run-a")
+	if err == nil {
+		rec.CheckoutDisks = []checkoutDisk{{Target: "/workspace"}}
+		err = h.engine.store(rec)
+	}
+	unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.stop(t.Context(), "run-a", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if h.units.vmm("run-a") == nil {
+		t.Fatal("a VM with a checkout disk powered off at stop; it should linger for the server's git work")
+	}
+	if info, err := h.engine.inspect(t.Context(), "run-a"); err != nil || !info.Exited {
+		t.Errorf("a lingering VM inspects as %+v, %v", info, err)
+	}
+	if _, _, _, err := h.engine.exec(t.Context(), "run-a", []string{"true"}, ""); err == nil {
+		t.Error("exec in a VM whose main process exited succeeded")
+	}
+	h.engine.endLinger("run-a", rec.Boots, 0)
+	deadline := time.Now().Add(5 * time.Second)
+	for h.units.vmm("run-a") != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("VM still running after its linger ended")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

@@ -758,7 +758,7 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 | `aether.db` | The SQLite database: members, workspaces, sessions and their history. |
 | `ssh/`, `edge/`, `push/` | The SSH host key, which clients pin and the edge knows the server by; edge enrollment; and the push notification key, without which every device must turn notifications off and on again. |
 | `repos/` | One bare git repository per workspace. |
-| `checkouts/` | One git worktree per session, and each session's recorded diff history in `<run-id>.diffsnap/`. |
+| `checkouts/` | One git worktree per session, and each session's recorded diff history in `<run-id>.diffsnap/`. With `session-runtime vm`, `<run-id>/` holds the session's checkout disk instead of a worktree. |
 | `transcripts/` | Terminal recordings and Enhanced conversation logs, kept until you delete the session. |
 | `homes/<member>/` | Each member's persistent home: installed agents, agent logins, uploaded configuration, and their GitHub token. |
 | `signing-keys/` | Each member's private commit signing key, which no container mounts. Without a backup, each member runs `aether github connect` again for a new key. |

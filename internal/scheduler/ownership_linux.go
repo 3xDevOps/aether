@@ -55,7 +55,7 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, hom
 	if err != nil {
 		return err
 	}
-	if run.Worktree != "" {
+	if run.Worktree != "" && !s.cfg.Git.IsVMCheckout(run.ID) {
 		protected, err := protectedInodes(filepath.Join(s.cfg.ReposDir, string(ws.ID)+".git"))
 		if err != nil {
 			return err
@@ -65,6 +65,9 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, hom
 		}
 	}
 	for _, extra := range run.Extras {
+		if s.cfg.Git.IsVMCheckout(extra.Key) {
+			continue
+		}
 		protected, err := protectedInodes(filepath.Join(s.cfg.ReposDir, string(extra.WorkspaceID)+".git"))
 		if err != nil {
 			return err

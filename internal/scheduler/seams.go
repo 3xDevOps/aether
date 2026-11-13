@@ -54,6 +54,9 @@ type GitEngine interface {
 	StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error
 	StopDiffWatch(run domain.RunID)
 	LastFileChange(run domain.RunID) (time.Time, bool)
+	// IsVMCheckout reports a checkout on a disk of the session's VM, whose
+	// files the VM's own user already owns.
+	IsVMCheckout(run domain.RunID) bool
 }
 
 type PTYHost interface {

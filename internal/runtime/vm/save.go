@@ -35,7 +35,7 @@ func (e *engine) save(ctx context.Context, key string) error {
 		for i, s := range booted.Shares {
 			sources[i] = s.Source
 		}
-		return fmt.Errorf("vm runtime: cannot save VM %s: it shares %s over virtio-fs, which would come back unusable after a restore; work item 6 moves checkouts onto the VM's disk", key, strings.Join(sources, ", "))
+		return fmt.Errorf("vm runtime: cannot save VM %s: it shares %s over virtio-fs, which would come back unusable after a restore", key, strings.Join(sources, ", "))
 	}
 	api := newCHAPI(e.path(key, apiSocket))
 	state, err := api.state(ctx)

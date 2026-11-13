@@ -738,6 +738,8 @@ func (g *fakeGit) WorkspaceBranchExists(_ context.Context, ws domain.WorkspaceID
 	}
 	return g.publishedBranches[ws][branch], nil
 }
+func (g *fakeGit) IsVMCheckout(domain.RunID) bool { return false }
+
 func (g *fakeGit) WorkspaceBranchCommit(_ context.Context, ws domain.WorkspaceID, branch string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

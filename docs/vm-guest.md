@@ -22,7 +22,8 @@ In order, as PID 1:
 2. Mounts `/dev/pts`, `/dev/shm`, the cgroup v2 hierarchy on `/sys/fs/cgroup`
    and a tmpfs on `/run`.
 3. Reads its configuration from `/proc/cmdline` (below), mounts the volumes
-   it names and binds what it names from them.
+   it names and binds what it names from them, then mounts each checkout
+   disk ([Checkouts](#checkouts)).
 4. Brings up `lo` and the VM's network device, sets the hostname, and writes
    `/etc/hostname`, `/etc/hosts` and, when DNS servers are given,
    `/etc/resolv.conf`.
@@ -50,6 +51,7 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.net=<address>/<prefix>,<gateway>` | IPv4 address of the VM's one network device and its default route. |
 | `aether.dns=<server>[,<server>...]` | Name servers for `/etc/resolv.conf`. Without it the image's file stays. |
 | `aether.mount=<volume>,<source>,<target>[,ro\|,overlay]` | Bind `<source>` of a volume at `<target>`, in command-line order. |
+| `aether.checkout=<serial>,<key>,<target>` | Mount the checkout disk with virtio serial `<serial>` for the git service under `<key>` and bind its checkout at `<target>`. |
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |
 
 Paths are escaped per segment as in a URL, so a space or a comma in a path
@@ -59,7 +61,7 @@ The volumes:
 
 | Volume | What it is | Source |
 | --- | --- | --- |
-| `share` | The virtio-fs share tagged `aether`, on `/run/aether-guest/share`. Binds are `nosuid,nodev`. Only checkouts use it. | A path in the share |
+| `share` | The virtio-fs share tagged `aether`, on `/run/aether-guest/share`. Binds are `nosuid,nodev`. Only checkouts left on the server's disk use it. | A path in the share |
 | `home` | The [file service](#the-file-service), on `/run/aether-guest/home`. Binds are `nosuid,nodev`. | The index of a shared host file |
 | `data` | The disk with serial `data`, on `/run/aether-guest/data`. A missing source directory is created with the mode and owner its target has in the image, so `/tmp` keeps its sticky bit. | A path on the disk |
 | `cache` | The disk with serial `cache`, on `/run/aether-guest/cache`: the session's copy of the member's tool caches. Its root is mode `1777` and has no `lost+found`. | `.` |
@@ -175,8 +177,16 @@ record it keeps for good. It reaps every orphan.
 
 PID 1 passes `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGTERM`, `SIGUSR1`, `SIGUSR2`,
 `SIGALRM` and `SIGWINCH` on to the main process, as `docker-init` does. When
-the main process exits the helper keeps running, and the server reads the
-exit code and powers the VM off.
+the main process exits the helper keeps running, kills every process left in
+the session cgroup, as a container's end does, and writes to the root
+cgroup's `memory.reclaim`. The server reads the exit code and powers the VM
+off, unless its checkouts live on its own disks ([Checkouts](#checkouts)):
+then the VM stays up for the git work that ends a session on its checkout,
+the last snapshot, the final commit, branch publication and evidence, until
+the session is removed, started again, or 10 minutes pass. A stop whose end
+of the main process the helper never confirmed powers the VM off at once.
+Meanwhile the VM reads as exited: exec and attach are refused, as for a
+stopped container.
 
 ## Output and input
 
@@ -227,6 +237,55 @@ deadline the request names, at most 10 minutes, so a server that dies
 mid-save never leaves the VM unwritable, and a copy that outlasted the
 deadline can tell. A second `Freeze` moves the deadline. `PowerOff` thaws
 first, since its sync would wait on a frozen filesystem.
+
+## Checkouts
+
+A session's checkout and each of its extra repositories live on a disk of
+their own, not in a directory on the server. The server keeps one prepared
+disk per workspace, base commit and owner, under
+`<data dir>/vm/images/prepared/`: an ext4 filesystem whose `checkout/` holds a
+self-contained clone at the base commit on the branch `aether-prepared`, owned
+by the session's user. The first session on a base builds it (1.7 seconds for
+40,000 files on local NVMe); every later one gets a qcow2 disk over it in
+`<data dir>/checkouts/<run-id>/disk.qcow2` in constant time (17 ms). That disk
+follows the checkout's retention, not the VM's.
+
+The helper mounts each checkout disk on `/run/aether-guest/checkouts/<key>`,
+binds its `checkout/` at `/run/aether-guest/data/git/<key>` for the git
+service and at the target for the session.
+
+### The git service
+
+The git service runs the server's own git engine over the checkouts, with
+the same hardening the server uses for a checkout on its disk: a root-owned
+scratch repository on the data disk, the checkout's config, hooks and
+attributes never consulted. So Changes, the live patch and staging behave as
+for a Docker session. It is `aether-internal guest git-service`, a process of
+its own outside the session cgroup that PID 1 starts again whenever it ends,
+waiting up to 30 seconds after a start that did not last:
+PID 1 reaps every child it has, which would collect a git's exit before the
+engine's own wait. It serves `internal/guest/guestpb/git.proto` on vsock port
+1100, to the host only, as the API is:
+
+| Call | What it does |
+| --- | --- |
+| `Setup` | Called before `Boot` on every boot and server restart. On a checkout's first boot it sets `aether.base`, `aether.branch`, `aether.workspace` and the origin remote, and renames `aether-prepared` to the run branch, running git as the checkout's owner so the session can keep writing everything git wrote. Then it starts the checkout's diff watch. |
+| `Watch` | Streams the checkout's diff watch: each snapshot's `run.diff` payload, each moved HEAD, and at most one file change report a second. A snapshot or HEAD counts as delivered only once the server acknowledges it; a refusal is a history gap the watch retries, as a failed publication on the server is. |
+| `Flush` | Takes a snapshot now and returns once `Watch` delivered it. |
+| `Objects` | Streams a pack of what `wants` reach and no `haves` do. |
+| `Patch` | Renders the live diff. |
+| `Head` | Returns the commit HEAD names. |
+
+The server treats every reply as data from the session. It copies a
+snapshot's tree and HEAD into the session's `<run-id>.diffsnap/` store with
+`git index-pack --strict`, which checks each object and that every object one
+names is in the pack or the store, and refuses a pack over 128 MiB. It then
+records the snapshot only when the tree is a tree within the snapshot's
+128 MiB bound, HEAD is a commit, and the base lies between the fork point and
+HEAD. The store borrows the workspace repository's objects, which hold the
+fork point. A moved HEAD is published by fetching it from that store into
+the workspace repository, as for a checkout on the server's disk. While the
+VM is not running, the session's patch is its last recorded snapshot.
 
 ## Versions
 

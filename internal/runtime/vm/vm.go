@@ -53,6 +53,9 @@ type Config struct {
 	Images  Images
 	Monitor []string
 	Helper  string
+	// CheckoutDisks, when set, puts the session checkouts it knows on disks
+	// of their own instead of sharing them from the server.
+	CheckoutDisks CheckoutDisks
 }
 
 // New returns a Runtime that keeps its VMs under DataDir/vm.
@@ -60,7 +63,9 @@ func New(cfg Config) (*Runtime, error) {
 	if cfg.Docker == nil || cfg.Images == nil || len(cfg.Monitor) == 0 || cfg.Helper == "" {
 		return nil, errors.New("vm runtime: Docker, the image store, the monitor command and the helper binary are required")
 	}
-	return &Runtime{Docker: cfg.Docker, vms: newEngine(cfg, systemdUnits{}, dialHelper)}, nil
+	r := &Runtime{Docker: cfg.Docker, vms: newEngine(cfg, systemdUnits{}, dialHelper)}
+	go r.vms.lingering(context.Background())
+	return r, nil
 }
 
 // terminalKey prefixes the creation key of a member's environment

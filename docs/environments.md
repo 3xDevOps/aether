@@ -345,8 +345,11 @@ What changes:
   limit by the unit's `CPUQuota`, and the memory limit as its memory; the
   unit's `MemoryMax` allows 512 MiB more for the VM monitor and the file
   service. The process limit applies inside the guest.
-- The checkout reaches the VM over virtio-fs. The home, the login files and
-  the other host files a session mounts go through the VM's file service
+- The checkout and each extra repository live on disks of their own, made
+  in constant time from a prepared disk per workspace and base commit, and
+  git work on them runs inside the VM ([vm-guest.md](vm-guest.md#checkouts)).
+  The home, the login files and the other host files a session mounts go
+  through the VM's file service
   ([vm-guest.md](vm-guest.md#the-file-service)): writes show in the
   member's other sessions within a second, and read-only mounts stay
   read-only.

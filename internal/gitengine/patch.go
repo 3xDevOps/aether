@@ -81,7 +81,12 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 	ctx, cancel := context.WithTimeout(ctx, snapshotTimeout)
 	defer cancel()
 
-	patch, err := e.renderPatch(ctx, run, checkout, req, maxBytes)
+	var patch Patch
+	if meta, metaErr := e.readRunMeta(run); metaErr == nil && meta.VM {
+		patch, err = e.vmPatch(ctx, run, checkout, req, maxBytes)
+	} else {
+		patch, err = e.renderPatch(ctx, run, checkout, req, maxBytes)
+	}
 	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		// A git killed by the deadline reports "signal: killed", not the
 		// deadline.

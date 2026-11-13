@@ -94,6 +94,9 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	if err != nil {
 		return EvidenceRevision{}, err
 	}
+	if meta.VM {
+		return EvidenceRevision{}, vmUnsupported(run)
+	}
 	repo, err := e.existingRepoPath(meta.Workspace)
 	if err != nil {
 		return EvidenceRevision{}, err

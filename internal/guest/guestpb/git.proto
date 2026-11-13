@@ -1,0 +1,118 @@
+// The helper's git service: the server's git engine running inside the VM
+// over the session's checkouts, which live on the VM's own disks. It is a
+// process of its own on vsock port 1100. docs/vm-guest.md describes it.
+syntax = "proto3";
+
+package aether.guest.v1;
+
+option go_package = "github.com/3xDevOps/Aether/internal/guest/guestpb";
+
+service Git {
+  // Setup gives each checkout the run branch on its first boot, records its
+  // identity and starts its diff watch. It is called before the session's
+  // first process starts, and again after every server restart.
+  rpc Setup(SetupRequest) returns (SetupReply);
+  // Watch streams one checkout's diff watch. The first acknowledgement
+  // names the checkout; a later Watch of the same checkout replaces this
+  // one. A diff or head event counts as delivered only once the server
+  // acknowledges its sequence number.
+  rpc Watch(stream WatchAck) returns (stream WatchEvent);
+  // Flush takes a snapshot of the checkout now and returns once Watch
+  // delivered it.
+  rpc Flush(FlushRequest) returns (FlushReply);
+  // Objects streams a pack of every object reachable from wants and from
+  // none of the haves the checkout holds.
+  rpc Objects(ObjectsRequest) returns (stream Chunk);
+  // Patch renders the checkout's live diff, as the server's RunPatch does
+  // for a checkout on its own disk.
+  rpc Patch(PatchRequest) returns (PatchReply);
+  // Head returns the commit the checkout's HEAD names.
+  rpc Head(HeadRequest) returns (HeadReply);
+}
+
+// GitFailure is the status detail of a call that failed for a reason the
+// server's git engine names, such as a snapshot tree the guest no longer
+// holds.
+message GitFailure {
+  string reason = 1;
+}
+
+message SetupRequest {
+  repeated Checkout checkouts = 1;
+}
+
+// Checkout describes a session checkout the kernel command line mounted
+// under key: the run branch it gets on its first boot and the identity the
+// git service reads it with.
+message Checkout {
+  string key = 1;
+  string workspace = 2;
+  string branch = 3;
+  string base = 4;
+  string base_branch = 5;
+  string origin = 6;
+}
+
+message SetupReply {}
+
+message WatchAck {
+  // key names the checkout on the first acknowledgement only.
+  string key = 1;
+  uint64 seq = 2;
+  // error, when set, refuses the event: the guest records a history gap
+  // and retries, as for a failed publication on the server.
+  string error = 3;
+}
+
+message WatchEvent {
+  // seq numbers the events that need an acknowledgement; changed events
+  // carry 0.
+  uint64 seq = 1;
+  oneof kind {
+    // diff is the run.diff payload as JSON.
+    bytes diff = 2;
+    // head is the commit HEAD moved to.
+    string head = 3;
+    // changed reports a file change since the last changed event.
+    bool changed = 4;
+  }
+}
+
+message FlushRequest {
+  string key = 1;
+}
+
+message FlushReply {}
+
+message ObjectsRequest {
+  string key = 1;
+  repeated string wants = 2;
+  repeated string haves = 3;
+}
+
+message Chunk {
+  bytes data = 1;
+}
+
+message HeadRequest {
+  string key = 1;
+}
+
+message HeadReply {
+  string commit = 1;
+}
+
+message PatchRequest {
+  string key = 1;
+  // from is a snapshot tree to render from; empty renders against the
+  // checkout's effective base.
+  string from = 2;
+  uint32 max_bytes = 3;
+}
+
+message PatchReply {
+  string base = 1;
+  string text = 2;
+  bool truncated = 3;
+  string fork_tree = 4;
+}

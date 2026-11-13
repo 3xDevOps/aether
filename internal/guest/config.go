@@ -18,6 +18,9 @@ import (
 const (
 	// APIPort is the vsock port the helper serves its API on.
 	APIPort = 1024
+	// GitPort is the vsock port of the helper's git service, far from the
+	// host ports forwarded sockets dial, which count up from 1025.
+	GitPort = 1100
 	// ShareTag is the virtio-fs tag of the VM's one shared folder.
 	ShareTag = "aether"
 	// MainID names the session's main process, which Boot starts.
@@ -63,8 +66,10 @@ type Config struct {
 	Hostname string
 	Network  *Network
 	// Mounts are bound in order, so a parent comes before its children.
-	Mounts  []Mount
-	Sockets []Socket
+	Mounts []Mount
+	// Checkouts are mounted after Mounts.
+	Checkouts []CheckoutMount
+	Sockets   []Socket
 }
 
 // Network configures the VM's one network interface.
@@ -84,6 +89,15 @@ type Mount struct {
 	Target   string
 	ReadOnly bool
 	Overlay  bool
+}
+
+// CheckoutMount mounts a session checkout's disk, the block device whose
+// virtio serial is Serial, for the git service under Key and binds it at
+// Target.
+type CheckoutMount struct {
+	Serial string
+	Key    string
+	Target string
 }
 
 // Socket makes the helper listen on Path in the VM and relay every
@@ -123,6 +137,9 @@ func (c Config) KernelArgs(base string) (string, error) {
 			arg += ",overlay"
 		}
 		args = append(args, arg)
+	}
+	for _, m := range c.Checkouts {
+		args = append(args, "aether.checkout="+m.Serial+","+m.Key+","+escapePath(m.Target))
 	}
 	for _, s := range c.Sockets {
 		args = append(args, "aether.sock="+strconv.FormatUint(uint64(s.Port), 10)+","+escapePath(s.Path))
@@ -204,6 +221,15 @@ func (c *Config) parseArg(key, value string) error {
 			option = fields[3]
 		}
 		c.Mounts = append(c.Mounts, Mount{Volume: Volume(fields[0]), Source: source, Target: target, ReadOnly: option == "ro", Overlay: option == "overlay"})
+	case "aether.checkout":
+		if len(fields) != 3 {
+			return errors.New("want <serial>,<key>,<target>")
+		}
+		target, err := url.PathUnescape(fields[2])
+		if err != nil {
+			return err
+		}
+		c.Checkouts = append(c.Checkouts, CheckoutMount{Serial: fields[0], Key: fields[1], Target: target})
 	case "aether.sock":
 		if len(fields) != 2 {
 			return errors.New("want <port>,<path>")
@@ -270,6 +296,17 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("mount %d: target %q must be a clean absolute path below /", i, m.Target))
 		}
 	}
+	for i, m := range c.Checkouts {
+		if !ValidCheckoutKey(m.Serial) || len(m.Serial) > 20 {
+			errs = append(errs, fmt.Errorf("checkout %d: serial %q must be at most 20 letters, digits, - or _", i, m.Serial))
+		}
+		if !ValidCheckoutKey(m.Key) {
+			errs = append(errs, fmt.Errorf("checkout %d: key %q must be letters, digits, - or _", i, m.Key))
+		}
+		if !cleanAbs(m.Target) || m.Target == "/" {
+			errs = append(errs, fmt.Errorf("checkout %d: target %q must be a clean absolute path below /", i, m.Target))
+		}
+	}
 	for i, s := range c.Sockets {
 		if s.Port == 0 || s.Port == APIPort {
 			errs = append(errs, fmt.Errorf("socket %d: port %d is reserved", i, s.Port))
@@ -282,6 +319,20 @@ func (c Config) Validate() error {
 		return fmt.Errorf("guest: invalid configuration: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// ValidCheckoutKey reports whether key can name a checkout in the VM: one
+// path element of at most 64 letters, digits, - or _.
+func ValidCheckoutKey(key string) bool {
+	if key == "" || len(key) > 64 {
+		return false
+	}
+	for _, r := range key {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func cleanAbs(p string) bool {

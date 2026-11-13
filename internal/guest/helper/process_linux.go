@@ -90,6 +90,8 @@ type processes struct {
 	exits uint64
 	// cgroup is the directory every spawned process starts in, nil for none.
 	cgroup *os.File
+	// mainExited, when set, runs once the main process exited.
+	mainExited func()
 }
 
 func newProcesses(cgroup *os.File) *processes {
@@ -101,6 +103,9 @@ func newProcesses(cgroup *os.File) *processes {
 type spawnSpec struct {
 	guest.ProcessSpec
 	log *os.File
+	// helper starts the process outside the session cgroup, as part of
+	// the helper rather than of the session.
+	helper bool
 }
 
 func (t *processes) spawn(spec spawnSpec) (*process, error) {
@@ -156,7 +161,7 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 // helper keeps; the child's are closed once it runs.
 func (t *processes) start(p *process, spec spawnSpec, program, dir string, env []string, cred *syscall.Credential) error {
 	attr := &syscall.SysProcAttr{Setsid: true, Credential: cred}
-	if t.cgroup != nil {
+	if t.cgroup != nil && !spec.helper {
 		attr.UseCgroupFD, attr.CgroupFD = true, int(t.cgroup.Fd())
 	}
 	var child []*os.File
@@ -423,6 +428,9 @@ func (t *processes) reap() {
 		}
 		close(p.done)
 		t.retire(p)
+		if p.id == guest.MainID && t.mainExited != nil {
+			go t.mainExited()
+		}
 		// A write blocked on a pipe its descendants still hold keeps the
 		// lock until its deadline, so this must not wait for it.
 		go func() { _ = p.closeInput() }()

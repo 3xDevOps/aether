@@ -96,7 +96,7 @@ func Open(dir, kernel string, docker DockerImages) (*Store, error) {
 	if err := os.RemoveAll(s.tmpDir()); err != nil {
 		return nil, fmt.Errorf("vmimage: clear %s: %w", s.tmpDir(), err)
 	}
-	for _, d := range []string{dir, s.tmpDir(), s.basesDir(), s.helpersDir()} {
+	for _, d := range []string{dir, s.tmpDir(), s.basesDir(), s.helpersDir(), s.preparedDir()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, fmt.Errorf("vmimage: create %s: %w", d, err)
 		}
@@ -381,7 +381,7 @@ func (s *Store) sweepLocked() error {
 		tagged[dirName(id)] = true
 	}
 	var errs []error
-	for _, d := range []struct{ dir, file string }{{s.basesDir(), "disk.raw"}, {s.helpersDir(), "helper.raw"}} {
+	for _, d := range []struct{ dir, file string }{{s.basesDir(), "disk.raw"}, {s.helpersDir(), "helper.raw"}, {s.preparedDir(), "disk.raw"}} {
 		entries, err := os.ReadDir(d.dir)
 		if err != nil {
 			return fmt.Errorf("vmimage: sweep: %w", err)
@@ -551,10 +551,11 @@ func (s *Store) writeTags(tags map[string]string) error {
 	return nil
 }
 
-func (s *Store) tmpDir() string     { return filepath.Join(s.dir, "tmp") }
-func (s *Store) basesDir() string   { return filepath.Join(s.dir, "bases") }
-func (s *Store) helpersDir() string { return filepath.Join(s.dir, "helpers") }
-func (s *Store) tagsPath() string   { return filepath.Join(s.dir, "tags.json") }
+func (s *Store) tmpDir() string      { return filepath.Join(s.dir, "tmp") }
+func (s *Store) basesDir() string    { return filepath.Join(s.dir, "bases") }
+func (s *Store) helpersDir() string  { return filepath.Join(s.dir, "helpers") }
+func (s *Store) preparedDir() string { return filepath.Join(s.dir, "prepared") }
+func (s *Store) tagsPath() string    { return filepath.Join(s.dir, "tags.json") }
 
 func dirName(id string) string { return strings.ReplaceAll(id, ":", "-") }
 
