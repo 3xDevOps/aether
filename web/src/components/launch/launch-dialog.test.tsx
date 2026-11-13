@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
+import type { LaunchDraft } from '@/components/launch/draft'
+import { useIsMobile } from '@/lib/breakpoints'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
@@ -8,6 +10,7 @@ import { useStore } from '@/store'
 import { useChildSettings } from '@/store/children'
 import { useLaunchDefaults } from '@/store/launch-defaults'
 import { optimisticDeadlineMs } from '@/store/optimistic'
+import { atViewport } from '@/test/viewport'
 import { agentInfo, alice, bob, otherWorkspace, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
 import { chooseModel, pickModel } from '@/test/model'
 import { pickOption } from '@/test/select'
@@ -21,6 +24,7 @@ const claude = (over: Parameters<typeof agentInfo>[0] = {}) =>
   agentInfo({ display_name: 'Claude Code', enhanced: 'adapter', enhanced_installed: true, login_found: true, default_mode: 'tui', ...over })
 
 beforeEach(() => {
+  localStorage.clear()
   Element.prototype.scrollIntoView = vi.fn()
   vi.mocked(api.runLaunch).mockResolvedValue(run())
   vi.mocked(api.agentList).mockResolvedValue([claude()])
@@ -33,6 +37,8 @@ beforeEach(() => {
     activeWorkspace: workspace.id,
     paletteDialog: 'launch',
     launchDraft: null,
+    launchDraftError: null,
+    linkStatus: null,
     identityKey: null,
     paletteRunID: null,
     route: { name: 'board', params: {} },
@@ -50,6 +56,7 @@ const signedOut = '~/.claude/.credentials.json: Claude OAuth access token is mis
 const launchButton = () => screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement
 const agentRow = (name: RegExp | string) => screen.getByRole('radio', { name }) as HTMLButtonElement
 const modeSegment = (name: string) => within(screen.getByRole('radiogroup', { name: 'Mode' })).getByRole('radio', { name }) as HTMLButtonElement
+const allowDraftStorage = () => useStore.getState().setCapabilities({ gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] })
 
 async function open() {
   render(<LaunchDialog />)
@@ -59,6 +66,13 @@ async function open() {
 function setTask(task: string) {
   fireEvent.change(screen.getByLabelText('Task'), { target: { value: task } })
 }
+
+const draft = (over: Partial<LaunchDraft> = {}): LaunchDraft => ({
+  version: 1, id: 'saved-draft', workspace: workspace.id, extras: [], account: alice.id,
+  fallback: { off: false, order: null, excluded: [] }, permission: 'default', childRuns: '',
+  limits: { cpus: '', memory: '', pids: '' }, harness: 'claude', mode: 'tui', model: '', effort: '', task: 'keep this prompt',
+  ...over,
+})
 
 describe('reopening', () => {
   it('starts a fresh form when New run opens again while the last panel is still leaving', async () => {
@@ -100,6 +114,7 @@ describe('saved launch draft', () => {
   })
 
   it('recovers the task, mode and model collapsed after a reload without applying saved defaults over them', async () => {
+    allowDraftStorage()
     useStore.getState().setIdentityKey('server/alice')
     const view = render(<PaletteDialogs />)
     await waitFor(() => expect(launchButton().disabled).toBe(false))
@@ -123,6 +138,7 @@ describe('saved launch draft', () => {
   })
 
   it.each(['Close', 'Cancel'])('discards the recovery copy with %s', async (name) => {
+    allowDraftStorage()
     useStore.getState().setIdentityKey('server/alice')
     render(<PaletteDialogs />)
     await waitFor(() => expect(launchButton().disabled).toBe(false))
@@ -185,6 +201,7 @@ describe('saved launch draft', () => {
   })
 
   it('isolates recovery by server and member', async () => {
+    allowDraftStorage()
     useStore.getState().setIdentityKey('server/alice')
     render(<PaletteDialogs />)
     await waitFor(() => expect(launchButton().disabled).toBe(false))
@@ -196,6 +213,123 @@ describe('saved launch draft', () => {
     expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('')
     act(() => useStore.getState().setIdentityKey('server/alice'))
     expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('Alice private draft')
+  })
+
+  it('keeps an Edge-linked draft in memory and removes its browser copy', () => {
+    const saved = draft()
+    allowDraftStorage()
+    useStore.setState({ identityKey: 'server/alice', launchDraft: saved })
+    useStore.getState().setLaunchDraft(saved)
+    expect(localStorage.getItem('aether.launch-draft.v1:server%2Falice')).not.toBeNull()
+
+    useStore.getState().setLinkStatus({ edge_url: 'http://127.0.0.1:4173' } as never)
+
+    expect(useStore.getState().launchDraft).toEqual(saved)
+    expect(localStorage.getItem('aether.launch-draft.v1:server%2Falice')).toBeNull()
+    useStore.getState().setLaunchDraft({ ...saved, task: 'still in memory' })
+    expect(localStorage.getItem('aether.launch-draft.v1:server%2Falice')).toBeNull()
+    useStore.setState({ identityKey: null, launchDraft: null })
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraft).toBeNull()
+  })
+
+  it('waits for the local link status before reading a saved draft', () => {
+    const saved = draft()
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, JSON.stringify(saved))
+    useStore.setState({
+      paletteDialog: null,
+      capabilities: { gateway: 'local', methods: [], ws: [], local: ['link.status'] },
+    })
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraft).toBeNull()
+    expect(useStore.getState().launchDraftError).toContain('Could not confirm')
+
+    useStore.getState().setLinkStatus({ linked: false } as never)
+
+    expect(useStore.getState().launchDraft).toEqual(saved)
+    expect(useStore.getState().launchDraftError).toBeNull()
+  })
+
+  it('never reads an Edge-linked draft from browser storage', () => {
+    const saved = draft()
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, JSON.stringify(saved))
+    useStore.setState({ capabilities: { gateway: 'local', methods: [], ws: [], local: ['link.status'] } })
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraft).toBeNull()
+    expect(localStorage.getItem(key)).not.toBeNull()
+
+    useStore.getState().setLinkStatus({ edge_url: 'http://127.0.0.1:4173' } as never)
+
+    expect(useStore.getState().launchDraft).toBeNull()
+    expect(localStorage.getItem(key)).toBeNull()
+  })
+
+  it('reports invalid saved draft data and waits for an explicit fresh draft', async () => {
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, '{')
+    allowDraftStorage()
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraftError).toContain('Could not read saved launch draft')
+    render(<LaunchDialog />)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Could not read saved launch draft')
+    expect(localStorage.getItem(key)).toBe('{')
+
+    await userEvent.click(within(alert).getByRole('button', { name: 'Start a new draft' }))
+    await waitFor(() => expect(useStore.getState().launchDraftError).toBeNull())
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(key) ?? 'null').version).toBe(1))
+  })
+
+  it('shows browser storage read errors without overwriting the saved draft', async () => {
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, JSON.stringify(draft()))
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage blocked') })
+    allowDraftStorage()
+    useStore.getState().setIdentityKey('server/alice')
+    getItem.mockRestore()
+    render(<LaunchDialog />)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('storage blocked')
+    expect(JSON.parse(localStorage.getItem(key) ?? 'null').task).toBe('keep this prompt')
+  })
+
+  it('falls back to the active workspace when the saved workspace was deleted', async () => {
+    useStore.setState({
+      activeWorkspace: otherWorkspace.id,
+      workspaces: { [otherWorkspace.id]: otherWorkspace },
+      launchDraft: draft({ workspace: 'deleted-workspace' }),
+    })
+    await open()
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: otherWorkspace.id, task: 'keep this prompt' })))
+  })
+
+  it('replaces a saved account that is no longer accessible while keeping the prompt', async () => {
+    useStore.setState({ launchDraft: draft({ account: bob.id }) })
+    await open()
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep this prompt')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: workspace.id, task: 'keep this prompt' })))
+    expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
+  })
+
+  it('moves the resume arrow to the replacement sidebar after resizing back from phone', async () => {
+    const resize = atViewport(1024)
+    function Shell() {
+      const phone = useIsMobile()
+      return <>{!phone && <aside id="sidebar" />}<PaletteDialogs /></>
+    }
+    useStore.setState({ paletteDialog: null, launchDraft: draft() })
+    const view = render(<Shell />)
+    const original = document.getElementById('sidebar')
+    expect(screen.getByRole('button', { name: 'Resume new session draft' }).parentElement).toBe(original)
+    resize(767)
+    resize(1024)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Resume new session draft' }).parentElement).toBe(document.getElementById('sidebar')))
+    expect(document.getElementById('sidebar')).not.toBe(original)
+    view.unmount()
   })
 })
 

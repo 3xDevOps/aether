@@ -227,6 +227,19 @@ export async function hydrate(
       store.getState().resetAssistant()
       store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {}, deletingRuns: {}, laneHistory: {}, watches: {}, watchNotices: {}, watchesFor: null, closeConfirmation: null })
     }
+    s.setCapabilities(capabilities)
+    // Resolve Edge before restoring drafts: another app can serve script on
+    // the gateway's loopback port after the local GUI exits.
+    if (capabilities?.local?.includes('link.status')) {
+      try {
+        const linkStatus = await client.localLinkStatus()
+        if (signal?.aborted) return false
+        s.setLinkStatus(linkStatus)
+        if (first && (linkStatus.linked === true || linkStatus.server_configured === true) && !store.getState().onboardingWorkspace) s.setOnboarded(true)
+      } catch {
+        ignore()
+      }
+    }
     s.setIdentityKey(incomingIdentity)
     noteServerTime(store, info.time)
     s.setInfo(info)
@@ -244,25 +257,12 @@ export async function hydrate(
     )
     s.setOverlaps(overlaps)
     if (signal?.aborted) return false
-    s.setCapabilities(capabilities)
     // Device cards are an extra; their failure must not fail hydration.
     await loadDevices(store, client).catch(ignore)
     await loadWatches(store, client).catch(ignore)
     await loadMergeProposals(store, client)
     await loadEdge(store, client).catch(ignore)
     if (signal?.aborted) return false
-    // Nothing else fetches linkStatus before settings or onboarding opens, so
-    // without this a linked machine launches looking unlinked. Must not fail hydration.
-    if (store.getState().capabilities?.local?.includes('link.status')) {
-      try {
-        const linkStatus = await client.localLinkStatus()
-        if (signal?.aborted) return false
-        s.setLinkStatus(linkStatus)
-        if (first && (linkStatus.linked === true || linkStatus.server_configured === true) && !store.getState().onboardingWorkspace) s.setOnboarded(true)
-      } catch {
-        ignore()
-      }
-    }
     if (signal?.aborted) return false
     s.setHydrated(true)
     store.setState({ staleSince: null })

@@ -31,6 +31,55 @@ describe('snapshot cache', () => {
     expect(empty.getState().hydrated).toBe(false)
   })
 
+  it('does not read a launch draft before an Edge link check', () => {
+    window.localStorage.clear()
+    const identity = 'o\u0000h\u0000m1'
+    const draftKey = `aether.launch-draft.v1:${encodeURIComponent(identity)}`
+    window.localStorage.setItem(draftKey, JSON.stringify({
+      version: 1, id: 'draft', workspace: 'w1', extras: [], account: 'm1',
+      fallback: { off: false, order: null, excluded: [] }, permission: 'default', childRuns: '',
+      limits: { cpus: '', memory: '', pids: '' }, harness: 'claude', mode: 'tui', model: '', effort: '', task: 'keep me',
+    }))
+    const live = createRootStore()
+    live.getState().setInfo(serverInfo)
+    live.getState().setIdentityKey(identity)
+    live.getState().setCapabilities({ gateway: 'local', local: ['link.status'], methods: [], ws: [] })
+    live.getState().setHydrated(true)
+    saveSnapshot(live)
+
+    const fresh = createRootStore()
+    paintSnapshot(fresh)
+
+    expect(fresh.getState().launchDraft).toBeNull()
+    expect(fresh.getState().launchDraftError).toContain('Could not confirm')
+    expect(window.localStorage.getItem(draftKey)).not.toBeNull()
+  })
+
+  it('keeps drafts pending when an old snapshot has no capabilities', () => {
+    window.localStorage.clear()
+    const identity = 'o\u0000h\u0000m1'
+    const draftKey = `aether.launch-draft.v1:${encodeURIComponent(identity)}`
+    const savedDraft = {
+      version: 1, id: 'draft', workspace: 'w1', extras: [], account: 'm1',
+      fallback: { off: false, order: null, excluded: [] }, permission: 'default', childRuns: '',
+      limits: { cpus: '', memory: '', pids: '' }, harness: 'claude', mode: 'tui', model: '', effort: '', task: 'keep me',
+    }
+    window.localStorage.setItem(draftKey, JSON.stringify(savedDraft))
+    const live = createRootStore()
+    live.getState().setInfo(serverInfo)
+    live.getState().setIdentityKey(identity)
+    live.getState().setHydrated(true)
+    saveSnapshot(live)
+
+    const fresh = createRootStore()
+    paintSnapshot(fresh)
+    expect(fresh.getState().launchDraft).toBeNull()
+    expect(window.localStorage.getItem(draftKey)).not.toBeNull()
+
+    fresh.getState().setCapabilities({ gateway: 'remote', methods: [], ws: [] })
+    expect(fresh.getState().launchDraft).toEqual(savedDraft)
+  })
+
   it('keeps nothing in Edge mode, paints only a cold start, and drops tool activity and git origins', () => {
     window.localStorage.clear()
     const live = createRootStore()

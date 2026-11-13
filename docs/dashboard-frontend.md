@@ -335,12 +335,13 @@ top to bottom:
 2. **New session**, the only filled button in the shell, for a member who may
    launch. A slanted cut splits it in two. The left half, **New session** (`n`),
    slides the launch panel out of the sidebar's right edge over the view, with
-   no scrim; the panel stays open while you use the view behind it, and
-   Escape or its **Close** button closes it and returns focus to what opened
-   it. The right half appears once a launch has been saved: it shows the saved
-   agent's glyph and launches that agent, mode, model, account and fallback at
-   once with no task and with `children: "on"`, so subsessions are allowed
-   whatever your Settings choice (`quick-launch.ts`). Hovering or focusing it slides out the saved choices.
+   no scrim; clicking outside or pressing Escape slides it away to an arrow
+   that restores it. The outside click reaches the view behind it. **Close**
+   dismisses the form and its draft. The right half appears once a launch has
+   been saved: it shows the saved agent's glyph and launches that agent, mode,
+   model, account and fallback at once with no task and with `children: "on"`,
+   so subsessions are allowed whatever your Settings choice (`quick-launch.ts`).
+   Hovering or focusing it slides out the saved choices.
    A Background launch needs a task, so that half opens the panel instead, as
    it does when the saved choices name an agent or model the account cannot
    use. The panel's **Subsessions** switch follows your Settings choice and
@@ -2668,8 +2669,11 @@ its own Escape first.
 The task and launch settings save on change in browser-local storage, scoped
 to the server and signed-in member. Refreshing or reopening the dashboard in
 the same browser profile restores a collapsed draft; another device, browser
-profile or the desktop app has separate storage. Clearing site data removes
-it. A successful launch clears the draft; a failed launch keeps it. Collapsing
+profile or the desktop app has separate storage. Edge-linked gateways keep
+the draft in memory only because another app could serve script from the
+gateway's loopback port. A read error is shown; the current form is kept in
+memory until the user starts a fresh draft. Clearing site data removes it. A
+successful launch clears the draft; a failed launch keeps it. Collapsing
 during launch keeps the pending request, so reopening does not launch twice.
 Shared text waits while a draft exists rather than replacing it.
 

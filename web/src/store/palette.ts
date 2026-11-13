@@ -19,7 +19,9 @@ export interface PaletteSlice {
   /** The task the launch form opens with: text shared to Aether. */
   paletteLaunchTask: string
   launchDraft: LaunchDraft | null
+  launchDraftError: string | null
   setLaunchDraft: (draft: LaunchDraft | null) => string | null
+  clearLaunchDraftError: () => void
   /** A verb that closes a run with close warnings, held until the owner confirms. */
   closeConfirmation: { check: RunCloseCheck; asked: string; outcome: CloseOutcome; command: Command } | null
   /** Runs whose close check is in flight, so a second press does not check again. */
@@ -43,11 +45,15 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set, get) => ({
   paletteWatchTarget: null,
   paletteLaunchTask: '',
   launchDraft: null,
+  launchDraftError: null,
   setLaunchDraft: (launchDraft) => {
-    const error = saveLaunchDraft(get().identityKey, launchDraft)
-    set({ launchDraft })
+    const state = get()
+    const linkStatusPending = state.capabilities === null || (state.capabilities.local?.includes('link.status') && !state.linkStatus)
+    const error = saveLaunchDraft(state.identityKey, launchDraft, !state.linkStatus?.edge_url && !linkStatusPending)
+    set({ launchDraft, launchDraftError: error ? `Could not save launch draft: ${error}` : null })
     return error
   },
+  clearLaunchDraftError: () => set({ launchDraftError: null }),
   closeConfirmation: null,
   closeChecking: {},
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
