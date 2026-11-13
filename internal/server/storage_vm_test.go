@@ -27,7 +27,7 @@ func TestVMStorageOwners(t *testing.T) {
 		{"run", string(run.ID), "Active session"},
 		{"run", string(run.ID), "Saved memory of a sleeping session VM; deleted when it wakes or its VM is deleted"},
 		{"server", "", "No durable owner found; cleanup eligibility unknown"},
-		{"server", "", "Base and helper disks session VMs boot from, one copy for every VM; cleanup deletes those no image and no VM uses"},
+		{"server", "", "Disks session VMs boot from, stored once and shared by every VM; cleanup deletes those no image tag or VM still uses"},
 		{"server", "", "Package cache new session VMs start from; rebuildable"},
 	}
 	for i, e := range u.Entries {

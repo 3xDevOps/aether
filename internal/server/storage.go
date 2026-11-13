@@ -209,7 +209,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			e.OwnerKind, e.OwnerID = "workspace", string(workspace.ID)
 			e.Reason = "Persistent repository, session branches and shared clone objects; no automatic expiry"
 		case "vm-image":
-			e.Reason = "Base and helper disks session VMs boot from, one copy for every VM; cleanup deletes those no image and no VM uses"
+			e.Reason = "Disks session VMs boot from, stored once and shared by every VM; cleanup deletes those no image tag or VM still uses"
 		case "vm-cache":
 			e.Reason = "Package cache new session VMs start from; rebuildable"
 		case "vm", "vm-state":

@@ -195,7 +195,7 @@ export function StorageSection() {
         <Block title="Aether data">
           <BarList items={categories(disk)} />
           <p className="text-ui-sm text-muted">
-            Snapshots {known(disk.snapshot_bytes)} (included in worktrees).{disk.vm_state_bytes ? ` Saved VM memory ${formatBytes(disk.vm_state_bytes)} (included in VMs).` : ''} These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space. Session and terminal pools
+            Snapshots {known(disk.snapshot_bytes)} (included in worktrees).{disk.vm_state_bytes ? ` Saved memory of sleeping VMs ${formatBytes(disk.vm_state_bytes)} (included in VMs).` : ''} These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space. Session and terminal pools
             belong to the launching member. Automatic cleanup protects active, retained and uncertain owners.
           </p>
           {disk.warnings && disk.warnings.length > 0 && (
