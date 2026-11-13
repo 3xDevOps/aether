@@ -6,6 +6,11 @@ name: CI suite
 # The cache lanes each job owns are described at the top of ci.yml.
 on:
   workflow_call:
+    inputs:
+      vm:
+        description: Whether the change can affect the tests that boot VMs
+        type: boolean
+        required: true
 
 permissions:
   contents: read
@@ -235,6 +240,15 @@ jobs:
         with:
           mode: save
           save-modules: 'true'
+
+  # The tests that boot real VMs, only for a change that can affect them
+  # (ci-classify-areas.sh vm) or in the nightly run. A workflow of its own
+  # so it can be started by hand on any branch.
+  kvm:
+    if: ${{ inputs.vm }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/kvm.yml
 
   # A workflow of its own so it can be started by hand on any branch.
   edge-image:

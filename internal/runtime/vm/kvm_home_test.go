@@ -203,8 +203,8 @@ func TestKVMHomeClientNow(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := guestpb.NewHomeClient(conn)
-	if r, err := api.Lookup(t.Context(), &guestpb.HomeNodeRequest{Path: "0/.claude"}); err != nil || r.GetErrno() != 0 {
-		t.Fatalf("lookup = %+v, %v", r, err)
+	if r, lookupErr := api.Lookup(t.Context(), &guestpb.HomeNodeRequest{Path: "0/.claude"}); lookupErr != nil || r.GetErrno() != 0 {
+		t.Fatalf("lookup = %+v, %v", r, lookupErr)
 	}
 	r, err := api.Mknod(t.Context(), &guestpb.HomeMknodRequest{Path: "0/escaped", Mode: unix.S_IFREG | 0o644})
 	if err != nil || syscall.Errno(r.GetErrno()) != unix.EROFS {

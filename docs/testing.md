@@ -14,7 +14,7 @@ pull request sessions are in
 | Server code that touches containers, git, SSH or storage | `make test-integration` | Docker, git; root to match CI |
 | Dashboard components in `web/src` | `cd web && bun run typecheck && bun run test` | Bun, Node 22+ |
 | Something a person clicks through in the dashboard | `make test-e2e` | Docker, git, Bun, Node 22+, Playwright's Chromium |
-| `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3, jq |
+| `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3, jq, Go |
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
 | How an agent CLI is launched (`internal/harness`) | [Real-agent smoke tests](#real-agent-smoke-tests) | Docker |
 | How a session drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
@@ -25,9 +25,10 @@ pull request sessions are in
 | The edge store or `scripts/edge-update.sh` | `make test-edge-upgrade` | root, Docker with Compose and buildx, jq, curl |
 | `images/browser/` | `make browser-image && make browser-smoke` | Docker |
 | `android/` | `make android` | Docker |
-| `internal/vmimage` | `go test ./internal/vmimage` | e2fsprogs, qemu-utils; root for the owner test |
-| `images/kernel/` | [The guest kernel](#the-guest-kernel) | Docker; a KVM host to boot it |
-| `internal/guest` (the VM helper) | `go test ./internal/guest/...`, then [the VM helper](#the-vm-helper) | Go; a KVM host for the VM test |
+| `internal/vmimage` | `go test ./internal/vmimage`, then [`make test-kvm`](#vm-tests) | e2fsprogs, qemu-utils; root for the owner test |
+| `images/kernel/` | [The guest kernel](#the-guest-kernel), then [`make test-kvm`](#vm-tests) | Docker; a KVM host to boot it |
+| `internal/guest` (the VM helper) | `go test ./internal/guest/...`, then [`make test-kvm`](#vm-tests) | Go; a KVM host for the VM test |
+| `internal/runtime/vm` (the VM engine) | `go test ./internal/runtime/vm`, then [`make test-kvm`](#vm-tests) | Go; a KVM host for the VM test |
 | Only `docs/` or root `*.md` | `make public-audit` | sh |
 
 ## Unit tests
@@ -760,19 +761,11 @@ SHA-256; compare them after changing either file. The build fails, naming
 the options, when a line of the config does not reach the kernel's
 `.config` because something it depends on is off.
 
-On a host with `/dev/kvm`, `cloud-hypervisor` and `qemu-img`, check that a
-change still boots an image and runs Docker in it. `TestKVMStandardImageRunsDocker`
-builds the image's disks with `internal/vmimage`, boots them with the kernel,
-starts dockerd, runs a container and a `-p` port mapping, and refuses to save
-the root disk while the VM runs. The static test binary is the VM's `/init`,
-so build it without cgo; it needs root:
-
-```sh
-CGO_ENABLED=0 go test -c -tags kvm -o vmimage-kvm.test ./internal/vmimage
-sudo AETHER_TEST_KERNEL=dist/aether-vmlinux-x86_64 \
-  AETHER_TEST_IMAGE=ghcr.io/3xdevops/aether-standard:<release> \
-  ./vmimage-kvm.test -test.run TestKVM -test.v
-```
+On a KVM host, `TestKVMStandardImageRunsDocker` ([VM tests](#vm-tests))
+checks that a change still boots an image and runs Docker in it: it builds
+the image's disks with `internal/vmimage`, boots them with the kernel, starts
+dockerd, runs a container and a `-p` port mapping, and refuses to save the
+root disk while the VM runs.
 
 Docker's `contrib/check-config.sh` from the moby repository, pointed at the
 config (`/proc/config.gz` in the guest), must report every
@@ -791,18 +784,68 @@ client over a Unix socket that answers Cloud Hypervisor's vsock handshake:
 processes on pipes and terminals, reattaching from a new client, lossless
 output, spawn failures, signals, orphan reaping and `Boot`. What only PID 1
 in a VM does (switching root, mounts, the network, socket forwarding, the
-process limit, an out-of-memory kill) needs a KVM host. `TestKVMHelper` boots
-an image from `internal/vmimage` disks with the test binary as the helper and
-drives it through the client; it also needs `virtiofsd` at
-`/usr/libexec/virtiofsd` and root. Run it alone: the unit tests' reaper
-collects every child of the test binary, including the VM monitor's.
+process limit, an out-of-memory kill) needs a KVM host. `TestKVMHelper`
+([VM tests](#vm-tests)) boots an image from `internal/vmimage` disks with the
+test binary as the helper and drives it through the client.
+
+## VM tests
+
+Tests that boot real Cloud Hypervisor VMs carry the `kvm` build tag, so
+`make test` and `make test-integration` never build them. `make test-kvm`
+runs every package that has them:
+
+| Package | Test | Boots |
+| --- | --- | --- |
+| `internal/vmimage` | `TestKVMStandardImageRunsDocker` | The standard image from store disks, with Docker inside ([The guest kernel](#the-guest-kernel)) |
+| `internal/guest/helper` | `TestKVMHelper` | The helper as PID 1, driven through its client ([The VM helper](#the-vm-helper)) |
+| `internal/runtime/vm` | `TestKVMSessionLifecycle`, `TestKVMSaveRestoreKeepsProcesses`, `TestKVMVMsCannotReachEachOther`, `TestKVMGuestRebootEndsTheSession` | Sessions through the engine, with real systemd units and the server binary as monitor and helper |
+
+It needs root on a Linux x86-64 host with `/dev/kvm`, `cloud-hypervisor`,
+`qemu-img`, `mkfs.ext4`, `virtiofsd` at `/usr/libexec/virtiofsd`, systemd,
+iptables and network access to pull images. It fails, naming what is
+missing, rather than skip. It runs only the tests named `TestKVM...`: the
+unit tests already run in `make test`, and the helper's reap every child of
+the test binary, the VM monitor's too. Build the kernel first:
 
 ```sh
-CGO_ENABLED=0 go test -c -tags kvm -o helper-kvm.test ./internal/guest/helper
-sudo AETHER_TEST_KERNEL=dist/aether-vmlinux-x86_64 \
-  AETHER_TEST_IMAGE=ghcr.io/3xdevops/aether-standard:<release> \
-  ./helper-kvm.test -test.run TestKVM -test.v
+make kernel
+sudo env "PATH=$PATH" "HOME=$HOME" make test-kvm
+sudo env "PATH=$PATH" "HOME=$HOME" make test-kvm KVM_RUN='^TestKVMHelper$' KVM_SKIP='./internal/vmimage ./internal/runtime/vm'
 ```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `KVM_KERNEL` | `dist/aether-vmlinux-x86_64` | The guest kernel |
+| `KVM_IMAGE` | `ghcr.io/3xdevops/aether-standard:latest` | The image the store and helper tests boot; the engine tests boot `ubuntu:24.04` |
+| `KVM_RUN` | `^TestKVM` | Passed to `go test -run` |
+| `KVM_SKIP` | none | Packages to leave out |
+
+The target builds the test binaries and `aether-server` with
+`CGO_ENABLED=0`: the binaries also run inside the VMs, where there are no
+libraries. It builds them, and keeps the disks, in a new private directory
+under `$TMPDIR` (default `/tmp`) that it removes at the end: root runs that
+server, so no other user may be able to replace it. A test's VM gets at most 2 GiB; on a CI runner the tests take
+about three minutes.
+
+On a KVM host without Go, build on your machine, copy the directory over,
+and run each test binary there with the variables `make test-kvm` sets:
+
+```sh
+CGO_ENABLED=0 go test -c -tags kvm -o kvm/ ./internal/vmimage ./internal/guest/helper ./internal/runtime/vm
+CGO_ENABLED=0 go build -o kvm/aether-server ./cmd/aether-server
+cp dist/aether-vmlinux-x86_64 kvm/
+scp -r kvm <host>:
+
+# on the host, in kvm/; then the same for helper.test and vmimage.test
+sudo env AETHER_TEST_KERNEL="$PWD/aether-vmlinux-x86_64" \
+  AETHER_TEST_IMAGE=ghcr.io/3xdevops/aether-standard:latest \
+  AETHER_VM_TEST_KERNEL="$PWD/aether-vmlinux-x86_64" AETHER_VM_TEST_DIR="$(sudo mktemp -d)" \
+  AETHER_VM_TEST_SERVER="$PWD/aether-server" ./vm.test -test.run TestKVM -test.v
+```
+
+A test that is interrupted can leave a VM behind: `systemctl list-units
+'aether-vm-*'` lists the engine's, and `pgrep -a cloud-hypervisor` the
+others.
 
 ## Windows
 
@@ -845,7 +888,9 @@ UTC. A pull request, draft or ready, runs `changes`, `audit`, `lint`,
 a run that skips them shows one skipped `suite` check; in a run that calls it
 each job shows as `suite / <job>`. The merge queue runs every job, so the full
 suite runs once per change, on the merge result, before `main` moves; a
-failure there removes the pull request from the queue.
+failure there removes the pull request from the queue. The one exception is
+`kvm`, which boots VMs: the queue runs it only when the change can affect
+the VM tests (the `vm` mode below), and the nightly run always does.
 
 The queue moves `main` to the commit it tested, so a push to `main` reuses
 that verdict: `scripts/ci-queue-verdict.sh` finds the merge queue run on the
@@ -890,6 +935,7 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` install (zip) and update legs package and launch the Windows desktop zip on amd64 and arm64 | |
 | `release-build (binaries, desktop, android)` | `make release-binaries`, `aether gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
 | `edge-image` | [The edge image](#the-edge-image) and [qualification](#edge-upgrade-qualification) | |
+| `kvm` | [VM tests](#vm-tests) on a hosted runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
 
 A pull request that changes only `docs/**` or root-level `*.md` files runs
 `audit` and nothing else. A Markdown file anywhere else counts as code.
@@ -900,14 +946,28 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 | `go` | `lint`, `build-and-test` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
 | `web` | `dashboard` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
 | `caches` | The full suite on a push to `main` | `go.mod`, `go.sum`, `.golangci.yml`, `.github/`, `images/`, the fonts the browser image copies from `web/public/fonts/`, the web and desktop package manifests and lockfiles, `web/.bun-version`, the Gradle files |
+| `vm` | `kvm` in the merge queue and on a push to `main` | `internal/runtime/vm/`, `internal/vmimage/`, the packages the VM code runs (`internal/guest/`, `internal/acpkeeper/`, `internal/version/`, `internal/devexec/`, `internal/disk/`, `internal/egress/`), `images/kernel/`, the `kvm*_test.go` files, the files of `internal/runtime/` the VM engine shares (`session.go`, `stream.go`, `managed_exec.go`, `docker_image.go`, `docker_cgroup.go`), files named `vm*.go` or `*_vm.go` (and their tests) anywhere under `internal/`, `go.mod`, `go.sum`, `vm.mk` and `kvm.yml` |
 
-The classifier runs from the pull request's base revision, so a pull request
-cannot change its own classification, and a renamed file counts by its old
-path as well as its new one. A failed classification runs both. A skipped job
-reports as skipped, not failed. A newer push cancels a pull request's run
-(`cancel-in-progress` for `pull_request` only); `main` pushes and merge queue
-runs, whose concurrency groups are unique per commit, always run to
-completion.
+VM code outside the VM packages goes in files named for the `vm` mode, so the
+merge queue still runs `kvm` for it. `make test-scripts` fails when the KVM
+tests compile a package that is neither in the list nor in the exclusions in
+`scripts/ci-classify-areas-test.sh`, each with the reason it needs no VM run,
+or when a test file with the `kvm` tag is outside the list. `make lint` builds
+the VM tests on every pull request. The merge queue classifies the files
+GitHub's compare lists between `main` and the group, because a group also
+carries the entries ahead of it; a push compares with the commit before it;
+past its 300-file limit, or when the lookup fails, `kvm` runs. The guest
+kernel takes up to six minutes to build, so `kvm` restores it from a cache
+keyed by a hash of `images/kernel/` and the `make kernel` recipe, and builds
+it only on a miss; runs on `main` save it.
+
+The classifier runs from the pull request's (or merge group's) base revision,
+so a pull request cannot change its own classification, and a renamed file
+counts by its old path as well as its new one. A failed classification runs
+both. A skipped job reports as skipped, not failed. A newer push cancels a
+pull request's run (`cancel-in-progress` for `pull_request` only); `main`
+pushes and merge queue runs, whose concurrency groups are unique per commit,
+always run to completion.
 
 To run the edge image jobs on a pull request branch, with write access to the repository:
 
@@ -915,6 +975,16 @@ To run the edge image jobs on a pull request branch, with write access to the re
 gh workflow run edge-image.yml --ref <branch>
 gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
 ```
+
+To run the VM tests on a branch without the merge queue:
+
+```sh
+gh workflow run kvm.yml --ref <branch>
+```
+
+A failed `kvm` fails `suite` and `CI gate`, so a nightly failure reaches
+whoever GitHub notifies about the scheduled run: the person who last changed
+its `cron` line.
 
 To rerun only the failed jobs of a session: `gh run rerun <session-id> --failed`.
 

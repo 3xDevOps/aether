@@ -161,9 +161,12 @@ func dial(addr string) string {
 
 func docker(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := exec.CommandContext(t.Context(), "docker", args...).CombinedOutput()
+	var stderr strings.Builder
+	cmd := exec.CommandContext(t.Context(), "docker", args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("docker %s: %v: %s", strings.Join(args, " "), err, out)
+		t.Fatalf("docker %s: %v: %s%s", strings.Join(args, " "), err, out, stderr.String())
 	}
 	return strings.TrimSpace(string(out))
 }
