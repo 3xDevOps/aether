@@ -489,4 +489,16 @@ func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		}
 	})
+
+	t.Run("a sync client that goes away", func(t *testing.T) {
+		server, client := net.Pipe()
+		served := make(chan error, 1)
+		go func() { served <- p.host.ServeVMSync(ctx, testRun, server) }()
+		_ = client.Close()
+		select {
+		case <-served:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the relay kept the VM's sync endpoint after its client left")
+		}
+	})
 }

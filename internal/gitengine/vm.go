@@ -206,16 +206,23 @@ func (e *Engine) ServeVMSync(ctx context.Context, run domain.RunID, stream io.Re
 		return vmErr(err)
 	}
 	defer func() { _ = endpoint.Close() }()
-	done := make(chan error, 1)
+	// Whichever side ends first closes the other: the VM's endpoint would
+	// otherwise wait for a client that left, keeping its sync slot.
+	up := make(chan error, 1)
 	go func() {
 		_, copyErr := io.Copy(endpoint, stream)
-		done <- copyErr
+		up <- copyErr
+		_ = endpoint.Close()
 	}()
 	_, err = io.Copy(stream, endpoint)
+	select {
+	case upErr := <-up:
+		_ = stream.Close()
+		return upErr
+	default:
+	}
 	_ = stream.Close()
 	_ = endpoint.Close()
-	if upErr := <-done; err == nil {
-		err = upErr
-	}
+	<-up
 	return err
 }
