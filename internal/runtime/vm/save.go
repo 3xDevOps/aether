@@ -83,7 +83,9 @@ func (e *engine) awaitStopped(ctx context.Context, key string) error {
 }
 
 // restore starts the monitor on the saved state, resumes the guest and sets
-// its clock; the snapshot is deleted once the guest answers.
+// its clock. Once the guest runs, its disks move past the snapshot, so the
+// snapshot is dropped before anything else can fail: a second restore of it
+// would pair old memory with newer disks.
 func (e *engine) restore(ctx context.Context, key string) (err error) {
 	unlock := e.lock(key)
 	defer unlock()
@@ -119,22 +121,22 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if err = api.resume(ctx); err != nil {
 		return fmt.Errorf("vm runtime: resume restored VM %s: %w", key, err)
 	}
+	rec.Saved = false
+	if err = e.store(rec); err != nil {
+		return err
+	}
+	if err = os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("vm runtime: remove the saved state of VM %s: %w", key, err)
+	}
 	h, err := e.helper(key)
 	if err != nil {
 		return err
 	}
-	if err := e.waitHelper(ctx, key, h); err != nil {
+	if err = e.waitHelper(ctx, key, h); err != nil {
 		return err
 	}
-	if err := h.SyncClock(ctx, time.Now()); err != nil {
+	if err = h.SyncClock(ctx, time.Now()); err != nil {
 		return fmt.Errorf("vm runtime: set the clock of restored VM %s: %w", key, err)
-	}
-	rec.Saved = false
-	if err := e.store(rec); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("vm runtime: remove the saved state of VM %s: %w", key, err)
 	}
 	return nil
 }

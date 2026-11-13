@@ -413,6 +413,23 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	if err := h.engine.restore(t.Context(), "run-a"); err == nil || !strings.Contains(err.Error(), "no saved state") {
 		t.Errorf("restore without state = %v", err)
 	}
+	h.createStarted("run-b", sessionSpec("run-b"))
+	if err := h.engine.save(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	h.guest("run-b").pingErr = errors.New("helper gone")
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := h.engine.restore(ctx, "run-b"); err == nil {
+		t.Fatal("restore with a dead helper succeeded")
+	}
+	rec, _ := h.engine.load("run-b")
+	if rec.Saved || h.units.vmm("run-b") != nil {
+		t.Errorf("a restore that failed after resume left saved=%v, running=%v", rec.Saved, h.units.vmm("run-b") != nil)
+	}
+	if _, err := os.Stat(h.engine.path("run-b", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a resumed snapshot was kept: %v", err)
+	}
 }
 
 func TestStatsAndMemoryEventsComeFromTheHelper(t *testing.T) {
