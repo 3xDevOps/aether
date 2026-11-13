@@ -20,7 +20,7 @@ export interface PaletteSlice {
   paletteLaunchTask: string
   launchDraft: LaunchDraft | null
   launchDraftError: string | null
-  setLaunchDraft: (draft: LaunchDraft | null) => string | null
+  setLaunchDraft: (draft: LaunchDraft | null, persist?: boolean) => string | null
   clearLaunchDraftError: () => void
   /** A verb that closes a run with close warnings, held until the owner confirms. */
   closeConfirmation: { check: RunCloseCheck; asked: string; outcome: CloseOutcome; command: Command } | null
@@ -46,11 +46,14 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set, get) => ({
   paletteLaunchTask: '',
   launchDraft: null,
   launchDraftError: null,
-  setLaunchDraft: (launchDraft) => {
+  setLaunchDraft: (launchDraft, persist = true) => {
     const state = get()
     const linkStatusPending = state.capabilities === null || (state.capabilities.local?.includes('link.status') && !state.linkStatus)
-    const error = saveLaunchDraft(state.identityKey, launchDraft, !state.linkStatus?.edge_url && !linkStatusPending)
-    set({ launchDraft, launchDraftError: error ? `Could not save launch draft: ${error}` : null })
+    const error = saveLaunchDraft(state.identityKey, launchDraft, persist && !state.linkStatus?.edge_url && !linkStatusPending)
+    set({
+      launchDraft,
+      launchDraftError: error ? `Could not save launch draft: ${error}` : persist ? null : state.launchDraftError,
+    })
     return error
   },
   clearLaunchDraftError: () => set({ launchDraftError: null }),

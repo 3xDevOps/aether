@@ -295,6 +295,21 @@ describe('saved launch draft', () => {
     expect(JSON.parse(localStorage.getItem(key) ?? 'null').task).toBe('keep this prompt')
   })
 
+  it('keeps typed work in memory and resumable when storage cannot be read', async () => {
+    allowDraftStorage()
+    localStorage.setItem('aether.launch-draft.v1:server%2Falice', '{')
+    useStore.getState().setIdentityKey('server/alice')
+    render(<><button>Main chat</button><PaletteDialogs /></>)
+    setTask('keep this new task in memory')
+    await waitFor(() => expect(useStore.getState().launchDraft?.task).toBe('keep this new task in memory'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Main chat' }))
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Resume new session draft' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Resume new session draft' }))
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep this new task in memory')
+  })
+
   it('falls back to the active workspace when the saved workspace was deleted', async () => {
     useStore.setState({
       activeWorkspace: otherWorkspace.id,
@@ -312,6 +327,23 @@ describe('saved launch draft', () => {
     expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep this prompt')
     fireEvent.click(launchButton())
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: workspace.id, task: 'keep this prompt' })))
+    expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
+  })
+
+  it('keeps the restored account and blocks launch when the account list read fails', async () => {
+    vi.mocked(api.accountList).mockRejectedValueOnce(new Error('account list unavailable'))
+    useStore.setState({ launchDraft: draft({ account: bob.id, task: 'keep account and task' }) })
+    render(<LaunchDialog />)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('account list unavailable')
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep account and task')
+    expect(launchButton().disabled).toBe(true)
+
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
+    await userEvent.click(within(alert).getByRole('button', { name: 'Retry account read' }))
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ task: 'keep account and task' })))
     expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
   })
 

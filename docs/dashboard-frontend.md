@@ -2823,6 +2823,9 @@ use (no Enhanced support, or its adapter not installed) shows as Standard.
 **Account** (`account-picker.tsx`), below Agent and above Mode, appears when
 `account.list` returns more than the caller. It is a radio list: the caller
 first, marked "You", then each account shared with them, marked "Shared".
+Launch stays disabled while `account.list` is pending or failed. A failure
+shows the server error and **Retry account read**; the saved account is only
+replaced after a successful read confirms it is no longer available.
 Each row ends with what a launch of the chosen agent there meets, read once
 per open with `agent.list` and `account.usage` for every account, four reads
 at a time, and nothing until that account's `agent.list` answers: "Not
