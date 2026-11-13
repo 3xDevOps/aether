@@ -134,6 +134,16 @@ func updateCmd(args []string) error {
 	if out, err := exec.CommandContext(probeCtx, self, "version").CombinedOutput(); err != nil {
 		return errors.Join(fmt.Errorf("the new aether-server does not run: %w: %s", err, strings.TrimSpace(string(out))), staged.Undo())
 	}
+	// After an undo the previous binary is back, and may still be running:
+	// it puts back its own files, which the failed step may have replaced.
+	restoreVMFiles := func(err error) error {
+		if vmKernel == "" {
+			return err
+		}
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		return errors.Join(err, installVMFiles(restoreCtx, self, vmKernel))
+	}
 	if vmKernel != "" {
 		// Interrupted, the step returns here so the update is undone rather
 		// than left staged.
@@ -141,19 +151,12 @@ func updateCmd(args []string) error {
 		err := installVMFiles(vmCtx, self, vmKernel)
 		stop()
 		if err != nil {
-			return errors.Join(err, staged.Undo())
+			return restoreVMFiles(errors.Join(err, staged.Undo()))
 		}
 	}
 	before, began := unitPID(), time.Now()
 	if err := restartOnto(staged, database); err != nil {
-		if vmKernel != "" {
-			// After an undo the previous binary is back, and may still be
-			// running: it gets its own files again.
-			restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			err = errors.Join(err, installVMFiles(restoreCtx, self, vmKernel))
-		}
-		return err
+		return restoreVMFiles(err)
 	}
 	return awaitUpdate(stateDir, database, target, staged, before, began)
 }
