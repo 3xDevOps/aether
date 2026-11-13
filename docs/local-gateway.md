@@ -1743,6 +1743,10 @@ The categories describe Aether's footprint: worktrees, transcripts, the
 SQLite database (including persisted events), bare workspace repositories,
 member homes, managed package/build caches, evidence, and other data-directory contents.
 `snapshot_bytes` is a subset of `worktree_bytes`, never an additional total.
+With `session-runtime vm`, `vm_bytes` holds the VMs' disks under `vm/` and
+their saved memory, and `vm_state_bytes`, the saved memory of sleeping VMs,
+is a subset of it; both are omitted on a server without VM disks. A VM's
+sparse disks count the blocks they hold, and the disks VMs share count once.
 The categories are not a promise that their bytes can be reclaimed.
 
 Directory accounting does not follow symlinks. It indexes file identities on
