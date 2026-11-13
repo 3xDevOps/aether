@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // outputLimit is how much of a stream the helper keeps: the newest bytes of
@@ -41,10 +43,14 @@ func (o *output) notify() {
 
 // room waits until the stream may take more bytes and says how many: a
 // lossy stream always may, a lossless one while its unread bytes are under
-// outputLimit.
+// outputLimit. A closed stream takes none.
 func (o *output) room() int {
 	for {
 		o.mu.Lock()
+		if o.closed {
+			o.mu.Unlock()
+			return 0
+		}
 		if !o.lossless {
 			o.mu.Unlock()
 			return 32 << 10
@@ -133,13 +139,49 @@ func (o *output) pump(f *os.File, done <-chan struct{}) {
 	go drainAfter(f, done)
 	buf := make([]byte, 32<<10)
 	for {
-		n, err := f.Read(buf[:o.room()])
+		room := o.room()
+		if room == 0 {
+			return
+		}
+		n, err := f.Read(buf[:room])
 		if n > 0 {
 			o.append(buf[:n])
+		}
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			o.drain(f, buf)
+			return
 		}
 		if err != nil {
 			return
 		}
+	}
+}
+
+// drain takes what f still held when its time ran out: the deadline fails
+// a read before it looks, so a lossless stream that waited for its reader
+// past the deadline would lose those bytes.
+func (o *output) drain(f *os.File, buf []byte) {
+	raw, err := f.SyscallConn()
+	if err != nil || f.SetReadDeadline(time.Time{}) != nil {
+		return
+	}
+	left := 0
+	_ = raw.Control(func(fd uintptr) { left, _ = unix.IoctlGetInt(int(fd), unix.TIOCINQ) })
+	for left > 0 {
+		room := min(o.room(), left)
+		if room == 0 {
+			return
+		}
+		n, readErr := 0, error(nil)
+		err := raw.Read(func(fd uintptr) bool {
+			n, readErr = unix.Read(int(fd), buf[:room])
+			return true
+		})
+		if err != nil || readErr != nil || n <= 0 {
+			return
+		}
+		o.append(buf[:n])
+		left -= n
 	}
 }
 

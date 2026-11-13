@@ -229,6 +229,46 @@ func TestLosslessOutput(t *testing.T) {
 	}
 }
 
+// A reader that comes after the stream's drain time still gets every byte a
+// lossless process wrote: the rest waited in the pipe.
+func TestLosslessOutputReadLate(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	const size = outputLimit + 48<<10
+	p := spawn(t, client, guest.ProcessSpec{ID: "late", Argv: []string{"head", "-c", fmt.Sprint(size), "/dev/zero"}, Lossless: true})
+	if code, err := p.Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("wait: %d, %v", code, err)
+	}
+	time.Sleep(exitDrain + 500*time.Millisecond)
+	a := p.Attach(true)
+	defer func() { _ = a.Close() }()
+	data, err := io.ReadAll(a.Stdout())
+	if err != nil || len(data) != size {
+		t.Fatalf("read %d of %d bytes: %v", len(data), size, err)
+	}
+}
+
+func TestWorkingDirectory(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh\necho ran in \"$(pwd)\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := spawn(t, client, guest.ProcessSpec{ID: "relative", Argv: []string{"./run.sh"}, Dir: dir})
+	a := p.Attach(true)
+	out, _ := io.ReadAll(a.Stdout())
+	_ = a.Close()
+	if string(out) != "ran in "+dir+"\n" {
+		t.Fatalf("a relative program runs from the working directory: %q", out)
+	}
+	var startErr *guest.StartError
+	_, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/nodir", User: self, Argv: []string{"true"}, Env: []string{"PATH=" + os.Getenv("PATH")}, Dir: filepath.Join(dir, "missing")})
+	if !errors.As(err, &startErr) || startErr.Code != 126 || !strings.Contains(err.Error(), "working directory") {
+		t.Fatalf("a missing working directory: %v", err)
+	}
+}
+
 func TestSpawnFailures(t *testing.T) {
 	_, client := startHelper(t)
 	ctx := testContext(t)
@@ -324,6 +364,19 @@ func TestBoot(t *testing.T) {
 	}
 	if code, err := client.Process(guest.MainID).Wait(ctx); err != nil || code != 0 {
 		t.Fatalf("main: %d, %v", code, err)
+	}
+}
+
+// Setup gets no input, as under Docker: a prompt reads end of file.
+func TestBootSetupHasNoInput(t *testing.T) {
+	_, client := startHelper(t)
+	forgetBoot(t)
+	err := client.Boot(testContext(t), guest.BootSpec{
+		Main:        guest.ProcessSpec{User: self, Argv: []string{"true"}, Env: []string{"PATH=" + os.Getenv("PATH")}},
+		SetupScript: "read answer || true; echo done",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
