@@ -28,10 +28,13 @@ const (
 	rootCopy    = "root-copy.img"
 	dataDisk    = "data.img"
 	cacheDisk   = "cache.qcow2"
-	consoleLog  = "console.log"
-	eventsFile  = "events.json"
-	monitorLog  = "monitor.log"
-	snapshotDir = "snapshot"
+	// stateDiskFile is the session's state disk, in a directory of the
+	// session's beside the VM's.
+	stateDiskFile = "disk.img"
+	consoleLog    = "console.log"
+	eventsFile    = "events.json"
+	monitorLog    = "monitor.log"
+	snapshotDir   = "snapshot"
 )
 
 // offline is the Net of a VM with no network device.
@@ -55,6 +58,7 @@ type record struct {
 	Root         vmimage.Disk    `json:"root"`
 	Data         vmimage.Disk    `json:"data"`
 	Cache        vmimage.Disk    `json:"cache,omitzero"`
+	State        vmimage.Disk    `json:"state,omitzero"`
 	User         string          `json:"user,omitempty"`
 	Env          []string        `json:"env"`
 	WorkingDir   string          `json:"working_dir,omitempty"`

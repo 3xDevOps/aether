@@ -8,9 +8,10 @@ import (
 	"testing"
 )
 
-// A VM's sparse data disk counts what the guest wrote, and the disks VMs and
-// checkouts hard-link from the image store count once, under the store, even
-// for a VM or checkout that sorts before it.
+// A VM's sparse disks, its data disk and its session's database disk, count
+// what the guest wrote, and the disks VMs and checkouts hard-link from the
+// image store count once, under the store, even for a VM or checkout that
+// sorts before it.
 func TestVMDisks(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, n int) string {
@@ -46,8 +47,11 @@ func TestVMDisks(t *testing.T) {
 	write("vm/run-1/root.img", 50)
 	write("vm/run-1/snapshot/memory-ranges", 500)
 	data := write("vm/run-1/data.img", 4096)
-	if err := os.Truncate(data, 128<<30); err != nil {
-		t.Fatal(err)
+	state := write("scratch/run-1/vm-state/disk.img", 4096)
+	for _, disk := range []string{data, state} {
+		if err := os.Truncate(disk, 16<<30); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	u := components(dir)
@@ -59,7 +63,10 @@ func TestVMDisks(t *testing.T) {
 		t.Errorf("image store and saved state: %v", got)
 	}
 	if own := got[[2]string{"vm", "run-1"}]; own <= 50 || own > 50+1<<20 {
-		t.Errorf("run-1's own disks count %d bytes, want its 50-byte root disk plus the few KiB its 128 GiB sparse data disk holds", own)
+		t.Errorf("run-1's own disks count %d bytes, want its 50-byte root disk plus the few KiB its 16 GiB sparse data disk holds", own)
+	}
+	if scratch := got[[2]string{"scratch", "run-1"}]; scratch == 0 || scratch > 1<<20 {
+		t.Errorf("run-1's sparse database disk counts %d bytes, want the few KiB it holds", scratch)
 	}
 	if _, ok := got[[2]string{"vm", "assistant-m1"}]; ok || u.WorktreeBytes != 0 {
 		t.Errorf("a link into the image store was charged to its VM or checkout: %v, worktrees %d", got, u.WorktreeBytes)

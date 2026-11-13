@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// Usage separates filesystem headroom from apparent regular-file sizes; a
-// VM's sparse disks count only what they hold. SnapshotBytes is included in
+// Usage separates filesystem headroom from apparent regular-file sizes; VM
+// disks, sparse, count only what they hold. SnapshotBytes is included in
 // WorktreeBytes and VMStateBytes in VMBytes. Entries attribute the component
 // sizes, not additional usage or a promise that deletion reclaims those bytes.
 type Usage struct {
@@ -159,7 +159,9 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 				var n uint64
 				if err == nil && info.Mode().IsRegular() {
 					n = uint64(info.Size())
-					if strings.HasPrefix(kind, "vm") {
+					// A session VM's agent databases are a sparse disk in
+					// its scratch directory.
+					if strings.HasPrefix(kind, "vm") || kind == "scratch" {
 						n = stored(info)
 					}
 				}

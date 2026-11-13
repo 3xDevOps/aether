@@ -259,6 +259,39 @@ func TestACacheIsPromotedOnlyWhenItsVMStopsForGood(t *testing.T) {
 	}
 }
 
+// An account move destroys a session's VM and makes another under the same
+// key: the session's database disk, outside the VM's directory, carries over.
+func TestASessionsDatabaseDiskOutlivesItsVM(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	spec := sessionSpec("run-a")
+	spec.Mounts = []runtime.Mount{
+		{HostPath: dir, Subpath: "0", ContainerPath: "/root/.codex/vm-sqlite", Kind: runtime.MountState},
+		{HostPath: dir, Subpath: "1", ContainerPath: "/root/.agent/index", Kind: runtime.MountState},
+	}
+	disk := filepath.Join(dir, stateDiskFile)
+	h.createStarted("run-a", spec)
+	args := strings.Join(h.units.last().launch.Args, " ")
+	for _, want := range []string{"path=" + disk + ",image_type=raw,id=state,serial=state", "aether.mount=state,0,/root/.codex/vm-sqlite", "aether.mount=state,1,/root/.agent/index"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("launch args lack %q:\n%s", want, args)
+		}
+	}
+	if err := os.WriteFile(disk, []byte("databases"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.destroy(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	h.createStarted("run-a", spec)
+	if got, err := os.ReadFile(disk); err != nil || string(got) != "databases" {
+		t.Errorf("the replacement VM's database disk holds %q, %v", got, err)
+	}
+	if args = strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "serial=state") {
+		t.Errorf("the replacement VM lacks the database disk:\n%s", args)
+	}
+}
+
 func TestRestoreServesTheSharesTheGuestMountedAtBoot(t *testing.T) {
 	h := newHarness(t)
 	memberHome, coord := t.TempDir(), t.TempDir()

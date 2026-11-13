@@ -64,6 +64,9 @@ func planMounts(checkouts, mounts []runtime.Mount, nestedDocker bool, dir string
 		case runtime.MountCache:
 			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeCache, Source: ".", Target: m.ContainerPath})
 			continue
+		case runtime.MountState:
+			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeState, Source: m.Subpath, Target: m.ContainerPath})
+			continue
 		case runtime.MountServerBinary:
 			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeHelper, Source: ".", Target: m.ContainerPath, ReadOnly: true})
 			continue

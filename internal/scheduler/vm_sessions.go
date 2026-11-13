@@ -28,28 +28,33 @@ func (s *Scheduler) sessionVMs() bool {
 	return ok
 }
 
-// vmStateDirName holds, beside a session's /tmp in its scratch directory,
-// the session's own copy of each agent database directory.
+// vmStateDirName holds, in a session's scratch directory, the disk with the
+// session's own copy of each agent database directory.
 const vmStateDirName = "vm-state"
 
 // vmStateMounts gives a session VM its own copy of each directory where the
 // agent keeps the databases its sessions share: a WAL database works only
-// among processes of one kernel. The copy is a host directory of the
-// session, so it outlives a VM replaced by an account move, and the
-// directory in the member's home is the mount point. A variable the
-// workspace or profile already sets is left alone.
+// among processes of one kernel, and only on a disk of the VM's, not over
+// the home's file service. The copies are on a disk of the session's, so
+// they outlive a VM replaced by an account move, and the directory in the
+// member's home is the mount point. A variable the workspace or profile
+// already sets is left alone.
 func (s *Scheduler) vmStateMounts(run domain.RunID, member domain.MemberID, profile harness.Profile, home string, env map[string]string) ([]runtime.Mount, error) {
 	var mounts []runtime.Mount
+	dir := filepath.Join(s.scratchRoot(), string(run), vmStateDirName)
+	if len(profile.VMState) > 0 {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("scheduler: create the session's %s database disk: %w", profile.Name, err)
+		}
+	}
 	for i, state := range profile.VMState {
 		if err := s.cfg.Homes.PrepareLoginMountpoint(member, state.Dir, true); err != nil {
 			return nil, fmt.Errorf("scheduler: %w", err)
 		}
-		dir := filepath.Join(s.scratchRoot(), string(run), vmStateDirName, strconv.Itoa(i))
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return nil, fmt.Errorf("scheduler: create the session's %s database directory: %w", profile.Name, err)
-		}
 		target := path.Join(home, state.Dir)
-		mounts = append(mounts, runtime.Mount{HostPath: dir, ContainerPath: target})
+		mounts = append(mounts, runtime.Mount{
+			HostPath: dir, Subpath: strconv.Itoa(i), ContainerPath: target, Kind: runtime.MountState,
+		})
 		if _, set := env[state.Env]; state.Env != "" && !set {
 			env[state.Env] = path.Join(target, state.File)
 		}

@@ -65,6 +65,7 @@ The volumes:
 | `home` | The [file service](#the-file-service), on `/run/aether-guest/home`. Binds are `nosuid,nodev`. | The index of a shared host file |
 | `data` | The disk with serial `data`, on `/run/aether-guest/data`. A missing source directory is created with the mode and owner its target has in the image, so `/tmp` keeps its sticky bit. | A path on the disk |
 | `cache` | The disk with serial `cache`, on `/run/aether-guest/cache`: the session's copy of the member's tool caches. Its root is mode `1777` and has no `lost+found`. | `.` |
+| `state` | The disk with serial `state`, on `/run/aether-guest/state`: the session's own agent databases, which outlive the VM. A missing source directory is created as on `data`. | A path on the disk |
 | `helper` | The helper's own executable, the server binary the VM booted with, bound read-only. | `.` |
 
 A source is opened beneath its volume and never through a symlink that

@@ -637,8 +637,10 @@ sessions nothing below applies: every container of a member shares the home's
 databases as before.
 
 Agents whose shared databases can move get a copy of their own in each
-session: a directory of the session on the server, mounted over the one in
-the home, kept until the session is deleted, also across a move to another
+session, mounted over the one in the home. The copy is on a disk of the
+session's own, `<data dir>/scratch/<session id>/vm-state/disk.img`, so
+SQLite runs on a local filesystem in the VM, not over the file service. The
+disk is kept until the session is deleted, also across a move to another
 account. Their logins and other files stay shared:
 
 | Agent | Session's own | How |

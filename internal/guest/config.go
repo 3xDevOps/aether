@@ -57,6 +57,10 @@ const (
 	// VolumeHelper is the helper's own executable, the server binary the VM
 	// booted with; Source is ".".
 	VolumeHelper Volume = "helper"
+	// VolumeState is the block device whose virtio serial is "state", a disk
+	// the session keeps across its VMs. Like VolumeData, a missing Source
+	// directory is created with the mode and owner of its Target.
+	VolumeState Volume = "state"
 )
 
 // Config is what the helper needs before it can serve: everything on it is
@@ -274,7 +278,7 @@ func (c Config) Validate() error {
 	}
 	for i, m := range c.Mounts {
 		switch m.Volume {
-		case VolumeShare, VolumeData:
+		case VolumeShare, VolumeData, VolumeState:
 		case VolumeHome:
 			if n, err := strconv.Atoi(m.Source); err != nil || n < 0 || strconv.Itoa(n) != m.Source {
 				errs = append(errs, fmt.Errorf("mount %d: home source %q must be an entry index", i, m.Source))

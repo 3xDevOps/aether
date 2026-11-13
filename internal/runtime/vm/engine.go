@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"net/netip"
 	"os"
@@ -40,11 +41,13 @@ type Images interface {
 }
 
 const (
-	// dataDiskBytes is sparse: it costs only what the guest writes.
-	dataDiskBytes = 128 << 30
-	minMemoryMiB  = 256
-	bootTimeout   = 90 * time.Second
-	agentOOMScore = 500
+	// dataDiskBytes and stateDiskBytes are sparse: they cost only what the
+	// guest writes.
+	dataDiskBytes  = 128 << 30
+	stateDiskBytes = 16 << 30
+	minMemoryMiB   = 256
+	bootTimeout    = 90 * time.Second
+	agentOOMScore  = 500
 	// unitOverheadMiB is what a VM's unit may hold beyond the guest's
 	// memory: Cloud Hypervisor, virtiofsd, and the monitor with the file
 	// service, whose requests a guest can fill.
@@ -231,9 +234,13 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 	if err != nil {
 		return "", err
 	}
+	state, err := e.stateDisk(ctx, spec.Mounts)
+	if err != nil {
+		return "", err
+	}
 	cpus, limit := vcpus(spec.CPULimit)
 	rec := &record{
-		Key: key, CreationKey: spec.CreationKey, Fingerprint: spec.Fingerprint, Image: spec.Image, Base: base, Root: root, Data: data, Cache: cache,
+		Key: key, CreationKey: spec.CreationKey, Fingerprint: spec.Fingerprint, Image: spec.Image, Base: base, Root: root, Data: data, Cache: cache, State: state,
 		User:       spec.User,
 		Env:        overrideEnv(base.Config.Env, runtime.EnvList(runtime.TrustCheckouts(spec.Env, spec.WorktreeMountPath, spec.ExtraWorktrees))),
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
@@ -396,6 +403,9 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if rec.Cache.Path != "" {
 		args = append(args, diskArg(rec.Cache, "cache"))
 	}
+	if rec.State.Path != "" {
+		args = append(args, diskArg(rec.State, "state"))
+	}
 	args = append(args,
 		"--cpus", fmt.Sprintf("boot=%d", rec.CPUs),
 		"--memory", fmt.Sprintf("size=%dM,shared=on", rec.MemoryMiB),
@@ -409,6 +419,36 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		l.Args = append(l.Args, "--fs", "tag="+guest.ShareTag+",socket="+e.path(rec.Key, fsSocket))
 	}
 	return l, nil
+}
+
+// stateDisk is the session's disk in the directory its state mounts name,
+// made empty for its first VM; a VM that replaces that one, as an account
+// move does, finds it as the last one left it.
+func (e *engine) stateDisk(ctx context.Context, mounts []runtime.Mount) (vmimage.Disk, error) {
+	var path string
+	for _, m := range mounts {
+		if m.Kind != runtime.MountState {
+			continue
+		}
+		if path != "" && m.HostPath != path {
+			return vmimage.Disk{}, fmt.Errorf("vm runtime: state mounts name two disks, %s and %s", path, m.HostPath)
+		}
+		path = m.HostPath
+	}
+	if path == "" {
+		return vmimage.Disk{}, nil
+	}
+	path = filepath.Join(path, stateDiskFile)
+	if _, err := os.Stat(path); err == nil {
+		return vmimage.Disk{Path: path, Format: vmimage.FormatRaw}, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return vmimage.Disk{}, fmt.Errorf("vm runtime: state disk: %w", err)
+	}
+	d, err := e.cfg.Images.NewDataDisk(ctx, path, stateDiskBytes)
+	if err != nil {
+		return vmimage.Disk{}, fmt.Errorf("vm runtime: state disk: %w", err)
+	}
+	return d, nil
 }
 
 func diskArg(d vmimage.Disk, id string) string {
