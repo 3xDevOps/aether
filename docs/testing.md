@@ -817,13 +817,14 @@ sudo env "PATH=$PATH" "HOME=$HOME" make test-kvm KVM_RUN='^TestKVMHelper$' KVM_S
 | --- | --- | --- |
 | `KVM_KERNEL` | `dist/aether-vmlinux-x86_64` | The guest kernel |
 | `KVM_IMAGE` | `ghcr.io/3xdevops/aether-standard:latest` | The image the store and helper tests boot; the engine tests boot `ubuntu:24.04` |
-| `KVM_DIR` | `/tmp/aether-kvm` | Scratch space for disks, on the filesystem they run from; the engine's image store under `engine/` is kept between runs |
 | `KVM_RUN` | `^TestKVM` | Passed to `go test -run` |
 | `KVM_SKIP` | none | Packages to leave out |
 
 The target builds the test binaries and `aether-server` with
 `CGO_ENABLED=0`: the binaries also run inside the VMs, where there are no
-libraries. A test's VM gets at most 2 GiB; on a CI runner the tests take
+libraries. It builds them, and keeps the disks, in a new private directory
+under `$TMPDIR` (default `/tmp`) that it removes at the end: root runs that
+server, so no other user may be able to replace it. A test's VM gets at most 2 GiB; on a CI runner the tests take
 about three minutes.
 
 On a KVM host without Go, build on your machine, copy the directory over,
@@ -838,7 +839,7 @@ scp -r kvm <host>:
 # on the host, in kvm/; then the same for helper.test and vmimage.test
 sudo env AETHER_TEST_KERNEL="$PWD/aether-vmlinux-x86_64" \
   AETHER_TEST_IMAGE=ghcr.io/3xdevops/aether-standard:latest \
-  AETHER_VM_TEST_KERNEL="$PWD/aether-vmlinux-x86_64" AETHER_VM_TEST_DIR=/var/tmp/aether-kvm \
+  AETHER_VM_TEST_KERNEL="$PWD/aether-vmlinux-x86_64" AETHER_VM_TEST_DIR="$(sudo mktemp -d)" \
   AETHER_VM_TEST_SERVER="$PWD/aether-server" ./vm.test -test.run TestKVM -test.v
 ```
 
