@@ -1,3 +1,4 @@
+import { readLaunchDraft } from '@/components/launch/draft'
 import { bareVersion } from '@/lib/format'
 import { compareVersions } from '@/lib/version'
 import type { ConnectionState } from '@/lib/stream'
@@ -245,7 +246,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     setAgentList: (identity, agents) => set({ agentList: { identity, agents } }),
     setInfo: (info) => set({ info }),
     // Text shared to the last member's launch form is not the next member's.
-    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {}, runViewMemory: s.savedRunViews[identityKey] ?? {}, ...(s.identityKey !== identityKey && { paletteLaunchTask: '' }) })),
+    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {}, runViewMemory: s.savedRunViews[identityKey] ?? {}, ...(s.identityKey !== identityKey && { paletteLaunchTask: '', launchDraft: readLaunchDraft(identityKey) }) })),
     setCapabilities: (capabilities) => set({ capabilities }),
     setConnection: (connection) => set({ connection }),
     noteSeq: (seq) =>
