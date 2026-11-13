@@ -5,10 +5,12 @@ package vm
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +119,7 @@ func TestKVMSessionLifecycle(t *testing.T) {
 		},
 	}
 	start := time.Now()
-	id, err := e.create(t.Context(), spec)
+	id, err := e.create(t.Context(), spec.CreationKey, spec, options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +192,7 @@ func TestKVMSaveRestoreKeepsProcesses(t *testing.T) {
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
 		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 2, MemoryLimitBytes: 1 << 30,
 	}
-	if _, err := e.create(t.Context(), spec); err != nil {
+	if _, err := e.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.start(t.Context(), key); err != nil {
@@ -224,7 +226,7 @@ func kvmSession(t *testing.T, e *engine, key string, mounts ...runtime.Mount) {
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
 		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 512 << 20, Mounts: mounts,
 	}
-	if _, err := e.create(t.Context(), spec); err != nil {
+	if _, err := e.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.start(t.Context(), key); err != nil {
@@ -269,5 +271,123 @@ func TestKVMGuestRebootEndsTheSession(t *testing.T) {
 	}
 	if up, _ := e.running(t.Context(), key); up {
 		t.Error("the rebooted VM still runs")
+	}
+}
+
+func TestKVMSaveEnvironmentWhileTheTerminalRuns(t *testing.T) {
+	e := kvmEngine(t)
+	r := &Runtime{vms: e}
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: "terminal:i9a", TTY: true,
+		Command: []string{"/bin/sh", "-c", "exec sleep infinity"}, Env: map[string]string{"HOME": "/root"},
+		CPULimit: 2, MemoryLimitBytes: 1 << 30,
+	}
+	name, opts, _ := vmFor(spec)
+	// Offline keeps the test off the host's shared VM firewall chain.
+	opts.Offline = true
+	const saved, session = "aether/i9-saved:1", "run-i9-saved"
+	t.Cleanup(func() {
+		_ = e.destroy(context.Background(), name)
+		_ = e.destroy(context.Background(), session)
+		_ = e.cfg.Images.Untag(saved)
+	})
+	if _, err := e.create(t.Context(), name, spec, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), name); err != nil {
+		t.Fatal(err)
+	}
+	// No sync: the freeze must flush what the guest has not written yet.
+	if out, code := vmRun(t, e, name, "dd if=/dev/urandom of=/opt/payload bs=1M count=256 status=none && sha256sum /opt/payload > /opt/payload.sum"); code != 0 {
+		t.Fatalf("write the payload: %d %s", code, out)
+	}
+	before, _ := vmRun(t, e, name, "setsid sh -c 'while :; do date >> /var/log/ticker; done' </dev/null >/dev/null 2>&1 & setsid sleep 4000 </dev/null >/dev/null 2>&1 & sleep 0.5; pgrep -x sleep | sort | tr '\\n' ' '")
+	start := time.Now()
+	if err := r.Commit(t.Context(), runtime.ID(idPrefix+name), saved, map[string]string{"aether.previous-image": "standard"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("save while running took %s", time.Since(start))
+	after, _ := vmRun(t, e, name, "pgrep -x sleep | sort | tr '\\n' ' '")
+	if before != after {
+		t.Errorf("processes changed across the save: %q vs %q", before, after)
+	}
+	if out, _ := vmRun(t, e, name, "a=$(wc -l < /var/log/ticker); sleep 1; b=$(wc -l < /var/log/ticker); [ $b -gt $a ] && echo writable"); !strings.Contains(out, "writable") {
+		t.Errorf("the root filesystem stayed frozen: %q", out)
+	}
+	if labels, err := r.ImageLabels(t.Context(), saved); err != nil || labels["aether.previous-image"] != "standard" {
+		t.Errorf("labels = %v, %v", labels, err)
+	}
+	start = time.Now()
+	if err := r.CheckImage(t.Context(), saved, "1000:1000"); err != nil {
+		t.Fatalf("check the saved image: %v", err)
+	}
+	t.Logf("boot check took %s", time.Since(start))
+
+	kvmSessionFrom(t, e, session, saved)
+	if out, code := vmRun(t, e, session, "sha256sum -c /opt/payload.sum"); code != 0 {
+		t.Errorf("the saved image lost the payload: %s", out)
+	}
+	ext4, _ := vmRun(t, e, session, "dmesg | grep 'EXT4-fs (vdb)'")
+	if !strings.Contains(ext4, "mounted filesystem") || strings.Contains(ext4, "recovery") || strings.Contains(strings.ToLower(ext4), "error") {
+		t.Errorf("the saved root filesystem was not mounted clean:\n%s", ext4)
+	}
+	t.Logf("the saved root filesystem mounted clean: %s", strings.TrimSpace(ext4))
+
+	if err := e.stop(t.Context(), name, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), name); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := vmRun(t, e, name, "sha256sum -c /opt/payload.sum"); code != 0 {
+		t.Errorf("a terminal's cold start lost its root disk: %s", out)
+	}
+}
+
+func TestKVMSavedImageThatDoesNotBootFailsTheCheck(t *testing.T) {
+	e := kvmEngine(t)
+	r := &Runtime{vms: e}
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: "terminal:i9b",
+		Command: []string{"/bin/sh", "-c", "exec sleep infinity"}, CPULimit: 1, MemoryLimitBytes: 512 << 20,
+	}
+	name, opts, _ := vmFor(spec)
+	opts.Offline = true
+	const saved = "aether/i9-broken:1"
+	t.Cleanup(func() {
+		_ = e.destroy(context.Background(), name)
+		_ = e.cfg.Images.Untag(saved)
+	})
+	if _, err := e.create(t.Context(), name, spec, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), name); err != nil {
+		t.Fatal(err)
+	}
+	vmRun(t, e, name, "rm -f /bin/sh /usr/bin/sh /bin/dash /usr/bin/dash")
+	if err := r.Commit(t.Context(), runtime.ID(idPrefix+name), saved, nil); err != nil {
+		t.Fatal(err)
+	}
+	err := r.CheckImage(t.Context(), saved, "1000:1000")
+	if !errors.Is(err, runtime.ErrUnstartableImage) {
+		t.Fatalf("check of an image without a shell = %v", err)
+	}
+	t.Logf("the check refused it: %v", err)
+	if keys, _ := e.keys(); slices.ContainsFunc(keys, func(k string) bool { return strings.HasPrefix(k, "check-") }) {
+		t.Errorf("the check left its VM: %v", keys)
+	}
+}
+
+func kvmSessionFrom(t *testing.T, e *engine, key, image string) {
+	t.Helper()
+	spec := runtime.Spec{
+		Image: image, CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
+		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 512 << 20,
+	}
+	if _, err := e.create(t.Context(), key, spec, options{Offline: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
 	}
 }

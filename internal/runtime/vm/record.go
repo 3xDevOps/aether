@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/vmimage"
@@ -24,6 +25,7 @@ const (
 	shareDir    = "share"
 	helperImage = "helper.img"
 	rootDisk    = "root.img"
+	rootCopy    = "root-copy.img"
 	dataDisk    = "data.img"
 	cacheDisk   = "cache.qcow2"
 	consoleLog  = "console.log"
@@ -31,6 +33,9 @@ const (
 	monitorLog  = "monitor.log"
 	snapshotDir = "snapshot"
 )
+
+// offline is the Net of a VM with no network device.
+const offline = -1
 
 // keyPattern keeps a creation key usable as a directory, a systemd unit name
 // and a guest hostname.
@@ -40,7 +45,10 @@ var keyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 // without reaching the guest. Env is the image's environment overlaid with
 // the spec's, which is what a container reports.
 type record struct {
-	Key          string          `json:"key"`
+	Key string `json:"key"`
+	// CreationKey is the spec's, which a VM of one of the kinds names
+	// differently.
+	CreationKey  string          `json:"creation_key,omitempty"`
 	Fingerprint  string          `json:"fingerprint,omitempty"`
 	Image        string          `json:"image"`
 	Base         vmimage.Base    `json:"base"`
@@ -62,8 +70,12 @@ type record struct {
 	PidsLimit    int64           `json:"pids_limit,omitempty"`
 	Checkouts    []runtime.Mount `json:"checkouts,omitempty"`
 	Mounts       []runtime.Mount `json:"mounts,omitempty"`
-	Net          int             `json:"net"`
-	Egress       bool            `json:"egress,omitempty"`
+	// Net is the VM's network index, or offline.
+	Net    int  `json:"net"`
+	Egress bool `json:"egress,omitempty"`
+	// KeepRoot keeps the root disk across cold starts.
+	KeepRoot bool          `json:"keep_root,omitempty"`
+	Lifetime time.Duration `json:"lifetime,omitempty"`
 	// Booted is set once a boot was launched: the next cold start builds a
 	// fresh root disk. Boots counts them, so a wait on one boot can tell it
 	// from the next.

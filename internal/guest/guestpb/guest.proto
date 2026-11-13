@@ -23,6 +23,11 @@ service Guest {
   rpc Stats(StatsRequest) returns (StatsReply);
   rpc SetClock(SetClockRequest) returns (SetClockReply);
   rpc PowerOff(PowerOffRequest) returns (PowerOffReply);
+  // Freeze flushes the root filesystem and holds every write to it until
+  // Thaw, or until timeout_ms passes, so its disk can be copied whole. A
+  // Freeze while frozen moves the deadline.
+  rpc Freeze(FreezeRequest) returns (FreezeReply);
+  rpc Thaw(ThawRequest) returns (ThawReply);
   // Sync writes every filesystem's dirty data to its disk.
   rpc Sync(SyncRequest) returns (SyncReply);
 }
@@ -176,6 +181,25 @@ message SetClockReply {}
 message PowerOffRequest {}
 
 message PowerOffReply {}
+
+message FreezeRequest {
+  uint32 timeout_ms = 1;
+  // id names this freeze for its Thaw, so a Thaw retried after a lost
+  // reply gets the first one's answer.
+  string id = 2;
+}
+
+message FreezeReply {}
+
+message ThawRequest {
+  string id = 1;
+}
+
+message ThawReply {
+  // frozen is whether the freeze id named held until this Thaw, or until an
+  // earlier Thaw of it: false after its deadline thawed it.
+  bool frozen = 1;
+}
 
 message SyncRequest {}
 

@@ -432,6 +432,10 @@ func TestUnstartableImageCause(t *testing.T) {
 			t.Errorf("unstartableImageCause(%q) = %q, want %q", msg, got, want)
 		}
 	}
+	vm := fmt.Errorf("start container: vm runtime: VM run-a failed to boot: switch to the root disk: mount /dev/vdb: %w", runtime.ErrUnstartableImage)
+	if got := unstartableImageCause(vm, mounts); got != "it does not boot" {
+		t.Errorf("unstartableImageCause(VM boot failure) = %q", got)
+	}
 	setup := fmt.Errorf("start container: %w", &runtime.SetupError{ExitCode: 125, Output: "docker: value too large for defined data type"})
 	if got := unstartableImageCause(setup, mounts); got != "" {
 		t.Errorf("unstartableImageCause(setup failure) = %q, want none", got)

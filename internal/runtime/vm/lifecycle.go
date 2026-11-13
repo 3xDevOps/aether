@@ -422,6 +422,9 @@ func (e *engine) containerIP(ctx context.Context, key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if rec.Net == offline {
+		return "", fmt.Errorf("vm runtime: VM %s has no network", key)
+	}
 	_, addr := netAddrs(rec.Net)
 	return addr.String(), nil
 }

@@ -981,6 +981,25 @@ func (d *Docker) InitPID(ctx context.Context, id ID) (int, error) {
 	return info.Container.State.Pid, nil
 }
 
+// CreationKeys maps the creation key of every Aether container, in any
+// state, to its ID.
+func (d *Docker) CreationKeys(ctx context.Context) (map[string]ID, error) {
+	list, err := d.cli.ContainerList(ctx, client.ContainerListOptions{
+		All:     true,
+		Filters: make(client.Filters).Add("label", labelManaged+"=true"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("runtime: list containers: %w", err)
+	}
+	keys := make(map[string]ID, len(list.Items))
+	for _, c := range list.Items {
+		if key := c.Labels[labelCreationKey]; key != "" {
+			keys[key] = ID(c.ID)
+		}
+	}
+	return keys, nil
+}
+
 // FindByCreationKey matches containers in any state.
 func (d *Docker) FindByCreationKey(ctx context.Context, key string) (ID, error) {
 	if key == "" {

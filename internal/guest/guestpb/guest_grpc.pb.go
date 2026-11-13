@@ -34,6 +34,8 @@ const (
 	Guest_Stats_FullMethodName    = "/aether.guest.v1.Guest/Stats"
 	Guest_SetClock_FullMethodName = "/aether.guest.v1.Guest/SetClock"
 	Guest_PowerOff_FullMethodName = "/aether.guest.v1.Guest/PowerOff"
+	Guest_Freeze_FullMethodName   = "/aether.guest.v1.Guest/Freeze"
+	Guest_Thaw_FullMethodName     = "/aether.guest.v1.Guest/Thaw"
 	Guest_Sync_FullMethodName     = "/aether.guest.v1.Guest/Sync"
 )
 
@@ -56,6 +58,11 @@ type GuestClient interface {
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
 	SetClock(ctx context.Context, in *SetClockRequest, opts ...grpc.CallOption) (*SetClockReply, error)
 	PowerOff(ctx context.Context, in *PowerOffRequest, opts ...grpc.CallOption) (*PowerOffReply, error)
+	// Freeze flushes the root filesystem and holds every write to it until
+	// Thaw, or until timeout_ms passes, so its disk can be copied whole. A
+	// Freeze while frozen moves the deadline.
+	Freeze(ctx context.Context, in *FreezeRequest, opts ...grpc.CallOption) (*FreezeReply, error)
+	Thaw(ctx context.Context, in *ThawRequest, opts ...grpc.CallOption) (*ThawReply, error)
 	// Sync writes every filesystem's dirty data to its disk.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error)
 }
@@ -178,6 +185,26 @@ func (c *guestClient) PowerOff(ctx context.Context, in *PowerOffRequest, opts ..
 	return out, nil
 }
 
+func (c *guestClient) Freeze(ctx context.Context, in *FreezeRequest, opts ...grpc.CallOption) (*FreezeReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FreezeReply)
+	err := c.cc.Invoke(ctx, Guest_Freeze_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *guestClient) Thaw(ctx context.Context, in *ThawRequest, opts ...grpc.CallOption) (*ThawReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ThawReply)
+	err := c.cc.Invoke(ctx, Guest_Thaw_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *guestClient) Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SyncReply)
@@ -207,6 +234,11 @@ type GuestServer interface {
 	Stats(context.Context, *StatsRequest) (*StatsReply, error)
 	SetClock(context.Context, *SetClockRequest) (*SetClockReply, error)
 	PowerOff(context.Context, *PowerOffRequest) (*PowerOffReply, error)
+	// Freeze flushes the root filesystem and holds every write to it until
+	// Thaw, or until timeout_ms passes, so its disk can be copied whole. A
+	// Freeze while frozen moves the deadline.
+	Freeze(context.Context, *FreezeRequest) (*FreezeReply, error)
+	Thaw(context.Context, *ThawRequest) (*ThawReply, error)
 	// Sync writes every filesystem's dirty data to its disk.
 	Sync(context.Context, *SyncRequest) (*SyncReply, error)
 	mustEmbedUnimplementedGuestServer()
@@ -251,6 +283,12 @@ func (UnimplementedGuestServer) SetClock(context.Context, *SetClockRequest) (*Se
 }
 func (UnimplementedGuestServer) PowerOff(context.Context, *PowerOffRequest) (*PowerOffReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method PowerOff not implemented")
+}
+func (UnimplementedGuestServer) Freeze(context.Context, *FreezeRequest) (*FreezeReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Freeze not implemented")
+}
+func (UnimplementedGuestServer) Thaw(context.Context, *ThawRequest) (*ThawReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Thaw not implemented")
 }
 func (UnimplementedGuestServer) Sync(context.Context, *SyncRequest) (*SyncReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Sync not implemented")
@@ -474,6 +512,42 @@ func _Guest_PowerOff_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Guest_Freeze_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FreezeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GuestServer).Freeze(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Guest_Freeze_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GuestServer).Freeze(ctx, req.(*FreezeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Guest_Thaw_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ThawRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GuestServer).Thaw(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Guest_Thaw_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GuestServer).Thaw(ctx, req.(*ThawRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Guest_Sync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SyncRequest)
 	if err := dec(in); err != nil {
@@ -542,6 +616,14 @@ var Guest_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PowerOff",
 			Handler:    _Guest_PowerOff_Handler,
+		},
+		{
+			MethodName: "Freeze",
+			Handler:    _Guest_Freeze_Handler,
+		},
+		{
+			MethodName: "Thaw",
+			Handler:    _Guest_Thaw_Handler,
 		},
 		{
 			MethodName: "Sync",

@@ -122,7 +122,7 @@ func probeVM(t *testing.T, e *engine, key string, egressOnly bool) string {
 			{HostPath: os.Getenv("AETHER_VM_TEST_SERVER"), ContainerPath: coordtransport.CLIPath, ReadOnly: true},
 		},
 	}
-	if _, err = e.create(t.Context(), spec); err != nil {
+	if _, err = e.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
 	}
 	if err = e.start(t.Context(), key); err != nil {

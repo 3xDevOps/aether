@@ -24,6 +24,9 @@ const (
 	MainID = "main"
 	// SetupID names the setup script's process while Boot runs it.
 	SetupID = "setup"
+	// RootStep is the boot step that mounts the root disk; a boot error
+	// that starts with it is the image's.
+	RootStep = "switch to the root disk"
 	// SetupOutputLimit matches the Docker runtime's: how much of a failed
 	// setup script's output Boot returns, from the end, where it failed.
 	SetupOutputLimit = 16 << 10

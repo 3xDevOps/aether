@@ -21,12 +21,18 @@ import (
 	"github.com/3xDevOps/Aether/internal/vmimage"
 )
 
+// Images is the image store, *vmimage.Store.
 type Images interface {
 	Kernel() (string, error)
 	HelperDisk(ctx context.Context, binary, path string) (vmimage.Disk, error)
 	BaseDisk(ctx context.Context, ref string) (vmimage.Base, error)
+	LookupBase(ref string) (vmimage.Base, error)
 	NewRootDisk(ctx context.Context, base vmimage.Base, path string) (vmimage.Disk, error)
 	NewDataDisk(ctx context.Context, path string, size int64) (vmimage.Disk, error)
+	SaveBase(ctx context.Context, rootDisk, ref string, labels map[string]string) (vmimage.Base, error)
+	Tag(source, target string) error
+	Untag(ref string) error
+	Tags(repo string) ([]string, error)
 	NewCacheDisk(ctx context.Context, pool, path string) (vmimage.Disk, error)
 	SnapshotCache(ctx context.Context, disk string) (string, error)
 	PromoteCache(ctx context.Context, pool, snapshot string) error
@@ -140,11 +146,20 @@ func (e *engine) flag(m map[string]bool, key string) bool {
 	return m[key]
 }
 
-func (e *engine) create(ctx context.Context, spec runtime.Spec) (_ runtime.ID, err error) {
+// options are what a VM of one kind needs beyond its spec.
+type options struct {
+	KeepRoot bool
+	// Offline gives the VM no network device.
+	Offline bool
+	// Lifetime has systemd end the VM after it, even when no server is
+	// left to: the VM of a check that a crash interrupted.
+	Lifetime time.Duration
+}
+
+func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts options) (_ runtime.ID, err error) {
 	if err = spec.Validate(); err != nil {
 		return "", err
 	}
-	key := spec.CreationKey
 	if err = checkKey(key); err != nil {
 		return "", err
 	}
@@ -161,11 +176,13 @@ func (e *engine) create(ctx context.Context, spec runtime.Spec) (_ runtime.ID, e
 	if err != nil {
 		return "", fmt.Errorf("vm runtime: base disk for %s: %w", spec.Image, err)
 	}
-	index, err := e.allocateNet()
-	if err != nil {
-		return "", err
+	index := offline
+	if !opts.Offline {
+		if index, err = e.allocateNet(); err != nil {
+			return "", err
+		}
+		defer e.releaseNet(index)
 	}
-	defer e.releaseNet(index)
 	if err = os.MkdirAll(e.dir(key), 0o700); err != nil {
 		return "", fmt.Errorf("vm runtime: %w", err)
 	}
@@ -190,12 +207,13 @@ func (e *engine) create(ctx context.Context, spec runtime.Spec) (_ runtime.ID, e
 	}
 	cpus, limit := vcpus(spec.CPULimit)
 	rec := &record{
-		Key: key, Fingerprint: spec.Fingerprint, Image: spec.Image, Base: base, Root: root, Data: data, Cache: cache,
+		Key: key, CreationKey: spec.CreationKey, Fingerprint: spec.Fingerprint, Image: spec.Image, Base: base, Root: root, Data: data, Cache: cache,
 		User:       spec.User,
 		Env:        overrideEnv(base.Config.Env, runtime.EnvList(runtime.TrustCheckouts(spec.Env, spec.WorktreeMountPath, spec.ExtraWorktrees))),
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
 		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: checkouts(spec), Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
+		KeepRoot: opts.KeepRoot, Lifetime: opts.Lifetime,
 	}
 	if err = e.store(rec); err != nil {
 		return "", err
@@ -267,7 +285,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 		}
 		rec.Saved = false
 	}
-	if rec.Booted {
+	if rec.Booted && !rec.KeepRoot {
 		if rec.Root, err = e.cfg.Images.NewRootDisk(ctx, rec.Base, e.path(key, rootDisk)); err != nil {
 			return fmt.Errorf("vm runtime: root disk: %w", err)
 		}
@@ -276,8 +294,10 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err = e.ensureNetwork(ctx); err != nil {
-		return err
+	if rec.Net != offline {
+		if err = e.ensureNetwork(ctx); err != nil {
+			return err
+		}
 	}
 	rec.Booted, rec.Exited = true, false
 	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
@@ -316,13 +336,15 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: helper disk: %w", err)
 	}
-	var dns []netip.Addr
-	if !rec.Egress {
-		dns = hostDNS()
+	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Sockets: p.sockets}
+	if rec.Net != offline {
+		var dns []netip.Addr
+		if !rec.Egress {
+			dns = hostDNS()
+		}
+		cfg.Network = guestNetwork(rec.Net, dns)
 	}
-	cmdline, err := guest.Config{
-		Hostname: rec.Key, Network: guestNetwork(rec.Net, dns), Mounts: p.mounts, Sockets: p.sockets,
-	}.KernelArgs(cmdlineBase)
+	cmdline, err := cfg.KernelArgs(cmdlineBase)
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: kernel command line: %w", err)
 	}
@@ -341,8 +363,10 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		"--cpus", fmt.Sprintf("boot=%d", rec.CPUs),
 		"--memory", fmt.Sprintf("size=%dM,shared=on", rec.MemoryMiB),
 		"--balloon", "size=0,free_page_reporting=on",
-		"--net", "id=net0,"+chNetArg(rec.Net, rec.Egress),
 	)
+	if rec.Net != offline {
+		args = append(args, "--net", "id=net0,"+chNetArg(rec.Net, rec.Egress))
+	}
 	l := launch{Args: args, Shares: p.shares, Home: p.homeConfig(rec.User)}
 	if len(p.shares) > 0 {
 		l.Args = append(l.Args, "--fs", "tag="+guest.ShareTag+",socket="+e.path(rec.Key, fsSocket))
@@ -375,6 +399,9 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	if rec.CPULimit > 0 {
 		properties = append(properties, fmt.Sprintf("CPUQuota=%d%%", int(math.Ceil(rec.CPULimit*100))))
 	}
+	if rec.Lifetime > 0 {
+		properties = append(properties, fmt.Sprintf("RuntimeMaxSec=%d", int(rec.Lifetime.Seconds())))
+	}
 	argv := append(append([]string{}, e.cfg.Monitor...), e.dir(rec.Key))
 	if err := e.units.Start(ctx, unitName(rec.Key), argv, properties); err != nil {
 		return err
@@ -405,11 +432,14 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 		}
 		home := cmp.Or(runtime.EnvValue(rec.Env, "HOME"), "/")
 		code, out, prepErr := e.runAsRoot(upCtx, h, rec, []string{"/bin/sh", "-c", runtime.UserScript, "aether-user", rec.User, home, allow})
+		if _, noShell := errors.AsType[*guest.StartError](prepErr); noShell {
+			return fmt.Errorf("vm runtime: prepare user %s: %w: %w", rec.User, prepErr, runtime.ErrUnstartableImage)
+		}
 		if prepErr != nil {
 			return stopped(fmt.Errorf("vm runtime: prepare user %s: %w", rec.User, prepErr))
 		}
 		if code != 0 {
-			return fmt.Errorf("vm runtime: prepare user %s exited %d: %s", rec.User, code, strings.TrimSpace(out))
+			return fmt.Errorf("vm runtime: prepare user %s exited %d: %s: %w", rec.User, code, strings.TrimSpace(out), runtime.ErrUnstartableImage)
 		}
 	}
 	var tty *guest.Size
@@ -429,10 +459,27 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	if errors.As(err, &setup) {
 		return &runtime.SetupError{ExitCode: setup.ExitCode, Output: runtime.SetupOutput(setup.Output, setup.Cut, runtime.SecretValues(rec.SecretEnv, rec.Env))}
 	}
+	if _, noMain := errors.AsType[*guest.StartError](err); noMain {
+		return stopped(fmt.Errorf("vm runtime: boot VM %s: %w: %w", rec.Key, err, runtime.ErrUnstartableImage))
+	}
 	if err != nil {
 		return stopped(fmt.Errorf("vm runtime: boot VM %s: %w", rec.Key, err))
 	}
 	return nil
+}
+
+// startKept is start, with a failure of a VM that keeps its root disk that
+// is not the disk's own marked runtime.ErrStartLater, so its unsaved
+// changes are not thrown away with it.
+func (e *engine) startKept(ctx context.Context, key string) error {
+	err := e.start(ctx, key)
+	if err == nil || errors.Is(err, runtime.ErrUnstartableImage) || ctx.Err() != nil {
+		return err
+	}
+	if rec, loadErr := e.load(key); loadErr == nil && rec.KeepRoot {
+		return fmt.Errorf("%w: %w", runtime.ErrStartLater, err)
+	}
+	return err
 }
 
 func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
@@ -452,6 +499,9 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 		case err := <-answered:
 			if err != nil {
 				return fmt.Errorf("vm runtime: helper of VM %s did not answer: %w%s", key, err, e.logTail(key))
+			}
+			if strings.HasPrefix(info.BootError, guest.RootStep) {
+				return fmt.Errorf("vm runtime: VM %s failed to boot: %s: %w", key, info.BootError, runtime.ErrUnstartableImage)
 			}
 			if info.BootError != "" {
 				return fmt.Errorf("vm runtime: VM %s failed to boot: %s", key, info.BootError)
