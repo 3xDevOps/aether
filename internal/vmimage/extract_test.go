@@ -263,6 +263,26 @@ func TestExtractKeepsMetadata(t *testing.T) {
 	}
 }
 
+func TestExtractHardLinkChainAcrossLayers(t *testing.T) {
+	// Three layers flattened upper first: c links to b, b links to a.
+	dir, err := extractInto(t,
+		entry{name: "c", typ: tar.TypeLink, link: "b"},
+		entry{name: "b", typ: tar.TypeLink, link: "a"},
+		entry{name: "a", body: "shared"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		if b, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(b) != "shared" {
+			t.Errorf("%s = %q, %v", name, b, err)
+		}
+	}
+	if got := nlink(t, filepath.Join(dir, "a")); got != 3 {
+		t.Errorf("a has %d links, want 3", got)
+	}
+}
+
 // TestExtractOwnersAsRoot needs root: it hands files to other users and sets
 // a file capability, as the server does.
 func TestExtractOwnersAsRoot(t *testing.T) {

@@ -2,6 +2,7 @@ package vmimage
 
 import (
 	"archive/tar"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -87,12 +88,8 @@ func extract(r io.Reader, root *os.Root) error {
 			return fmt.Errorf("vmimage: image entry %s: %w", name, err)
 		}
 	}
-	// A flattened image lists upper layers first, so a hard link can come
-	// before its target.
-	for _, hdr := range links {
-		if err := root.Link(hdr.Linkname, hdr.Name); err != nil {
-			return fmt.Errorf("vmimage: image entry %s: %w", hdr.Name, err)
-		}
+	if err := makeLinks(root, links); err != nil {
+		return err
 	}
 	// Directory metadata goes last: writing into a directory changes its
 	// times, and a directory may be listed after its contents.
@@ -100,6 +97,32 @@ func extract(r io.Reader, root *os.Root) error {
 		if err := setDirMeta(root, hdr); err != nil {
 			return fmt.Errorf("vmimage: image entry %s: %w", hdr.Name, err)
 		}
+	}
+	return nil
+}
+
+// makeLinks creates hard links once their targets exist. A flattened image
+// lists upper layers first, so a link, or a chain of links across layers,
+// can come before its target.
+func makeLinks(root *os.Root, links []*tar.Header) error {
+	for len(links) > 0 {
+		var waiting []*tar.Header
+		var firstErr error
+		for _, hdr := range links {
+			err := root.Link(hdr.Linkname, hdr.Name)
+			if errors.Is(err, fs.ErrNotExist) {
+				waiting = append(waiting, hdr)
+				firstErr = cmp.Or(firstErr, err)
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("vmimage: image entry %s: %w", hdr.Name, err)
+			}
+		}
+		if len(waiting) == len(links) {
+			return fmt.Errorf("vmimage: image entry %s: %w", waiting[0].Name, firstErr)
+		}
+		links = waiting
 	}
 	return nil
 }
