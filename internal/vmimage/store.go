@@ -268,7 +268,9 @@ func (s *Store) NewDataDisk(ctx context.Context, path string, size int64) (Disk,
 	if err := removeIfExists(tmp); err != nil {
 		return Disk{}, err
 	}
-	if err := mkfs(ctx, tmp, size, "aether-data", ""); err != nil {
+	// The new file reads as zeros, so the journal needs no writing, and
+	// keeps its holes; the session's users get every block.
+	if err := mkfs(ctx, tmp, size, "aether-data", "", "-E", "lazy_journal_init=1", "-m", "0"); err != nil {
 		return Disk{}, errors.Join(err, removeIfExists(tmp))
 	}
 	err := os.Link(tmp, path)

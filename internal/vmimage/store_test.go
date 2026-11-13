@@ -529,8 +529,8 @@ func TestStoreDataDisk(t *testing.T) {
 	if err := syscall.Stat(path, &st); err != nil {
 		t.Fatal(err)
 	}
-	if st.Size != 2<<30 || st.Blocks*512 > 128<<20 {
-		t.Errorf("data disk is %d bytes using %d on the host, want 2 GiB sparse", st.Size, st.Blocks*512)
+	if st.Size != 2<<30 || st.Blocks*512 > 2<<20 {
+		t.Errorf("data disk is %d bytes using %d on the host, want 2 GiB sparse, its journal unwritten", st.Size, st.Blocks*512)
 	}
 	if _, err := s.NewDataDisk(context.Background(), path, 2<<30); err == nil {
 		t.Error("NewDataDisk replaced an existing data disk")
