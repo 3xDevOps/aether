@@ -244,17 +244,14 @@ func credential(spec string) (*syscall.Credential, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: user %q is not a numeric uid:gid", errInvalid, spec)
 	}
-	home := "/"
-	gid := uint64(0)
-	var groups []uint32
-	if u, err := user.LookupId(uidText); err == nil {
+	home, gid, groups := "/", uint64(0), []uint32(nil)
+	if u, lookupErr := user.LookupId(uidText); lookupErr == nil {
 		home = cmp.Or(u.HomeDir, "/")
 		gid, _ = strconv.ParseUint(u.Gid, 10, 32)
-		if ids, err := u.GroupIds(); err == nil {
-			for _, id := range ids {
-				if g, err := strconv.ParseUint(id, 10, 32); err == nil {
-					groups = append(groups, uint32(g))
-				}
+		ids, _ := u.GroupIds()
+		for _, id := range ids {
+			if g, parseErr := strconv.ParseUint(id, 10, 32); parseErr == nil {
+				groups = append(groups, uint32(g))
 			}
 		}
 	}

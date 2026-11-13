@@ -19,14 +19,14 @@ func configureNetwork(cfg guest.Config) error {
 	if err != nil {
 		return fmt.Errorf("find lo: %w", err)
 	}
-	if err := netlink.LinkSetUp(lo); err != nil {
+	if err = netlink.LinkSetUp(lo); err != nil {
 		return fmt.Errorf("bring up lo: %w", err)
 	}
 	if cfg.Hostname != "" {
-		if err := unix.Sethostname([]byte(cfg.Hostname)); err != nil {
+		if err = unix.Sethostname([]byte(cfg.Hostname)); err != nil {
 			return fmt.Errorf("set the hostname: %w", err)
 		}
-		if err := replaceFile("/etc/hostname", cfg.Hostname+"\n"); err != nil {
+		if err = replaceFile("/etc/hostname", cfg.Hostname+"\n"); err != nil {
 			return err
 		}
 	}
@@ -35,7 +35,7 @@ func configureNetwork(cfg guest.Config) error {
 	if n != nil && cfg.Hostname != "" {
 		hosts += n.Address.Addr().String() + "\t" + cfg.Hostname + "\n"
 	}
-	if err := replaceFile("/etc/hosts", hosts); err != nil {
+	if err = replaceFile("/etc/hosts", hosts); err != nil {
 		return err
 	}
 	if n == nil {
@@ -46,14 +46,14 @@ func configureNetwork(cfg guest.Config) error {
 		return err
 	}
 	address := &net.IPNet{IP: n.Address.Addr().AsSlice(), Mask: net.CIDRMask(n.Address.Bits(), 32)}
-	if err := netlink.AddrAdd(link, &netlink.Addr{IPNet: address}); err != nil {
+	if err = netlink.AddrAdd(link, &netlink.Addr{IPNet: address}); err != nil {
 		return fmt.Errorf("address %s: %w", link.Attrs().Name, err)
 	}
-	if err := netlink.LinkSetUp(link); err != nil {
+	if err = netlink.LinkSetUp(link); err != nil {
 		return fmt.Errorf("bring up %s: %w", link.Attrs().Name, err)
 	}
 	route := &netlink.Route{LinkIndex: link.Attrs().Index, Gw: n.Gateway.AsSlice()}
-	if err := netlink.RouteAdd(route); err != nil {
+	if err = netlink.RouteAdd(route); err != nil {
 		return fmt.Errorf("default route via %s: %w", n.Gateway, err)
 	}
 	if len(n.DNS) == 0 {

@@ -88,7 +88,7 @@ func (s *service) startDockerd(main guest.ProcessSpec) error {
 	}
 	env := withDefaults(main.Env, home, false)
 	for _, name := range []string{"dockerd", "docker"} {
-		if _, err := lookPath(name, envValue(env, "PATH")); err != nil {
+		if _, err = lookPath(name, envValue(env, "PATH")); err != nil {
 			return nil
 		}
 	}

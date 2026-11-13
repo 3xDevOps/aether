@@ -65,7 +65,7 @@ func (l hybridVsock) Accept() (net.Conn, error) {
 
 // startHelper serves a helper on a Unix socket and returns its socket path
 // and a client of it.
-func startHelper(t *testing.T) (string, *service, *guest.Client) {
+func startHelper(t *testing.T) (string, *guest.Client) {
 	t.Helper()
 	socket := filepath.Join(t.TempDir(), "vsock.sock")
 	listener, err := net.Listen("unix", socket)
@@ -76,7 +76,7 @@ func startHelper(t *testing.T) (string, *service, *guest.Client) {
 	server := newServer(svc)
 	go func() { _ = server.Serve(hybridVsock{listener}) }()
 	t.Cleanup(server.Stop)
-	return socket, svc, dial(t, socket)
+	return socket, dial(t, socket)
 }
 
 func dial(t *testing.T, socket string) *guest.Client {
@@ -121,7 +121,7 @@ func forgetBoot(t *testing.T) {
 }
 
 func TestPipeProcess(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	if info, err := client.Ping(ctx); err != nil || info.Protocol != guest.Protocol || info.BootID == "" {
 		t.Fatalf("ping: %+v, %v", info, err)
@@ -143,7 +143,7 @@ func TestPipeProcess(t *testing.T) {
 }
 
 func TestTerminalProcess(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	p := spawn(t, client, guest.ProcessSpec{ID: "tty", Argv: []string{"sh", "-c", `stty size; read x; stty size; echo "term $TERM"`}, TTY: &guest.Size{Cols: 80, Rows: 24}})
 	a := p.Attach(true)
@@ -182,7 +182,7 @@ func waitFor(t *testing.T, r io.Reader, want string) {
 // A server restart is a new client: it finds the process by ID and reads
 // the output the helper kept, and the process never noticed.
 func TestReattachAfterClientRestart(t *testing.T) {
-	socket, _, first := startHelper(t)
+	socket, first := startHelper(t)
 	ctx := testContext(t)
 	p := spawn(t, first, guest.ProcessSpec{ID: "kept", Argv: []string{"sh", "-c", `echo before; read x; echo "after $x"`}})
 	a := p.Attach(true)
@@ -210,7 +210,7 @@ func TestReattachAfterClientRestart(t *testing.T) {
 // A lossless process waits for its reader instead of losing output, also
 // past the helper's window.
 func TestLosslessOutput(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	const size = 4 * outputLimit
 	p := spawn(t, client, guest.ProcessSpec{ID: "lossless", Argv: []string{"head", "-c", fmt.Sprint(size), "/dev/zero"}, Lossless: true})
@@ -230,7 +230,7 @@ func TestLosslessOutput(t *testing.T) {
 }
 
 func TestSpawnFailures(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	var startErr *guest.StartError
 	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/missing", User: self, Argv: []string{"/no/such/program"}}); !errors.As(err, &startErr) || startErr.Code != 127 {
@@ -249,7 +249,7 @@ func TestSpawnFailures(t *testing.T) {
 }
 
 func TestSignalAndInput(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	p := spawn(t, client, guest.ProcessSpec{ID: "sleep", Argv: []string{"sleep", "60"}})
 	short, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
@@ -273,7 +273,7 @@ func TestSignalAndInput(t *testing.T) {
 
 // The helper reaps every orphan, as PID 1 must, so none stays a zombie.
 func TestOrphansAreReaped(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	p := spawn(t, client, guest.ProcessSpec{ID: "parent", Argv: []string{"sh", "-c", `sleep 0.2 & echo $!`}})
 	a := p.Attach(true)
@@ -297,7 +297,7 @@ func TestOrphansAreReaped(t *testing.T) {
 }
 
 func TestBoot(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	marker := filepath.Join(t.TempDir(), "setup-ran")
 	forgetBoot(t)
@@ -328,7 +328,7 @@ func TestBoot(t *testing.T) {
 }
 
 func TestBootSetupFails(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	ctx := testContext(t)
 	forgetBoot(t)
 	marker := filepath.Join(t.TempDir(), "main-ran")
@@ -347,7 +347,7 @@ func TestBootSetupFails(t *testing.T) {
 }
 
 func TestStats(t *testing.T) {
-	_, _, client := startHelper(t)
+	_, client := startHelper(t)
 	stats, err := client.Stats(testContext(t))
 	if err != nil {
 		t.Fatal(err)
